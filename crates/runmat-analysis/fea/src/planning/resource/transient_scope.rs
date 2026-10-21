@@ -266,17 +266,19 @@ pub(crate) fn build_structural_transient_scope_resource_plan(
         transport_closure_bytes_upper_bound: ByteCount(scope_transport_bytes),
         construction_resident_bytes_admission_budget: ByteCount(scope_construction_bytes),
     };
-    let output_set = match output_set {
-        Some(facts) if facts.encoded_bytes_upper_bound.0 >= scope_payload_bytes => facts,
-        Some(_) => {
-            return Err(ResourcePlanningError::Invalid(
-                "transient scope output set is smaller than the planned scope payload".into(),
-            ))
-        }
-        None => PreparedOutputSetResourceFacts {
-            encoded_bytes_upper_bound: ByteCount(scope_payload_bytes),
-        },
-    };
+    // The output set is the one root manifest listing this phase's output roots. Its bound is
+    // the root schema bound, not the numerical payload bound carried by the prepared output.
+    let output_set = output_set.unwrap_or(PreparedOutputSetResourceFacts {
+        encoded_bytes_upper_bound: ByteCount(crate::execution::ANALYSIS_OUTPUT_SET_MAX_ENCODED_BYTES),
+    });
+    if output_set.encoded_bytes_upper_bound.0 == 0
+        || output_set.encoded_bytes_upper_bound.0
+            > crate::execution::ANALYSIS_OUTPUT_SET_MAX_ENCODED_BYTES
+    {
+        return Err(ResourcePlanningError::Invalid(
+            "transient scope output set is outside the output-set root schema bound".into(),
+        ));
+    }
     let phase_bytes = add(
         add(
             schedule_bytes,

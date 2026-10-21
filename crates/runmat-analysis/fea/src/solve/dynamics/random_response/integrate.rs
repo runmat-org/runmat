@@ -27,20 +27,22 @@ pub fn solve_modal_random_response(
         plan.breakpoints_hz(),
         plan.authored_interval_count(),
         policy,
-        |frequency| frequency_response.evaluate(frequency),
+        frequency_response.mode_count(),
+        |frequency| frequency_response.modal_density(frequency),
     )?;
+    let integrated_values = frequency_response.project(&integrated.values)?;
     let layout = frequency_response.layout();
-    if integrated.values.len() != layout.total_length {
+    if integrated_values.len() != layout.total_length {
         return Err(FeaRunError::Solve(
             "random-response integrated values do not match their recovery layout".into(),
         ));
     }
-    let dof_variance = integrated.values[..layout.dof_count].to_vec();
+    let dof_variance = integrated_values[..layout.dof_count].to_vec();
     let fields = layout
         .fields
         .iter()
         .map(|field| {
-            let variance = integrated.values[field.offset..field.offset + field.length].to_vec();
+            let variance = integrated_values[field.offset..field.offset + field.length].to_vec();
             let rms = variance.iter().map(|value| value.sqrt()).collect();
             RandomResponseFieldStatistics {
                 quantity: field.quantity,

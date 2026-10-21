@@ -207,7 +207,7 @@ pub use object::{
     AnalysisPayloadPartition, AnalysisPayloadPartitionDescriptor, AnalysisPayloadPartitionPlan,
     AnalysisPayloadPlan, AnalysisTransportProfile, AnalysisTransportProfiler,
     ChunkedAnalysisPayload, ANALYSIS_CHUNK_MEDIA_TYPE, ANALYSIS_CHUNK_VALUE_SCHEMA,
-    ANALYSIS_MANIFEST_MAX_ENCODED_BYTES, ANALYSIS_MANIFEST_MEDIA_TYPE,
+    ANALYSIS_MANIFEST_MAX_ENCODED_BYTES, ANALYSIS_MANIFEST_MEDIA_TYPE, ANALYSIS_OUTPUT_SET_MAX_ENCODED_BYTES,
     ANALYSIS_MANIFEST_VALUE_SCHEMA, DEFAULT_ANALYSIS_CHUNK_BYTES,
 };
 pub use observation::ObservationEvaluationRequest;

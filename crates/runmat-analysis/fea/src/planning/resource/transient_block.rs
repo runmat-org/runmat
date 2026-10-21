@@ -194,17 +194,19 @@ pub fn build_structural_transient_block_resource_plan(
         transport_closure_bytes_upper_bound: ByteCount(segment_closure),
         construction_resident_bytes_admission_budget: ByteCount(segment_construction),
     };
-    let output_set = match output_set {
-        Some(facts) if facts.encoded_bytes_upper_bound.0 >= segment_bytes => facts,
-        Some(_) => {
-            return Err(ResourcePlanningError::Invalid(
-                "transient block output set is smaller than its segment bound".into(),
-            ))
-        }
-        None => PreparedOutputSetResourceFacts {
-            encoded_bytes_upper_bound: ByteCount(segment_bytes),
-        },
-    };
+    // The output set is the one root manifest listing this phase's output roots. Its bound is
+    // the root schema bound, not the numerical payload bound carried by the prepared output.
+    let output_set = output_set.unwrap_or(PreparedOutputSetResourceFacts {
+        encoded_bytes_upper_bound: ByteCount(crate::execution::ANALYSIS_OUTPUT_SET_MAX_ENCODED_BYTES),
+    });
+    if output_set.encoded_bytes_upper_bound.0 == 0
+        || output_set.encoded_bytes_upper_bound.0
+            > crate::execution::ANALYSIS_OUTPUT_SET_MAX_ENCODED_BYTES
+    {
+        return Err(ResourcePlanningError::Invalid(
+            "transient block output set is outside the output-set root schema bound".into(),
+        ));
+    }
     let operator = scope_demand.operator;
     let operator_nonzeros = operator
         .sparse

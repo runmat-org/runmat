@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use crate::contracts::FeaRunError;
 
 use super::{RandomResponseIntegrationEvidence, RandomResponseIntegrationPolicy};
@@ -16,10 +14,130 @@ pub(super) struct IntegratedResponse {
     pub evidence: RandomResponseIntegrationEvidence,
 }
 
+/// Gauss-Kronrod 7/15 abscissae on [-1, 1] (non-negative half, QUADPACK `qk15`).
+const KRONROD_NODES: [f64; 8] = [
+    0.991_455_371_120_812_6,
+    0.949_107_912_342_758_5,
+    0.864_864_423_359_769_1,
+    0.741_531_185_599_394_4,
+    0.586_087_235_467_691_1,
+    0.405_845_151_377_397_2,
+    0.207_784_955_007_898_5,
+    0.0,
+];
+const KRONROD_WEIGHTS: [f64; 8] = [
+    0.022_935_322_010_529_22,
+    0.063_092_092_629_978_55,
+    0.104_790_010_322_250_18,
+    0.140_653_259_715_525_92,
+    0.169_004_726_639_267_9,
+    0.190_350_578_064_785_4,
+    0.204_432_940_075_298_9,
+    0.209_482_141_084_727_83,
+];
+/// Gauss 7-point weights for Kronrod nodes 1, 3, 5 and the center.
+const GAUSS_WEIGHTS: [f64; 4] = [
+    0.129_484_966_168_869_7,
+    0.279_705_391_489_276_7,
+    0.381_830_050_505_118_9,
+    0.417_959_183_673_469_4,
+];
+/// Hard bound on integrand evaluations per interval, independent of the authored depth.
+const MAXIMUM_EVALUATIONS_PER_INTERVAL: usize = 1 << 21;
+
+struct Segment {
+    left: f64,
+    right: f64,
+    depth: u8,
+    values: Vec<f64>,
+    error: Vec<f64>,
+}
+
+fn kronrod_segment<F>(
+    left: f64,
+    right: f64,
+    depth: u8,
+    width: usize,
+    evaluate: &mut F,
+) -> Result<Segment, FeaRunError>
+where
+    F: FnMut(f64) -> Result<Vec<f64>, FeaRunError>,
+{
+    let center = 0.5 * (left + right);
+    let half = 0.5 * (right - left);
+    let mut kronrod = vec![0.0; width];
+    let mut gauss = vec![0.0; width];
+    let mut accumulate = |frequency: f64, node: usize| -> Result<(), FeaRunError> {
+        let values = evaluate(frequency)?;
+        if values.len() != width || values.iter().any(|value| !value.is_finite()) {
+            return Err(FeaRunError::Solve(
+                "random-response modal covariance density is malformed".into(),
+            ));
+        }
+        for (index, value) in values.iter().enumerate() {
+            kronrod[index] += KRONROD_WEIGHTS[node] * value;
+            if node % 2 == 1 {
+                gauss[index] += GAUSS_WEIGHTS[node / 2] * value;
+            }
+        }
+        Ok(())
+    };
+    accumulate(center, 7)?;
+    for node in 0..7 {
+        let offset = half * KRONROD_NODES[node];
+        accumulate(center - offset, node)?;
+        accumulate(center + offset, node)?;
+    }
+    Ok(Segment {
+        left,
+        right,
+        depth,
+        values: kronrod.iter().map(|value| half * value).collect(),
+        error: kronrod
+            .iter()
+            .zip(&gauss)
+            .map(|(kronrod, gauss)| half * (kronrod - gauss).abs())
+            .collect(),
+    })
+}
+
+/// Largest error of a symmetric modal covariance relative to its own correlation scale.
+///
+/// Entry `(i, j)` is normalized by `sqrt(Q_ii Q_jj)`, so every recovered quantity
+/// `phiᵀ Q phi` inherits the tolerance relative to `(Σ |phi_i| sqrt(Q_ii))²` regardless of
+/// its absolute size. Modes with an exactly zero integral contribute exactly zero rows.
+fn normalized_error(total: &[f64], error: &[f64], mode_count: usize) -> f64 {
+    let mut worst = 0.0_f64;
+    for row in 0..mode_count {
+        for column in 0..mode_count {
+            let index = row * mode_count + column;
+            let scale = (total[row * mode_count + row].max(0.0)
+                * total[column * mode_count + column].max(0.0))
+            .sqrt();
+            let relative = if scale > 0.0 {
+                error[index] / scale
+            } else if error[index] == 0.0 {
+                0.0
+            } else {
+                f64::INFINITY
+            };
+            worst = worst.max(relative);
+        }
+    }
+    worst
+}
+
+/// Globally adaptive Gauss-Kronrod integration of a modal covariance density over one interval.
+///
+/// The integrand is the real part of the `mode_count × mode_count` modal response covariance
+/// density in row-major order. Bisection always targets the segment with the largest normalized
+/// error; the authored refinement limit bounds bisection depth, so a resonance narrower than the
+/// finest admitted segment fails closed instead of publishing an unconverged variance.
 pub(super) fn integrate_interval<F>(
     left: f64,
     right: f64,
     policy: RandomResponseIntegrationPolicy,
+    mode_count: usize,
     mut evaluate: F,
 ) -> Result<IntervalIntegration, FeaRunError>
 where
@@ -30,71 +148,68 @@ where
             "random-response integration interval is invalid".into(),
         ));
     }
-    let mut cache = HashMap::<u64, Vec<f64>>::new();
-    let left_values = evaluate_cached(left, &mut cache, &mut evaluate)?;
-    let right_values = evaluate_cached(right, &mut cache, &mut evaluate)?;
-    if left_values.len() != right_values.len() || left_values.is_empty() {
-        return Err(FeaRunError::Solve(
-            "random-response integrand changed shape".into(),
-        ));
-    }
-    let mut prior = left_values
-        .iter()
-        .zip(&right_values)
-        .map(|(left_value, right_value)| 0.5 * (right - left) * (left_value + right_value))
-        .collect::<Vec<_>>();
-    for level in 1..=policy.maximum_refinement_levels {
-        let panel_count = 1_usize << level;
-        let step = (right - left) / panel_count as f64;
-        let mut midpoint_sum = vec![0.0; prior.len()];
-        for odd_index in (1..panel_count).step_by(2) {
-            let frequency = left + odd_index as f64 * step;
-            let values = evaluate_cached(frequency, &mut cache, &mut evaluate)?;
-            if values.len() != midpoint_sum.len() {
-                return Err(FeaRunError::Solve(
-                    "random-response integrand changed shape".into(),
-                ));
-            }
-            for (sum, value) in midpoint_sum.iter_mut().zip(values) {
+    let width = mode_count
+        .checked_mul(mode_count)
+        .filter(|width| *width > 0)
+        .ok_or_else(|| FeaRunError::Solve("random-response modal dimension is invalid".into()))?;
+    let middle = 0.5 * (left + right);
+    let mut segments = vec![
+        kronrod_segment(left, middle, 1, width, &mut evaluate)?,
+        kronrod_segment(middle, right, 1, width, &mut evaluate)?,
+    ];
+    let mut evaluations = 30_usize;
+    loop {
+        let mut total = vec![0.0; width];
+        let mut total_compensation = vec![0.0; width];
+        let mut error = vec![0.0; width];
+        for segment in &segments {
+            compensated_add(&mut total, &mut total_compensation, &segment.values);
+            for (sum, value) in error.iter_mut().zip(&segment.error) {
                 *sum += value;
             }
         }
-        let refined = prior
-            .iter()
-            .zip(midpoint_sum)
-            .map(|(coarse, midpoints)| 0.5 * coarse + step * midpoints)
-            .collect::<Vec<_>>();
-        let mut converged = true;
-        let mut maximum_relative_error = 0.0_f64;
-        for (coarse, value) in prior.iter().zip(&refined) {
-            let absolute_error = (value - coarse).abs() / 3.0;
-            let scale = value.abs().max(coarse.abs()).max(f64::MIN_POSITIVE);
-            let relative_error = absolute_error / scale;
-            maximum_relative_error = maximum_relative_error.max(relative_error);
-            if relative_error > policy.relative_variance_tolerance {
-                converged = false;
-            }
-        }
-        if converged {
+        let estimated = normalized_error(&total, &error, mode_count);
+        if estimated <= policy.relative_variance_tolerance {
             return Ok(IntervalIntegration {
-                values: refined,
-                evaluated_frequency_count: cache.len(),
-                refinement_level: level,
-                estimated_relative_error: maximum_relative_error,
+                values: total,
+                evaluated_frequency_count: evaluations,
+                refinement_level: segments
+                    .iter()
+                    .map(|segment| segment.depth)
+                    .max()
+                    .unwrap_or(1),
+                estimated_relative_error: estimated,
             });
         }
-        prior = refined;
+        let (worst, _) = segments
+            .iter()
+            .enumerate()
+            .map(|(index, segment)| (index, normalized_error(&total, &segment.error, mode_count)))
+            .max_by(|left, right| left.1.total_cmp(&right.1))
+            .expect("an interval always has segments");
+        let segment = &segments[worst];
+        if segment.depth >= policy.maximum_refinement_levels
+            || evaluations + 30 > MAXIMUM_EVALUATIONS_PER_INTERVAL
+        {
+            return Err(FeaRunError::Solve(format!(
+                "random-response variance integration did not converge on [{left}, {right}] Hz: estimated relative error {estimated:.3e} exceeds {:.3e} at bisection depth {} ({evaluations} frequencies)",
+                policy.relative_variance_tolerance, segment.depth
+            )));
+        }
+        let segment = segments.swap_remove(worst);
+        let center = 0.5 * (segment.left + segment.right);
+        let depth = segment.depth + 1;
+        segments.push(kronrod_segment(segment.left, center, depth, width, &mut evaluate)?);
+        segments.push(kronrod_segment(center, segment.right, depth, width, &mut evaluate)?);
+        evaluations += 30;
     }
-    Err(FeaRunError::Solve(format!(
-        "random-response variance integration did not converge on [{left}, {right}] Hz after {} refinements",
-        policy.maximum_refinement_levels
-    )))
 }
 
 pub(super) fn integrate_breakpoints<F>(
     breakpoints: &[f64],
     authored_interval_count: usize,
     policy: RandomResponseIntegrationPolicy,
+    mode_count: usize,
     mut evaluate: F,
 ) -> Result<IntegratedResponse, FeaRunError>
 where
@@ -107,7 +222,9 @@ where
     }
     let intervals = breakpoints
         .windows(2)
-        .map(|interval| integrate_interval(interval[0], interval[1], policy, &mut evaluate))
+        .map(|interval| {
+            integrate_interval(interval[0], interval[1], policy, mode_count, &mut evaluate)
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let value_count = intervals
         .first()
@@ -123,7 +240,7 @@ where
         }
         compensated_add(&mut total, &mut compensation, &interval.values);
     }
-    if total.iter().any(|value| !value.is_finite() || *value < 0.0) {
+    if total.iter().any(|value| !value.is_finite()) {
         return Err(FeaRunError::Solve(
             "random-response integration produced invalid variance".into(),
         ));
@@ -161,32 +278,6 @@ pub(super) fn compensated_add(total: &mut [f64], compensation: &mut [f64], value
     }
 }
 
-fn evaluate_cached<F>(
-    frequency: f64,
-    cache: &mut HashMap<u64, Vec<f64>>,
-    evaluate: &mut F,
-) -> Result<Vec<f64>, FeaRunError>
-where
-    F: FnMut(f64) -> Result<Vec<f64>, FeaRunError>,
-{
-    let key = frequency.to_bits();
-    if let Some(values) = cache.get(&key) {
-        return Ok(values.clone());
-    }
-    let values = evaluate(frequency)?;
-    if values.is_empty()
-        || values
-            .iter()
-            .any(|value| !value.is_finite() || *value < 0.0)
-    {
-        return Err(FeaRunError::Solve(
-            "random-response integrand is not finite and nonnegative".into(),
-        ));
-    }
-    cache.insert(key, values.clone());
-    Ok(values)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -202,11 +293,12 @@ mod tests {
                 relative_variance_tolerance: 1.0e-7,
                 maximum_refinement_levels: 12,
             },
+            1,
             |frequency| Ok(vec![frequency * frequency]),
         )
         .unwrap();
         assert!((integrated.values[0] - 1.0 / 3.0).abs() < 1.0e-7);
-        assert!(integrated.evidence.evaluated_frequency_count > 4);
+        assert!(integrated.evidence.evaluated_frequency_count >= 60);
     }
 
     #[test]
@@ -220,6 +312,7 @@ mod tests {
                 relative_variance_tolerance: 1.0e-8,
                 maximum_refinement_levels: 1,
             },
+            1,
             |frequency| {
                 let offset = (frequency - 0.5) / 0.01;
                 Ok(vec![(-offset * offset).exp()])

@@ -505,18 +505,23 @@ pub fn solve_modal_random_response_interval(
             FeaRunError::Solve("random-response interval ordinal is outside the plan".into())
         })?;
     let response = plan.frequency_response(summary, basis, excitation)?;
-    let integrated = integrate_interval(bounds[0], bounds[1], policy, |frequency| {
-        response.evaluate(frequency)
-    })?;
+    let integrated = integrate_interval(
+        bounds[0],
+        bounds[1],
+        policy,
+        response.mode_count(),
+        |frequency| response.modal_density(frequency),
+    )?;
+    let projected = response.project(&integrated.values)?;
     let layout = response.layout();
-    let dof_variance = integrated.values[..layout.dof_count].to_vec();
+    let dof_variance = projected[..layout.dof_count].to_vec();
     let fields = layout
         .fields
         .iter()
         .map(|field| RandomResponseFieldVariance {
             quantity: field.quantity,
             shape: field.shape.clone(),
-            variance: integrated.values[field.offset..field.offset + field.length].to_vec(),
+            variance: projected[field.offset..field.offset + field.length].to_vec(),
         })
         .collect();
     let mut result = ModalRandomResponseIntervalResult {
