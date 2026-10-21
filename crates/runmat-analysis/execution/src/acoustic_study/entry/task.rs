@@ -12,7 +12,12 @@ impl AcousticStudyEntryCoordinator {
             }
             AcousticStudyPhase::ReadyForObservationFanout => {
                 self.prepare_observation_fanout(source)?;
-                self.prepare_observation_partition()?;
+                // A frequency no authored observation samples continues with accuracy.
+                if self.phase == AcousticStudyPhase::ReadyForAccuracy {
+                    self.prepare_accuracy()?;
+                } else {
+                    self.prepare_observation_partition()?;
+                }
             }
             AcousticStudyPhase::ReadyForObservationPartition { .. } => {
                 self.prepare_observation_partition()?;
