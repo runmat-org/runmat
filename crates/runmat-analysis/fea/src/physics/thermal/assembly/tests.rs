@@ -120,12 +120,7 @@ fn thermal_reference_model() -> (
         .position(|node| node.node_id == free_node_id)
         .unwrap();
     mesh.seal_canonical_digest().unwrap();
-    (
-        model,
-        mesh,
-        free_node_index,
-        base_region.source_topology_id.clone(),
-    )
+    (model, mesh, free_node_index, base_region.source_topology_id.clone())
 }
 
 #[test]

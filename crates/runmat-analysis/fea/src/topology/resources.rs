@@ -57,14 +57,10 @@ impl AnalysisProjection {
         }
         for element in &self.elements {
             add(&mut total, vector::<usize>(element.node_indices.len())?)?;
-            add(&mut total, entity_payload_bytes(&element.region_id)?)?;
             add(
                 &mut total,
                 vector::<PersistentEntityId>(element.provenance.len())?,
             )?;
-            for entity in &element.provenance {
-                add(&mut total, entity_payload_bytes(entity)?)?;
-            }
         }
         for face in &self.boundary_faces {
             add(&mut total, vector::<usize>(face.node_indices.len())?)?;
@@ -76,9 +72,6 @@ impl AnalysisProjection {
                 &mut total,
                 vector::<PersistentEntityId>(face.provenance.len())?,
             )?;
-            for entity in &face.provenance {
-                add(&mut total, entity_payload_bytes(entity)?)?;
-            }
         }
         Ok(total)
     }
@@ -133,6 +126,8 @@ impl AnalysisProjection {
 
 // Records contain the scalar kind and string/vector headers already. Count only the
 // borrowed original UTF-8 and path buffers copied by their standard Clone implementations.
+/// Owned identity text, for retained-storage bounds. Clones share interned
+/// identities, so clone estimates charge only the handle slots.
 fn entity_payload_bytes(entity: &PersistentEntityId) -> Result<u64, AnalysisProjectionError> {
     let mut bytes = vector::<String>(entity.assembly_path.len())?;
     add(&mut bytes, vector::<u8>(entity.source_topology_id.len())?)?;
