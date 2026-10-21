@@ -5,6 +5,7 @@
 //! without interpreting authoring syntax or introducing host-specific physics defaults.
 
 mod acoustic_execution;
+mod acoustic_response_execution;
 mod assessment;
 mod callable;
 mod electrical_execution;
@@ -42,6 +43,7 @@ mod spatial_signals;
 mod assessment_functions;
 
 pub use acoustic_execution::CompletedAuthoredAcousticStudy;
+pub use acoustic_response_execution::CompletedAuthoredAcousticResponseStudy;
 pub use assessment::{
     complete as complete_local_fea_assessments,
     complete_frozen_locally as complete_frozen_fea_assessments,
@@ -55,7 +57,7 @@ pub use geometry::MaterializedFeaGeometry;
 pub use magnetic_execution::CompletedAuthoredMagneticStudy;
 pub use maxwell_execution::CompletedAuthoredMaxwellStudy;
 pub use preparation::{
-    checked_fea_artifact_access, PreparedAuthoredAcousticStudy, PreparedAuthoredElectricalStudy,
+    checked_fea_artifact_access, PreparedAuthoredAcousticResponseStudy, PreparedAuthoredAcousticStudy, PreparedAuthoredElectricalStudy,
     PreparedAuthoredFluidStudy, PreparedAuthoredMagneticStudy, PreparedAuthoredMaxwellStudy,
     PreparedAuthoredNonlinearSolidStudy, PreparedAuthoredThermalStudy, PreparedFeaStudy,
     PreparedFeaStudyRoot,
@@ -154,6 +156,7 @@ pub enum CompletedFeaStudyResult {
     Fluid(Box<CompletedAuthoredFluidStudy>),
     Nonlinear(Box<CompletedAuthoredNonlinearSolidStudy>),
     Acoustic(Box<CompletedAuthoredAcousticStudy>),
+    AcousticResponse(Box<CompletedAuthoredAcousticResponseStudy>),
     Electrical(Box<CompletedAuthoredElectricalStudy>),
     Magnetic(Box<CompletedAuthoredMagneticStudy>),
     Maxwell(Box<CompletedAuthoredMaxwellStudy>),
@@ -167,6 +170,7 @@ impl CompletedFeaStudyResult {
             Self::Fluid(result) => &result.mesh,
             Self::Nonlinear(result) => &result.mesh,
             Self::Acoustic(result) => &result.mesh,
+            Self::AcousticResponse(result) => &result.mesh,
             Self::Electrical(result) => &result.mesh,
             Self::Magnetic(result) => &result.mesh,
             Self::Maxwell(result) => &result.mesh,

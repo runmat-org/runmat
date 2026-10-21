@@ -37,6 +37,9 @@ pub(super) fn validate_prepared_execution(
         PreparedFeaStudyRoot::Acoustic(root) => {
             metadata!(root, runmat_analysis_fea::ComputeBackend::Cpu)
         }
+        PreparedFeaStudyRoot::AcousticResponse(root) => {
+            metadata!(root, runmat_analysis_fea::ComputeBackend::Cpu)
+        }
         PreparedFeaStudyRoot::Thermal(root) => metadata!(root, root.planning.backend),
         PreparedFeaStudyRoot::Structural(root) => {
             let expected = root.result_expectation();

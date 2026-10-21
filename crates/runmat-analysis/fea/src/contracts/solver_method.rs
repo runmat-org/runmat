@@ -21,6 +21,8 @@ pub enum SolverMethod {
     IncrementalNewtonRaphson,
     AcousticDomainGraphHelmholtzHarmonic,
     AcousticCanonicalHelmholtzGmres,
+    AcousticCanonicalShiftInvertBlockKrylov,
+    AcousticCanonicalNewmarkPcg,
     CfdVelocityPressureFiniteVolume,
     ChtConjugateProjection,
     FsiPartitionedProjection,
@@ -52,6 +54,10 @@ impl SolverMethod {
                 "acoustic_domain_graph_helmholtz_harmonic"
             }
             Self::AcousticCanonicalHelmholtzGmres => "acoustic_canonical_helmholtz_gmres",
+            Self::AcousticCanonicalShiftInvertBlockKrylov => {
+                "acoustic_canonical_shift_invert_block_krylov"
+            }
+            Self::AcousticCanonicalNewmarkPcg => "acoustic_canonical_newmark_pcg",
             Self::CfdVelocityPressureFiniteVolume => "cfd_velocity_pressure_finite_volume",
             Self::ChtConjugateProjection => "cht_conjugate_projection",
             Self::FsiPartitionedProjection => "fsi_partitioned_projection",

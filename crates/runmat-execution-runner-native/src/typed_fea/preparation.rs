@@ -9,6 +9,7 @@ use runmat_execution_artifact::ArtifactAccess;
 use super::LocalFeaExecutionOptions;
 
 mod acoustic;
+mod acoustic_response;
 mod admission;
 mod electrical;
 mod fluid;
@@ -18,6 +19,7 @@ mod magnetic;
 mod maxwell;
 mod thermal;
 pub use acoustic::PreparedAuthoredAcousticStudy;
+pub use acoustic_response::PreparedAuthoredAcousticResponseStudy;
 pub use electrical::PreparedAuthoredElectricalStudy;
 pub use fluid::PreparedAuthoredFluidStudy;
 pub use magnetic::PreparedAuthoredMagneticStudy;
@@ -26,6 +28,7 @@ pub use thermal::PreparedAuthoredThermalStudy;
 
 pub enum PreparedFeaStudyRoot {
     Acoustic(PreparedAuthoredAcousticStudy),
+    AcousticResponse(PreparedAuthoredAcousticResponseStudy),
     Electrical(PreparedAuthoredElectricalStudy),
     Magnetic(PreparedAuthoredMagneticStudy),
     Maxwell(PreparedAuthoredMaxwellStudy),
@@ -58,6 +61,7 @@ pub async fn prepare_study(
     if matches!(
         family,
         admission::PreparedFamily::Acoustic
+            | admission::PreparedFamily::AcousticResponse
             | admission::PreparedFamily::Nonlinear
             | admission::PreparedFamily::Fluid
             | admission::PreparedFamily::Magnetic
@@ -239,6 +243,29 @@ pub async fn prepare_study(
                 artifact_access: access,
                 input_materializations,
                 planning: runmat_analysis_fea::study::MagneticStudyPlanningPolicy {
+                    formulation_requirement: resolved.study.formulation_requirement,
+                },
+                local_execution,
+                analysis_accelerator_requests: options.accelerators.clone(),
+            })
+        }
+        admission::PreparedFamily::AcousticResponse => {
+            if !input_materializations.is_empty() {
+                return Err(
+                    "acoustic cavity-mode and transient studies take tabulated signals; generated signal inputs are evaluated for harmonic studies"
+                        .into(),
+                );
+            }
+            PreparedFeaStudyRoot::AcousticResponse(PreparedAuthoredAcousticResponseStudy {
+                geometry_meshing,
+                authored_study_digest,
+                frozen_project_digest,
+                study: realized.clone(),
+                materials: resolved.material_catalog,
+                program_revision: revision.clone(),
+                artifact_access: access,
+                input_materializations,
+                planning: runmat_analysis_fea::study::AcousticResponseStudyPlanningPolicy {
                     formulation_requirement: resolved.study.formulation_requirement,
                 },
                 local_execution,

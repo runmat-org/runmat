@@ -20,6 +20,8 @@ pub(super) struct SpdOperator<'a> {
 pub(super) struct SpdSolution {
     pub values: Vec<f64>,
     pub iterations: usize,
+    /// Achieved |b - A x| / |b| (zero for a zero right-hand side).
+    pub relative_residual: f64,
 }
 
 impl<'a> SpdOperator<'a> {
@@ -78,6 +80,7 @@ impl<'a> SpdOperator<'a> {
             return Ok(SpdSolution {
                 values: vec![0.0; n],
                 iterations: 0,
+                relative_residual: 0.0,
             });
         }
         let cancellation = crate::progress::cancellation_token();
@@ -90,10 +93,12 @@ impl<'a> SpdOperator<'a> {
             .map(|(b, a)| b - a)
             .collect::<Vec<_>>();
         let target = self.relative_tolerance * rhs_norm;
-        if norm(&residual) <= target {
+        let initial_norm = norm(&residual);
+        if initial_norm <= target {
             return Ok(SpdSolution {
                 values: solution,
                 iterations: 0,
+                relative_residual: initial_norm / rhs_norm,
             });
         }
         let mut preconditioned = self
@@ -123,10 +128,12 @@ impl<'a> SpdOperator<'a> {
                 solution[index] += step * direction[index];
                 residual[index] -= step * image[index];
             }
-            if norm(&residual) <= target {
+            let residual_norm = norm(&residual);
+            if residual_norm <= target {
                 return Ok(SpdSolution {
                     values: solution,
                     iterations: iteration,
+                    relative_residual: residual_norm / rhs_norm,
                 });
             }
             preconditioned = self

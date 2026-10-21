@@ -7,6 +7,7 @@ mod accelerator_placement;
 mod machine_capacity;
 pub use accelerator_placement::active_provider_resource;
 mod analysis_acoustic;
+mod analysis_acoustic_response;
 mod analysis_electrical;
 mod analysis_fluid;
 pub use analysis_fluid::{execute_fluid_study_locally, FluidStudyExecutionPolicy};
@@ -22,6 +23,7 @@ pub use analysis_nonlinear::{
 };
 mod analysis_magnetic;
 mod analysis_maxwell;
+pub use analysis_acoustic_response::source::acoustic_response_study_completion_from_source;
 pub use analysis_electrical::source::electrical_study_completion_from_source;
 pub use analysis_fluid::source::fluid_study_completion_from_source;
 pub use analysis_magnetic::source::magnetic_study_completion_from_source;
@@ -267,14 +269,15 @@ pub use typed_fea::{
     checked_fea_artifact_access, complete_frozen_fea_assessments, complete_local_fea_assessments,
     complete_remote_fea_assessments, freeze_fea_assessment_functions,
     materialize_checked_fea_study_geometry, prepare_checked_fea_study, reassess_saved_fea_locally,
-    MaterializedFeaGeometry, PreparedAuthoredAcousticStudy, PreparedAuthoredElectricalStudy,
+    MaterializedFeaGeometry, PreparedAuthoredAcousticResponseStudy, PreparedAuthoredAcousticStudy, PreparedAuthoredElectricalStudy,
     PreparedAuthoredFluidStudy, PreparedAuthoredMagneticStudy, PreparedAuthoredMaxwellStudy,
     PreparedAuthoredNonlinearSolidStudy, PreparedAuthoredThermalStudy, PreparedFeaStudy,
     PreparedFeaStudyRoot,
 };
 pub use typed_fea::{
     execute_checked_fea_locally, execute_prepared_fea_study_locally,
-    CompletedAuthoredAcousticStudy, CompletedAuthoredElectricalStudy, CompletedAuthoredFluidStudy,
+    CompletedAuthoredAcousticResponseStudy, CompletedAuthoredAcousticStudy,
+    CompletedAuthoredElectricalStudy, CompletedAuthoredFluidStudy,
     CompletedAuthoredMagneticStudy, CompletedAuthoredMaxwellStudy,
     CompletedAuthoredNonlinearSolidStudy, CompletedAuthoredThermalStudy, CompletedFeaStudyResult,
     CompletedLocalFeaCase, LocalFeaExecution, LocalFeaExecutionOptions, LocalFeaMeshObserver,

@@ -14,6 +14,9 @@ use runmat_geometry_core::GeometryAsset;
 use runmat_meshing_core::MeshingRequestSettings;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+#[path = "acoustic_response_run_options.rs"]
+mod acoustic_response_run_options;
+pub use acoustic_response_run_options::AnalysisAcousticResponseRunOptions;
 #[path = "electrical_run_options.rs"]
 mod electrical_run_options;
 pub use electrical_run_options::AnalysisElectricalRunOptions;
@@ -1860,6 +1863,7 @@ pub enum AnalysisSolverOptions {
     StructuralRandomResponse(AnalysisRandomResponseRunOptions),
     StructuralBuckling(AnalysisBucklingRunOptions),
     AcousticHelmholtz(AnalysisAcousticRunOptions),
+    AcousticResponse(super::AnalysisAcousticResponseRunOptions),
     ThermalDiffusion(AnalysisThermalRunOptions),
     StructuralTransient(AnalysisTransientRunOptions),
     IncompressibleFlow(AnalysisCfdRunOptions),

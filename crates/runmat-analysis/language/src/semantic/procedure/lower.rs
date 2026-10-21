@@ -431,7 +431,7 @@ fn generic_procedure(
             IndependentDomain::Eigenvalue {
                 requested_count: requirements::count(declaration, header, statements, diagnostics)?,
             },
-            StateKind::AcousticComplex,
+            StateKind::AcousticModes,
         ),
         "nonlinear" => (
             AnalysisProcedure::Nonlinear,
@@ -540,7 +540,10 @@ fn static_state(family: PhysicsFamily) -> StateKind {
 }
 
 fn transient_state(family: PhysicsFamily) -> StateKind {
-    static_state(family)
+    match family {
+        PhysicsFamily::Acoustic => StateKind::AcousticPressure,
+        _ => static_state(family),
+    }
 }
 
 fn harmonic_state(family: PhysicsFamily) -> StateKind {

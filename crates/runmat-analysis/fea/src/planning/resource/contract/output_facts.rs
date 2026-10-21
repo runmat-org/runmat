@@ -41,6 +41,16 @@ impl FeaResourceDemand {
             (Self::AcousticFieldRecovery(demand), AnalysisNumericalObjectKind::Field) => {
                 Some(&demand.output)
             }
+            (Self::AcousticResponse(demand), AnalysisNumericalObjectKind::SolverResult) => {
+                Some(&demand.result_output)
+            }
+            (Self::AcousticResponse(demand), AnalysisNumericalObjectKind::NumericalReceipt) => {
+                Some(&demand.receipt_output)
+            }
+            (
+                Self::AcousticResponse(demand),
+                AnalysisNumericalObjectKind::StatePublicationProfiles,
+            ) => Some(&demand.state_profiles_output),
             (Self::MaxwellHarmonic(demand), AnalysisNumericalObjectKind::SolverResult) => {
                 Some(&demand.result_output)
             }

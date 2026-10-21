@@ -393,6 +393,14 @@ impl NumericalPlanIdentity {
         Self::derive("electrical-static-numerical-plan", &(workload, topology))
     }
 
+    /// Canonical cavity-mode or pressure-transient workload and topology.
+    pub fn from_acoustic_response_workload(
+        workload: AnalysisWorkloadIdentity,
+        topology: Digest,
+    ) -> AnalysisExecutionResult<Self> {
+        Self::derive("acoustic-response-numerical-plan", &(workload, topology))
+    }
+
     /// Canonical acoustic workload and topology, independent of placement and transport.
     pub fn from_acoustic_workload(
         workload: AnalysisWorkloadIdentity,

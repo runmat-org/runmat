@@ -56,6 +56,41 @@ pub(super) async fn execute_prepared_with_source(
                 publication,
             )
         }
+        PreparedFeaStudyRoot::AcousticResponse(root) => {
+            let result = acoustic_response_execution::execute(root, workers, options).await?;
+            let digest = result
+                .completion
+                .compiled
+                .definition_digest()
+                .map_err(|e| e.to_string())?;
+            let publication_options = runmat_runtime::analysis::AnalysisAcousticResponseRunOptions {
+                precision_mode: runmat_runtime::analysis::PrecisionMode::Fp64,
+                residual_target: result.completion.workload.solver.relative_tolerance(),
+            };
+            let identity =
+                runmat_runtime::analysis::AnalysisStudyCompletionIdentity::new(format!(
+                    "typed-local:{}:{}",
+                    digest.to_string().trim_start_matches("sha256:"),
+                    result.completion.root.logical_digest,
+                ))?;
+            let publication =
+                runmat_runtime::analysis::prepare_acoustic_response_study_publication(
+                    &result.completion,
+                    &result.source,
+                    &result.mesh,
+                    &result.meshing_evidence,
+                    &publication_options,
+                    digest,
+                    runmat_runtime::operations::OperationContext::new(None, None),
+                    identity,
+                )
+                .map_err(|e| e.message)?;
+            let publication = complete_prepared_publication(source, publication).await?;
+            (
+                CompletedFeaStudyResult::AcousticResponse(Box::new(result)),
+                publication,
+            )
+        }
         PreparedFeaStudyRoot::Magnetic(root) => {
             let result = magnetic_execution::execute(root, workers, options).await?;
             let digest = result

@@ -1,6 +1,7 @@
 //! Reprojection shared by admission and workers. Context is bound to the producing receipt,
 //! independently of the observation catalog's own declarations and hashes.
 mod acoustic;
+mod acoustic_response;
 mod electrical;
 pub(crate) mod fluid;
 mod magnetic;
@@ -44,6 +45,9 @@ pub fn validate_accuracy_source_context(
     }
     if let AccuracySourceReceipt::AcousticHarmonic(receipt) = receipt {
         return acoustic::validate(request, receipt, observations, inputs);
+    }
+    if let AccuracySourceReceipt::AcousticResponse(receipt) = receipt {
+        return acoustic_response::validate(request, receipt, observations, inputs);
     }
     if let AccuracySourceReceipt::ElectricalStatic(receipt) = receipt {
         return electrical::validate(request, receipt, observations, inputs);

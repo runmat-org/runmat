@@ -155,6 +155,11 @@ pub use acoustic_frequency_assembly::{
     validate_acoustic_frequency_assembly_entries, AcousticFrequencyAssemblyPreparation,
     ImportedAcousticFrequencyAssembly, PreparedAcousticFrequencyAssemblyTask,
 };
+mod acoustic_response_plan;
+mod acoustic_response_result;
+mod acoustic_response_state_profiles;
+mod acoustic_response_study;
+mod acoustic_response_task;
 mod electrical_state_profiles;
 mod electrical_static_plan;
 mod electrical_static_result;
@@ -229,6 +234,23 @@ pub use electrical_study::{
     prepare_electrical_study_root, CompletedElectricalStudy, ElectricalStudyCoordinator,
     ElectricalStudyPhase, ElectricalStudyPreparation, ElectricalStudyResultClosure,
     ElectricalStudyResultPhase, PreparedElectricalStudyRoot,
+};
+pub use acoustic_response_state_profiles::acoustic_response_state_publication_profiles;
+pub use acoustic_response_plan::{
+    prepare_acoustic_response_inputs, rederive_acoustic_response_resource_plan,
+    PreparedAcousticResponseInputs,
+};
+pub use acoustic_response_result::{
+    import_acoustic_response_result, ImportedAcousticResponseResult,
+};
+pub use acoustic_response_task::{
+    prepare_acoustic_response_task, AcousticResponseTaskPreparation, PreparedAcousticResponseTask,
+};
+pub use acoustic_response_study::{
+    import_acoustic_response_study_completion, import_acoustic_response_study_root,
+    prepare_acoustic_response_study_root, CompletedAcousticResponseStudy, AcousticResponseStudyCoordinator,
+    AcousticResponseStudyPhase, AcousticResponseStudyPreparation, AcousticResponseStudyResultClosure,
+    AcousticResponseStudyResultPhase, PreparedAcousticResponseStudyRoot,
 };
 pub use magnetic_field_recovery::{
     build_magnetic_recovery_metadata_resource_plan,

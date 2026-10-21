@@ -55,7 +55,7 @@ pub fn registered_formulations(
         PhysicsFamily::Structural => Vec::new(),
         PhysicsFamily::Thermal => thermal_realizations(procedure),
         PhysicsFamily::Electromagnetic => electromagnetic_realizations(procedure),
-        PhysicsFamily::Acoustic => acoustic_realizations(),
+        PhysicsFamily::Acoustic => acoustic_realizations(procedure),
         PhysicsFamily::Fluid => fluid_realizations(procedure),
         PhysicsFamily::Coupled(coupled) => coupled_realizations(coupled, procedure),
     };
@@ -140,7 +140,35 @@ fn electromagnetic_realizations(procedure: AnalysisProcedure) -> Vec<ExactFormul
     super::maxwell::registered_realizations()
 }
 
-fn acoustic_realizations() -> Vec<ExactFormulationRealization> {
+fn acoustic_realizations(procedure: AnalysisProcedure) -> Vec<ExactFormulationRealization> {
+    let temporal = match procedure {
+        AnalysisProcedure::ModalExtraction => TemporalImplementation::AcousticCanonicalModalSolve,
+        AnalysisProcedure::TransientResponse => {
+            TemporalImplementation::AcousticCanonicalTransientSolve
+        }
+        _ => return harmonic_acoustic_realizations(),
+    };
+    [
+        TopologyImplementation::CanonicalSolverMeshTet4,
+        TopologyImplementation::CanonicalSolverMeshTet10,
+    ]
+    .into_iter()
+    .map(|topology| ExactFormulationRealization {
+        components: vec![ExactFormulationComponent {
+            spatial_operator: SpatialOperatorImplementation::AcousticGalerkinHelmholtz,
+            constitutive: ConstitutiveImplementation::ElementOwnedLosslessAcousticFluid,
+            recovery: RecoveryImplementation::AcousticSolverMeshNodalPressure,
+            topologies: vec![topology],
+            sources: vec![SourceImplementation::CanonicalBoundaryProjection],
+        }],
+        temporals: vec![temporal],
+        coupling: CouplingImplementation::Uncoupled,
+        boundary_transfers: vec![BoundaryTransferImplementation::CanonicalBoundaryProjection],
+    })
+    .collect()
+}
+
+fn harmonic_acoustic_realizations() -> Vec<ExactFormulationRealization> {
     let mut realizations = [
         SourceImplementation::SyntheticProfileFallback,
         SourceImplementation::AcousticHashedTargetGraphProjection,

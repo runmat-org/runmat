@@ -82,6 +82,7 @@ pub(super) fn validate(
         | AccuracySourceKind::Thermal
         | AccuracySourceKind::Magnetostatic
         | AccuracySourceKind::AcousticHarmonic
+        | AccuracySourceKind::AcousticResponse
         | AccuracySourceKind::ElectricalStatic => {
             return Err(AnalysisBridgeError::Identity(
                 "nonstructural source used structural context",
@@ -178,6 +179,7 @@ pub(super) fn validate(
         | AccuracySourceKind::Thermal
         | AccuracySourceKind::Magnetostatic
         | AccuracySourceKind::AcousticHarmonic
+        | AccuracySourceKind::AcousticResponse
         | AccuracySourceKind::ElectricalStatic => {
             unreachable!("rejected above")
         }

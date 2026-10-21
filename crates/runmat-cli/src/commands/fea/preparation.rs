@@ -31,6 +31,7 @@ pub(super) fn require_remote_root(
         runmat_execution_runner_native::PreparedFeaStudyRoot::Maxwell(_) => bail!("RM.FEA.TYPED_EXECUTION.REMOTE_PHYSICS_UNSUPPORTED: authored harmonic Maxwell roots are not qualified for remote submission"),
         runmat_execution_runner_native::PreparedFeaStudyRoot::Nonlinear(_) => bail!("RM.FEA.TYPED_EXECUTION.REMOTE_PHYSICS_UNSUPPORTED: authored J2 roots are not qualified for remote submission"),
         runmat_execution_runner_native::PreparedFeaStudyRoot::Fluid(_) => bail!("RM.FEA.TYPED_EXECUTION.REMOTE_PHYSICS_UNSUPPORTED: authored canonical steady fluid roots are not qualified for remote submission"),
+        runmat_execution_runner_native::PreparedFeaStudyRoot::AcousticResponse(_) => bail!("RM.FEA.TYPED_EXECUTION.REMOTE_PHYSICS_UNSUPPORTED: acoustic cavity-mode and transient roots are not implemented for remote submission"),
         runmat_execution_runner_native::PreparedFeaStudyRoot::Acoustic(_) => bail!("RM.FEA.TYPED_EXECUTION.REMOTE_PHYSICS_UNSUPPORTED: standalone acoustic authored roots are not implemented for remote submission"),
         runmat_execution_runner_native::PreparedFeaStudyRoot::Thermal(_) => bail!("RM.FEA.TYPED_EXECUTION.REMOTE_PHYSICS_UNSUPPORTED: standalone thermal authored roots are not implemented for remote submission"),
     }

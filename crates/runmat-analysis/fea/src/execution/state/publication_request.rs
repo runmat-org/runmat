@@ -23,6 +23,7 @@ pub enum SemanticStatePublicationSource {
     StructuralPrimaryFields,
     ThermalPrimaryField,
     AcousticNativeFields,
+    AcousticResponseFields,
     StaticElectricalNativeFields,
     MagnetostaticNativeFields,
     MaxwellNativeFields,
@@ -76,6 +77,9 @@ impl SemanticStatePublicationRequest {
                 ) | (
                     SemanticStatePublicationSource::AcousticNativeFields,
                     StateKind::AcousticComplex
+                ) | (
+                    SemanticStatePublicationSource::AcousticResponseFields,
+                    StateKind::AcousticModes | StateKind::AcousticPressure
                 ) | (
                     SemanticStatePublicationSource::StaticElectricalNativeFields,
                     StateKind::ElectromagneticStatic

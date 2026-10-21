@@ -3,6 +3,8 @@ use super::*;
 
 #[path = "acoustic/duct.rs"]
 mod duct;
+#[path = "acoustic/response.rs"]
+mod response;
 
 #[test]
 fn authored_acoustic_orders_publish_cold_native_fields_and_exact_state_catalog() {

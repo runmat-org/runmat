@@ -15,7 +15,7 @@ impl AnalysisSolverOptions {
                 options.solver_mesh_artifact_path = None;
             }
             Self::StructuralBuckling(options) => options.solver_mesh_artifact_path = None,
-            Self::AcousticHelmholtz(_) => {}
+            Self::AcousticHelmholtz(_) | Self::AcousticResponse(_) => {}
             Self::ThermalDiffusion(options) => options.solver_mesh_artifact_path = None,
             Self::StructuralTransient(options) => options.solver_mesh_artifact_path = None,
             Self::IncompressibleFlow(_) => {}
@@ -86,6 +86,9 @@ impl AnalysisSolverOptions {
             )),
             (Structural, HarmonicResponse, SolutionSpace::Direct) => Ok(
                 Self::StructuralFrequency(AnalysisStructuralFrequencyRunOptions::default()),
+            ),
+            (Acoustic, ModalExtraction | TransientResponse, SolutionSpace::Direct) => Ok(
+                Self::AcousticResponse(super::super::AnalysisAcousticResponseRunOptions::default()),
             ),
             (Acoustic, HarmonicResponse, SolutionSpace::Direct) => Ok(Self::AcousticHelmholtz(
                 AnalysisAcousticRunOptions::default(),

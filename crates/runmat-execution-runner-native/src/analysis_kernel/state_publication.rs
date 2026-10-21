@@ -130,6 +130,18 @@ pub(super) fn execute(
             ))?;
             CanonicalSemanticState::from_acoustic_publication(&publication, &result)?
         }
+        SemanticStatePublicationSource::AcousticResponseFields => {
+            let result =
+                runmat_analysis_fea::execution::AcousticResponseSolverResult::from_canonical_bytes(
+                    &solver_result.payload(),
+                )?;
+            result.validate_publication_request(&publication)?;
+            let fields = result.state_fields();
+            check_profile(
+                SemanticStatePublicationProfileSource::AcousticResponseFields(&fields),
+            )?;
+            CanonicalSemanticState::from_acoustic_response_publication(&publication, &result)?
+        }
         SemanticStatePublicationSource::ThermalPrimaryField => {
             let manifest =
                 runmat_analysis_execution::decode_prepared_thermal_manifest(solver_result)?;

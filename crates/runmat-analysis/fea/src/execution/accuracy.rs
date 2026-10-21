@@ -24,6 +24,7 @@ pub enum AccuracySourceKind {
     Magnetostatic,
     ElectricalStatic,
     AcousticHarmonic,
+    AcousticResponse,
     Thermal,
     StructuralLinear,
     StructuralModalResponseSpectrum,

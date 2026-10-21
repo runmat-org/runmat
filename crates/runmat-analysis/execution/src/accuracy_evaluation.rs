@@ -71,6 +71,7 @@ pub fn prepare_accuracy(
         AccuracySourceKind::MaxwellHarmonic => AnalysisWorkKind::SolveMaxwellHarmonic,
         AccuracySourceKind::Thermal => AnalysisWorkKind::SolveThermal,
         AccuracySourceKind::AcousticHarmonic => AnalysisWorkKind::SolveAcousticHarmonic,
+        AccuracySourceKind::AcousticResponse => AnalysisWorkKind::SolveAcousticResponse,
         AccuracySourceKind::StructuralLinear => AnalysisWorkKind::Solve,
         AccuracySourceKind::StructuralModalResponseSpectrum => {
             AnalysisWorkKind::AssembleStructuralModalResponseSpectrumResult
@@ -138,6 +139,7 @@ pub fn prepare_accuracy(
             | AccuracySourceKind::NonlinearSolid
             | AccuracySourceKind::FluidSteady
             | AccuracySourceKind::AcousticHarmonic
+            | AccuracySourceKind::AcousticResponse
             | AccuracySourceKind::ElectricalStatic
             | AccuracySourceKind::Magnetostatic
             | AccuracySourceKind::MaxwellHarmonic

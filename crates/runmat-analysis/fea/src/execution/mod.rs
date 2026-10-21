@@ -14,6 +14,13 @@ pub use acoustic::{
     AcousticNumericalReceipt, AcousticNumericalReceiptArtifact, ACOUSTIC_RECEIPT_MAX_ENCODED_BYTES,
 };
 mod accuracy_source;
+mod acoustic_response;
+pub use acoustic_response::{
+    AcousticResponseDiagnostics, AcousticResponseNumericalReceipt,
+    AcousticResponseNumericalReceiptArtifact, AcousticResponseSolver,
+    AcousticResponseSolverResult, AcousticResponseWorkload, ACOUSTIC_PRESSURE_FIELD_ID,
+    ACOUSTIC_RESPONSE_RECEIPT_MAX_ENCODED_BYTES,
+};
 mod buckling_result;
 mod buckling_workload;
 mod electrical_static;
