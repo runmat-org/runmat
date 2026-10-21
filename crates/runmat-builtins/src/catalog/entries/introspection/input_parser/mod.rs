@@ -35,6 +35,15 @@ const fn entry(definition: Definition) -> BuiltinCatalogEntry {
                 fixture: BuiltinExampleFixture::None,
                 requirements: BuiltinExampleRequirements::NONE,
                 verification: BuiltinExampleVerification::Assertions { source: "assert(result == 5);" },
+            }, BuiltinExample {
+                id: "omitted-default", title: "Use the registered default when the name is omitted",
+                program: "p = inputParser(); addParameter(p, 'scale', 2); parse(p); result = p.Results.scale;",
+                display_output: None,
+                compatibility: BuiltinExampleCompatibility::Matlab,
+                harness: BuiltinExampleHarness::Portable,
+                fixture: BuiltinExampleFixture::None,
+                requirements: BuiltinExampleRequirements::NONE,
+                verification: BuiltinExampleVerification::Assertions { source: "assert(result == 2);" },
             }],
             ..BuiltinDocumentation::EMPTY
         },

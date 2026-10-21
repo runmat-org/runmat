@@ -57,6 +57,7 @@ export interface FeaDiagnostic {
   severity: FeaDiagnosticSeverity;
   phase: FeaDiagnosticPhase;
   location: FeaSourceLocation | null;
+  label?: string;
   related: FeaRelatedDiagnostic[];
   availability: FeaSourceAvailability;
 }

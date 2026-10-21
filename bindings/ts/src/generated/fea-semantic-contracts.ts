@@ -2468,7 +2468,9 @@ export type PartitionBalance = "nonzeros"
   | "dofs"
   | "elements";
 
-export interface PersistentEntityId {
+export type PersistentEntityId = PersistentEntityIdData;
+
+export interface PersistentEntityIdData {
   kind: PersistentEntityKind;
   source_topology_id: string;
   assembly_path: string[];
