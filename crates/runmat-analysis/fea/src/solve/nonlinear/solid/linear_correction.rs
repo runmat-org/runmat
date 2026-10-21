@@ -13,10 +13,6 @@ use crate::{
     },
 };
 
-/// Krylov space and iteration cap of a nonsymmetric Newton correction.
-const GENERAL_CORRECTION_RESTART: usize = 60;
-const GENERAL_CORRECTION_ITERATIONS: usize = 6000;
-
 impl SolidNewtonProblem<'_> {
     pub(super) fn correction(
         &self,
@@ -38,32 +34,45 @@ impl SolidNewtonProblem<'_> {
         }
         work.linear_solves += 1;
         // Contact and follower tangents are not symmetric: their Newton corrections use the
-        // general preconditioned Krylov solve. The nonlinear residual accepts the iterate.
+        // certified general direct solve.
         if self.contact.is_some() || self.follower.is_some() {
-            let policy = match &self.contact {
-                Some(contact) => crate::solve::krylov::GmresPolicy {
-                    relative_tolerance: contact.input.solve_policy.relative_tolerance,
-                    restart: contact.input.solve_policy.restart,
-                    maximum_iterations: contact.input.solve_policy.maximum_iterations,
-                },
-                None => crate::solve::krylov::GmresPolicy {
-                    relative_tolerance: self.policy.linear_relative_tolerance,
-                    restart: GENERAL_CORRECTION_RESTART,
-                    maximum_iterations: GENERAL_CORRECTION_ITERATIONS,
-                },
+            let (policy, admission) = match &self.contact {
+                Some(contact) => (
+                    contact.input.solve_policy,
+                    contact
+                        .solve_resources
+                        .ok_or(crate::solve::general::GeneralSolveError::Admission)?
+                        .admit_operator(&reduced, contact.input.solve_policy)?,
+                ),
+                None => {
+                    let policy = crate::solve::general::GeneralSolvePolicy::bounded(
+                        self.policy.linear_relative_tolerance,
+                    );
+                    (
+                        policy,
+                        crate::solve::general::GeneralSolveEnvelope::derive(&reduced, policy)
+                            .map_err(SolidNewtonError::General)?,
+                    )
+                }
             };
             let rhs = residual.iter().map(|r| -r).collect::<Vec<_>>();
-            let solved = crate::solve::general::solve_newton_correction(&reduced, &rhs, policy)
-                .map_err(|error| match error {
-                    crate::solve::general::GeneralSolveError::Cancelled => {
-                        SolidNewtonError::Cancelled
-                    }
-                    other => SolidNewtonError::NotConverged {
+            let solved = crate::solve::general::solve_general_system(
+                &reduced,
+                &rhs,
+                policy,
+                admission,
+            )
+            .map_err(|error| match error {
+                crate::solve::general::GeneralSolveError::Cancelled => SolidNewtonError::Cancelled,
+                crate::solve::general::GeneralSolveError::NotConverged { .. } => {
+                    SolidNewtonError::NotConverged {
                         factor,
                         cutbacks: 0,
-                        reason: format!("general tangent correction rejected: {other}"),
-                    },
-                })?;
+                        reason: error.to_string(),
+                    }
+                }
+                other => SolidNewtonError::General(other),
+            })?;
             return self
                 .reduction
                 .expand_linear(&solved.solution)

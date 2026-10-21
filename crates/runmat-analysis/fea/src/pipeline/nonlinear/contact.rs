@@ -14,7 +14,6 @@ use crate::{
     solve::{
         general::{GeneralSolveEnvelope, GeneralSolvePolicy},
         nonlinear::{solid::SolidContactCoupling, ContactBlockExecution},
-        uniqueness::SparseUniquenessPolicy,
     },
     topology::{
         AnalysisProjection, BoundaryPairingPolicy, BoundaryProjectionDifferentialPolicy,
@@ -30,8 +29,6 @@ use std::collections::BTreeMap;
 const NORMAL_PENALTY_FACTOR: f64 = 10.0;
 /// Pairing search reaches this many face sizes beyond the primary surface.
 const SEARCH_FACE_SIZES: f64 = 4.0;
-const GMRES_RESTART: usize = 60;
-const GMRES_ITERATIONS: usize = 6000;
 
 /// Owned inputs that the contact operator borrows for the whole step.
 pub(super) struct ContactInputs {
@@ -218,12 +215,7 @@ pub(super) fn execution<'a>(
     options: &NonlinearSolveOptions,
     maximum_resident_bytes: u64,
 ) -> ContactBlockExecution<'a> {
-    let solve_policy = GeneralSolvePolicy {
-        relative_tolerance: options.linear_tolerance,
-        restart: GMRES_RESTART,
-        maximum_iterations: GMRES_ITERATIONS,
-        uniqueness: SparseUniquenessPolicy::bounded(),
-    };
+    let solve_policy = GeneralSolvePolicy::bounded(options.linear_tolerance);
     ContactBlockExecution {
         coupling: SolidContactCoupling {
             operator,

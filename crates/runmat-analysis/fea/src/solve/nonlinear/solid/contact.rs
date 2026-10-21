@@ -24,6 +24,7 @@ pub(super) struct PreparedSolidContact<'a> {
     pub input: SolidContactCoupling<'a>,
     pub pattern: SparsePattern,
     pub reduced_pattern: SparsePattern,
+    pub solve_resources: Option<crate::planning::resource::GeneralSparseSolveResourceDemand>,
 }
 pub(super) struct SolidTrialEvaluation {
     pub(super) evaluation: NonlinearSolidEvaluation,
@@ -47,19 +48,15 @@ impl SolidNewtonProblem<'_> {
         work: &mut SolidAttemptWork,
     ) -> Result<(), SolidNewtonError> {
         if self.contact.is_some() {
-            // An open contact pair can leave a body unanchored. A singular reduced tangent
-            // cannot solve a generic right-hand side to the linear tolerance, so a dense
-            // deterministic probe rejects it without constructing an inverse.
-            let probe = (0..self.reduction.reduced_dof_count)
-                .map(|i| 1.0 + 0.5 * ((i as f64) * 0.618_033_988_75).sin())
-                .collect::<Vec<_>>();
-            self.correction(tangent, &probe, factor, work)
-                .map_err(|error| match error {
-                    SolidNewtonError::NotConverged { reason, .. } => SolidNewtonError::Evaluation(
-                        format!("contact tangent is singular or unsolvable: {reason}"),
-                    ),
-                    other => other,
-                })?;
+            // The certified direct correction rejects a singular reduced tangent (an open pair
+            // can leave a body unanchored); a zero load must give a zero correction.
+            let zero = vec![0.; self.reduction.reduced_dof_count];
+            let correction = self.correction(tangent, &zero, factor, work)?;
+            if correction.iter().any(|v| *v != 0.) {
+                return Err(SolidNewtonError::Evaluation(
+                    "nonzero zero-load contact correction".into(),
+                ));
+            }
         }
         Ok(())
     }
