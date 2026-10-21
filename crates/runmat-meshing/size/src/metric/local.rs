@@ -190,28 +190,45 @@ impl ResolvedMetricField {
             ));
         }
         let slope = self.request.maximum_grading_ratio - 1.0;
-        let reach_length = coarsest_length_bound(constant)?;
-        let mut metric = constant;
-        for source in sources {
-            // Beyond this distance the relaxed source is isotropically coarser than the
-            // coarsest direction of the constant part and cannot tighten it.
-            if slope > 0.0 {
-                let reach = (reach_length - source.characteristic_length_m) / slope;
-                if bounds_distance(source.bounds, point_m) > reach {
-                    continue;
-                }
+        if slope <= 0.0 {
+            // Without grading every local source applies at full strength everywhere.
+            let mut metric = constant;
+            for source in sources {
+                metric = intersection::intersect(metric, source.metric)?;
             }
-            let distance = if slope > 0.0 {
-                polyline_distance(
-                    &self.request.entity_supports[source.support].points_m,
-                    point_m,
-                )
-            } else {
-                0.0
-            };
+            metric.validate()?;
+            return Ok(metric);
+        }
+        // Nearest sources first (ties keep canonical order): each one that tightens the metric
+        // shrinks the distance beyond which a later source is isotropically coarser than the
+        // metric's coarsest direction, so it is dominated and skipped. Every consumer, including
+        // the independent validator, evaluates through this function.
+        let mut order = sources
+            .iter()
+            .map(|source| (bounds_distance(source.bounds, point_m), source))
+            .collect::<Vec<_>>();
+        order.sort_by(|left, right| left.0.total_cmp(&right.0));
+        let mut metric = constant;
+        let mut reach_length = coarsest_length_bound(metric)?;
+        for (lower_bound, source) in order {
+            let reach = (reach_length - source.characteristic_length_m) / slope;
+            if lower_bound > reach {
+                continue;
+            }
+            let distance = polyline_distance(
+                &self.request.entity_supports[source.support].points_m,
+                point_m,
+            );
+            if distance > reach {
+                continue;
+            }
             let scale = 1.0 + slope * distance / source.characteristic_length_m;
             let graded = scaled(source.metric, scale)?;
-            metric = intersection::intersect(metric, graded)?;
+            let tightened = intersection::intersect(metric, graded)?;
+            if tightened != metric {
+                metric = tightened;
+                reach_length = coarsest_length_bound(metric)?;
+            }
         }
         metric.validate()?;
         Ok(metric)
