@@ -36,6 +36,7 @@ pub fn solve_electrothermal_heat_study(
     let electrical = electrical_part(&compiled.model, &step);
     let mut thermal = compiled.clone();
     thermal.model = thermal_part(&compiled.model, &step);
+    keep_observations(&mut thermal.model, &step, is_thermal_quantity);
     runmat_analysis_core::retain_authored_outputs(
         &mut thermal.outputs,
         &mut thermal.assessments,
@@ -62,6 +63,7 @@ pub fn electrothermal_conduction_study(
     let step = single_step(compiled)?;
     let mut conduction = compiled.clone();
     conduction.model = electrical_part(&compiled.model, &step);
+    keep_observations(&mut conduction.model, &step, is_electrical_quantity);
     runmat_analysis_core::retain_authored_outputs(
         &mut conduction.outputs,
         &mut conduction.assessments,
@@ -112,6 +114,28 @@ fn operating_point(
         joule_power_w: CoupledElectrothermalCompletion::joule_power_w(sample),
         terminal_power_w: CoupledElectrothermalCompletion::terminal_power_w(sample),
     })
+}
+
+/// Each side publishes the authored observations of the quantities it solves.
+fn keep_observations(
+    part: &mut runmat_analysis_core::AnalysisModel,
+    step: &runmat_analysis_core::ProcedureStep,
+    keep: fn(ObservationQuantity) -> bool,
+) {
+    let observations = step
+        .observations
+        .iter()
+        .filter(|request| request.spec().is_some_and(|spec| keep(spec.quantity)))
+        .cloned()
+        .collect();
+    if let Some(side) = part
+        .sequence
+        .steps
+        .iter_mut()
+        .find(|side| side.step_id == step.step_id)
+    {
+        side.observations = observations;
+    }
 }
 
 fn is_thermal_quantity(quantity: ObservationQuantity) -> bool {
