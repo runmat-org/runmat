@@ -230,6 +230,7 @@ fn native_requirement(
 ) -> AnalysisExecutionResult<FieldRecoveryRequirement> {
     let count = u64::try_from(count).map_err(invalid)?;
     Ok(FieldRecoveryRequirement {
+        support: Default::default(),
         quantity,
         source_location: location,
         output_location: location,

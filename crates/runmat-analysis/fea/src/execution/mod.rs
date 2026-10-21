@@ -53,8 +53,8 @@ mod fluid;
 #[cfg(test)]
 pub(crate) use fluid::tests::authored as fluid_test_workload;
 pub use fluid::{
-    fluid_field_definition_inventory, fluid_native_field_definition_inventory,
-    fluid_receipt_encoding_profile, FluidCoupling, FluidNumericalReceipt,
+    fluid_native_field_definition_inventory,
+    fluid_native_field_definitions, fluid_receipt_encoding_profile, FluidCoupling, FluidNumericalReceipt,
     FluidNumericalReceiptArtifact, FluidRetainedOriginal, FluidSolverProvenance,
     FluidSteadySolverResult, FluidSteadyWorkload, FluidTransientBlock,
     FluidTransientBlockReservation, FluidTransientBlockResult, FluidTransientBlockWorkload,

@@ -1,7 +1,7 @@
 use runmat_analysis_core::AnalysisModel;
 use runmat_analysis_fea::{
     execution::{
-        AnalysisNumericalObjectKind, FluidSteadyWorkload, MagnetostaticWorkload,
+        AnalysisNumericalObjectKind, MagnetostaticWorkload,
         MaxwellHarmonicWorkload, NonlinearSolidWorkload, StructuralFrequencyWorkload,
         StructuralLinearWorkload, ThermalWorkload,
     },
@@ -23,7 +23,6 @@ pub enum ObservationWorkloadSource {
     Thermal(PreparedAnalysisObjects),
     Magnetostatic(PreparedAnalysisObjects),
     MaxwellHarmonic(PreparedAnalysisObjects),
-    FluidSteady(PreparedAnalysisObjects),
     /// The producing workload of native node/element fields on the canonical solver mesh,
     /// of any family. It authenticates provenance only; plans re-resolve from the authored
     /// step and mesh carried by the volume-mesh catalog, never from a decoded workload.
@@ -39,7 +38,6 @@ impl ObservationWorkloadSource {
             Self::Thermal(_) => AnalysisNumericalObjectKind::ThermalWorkload,
             Self::Magnetostatic(_) => AnalysisNumericalObjectKind::MagnetostaticWorkload,
             Self::MaxwellHarmonic(_) => AnalysisNumericalObjectKind::MaxwellHarmonicWorkload,
-            Self::FluidSteady(_) => AnalysisNumericalObjectKind::FluidSteadyWorkload,
             Self::VolumeMesh(objects) => objects.manifest.kind,
         }
     }
@@ -52,8 +50,7 @@ impl ObservationWorkloadSource {
             | Self::Thermal(objects)
             | Self::Magnetostatic(objects)
             | Self::MaxwellHarmonic(objects)
-            | Self::VolumeMesh(objects)
-            | Self::FluidSteady(objects) => objects,
+            | Self::VolumeMesh(objects) => objects,
         }
     }
 
@@ -80,9 +77,6 @@ impl ObservationWorkloadSource {
                     workload,
                 )))
             }
-            Self::FluidSteady(_) => Ok(AdmittedObservationWorkload::FluidSteady(
-                FluidSteadyWorkload::from_canonical_bytes(&objects.payload())?,
-            )),
             Self::Linear(_) => Ok(AdmittedObservationWorkload::Linear(
                 StructuralLinearWorkload::from_canonical_bytes(&objects.payload())?,
             )),
@@ -110,7 +104,6 @@ pub(crate) enum AdmittedObservationWorkload {
     Thermal(ThermalWorkload),
     Magnetostatic(MagnetostaticWorkload),
     MaxwellHarmonic(MaxwellHarmonicWorkload),
-    FluidSteady(FluidSteadyWorkload),
     VolumeMesh,
 }
 
@@ -123,7 +116,6 @@ impl AdmittedObservationWorkload {
             Self::Thermal(workload) => &workload.model,
             Self::Magnetostatic(workload) => &workload.model,
             Self::MaxwellHarmonic(workload) => &workload.model,
-            Self::FluidSteady(workload) => &workload.model,
             Self::VolumeMesh => {
                 return Err(AnalysisBridgeError::Identity(
                     "volume-mesh observations resolve from their catalog step, not a model",
@@ -140,8 +132,7 @@ impl AdmittedObservationWorkload {
             Self::NonlinearSolid(_)
             | Self::Magnetostatic(_)
             | Self::MaxwellHarmonic(_)
-            | Self::VolumeMesh
-            | Self::FluidSteady(_) => ComputeBackend::Cpu,
+            | Self::VolumeMesh => ComputeBackend::Cpu,
         }
     }
 
@@ -155,8 +146,7 @@ impl AdmittedObservationWorkload {
             | Self::Thermal(_)
             | Self::Magnetostatic(_)
             | Self::MaxwellHarmonic(_)
-            | Self::VolumeMesh
-            | Self::FluidSteady(_) => ObservationExecutionPolicy::serial(),
+            | Self::VolumeMesh => ObservationExecutionPolicy::serial(),
         }
     }
 }

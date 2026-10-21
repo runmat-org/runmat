@@ -11,14 +11,6 @@ mod contract;
 mod distributed;
 mod distributed_numeric;
 mod entity;
-mod finite_volume;
-pub use finite_volume::{
-    evaluate_finite_volume_observation_partition, evaluate_finite_volume_observations,
-    finite_volume_observation_partition_source_indices,
-    finite_volume_observation_topology_resident_bytes,
-    prepare_finite_volume_observation_field_partition, resolve_finite_volume_observation_plan,
-    verify_finite_volume_observation_plan, FiniteVolumeObservationSource,
-};
 mod evaluate;
 mod extrema;
 mod history;

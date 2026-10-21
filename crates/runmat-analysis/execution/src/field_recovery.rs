@@ -183,9 +183,7 @@ pub fn decode_recovered_field_artifact(
                 entry.definition.clone(),
                 entry.sample,
                 partitions,
-                manifest
-                    .entity_counts
-                    .entity_count(entry.definition.entity_domain()),
+                entry.definition.stored_entities(manifest.entity_counts),
             )
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
         })

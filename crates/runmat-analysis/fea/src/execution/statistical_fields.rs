@@ -97,6 +97,7 @@ pub fn statistical_field_request(
         };
         let count = entity_count(definition.entity_domain(), &projection)?;
         requirements.push(FieldRecoveryRequirement {
+            support: Default::default(),
             quantity: definition.quantity(),
             source_location: definition.location(),
             output_location: definition.location(),

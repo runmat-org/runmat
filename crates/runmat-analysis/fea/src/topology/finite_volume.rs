@@ -34,6 +34,20 @@ impl Default for FiniteVolumeProjectionPolicy {
     }
 }
 
+impl FiniteVolumeProjectionPolicy {
+    /// Limits that admit exactly this projection's complete cell complex. Work and scratch
+    /// are governed by the calling phase's resident admission, not by a fixed cell cap.
+    pub fn covering(source: &AnalysisProjection) -> Self {
+        Self {
+            max_cells: source.elements.len(),
+            max_face_incidences: source.elements.len().saturating_mul(4),
+            max_boundary_faces: source.boundary_faces.len(),
+            max_scratch_bytes: usize::MAX,
+            max_traversal_operations: usize::MAX,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FiniteVolumeReservation {
     pub cell_count: usize,

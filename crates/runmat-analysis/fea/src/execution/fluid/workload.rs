@@ -91,32 +91,6 @@ impl FluidSteadyWorkload {
         }
     }
 
-    /// The fluid cell complex of this study on its mesh: every element of a standalone flow
-    /// study, the fluid-role regions of a coupled one. Solve, field recovery, observation and
-    /// publication all derive the complex here.
-    pub fn fluid_cell_complex(
-        &self,
-        mesh: &SolverMeshArtifact,
-        projection: &crate::topology::AnalysisProjection,
-    ) -> AnalysisExecutionResult<crate::topology::FiniteVolumeTopology> {
-        let selection = match self.coupling() {
-            FluidCoupling::Standalone => crate::topology::FiniteVolumeCellSelection::AllElements,
-            FluidCoupling::ConjugateHeat | FluidCoupling::FluidStructure => {
-                let properties = crate::properties::compile_property_map(&self.model, Some(mesh))
-                    .map_err(invalid)?;
-                crate::study::derive_fluid_cells(&self.model, mesh, &properties)
-                    .map_err(invalid)?
-                    .selection
-            }
-        };
-        crate::topology::FiniteVolumeTopology::derive_selected(
-            projection,
-            self.geometry_policy,
-            selection,
-        )
-        .map_err(invalid)
-    }
-
     /// Authored procedure of the singleton fluid step. Steady and backward-Euler transient
     /// studies share this workload, its task lifecycle and its publication.
     pub fn is_transient(&self) -> bool {

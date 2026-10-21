@@ -659,6 +659,10 @@ impl RecoveredFieldArtifact {
         &self.fields
     }
 
+    pub fn entity_counts(&self) -> RecoveredFieldEntityCounts {
+        self.entity_counts
+    }
+
     pub fn into_fields(self) -> Vec<RecoveredField> {
         self.fields
     }

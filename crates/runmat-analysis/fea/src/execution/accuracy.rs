@@ -70,19 +70,6 @@ impl ObservationPublicationCatalog {
         }
         match (kind, self.source().source()) {
             (
-                AccuracySourceKind::FluidSteady,
-                crate::results::observation::ObservationFieldCatalogSource::FiniteVolumeRecovery {
-                    recovery_request,
-                    manifest,
-                    ..
-                },
-            ) if recovery_request.producer == producer
-                && recovery_request.source.solver_result() == Some(result)
-                && manifest.source == recovery_request.source =>
-            {
-                Ok(())
-            }
-            (
                 AccuracySourceKind::Magnetostatic | AccuracySourceKind::MaxwellHarmonic,
                 crate::results::observation::ObservationFieldCatalogSource::SampledRecovery {
                     recovery_request,

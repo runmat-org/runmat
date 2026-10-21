@@ -87,6 +87,7 @@ fn sample(
         authority.topology,
         FieldRecoveryPlan {
             requirements: vec![FieldRecoveryRequirement {
+                support: Default::default(),
                 quantity: ObservationQuantity::AcousticPressure,
                 source_location: FieldLocation::Node,
                 output_location: FieldLocation::Node,

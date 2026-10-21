@@ -45,6 +45,7 @@ fn source(
     let count = nodes as u64;
     let plan = FieldRecoveryPlan {
         requirements: vec![FieldRecoveryRequirement {
+            support: Default::default(),
             quantity: definition.quantity(),
             source_location: FieldLocation::Node,
             output_location: FieldLocation::Node,

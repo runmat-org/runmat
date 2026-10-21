@@ -146,7 +146,11 @@ pub(super) fn requested_bytes(
     workload: &FluidSteadyWorkload,
     source: &super::super::workload::PreparedFluidSource,
 ) -> AnalysisExecutionResult<u64> {
-    let definitions = super::field_definition_inventory(workload.coupling())?;
+    let definitions = super::VolumeMeshLayout::source_definitions(
+        &source.source,
+        &source.topology,
+        workload.coupling(),
+    )?;
     let nodes = source.source.nodes.len();
     let cells = source.topology.cells.len();
     let faces = source.topology.faces.len();
@@ -166,8 +170,8 @@ pub(super) fn requested_bytes(
     }
     let entity_counts = RecoveredFieldEntityCounts {
         nodes,
-        volume_elements: cells,
-        oriented_faces: faces,
+        volume_elements: source.source.elements.len(),
+        oriented_faces: super::VolumeMeshLayout::face_count_bound(&source.source, &source.topology),
         volume_integration_points: 0,
         oriented_edges: 0,
         beam_elements: 0,
@@ -199,6 +203,9 @@ pub(super) fn requested_bytes(
         required,
         u64::try_from(source.topology.reservation.scratch_bytes).map_err(invalid)?,
     )?;
+    // Placement on the canonical mesh: stored orders and, for a fluid subset, the
+    // complete mesh face derivation.
+    required = add(required, super::VolumeMeshLayout::requested_bytes(&source.source, &source.topology)?)?;
     // The field-layout owner profiles its counted validation and one face identity codec;
     // no numerical projection or unrelated tree-index estimator is substituted here.
     required = add(

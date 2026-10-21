@@ -1,5 +1,4 @@
 use super::*;
-mod finite_volume;
 mod partition;
 mod sampled;
 pub(super) use partition::execute_observation_partition;

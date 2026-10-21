@@ -81,9 +81,7 @@ impl AnalysisPublicationBuilder {
                     != entry
                         .definition
                         .storage_shape(
-                            catalog
-                                .entity_counts
-                                .entity_count(entry.definition.entity_domain()),
+                            entry.definition.stored_entities(catalog.entity_counts),
                         )
                         .map_err(|e| e.to_string())?
                 {

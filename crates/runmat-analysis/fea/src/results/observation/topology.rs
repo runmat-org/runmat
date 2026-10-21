@@ -58,9 +58,6 @@ mod sampled;
 mod tests;
 
 impl<'a> ObservationTopology<'a> {
-    pub(super) fn set_finite_volume_digest(&mut self, digest: Digest) {
-        self.topology_digest = digest;
-    }
     pub fn from_projection(projection: &'a AnalysisProjection) -> Result<Self, ObservationError> {
         Self::from_solid_projection(Cow::Borrowed(projection))
     }
@@ -97,7 +94,7 @@ impl<'a> ObservationTopology<'a> {
         ))?;
         let geometry = crate::topology::FiniteVolumeTopology::derive_selected(
             projection,
-            crate::topology::FiniteVolumeProjectionPolicy::default(),
+            crate::topology::FiniteVolumeProjectionPolicy::covering(projection),
             crate::topology::FiniteVolumeCellSelection::AllElements,
         )
         .map_err(|error| ObservationError::Invalid(error.to_string()))?;
