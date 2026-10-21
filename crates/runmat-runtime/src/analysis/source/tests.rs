@@ -518,6 +518,7 @@ fn filesystem_host_retains_normalized_ap242_exchange_facts() {
             logical_path: LogicalSourcePath::new("part.step").unwrap(),
             source_units: runmat_geometry_core::UnitSystem::Meter,
             expected_content_digest: None,
+            shared_interfaces: false,
         })
         .unwrap()
         .exchange

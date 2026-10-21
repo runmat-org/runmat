@@ -10,7 +10,7 @@ use runmat_execution_artifact::{
 use runmat_execution_runner_native::{
     execute_prepared_fea_study_locally, fluid_study_completion_from_source,
     prepare_checked_fea_study, CompletedFeaStudyResult, LocalFeaExecutionOptions,
-    PreparedFeaStudyRoot,
+    StudyRootPlanning,
 };
 use runmat_runtime::analysis::FeaRootSelector;
 
@@ -114,11 +114,11 @@ pub(super) async fn run() {
         )
         .await
         .unwrap();
-        let PreparedFeaStudyRoot::Fluid(root) = &mut prepared.root else {
+        let StudyRootPlanning::Fluid(planning) = &mut prepared.root.planning else {
             panic!("expected original authored fluid root")
         };
-        root.planning.numerical.maximum_outer_iterations = 400;
-        root.planning.numerical.linear_relative_tolerance = 1e-11;
+        planning.numerical.maximum_outer_iterations = 400;
+        planning.numerical.linear_relative_tolerance = 1e-11;
         let case = execute_prepared_fea_study_locally(prepared, &options)
             .await
             .unwrap();

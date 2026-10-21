@@ -4,24 +4,23 @@
 //! session product, resolves a typed root, materializes geometry, meshes, executes, and publishes
 //! without interpreting authoring syntax or introducing host-specific physics defaults.
 
-mod acoustic_execution;
 mod assessment;
 mod callable;
 mod chain;
-mod electrical_execution;
 mod execution;
-mod fluid_execution;
+mod family_execution;
 mod geometry;
 mod input;
-mod magnetic_execution;
-mod maxwell_execution;
-mod nonlinear_execution;
 mod preparation;
 mod prepared_validation;
-pub use execution::execute_prepared_fea_study_locally;
+pub use execution::{execute_prepared_fea_study_locally, prepare_study_publication};
 use execution::execute_prepared_with_source;
-pub use nonlinear_execution::CompletedAuthoredNonlinearSolidStudy;
-mod thermal_execution;
+pub(crate) use family_execution::local_result as local_family_result;
+pub use family_execution::{
+    imported_family_result, CompletedAuthoredAcousticStudy, CompletedAuthoredElectricalStudy,
+    CompletedAuthoredFluidStudy, CompletedAuthoredMagneticStudy, CompletedAuthoredMaxwellStudy,
+    CompletedAuthoredNonlinearSolidStudy, CompletedAuthoredThermalStudy,
+};
 
 #[cfg(all(test, feature = "occt-native"))]
 mod tests;
@@ -42,7 +41,6 @@ mod spatial_signals;
 #[path = "tests/assessment_functions.rs"]
 mod assessment_functions;
 
-pub use acoustic_execution::CompletedAuthoredAcousticStudy;
 pub use assessment::{
     complete as complete_local_fea_assessments,
     complete_frozen_locally as complete_frozen_fea_assessments,
@@ -50,18 +48,8 @@ pub use assessment::{
     freeze_functions as freeze_fea_assessment_functions,
     reassess_saved_locally as reassess_saved_fea_locally,
 };
-pub use electrical_execution::CompletedAuthoredElectricalStudy;
-pub use fluid_execution::CompletedAuthoredFluidStudy;
 pub use geometry::MaterializedFeaGeometry;
-pub use magnetic_execution::CompletedAuthoredMagneticStudy;
-pub use maxwell_execution::CompletedAuthoredMaxwellStudy;
-pub use preparation::{
-    checked_fea_artifact_access, PreparedAuthoredAcousticStudy, PreparedAuthoredElectricalStudy,
-    PreparedAuthoredFluidStudy, PreparedAuthoredMagneticStudy, PreparedAuthoredMaxwellStudy,
-    PreparedAuthoredNonlinearSolidStudy, PreparedAuthoredThermalStudy, PreparedFeaStudy,
-    PreparedFeaStudyRoot,
-};
-pub use thermal_execution::CompletedAuthoredThermalStudy;
+pub use preparation::{checked_fea_artifact_access, PreparedFeaStudy};
 
 pub async fn materialize_checked_fea_study_geometry(
     source: &runmat_core::CheckedFeaSessionSource,
@@ -163,6 +151,47 @@ pub enum CompletedFeaStudyResult {
 }
 
 impl CompletedFeaStudyResult {
+    /// Compiled study of a non-structural family completion.
+    pub fn family_compiled_study(
+        &self,
+    ) -> Option<&runmat_analysis_fea::study::CompiledAnalysisStudy> {
+        match self {
+            Self::Fluid(result) => Some(&result.completion.compiled),
+            Self::Nonlinear(result) => Some(&result.completion.compiled),
+            Self::Acoustic(result) => Some(&result.completion.compiled),
+            Self::Electrical(result) => Some(&result.completion.compiled),
+            Self::Magnetic(result) => Some(&result.completion.compiled),
+            Self::Maxwell(result) => Some(&result.completion.compiled),
+            Self::Thermal(result) => Some(&result.completion.compiled),
+            Self::Structural(_) => None,
+        }
+    }
+
+    /// Digest of the solved numerical content, independent of placement and attempt evidence.
+    ///
+    /// Local and remote runs of one study under one artifact authority produce the same value.
+    pub fn numerical_digest(&self) -> Result<runmat_execution::Digest, String> {
+        let bytes = match self {
+            Self::Thermal(result) => serde_json::to_vec(&(
+                &result.completion.manifest,
+                &result.completion.field_partitions,
+                &result.completion.states,
+            )),
+            Self::Electrical(result) => serde_json::to_vec(&result.completion.result),
+            Self::Magnetic(result) => serde_json::to_vec(&result.completion.result),
+            Self::Maxwell(result) => serde_json::to_vec(&result.completion.result),
+            Self::Acoustic(result) => serde_json::to_vec(&result.completion.result),
+            Self::Fluid(result) => serde_json::to_vec(&result.completion.result),
+            Self::Nonlinear(result) => serde_json::to_vec(&(
+                &result.completion.terminal_block,
+                &result.completion.states,
+            )),
+            Self::Structural(result) => serde_json::to_vec(result.numerical()),
+        }
+        .map_err(|error| error.to_string())?;
+        Ok(runmat_execution::Digest::sha256(bytes))
+    }
+
     pub fn mesh(&self) -> &runmat_meshing_core::SolverMeshArtifact {
         match self {
             Self::Fluid(result) => &result.mesh,
@@ -182,8 +211,17 @@ pub enum LocalFeaExecution {
     Study(Box<CompletedLocalFeaCase>),
     Sweep {
         sweep_id: String,
-        cases: Vec<CompletedLocalFeaCase>,
+        /// Every authored case in authored order, each with its own terminal status.
+        cases: Vec<LocalSweepCase>,
     },
+}
+
+/// One sweep case: its authored identity and its own success or failure. A failed case never
+/// disappears from the sweep and never hides the results of its siblings.
+#[derive(Debug)]
+pub struct LocalSweepCase {
+    pub case_id: String,
+    pub outcome: Result<CompletedLocalFeaCase, String>,
 }
 
 pub async fn execute_checked_fea_locally(
@@ -259,6 +297,8 @@ pub async fn execute_checked_fea_locally(
                 return Err("typed FEA sweep contains no cases".into());
             }
             let concurrency = sweep_concurrency(&sweep, &options, expanded.len());
+            // Independent cases overlap up to the admitted concurrency; completion order is
+            // irrelevant because results are restored to authored order below.
             let mut cases =
                 futures::stream::iter(expanded.into_iter().enumerate().map(|(index, case)| {
                     let study = sweep.study.clone();
@@ -272,19 +312,24 @@ pub async fn execute_checked_fea_locally(
                                 value: binding.value,
                             })
                             .collect();
-                        execute_case(source, study, inputs, options)
+                        let outcome = execute_case(source, study, inputs, options)
                             .await
                             .map(|mut completed| {
-                                completed.case_id = case.case_id;
-                                (index, completed)
-                            })
+                                completed.case_id = case.case_id.clone();
+                                completed
+                            });
+                        (
+                            index,
+                            LocalSweepCase {
+                                case_id: case.case_id,
+                                outcome,
+                            },
+                        )
                     }
                 }))
                 .buffer_unordered(concurrency)
                 .collect::<Vec<_>>()
-                .await
-                .into_iter()
-                .collect::<Result<Vec<_>, _>>()?;
+                .await;
             cases.sort_by_key(|(index, _)| *index);
             Ok(LocalFeaExecution::Sweep {
                 sweep_id: sweep.sweep.sweep_id,

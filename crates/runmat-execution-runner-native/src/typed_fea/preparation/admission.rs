@@ -119,6 +119,9 @@ pub(super) fn select_family(
     {
         return Ok(PreparedFamily::Acoustic);
     }
+    if is_electrothermal(sequence) {
+        return Ok(PreparedFamily::Thermal);
+    }
     if step.family != PhysicsFamily::Thermal
         || !matches!(
             step.procedure,
@@ -149,7 +152,7 @@ pub(in crate::typed_fea) fn is_electrothermal(sequence: &AnalysisSequence) -> bo
 }
 
 fn unsupported() -> String {
-    "RM.FEA.TYPED_EXECUTION.UNSUPPORTED_PHYSICS_FAMILY: typed native execution admits structural studies or one fresh independent direct thermal steady/transient, fluid steady, equation-selected static electrical/magnetic, singleton Maxwell harmonic, or acoustic harmonic step".into()
+    "RM.FEA.TYPED_EXECUTION.UNSUPPORTED_PHYSICS_FAMILY: typed native execution admits structural studies or one fresh independent direct thermal steady/transient, fluid steady, equation-selected static electrical/magnetic, singleton Maxwell harmonic, acoustic harmonic, or electrothermal steady/transient step".into()
 }
 
 #[cfg(test)]

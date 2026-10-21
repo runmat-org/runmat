@@ -436,17 +436,23 @@ where
 
         fn by_name(
             &self,
-            _role: runmat_geometry_core::GeometryRegionRole,
-            _name: &str,
+            role: runmat_geometry_core::GeometryRegionRole,
+            name: &str,
         ) -> Result<Vec<runmat_geometry_core::PersistentEntityId>, Self::Error> {
-            Err("named CAD evidence is unavailable until AP242 admission".into())
+            let imported = self.imported.ok_or_else(|| {
+                "authored names require imported or derived exact CAD geometry".to_string()
+            })?;
+            imported.entities_named(role, name)
         }
         fn by_tag(
             &self,
-            _role: runmat_geometry_core::GeometryRegionRole,
-            _tag: &str,
+            role: runmat_geometry_core::GeometryRegionRole,
+            tag: &str,
         ) -> Result<Vec<runmat_geometry_core::PersistentEntityId>, Self::Error> {
-            Err("tagged CAD evidence is unavailable until AP242 admission".into())
+            let imported = self.imported.ok_or_else(|| {
+                "authored tags require imported or derived exact CAD geometry".to_string()
+            })?;
+            imported.entities_tagged(role, tag)
         }
         fn by_alias(
             &self,

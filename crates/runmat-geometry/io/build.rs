@@ -43,6 +43,8 @@ fn build_occt_backend() {
         .file("src/occt/exact_xcaf_healing.cc")
         .file("src/occt/exact_xcaf_subshape_remap.cc")
         .file("src/occt/exact_nesting.cc")
+        .file("src/occt/exact_names.cc")
+        .file("src/occt/exact_shared_interfaces.cc")
         .file("src/occt/exact_topology.cc")
         .file("src/occt/exact_wire.cc")
         .file("src/occt/exact_evaluator.cc")
@@ -93,6 +95,10 @@ fn build_occt_backend() {
     println!("cargo:rerun-if-changed=src/occt/ffi.rs");
     println!("cargo:rerun-if-changed=src/occt/occt_bridge.hxx");
     println!("cargo:rerun-if-changed=src/occt/occt_bridge.cc");
+    println!("cargo:rerun-if-changed=src/occt/exact_names.hxx");
+    println!("cargo:rerun-if-changed=src/occt/exact_names.cc");
+    println!("cargo:rerun-if-changed=src/occt/exact_shared_interfaces.hxx");
+    println!("cargo:rerun-if-changed=src/occt/exact_shared_interfaces.cc");
     println!("cargo:rerun-if-changed=src/occt/exact_assembly.hxx");
     println!("cargo:rerun-if-changed=src/occt/exact_assembly.cc");
     println!("cargo:rerun-if-changed=src/occt/exact_identity.hxx");

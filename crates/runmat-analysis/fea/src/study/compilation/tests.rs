@@ -221,6 +221,7 @@ fn imported_study(document: &runmat_geometry_core::GeometryDocument) -> Realized
                     ..Default::default()
                 },
                 exchange: None,
+                shared_interfaces: false,
             }),
             bindings: Default::default(),
         },

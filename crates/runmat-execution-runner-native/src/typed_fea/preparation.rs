@@ -8,60 +8,27 @@ use runmat_execution_artifact::ArtifactAccess;
 
 use super::LocalFeaExecutionOptions;
 
-mod acoustic;
 mod admission;
-mod electrical;
-mod fluid;
-mod nonlinear;
-pub use nonlinear::PreparedAuthoredNonlinearSolidStudy;
-mod magnetic;
-mod maxwell;
-mod thermal;
-pub use acoustic::PreparedAuthoredAcousticStudy;
-pub use electrical::PreparedAuthoredElectricalStudy;
-pub use fluid::PreparedAuthoredFluidStudy;
-pub use magnetic::PreparedAuthoredMagneticStudy;
-pub use maxwell::PreparedAuthoredMaxwellStudy;
-pub use thermal::PreparedAuthoredThermalStudy;
 
-pub enum PreparedFeaStudyRoot {
-    Acoustic(PreparedAuthoredAcousticStudy),
-    Electrical(PreparedAuthoredElectricalStudy),
-    Magnetic(PreparedAuthoredMagneticStudy),
-    Maxwell(PreparedAuthoredMaxwellStudy),
-    Fluid(PreparedAuthoredFluidStudy),
-    Nonlinear(Box<PreparedAuthoredNonlinearSolidStudy>),
-    Structural(crate::PreparedStructuralStudyRoot),
-    Thermal(PreparedAuthoredThermalStudy),
-}
-
+/// One authored study ready for any placement.
+///
+/// `root` is the unencoded portable root shared by every family; local and remote execution
+/// both encode it with [`crate::prepare_structural_study_root`] and decode the same contract.
 pub struct PreparedFeaStudy {
-    pub root: PreparedFeaStudyRoot,
+    pub root: crate::StructuralStudyRootPreparation,
     pub workers: u32,
     pub revision: ProgramRevision,
     pub realized: RealizedStudy,
 }
 
-/// A solved heat source bound to a thermal analysis: element loss density per canonical
-/// volume element of the mesh it was solved on. It is bound to the compiled thermal model
-/// after meshing, against that mesh's own identity.
-#[derive(Clone, Debug)]
-pub struct PreparedHeatSource {
-    pub step_id: String,
-    pub source_id: String,
-    pub element_density_w_per_m3: Vec<f64>,
-}
-
 /// How a prepared root executes an authored study.
 #[derive(Clone, Debug)]
 pub enum PreparationRole {
-    /// The authored study as written.
+    /// The authored study as written. An electrothermal analysis runs as its heat-transfer
+    /// side: conduction and heat transfer iterated to the two-way fixed point.
     Authored,
     /// A thermal analysis heated by a solved upstream loss field.
-    Heated(PreparedHeatSource),
-    /// The heat-transfer side of an electrothermal analysis: conduction and heat transfer
-    /// iterated to the two-way fixed point; publishes temperature and heat flux.
-    ElectrothermalHeat,
+    Heated(runmat_analysis_fea::study::ElementHeatSource),
     /// The conduction side of an electrothermal analysis at its solved temperature field;
     /// publishes potential, current density and Joule loss.
     ElectrothermalConduction {
@@ -101,38 +68,24 @@ pub async fn prepare_study_with_role(
         .realize_with_models(&resolved.models, &resolved.geometry, inputs)
         .map_err(|error| error.to_string())?;
     let family = match &role {
-        PreparationRole::Authored | PreparationRole::Heated(_) => {
-            admission::select_family(&realized.sequence, realized.model.electromagnetic.as_ref())?
+        PreparationRole::ElectrothermalConduction { .. } => {
+            if !admission::is_electrothermal(&realized.sequence) {
+                return Err(
+                    "the conduction role requires one fresh electrothermal analysis".into(),
+                );
+            }
+            admission::PreparedFamily::Electrical
         }
-        PreparationRole::ElectrothermalHeat => admission::PreparedFamily::Thermal,
-        PreparationRole::ElectrothermalConduction { .. } => admission::PreparedFamily::Electrical,
+        _ => admission::select_family(&realized.sequence, realized.model.electromagnetic.as_ref())?,
     };
-    if matches!(
-        role,
-        PreparationRole::ElectrothermalHeat | PreparationRole::ElectrothermalConduction { .. }
-    ) && !admission::is_electrothermal(&realized.sequence)
-    {
-        return Err("an electrothermal role requires one fresh electrothermal analysis".into());
-    }
-    let heat_source = match &role {
-        PreparationRole::Heated(source) => Some(source.clone()),
-        _ => None,
+    let (element_heat_source, element_temperature_k, operating_time_s) = match role {
+        PreparationRole::Authored => (None, None, None),
+        PreparationRole::Heated(source) => (Some(source), None, None),
+        PreparationRole::ElectrothermalConduction {
+            element_temperature_k,
+            operating_time_s,
+        } => (None, Some(element_temperature_k), operating_time_s),
     };
-    if matches!(
-        family,
-        admission::PreparedFamily::Acoustic
-            | admission::PreparedFamily::Nonlinear
-            | admission::PreparedFamily::Fluid
-            | admission::PreparedFamily::Magnetic
-            | admission::PreparedFamily::Maxwell
-    ) && (options.backend != runmat_analysis_fea::ComputeBackend::Cpu
-        || !options.accelerators.is_empty())
-    {
-        return Err(
-            "authored J2/acoustic/fluid/magnetic/Maxwell execution has no admitted accelerator envelope"
-                .into(),
-        );
-    }
     let revision = program_revision(source)?;
     let access = checked_fea_artifact_access(authority);
     let geometry_source = super::geometry::prepare_geometry_source(
@@ -214,235 +167,97 @@ pub async fn prepare_study_with_role(
     let frozen_project_digest = source
         .frozen_project()
         .map(|project| Digest::from_bytes(*project.graph_digest().bytes()));
-    let root = match family {
+    let planning = match family {
+        admission::PreparedFamily::Structural => {
+            crate::StudyRootPlanning::Structural(runmat_analysis_fea::study::StructuralStudyPlanningPolicy {
+                backend: options.backend,
+                formulation_requirement: resolved.study.formulation_requirement,
+                numerics: runmat_analysis_fea::study::StructuralNumericalPlanningPolicy::production(),
+            })
+        }
+        admission::PreparedFamily::Thermal => {
+            crate::StudyRootPlanning::Thermal(runmat_analysis_fea::study::ThermalStudyPlanningPolicy {
+                backend: options.backend,
+                formulation_requirement: resolved.study.formulation_requirement,
+                element_heat_source,
+            })
+        }
+        admission::PreparedFamily::Acoustic => {
+            crate::StudyRootPlanning::Acoustic(runmat_analysis_fea::study::AcousticStudyPlanningPolicy {
+                formulation_requirement: resolved.study.formulation_requirement,
+                ..runmat_analysis_fea::study::AcousticStudyPlanningPolicy::experimental()
+            })
+        }
+        admission::PreparedFamily::Electrical => {
+            crate::StudyRootPlanning::Electrical(runmat_analysis_fea::study::ElectricalStudyPlanningPolicy {
+                formulation_requirement: resolved.study.formulation_requirement,
+                element_temperature_k,
+                operating_time_s,
+            })
+        }
+        admission::PreparedFamily::Magnetic => {
+            crate::StudyRootPlanning::Magnetic(runmat_analysis_fea::study::MagneticStudyPlanningPolicy {
+                formulation_requirement: resolved.study.formulation_requirement,
+            })
+        }
+        admission::PreparedFamily::Maxwell => {
+            crate::StudyRootPlanning::Maxwell(runmat_analysis_fea::study::MaxwellStudyPlanningPolicy {
+                formulation_requirement: resolved.study.formulation_requirement,
+            })
+        }
+        admission::PreparedFamily::Fluid => {
+            crate::StudyRootPlanning::Fluid(runmat_analysis_fea::study::FluidStudyPlanningPolicy {
+                formulation_requirement: resolved.study.formulation_requirement,
+                numerical: Default::default(),
+                geometry: Default::default(),
+            })
+        }
         admission::PreparedFamily::Nonlinear => {
-            if !input_materializations.is_empty() {
-                return Err(
-                    "authored J2 execution does not yet admit source materializations".into(),
-                );
-            }
-            PreparedFeaStudyRoot::Nonlinear(Box::new(PreparedAuthoredNonlinearSolidStudy {
-                geometry_meshing,
-                authored_study_digest,
-                frozen_project_digest,
-                study: realized.clone(),
-                materials: resolved.material_catalog,
-                program_revision: revision.clone(),
-                artifact_access: access,
-                input_materializations,
-                local_execution,
-                analysis_accelerator_requests: options.accelerators.clone(),
+            crate::StudyRootPlanning::NonlinearSolid(crate::NonlinearSolidStudyPlanning {
                 controls: runmat_analysis_fea::solve::nonlinear::NonlinearSolveOptions {
                     formulation_requirement: resolved.study.formulation_requirement,
                     ..Default::default()
                 },
                 accepted_block_limit:
-                    runmat_analysis_execution::DEFAULT_NONLINEAR_SOLID_ACCEPTED_BLOCK_LIMIT,
-            }))
-        }
-        admission::PreparedFamily::Fluid => {
-            if !input_materializations.is_empty() {
-                return Err(
-                    "authored fluid execution does not support source materializations".into(),
-                );
-            }
-            PreparedFeaStudyRoot::Fluid(PreparedAuthoredFluidStudy {
-                geometry_meshing,
-                authored_study_digest,
-                frozen_project_digest,
-                study: realized.clone(),
-                materials: resolved.material_catalog,
-                program_revision: revision.clone(),
-                artifact_access: access,
-                input_materializations,
-                planning: runmat_analysis_fea::study::FluidStudyPlanningPolicy {
-                    formulation_requirement: resolved.study.formulation_requirement,
-                    numerical: Default::default(),
-                    geometry: Default::default(),
-                },
-                local_execution,
-                analysis_accelerator_requests: options.accelerators.clone(),
+                    runmat_analysis_execution::DEFAULT_NONLINEAR_SOLID_ACCEPTED_BLOCK_LIMIT as u64,
             })
         }
-        admission::PreparedFamily::Maxwell => {
-            if !input_materializations.is_empty() {
-                return Err(
-                    "authored Maxwell execution does not support source materializations".into(),
-                );
-            }
-            PreparedFeaStudyRoot::Maxwell(PreparedAuthoredMaxwellStudy {
-                geometry_meshing,
-                authored_study_digest,
-                frozen_project_digest,
-                study: realized.clone(),
-                materials: resolved.material_catalog,
-                program_revision: revision.clone(),
-                artifact_access: access,
-                input_materializations,
-                planning: runmat_analysis_fea::study::MaxwellStudyPlanningPolicy {
-                    formulation_requirement: resolved.study.formulation_requirement,
-                },
-                local_execution,
-                analysis_accelerator_requests: options.accelerators.clone(),
-            })
+    };
+    if let Some(kind) = crate::StudyFamilyKind::of(&planning) {
+        if !input_materializations.is_empty() && !kind.admits_input_materializations() {
+            return Err(format!(
+                "authored {} execution does not support source materializations",
+                kind.label()
+            ));
         }
-        admission::PreparedFamily::Magnetic => {
-            if !input_materializations.is_empty() {
-                return Err(
-                    "authored magnetic execution does not support source materializations".into(),
-                );
-            }
-            PreparedFeaStudyRoot::Magnetic(PreparedAuthoredMagneticStudy {
-                geometry_meshing,
-                authored_study_digest,
-                frozen_project_digest,
-                study: realized.clone(),
-                materials: resolved.material_catalog,
-                program_revision: revision.clone(),
-                artifact_access: access,
-                input_materializations,
-                planning: runmat_analysis_fea::study::MagneticStudyPlanningPolicy {
-                    formulation_requirement: resolved.study.formulation_requirement,
-                },
-                local_execution,
-                analysis_accelerator_requests: options.accelerators.clone(),
-            })
+        if planning.backend() != runmat_analysis_fea::ComputeBackend::Cpu
+            || !options.accelerators.is_empty()
+        {
+            return Err(format!(
+                "authored {} execution has no admitted accelerator envelope",
+                kind.label()
+            ));
         }
-        admission::PreparedFamily::Electrical => {
-            if options.backend != runmat_analysis_fea::ComputeBackend::Cpu
-                || !options.accelerators.is_empty()
-                || !input_materializations.is_empty()
-            {
-                return Err(
-                    "authored electrical execution admits only CPU with no source materializations"
-                        .into(),
-                );
-            }
-            PreparedFeaStudyRoot::Electrical(PreparedAuthoredElectricalStudy {
-                geometry_meshing,
-                authored_study_digest,
-                frozen_project_digest,
-                study: realized.clone(),
-                materials: resolved.material_catalog,
-                program_revision: revision.clone(),
-                artifact_access: access,
-                input_materializations,
-                planning: runmat_analysis_fea::study::ElectricalStudyPlanningPolicy {
-                    formulation_requirement: resolved.study.formulation_requirement,
-                    element_temperature_k: match &role {
-                        PreparationRole::ElectrothermalConduction {
-                            element_temperature_k,
-                            ..
-                        } => Some(element_temperature_k.clone()),
-                        _ => None,
-                    },
-                    operating_time_s: match &role {
-                        PreparationRole::ElectrothermalConduction {
-                            operating_time_s, ..
-                        } => *operating_time_s,
-                        _ => None,
-                    },
-                },
-                electrothermal_conduction: matches!(
-                    role,
-                    PreparationRole::ElectrothermalConduction { .. }
-                ),
-                local_execution,
-                analysis_accelerator_requests: options.accelerators.clone(),
-            })
-        }
-        admission::PreparedFamily::Acoustic => {
-            let input_materializations = input_materializations
-                .into_iter()
-                .map(|materialization| materialization.rebind(&access).map_err(|e| e.to_string()))
-                .collect::<Result<Vec<_>, String>>()?;
-            crate::input_materialization_contract::validate_input_materialization_plan_inventory(
-                &realized,
-                &input_materializations,
-                &revision,
-            )
-            .map_err(|e| e.to_string())?;
-            PreparedFeaStudyRoot::Acoustic(PreparedAuthoredAcousticStudy {
-                geometry_meshing,
-                authored_study_digest,
-                frozen_project_digest,
-                study: realized.clone(),
-                materials: resolved.material_catalog,
-                program_revision: revision.clone(),
-                artifact_access: access,
-                input_materializations,
-                planning: runmat_analysis_fea::study::AcousticStudyPlanningPolicy {
-                    formulation_requirement: resolved.study.formulation_requirement,
-                    ..runmat_analysis_fea::study::AcousticStudyPlanningPolicy::experimental()
-                },
-                local_execution,
-                analysis_accelerator_requests: options.accelerators.clone(),
-            })
-        }
-        admission::PreparedFamily::Thermal => {
-            let input_materializations = input_materializations
-                .into_iter()
-                .map(|materialization| {
-                    materialization
-                        .rebind(&access)
-                        .map_err(|error| error.to_string())
-                })
-                .collect::<Result<Vec<_>, String>>()?;
-            crate::input_materialization_contract::validate_input_materialization_plan_inventory(
-                &realized,
-                &input_materializations,
-                &revision,
-            )
-            .map_err(|error| error.to_string())?;
-            PreparedFeaStudyRoot::Thermal(PreparedAuthoredThermalStudy {
-                heat_source: heat_source.clone(),
-                electrothermal: matches!(role, PreparationRole::ElectrothermalHeat),
-                geometry_meshing,
-                authored_study_digest,
-                frozen_project_digest,
-                study: realized.clone(),
-                materials: resolved.material_catalog,
-                program_revision: revision.clone(),
-                artifact_access: access,
-                input_materializations,
-                planning: runmat_analysis_fea::study::ThermalStudyPlanningPolicy {
-                    backend: options.backend,
-                    formulation_requirement: resolved.study.formulation_requirement,
-                },
-                local_execution,
-                analysis_accelerator_requests: options.accelerators.clone(),
-            })
-        }
-        admission::PreparedFamily::Structural => PreparedFeaStudyRoot::Structural(
-            crate::prepare_structural_study_root(crate::StructuralStudyRootPreparation {
-                program_revision: revision.clone(),
-                artifact_access: access,
-                authored_study_digest,
-                frozen_project_digest,
-                study: realized.clone(),
-                materials: resolved.material_catalog,
-                planning: runmat_analysis_fea::study::StructuralStudyPlanningPolicy {
-                    backend: options.backend,
-                    formulation_requirement: resolved.study.formulation_requirement,
-                    numerics:
-                        runmat_analysis_fea::study::StructuralNumericalPlanningPolicy::production(),
-                },
-                local_execution,
-                analysis_accelerator_requests: options.accelerators.clone(),
-                initial_fields:
-                    runmat_runtime::analysis::storage::resolve_initial_field_references(
-                        realized.initial_field_references(),
-                        runmat_analysis_fea::planning::resource::initial_field_source_ceiling(
-                            &realized.sequence,
-                        )
-                        .map_err(|error| error.to_string())?,
-                    )
-                    .map_err(|error| error.to_string())?,
-                input_materializations,
-                geometry_meshing,
-            })
+    }
+    let initial_fields = runmat_runtime::analysis::storage::resolve_initial_field_references(
+        realized.initial_field_references(),
+        runmat_analysis_fea::planning::resource::initial_field_source_ceiling(&realized.sequence)
             .map_err(|error| error.to_string())?,
-        ),
+    )
+    .map_err(|error| error.to_string())?;
+    let root = crate::StructuralStudyRootPreparation {
+        program_revision: revision.clone(),
+        artifact_access: access,
+        authored_study_digest,
+        frozen_project_digest,
+        study: realized.clone(),
+        materials: resolved.material_catalog,
+        planning,
+        local_execution,
+        analysis_accelerator_requests: options.accelerators.clone(),
+        initial_fields,
+        input_materializations,
+        geometry_meshing,
     };
     Ok(PreparedFeaStudy {
         root,

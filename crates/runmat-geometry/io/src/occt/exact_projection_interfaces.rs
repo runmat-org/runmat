@@ -50,10 +50,19 @@ pub(super) fn project_regions_and_interfaces(
             let Some(owner) = owner else {
                 continue;
             };
+            // A cavity shell is used reversed by its solid; the side a face bounds is the face
+            // use composed with its shell's orientation.
+            let orientation = match shell.orientation {
+                TopologicalOrientation::Forward => face_use.orientation,
+                TopologicalOrientation::Reversed => match face_use.orientation {
+                    TopologicalOrientation::Forward => TopologicalOrientation::Reversed,
+                    TopologicalOrientation::Reversed => TopologicalOrientation::Forward,
+                },
+            };
             face_uses
                 .entry(&face_use.entity_id)
                 .or_default()
-                .push((owner, face_use.orientation));
+                .push((owner, orientation));
         }
     }
 
