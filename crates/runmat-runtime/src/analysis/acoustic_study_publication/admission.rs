@@ -33,10 +33,8 @@ pub(super) fn validate(
     };
     if step.family != PhysicsFamily::Acoustic
         || step.procedure != AnalysisProcedure::HarmonicResponse
-        || !step.observations.is_empty()
-        || !completed.compiled.outputs.is_empty()
     {
-        return Err("acoustic publication requires an exact independent authored workload without unsupported observations".into());
+        return Err("acoustic publication requires an exact independent authored workload".into());
     }
     completed
         .result
@@ -78,11 +76,7 @@ pub(super) fn validate(
             krylov_restart: first.workload.solver.restart,
             maximum_iterations: first.workload.solver.maximum_iterations,
             power_balance_relative_tolerance: first.workload.power_balance_relative_tolerance,
-            uniqueness: first
-                .workload
-                .solver
-                .uniqueness
-                .ok_or("authored acoustic publication lacks uniqueness controls")?,
+            uniqueness: first.workload.solver.uniqueness,
         },
     )
     .map_err(|e| e.to_string())?;
@@ -133,7 +127,7 @@ fn validate_entry(
             .result
             .source_result_identity()
             .map_err(|e| e.to_string())?,
-        None,
+        completed.observation_catalog.as_ref(),
         completed.workload.formulation_requirement,
         step.accuracy.clone(),
     )
@@ -150,6 +144,35 @@ fn validate_entry(
         return Err(
             "acoustic accuracy differs from exact authored plan and accepted receipt".into(),
         );
+    }
+    match &completed.observation_catalog {
+        None if step.observations.is_empty() && completed.observation_results.is_empty() => {}
+        Some(catalog) if !step.observations.is_empty() => {
+            catalog
+                .validate_authored_step(step)
+                .map_err(|e| e.to_string())?;
+            let sample = runmat_analysis_fea::results::field::RecoveredFieldSample::FrequencyHertz(
+                completed.workload.frequency.hertz,
+            );
+            if completed.observation_results.len() != step.observations.len()
+                || completed
+                    .observation_results
+                    .iter()
+                    .zip(&step.observations)
+                    .any(|(result, request)| {
+                        request
+                            .spec()
+                            .is_none_or(|spec| spec.observation_id != result.observation_id)
+                            || result.sample != sample
+                    })
+            {
+                return Err(
+                    "acoustic outputs differ from the authored observations at this frequency"
+                        .into(),
+                );
+            }
+        }
+        _ => return Err("acoustic output catalog differs from the authored step".into()),
     }
     let requests = completed
         .result

@@ -9,7 +9,8 @@ use crate::{
     PreparedAnalysisProgram, ANALYSIS_HOST_ABI,
 };
 use runmat_analysis_fea::execution::{
-    AcousticFrequencyResult, AcousticFrequencyWorkload, AcousticHarmonicSolverResult,
+    AcousticFrequencyAssemblyRequest, AcousticFrequencyResult, AcousticFrequencyWorkload,
+    AcousticHarmonicSolverResult,
     AnalysisNumericalObjectKind, AnalysisWorkKind, ExecutionPlanIdentity,
     FrequencySamplePublicationManifest, NumericalPlanIdentity, SequenceIdentity, StepIdentity,
     StudyIdentity,
@@ -30,6 +31,8 @@ pub struct AcousticFrequencyAssemblyPreparation {
     pub workload: AcousticFrequencyWorkload,
     pub mesh: SolverMeshArtifact,
     pub entries: Vec<PreparedAnalysisObjects>,
+    /// Per-entry observation manifests in exact plan order.
+    pub request: AcousticFrequencyAssemblyRequest,
     pub artifact_access: ArtifactAccess,
     pub program_revision: ProgramRevision,
     pub output_policy: AnalysisOutputPolicy,
@@ -42,6 +45,7 @@ pub struct PreparedAcousticFrequencyAssemblyTask {
     pub workload: AcousticFrequencyWorkload,
     pub mesh: SolverMeshArtifact,
     pub entries: Vec<AcousticHarmonicSolverResult>,
+    pub request: AcousticFrequencyAssemblyRequest,
     pub host: AnalysisHostWorkload,
     pub program: PreparedAnalysisProgram,
     pub inputs: Vec<PreparedAnalysisObjects>,
@@ -53,7 +57,6 @@ pub struct ImportedAcousticFrequencyAssembly {
     pub publication: FrequencySamplePublicationManifest,
     pub result_objects: PreparedAnalysisObjects,
     pub publication_objects: PreparedAnalysisObjects,
-    pub fields: Vec<PreparedAnalysisObjects>,
 }
 
 pub fn validate_acoustic_frequency_assembly_entries(
@@ -144,57 +147,27 @@ pub fn rederive_acoustic_frequency_assembly_resource_plan(
     let mut publication_bytes = count
         .checked_mul(64 * 1024)
         .ok_or_else(|| invalid("acoustic publication metadata overflow"))?;
-    let mut field_profile = runmat_canonical_codec::SerializedCanonicalProfile {
-        encoded_bytes_upper_bound: 0,
-        materialization_resident_bytes_estimate: 0,
-    };
     for entry in entries {
-        let (catalog, fields) = entry.native_field_encoding_profiles()?;
+        let (catalog, _) = entry.native_field_encoding_profiles()?;
         // Authority, plan, recovery request and fixed native definitions fit the per-entry
         // allowance. Every growing partition descriptor is covered by its catalog profile.
-        // The metadata contains no pressure, velocity, mesh or original solver arrays.
+        // Fields themselves are published by each entry's own recovery task.
         publication_bytes = publication_bytes
             .checked_add(catalog.encoded_bytes_upper_bound)
             .ok_or_else(|| invalid("acoustic publication catalog overflow"))?;
-        field_profile.encoded_bytes_upper_bound = field_profile
-            .encoded_bytes_upper_bound
-            .checked_add(fields.encoded_bytes_upper_bound)
-            .ok_or_else(|| invalid("acoustic field payload profile overflow"))?;
-        field_profile.materialization_resident_bytes_estimate = field_profile
-            .materialization_resident_bytes_estimate
-            .checked_add(fields.materialization_resident_bytes_estimate)
-            .ok_or_else(|| invalid("acoustic field resident profile overflow"))?;
     }
+    // Observation manifests are carried verbatim from the request object.
+    let request_bytes = inputs
+        .iter()
+        .filter(|input| {
+            input.manifest.kind == AnalysisNumericalObjectKind::AcousticFrequencyAssemblyRequest
+        })
+        .map(|input| input.manifest.encoded_length)
+        .sum::<u64>();
+    publication_bytes = publication_bytes
+        .checked_add(request_bytes)
+        .ok_or_else(|| invalid("acoustic publication observation overflow"))?;
     let publication_output = crate::projected_output_resource_facts(publication_bytes)?;
-    // Native fields have one independent analysis manifest per frequency. A single
-    // aggregate payload allowance must not silently account for just one field root.
-    let mut fields_output = profiled_output_facts(field_profile)?;
-    let extra_roots = count
-        .checked_sub(1)
-        .ok_or_else(|| invalid("empty acoustic field output"))?;
-    let root_allowance = crate::projected_output_resource_facts(1)?;
-    fields_output.transport_closure_bytes_upper_bound.0 = fields_output
-        .transport_closure_bytes_upper_bound
-        .0
-        .checked_add(
-            root_allowance
-                .transport_closure_bytes_upper_bound
-                .0
-                .checked_mul(extra_roots)
-                .ok_or_else(|| invalid("acoustic field closure overflow"))?,
-        )
-        .ok_or_else(|| invalid("acoustic field closure overflow"))?;
-    fields_output.construction_resident_bytes_admission_budget.0 = fields_output
-        .construction_resident_bytes_admission_budget
-        .0
-        .checked_add(
-            root_allowance
-                .construction_resident_bytes_admission_budget
-                .0
-                .checked_mul(extra_roots)
-                .ok_or_else(|| invalid("acoustic field construction overflow"))?,
-        )
-        .ok_or_else(|| invalid("acoustic field construction overflow"))?;
     let workspace = facts
         .decoded_resident_bytes_admission_budget
         .0
@@ -224,7 +197,6 @@ pub fn rederive_acoustic_frequency_assembly_resource_plan(
             workspace_bytes_upper_bound: ByteCount(workspace),
             result_output,
             publication_output,
-            fields_output,
         },
         crate::projected_output_set_resource_facts(),
         authored,
@@ -277,6 +249,14 @@ pub fn prepare_acoustic_frequency_assembly_task(
             policy.inventory_limits(),
         )?,
     ];
+    inputs.push(prepare_analysis_objects(
+        AnalysisNumericalObjectKind::AcousticFrequencyAssemblyRequest,
+        preparation.request.identity(),
+        &preparation.request.canonical_bytes()?,
+        policy.chunk_bytes(),
+        ObjectNamespace::InputValue,
+        policy.inventory_limits(),
+    )?);
     inputs.extend(preparation.entries);
     let entries = decode_acoustic_frequency_assembly_entries(&inputs)?;
     let resource_plan = rederive_acoustic_frequency_assembly_resource_plan(
@@ -310,14 +290,10 @@ pub fn prepare_acoustic_frequency_assembly_task(
         )?,
         resource_plan.identity.digest(),
     )?;
-    let mut outputs = vec![
+    let outputs = vec![
         AnalysisNumericalObjectKind::SolverResult,
         AnalysisNumericalObjectKind::FrequencySamplePublication,
     ];
-    outputs.extend(std::iter::repeat_n(
-        AnalysisNumericalObjectKind::Field,
-        entries.len(),
-    ));
     let request = AnalysisWorkloadRequest::new(
         StudyIdentity::from_authored_digest(
             preparation.authored_study_digest,
@@ -358,6 +334,7 @@ pub fn prepare_acoustic_frequency_assembly_task(
         workload: preparation.workload,
         mesh: preparation.mesh,
         entries,
+        request: preparation.request,
         host,
         program,
         inputs,
@@ -373,7 +350,7 @@ pub fn import_acoustic_frequency_assembly(
 ) -> AnalysisBridgeResult<ImportedAcousticFrequencyAssembly> {
     response.validate_against(&prepared.program.request)?;
     let output_set = import_analysis_output_set(source, response, &prepared.host)?;
-    if output_set.manifest.outputs.len() != prepared.entries.len() + 2 {
+    if output_set.manifest.outputs.len() != 2 {
         return Err(invalid("acoustic assembly output count differs"));
     }
     let mut imported = Vec::new();
@@ -407,6 +384,7 @@ pub fn import_acoustic_frequency_assembly(
         prepared.workload.clone(),
         &prepared.mesh,
         prepared.entries.clone(),
+        &prepared.request,
     )?;
     let publication =
         FrequencySamplePublicationManifest::from_canonical_bytes(&publication_objects.payload())?;
@@ -418,48 +396,6 @@ pub fn import_acoustic_frequency_assembly(
         return Err(AnalysisBridgeError::Identity(
             "acoustic assembly output differs from original entries",
         ));
-    }
-    let mut by_identity = BTreeMap::new();
-    for objects in imported
-        .iter()
-        .filter(|objects| objects.manifest.kind == AnalysisNumericalObjectKind::Field)
-    {
-        if by_identity
-            .insert(objects.manifest.logical_identity, objects)
-            .is_some()
-        {
-            return Err(invalid("duplicate acoustic field output"));
-        }
-    }
-    let mut fields = Vec::new();
-    for artifact in &expected.fields {
-        let objects = by_identity
-            .remove(&artifact.identity().digest())
-            .ok_or_else(|| invalid("missing original acoustic field output"))?;
-        let expected_partitions =
-            crate::field_recovery::recovered_field_payload_partitions(artifact)?;
-        if objects.manifest.partitions.len() != expected_partitions.len() {
-            return Err(AnalysisBridgeError::Identity(
-                "acoustic field partitions differ from original native fields",
-            ));
-        }
-        for (declared, (identity, payload)) in
-            objects.manifest.partitions.iter().zip(expected_partitions)
-        {
-            if declared.logical_identity != identity
-                || declared.encoded_length != payload.len() as u64
-                || declared.payload_digest != Digest::sha256(&payload)
-                || objects.partition_payload(identity)? != payload
-            {
-                return Err(AnalysisBridgeError::Identity(
-                    "acoustic field partitions differ from original native fields",
-                ));
-            }
-        }
-        fields.push(objects.clone());
-    }
-    if !by_identity.is_empty() {
-        return Err(invalid("foreign acoustic field output"));
     }
     let mut closure = Vec::new();
     for objects in &imported {
@@ -480,21 +416,7 @@ pub fn import_acoustic_frequency_assembly(
         publication,
         result_objects,
         publication_objects,
-        fields,
     })
-}
-
-pub fn prepare_acoustic_frequency_field_objects(
-    artifact: &runmat_analysis_fea::results::field::RecoveredFieldArtifact,
-    chunk_bytes: usize,
-    limits: ObjectInventoryLimits,
-) -> AnalysisBridgeResult<PreparedAnalysisObjects> {
-    crate::prepare_recovered_field_objects(
-        artifact,
-        chunk_bytes,
-        ObjectNamespace::ResultValue,
-        limits,
-    )
 }
 
 fn invalid(error: impl std::fmt::Display) -> AnalysisBridgeError {

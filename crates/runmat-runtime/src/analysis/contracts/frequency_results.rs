@@ -21,6 +21,9 @@ pub struct AcousticFrequencyEntryEvidence {
     pub host_workload_digest: runmat_execution::Digest,
     pub result: runmat_analysis_fea::execution::AcousticHarmonicResultSummary,
     pub numerical_receipt: runmat_analysis_fea::execution::AcousticNumericalReceiptArtifact,
+    /// Authored outputs evaluated at this frequency (pressure, level, peaks).
+    #[serde(default)]
+    pub observations: Vec<runmat_analysis_fea::results::observation::ObservationResult>,
     pub accuracy: runmat_analysis_fea::results::accuracy::AccuracyArtifact,
     pub states: Vec<crate::analysis::study_result_manifest::PersistedStateEvidence>,
     pub baseline_usage: runmat_analysis_fea::planning::resource::ResourceUsageEvidence,

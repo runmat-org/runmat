@@ -154,6 +154,11 @@ fn boundary_operator(value: &AuthoredBoundaryKind) -> BoundaryOperator {
         AuthoredBoundaryKind::MagneticInsulation => BoundaryOperator::MagneticInsulation,
         AuthoredBoundaryKind::AcousticRigidWall => BoundaryOperator::AcousticRigidWall,
         AuthoredBoundaryKind::AcousticRadiation => BoundaryOperator::AcousticRadiation,
+        AuthoredBoundaryKind::AcousticSphericalRadiation { center_m } => {
+            BoundaryOperator::AcousticSphericalRadiation {
+                center_m: *center_m,
+            }
+        }
         AuthoredBoundaryKind::AcousticImpedance { impedance } => {
             BoundaryOperator::AcousticImpedance {
                 impedance: *impedance,

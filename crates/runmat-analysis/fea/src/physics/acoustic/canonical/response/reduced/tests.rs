@@ -259,6 +259,7 @@ fn assembly(phase: f64, amplitude: f64) -> AcousticAssembly {
     AcousticAssembly {
         projection,
         stiffness: matrix(STIFFNESS, OperatorRole::Stiffness),
+        volume_stiffness: matrix(STIFFNESS, OperatorRole::Stiffness),
         mass: matrix(MASS, OperatorRole::Mass),
         impedance: matrix(IMPEDANCE, OperatorRole::Damping),
         omega: OMEGA,

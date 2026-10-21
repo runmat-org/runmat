@@ -9,6 +9,13 @@
 
 mod assembly;
 mod boundary;
+mod modal;
+mod real_solve;
+mod transient;
+pub use modal::{solve_canonical_modal, AcousticModalPolicy, CanonicalAcousticModes};
+pub use transient::{
+    solve_canonical_transient, AcousticTransientPolicy, CanonicalAcousticTransient,
+};
 mod periodic;
 mod recovery;
 mod response;

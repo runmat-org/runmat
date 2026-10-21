@@ -94,7 +94,8 @@ fn boundary(
         "thermal.convection" => &["target", "ambient_temperature", "coefficient"][..],
         "thermal.radiation" => &["target", "ambient_temperature", "emissivity"][..],
         "acoustic.impedance" => &["target", "impedance"][..],
-        "magnetic.insulation" | "acoustic.rigid_wall" | "acoustic.radiation" => &["target"][..],
+        "acoustic.radiation" => &["target", "center"][..],
+        "magnetic.insulation" | "acoustic.rigid_wall" => &["target"][..],
         _ => {
             diagnostic(
                 declaration,
@@ -158,6 +159,19 @@ fn boundary(
         },
         "magnetic.insulation" => AuthoredBoundaryKind::MagneticInsulation,
         "acoustic.rigid_wall" => AuthoredBoundaryKind::AcousticRigidWall,
+        // Without `center` the outgoing wave is planar (normal incidence); with a center it
+        // is spherical about that point.
+        "acoustic.radiation" if optional_property_assignment(body, "center").is_some() => {
+            AuthoredBoundaryKind::AcousticSphericalRadiation {
+                center_m: required_vector(
+                    declaration,
+                    body,
+                    "center",
+                    PhysicalDimension::LENGTH,
+                    diagnostics,
+                )?,
+            }
+        }
         "acoustic.radiation" => AuthoredBoundaryKind::AcousticRadiation,
         "acoustic.impedance" => AuthoredBoundaryKind::AcousticImpedance {
             impedance: SpecificAcousticImpedance::new(required_quantity(

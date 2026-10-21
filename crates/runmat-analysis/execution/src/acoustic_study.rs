@@ -165,11 +165,18 @@ impl AcousticStudyCoordinator {
                     .clone()
             })
             .collect();
+        let request = runmat_analysis_fea::execution::AcousticFrequencyAssemblyRequest::new(
+            self.entries
+                .iter()
+                .map(|entry| entry.observations().map(|value| value.manifest.clone()))
+                .collect(),
+        )?;
         let task =
             prepare_acoustic_frequency_assembly_task(AcousticFrequencyAssemblyPreparation {
                 workload: self.workload.clone(),
                 mesh: self.preparation.mesh.clone(),
                 entries: inputs,
+                request,
                 artifact_access: self.preparation.artifact_access.clone(),
                 program_revision: self.preparation.program_revision.clone(),
                 output_policy: self.preparation.output_policy,

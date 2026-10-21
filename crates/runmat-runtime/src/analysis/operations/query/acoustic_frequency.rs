@@ -43,6 +43,16 @@ pub(super) fn results_op(
                 BTreeMap::from([("run_id".to_string(), step.run_id.clone())]),
             )
         })?;
+    // Authored outputs evaluated at each frequency are small inline results, one per sample.
+    let mut observation_fields = Vec::new();
+    for entry in &result.entries {
+        for observation in &entry.observations {
+            let mut descriptor = AnalysisFieldDescriptor::from_field(&observation.field);
+            descriptor.sample = Some(observation.sample);
+            descriptors.push(descriptor);
+            observation_fields.push(observation.field.clone());
+        }
+    }
     if !query.include_fields.is_empty() {
         for requested in &query.include_fields {
             if !descriptors.iter().any(|descriptor| {
@@ -101,7 +111,18 @@ pub(super) fn results_op(
         AnalysisResultsData {
             identity: step.identity.clone(),
             field_descriptors: descriptors,
-            fields: Vec::new(),
+            fields: observation_fields
+                .into_iter()
+                .filter(|field| {
+                    query.include_fields.is_empty()
+                        || query.include_fields.iter().any(|requested| {
+                            crate::analysis::field_selection::field_id_matches(
+                                &field.field_id,
+                                requested,
+                            )
+                        })
+                })
+                .collect(),
             modal_results: None,
             buckling_results: None,
             thermal_results: None,
