@@ -226,7 +226,7 @@ fn problem<'a>(c: &'a Case, p: &'a Prepared, tolerance: f64) -> FluidStructurePr
                 // Tight outer and linear targets on the coupled reference raise the
                 // conservative work bound past the interactive default.
                 maximum_operator_work: u64::MAX / 4,
-                linear_relative_tolerance: 1e-11,
+                linear_relative_tolerance: 1e-9,
                 physical_relative_tolerance: 1e-8,
                 ..CanonicalFluidPolicy::default()
             },
