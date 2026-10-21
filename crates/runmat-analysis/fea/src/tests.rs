@@ -4501,10 +4501,8 @@ fn nonlinear_contact_reference_is_explicitly_unsupported() {
         ComputeBackend::Cpu,
         NonlinearSolveOptions {
             contact_enforcement: Some(FeaContactEnforcement {
-                enabled: true,
                 penalty_stiffness_scale: 2.0,
                 max_penetration_ratio: 0.01,
-                friction_coefficient: 0.0,
             }),
             ..experimental_nonlinear_options()
         },

@@ -7,11 +7,13 @@ use runmat_analysis_core::{
 fn input(operator: StructuralOperatorImplementation) -> StructuralRealizationInput {
     let recovery = match operator {
         StructuralOperatorImplementation::Tet4LinearElasticity
-        | StructuralOperatorImplementation::Tet4SmallStrainContinuum => {
+        | StructuralOperatorImplementation::Tet4SmallStrainContinuum
+        | StructuralOperatorImplementation::Tet4TotalLagrangianContinuum => {
             Some(StructuralRecoveryImplementation::Tet4ConstantStrain)
         }
         StructuralOperatorImplementation::Tet10LinearElasticity
-        | StructuralOperatorImplementation::Tet10SmallStrainContinuum => {
+        | StructuralOperatorImplementation::Tet10SmallStrainContinuum
+        | StructuralOperatorImplementation::Tet10TotalLagrangianContinuum => {
             Some(StructuralRecoveryImplementation::Tet10IntegrationPointProjection)
         }
         StructuralOperatorImplementation::EulerBernoulliBeam3d => {

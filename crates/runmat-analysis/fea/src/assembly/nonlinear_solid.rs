@@ -149,9 +149,6 @@ impl CanonicalNonlinearSolidBasis {
     pub(crate) fn identity(&self) -> Digest {
         self.identity
     }
-    pub(crate) fn kinematics(&self) -> StructuralKinematics {
-        self.kinematics
-    }
     pub(crate) fn dof_count(&self) -> usize {
         self.dof_count
     }

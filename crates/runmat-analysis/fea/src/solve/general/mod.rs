@@ -1,7 +1,11 @@
 //! Admitted real GENERAL solve. Local operator nonsingularity is neither
 //! coercivity nor uniqueness/stability of the surrounding nonlinear problem.
 use super::{
-    krylov::{restarted_gmres, right_ilu::SparseRightIluError, GmresPolicy},
+    krylov::{
+        restarted_gmres,
+        right_ilu::{SparseRightIlu, SparseRightIluError},
+        GmresPolicy,
+    },
     uniqueness::{
         prepare_sparse_uniqueness, SparseUniquenessError, SparseUniquenessPolicy,
         SparseUniquenessUncertainty, SparseUniquenessVerdict,
@@ -223,16 +227,12 @@ pub(crate) fn solve_newton_correction(
             relative_residual,
         });
     }
-    Ok(GeneralCorrection {
-        solution,
-        iterations: result.iterations,
-    })
+    Ok(GeneralCorrection { solution })
 }
 
 #[derive(Debug)]
 pub(crate) struct GeneralCorrection {
     pub solution: Vec<f64>,
-    pub iterations: u32,
 }
 
 fn cancelled() -> Result<(), GeneralSolveError> {
