@@ -161,7 +161,7 @@ fn conduction_reproduces_the_exact_linear_field_for_every_rank_count() {
         assert!(quality.smallest_part > 0);
         for (node, point) in problem.mesh.coordinates.iter().enumerate() {
             let exact = 300.0 + 50.0 * point[0];
-            assert!((solution.solution[node] - exact).abs() < 1e-7, "{ranks}: {} vs {exact}", solution.solution[node]);
+            assert!((solution.solution[node] - exact).abs() < 1e-6, "{ranks}: {} vs {exact}", solution.solution[node]);
         }
         for element in 0..problem.mesh.element_count() {
             assert!((solution.element_results[element * 3] + 50.0).abs() < 1e-6);

@@ -331,7 +331,7 @@ async fn run_family(family: &'static str, source: &str, nodes: u32) -> RemoteFam
     write_bundle(&builder.build().unwrap(), &mut bundle, ArchiveLimits::default()).unwrap();
     let cpu_millicores = expectation.local_execution.checked_cpu_millicores().unwrap();
     let allocation = AllocationResources {
-        cpu_millicores,
+        cpu_millicores: cpu_millicores.into(),
         memory_bytes: 4 << 30,
         scratch_bytes: 4 << 30,
         accelerators: Vec::new(),
@@ -483,7 +483,7 @@ where
             resources: inventory.clone(),
         };
         let session_id = [u8::try_from(node % 200).unwrap() + 1; 16];
-        servers.push(tokio::spawn(run_remote_meshing_worker_quic(
+        servers.push(Box::pin(run_remote_meshing_worker_quic(
             RemoteMeshingWorkerQuicRequest {
                 worker: RemoteWorkerQuicRequest {
                     listener,
@@ -504,46 +504,50 @@ where
     resource_limit.cpu_millicores *= nodes;
     resource_limit.memory_bytes *= u64::from(nodes);
     resource_limit.scratch_bytes *= u64::from(nodes);
-    let pool = RemotePoolDriver::new_with_value_scope(
-        runmat_execution::ExecutionScopeId::derive(&[run_identity.as_bytes(), b"/scope"]),
-        PoolSpec {
-            id: pool_id,
-            min_workers: nodes,
-            max_workers: nodes,
-            max_in_flight: nodes,
-            resource_limit,
-        },
-        91,
-        bundle,
-        run_identity,
-    )
-    .unwrap();
-    for (node, (authority, worker, session_id)) in endpoints.into_iter().enumerate() {
-        let channel = QuicRemoteWorkerChannel::connect(
-            RemoteWorkerChannelConfig {
-                run_identity: run_identity.into(),
-                node_identity: format!("{run_identity}-node-{node}"),
-                worker,
-                driver_fence: 91,
-                session_id,
-                run_key: run_key.clone(),
-                limits: FrameLimits::default(),
+    let client = async {
+        let pool = RemotePoolDriver::new_with_value_scope(
+            runmat_execution::ExecutionScopeId::derive(&[run_identity.as_bytes(), b"/scope"]),
+            PoolSpec {
+                id: pool_id,
+                min_workers: nodes,
+                max_workers: nodes,
+                max_in_flight: nodes,
+                resource_limit,
             },
-            &PinnedQuicEndpoint {
-                authority,
-                server_name: "runmat.execution".into(),
-                certificate_der: certificate_der.clone(),
-            },
+            91,
+            bundle,
+            run_identity,
         )
-        .await
         .unwrap();
-        pool.add_worker(channel).await.unwrap();
+        for (node, (authority, worker, session_id)) in endpoints.into_iter().enumerate() {
+            let channel = QuicRemoteWorkerChannel::connect(
+                RemoteWorkerChannelConfig {
+                    run_identity: run_identity.into(),
+                    node_identity: format!("{run_identity}-node-{node}"),
+                    worker,
+                    driver_fence: 91,
+                    session_id,
+                    run_key: run_key.clone(),
+                    limits: FrameLimits::default(),
+                },
+                &PinnedQuicEndpoint {
+                    authority,
+                    server_name: "runmat.execution".into(),
+                    certificate_der: certificate_der.clone(),
+                },
+            )
+            .await
+            .unwrap();
+            pool.add_worker(channel).await.unwrap();
+        }
+        tokio::time::timeout(Duration::from_secs(3_600), body(Arc::clone(&pool)))
+            .await
+            .expect("loopback cluster run timed out")
+    };
+    // Worker servers are not Send; drive them on this task beside the client.
+    let servers = futures::future::join_all(servers);
+    tokio::select! {
+        result = client => result,
+        outcomes = servers => panic!("loopback worker nodes stopped early: {:?}", outcomes.into_iter().map(|outcome| outcome.err().map(|error| error.to_string())).collect::<Vec<_>>()),
     }
-    let result = tokio::time::timeout(Duration::from_secs(3_600), body(Arc::clone(&pool)))
-        .await
-        .expect("loopback cluster run timed out");
-    for server in servers {
-        server.abort();
-    }
-    result
 }

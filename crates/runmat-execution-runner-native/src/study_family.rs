@@ -116,18 +116,6 @@ pub(crate) struct PlannedFamilyStudy {
 }
 
 impl PlannedFamilyStudy {
-    pub fn kind(&self) -> StudyFamilyKind {
-        match &self.preparation {
-            FamilyStudyPreparation::Thermal(_) => StudyFamilyKind::Thermal,
-            FamilyStudyPreparation::Electrical(_) => StudyFamilyKind::Electrical,
-            FamilyStudyPreparation::Magnetic(_) => StudyFamilyKind::Magnetic,
-            FamilyStudyPreparation::Maxwell(_) => StudyFamilyKind::Maxwell,
-            FamilyStudyPreparation::Acoustic(_) => StudyFamilyKind::Acoustic,
-            FamilyStudyPreparation::Fluid(_) => StudyFamilyKind::Fluid,
-            FamilyStudyPreparation::NonlinearSolid(_) => StudyFamilyKind::NonlinearSolid,
-        }
-    }
-
     /// Process-isolated task envelope derived from the authored step accuracy resources.
     pub fn local_resources(
         &self,
@@ -392,7 +380,6 @@ pub(crate) struct FamilyStudyExecutionPolicy {
 }
 
 /// Bridge-level completion of one family study, independent of where its tasks ran.
-#[derive(Debug)]
 pub enum CompletedFamilyStudy {
     Thermal(Box<CompletedThermalStudy>),
     Electrical(Box<CompletedElectricalStudy>),
@@ -522,6 +509,15 @@ pub(crate) struct FamilyCompletionRoot {
     pub root: ValueRef,
     pub objects: Vec<LogicalObject>,
     pub catalog: PublishedObjectCatalog,
+}
+
+impl std::fmt::Debug for CompletedFamilyStudy {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("CompletedFamilyStudy")
+            .field("family", &self.kind())
+            .finish_non_exhaustive()
+    }
 }
 
 impl CompletedFamilyStudy {

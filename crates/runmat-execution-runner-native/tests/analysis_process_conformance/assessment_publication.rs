@@ -4,7 +4,7 @@ use runmat_analysis_execution::assessment_program::FrozenAssessmentCallable;
 use runmat_execution_runner_native::{
     complete_frozen_fea_assessments, execute_prepared_structural_study_locally,
     freeze_fea_assessment_functions, prepare_checked_fea_study, LocalFeaExecutionOptions,
-    NativeExecutionConfig, PreparedFeaStudyRoot,
+    prepare_structural_study_root, NativeExecutionConfig,
 };
 use runmat_runtime::analysis::{
     prepare_structural_study_publication, AnalysisStudyCompletionIdentity, FeaCheckStatus,
@@ -59,6 +59,7 @@ pub(super) async fn run() {
     .unwrap();
     session
         .install_project_handoff(runmat_package::FrozenProjectHandoff::new(project))
+        .await
         .unwrap();
     let checked = session.load_and_check_fea_source_path(&path).await.unwrap();
     let report = checked.checked().check_result();
@@ -95,13 +96,13 @@ pub(super) async fn run() {
     )
     .await
     .unwrap();
-    let PreparedFeaStudyRoot::Structural(structural_root) = prepared.root else {
-        panic!("expected structural root");
-    };
+    assert!(prepared.root.planning.structural().is_some(), "expected structural root");
+    let workers = prepared.workers;
+    let structural_root = prepare_structural_study_root(prepared.root).unwrap();
     let mut config = NativeExecutionConfig::for_current_executable().unwrap();
     config.store_root = project_directory.join("numerical-processes");
     let numerical =
-        execute_prepared_structural_study_locally(config, structural_root, prepared.workers)
+        execute_prepared_structural_study_locally(config, structural_root, workers)
             .await
             .unwrap();
     // Completion consumes admitted numerical evidence and submitted executables. No source
