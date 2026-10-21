@@ -140,7 +140,10 @@ fn project_type(operation: OutputOperation, value: &FeaType) -> Result<FeaType, 
             } if element.is_numeric() => {
                 Ok(projected_field(field, element.clone(), field.quantity))
             }
-            _ => Err("magnitude requires a three-component numeric field"),
+            // The modulus of a scalar phasor. The study's procedure decides whether the
+            // field is complex; authored-output validation rejects a real scalar source.
+            scalar if scalar.is_numeric() => Ok(FeaType::Field(field.clone())),
+            _ => Err("magnitude requires a three-component or complex scalar numeric field"),
         },
         OutputOperation::Component => match field.value.as_ref() {
             FeaType::Vector {

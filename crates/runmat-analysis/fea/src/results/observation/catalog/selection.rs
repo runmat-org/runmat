@@ -16,6 +16,8 @@ pub enum ObservationSelectionCoordinate {
     SampledRecovery,
     StructuralRecovery,
     ThermalSample { ordinal: usize },
+    /// Native canonical-mesh fields; the selection's projection digest is the plan topology.
+    VolumeMeshRecovery,
 }
 
 impl ObservationFieldCatalog {
@@ -65,6 +67,18 @@ impl ObservationFieldCatalog {
                 ObservationSelectionCoordinate::StructuralRecovery,
             ) => ObservationFieldSelection::structural(recovery_request, manifest, selected),
             (
+                ObservationFieldCatalogSource::VolumeMeshRecovery {
+                    recovery_request,
+                    manifest,
+                },
+                ObservationSelectionCoordinate::VolumeMeshRecovery,
+            ) => ObservationFieldSelection::volume_mesh_recovery(
+                recovery_request,
+                manifest,
+                plan.topology_digest,
+                selected,
+            ),
+            (
                 ObservationFieldCatalogSource::Thermal { manifest },
                 ObservationSelectionCoordinate::ThermalSample { ordinal },
             ) => {
@@ -99,6 +113,9 @@ impl ObservationFieldCatalog {
             }
             ObservationFieldSource::StructuralRecovery { .. } => {
                 ObservationSelectionCoordinate::StructuralRecovery
+            }
+            ObservationFieldSource::VolumeMeshRecovery { .. } => {
+                ObservationSelectionCoordinate::VolumeMeshRecovery
             }
             ObservationFieldSource::ThermalResult { sample_ordinal, .. } => {
                 ObservationSelectionCoordinate::ThermalSample {
@@ -139,6 +156,10 @@ impl ObservationFieldCatalog {
             (
                 ObservationFieldCatalogSource::Structural { manifest, .. },
                 ObservationSelectionCoordinate::StructuralRecovery,
+            ) => &manifest.fields,
+            (
+                ObservationFieldCatalogSource::VolumeMeshRecovery { manifest, .. },
+                ObservationSelectionCoordinate::VolumeMeshRecovery,
             ) => &manifest.fields,
             (
                 ObservationFieldCatalogSource::Thermal { manifest },

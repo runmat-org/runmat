@@ -93,6 +93,18 @@ impl ObservationPublicationCatalog {
                 Ok(())
             }
             (
+                AccuracySourceKind::AcousticHarmonic,
+                crate::results::observation::ObservationFieldCatalogSource::VolumeMeshRecovery {
+                    recovery_request,
+                    manifest,
+                },
+            ) if recovery_request.producer == producer
+                && recovery_request.source.solver_result() == Some(result)
+                && manifest.source == recovery_request.source =>
+            {
+                Ok(())
+            }
+            (
                 AccuracySourceKind::Thermal,
                 crate::results::observation::ObservationFieldCatalogSource::Thermal { manifest },
             ) if manifest.producer == producer && manifest.identity() == result => Ok(()),

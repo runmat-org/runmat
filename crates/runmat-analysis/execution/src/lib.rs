@@ -150,7 +150,7 @@ mod acoustic_frequency_assembly;
 mod acoustic_harmonic_plan;
 pub use acoustic_frequency_assembly::{
     decode_acoustic_frequency_assembly_entries, import_acoustic_frequency_assembly,
-    prepare_acoustic_frequency_assembly_task, prepare_acoustic_frequency_field_objects,
+    prepare_acoustic_frequency_assembly_task,
     rederive_acoustic_frequency_assembly_resource_plan,
     validate_acoustic_frequency_assembly_entries, AcousticFrequencyAssemblyPreparation,
     ImportedAcousticFrequencyAssembly, PreparedAcousticFrequencyAssemblyTask,
@@ -182,6 +182,12 @@ pub use maxwell_study::{
 };
 mod magnetic_field_recovery;
 mod magnetic_state_profiles;
+mod acoustic_field_recovery;
+pub use acoustic_field_recovery::{
+    build_prepared_acoustic_field_recovery_resource_plan, decode_acoustic_recovery_source,
+    import_acoustic_recovered_fields, prepare_acoustic_field_recovery,
+    AcousticFieldRecoveryPreparation, PreparedAcousticFieldRecovery,
+};
 mod maxwell_field_recovery;
 mod maxwell_harmonic_plan;
 mod maxwell_harmonic_result;

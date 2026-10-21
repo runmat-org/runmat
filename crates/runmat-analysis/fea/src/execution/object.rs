@@ -50,6 +50,7 @@ pub enum AnalysisNumericalObjectKind {
     FrequencySamplePublication,
     AcousticHarmonicWorkload,
     AcousticFrequencyWorkload,
+    AcousticFrequencyAssemblyRequest,
     ElectricalStaticWorkload,
     MagnetostaticWorkload,
     MaxwellHarmonicWorkload,

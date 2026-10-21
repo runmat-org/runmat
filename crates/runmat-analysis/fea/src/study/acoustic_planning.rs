@@ -116,9 +116,6 @@ pub fn plan_acoustic_study(
     {
         return Err(AcousticStudyPlanningError::UnsupportedSequence);
     }
-    if !step.observations.is_empty() || !study.outputs.is_empty() {
-        return Err(AcousticStudyPlanningError::UnsupportedPublication);
-    }
     if !matches!(
         step.state_outputs.as_slice(),
         [output]
@@ -200,8 +197,6 @@ pub enum AcousticStudyPlanningError {
     UnsupportedSequence,
     #[error("acoustic planning currently supports only direct harmonic response")]
     UnsupportedProcedure,
-    #[error("acoustic observations and authored result publication are not yet wired")]
-    UnsupportedPublication,
     #[error("acoustic planning requires exactly one complete acoustic-complex state output")]
     UnsupportedStatePublication,
     #[error("acoustic harmonic response requires at least one authored frequency")]

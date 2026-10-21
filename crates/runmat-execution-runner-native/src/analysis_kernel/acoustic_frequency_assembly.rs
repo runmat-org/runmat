@@ -4,11 +4,11 @@ use super::{
     AnalysisKernelOutput,
 };
 use runmat_analysis_execution::{
-    decode_acoustic_frequency_assembly_entries, prepare_acoustic_frequency_field_objects,
-    rederive_acoustic_frequency_assembly_resource_plan,
+    decode_acoustic_frequency_assembly_entries, rederive_acoustic_frequency_assembly_resource_plan,
 };
 use runmat_analysis_fea::execution::{
-    assemble_acoustic_frequency_result, AcousticFrequencyWorkload, AnalysisNumericalObjectKind,
+    assemble_acoustic_frequency_result, AcousticFrequencyAssemblyRequest,
+    AcousticFrequencyWorkload, AnalysisNumericalObjectKind,
     ExecutionPlanIdentity, NumericalPlanIdentity,
 };
 use runmat_analysis_fea::planning::resource::{FeaResourceDemand, FeaResourcePlan};
@@ -24,20 +24,22 @@ pub(super) fn execute(
     )?;
     let mesh_input = unique_input(&invocation, AnalysisNumericalObjectKind::Mesh)?;
     let resource_input = unique_input(&invocation, AnalysisNumericalObjectKind::ResourcePlan)?;
+    let request_input = unique_input(
+        &invocation,
+        AnalysisNumericalObjectKind::AcousticFrequencyAssemblyRequest,
+    )?;
+    let request = AcousticFrequencyAssemblyRequest::from_canonical_bytes(&request_input.payload())?;
     let workload = AcousticFrequencyWorkload::from_canonical_bytes(&workload_input.payload())?;
     let mesh = SolverMeshArtifact::canonical_decode(&mesh_input.payload())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let resource = FeaResourcePlan::from_canonical_bytes(&resource_input.payload())?;
     let entries = decode_acoustic_frequency_assembly_entries(invocation.inputs)?;
-    let mut expected_outputs = vec![
+    let expected_outputs = vec![
         AnalysisNumericalObjectKind::SolverResult,
         AnalysisNumericalObjectKind::FrequencySamplePublication,
     ];
-    expected_outputs.extend(std::iter::repeat_n(
-        AnalysisNumericalObjectKind::Field,
-        entries.len(),
-    ));
-    if invocation.inputs.len() != entries.len() + 3
+    if invocation.inputs.len() != entries.len() + 4
+        || request_input.manifest.logical_identity != request.identity()
         || invocation.host.workload.outputs != expected_outputs
     {
         return Err(AnalysisBridgeError::Identity(
@@ -70,7 +72,7 @@ pub(super) fn execute(
             "acoustic fan-in resource or numerical authority differs",
         ));
     }
-    let assembled = assemble_acoustic_frequency_result(workload, &mesh, entries)?;
+    let assembled = assemble_acoustic_frequency_result(workload, &mesh, entries, &request)?;
     let FeaResourceDemand::AcousticFrequencyAssembly(demand) = &resource.input.demand else {
         return Err(AnalysisBridgeError::Identity(
             "acoustic fan-in requires its exact resource demand",
@@ -89,7 +91,7 @@ pub(super) fn execute(
             "acoustic fan-in metadata exceeds admitted payload bounds",
         ));
     }
-    let mut outputs = vec![
+    let outputs = vec![
         AnalysisKernelOutput::whole(
             AnalysisNumericalObjectKind::SolverResult,
             assembled.result.source_result_identity()?.digest(),
@@ -101,25 +103,6 @@ pub(super) fn execute(
             publication_bytes,
         ),
     ];
-    let mut field_bytes = 0_u64;
-    for artifact in &assembled.fields {
-        let objects = prepare_acoustic_frequency_field_objects(
-            artifact,
-            invocation.output_policy.chunk_bytes(),
-            invocation.output_policy.inventory_limits(),
-        )?;
-        field_bytes = field_bytes
-            .checked_add(objects.manifest.encoded_length)
-            .ok_or_else(|| {
-                AnalysisBridgeError::Invalid("acoustic fan-in field bytes overflow".into())
-            })?;
-        outputs.push(AnalysisKernelOutput::prepared(objects));
-    }
-    if field_bytes > demand.fields_output.encoded_payload_bytes_upper_bound.0 {
-        return Err(AnalysisBridgeError::Identity(
-            "complete acoustic field inventory exceeds admitted payload bound",
-        ));
-    }
     Ok(outputs)
 }
 

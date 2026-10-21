@@ -16,6 +16,7 @@ mod finite_volume;
 mod frequency;
 mod sampled;
 mod selection;
+mod volume_mesh;
 pub use selection::ObservationSelectionCoordinate;
 
 const PREFIX: &[u8] = b"runmat-observation-field-catalog/v1\0";
@@ -46,6 +47,10 @@ pub enum ObservationFieldCatalogSource {
     },
     Thermal {
         manifest: Box<ThermalSolverResultManifest>,
+    },
+    VolumeMeshRecovery {
+        recovery_request: Box<FieldRecoveryRequest>,
+        manifest: Box<RecoveredFieldArtifactManifest>,
     },
 }
 
@@ -218,6 +223,10 @@ impl ObservationFieldCatalog {
                 }
             }
             ObservationFieldCatalogSource::Thermal { manifest } => manifest.validate()?,
+            ObservationFieldCatalogSource::VolumeMeshRecovery {
+                recovery_request,
+                manifest,
+            } => super::source::validate_volume_mesh_authority(recovery_request, manifest)?,
             ObservationFieldCatalogSource::StructuralFrequencyHistory { samples } => {
                 frequency::validate_samples(samples)?;
             }
@@ -241,6 +250,7 @@ impl ObservationFieldCatalog {
             ObservationFieldCatalogSource::Thermal { .. }
             | ObservationFieldCatalogSource::StructuralFrequencyHistory { .. }
             | ObservationFieldCatalogSource::FiniteVolumeRecovery { .. }
+            | ObservationFieldCatalogSource::VolumeMeshRecovery { .. }
             | ObservationFieldCatalogSource::SampledRecovery { .. } => {
                 Err(invalid("expected structural catalog"))
             }
@@ -261,6 +271,7 @@ impl ObservationFieldCatalog {
             ObservationFieldCatalogSource::Structural { .. }
             | ObservationFieldCatalogSource::StructuralFrequencyHistory { .. }
             | ObservationFieldCatalogSource::FiniteVolumeRecovery { .. }
+            | ObservationFieldCatalogSource::VolumeMeshRecovery { .. }
             | ObservationFieldCatalogSource::SampledRecovery { .. } => {
                 Err(invalid("expected thermal catalog"))
             }

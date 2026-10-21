@@ -265,6 +265,35 @@ impl ObservationPublicationCatalog {
                 }
             }
             (
+                ObservationFieldCatalogSource::VolumeMeshRecovery {
+                    recovery_request, ..
+                },
+                ObservationHistorySourceContext::AcousticHarmonic { workload, mesh },
+            ) => {
+                if recovery_request.producer != self.producer
+                    || workload.producer_identity()? != self.producer
+                    || workload.step_id != step.step_id
+                    || !workload
+                        .model
+                        .sequence
+                        .steps
+                        .iter()
+                        .any(|authored| authored == step)
+                {
+                    return Err(invalid(
+                        "volume-mesh publication producer or authored step differs",
+                    ));
+                }
+                self.source
+                    .validate_volume_mesh_plan(&self.plan, step, mesh)?;
+                for entry in &self.entries {
+                    if let ObservationPublicationEntry::Sample(value) = entry {
+                        self.source
+                            .validate_volume_mesh_selection(&value.request.selection, mesh)?;
+                    }
+                }
+            }
+            (
                 ObservationFieldCatalogSource::Thermal { manifest },
                 ObservationHistorySourceContext::Thermal { workload, mesh },
             ) => {

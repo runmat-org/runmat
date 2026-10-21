@@ -116,6 +116,21 @@ impl AcousticAssembly {
         })
     }
 
+    /// Reset sources and prescribed values before resampling boundaries at another time.
+    /// Operators and projection are retained; the boundary admittance is rebuilt.
+    pub(super) fn with_cleared_sources(mut self) -> Self {
+        self.source.iter_mut().for_each(|value| {
+            *value = ProjectionScalar {
+                real: 0.0,
+                imaginary: 0.0,
+            }
+        });
+        self.prescribed.iter_mut().for_each(|value| *value = None);
+        self.source_evidence.clear();
+        self.incident_faces.clear();
+        self
+    }
+
     pub(super) fn apply(&self, real: &[f64], imaginary: &[f64]) -> (Vec<f64>, Vec<f64>) {
         let kr = spmv(&self.stiffness, real).expect("validated pressure shape");
         let ki = spmv(&self.stiffness, imaginary).expect("validated pressure shape");

@@ -1,7 +1,7 @@
 use runmat_analysis_core::AnalysisModel;
 use runmat_analysis_fea::{
     execution::{
-        AnalysisNumericalObjectKind, FluidSteadyWorkload, MagnetostaticWorkload,
+        AcousticHarmonicWorkload, AnalysisNumericalObjectKind, FluidSteadyWorkload, MagnetostaticWorkload,
         MaxwellHarmonicWorkload, NonlinearSolidWorkload, StructuralFrequencyWorkload,
         StructuralLinearWorkload, ThermalWorkload,
     },
@@ -23,6 +23,7 @@ pub enum ObservationWorkloadSource {
     Thermal(PreparedAnalysisObjects),
     Magnetostatic(PreparedAnalysisObjects),
     MaxwellHarmonic(PreparedAnalysisObjects),
+    AcousticHarmonic(PreparedAnalysisObjects),
     FluidSteady(PreparedAnalysisObjects),
 }
 
@@ -35,6 +36,7 @@ impl ObservationWorkloadSource {
             Self::Thermal(_) => AnalysisNumericalObjectKind::ThermalWorkload,
             Self::Magnetostatic(_) => AnalysisNumericalObjectKind::MagnetostaticWorkload,
             Self::MaxwellHarmonic(_) => AnalysisNumericalObjectKind::MaxwellHarmonicWorkload,
+            Self::AcousticHarmonic(_) => AnalysisNumericalObjectKind::AcousticHarmonicWorkload,
             Self::FluidSteady(_) => AnalysisNumericalObjectKind::FluidSteadyWorkload,
         }
     }
@@ -47,6 +49,7 @@ impl ObservationWorkloadSource {
             | Self::Thermal(objects)
             | Self::Magnetostatic(objects)
             | Self::MaxwellHarmonic(objects)
+            | Self::AcousticHarmonic(objects)
             | Self::FluidSteady(objects) => objects,
         }
     }
@@ -92,6 +95,17 @@ impl ObservationWorkloadSource {
             Self::MaxwellHarmonic(_) => Ok(AdmittedObservationWorkload::MaxwellHarmonic(
                 MaxwellHarmonicWorkload::from_canonical_bytes(&objects.payload())?,
             )),
+            Self::AcousticHarmonic(_) => {
+                let workload = AcousticHarmonicWorkload::from_canonical_bytes(&objects.payload())?;
+                if workload.identity()?.digest() != objects.manifest.logical_identity {
+                    return Err(AnalysisBridgeError::Identity(
+                        "acoustic observation workload identity differs",
+                    ));
+                }
+                Ok(AdmittedObservationWorkload::AcousticHarmonic(Box::new(
+                    workload,
+                )))
+            }
         }
     }
 }
@@ -103,6 +117,7 @@ pub(crate) enum AdmittedObservationWorkload {
     Thermal(ThermalWorkload),
     Magnetostatic(MagnetostaticWorkload),
     MaxwellHarmonic(MaxwellHarmonicWorkload),
+    AcousticHarmonic(Box<AcousticHarmonicWorkload>),
     FluidSteady(FluidSteadyWorkload),
 }
 
@@ -115,6 +130,7 @@ impl AdmittedObservationWorkload {
             Self::Thermal(workload) => &workload.model,
             Self::Magnetostatic(workload) => &workload.model,
             Self::MaxwellHarmonic(workload) => &workload.model,
+            Self::AcousticHarmonic(workload) => &workload.model,
             Self::FluidSteady(workload) => &workload.model,
         }
     }
@@ -127,6 +143,7 @@ impl AdmittedObservationWorkload {
             Self::NonlinearSolid(_)
             | Self::Magnetostatic(_)
             | Self::MaxwellHarmonic(_)
+            | Self::AcousticHarmonic(_)
             | Self::FluidSteady(_) => ComputeBackend::Cpu,
         }
     }
@@ -141,6 +158,7 @@ impl AdmittedObservationWorkload {
             | Self::Thermal(_)
             | Self::Magnetostatic(_)
             | Self::MaxwellHarmonic(_)
+            | Self::AcousticHarmonic(_)
             | Self::FluidSteady(_) => ObservationExecutionPolicy::serial(),
         }
     }

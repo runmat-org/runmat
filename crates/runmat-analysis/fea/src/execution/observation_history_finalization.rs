@@ -26,6 +26,10 @@ pub enum ObservationHistorySourceContext<'a> {
         workload: &'a super::MaxwellHarmonicWorkload,
         mesh: &'a SolverMeshArtifact,
     },
+    AcousticHarmonic {
+        workload: &'a super::AcousticHarmonicWorkload,
+        mesh: &'a SolverMeshArtifact,
+    },
     Magnetostatic {
         workload: &'a super::MagnetostaticWorkload,
         mesh: &'a SolverMeshArtifact,
@@ -45,6 +49,7 @@ impl ObservationHistorySourceContext<'_> {
         match self {
             Self::Magnetostatic { .. }
             | Self::MaxwellHarmonic { .. }
+            | Self::AcousticHarmonic { .. }
             | Self::FluidSteady { .. } => ObservationExecutionPolicy::serial(),
             Self::Structural { source, .. } => source.observation_execution(),
             Self::Thermal { .. } => ObservationExecutionPolicy::serial(),
@@ -56,6 +61,7 @@ impl ObservationHistorySourceContext<'_> {
             Self::FluidSteady { workload, .. } => workload.validate(),
             Self::Magnetostatic { workload, .. } => workload.validate(),
             Self::MaxwellHarmonic { workload, .. } => workload.validate(),
+            Self::AcousticHarmonic { workload, .. } => workload.validate(),
             Self::Structural { source, .. } => source.validate(),
             Self::Thermal { workload, .. } => workload.validate(),
         }

@@ -44,6 +44,10 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
         &invocation,
         AnalysisNumericalObjectKind::FluidSteadyWorkload,
     )?;
+    let acoustic_workload = optional_unique_input(
+        &invocation,
+        AnalysisNumericalObjectKind::AcousticHarmonicWorkload,
+    )?;
     if usize::from(nonlinear_workload.is_some())
         + usize::from(linear_workload.is_some())
         + usize::from(frequency_workload.is_some())
@@ -51,6 +55,7 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
         + usize::from(magnetic_workload.is_some())
         + usize::from(maxwell_workload.is_some())
         + usize::from(fluid_workload.is_some())
+        + usize::from(acoustic_workload.is_some())
         != 1
     {
         return Err(AnalysisBridgeError::Invalid(
@@ -123,7 +128,7 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
                 .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
         })
         .transpose()?;
-    let mut thermal_projection = None;
+    let mut solid_projection = None;
     let mut sampled_topology = None;
     let mut finite_volume_topology = None;
     let (model, backend) = if let Some(workload_objects) = fluid_workload {
@@ -146,6 +151,49 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
         )?;
         sampled_topology = Some(sampling);
         (model, runmat_analysis_fea::ComputeBackend::Cpu)
+    } else if let Some(workload_objects) = acoustic_workload {
+        let workload = runmat_analysis_fea::execution::AcousticHarmonicWorkload::from_canonical_bytes(
+            &workload_objects.payload(),
+        )?;
+        let mesh = mesh.as_ref().ok_or(AnalysisBridgeError::Identity(
+            "acoustic observation requires its exact mesh",
+        ))?;
+        if workload.identity()?.digest() != workload_objects.manifest.logical_identity
+            || workload.producer_identity()? != request.producer
+            || request.event_attribution.is_some()
+            || !resource_plan.request.accelerators.is_empty()
+        {
+            return Err(AnalysisBridgeError::Identity(
+                "acoustic observation workload identity or serial envelope differs",
+            ));
+        }
+        let step = workload
+            .model
+            .sequence
+            .steps
+            .iter()
+            .find(|step| step.step_id == workload.step_id)
+            .ok_or(AnalysisBridgeError::Identity(
+                "acoustic observation step is absent",
+            ))?;
+        catalog.validate_volume_mesh_selection(&source_request.selection, mesh)?;
+        catalog.validate_volume_mesh_plan(&source_request.plan, step, mesh)?;
+        let expected_partitions = ObservationPartitionPlan::derive(
+            &source_request.plan,
+            &partition_plan.observation_id,
+            runmat_analysis_fea::results::observation::ObservationExecutionPolicy::serial(),
+        )
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+        if partition_plan != expected_partitions {
+            return Err(AnalysisBridgeError::Identity(
+                "acoustic observation partition policy differs from its workload",
+            ));
+        }
+        solid_projection = Some(
+            runmat_analysis_fea::topology::AnalysisProjection::derive(mesh)
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+        );
+        (workload.model, runmat_analysis_fea::ComputeBackend::Cpu)
     } else if let Some(workload_objects) = thermal_workload {
         let workload = runmat_analysis_fea::execution::ThermalWorkload::from_canonical_bytes(
             &workload_objects.payload(),
@@ -173,7 +221,7 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
                 "thermal observation partition policy differs from its workload",
             ));
         }
-        thermal_projection = Some(
+        solid_projection = Some(
             runmat_analysis_fea::topology::AnalysisProjection::derive(mesh)
                 .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
         );
@@ -297,12 +345,12 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
                 &fields,
             )
         }
-        [] if thermal_projection.is_some() => {
+        [] if solid_projection.is_some() => {
             runmat_analysis_fea::results::observation::evaluate_solid_observation_partition(
                 &source_request.plan,
                 &partition_plan,
                 partition,
-                thermal_projection.as_ref().expect("thermal branch"),
+                solid_projection.as_ref().expect("solid-projection branch"),
                 &fields,
                 request.event_attribution,
             )
