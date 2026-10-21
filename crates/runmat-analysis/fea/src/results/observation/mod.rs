@@ -73,6 +73,7 @@ pub use evaluate::{
     evaluate_observation_event_sample, evaluate_observation_sample, evaluate_observations,
     evaluate_structural_observation_event_sample, evaluate_structural_observation_sample,
     evaluate_structural_observations, resolved_observation_accepts_sample,
+    authored_observations_sample,
 };
 pub(crate) use history::{
     exact_scheduled_coordinate_at, exact_scheduled_sample_count, sample_matches_policy,

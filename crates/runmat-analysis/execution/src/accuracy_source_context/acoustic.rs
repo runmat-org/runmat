@@ -72,17 +72,14 @@ pub(super) fn validate(
         step,
     )?;
     // An entry carries an observation manifest exactly when an authored observation samples its
-    // frequency: final-only outputs sample the terminal frequency of the sweep alone.
-    let terminal = match &step.independent_domain {
-        runmat_analysis_core::IndependentDomain::FrequencyHertz(values) => values.last().copied(),
-        _ => None,
-    };
-    let sampled = step.observations.iter().any(|observation| {
-        observation.spec().is_none_or(|spec| {
-            spec.sampling != runmat_analysis_core::SamplingPolicy::Final
-                || terminal == Some(workload.frequency.hertz)
-        })
-    });
+    // frequency (final-only outputs sample the terminal frequency of the sweep alone).
+    let sampled = runmat_analysis_fea::results::observation::authored_observations_sample(
+        step,
+        runmat_analysis_fea::results::field::RecoveredFieldSample::FrequencyHertz(
+            workload.frequency.hertz,
+        ),
+    )
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if producer != request.producer
         || request.plan != step.accuracy
         || observations.is_some() != sampled

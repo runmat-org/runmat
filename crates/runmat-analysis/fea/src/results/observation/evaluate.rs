@@ -233,6 +233,30 @@ pub fn resolved_observation_accepts_sample(
     )
 }
 
+/// Whether any authored observation of `step` samples `sample`: the single rule deciding
+/// whether a sampled source (one frequency of a sweep, one time point) carries observations.
+pub fn authored_observations_sample(
+    step: &runmat_analysis_core::ProcedureStep,
+    sample: RecoveredFieldSample,
+) -> Result<bool, ObservationError> {
+    for observation in &step.observations {
+        let Some(spec) = observation.spec() else {
+            return Ok(true);
+        };
+        let accepted = if spec.sampling == SamplingPolicy::Final {
+            sample == RecoveredFieldSample::Final
+                || terminal_physical_sample(&step.independent_domain) == Some(sample)
+        } else {
+            sample_matches_history_policy(&spec.sampling, sample, None)?
+                && sample_matches_domain(&step.independent_domain, sample)
+        };
+        if accepted {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 fn terminal_physical_sample(
     domain: &runmat_analysis_core::IndependentDomain,
 ) -> Option<RecoveredFieldSample> {

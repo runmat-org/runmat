@@ -141,9 +141,17 @@ fn validate_entry(
             "acoustic accuracy differs from exact authored plan and accepted receipt".into(),
         );
     }
+    let sampled = runmat_analysis_fea::results::observation::authored_observations_sample(
+        step,
+        runmat_analysis_fea::results::field::RecoveredFieldSample::FrequencyHertz(
+            completed.workload.frequency.hertz,
+        ),
+    )
+    .map_err(|e| e.to_string())?;
     match &completed.observation_catalog {
-        None if step.observations.is_empty() && completed.observation_results.is_empty() => {}
-        Some(catalog) if !step.observations.is_empty() => {
+        // No authored observation samples this frequency of the sweep.
+        None if !sampled && completed.observation_results.is_empty() => {}
+        Some(catalog) if sampled => {
             catalog
                 .validate_authored_step(step)
                 .map_err(|e| e.to_string())?;
