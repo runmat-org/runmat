@@ -14,9 +14,11 @@
 //! gradient test field. Without that closure the open terminals would charge like a
 //! capacitor and the solution would be dominated by an unphysical gap field.
 //!
-//! A medium is electrically transparent at angular frequency omega when its skin depth is
-//! larger than the model: omega * mu * sigma * L^2 < 1, with L the model's bounding-box
-//! diagonal. Such a medium cannot carry significant induced current at that frequency.
+//! A conductor is a connected conducting body that a terminal bounds, or one that is not
+//! electrically transparent. A medium is electrically transparent at angular frequency omega
+//! when its skin depth is larger than the model: omega * mu * sigma * L^2 < 1, with L the
+//! model's bounding-box diagonal. Such a medium cannot carry significant induced current at
+//! that frequency; terminal current closes through the non-conductor elements.
 use super::{
     invalid, topology, ComplexPhasor, MaxwellDriveExcitation, MaxwellElementVector, MaxwellError,
     MaxwellTerminalDrive, MaxwellVolumeData,
@@ -103,10 +105,35 @@ pub(super) fn compile(context: &DriveContext<'_>) -> Result<Vec<MaxwellTerminalD
         return Ok(Vec::new());
     }
     let length = model_length_m(context.projection);
-    let conducting: Vec<bool> = context
+    // A conductor is a connected conducting body that a terminal bounds or that is not
+    // electrically transparent at this frequency; every other element is the medium the
+    // terminal current may close through.
+    let positive: Vec<bool> = context
         .volumes
         .iter()
-        .map(|volume| !transparent(volume, context.omega, length))
+        .map(|volume| volume.conductivity_s_per_m > 0.0)
+        .collect();
+    let candidates = conductor_components(context, &positive);
+    let mut kept = BTreeSet::new();
+    for (element, owner) in candidates.iter().enumerate() {
+        if let Some(owner) = owner {
+            if !transparent(&context.volumes[element], context.omega, length) {
+                kept.insert(*owner);
+            }
+        }
+    }
+    for terminal in &terminals {
+        for &face in &terminal.faces {
+            for &element in &context.projection.boundary_faces[face].adjacent_element_indices {
+                if let Some(owner) = candidates[element] {
+                    kept.insert(owner);
+                }
+            }
+        }
+    }
+    let conducting: Vec<bool> = candidates
+        .iter()
+        .map(|owner| owner.is_some_and(|owner| kept.contains(&owner)))
         .collect();
     let component = conductor_components(context, &conducting);
     // Group terminals by the conductor component they bound.

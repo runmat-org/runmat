@@ -253,7 +253,8 @@ fn authored_frequency_pec_material_source_and_lifecycle_negatives_fail_closed() 
     let original = workload();
     let mut changed = original.clone();
     changed.model.constraints.pop();
-    reject(changed);
+    // A face without a ground is a symmetry plane of the current (n x H = 0), not an error.
+    changed.execute(&mesh).unwrap();
     let mut changed = original.clone();
     changed.model.constraints[0] = AnalysisConstraint::Electrical(ElectricalConstraint {
         constraint_id: "potential".into(),

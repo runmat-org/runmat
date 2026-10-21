@@ -124,6 +124,7 @@ pub(crate) fn mesh(
         })
         .collect::<Vec<_>>();
     let mut boundary_faces = Vec::new();
+    let mut interfaces = BTreeMap::<(String, &str, &str), Vec<u64>>::new();
     for (key, adjacent) in &owners {
         let regions: Vec<&str> = adjacent.iter().map(|(_, e)| names[*e]).collect();
         let role = match adjacent.len() {
@@ -157,6 +158,17 @@ pub(crate) fn mesh(
             normal = normal.map(|n| -n);
         }
         let name = face(centroid, normal, &regions);
+        if role == BoundaryFaceRole::ConformalInterface {
+            let (a, b) = if regions[0] < regions[1] {
+                (regions[0], regions[1])
+            } else {
+                (regions[1], regions[0])
+            };
+            interfaces
+                .entry((name.clone(), a, b))
+                .or_default()
+                .push(boundary_faces.len() as u64 + 1);
+        }
         boundary_faces.push(SolverBoundaryFace {
             face_id: boundary_faces.len() as u64 + 1,
             stable_identity: solver_boundary_face_identity(
@@ -181,6 +193,24 @@ pub(crate) fn mesh(
     artifact.topology.neighbors = neighbors;
     artifact.topology.boundary_faces = boundary_faces;
     artifact.topology.boundary_edges.clear();
+    let mut conformal = interfaces
+        .into_iter()
+        .map(|((name, a, b), boundary_face_ids)| runmat_meshing_core::ConformalInterface {
+            source_face_id: entity(PersistentEntityKind::Face, &name),
+            side_a_region_id: entity(PersistentEntityKind::Region, a),
+            side_b_region_id: entity(PersistentEntityKind::Region, b),
+            boundary_face_ids,
+        })
+        .collect::<Vec<_>>();
+    conformal.sort_by(|x, y| {
+        (&x.source_face_id, &x.side_a_region_id, &x.side_b_region_id).cmp(&(
+            &y.source_face_id,
+            &y.side_a_region_id,
+            &y.side_b_region_id,
+        ))
+    });
+    artifact.topology.conformal_interfaces = conformal;
+    artifact.topology.contacts.clear();
     artifact.topology.regions = regions
         .into_iter()
         .map(|(name, element_ids)| MeshRegion {

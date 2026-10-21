@@ -82,10 +82,12 @@ fn coupled_model() -> AnalysisModel {
             relative_tolerance: 1e-12,
         },
     }));
-    // Every excitation belongs to a declared case when the model declares cases.
-    if let Some(case) = model.excitation_cases.first_mut() {
-        case.action_ids.push(ExcitationId("supply".into()));
-    }
+    // Every excitation belongs to a declared case.
+    model.excitation_cases.push(runmat_analysis_core::ExcitationCase {
+        case_id: runmat_analysis_core::ExcitationCaseId("supply".into()),
+        action_ids: vec![ExcitationId("supply".into())],
+        activation: runmat_analysis_core::ExcitationCaseActivation::Always,
+    });
     model
 }
 
@@ -98,7 +100,7 @@ fn exact_rise(x: f64) -> f64 {
 #[test]
 fn two_way_joule_heating_matches_the_closed_form_bar() {
     let mut errors = Vec::new();
-    for cells in [2, 4] {
+    for cells in [2, 4, 8] {
         let mesh = mesh(ElementOrder::Tet10, cells);
         let coupled = coupled_model();
         let step = coupled.sequence.steps[0].clone();
@@ -108,7 +110,6 @@ fn two_way_joule_heating_matches_the_closed_form_bar() {
             model: thermal_model,
             step_id: ProcedureStepId("heat".into()),
             backend: ComputeBackend::Cpu,
-            formulation_requirement: FormulationRequirement::Production,
             procedure: ThermalProcedureControl::Steady,
             residual_target: 1e-11,
             initial_fields: vec![],
@@ -152,5 +153,6 @@ fn two_way_joule_heating_matches_the_closed_form_bar() {
         eprintln!("  power {joule:.6} W vs I^2 R(T) {exact_power:.6} W");
         assert!((joule - exact_power).abs() < 5e-3 * exact_power);
     }
-    assert!(errors[1] < 2e-3, "{errors:?}");
+    // Each element's conductivity is taken at its mean temperature: second-order convergence.
+    assert!(errors[2] < errors[1] / 3.0 && errors[2] < 3e-3, "{errors:?}");
 }

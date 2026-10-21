@@ -76,7 +76,9 @@ fn explicit_pec_positive_loss_and_original_current_are_not_inferred() {
     source.signal_id = SignalId("missing-current".into());
     // Zero conductivity (air) needs no artificial loss.
     assert!(plan_maxwell_study_product(compiled(lossless, &mesh), &mesh, policy()).is_ok());
-    for changed in [missing_pec, magnetic_ground, foreign_source] {
+    // Faces without a ground are symmetry planes of the current (n x H = 0).
+    assert!(plan_maxwell_study_product(compiled(missing_pec, &mesh), &mesh, policy()).is_ok());
+    for changed in [magnetic_ground, foreign_source] {
         assert!(plan_maxwell_study_product(compiled(changed, &mesh), &mesh, policy()).is_err());
     }
 }

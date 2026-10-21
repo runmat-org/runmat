@@ -244,8 +244,10 @@ fn source_material_sampling_frequency_and_lossless_gates_fail_closed() {
             value.imaginary *= 1e-200;
         }
     }
-    // Nonzero forcing must never be mistaken for zero through squared-norm underflow.
-    reject(&changed, 10);
+    // Tiny but nonzero forcing is still nonzero: the linear solve scales with it, and the
+    // acceptance checks are relative, so it is neither mistaken for zero nor rejected.
+    let tiny = solve(&mesh, &changed, 1e-10).unwrap();
+    assert!(tiny.edge_circulations_v.iter().any(|value| value.real != 0.0 || value.imaginary != 0.0));
     let (other_mesh, _) = fixture::problem(
         ElementOrder::Tet4,
         2,
