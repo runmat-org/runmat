@@ -11,7 +11,8 @@ use runmat_analysis_fea::{
         AnalysisNumericalObjectKind as Kind, AnalysisTransportProfiler, FluidTransientBlockWorkload,
     },
     planning::resource::{
-        prepare_fluid_transient_resources, FeaResourcePlan, PreparedPhaseResourceFacts,
+        prepare_fluid_transient_resources, FeaResourcePlan, LocalExecutionPlan,
+        PreparedPhaseResourceFacts,
     },
 };
 use runmat_execution::Digest;
@@ -44,6 +45,7 @@ pub fn prepare_fluid_transient_inputs(
     request: &FluidTransientBlockWorkload,
     mesh: &SolverMeshArtifact,
     policy: AnalysisOutputPolicy,
+    local_execution: LocalExecutionPlan,
 ) -> AnalysisBridgeResult<PreparedFluidTransientInputs> {
     let resources = prepare_fluid_transient_resources(request, mesh)?;
     let projection = resources.projection();
@@ -77,6 +79,7 @@ pub fn prepare_fluid_transient_inputs(
             output,
             output_set: projected_output_set_resource_facts(),
         },
+        local_execution,
     )?;
     Ok(PreparedFluidTransientInputs {
         inputs,
@@ -97,6 +100,11 @@ pub fn rederive_fluid_transient_resource_plan(
         projection.checkpoint_resident_bytes,
         policy,
     )?;
+    let actual = inputs
+        .iter()
+        .find(|i| i.manifest.kind == Kind::ResourcePlan)
+        .ok_or_else(|| invalid("fluid transient resource plan missing"))?;
+    let declared = FeaResourcePlan::from_canonical_bytes(&actual.payload())?;
     let resource_plan = resources.build(
         request,
         PreparedPhaseResourceFacts {
@@ -104,6 +112,8 @@ pub fn rederive_fluid_transient_resource_plan(
             output,
             output_set: projected_output_set_resource_facts(),
         },
+        LocalExecutionPlan::from_cpu_millicores(declared.request.cpu_millicores)
+            .map_err(invalid)?,
     )?;
     let expected = prepare_analysis_objects(
         Kind::ResourcePlan,
@@ -113,10 +123,6 @@ pub fn rederive_fluid_transient_resource_plan(
         ObjectNamespace::InputValue,
         policy.inventory_limits(),
     )?;
-    let actual = inputs
-        .iter()
-        .find(|i| i.manifest.kind == Kind::ResourcePlan)
-        .unwrap();
     if actual != &expected {
         return Err(invalid("fluid transient resource source differs"));
     }

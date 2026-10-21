@@ -5,6 +5,10 @@ use runmat_analysis_core::{
 
 use crate::{
     algebra::{
+        element_assembly::{
+            assemble_elements, no_visit, ElementAssemblyError, ElementOutputShape,
+            ElementOutputs,
+        },
         spmv, AssembledRealSystem, CanonicalRealOperators, ContributionDomain, ContributionId,
         ContributionProvenance, MatrixProperties, OperatorRole, RealSparseAssembler,
         RealSparseMatrix,
@@ -142,35 +146,10 @@ pub(crate) fn assemble(
         ));
     }
     volume_source::validate_fields(mesh, &projection, excitations)?;
-    let mut conductivity = RealSparseAssembler::with_pattern(
-        support
-            .try_clone()
-            .map_err(|error| ThermalAssemblyError::SparseOperator(error.to_string()))?,
-        OperatorRole::Conductivity,
-        MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
-    )
-    .map_err(|error| ThermalAssemblyError::SparseOperator(error.to_string()))?;
-    let mut capacity = RealSparseAssembler::with_pattern(
-        support
-            .try_clone()
-            .map_err(|error| ThermalAssemblyError::SparseOperator(error.to_string()))?,
-        OperatorRole::Capacity,
-        MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
-    )
-    .map_err(|error| ThermalAssemblyError::SparseOperator(error.to_string()))?;
-    conductivity.add_contribution(ContributionProvenance {
-        domain: ContributionDomain::Thermal,
-        contribution_id: ContributionId("conductive_element_and_boundary_terms".to_string()),
-    });
-    capacity.add_contribution(ContributionProvenance {
-        domain: ContributionDomain::Thermal,
-        contribution_id: ContributionId("consistent_heat_capacity".to_string()),
-    });
     let mut element_conductivity_w_per_mk = Vec::with_capacity(projection.elements.len());
     let mut element_volumetric_capacity_j_per_m3k = Vec::with_capacity(projection.elements.len());
     let mut element_specific_heat_j_per_kgk = Vec::with_capacity(projection.elements.len());
     let mut element_density_kg_per_m3 = Vec::with_capacity(projection.elements.len());
-
     for element in &projection.elements {
         let material = &properties
             .solid_material(element.stable_identity)
@@ -189,36 +168,83 @@ pub(crate) fn assemble(
         element_density_kg_per_m3.push(mass_density_kg_per_m3);
         element_volumetric_capacity_j_per_m3k
             .push(mass_density_kg_per_m3 * thermal.specific_heat_j_per_kgk);
-        projection
-            .visit_element_quadrature(element, |point| {
-                for (local_row, &row) in element.node_indices.iter().enumerate() {
-                    for (local_column, &column) in element.node_indices.iter().enumerate() {
-                        let gradient_product = point.physical_shape_gradients()[local_row]
-                            .iter()
-                            .zip(point.physical_shape_gradients()[local_column])
-                            .map(|(left, right)| left * right)
-                            .sum::<f64>();
-                        conductivity.add(
-                            row,
-                            column,
-                            thermal.conductivity_w_per_mk
-                                * gradient_product
-                                * point.volume_weight_m3,
-                        );
-                        capacity.add(
-                            row,
-                            column,
-                            mass_density_kg_per_m3
-                                * thermal.specific_heat_j_per_kgk
-                                * point.shape_values()[local_row]
-                                * point.shape_values()[local_column]
-                                * point.volume_weight_m3,
-                        );
-                    }
-                }
-            })
-            .map_err(|error| ThermalAssemblyError::InvalidProjection(error.to_string()))?;
     }
+    // Element conduction/capacity kernels run on the admitted CPU pool and scatter onto the
+    // planned support in canonical element order (thread-count independent values).
+    let element_map = crate::topology::projection_element_map(&projection)
+    .map_err(|error| ThermalAssemblyError::SparseOperator(error.to_string()))?;
+    let assembled = assemble_elements(
+        &element_map,
+        support,
+        ElementOutputShape {
+            matrices: 2,
+            ..Default::default()
+        },
+        crate::planning::resource::LocalExecutionPlan::serial(),
+        |index, _, out: &mut ElementOutputs<'_, f64>| {
+            let element = &projection.elements[index];
+            let n = element.node_indices.len();
+            let conductivity = element_conductivity_w_per_mk[index];
+            let capacity = element_volumetric_capacity_j_per_m3k[index];
+            let mut local_conductivity = vec![0.0; n * n];
+            let mut local_capacity = vec![0.0; n * n];
+            projection
+                .visit_element_quadrature(element, |point| {
+                    let gradients = point.physical_shape_gradients();
+                    let shapes = point.shape_values();
+                    for row in 0..n {
+                        for column in 0..n {
+                            let gradient_product = gradients[row]
+                                .iter()
+                                .zip(gradients[column])
+                                .map(|(left, right)| left * right)
+                                .sum::<f64>();
+                            local_conductivity[row * n + column] +=
+                                conductivity * gradient_product * point.volume_weight_m3;
+                            local_capacity[row * n + column] +=
+                                capacity * shapes[row] * shapes[column] * point.volume_weight_m3;
+                        }
+                    }
+                })
+                .map_err(|error| ThermalAssemblyError::InvalidProjection(error.to_string()))?;
+            out.matrix(0).copy_from_slice(&local_conductivity);
+            out.matrix(1).copy_from_slice(&local_capacity);
+            Ok(())
+        },
+        no_visit,
+    )
+    .map_err(|error| match error {
+        ElementAssemblyError::Element { error, .. } => error,
+        other => ThermalAssemblyError::SparseOperator(other.to_string()),
+    })?;
+    drop(element_map);
+    let mut matrices = assembled.matrices.into_iter();
+    let mut conductivity = RealSparseAssembler::from_planned_values(
+        support
+            .try_clone()
+            .map_err(|error| ThermalAssemblyError::SparseOperator(error.to_string()))?,
+        matrices.next().unwrap_or_default(),
+        OperatorRole::Conductivity,
+        MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+    )
+    .map_err(|error| ThermalAssemblyError::SparseOperator(error.to_string()))?;
+    let mut capacity = RealSparseAssembler::from_planned_values(
+        support
+            .try_clone()
+            .map_err(|error| ThermalAssemblyError::SparseOperator(error.to_string()))?,
+        matrices.next().unwrap_or_default(),
+        OperatorRole::Capacity,
+        MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+    )
+    .map_err(|error| ThermalAssemblyError::SparseOperator(error.to_string()))?;
+    conductivity.add_contribution(ContributionProvenance {
+        domain: ContributionDomain::Thermal,
+        contribution_id: ContributionId("conductive_element_and_boundary_terms".to_string()),
+    });
+    capacity.add_contribution(ContributionProvenance {
+        domain: ContributionDomain::Thermal,
+        contribution_id: ContributionId("consistent_heat_capacity".to_string()),
+    });
 
     let mut applied_source = vec![0.0; projection.nodes.len()];
     let mut source_evidence = Vec::new();

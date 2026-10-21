@@ -137,6 +137,7 @@ pub fn build_structural_transient_recovery_resource_plan(
         &prepared,
         None,
         None,
+        super::LocalExecutionPlan::serial(),
     )?;
     let FeaResourceDemand::StructuralTransientScopePreparation(scope_demand) =
         scope_plan.input.demand

@@ -35,7 +35,14 @@ fn direct_block_workspace_covers_actual_mass_and_newmark_proofs_for_both_orders(
                 super::super::prepare_transient_checkpoint_scope(&workload, &mesh, None).unwrap();
             let request = StructuralTransientBlockRequest::new(scope, None, 2).unwrap();
             let plan = build_structural_transient_block_resource_plan(
-                &workload, &mesh, None, &request, None, None, None,
+                &workload,
+                &mesh,
+                None,
+                &request,
+                None,
+                None,
+                None,
+                crate::planning::resource::LocalExecutionPlan::serial(),
             )
             .unwrap();
             let FeaResourceDemand::StructuralTransientBlock(demand) = &plan.input.demand else {

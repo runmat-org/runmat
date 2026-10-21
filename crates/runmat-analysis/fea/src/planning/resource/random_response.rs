@@ -19,9 +19,9 @@ use super::{
     structural_facts::derive_structural_resource_facts,
     AccuracyResourceDemand, AssemblyResourcePolicy, ByteCount, CheckpointArtifactPolicy, Count,
     FeaResourceDemand, FeaResourcePhase, FeaResourcePlan, FeaResourcePlanningInput,
-    ObservationResourceFacts, PartitioningPolicy, PhaseResourcePolicy, PreparedInputResourceFacts,
-    PreparedOutputResourceFacts, PreparedOutputSetResourceFacts, ResourcePlanningError,
-    SolveResourcePolicy, StructuralOperatorResourceDemand,
+    LocalExecutionPlan, ObservationResourceFacts, PartitioningPolicy, PhaseResourcePolicy,
+    PreparedInputResourceFacts, PreparedOutputResourceFacts, PreparedOutputSetResourceFacts,
+    ResourcePlanningError, SolveResourcePolicy, StructuralOperatorResourceDemand,
     StructuralRandomResponseAssemblyResourceDemand, StructuralRandomResponseIntervalResourceDemand,
     WorkerResourcePolicy, RESOURCE_ESTIMATION_MODEL_REVISION,
 };
@@ -47,11 +47,29 @@ pub struct StructuralRandomResponseResourceProjection {
     operator_digest: runmat_execution::Digest,
     physical_dof_count: u64,
     available_mode_count: u64,
-    worker: WorkerResourcePolicy,
+    maximum_wall_milliseconds: u64,
     accuracy_ceiling: runmat_analysis_core::AccuracyResourceCeiling,
 }
 
 impl StructuralRandomResponseResourceProjection {
+    /// One worker sized by the admitted local execution plan; the projection itself is
+    /// thread-independent so one projection serves every scheduled phase.
+    fn worker(
+        &self,
+        local_execution: LocalExecutionPlan,
+    ) -> Result<WorkerResourcePolicy, ResourcePlanningError> {
+        Ok(WorkerResourcePolicy {
+            cpu_millicores: local_execution
+                .checked_cpu_millicores()
+                .map_err(invalid_error)?,
+            maximum_wall_milliseconds: self.maximum_wall_milliseconds,
+            fixed_memory_bytes: ByteCount(FIXED_WORKER_MEMORY_BYTES),
+            fixed_scratch_bytes: ByteCount(FIXED_WORKER_SCRATCH_BYTES),
+            required_capabilities: BTreeSet::new(),
+            accelerators: Vec::new(),
+        })
+    }
+
     pub fn new(
         mesh: &SolverMeshArtifact,
         constraints: &CanonicalStructuralConstraintPlan,
@@ -133,14 +151,7 @@ impl StructuralRandomResponseResourceProjection {
             operator_digest: basis.operator_digest(),
             physical_dof_count,
             available_mode_count,
-            worker: WorkerResourcePolicy {
-                cpu_millicores: 1_000,
-                maximum_wall_milliseconds: step.accuracy.resources.maximum_wall_time_milliseconds,
-                fixed_memory_bytes: ByteCount(FIXED_WORKER_MEMORY_BYTES),
-                fixed_scratch_bytes: ByteCount(FIXED_WORKER_SCRATCH_BYTES),
-                required_capabilities: BTreeSet::new(),
-                accelerators: Vec::new(),
-            },
+            maximum_wall_milliseconds: step.accuracy.resources.maximum_wall_time_milliseconds,
             accuracy_ceiling: step.accuracy.resources,
         })
     }
@@ -151,6 +162,7 @@ impl StructuralRandomResponseResourceProjection {
         inputs: PreparedInputResourceFacts,
         output: PreparedOutputResourceFacts,
         output_set: PreparedOutputSetResourceFacts,
+        local_execution: LocalExecutionPlan,
     ) -> Result<FeaResourcePlan, ResourcePlanningError> {
         request
             .validate_for(&self.workload)
@@ -334,7 +346,7 @@ impl StructuralRandomResponseResourceProjection {
                 },
             ),
             output_set: Some(output_set),
-            worker: self.worker.clone(),
+            worker: self.worker(local_execution)?,
             accuracy_ceiling: self.accuracy_ceiling,
         })
     }
@@ -347,6 +359,7 @@ impl StructuralRandomResponseResourceProjection {
         receipt_output: PreparedOutputResourceFacts,
         state_profiles_output: PreparedOutputResourceFacts,
         output_set: PreparedOutputSetResourceFacts,
+        local_execution: LocalExecutionPlan,
     ) -> Result<FeaResourcePlan, ResourcePlanningError> {
         request.validate().map_err(invalid_error)?;
         request
@@ -425,7 +438,7 @@ impl StructuralRandomResponseResourceProjection {
                 },
             ),
             output_set: Some(output_set),
-            worker: self.worker.clone(),
+            worker: self.worker(local_execution)?,
             accuracy_ceiling: self.accuracy_ceiling,
         })
     }

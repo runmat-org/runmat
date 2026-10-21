@@ -45,22 +45,47 @@ fn usable_memory(host_available: u64, container_available: Option<u64>) -> u64 {
     container_available.map_or(host_available, |available| host_available.min(available))
 }
 
+/// The single thread-plan authority for local FEA execution.
+///
+/// `workers` co-located task slots share the machine: with no explicit thread count each slot
+/// gets an equal share of the cores (`capacity / workers`, at least one), so concurrent workers
+/// never oversubscribe the host. An explicit `cpu_threads_per_worker` is honored only when all
+/// co-located workers fit (`workers × threads ≤ capacity`). Sweep case concurrency and remote
+/// fan-out derive from the same plan ([`case_concurrency`]).
 pub(super) fn study_allocation(workers: u32, explicit_threads: Option<u32>) -> Result<u32, String> {
     allocate(cpu_millicores() / 1000, workers, explicit_threads)
 }
+
 fn allocate(capacity: u32, workers: u32, explicit_threads: Option<u32>) -> Result<u32, String> {
     if workers == 0 || workers > capacity {
         return Err("requested local worker count exceeds available CPU capacity".into());
     }
-    // Worker count is a slot ceiling, not a simultaneous CPU reservation.
-    // Wide tasks may use the whole budget; aggregate pool admission governs fanout.
-    let threads = explicit_threads.unwrap_or(capacity);
-    if threads == 0 || threads > capacity {
+    let threads = match explicit_threads {
+        Some(threads) => threads,
+        None => (capacity / workers).max(1),
+    };
+    if threads == 0 || threads.saturating_mul(workers) > capacity {
         return Err(
             "requested local worker/thread allocation exceeds available CPU capacity".into(),
         );
     }
     Ok(threads)
+}
+
+/// Independent cases (sweep cases) that may run at once on this host given the per-case plan:
+/// `capacity / (workers × threads)`, at least one, at most `cases` and the authored limit.
+pub(crate) fn case_concurrency(
+    workers_per_case: u32,
+    threads_per_worker: u32,
+    cases: usize,
+    authored_limit: Option<usize>,
+) -> usize {
+    let capacity = (cpu_millicores() / 1000).max(1) as usize;
+    let per_case = (workers_per_case.max(1) as usize).saturating_mul(threads_per_worker.max(1) as usize);
+    (capacity / per_case)
+        .max(1)
+        .min(authored_limit.unwrap_or(usize::MAX))
+        .min(cases.max(1))
 }
 
 #[cfg(test)]
@@ -76,9 +101,12 @@ mod tests {
     #[test]
     fn automatic_and_explicit_study_allocations_share_machine_capacity() {
         assert_eq!(allocate(16, 1, None).unwrap(), 16);
-        assert_eq!(allocate(16, 4, None).unwrap(), 16);
+        // Co-located workers split the cores instead of oversubscribing.
+        assert_eq!(allocate(16, 4, None).unwrap(), 4);
+        assert_eq!(allocate(16, 5, None).unwrap(), 3);
         assert_eq!(allocate(16, 3, Some(2)).unwrap(), 2);
-        assert_eq!(allocate(16, 4, Some(5)).unwrap(), 5);
+        assert_eq!(allocate(16, 4, Some(4)).unwrap(), 4);
+        assert!(allocate(16, 4, Some(5)).is_err());
         assert!(allocate(16, 4, Some(17)).is_err());
         assert!(allocate(16, 17, None).is_err());
         assert!(allocate(16, 0, None).is_err());

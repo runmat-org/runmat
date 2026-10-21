@@ -58,6 +58,7 @@ impl MaxwellStudyResultClosure {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct MaxwellStudyReplayContext {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub policy: MaxwellStudyPlanningPolicy,
     pub mesh: SolverMeshArtifact,
     pub frozen_project_digest: Option<Digest>,
@@ -94,6 +95,7 @@ impl CompletedMaxwellStudy {
             ));
         }
         Ok(MaxwellStudyPreparation {
+            local_execution: self.replay.local_execution,
             policy: self.replay.policy,
             product: MaxwellStudyProduct {
                 compiled: self.compiled.clone(),

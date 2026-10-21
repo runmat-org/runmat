@@ -6,6 +6,7 @@ use crate::{
     projected_transport_output_resource_facts, AnalysisBridgeError, AnalysisBridgeResult,
     AnalysisOutputPolicy, PreparedAnalysisObjects,
 };
+use runmat_analysis_fea::planning::resource::LocalExecutionPlan;
 use runmat_analysis_fea::{
     execution::{AnalysisNumericalObjectKind, AnalysisTransportProfiler, MaxwellHarmonicWorkload},
     planning::resource::{
@@ -26,6 +27,7 @@ pub fn prepare_maxwell_harmonic_inputs(
     workload: &MaxwellHarmonicWorkload,
     mesh: &SolverMeshArtifact,
     policy: AnalysisOutputPolicy,
+    local_execution: LocalExecutionPlan,
 ) -> AnalysisBridgeResult<PreparedMaxwellHarmonicInputs> {
     let result_output = projected_result(workload, mesh, policy)?;
     let workload_objects = prepare_analysis_objects(
@@ -50,6 +52,7 @@ pub fn prepare_maxwell_harmonic_inputs(
         workload,
         mesh,
         PreparedMaxwellHarmonicResourceFacts {
+            local_execution,
             inputs: prepared_input_resource_facts(&inputs)?,
             result_output,
             receipt_output: projected_output(
@@ -121,10 +124,19 @@ pub fn rederive_maxwell_harmonic_resource_plan(
             ));
         }
     }
+    let input = inputs
+        .iter()
+        .find(|input| input.manifest.kind == ResourcePlan)
+        .ok_or_else(|| invalid("Maxwell resource plan missing"))?;
+    let imported = FeaResourcePlan::from_canonical_bytes(&input.payload())?;
     let plan = build_maxwell_harmonic_resource_plan(
         workload,
         mesh,
         PreparedMaxwellHarmonicResourceFacts {
+            local_execution: LocalExecutionPlan::from_cpu_millicores(
+                imported.request.cpu_millicores,
+            )
+            .map_err(invalid)?,
             inputs: prepared_input_resource_facts_without_resource_plan(inputs)?,
             result_output: projected_result(workload, mesh, policy)?,
             receipt_output: projected_output(
@@ -136,11 +148,6 @@ pub fn rederive_maxwell_harmonic_resource_plan(
             output_set: projected_output_set_resource_facts(),
         },
     )?;
-    let input = inputs
-        .iter()
-        .find(|input| input.manifest.kind == ResourcePlan)
-        .ok_or_else(|| invalid("Maxwell resource plan missing"))?;
-    let imported = FeaResourcePlan::from_canonical_bytes(&input.payload())?;
     if imported != plan || input.manifest.logical_identity != plan.identity.digest() {
         return Err(invalid(
             "Maxwell resource plan disagrees with imported inputs or output policy",

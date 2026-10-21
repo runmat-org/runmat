@@ -58,6 +58,30 @@ impl RealSparseAssembler {
         })
     }
 
+    /// Wraps values already assembled on `pattern` (e.g. by parallel element assembly).
+    /// Finalization applies the same zero compaction and finiteness checks as `add`.
+    pub fn from_planned_values(
+        pattern: SparsePattern,
+        values: Vec<f64>,
+        role: OperatorRole,
+        properties: MatrixProperties,
+    ) -> Result<Self, RealSparseMatrixError> {
+        if values.len() != pattern.column_indices().len() {
+            return Err(RealSparseMatrixError::ValueCountMismatch {
+                expected: pattern.column_indices().len(),
+                actual: values.len(),
+            });
+        }
+        Ok(Self {
+            columns: pattern.columns(),
+            storage: AssemblyStorage::Planned { pattern, values },
+            role,
+            properties,
+            contributions: Vec::new(),
+            error: None,
+        })
+    }
+
     pub fn add(&mut self, row: usize, column: usize, value: f64) {
         let rows = match &self.storage {
             AssemblyStorage::Discovered(rows) => rows.len(),

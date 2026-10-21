@@ -59,6 +59,7 @@ pub(super) fn preparation_from(
         None,
     );
     NonlinearSolidStudyPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         product,
         mesh,
         accepted_block_limit: 9,

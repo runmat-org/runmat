@@ -30,6 +30,10 @@ impl FluidTransientBlockWorkload {
                     .clone()
                     .ok_or_else(|| invalid("fluid transient output-set budget missing"))?,
             },
+            crate::planning::resource::LocalExecutionPlan::from_cpu_millicores(
+                plan.request.cpu_millicores,
+            )
+            .map_err(invalid)?,
         )
         .map_err(invalid)?;
         if &expected != plan {

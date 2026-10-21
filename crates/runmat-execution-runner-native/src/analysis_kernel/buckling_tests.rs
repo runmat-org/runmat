@@ -171,6 +171,7 @@ fn native_buckling_task_round_trips_the_preload_bound_result() {
         encryption_context: digest("buckling-encryption"),
     };
     let prepared = prepare_structural_buckling_task(StructuralBucklingTaskPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         authored_study_digest: digest("buckling-study"),
         frozen_project_digest: None,
         program_revision: revision(),

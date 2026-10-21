@@ -20,7 +20,13 @@ pub(in crate::planning::resource) fn derive(
     mesh: &SolverMeshArtifact,
     output_limit: usize,
 ) -> Result<FeaResourcePlanningInput, ResourcePlanningError> {
-    derive_for(workload, mesh, output_limit, false)
+    derive_for(
+        workload,
+        mesh,
+        output_limit,
+        false,
+        LocalExecutionPlan::serial(),
+    )
 }
 
 pub(in crate::planning::resource) fn derive_recovery(
@@ -28,7 +34,13 @@ pub(in crate::planning::resource) fn derive_recovery(
     mesh: &SolverMeshArtifact,
     output_limit: usize,
 ) -> Result<FeaResourcePlanningInput, ResourcePlanningError> {
-    derive_for(workload, mesh, output_limit, true)
+    derive_for(
+        workload,
+        mesh,
+        output_limit,
+        true,
+        LocalExecutionPlan::serial(),
+    )
 }
 
 fn derive_for(
@@ -36,6 +48,7 @@ fn derive_for(
     mesh: &SolverMeshArtifact,
     output_limit: usize,
     recovery: bool,
+    local_execution: LocalExecutionPlan,
 ) -> Result<FeaResourcePlanningInput, ResourcePlanningError> {
     let invalid = |e: &dyn std::fmt::Display| ResourcePlanningError::Invalid(e.to_string());
     workload.validate().map_err(|e| invalid(&e))?;
@@ -59,13 +72,13 @@ fn derive_for(
             model: &workload.model,
             step,
             backend: crate::ComputeBackend::Cpu,
-            preconditioner: SpdPreconditionerKind::Jacobi,
+            preconditioner: SpdPreconditionerKind::Auto,
             observation_execution: ObservationExecutionPolicy::serial(),
             mesh: Some(mesh),
             constraints: &constraints,
             observations: &observations,
             accelerator_requests: &[],
-            local_execution: LocalExecutionPlan::serial(),
+            local_execution,
             prepared_inputs: None,
         },
         &workload.controls,
@@ -129,7 +142,13 @@ pub fn build_nonlinear_solid_block_resource_plan(
             predecessor,
         )
         .map_err(|e| invalid(&e))?;
-    let mut input = derive(workload, mesh, request.accepted_block_limit)?;
+    let mut input = derive_for(
+        workload,
+        mesh,
+        request.accepted_block_limit,
+        false,
+        prepared.local_execution,
+    )?;
     let bytes = payload_bound(&input, request)?;
     let materialization =
         runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(

@@ -74,6 +74,7 @@ fn preparation(order: ElementOrder) -> MaxwellStudyPreparation {
     let policy = MaxwellStudyPlanningPolicy {};
     let workload = plan_maxwell_study(&compiled, policy).unwrap();
     MaxwellStudyPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         policy,
         product: MaxwellStudyProduct { compiled, workload },
         mesh,

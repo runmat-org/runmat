@@ -673,6 +673,7 @@ pub async fn execute_structural_workloads_locally(
             let (completion, source) = execute_structural_frequency_locally_with_source(
                 execution_config,
                 StructuralFrequencyExecutionPreparation {
+                    local_execution,
                     workload: resolved_workload.clone(),
                     mesh: (*mesh).clone(),
                     prestress_state: None,
@@ -740,6 +741,7 @@ pub async fn execute_structural_workloads_locally(
             let step_id = workload.step_id.clone();
             let preparation = runmat_analysis_execution::prepare_structural_transient_sequence(
                 runmat_analysis_execution::StructuralTransientSequencePreparationInput {
+                    local_execution,
                     workload: &workload,
                     mesh,
                     modal_state: None,

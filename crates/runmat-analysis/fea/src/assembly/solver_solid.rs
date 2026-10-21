@@ -9,7 +9,7 @@ use runmat_meshing_core::{ElementOrder, SolverMeshArtifact, SolverVolumeElement}
 use crate::algebra::{OperatorRole, RealSparseMatrix};
 use crate::{
     physics::structural::material::StructuralElementMaterial,
-    planning::resource::{execute_scoped_chunks, LocalExecutionPlan, ScopedLocalExecutionError},
+    planning::resource::LocalExecutionPlan,
     properties::CompiledPropertyMap,
 };
 
@@ -19,10 +19,14 @@ use super::{
         tetrahedron10_global_stiffness_matrix, tetrahedron4_consistent_mass_matrix, SolidMaterial,
         Tetrahedron10ElementGeometry, Tetrahedron4ElementGeometry,
     },
-    solid_matrix::{empty_rows, rows_to_sparse, scatter_csr},
 };
-
-pub(crate) const MAX_SOLID_ELEMENT_CONTRIBUTIONS_PER_WORKER: usize = 8;
+use crate::algebra::{
+    element_assembly::{
+        assemble_elements, AssembledElements, ElementAssemblyError, ElementDofMap,
+        ElementOutputShape, ElementOutputs, ElementView,
+    },
+    MatrixProperties, RealSparseAssembler,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SolverSolidTopology {
@@ -75,57 +79,6 @@ pub struct SolverSolidOperators {
     pub damping: RealSparseMatrix,
     pub lumped_mass_diag: Vec<f64>,
     pub total_mass_kg: f64,
-}
-
-struct SolidOperatorRows {
-    stiffness: Vec<BTreeMap<usize, f64>>,
-    mass: Vec<BTreeMap<usize, f64>>,
-    damping: Vec<BTreeMap<usize, f64>>,
-    lumped_mass_diag: Vec<f64>,
-    total_mass_kg: f64,
-}
-
-impl SolidOperatorRows {
-    fn new(dof_count: usize) -> Self {
-        Self {
-            stiffness: empty_rows(dof_count),
-            mass: empty_rows(dof_count),
-            damping: empty_rows(dof_count),
-            lumped_mass_diag: vec![0.0; dof_count],
-            total_mass_kg: 0.0,
-        }
-    }
-
-    fn add_element<const D: usize>(
-        &mut self,
-        offsets: &[usize],
-        stiffness: &[[f64; D]; D],
-        mass: &[[f64; D]; D],
-        damping: MechanicalDampingModel,
-    ) -> Result<(), SolverSolidAssemblyError> {
-        scatter_csr(&mut self.stiffness, offsets, stiffness);
-        scatter_csr(&mut self.mass, offsets, mass);
-        let (mass_coefficient, stiffness_coefficient) = match damping {
-            MechanicalDampingModel::Undamped => (0.0, 0.0),
-            MechanicalDampingModel::Rayleigh {
-                mass_coefficient,
-                stiffness_coefficient,
-            } => (mass_coefficient.per_second, stiffness_coefficient.seconds),
-        };
-        let element_damping: [[f64; D]; D] = std::array::from_fn(|row| {
-            std::array::from_fn(|column| {
-                mass_coefficient * mass[row][column]
-                    + stiffness_coefficient * stiffness[row][column]
-            })
-        });
-        scatter_csr(&mut self.damping, offsets, &element_damping);
-        add_lumped_mass(
-            &mut self.lumped_mass_diag,
-            offsets,
-            mass,
-            &mut self.total_mass_kg,
-        )
-    }
 }
 
 pub fn solver_solid_topology(
@@ -182,102 +135,113 @@ pub(in crate::assembly) fn assemble_solver_solid_operators_capturing(
         .enumerate()
         .map(|(index, node)| (node.node_id, (node.coordinates_m, index * 3)))
         .collect::<BTreeMap<_, _>>();
-    let rows = assemble_solid_rows(
+    assemble_solid_operators(
         &artifact.topology.volume_elements,
         properties,
         &nodes,
         topology.dof_count,
         local_execution,
         capture,
-    )?;
-    Ok(SolverSolidOperators {
-        stiffness: sparse(rows.stiffness, OperatorRole::Stiffness)?,
-        consistent_mass: sparse(rows.mass, OperatorRole::Mass)?,
-        damping: sparse(rows.damping, OperatorRole::Damping)?,
-        lumped_mass_diag: rows.lumped_mass_diag,
-        total_mass_kg: rows.total_mass_kg,
-    })
+    )
 }
 
-fn assemble_solid_rows(
+const STIFFNESS: usize = 0;
+const MASS: usize = 1;
+const DAMPING: usize = 2;
+const LUMPED_MASS: usize = 0;
+const ELEMENT_MASS: usize = 0;
+
+/// Element kernels run on the admitted CPU pool and are scattered into one shared symbolic
+/// pattern in canonical element order, so operators are bitwise independent of thread count.
+fn assemble_solid_operators(
     elements: &[SolverVolumeElement],
     properties: &CompiledPropertyMap,
     nodes: &NodeIndex,
     dof_count: usize,
     local_execution: LocalExecutionPlan,
     mut capture: Option<&mut SolidEnergyPreparation>,
-) -> Result<SolidOperatorRows, SolverSolidAssemblyError> {
-    let mut rows = SolidOperatorRows::new(dof_count);
-    let cancellation = crate::progress::cancellation_token();
-    // Each worker retains at most eight element contributions (Tet10: two 30x30 matrices).
-    let wave_capacity = usize::from(local_execution.thread_count().get())
-        .checked_mul(MAX_SOLID_ELEMENT_CONTRIBUTIONS_PER_WORKER)
-        .ok_or_else(|| {
-            SolverSolidAssemblyError::LocalExecution("assembly wave size overflow".into())
-        })?;
-    for wave in elements.chunks(wave_capacity) {
-        if cancellation.is_cancelled() {
-            return Err(SolverSolidAssemblyError::Cancelled);
+) -> Result<SolverSolidOperators, SolverSolidAssemblyError> {
+    let map = ElementDofMap::from_elements(dof_count, elements.len(), local_execution, |index, out| {
+        let element = &elements[index];
+        for node_id in &element.node_ids {
+            let (_, offset) = nodes.get(node_id).copied().ok_or(
+                SolverSolidAssemblyError::UnknownElementNode {
+                    element_id: element.element_id,
+                    node_id: *node_id,
+                },
+            )?;
+            out.extend((0..3).map(|axis| Some(offset + axis)));
         }
-        let chunks = execute_scoped_chunks(local_execution, wave.len() as u64, |chunk| {
-            let mut contributions = Vec::with_capacity(chunk.len() as usize);
-            for element in &wave[chunk.start() as usize..chunk.end_exclusive() as usize] {
-                if cancellation.is_cancelled() {
-                    return Err(SolverSolidAssemblyError::Cancelled);
-                }
-                contributions.push(element_contribution(element, properties, nodes)?);
-            }
-            Ok(contributions)
-        })
-        .map_err(|error| match error {
-            ScopedLocalExecutionError::Work { source, .. } => source,
-            other => SolverSolidAssemblyError::LocalExecution(format!("{other:?}")),
-        })?;
-        for contribution in chunks.into_iter().flatten() {
-            contribution.scatter(&mut rows, capture.as_deref_mut())?;
-        }
-    }
-    Ok(rows)
+        Ok(())
+    })
+    .map_err(element_assembly_error)?;
+    let pattern = map
+        .symbolic_pattern(local_execution)
+        .map_err(|error| element_assembly_error(error.map_element(|never| match never {})))?;
+    let damped = elements.iter().try_fold(false, |damped, element| {
+        Ok::<_, SolverSolidAssemblyError>(
+            damped
+                || !matches!(
+                    resolve_element_material(element, properties)?.damping,
+                    MechanicalDampingModel::Undamped
+                ),
+        )
+    })?;
+    let shape = ElementOutputShape {
+        matrices: if damped { 3 } else { 2 },
+        vectors: 1,
+        scalars: 1,
+    };
+    let assembled = assemble_elements(
+        &map,
+        &pattern,
+        shape,
+        local_execution,
+        |index, _, out: &mut ElementOutputs<'_, f64>| {
+            element_contribution(&elements[index], properties, nodes, damped, out)
+        },
+        |view: &ElementView<'_, f64>| match capture.as_deref_mut() {
+            Some(capture) => capture.capture(view.dofs, view.matrix(STIFFNESS)),
+            None => Ok(()),
+        },
+    )
+    .map_err(element_assembly_error)?;
+    let AssembledElements {
+        matrices,
+        vectors,
+        scalars,
+    } = assembled;
+    let mut matrices = matrices.into_iter();
+    let stiffness = matrices.next().unwrap_or_default();
+    let mass = matrices.next().unwrap_or_default();
+    let damping = matrices.next();
+    Ok(SolverSolidOperators {
+        stiffness: sparse(&pattern, stiffness, OperatorRole::Stiffness)?,
+        consistent_mass: sparse(&pattern, mass, OperatorRole::Mass)?,
+        damping: match damping {
+            Some(values) => sparse(&pattern, values, OperatorRole::Damping)?,
+            None => finish_operator(
+                RealSparseAssembler::square(
+                    dof_count,
+                    OperatorRole::Damping,
+                    MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+                ),
+                OperatorRole::Damping,
+            )?,
+        },
+        lumped_mass_diag: vectors.into_iter().nth(LUMPED_MASS).unwrap_or_default(),
+        total_mass_kg: scalars[ELEMENT_MASS],
+    })
 }
 
-enum SolidElementContribution {
-    Tet4(Box<SolidElementMatrices<4, 12>>),
-    Tet10(Box<SolidElementMatrices<10, 30>>),
-}
-
-struct SolidElementMatrices<const N: usize, const D: usize> {
-    offsets: [usize; N],
-    stiffness: [[f64; D]; D],
-    mass: [[f64; D]; D],
-    damping: MechanicalDampingModel,
-}
-
-impl SolidElementContribution {
-    fn scatter(
-        self,
-        rows: &mut SolidOperatorRows,
-        capture: Option<&mut SolidEnergyPreparation>,
-    ) -> Result<(), SolverSolidAssemblyError> {
-        if let Some(capture) = capture {
-            match &self {
-                Self::Tet4(matrices) => capture.capture(&matrices.offsets, &matrices.stiffness)?,
-                Self::Tet10(matrices) => capture.capture(&matrices.offsets, &matrices.stiffness)?,
-            }
-        }
-        match self {
-            Self::Tet4(matrices) => rows.add_element(
-                &matrices.offsets,
-                &matrices.stiffness,
-                &matrices.mass,
-                matrices.damping,
-            ),
-            Self::Tet10(matrices) => rows.add_element(
-                &matrices.offsets,
-                &matrices.stiffness,
-                &matrices.mass,
-                matrices.damping,
-            ),
-        }
+fn element_assembly_error(
+    error: ElementAssemblyError<SolverSolidAssemblyError>,
+) -> SolverSolidAssemblyError {
+    match error {
+        ElementAssemblyError::Element { error, .. } => error,
+        ElementAssemblyError::Cancelled => SolverSolidAssemblyError::Cancelled,
+        ElementAssemblyError::Execution(reason) => SolverSolidAssemblyError::LocalExecution(reason),
+        other => SolverSolidAssemblyError::SparseOperator(other.to_string()),
     }
 }
 
@@ -285,12 +249,14 @@ fn element_contribution(
     element: &SolverVolumeElement,
     properties: &CompiledPropertyMap,
     nodes: &NodeIndex,
-) -> Result<SolidElementContribution, SolverSolidAssemblyError> {
+    damped: bool,
+    out: &mut ElementOutputs<'_, f64>,
+) -> Result<(), SolverSolidAssemblyError> {
     let material = resolve_element_material(element, properties)?;
     let elasticity = solid_material(material);
     match element.order {
         ElementOrder::Tet4 => {
-            let (coordinates, offsets) =
+            let (coordinates, _) =
                 element_geometry::<4>(element.element_id, &element.node_ids, nodes)?;
             let geometry = Tetrahedron4ElementGeometry {
                 nodes_m: coordinates,
@@ -299,17 +265,10 @@ fn element_contribution(
                 .map_err(|error| element_failure(element.element_id, error))?;
             let mass = tetrahedron4_consistent_mass_matrix(elasticity, geometry)
                 .map_err(|error| mass_failure(element.element_id, error))?;
-            Ok(SolidElementContribution::Tet4(Box::new(
-                SolidElementMatrices {
-                    offsets,
-                    stiffness,
-                    mass,
-                    damping: material.damping,
-                },
-            )))
+            write_element(out, &stiffness, &mass, material.damping, damped)
         }
         ElementOrder::Tet10 => {
-            let (coordinates, offsets) =
+            let (coordinates, _) =
                 element_geometry::<10>(element.element_id, &element.node_ids, nodes)?;
             let geometry = Tetrahedron10ElementGeometry {
                 nodes_m: coordinates,
@@ -318,16 +277,61 @@ fn element_contribution(
                 .map_err(|error| element_failure(element.element_id, error))?;
             let mass = tetrahedron10_consistent_mass_matrix(elasticity, geometry)
                 .map_err(|error| mass_failure(element.element_id, error))?;
-            Ok(SolidElementContribution::Tet10(Box::new(
-                SolidElementMatrices {
-                    offsets,
-                    stiffness,
-                    mass,
-                    damping: material.damping,
-                },
-            )))
+            write_element(out, &stiffness, &mass, material.damping, damped)
         }
     }
+}
+
+fn write_element<const D: usize>(
+    out: &mut ElementOutputs<'_, f64>,
+    stiffness: &[[f64; D]; D],
+    mass: &[[f64; D]; D],
+    damping: MechanicalDampingModel,
+    damped: bool,
+) -> Result<(), SolverSolidAssemblyError> {
+    for (target, row) in out.matrix(STIFFNESS).chunks_exact_mut(D).zip(stiffness) {
+        target.copy_from_slice(row);
+    }
+    for (target, row) in out.matrix(MASS).chunks_exact_mut(D).zip(mass) {
+        target.copy_from_slice(row);
+    }
+    if damped {
+        let (mass_coefficient, stiffness_coefficient) = match damping {
+            MechanicalDampingModel::Undamped => (0.0, 0.0),
+            MechanicalDampingModel::Rayleigh {
+                mass_coefficient,
+                stiffness_coefficient,
+            } => (mass_coefficient.per_second, stiffness_coefficient.seconds),
+        };
+        let target = out.matrix(DAMPING);
+        for row in 0..D {
+            for column in 0..D {
+                target[row * D + column] = mass_coefficient * mass[row][column]
+                    + stiffness_coefficient * stiffness[row][column];
+            }
+        }
+    }
+    // Row-sum-scaled nodal lumping: each node's three DOFs receive its share of element mass.
+    let element_mass_kg = mass
+        .iter()
+        .step_by(3)
+        .map(|row| row.iter().step_by(3).sum::<f64>())
+        .sum::<f64>();
+    let diagonal_sum = (0..D / 3).map(|node| mass[node * 3][node * 3]).sum::<f64>();
+    if !element_mass_kg.is_finite()
+        || element_mass_kg <= 0.0
+        || !diagonal_sum.is_finite()
+        || diagonal_sum <= 0.0
+    {
+        return Err(SolverSolidAssemblyError::InvalidMassOperator);
+    }
+    let lumped = out.vector(LUMPED_MASS);
+    for node in 0..D / 3 {
+        let nodal_mass = element_mass_kg * mass[node * 3][node * 3] / diagonal_sum;
+        lumped[node * 3..node * 3 + 3].fill(nodal_mass);
+    }
+    *out.scalar(ELEMENT_MASS) = element_mass_kg;
+    Ok(())
 }
 
 pub(super) fn resolve_element_material(
@@ -355,44 +359,28 @@ fn solid_material(material: StructuralElementMaterial) -> SolidMaterial {
     }
 }
 
-fn add_lumped_mass<const D: usize>(
-    lumped_mass_diag: &mut [f64],
-    offsets: &[usize],
-    mass: &[[f64; D]; D],
-    total_mass_kg: &mut f64,
-) -> Result<(), SolverSolidAssemblyError> {
-    let element_mass_kg = mass
-        .iter()
-        .step_by(3)
-        .map(|row| row.iter().step_by(3).sum::<f64>())
-        .sum::<f64>();
-    let diagonal_sum = offsets
-        .iter()
-        .enumerate()
-        .map(|(node, _)| mass[node * 3][node * 3])
-        .sum::<f64>();
-    if !element_mass_kg.is_finite()
-        || element_mass_kg <= 0.0
-        || !diagonal_sum.is_finite()
-        || diagonal_sum <= 0.0
-    {
-        return Err(SolverSolidAssemblyError::InvalidMassOperator);
-    }
-    for (node, &offset) in offsets.iter().enumerate() {
-        let nodal_mass = element_mass_kg * mass[node * 3][node * 3] / diagonal_sum;
-        for axis in 0..3 {
-            lumped_mass_diag[offset + axis] += nodal_mass;
-        }
-    }
-    *total_mass_kg += element_mass_kg;
-    Ok(())
-}
-
 fn sparse(
-    rows: Vec<BTreeMap<usize, f64>>,
+    pattern: &crate::algebra::SparsePattern,
+    values: Vec<f64>,
     role: OperatorRole,
 ) -> Result<RealSparseMatrix, SolverSolidAssemblyError> {
-    rows_to_sparse(rows, role)
+    let assembler = RealSparseAssembler::from_planned_values(
+        pattern.clone(),
+        values,
+        role,
+        MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+    )
+    .map_err(|error| SolverSolidAssemblyError::SparseOperator(format!("{error:?}")))?;
+    finish_operator(assembler, role)
+}
+
+fn finish_operator(
+    mut assembler: RealSparseAssembler,
+    role: OperatorRole,
+) -> Result<RealSparseMatrix, SolverSolidAssemblyError> {
+    assembler.add_contribution(super::solid_matrix::solid_operator_provenance(role));
+    assembler
+        .finish()
         .map_err(|error| SolverSolidAssemblyError::SparseOperator(format!("{error:?}")))
 }
 

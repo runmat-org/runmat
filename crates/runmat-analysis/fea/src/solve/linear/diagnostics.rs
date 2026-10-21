@@ -9,12 +9,12 @@ use serde::Serialize;
 
 use crate::{
     diagnostics::{DiagnosticSerialization, FeaDiagnostic, FeaDiagnosticSeverity},
-    solve::preconditioner::SpdPreconditionerKind,
+    solve::{preconditioner::SpdPreconditionerKind, shared_sparse::SpdStrategy},
 };
 
 #[derive(Clone, Copy)]
 pub(super) enum SuccessfulDiagnostic {
-    CpuMethod(SpdPreconditionerKind),
+    CpuMethod(SpdStrategy),
     AcceleratorMethod(SpdPreconditionerKind),
     AdmissionFallback,
 }
@@ -47,8 +47,7 @@ impl SuccessfulDiagnostic {
 impl Display for SuccessfulDiagnostic {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::CpuMethod(preconditioner) => write!(formatter,
-                "solver=pcg preconditioner={} matrix_free=true", preconditioner.as_str()),
+            Self::CpuMethod(strategy) => formatter.write_str(strategy.label()),
             Self::AcceleratorMethod(preconditioner) => write!(formatter,
                 "solver=pcg preconditioner={} matrix_free=false backend=accelerator_native_sparse", preconditioner.as_str()),
             Self::AdmissionFallback => formatter.write_str(
@@ -66,10 +65,20 @@ impl Serialize for SuccessfulDiagnostic {
 const PROFILE_LIMITS: CanonicalLimits =
     CanonicalLimits::new(usize::MAX, usize::MAX, usize::MAX, 32);
 
-fn cpu_projection(preconditioner: SpdPreconditionerKind) -> [SuccessfulDiagnostic; 2] {
+fn cpu_projection(strategy: SpdStrategy) -> [SuccessfulDiagnostic; 2] {
     [
         SuccessfulDiagnostic::AdmissionFallback,
-        SuccessfulDiagnostic::CpuMethod(preconditioner),
+        SuccessfulDiagnostic::CpuMethod(strategy),
+    ]
+}
+
+fn all_strategies() -> [SpdStrategy; 4] {
+    use runmat_sparse_solvers::policy::PreconditionerChoice;
+    [
+        SpdStrategy::Cholesky,
+        SpdStrategy::Pcg(PreconditionerChoice::Amg),
+        SpdStrategy::Pcg(PreconditionerChoice::Ilu0),
+        SpdStrategy::Pcg(PreconditionerChoice::Jacobi),
     ]
 }
 
@@ -79,12 +88,12 @@ fn accelerator_projection(preconditioner: SpdPreconditionerKind) -> [SuccessfulD
 
 /// Maximum record count among the same successful placement alternatives used by profiling.
 pub(crate) fn successful_diagnostic_record_count() -> usize {
-    cpu_projection(SpdPreconditionerKind::Jacobi)
+    cpu_projection(SpdStrategy::Cholesky)
         .len()
         .max(accelerator_projection(SpdPreconditionerKind::Jacobi).len())
 }
 
-/// Bounds successful shared PCG diagnostics for Jacobi and ILU0, irrespective of placement.
+/// Bounds successful shared SPD solve diagnostics for every strategy, irrespective of placement.
 /// Nonconvergence and provider errors are deliberately excluded: callers must first require
 /// convergence. Profiles the fallback-plus-CPU and accelerator alternatives through the actual
 /// message and diagnostic serializers, without allocating owned messages or diagnostic vectors.
@@ -94,13 +103,13 @@ pub(crate) fn successful_diagnostics_profile(
         encoded_bytes_upper_bound: 0,
         materialization_resident_bytes_estimate: 0,
     };
-    for preconditioner in [SpdPreconditionerKind::Jacobi, SpdPreconditionerKind::Ilu0] {
+    for strategy in all_strategies() {
         let cpu = profile_serialized(
-            &cpu_projection(preconditioner).map(SuccessfulDiagnostic::wire),
+            &cpu_projection(strategy).map(SuccessfulDiagnostic::wire),
             PROFILE_LIMITS,
         )?;
         let accelerator = profile_serialized(
-            &accelerator_projection(preconditioner).map(SuccessfulDiagnostic::wire),
+            &accelerator_projection(SpdPreconditionerKind::Jacobi).map(SuccessfulDiagnostic::wire),
             PROFILE_LIMITS,
         )?;
         bound = SerializedCanonicalProfile {

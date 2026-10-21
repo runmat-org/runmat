@@ -57,6 +57,7 @@ async fn execute_with_pool(
             "modal-frequency preparation and execution policy name different accelerator requests",
         ));
     }
+    let local_execution = preparation.local_execution;
     let mesh = preparation.mesh.clone();
     let program_revision = preparation.program_revision.clone();
     let artifact_access = preparation.artifact_access.clone();
@@ -129,6 +130,7 @@ async fn execute_with_pool(
     let frequency = crate::analysis_frequency::execute_with_pool(
         pool,
         StructuralFrequencyExecutionPreparation {
+            local_execution,
             workload: bound.workload,
             mesh,
             prestress_state: None,

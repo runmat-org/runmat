@@ -29,6 +29,7 @@ use crate::{
 };
 
 pub struct StructuralFrequencyFieldRecoveryPreparation {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub source_host: AnalysisHostWorkload,
     pub workload: PreparedAnalysisObjects,
     pub mesh: PreparedAnalysisObjects,
@@ -202,6 +203,7 @@ pub fn prepare_structural_frequency_field_recovery(
             )?,
             output_set: crate::projected_output_set_resource_facts(),
         },
+        preparation.local_execution,
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let resource_plan_objects = prepare_analysis_objects(
