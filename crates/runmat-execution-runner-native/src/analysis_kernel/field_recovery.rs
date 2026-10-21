@@ -196,6 +196,10 @@ fn execute_structural_frequency_field_recovery(
                 )?,
                 output_set: projected_output_set_resource_facts(),
             },
+            runmat_analysis_fea::planning::resource::LocalExecutionPlan::from_cpu_millicores(
+                resource_plan.request.cpu_millicores,
+            )
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
         )
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if resource_plan.identity.digest() != resource_plan_identity
@@ -206,20 +210,22 @@ fn execute_structural_frequency_field_recovery(
         ));
     }
     drop(compiled);
-    let artifact = match prestress_state {
-        Some(state) => runmat_analysis_fea::pipeline::structural_frequency::recover_prestressed_structural_frequency_entry_fields(
-            &workload,
-            &mesh,
-            &request,
-            &result,
-            state,
-        )?,
-        None => runmat_analysis_fea::pipeline::structural_frequency::recover_structural_frequency_entry_fields(
-            &workload,
-            &mesh,
-            &request,
-            &result,
-        )?,
-    };
+    let artifact = super::with_admitted_cpu_pool(&resource_plan, || {
+        Ok(match prestress_state {
+            Some(state) => runmat_analysis_fea::pipeline::structural_frequency::recover_prestressed_structural_frequency_entry_fields(
+                &workload,
+                &mesh,
+                &request,
+                &result,
+                state,
+            )?,
+            None => runmat_analysis_fea::pipeline::structural_frequency::recover_structural_frequency_entry_fields(
+                &workload,
+                &mesh,
+                &request,
+                &result,
+            )?,
+        })
+    })?;
     recovered_field_output(&artifact)
 }

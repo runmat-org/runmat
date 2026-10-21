@@ -77,6 +77,7 @@ fn portable_direction_tasks_reassemble_in_authored_order_and_bind_receipt() {
             prepared_inputs(),
             prepared_output(direction_payload),
             prepared_output_set(),
+            crate::planning::resource::LocalExecutionPlan::serial(),
         )
         .unwrap();
     let FeaResourceDemand::StructuralModalResponseSpectrumDirection(direction_demand) =
@@ -119,6 +120,7 @@ fn portable_direction_tasks_reassemble_in_authored_order_and_bind_receipt() {
                 ),
             },
             prepared_output_set(),
+            crate::planning::resource::LocalExecutionPlan::serial(),
         )
         .unwrap();
     let FeaResourceDemand::StructuralModalResponseSpectrumAssembly(assembly_demand) =
@@ -328,6 +330,7 @@ fn assembly_plan(spectra: Vec<ResponseSpectrum>) -> crate::planning::resource::F
                 ),
             },
             prepared_output_set(),
+            crate::planning::resource::LocalExecutionPlan::serial(),
         )
         .unwrap()
 }

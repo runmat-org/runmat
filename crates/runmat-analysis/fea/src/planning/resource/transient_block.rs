@@ -51,6 +51,7 @@ pub fn build_structural_transient_block_resource_plan(
     predecessor: Option<&StructuralTransientCheckpoint>,
     prepared_inputs: Option<PreparedInputResourceFacts>,
     output_set: Option<PreparedOutputSetResourceFacts>,
+    local_execution: super::LocalExecutionPlan,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     request
         .validate_against_predecessor(predecessor)
@@ -69,6 +70,7 @@ pub fn build_structural_transient_block_resource_plan(
         &prepared,
         None,
         None,
+        local_execution,
     )?;
     let FeaResourceDemand::StructuralTransientScopePreparation(scope_demand) =
         scope_plan.input.demand

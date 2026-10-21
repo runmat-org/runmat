@@ -1,7 +1,7 @@
 //! Exact worker-side plan rederivation before quadrature or operator allocation.
 use super::*;
 use crate::planning::resource::{
-    build_maxwell_harmonic_resource_plan, FeaResourceDemand, FeaResourcePlan,
+    build_maxwell_harmonic_resource_plan, FeaResourceDemand, FeaResourcePlan, LocalExecutionPlan,
     PreparedMaxwellHarmonicResourceFacts,
 };
 impl MaxwellHarmonicWorkload {
@@ -25,6 +25,10 @@ impl MaxwellHarmonicWorkload {
             self,
             mesh,
             PreparedMaxwellHarmonicResourceFacts {
+                local_execution: LocalExecutionPlan::from_cpu_millicores(
+                    plan.request.cpu_millicores,
+                )
+                .map_err(invalid)?,
                 inputs: demand.inputs.clone(),
                 result_output: demand.result_output.clone(),
                 receipt_output: demand.receipt_output.clone(),

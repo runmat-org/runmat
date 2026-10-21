@@ -38,6 +38,7 @@ fn output(bytes: u64) -> PreparedOutputResourceFacts {
 fn facts(w: &MagnetostaticWorkload, m: &SolverMeshArtifact) -> PreparedMagnetostaticResourceFacts {
     let input = (w.canonical_bytes().unwrap().len() + m.canonical_encode().unwrap().len()) as u64;
     PreparedMagnetostaticResourceFacts {
+        local_execution: crate::planning::resource::LocalExecutionPlan::serial(),
         inputs: PreparedInputResourceFacts {
             encoded_payload_bytes: ByteCount(input),
             transport_closure_bytes: ByteCount(input + 2048),

@@ -108,6 +108,7 @@ fn both_orders_native_solve_recovery_complex_observation_state_and_accuracy_cold
         })
         .collect();
         let task = prepare_maxwell_harmonic_task(MaxwellHarmonicTaskPreparation {
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             authored_study_digest: original.host.workload.study.digest(),
             frozen_project_digest: None,
             program_revision: original.program.request.recipe.program_revision.clone(),

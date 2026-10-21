@@ -33,6 +33,7 @@ fn prepare(
 ) -> PreparedNonlinearSolidBlockTask {
     let digest = Digest::sha256(b"native J2 original history");
     prepare_nonlinear_solid_block_task(NonlinearSolidBlockPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         authored_study_digest: digest,
         frozen_project_digest: None,
         program_revision: ProgramRevision::new(

@@ -46,6 +46,7 @@ pub(super) async fn run() {
             .resources
             .maximum_resident_bytes;
         let preparation = NonlinearSolidStudyPreparation {
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             product,
             mesh: mesh.clone(),
             accepted_block_limit: 9,

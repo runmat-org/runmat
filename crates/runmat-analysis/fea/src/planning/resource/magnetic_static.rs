@@ -15,6 +15,7 @@ mod tests;
 const LIMITS: CanonicalLimits = CanonicalLimits::new(usize::MAX, usize::MAX, usize::MAX, 64);
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PreparedMagnetostaticResourceFacts {
+    pub local_execution: super::LocalExecutionPlan,
     pub inputs: PreparedInputResourceFacts,
     pub result_output: PreparedOutputResourceFacts,
     pub receipt_output: PreparedOutputResourceFacts,
@@ -138,7 +139,10 @@ pub fn build_magnetostatic_resource_plan(
         }),
         output_set: Some(prepared.output_set),
         worker: WorkerResourcePolicy {
-            cpu_millicores: 1000,
+            cpu_millicores: prepared
+                .local_execution
+                .checked_cpu_millicores()
+                .map_err(invalid)?,
             maximum_wall_milliseconds: step.accuracy.resources.maximum_wall_time_milliseconds,
             fixed_memory_bytes: ByteCount(16 * 1024 * 1024),
             fixed_scratch_bytes: ByteCount(8 * 1024 * 1024),

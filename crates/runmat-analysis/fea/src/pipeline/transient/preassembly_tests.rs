@@ -112,11 +112,23 @@ fn checkpoint_scope_resource_preflight_is_deterministic_and_precedes_assembly() 
     let (workload, mesh) = direct_scope_case();
     let prepared = prepare_transient_preassembly(&workload.model, (&workload).into()).unwrap();
     let first = crate::planning::resource::build_structural_transient_scope_resource_plan(
-        &workload, &mesh, None, &prepared, None, None,
+        &workload,
+        &mesh,
+        None,
+        &prepared,
+        None,
+        None,
+        crate::planning::resource::LocalExecutionPlan::serial(),
     )
     .unwrap();
     let second = crate::planning::resource::build_structural_transient_scope_resource_plan(
-        &workload, &mesh, None, &prepared, None, None,
+        &workload,
+        &mesh,
+        None,
+        &prepared,
+        None,
+        None,
+        crate::planning::resource::LocalExecutionPlan::serial(),
     )
     .unwrap();
     assert_eq!(first.identity, second.identity);
@@ -152,6 +164,7 @@ fn checkpoint_scope_resource_preflight_is_deterministic_and_precedes_assembly() 
         &longer_prepared,
         None,
         None,
+        crate::planning::resource::LocalExecutionPlan::serial(),
     )
     .unwrap();
     let longer_scope = prepare_transient_checkpoint_scope(&longer, &mesh, None).unwrap();
@@ -219,13 +232,26 @@ fn transient_block_rejects_its_own_memory_ceiling_before_initial_assembly() {
     let (mut workload, mesh) = direct_scope_case();
     let prepared = prepare_transient_preassembly(&workload.model, (&workload).into()).unwrap();
     let scope_plan = crate::planning::resource::build_structural_transient_scope_resource_plan(
-        &workload, &mesh, None, &prepared, None, None,
+        &workload,
+        &mesh,
+        None,
+        &prepared,
+        None,
+        None,
+        crate::planning::resource::LocalExecutionPlan::serial(),
     )
     .unwrap();
     let scope = prepare_transient_checkpoint_scope(&workload, &mesh, None).unwrap();
     let request = crate::execution::StructuralTransientBlockRequest::new(scope, None, 2).unwrap();
     let block_plan = crate::planning::resource::build_structural_transient_block_resource_plan(
-        &workload, &mesh, None, &request, None, None, None,
+        &workload,
+        &mesh,
+        None,
+        &request,
+        None,
+        None,
+        None,
+        crate::planning::resource::LocalExecutionPlan::serial(),
     )
     .unwrap();
     assert!(block_plan.request.memory_bytes > scope_plan.request.memory_bytes);
@@ -263,7 +289,14 @@ fn transient_block_resource_plan_bounds_a_physical_segment() {
     let scope = prepare_transient_checkpoint_scope(&workload, &mesh, None).unwrap();
     let request = crate::execution::StructuralTransientBlockRequest::new(scope, None, 2).unwrap();
     let plan = crate::planning::resource::build_structural_transient_block_resource_plan(
-        &workload, &mesh, None, &request, None, None, None,
+        &workload,
+        &mesh,
+        None,
+        &request,
+        None,
+        None,
+        None,
+        crate::planning::resource::LocalExecutionPlan::serial(),
     )
     .unwrap();
     let crate::planning::resource::FeaResourceDemand::StructuralTransientBlock(demand) =
@@ -324,6 +357,7 @@ fn transient_block_resource_plan_bounds_a_physical_segment() {
             None,
             Some(wrong_inputs),
             None,
+            crate::planning::resource::LocalExecutionPlan::serial(),
         )
         .is_err()
     );
@@ -334,7 +368,13 @@ fn scope_task_plan_uses_the_prepared_input_closure_and_output_set() {
     let (workload, mesh) = direct_scope_case();
     let prepared = prepare_transient_preassembly(&workload.model, (&workload).into()).unwrap();
     let baseline = crate::planning::resource::build_structural_transient_scope_resource_plan(
-        &workload, &mesh, None, &prepared, None, None,
+        &workload,
+        &mesh,
+        None,
+        &prepared,
+        None,
+        None,
+        crate::planning::resource::LocalExecutionPlan::serial(),
     )
     .unwrap();
     let crate::planning::resource::FeaResourceDemand::StructuralTransientScopePreparation(demand) =
@@ -355,6 +395,7 @@ fn scope_task_plan_uses_the_prepared_input_closure_and_output_set() {
         None,
         input_facts.clone(),
         output_set.clone(),
+        crate::planning::resource::LocalExecutionPlan::serial(),
     )
     .unwrap();
     let crate::planning::resource::FeaResourceDemand::StructuralTransientScopePreparation(
@@ -383,6 +424,7 @@ fn scope_task_plan_uses_the_prepared_input_closure_and_output_set() {
                     demand.scope_output.encoded_payload_bytes_upper_bound.0 - 1,
                 ),
             },
+            crate::planning::resource::LocalExecutionPlan::serial(),
         ),
         Err(FeaRunError::Resource(
             crate::planning::resource::ResourcePlanningError::Invalid(_)
@@ -391,7 +433,14 @@ fn scope_task_plan_uses_the_prepared_input_closure_and_output_set() {
 
     input_facts.encoded_payload_bytes.0 -= 1;
     assert!(matches!(
-        plan_transient_checkpoint_scope_task(&workload, &mesh, None, input_facts, output_set,),
+        plan_transient_checkpoint_scope_task(
+            &workload,
+            &mesh,
+            None,
+            input_facts,
+            output_set,
+            crate::planning::resource::LocalExecutionPlan::serial(),
+        ),
         Err(FeaRunError::Resource(
             crate::planning::resource::ResourcePlanningError::Invalid(_)
         ))

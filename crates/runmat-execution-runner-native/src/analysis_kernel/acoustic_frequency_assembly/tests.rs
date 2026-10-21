@@ -110,6 +110,8 @@ fn native_admitted_frequency_assembly_reopens_original_complete_fields_and_metad
             let mut objects = Vec::new();
             for entry in workload.plan().entries().unwrap().into_iter().rev() {
                 let solve = prepare_acoustic_harmonic_task(AcousticHarmonicTaskPreparation {
+                    local_execution:
+                        runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
                     authored_study_digest: digest,
                     frozen_project_digest: None,
                     program_revision: revision.clone(),

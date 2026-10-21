@@ -251,6 +251,10 @@ pub(super) fn execute_block(
             invocation.inputs,
         )?),
         Some(projected_output_set_resource_facts()),
+        runmat_analysis_fea::planning::resource::LocalExecutionPlan::from_cpu_millicores(
+            resource_plan.request.cpu_millicores,
+        )
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if resource_input.manifest.logical_identity != resource_plan.identity.digest()
@@ -262,20 +266,22 @@ pub(super) fn execute_block(
             "transient block resource plan does not converge from authoritative inputs",
         ));
     }
-    let segment = runmat_analysis_fea::pipeline::transient::run_transient_block(
-        runmat_analysis_fea::pipeline::transient::StructuralTransientRunBlockInput {
-            workload: &workload,
-            solver_mesh: &mesh,
-            request: &request,
-            predecessor: predecessor.as_ref(),
-            modal_state: modal_state.as_ref(),
-            observation_cursors: predecessor
-                .as_ref()
-                .map(|checkpoint| checkpoint.observation_cursors.clone())
-                .unwrap_or_default(),
-        },
-    )
-    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let segment = super::with_admitted_cpu_pool(&resource_plan, || {
+        runmat_analysis_fea::pipeline::transient::run_transient_block(
+            runmat_analysis_fea::pipeline::transient::StructuralTransientRunBlockInput {
+                workload: &workload,
+                solver_mesh: &mesh,
+                request: &request,
+                predecessor: predecessor.as_ref(),
+                modal_state: modal_state.as_ref(),
+                observation_cursors: predecessor
+                    .as_ref()
+                    .map(|checkpoint| checkpoint.observation_cursors.clone())
+                    .unwrap_or_default(),
+            },
+        )
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
+    })?;
     let mut partitions = Vec::with_capacity(
         segment.samples().len() + 1 + usize::from(segment.initial_sample().is_some()),
     );

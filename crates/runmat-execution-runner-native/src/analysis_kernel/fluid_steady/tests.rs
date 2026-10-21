@@ -38,6 +38,7 @@ fn task_with_pressure(
     let (workload, mesh) = source_fixture::workload(nonzero, reference_pa);
     let digest = Digest::sha256(b"native fluid original authority fixture");
     let prepared = prepare_fluid_steady_task(FluidSteadyTaskPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         authored_study_digest: digest,
         frozen_project_digest: None,
         program_revision: ProgramRevision::new(

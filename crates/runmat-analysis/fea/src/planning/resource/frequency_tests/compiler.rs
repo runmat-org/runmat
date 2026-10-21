@@ -45,6 +45,7 @@ fn original_frequency_projection_reuses_compilation_without_source_scope_substit
                 PreparedOutputSetResourceFacts {
                     encoded_bytes_upper_bound: ByteCount(64 * 1024),
                 },
+                crate::planning::resource::LocalExecutionPlan::serial(),
             )
             .unwrap()
     };
@@ -118,6 +119,7 @@ pub(super) fn assert_recovery_compilation(
             input_facts(1024),
             recovery_output(mesh, compiled.plan(), workload),
         ),
+        crate::planning::resource::LocalExecutionPlan::serial(),
     )
     .unwrap();
     assert_eq!(&carried, original);

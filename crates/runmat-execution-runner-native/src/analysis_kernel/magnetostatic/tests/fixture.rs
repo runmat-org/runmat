@@ -132,6 +132,7 @@ pub(super) fn task(
     };
     let d = Digest::sha256(b"native magnetic fixture");
     let prepared = prepare_magnetostatic_task(MagnetostaticTaskPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         authored_study_digest: d,
         frozen_project_digest: None,
         program_revision: ProgramRevision::new(
