@@ -5,7 +5,7 @@ use incidence::{FaceIncidence, WireOwners};
 use super::{
     exact_topology_assembly_validation::validate_assembly_occurrences,
     exact_topology_validation_support::*, ExactBRepModel, ExactBRepTopology, GeometryContractError,
-    PersistentEntityKind, EXACT_BREP_TOPOLOGY_SCHEMA_VERSION,
+    PersistentEntityKind, TopologicalOrientation, EXACT_BREP_TOPOLOGY_SCHEMA_VERSION,
 };
 
 const MAX_TOPOLOGY_ENTITIES: usize = 10_000_000;
@@ -333,7 +333,16 @@ impl ExactBRepTopology {
                 shell.face_uses.iter().map(|face_use| &face_use.entity_id),
             )?;
             for face_use in &shell.face_uses {
-                face_use_orientations.push(&face_use.entity_id, face_use.orientation)?;
+                // The side a face use bounds is the use composed with its shell's orientation:
+                // a solid's cavity shell is used reversed (the convention meshing applies too).
+                let orientation = match shell.orientation {
+                    TopologicalOrientation::Forward => face_use.orientation,
+                    TopologicalOrientation::Reversed => match face_use.orientation {
+                        TopologicalOrientation::Forward => TopologicalOrientation::Reversed,
+                        TopologicalOrientation::Reversed => TopologicalOrientation::Forward,
+                    },
+                };
+                face_use_orientations.push(&face_use.entity_id, orientation)?;
             }
         }
 

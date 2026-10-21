@@ -109,6 +109,7 @@ pub fn import_faceted_solid(
             consolidate_duplicates: false,
             repair_tolerance_scale_gaps: false,
             simplify_short_edges_and_sliver_faces: false,
+            shared_interfaces: false,
         },
         model: GeometryModel::FacetedSolid {
             model: FacetedSolidModel {

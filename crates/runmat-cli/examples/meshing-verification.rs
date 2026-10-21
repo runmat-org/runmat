@@ -67,6 +67,7 @@ async fn main() -> ExitCode {
         },
         maximum_elements: arguments.max_elements,
         deterministic_seed: arguments.seed,
+        shared_interfaces: false,
         force: false,
         json: true,
     };

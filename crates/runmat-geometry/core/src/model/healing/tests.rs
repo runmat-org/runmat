@@ -43,6 +43,7 @@ fn report() -> GeometryHealingReport {
             consolidate_duplicates: true,
             repair_tolerance_scale_gaps: true,
             simplify_short_edges_and_sliver_faces: true,
+            shared_interfaces: false,
         },
         tolerance: crate::GeometryTolerancePolicy {
             source_tolerance_m: 1.0e-8,

@@ -25,6 +25,8 @@ pub(super) struct ExactProjection {
     pub model: ExactBRepModel,
     pub kernel_body_shapes: BTreeMap<runmat_geometry_core::MassPropertiesEvaluatorId, Vec<u64>>,
     pub source_face_ids: BTreeMap<u64, runmat_geometry_core::PersistentEntityId>,
+    pub entity_names: BTreeMap<runmat_geometry_core::PersistentEntityId, Vec<String>>,
+    pub entity_tags: BTreeMap<runmat_geometry_core::PersistentEntityId, Vec<String>>,
     pub kernel_entity_ids:
         BTreeMap<(u64, PersistentEntityKind, u64), runmat_geometry_core::PersistentEntityId>,
 }
@@ -180,6 +182,8 @@ pub(super) fn project_exact_contracts(
         .sort_by(|left, right| left.id.cmp(&right.id));
 
     let mut source_face_ids = BTreeMap::new();
+    let mut entity_names = BTreeMap::new();
+    let mut entity_tags = BTreeMap::new();
     topology.faces = payload
         .faces
         .iter()
@@ -205,6 +209,8 @@ pub(super) fn project_exact_contracts(
                 path,
             )?;
             source_face_ids.insert(face.source_face_index, id.clone());
+            record_names(&mut entity_names, &id, &face.names);
+            record_names(&mut entity_tags, &id, &face.tags);
             Ok(ExactFace {
                 id,
                 orientation: orientation(face.reversed),
@@ -281,13 +287,16 @@ pub(super) fn project_exact_contracts(
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             void_shell_ids.sort();
+            let id = names.shape_id(
+                PersistentEntityKind::Solid,
+                solid.shape_key,
+                solid.occurrence_index,
+                path,
+            )?;
+            record_names(&mut entity_names, &id, &solid.names);
+            record_names(&mut entity_tags, &id, &solid.tags);
             Ok(ExactSolid {
-                id: names.shape_id(
-                    PersistentEntityKind::Solid,
-                    solid.shape_key,
-                    solid.occurrence_index,
-                    path,
-                )?,
+                id,
                 outer_shell_id: names.shape_id(
                     PersistentEntityKind::Shell,
                     solid.outer_shell_key,
@@ -358,8 +367,27 @@ pub(super) fn project_exact_contracts(
         model,
         kernel_body_shapes: body_projection.kernel_shapes,
         source_face_ids,
+        entity_names,
+        entity_tags,
         kernel_entity_ids,
     })
+}
+
+/// Authored names stay in kernel precedence order; repeated names on one entity collapse.
+fn record_names(
+    entity_names: &mut BTreeMap<runmat_geometry_core::PersistentEntityId, Vec<String>>,
+    id: &runmat_geometry_core::PersistentEntityId,
+    authored: &[String],
+) {
+    if authored.is_empty() {
+        return;
+    }
+    let names = entity_names.entry(id.clone()).or_insert_with(Vec::new);
+    for name in authored {
+        if !names.contains(name) {
+            names.push(name.clone());
+        }
+    }
 }
 
 fn project_kernel_entity_ids(

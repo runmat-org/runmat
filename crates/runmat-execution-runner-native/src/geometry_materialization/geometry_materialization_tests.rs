@@ -634,6 +634,7 @@ fn imported_request(
                     ..Default::default()
                 },
                 exchange: None,
+                shared_interfaces: false,
             }),
             regions: body_region(),
             cad_parameters: Vec::new(),

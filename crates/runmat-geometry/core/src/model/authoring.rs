@@ -41,6 +41,10 @@ pub struct ImportedGeometryDefinition {
     pub capabilities: GeometryAuthoringCapabilities,
     #[serde(default)]
     pub exchange: Option<Ap242ExchangeInventory>,
+    /// Touching bodies join so each pair of coincident faces becomes one shared interface face
+    /// (`interfaces = shared` in `.fea`); otherwise every part keeps its own faces.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub shared_interfaces: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
