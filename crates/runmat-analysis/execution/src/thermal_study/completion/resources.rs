@@ -140,6 +140,7 @@ impl CompletedThermalStudy {
             .retained_storage_bytes(maximum)?
             .checked_mul(3)
             .ok_or_else(|| capacity("thermal replay retained storage overflow"))?;
+        eprintln!("QTHERMAL-DEBUG publication_workspace_bytes maximum={maximum} retained3={retained}");
         let available = maximum
             .checked_sub(retained)
             .ok_or_else(|| capacity("thermal replay has no remaining codec workspace"))?;

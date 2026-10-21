@@ -114,8 +114,13 @@ pub fn plan_structural_study_with_fields(
     dynamics::plan(study, policy, fields)
 }
 
+/// Linear static structural steps, including thermal stress from a prescribed temperature
+/// field (a thermomechanical static step that consumes no solved thermal state).
 fn is_linear_static_step(step: &ProcedureStep) -> bool {
-    step.family == PhysicsFamily::Structural
+    let prescribed_thermal_stress = step.family
+        == PhysicsFamily::Coupled(runmat_analysis_core::CoupledPhysicsFamily::Thermomechanical)
+        && step.state_inputs.is_empty();
+    (step.family == PhysicsFamily::Structural || prescribed_thermal_stress)
         && step.procedure == AnalysisProcedure::Static
         && step.solution_space == SolutionSpace::Direct
 }

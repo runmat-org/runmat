@@ -142,6 +142,7 @@ impl<S: CacheImport + Send + Sync> ThermalStudySource for RetainedThermalSource<
                 .checked_add(bytes.capacity() as u64)
                 .ok_or_else(|| limit("thermal source root storage overflow"))?;
         }
+        eprintln!("QTHERMAL-DEBUG publication_workspace maximum={maximum} owned={owned}");
         let available = maximum
             .checked_sub(owned)
             .ok_or_else(|| limit("thermal source retained roots exceed allowance"))?;

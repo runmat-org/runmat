@@ -33,6 +33,22 @@ fn realize_thermo_mechanical_context(
     let Some(domain) = model.thermo_mechanical.as_ref() else {
         return Ok(None);
     };
+    // A declared domain alone couples nothing: structural-only studies may share the model.
+    // The prescribed-profile coupling belongs to thermomechanical steps that do not consume a
+    // solved thermal state; solved-state preloads receive their temperatures explicitly.
+    let prescribed_profile_step = model.sequence.steps.iter().any(|step| {
+        step.family
+            == runmat_analysis_core::PhysicsFamily::Coupled(
+                runmat_analysis_core::CoupledPhysicsFamily::Thermomechanical,
+            )
+            && !step
+                .state_inputs
+                .iter()
+                .any(|input| input.required_kind == runmat_analysis_core::StateKind::Thermal)
+    });
+    if !prescribed_profile_step {
+        return Ok(None);
+    }
     let reference_temperature_k = domain.reference_temperature.kelvin;
     if !reference_temperature_k.is_finite() || reference_temperature_k <= 0.0 {
         return Err("thermo-mechanical reference temperature must be finite and positive".into());

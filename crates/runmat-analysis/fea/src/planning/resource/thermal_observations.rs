@@ -22,13 +22,18 @@ impl ThermalObservationResourceFacts {
         mesh: &SolverMeshArtifact,
         step: &ProcedureStep,
     ) -> Result<Self, ResourcePlanningError> {
-        // Final fields are evaluated after the solve, but their selectors and components
+        // Final fields and spatial reductions are evaluated after the solve, but their selectors and components
         // must still be admissible before numerical assembly. Keep their validation
         // separate from the inline-history reservation below.
         if step
             .observations
             .iter()
-            .any(|request| matches!(request, ObservationRequest::Field(_)))
+            .any(|request| {
+                matches!(
+                    request,
+                    ObservationRequest::Field(_) | ObservationRequest::Reduction(_)
+                )
+            })
         {
             let projection = AnalysisProjection::derive(mesh).map_err(invalid)?;
             let definitions = history_fields::definitions().map_err(invalid)?;
