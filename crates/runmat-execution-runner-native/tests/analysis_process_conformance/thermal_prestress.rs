@@ -166,6 +166,7 @@ fn base(order: ElementOrder, scope: &str, revision: ProgramRevision) -> ThermalS
         ThermalStudyPlanningPolicy {
             backend: ComputeBackend::Cpu,
             formulation_requirement: FormulationRequirement::Experimental,
+            element_heat_source: None,
         },
     )
     .unwrap();

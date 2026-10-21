@@ -267,17 +267,29 @@ pub async fn execute_checked_fea_locally(
                     };
                     let options = &options;
                     async move {
-                        execute_study_cases(source, case, &prefix, options)
-                            .await
-                            .map(|cases| (index, cases))
+                        // A failed frequency keeps its place in the sweep and never hides
+                        // the results of its siblings.
+                        let cases = match execute_study_cases(source, case, &prefix, options).await
+                        {
+                            Ok(cases) => cases
+                                .into_iter()
+                                .map(|case| LocalSweepCase {
+                                    case_id: case.case_id.clone(),
+                                    outcome: Ok(case),
+                                })
+                                .collect(),
+                            Err(error) => vec![LocalSweepCase {
+                                case_id: prefix.clone(),
+                                outcome: Err(error),
+                            }],
+                        };
+                        (index, cases)
                     }
                 },
             ))
             .buffer_unordered(concurrency)
             .collect::<Vec<_>>()
-            .await
-            .into_iter()
-            .collect::<Result<Vec<_>, _>>()?;
+            .await;
             let mut groups = groups;
             groups.sort_by_key(|(index, _)| *index);
             Ok(LocalFeaExecution::Sweep {
@@ -435,26 +447,10 @@ async fn execute_study_cases(
     };
     if let Some(analysis) = chain::electrothermal_analysis(&study) {
         // Heat transfer iterated with conduction to the two-way fixed point, then the
-        // conduction field at the solved temperatures (final time of a transient).
-        let authority = format!("typed-fea-local:{}", uuid::Uuid::new_v4());
-        let prepared = preparation::prepare_study_with_role(
-            source,
-            study.clone(),
-            &[],
-            &authority,
-            options,
-            preparation::PreparationRole::ElectrothermalHeat,
-        )
-        .await?;
-        let mut heat = execute_prepared_with_source(prepared, options, Some(source)).await?;
+        // conduction field at the solved temperatures (final time of a transient). Each case
+        // derives the operating point from the authored study, so either runs on any placement.
+        let mut heat = execute_case(source, study.clone(), Vec::new(), options).await?;
         heat.case_id = label(&analysis);
-        let CompletedFeaStudyResult::Thermal(thermal) = &heat.result else {
-            return Err("electrothermal heat transfer did not produce a thermal result".into());
-        };
-        let operating = thermal
-            .electrothermal
-            .as_ref()
-            .ok_or("electrothermal heat transfer did not report its operating point")?;
         let authority = format!("typed-fea-local:{}", uuid::Uuid::new_v4());
         let prepared = preparation::prepare_study_with_role(
             source,
@@ -462,10 +458,7 @@ async fn execute_study_cases(
             &[],
             &authority,
             options,
-            preparation::PreparationRole::ElectrothermalConduction {
-                element_temperature_k: operating.element_temperature_k.clone(),
-                operating_time_s: operating.operating_time_s,
-            },
+            preparation::PreparationRole::ElectrothermalConduction,
         )
         .await?;
         let mut conduction = execute_prepared_with_source(prepared, options, Some(source)).await?;
@@ -496,7 +489,7 @@ async fn execute_study_cases(
         &[],
         &authority,
         options,
-        preparation::PreparationRole::Heated(preparation::PreparedHeatSource {
+        preparation::PreparationRole::Heated(runmat_analysis_fea::study::ElementHeatSource {
             step_id: chain.thermal.clone(),
             source_id: format!("{}.{}", chain.harmonic, chain.state_id),
             element_density_w_per_m3: density,

@@ -33,6 +33,7 @@ fn retained_preparation() -> ThermalStudyPreparation {
         runmat_analysis_fea::study::ThermalStudyPlanningPolicy {
             backend: input.product.workload.backend,
             formulation_requirement: FormulationRequirement::Experimental,
+            element_heat_source: None,
         },
     )
     .unwrap();

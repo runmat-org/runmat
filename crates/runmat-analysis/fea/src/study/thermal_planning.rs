@@ -18,11 +18,47 @@ pub use initial_selection::thermal_step_initial_selection_supported;
 mod tests;
 
 /// Backend admission is resolved by the caller; physical and accuracy controls remain authored.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ThermalStudyPlanningPolicy {
     pub backend: ComputeBackend,
     pub formulation_requirement: FormulationRequirement,
+    /// A solved upstream loss field that heats this analysis (`heat_source = analysis.<p>.state.<s>`).
+    pub element_heat_source: Option<ElementHeatSource>,
+}
+
+/// Element heat generation solved by an upstream analysis on the same canonical mesh.
+///
+/// The density of each element, in canonical element order, is bound as the heat source
+/// `source_id` of the thermal step `step_id`, so the total heat equals the upstream loss.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ElementHeatSource {
+    pub step_id: String,
+    pub source_id: String,
+    pub element_density_w_per_m3: Vec<f64>,
+}
+
+impl ElementHeatSource {
+    /// Bind the solved density into the compiled thermal model as the step's heat source.
+    pub fn bind(
+        &self,
+        model: &mut runmat_analysis_core::AnalysisModel,
+        mesh: &runmat_meshing_core::SolverMeshArtifact,
+    ) -> crate::execution::AnalysisExecutionResult<()> {
+        let transient = model.sequence.steps.iter().any(|step| {
+            step.step_id.as_str() == self.step_id
+                && step.procedure == AnalysisProcedure::TransientResponse
+        });
+        crate::execution::bind_element_heat_source(
+            model,
+            &self.step_id,
+            &self.source_id,
+            runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes()),
+            &[(0.0, self.element_density_w_per_m3.clone())],
+            transient,
+        )
+    }
 }
 
 /// Plan one fresh steady or backward-Euler thermal step without rewriting its authored model.

@@ -21,6 +21,11 @@ pub use coupled::{
     thermal_part, CoupledElectrothermalCompletion, ElectrothermalCouplingControls,
     ElectrothermalElectricalSample, ElectrothermalSweep,
 };
+mod operating_point;
+pub use operating_point::{
+    electrothermal_conduction_study, is_electrothermal_study, solve_electrothermal_heat_study,
+    ElectrothermalOperatingPoint,
+};
 mod transfer;
 pub use transfer::RetainedJouleHeatTransfer;
 mod source;

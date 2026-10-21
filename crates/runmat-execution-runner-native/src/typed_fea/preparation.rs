@@ -31,10 +31,7 @@ pub enum PreparationRole {
     Heated(runmat_analysis_fea::study::ElementHeatSource),
     /// The conduction side of an electrothermal analysis at its solved temperature field;
     /// publishes potential, current density and Joule loss.
-    ElectrothermalConduction {
-        element_temperature_k: Vec<f64>,
-        operating_time_s: Option<f64>,
-    },
+    ElectrothermalConduction,
 }
 
 pub async fn prepare_study(
@@ -68,7 +65,7 @@ pub async fn prepare_study_with_role(
         .realize_with_models(&resolved.models, &resolved.geometry, inputs)
         .map_err(|error| error.to_string())?;
     let family = match &role {
-        PreparationRole::ElectrothermalConduction { .. } => {
+        PreparationRole::ElectrothermalConduction => {
             if !admission::is_electrothermal(&realized.sequence) {
                 return Err(
                     "the conduction role requires one fresh electrothermal analysis".into(),
@@ -78,13 +75,9 @@ pub async fn prepare_study_with_role(
         }
         _ => admission::select_family(&realized.sequence, realized.model.electromagnetic.as_ref())?,
     };
-    let (element_heat_source, element_temperature_k, operating_time_s) = match role {
-        PreparationRole::Authored => (None, None, None),
-        PreparationRole::Heated(source) => (Some(source), None, None),
-        PreparationRole::ElectrothermalConduction {
-            element_temperature_k,
-            operating_time_s,
-        } => (None, Some(element_temperature_k), operating_time_s),
+    let element_heat_source = match role {
+        PreparationRole::Heated(source) => Some(source),
+        PreparationRole::Authored | PreparationRole::ElectrothermalConduction => None,
     };
     let revision = program_revision(source)?;
     let access = checked_fea_artifact_access(authority);
@@ -191,8 +184,8 @@ pub async fn prepare_study_with_role(
         admission::PreparedFamily::Electrical => {
             crate::StudyRootPlanning::Electrical(runmat_analysis_fea::study::ElectricalStudyPlanningPolicy {
                 formulation_requirement: resolved.study.formulation_requirement,
-                element_temperature_k,
-                operating_time_s,
+                element_temperature_k: None,
+                operating_time_s: None,
             })
         }
         admission::PreparedFamily::Magnetic => {

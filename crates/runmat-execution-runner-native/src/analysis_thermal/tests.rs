@@ -143,7 +143,8 @@ fn planning_policy() -> ThermalStudyPlanningPolicy {
     ThermalStudyPlanningPolicy {
         backend: ComputeBackend::Cpu,
         formulation_requirement: FormulationRequirement::Experimental,
-    }
+    },
+    element_heat_source: None,
 }
 
 /// Execute the real immutable program and retain the actual portable test driver history.

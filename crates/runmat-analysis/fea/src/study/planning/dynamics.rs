@@ -122,6 +122,7 @@ fn plan_heterogeneous(
                 super::super::ThermalStudyPlanningPolicy {
                     backend: policy.backend,
                     formulation_requirement: policy.formulation_requirement,
+                    element_heat_source: None,
                 },
                 super::initial_fields::select(&study.model, step, fields)?,
             )

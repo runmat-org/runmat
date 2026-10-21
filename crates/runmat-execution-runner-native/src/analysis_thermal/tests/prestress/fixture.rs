@@ -12,7 +12,8 @@ fn planning_policy() -> ThermalStudyPlanningPolicy {
     ThermalStudyPlanningPolicy {
         backend: ComputeBackend::Cpu,
         formulation_requirement: FormulationRequirement::Experimental,
-    }
+    },
+    element_heat_source: None,
 }
 
 pub fn setup(mut setup: ThermalStudyPreparation, buckling: bool) -> ThermalStudyPreparation {

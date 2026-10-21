@@ -257,6 +257,7 @@ fn assert_foreign_contexts(cold: &MemoryStore, completed: &CompletedThermalStudy
     let policy = ThermalStudyPlanningPolicy {
         backend: completed.workload.backend,
         formulation_requirement: completed.workload.formulation_requirement,
+        element_heat_source: None,
     };
     let mut foreign_model = completed.preparation();
     foreign_model.product.compiled.model.materials[0]

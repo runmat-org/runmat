@@ -78,13 +78,7 @@ async fn execute_study(
                 }
                 // A multi-frequency harmonic study runs one case per frequency.
                 runmat_execution_runner_native::LocalFeaExecution::Sweep { sweep_id, cases } => {
-                    let summaries = cases
-                        .iter()
-                        .map(|case| {
-                            completed_summary(&case.case_id, &case.result, &case.publication)
-                        })
-                        .collect::<Result<Vec<_>>>()?;
-                    print_sweep_result(&sweep_id, &summaries, json)
+                    print_local_sweep(&sweep_id, cases, json)
                 }
             }
         }
@@ -137,31 +131,7 @@ async fn execute_sweep(
             else {
                 bail!("selected sweep resolved to a study during native execution");
             };
-            let case_ids = completed
-                .iter()
-                .map(|case| case.case_id.clone())
-                .collect::<Vec<_>>();
-            let materialized = super::remote::MaterializedFeaSweep {
-                entries: completed
-                    .into_iter()
-                    .enumerate()
-                    .map(|(study_index, case)| super::remote::MaterializedFeaSweepEntry {
-                        study_index,
-                        terminal: match case.outcome {
-                            Ok(completed) => super::remote::MaterializedFeaSweepTerminal::Succeeded(
-                                Box::new(super::remote::MaterializedFeaStudy {
-                                    result: completed.result,
-                                    publication: completed.publication,
-                                }),
-                            ),
-                            Err(message) => {
-                                super::remote::MaterializedFeaSweepTerminal::Failed(message)
-                            }
-                        },
-                    })
-                    .collect(),
-            };
-            print_fea_sweep_result(&sweep.sweep.sweep_id, &case_ids, &materialized, json)
+            print_local_sweep(&sweep.sweep.sweep_id, completed, json)
         }
         ExecutionTarget::Remote(target) => {
             execute_sweep_remotely(
@@ -176,6 +146,37 @@ async fn execute_sweep(
             .await
         }
     }
+}
+
+/// Print locally executed cases, each with its own terminal status, in authored order.
+fn print_local_sweep(
+    sweep_id: &str,
+    completed: Vec<runmat_execution_runner_native::LocalSweepCase>,
+    json: bool,
+) -> Result<()> {
+    let case_ids = completed
+        .iter()
+        .map(|case| case.case_id.clone())
+        .collect::<Vec<_>>();
+    let materialized = super::remote::MaterializedFeaSweep {
+        entries: completed
+            .into_iter()
+            .enumerate()
+            .map(|(study_index, case)| super::remote::MaterializedFeaSweepEntry {
+                study_index,
+                terminal: match case.outcome {
+                    Ok(completed) => super::remote::MaterializedFeaSweepTerminal::Succeeded(
+                        Box::new(super::remote::MaterializedFeaStudy {
+                            result: completed.result,
+                            publication: completed.publication,
+                        }),
+                    ),
+                    Err(message) => super::remote::MaterializedFeaSweepTerminal::Failed(message),
+                },
+            })
+            .collect(),
+    };
+    print_fea_sweep_result(sweep_id, &case_ids, &materialized, json)
 }
 
 async fn execute_sweep_remotely(

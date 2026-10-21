@@ -65,6 +65,7 @@ pub(super) async fn run(
         ThermalStudyPlanningPolicy {
             backend: input.backend,
             formulation_requirement: input.formulation_requirement,
+            element_heat_source: None,
         },
         input.initial_fields,
     )
