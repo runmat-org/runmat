@@ -61,7 +61,6 @@ study conduction {
     geometry = geometry.stack
     mesh = mesh.stack
     model = model.stacked_conduction
-    formulation = experimental
     analysis heat { thermal steady {} }
     output temperature = analysis.heat.field.node.temperature
     output heat_flux = analysis.heat.field.element.heat_flux
