@@ -212,7 +212,7 @@ pub fn scan(root: &Path) -> (Vec<Tag>, Vec<Problem>) {
         let Ok(text) = fs::read_to_string(&file) else {
             continue;
         };
-        if !text.contains("// witness:") {
+        if !text.lines().any(|l| l.trim_start().starts_with("// witness:")) {
             continue;
         }
         let relative = file.strip_prefix(root).unwrap_or(&file).to_path_buf();

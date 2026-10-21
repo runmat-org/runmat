@@ -43,3 +43,31 @@ fn tag_text_parses_alternatives_and_rejects_unknown_names() {
     assert!(parse_tag_text("A/b @ thermal_steady/tet4/durable;").is_err());
     assert!(parse_tag_text("A/b @ thermal_steady/tet4/durable; boundary:  ").is_err());
 }
+
+#[test]
+fn verdicts_follow_test_results_and_never_exceed_tags() {
+    use runmat_analysis_qualification::catalog::{cells, TestResult, Verdict};
+    use std::collections::BTreeMap;
+    let (tags, _) = scan(&repository_root());
+    let registry: Vec<_> = requirements().collect();
+    let all = cells(&registry, &tags, None);
+    assert!(all.iter().all(|c| c.verdict != Verdict::Pass && c.verdict != Verdict::Fail));
+    let tagged = all.iter().filter(|c| c.verdict == Verdict::Tagged).count();
+    assert!(tagged > 0);
+    let mut results = BTreeMap::new();
+    for tag in &tags {
+        results.insert(tag.test.describe(), TestResult::Passed);
+    }
+    let passed = cells(&registry, &tags, Some(&results));
+    assert_eq!(passed.iter().filter(|c| c.verdict == Verdict::Pass).count(), tagged);
+    let broken = tags[0].test.describe();
+    results.insert(broken.clone(), TestResult::Failed("x".into()));
+    let failed = cells(&registry, &tags, Some(&results));
+    assert!(failed
+        .iter()
+        .any(|c| c.verdict == Verdict::Fail && c.tests.iter().any(|t| t.locator.describe() == broken)));
+    results.remove(&broken);
+    assert!(cells(&registry, &tags, Some(&results))
+        .iter()
+        .any(|c| c.verdict == Verdict::Fail));
+}
