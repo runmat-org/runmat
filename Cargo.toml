@@ -2,6 +2,7 @@
 members = [
     "crates/runmat-async",
     "crates/runmat-cpu-execution",
+    "crates/runmat-sparse-solvers",
     "crates/runmat-lexer",
     "crates/runmat-parser",
     "crates/runmat-hir",
@@ -82,6 +83,7 @@ resolver = "2"
 [workspace.dependencies]
 runmat-build-identity = { version = "=0.6.2", path = "crates/runmat-build-identity" }
 runmat-cpu-execution = { version = "=0.6.2", path = "crates/runmat-cpu-execution" }
+runmat-sparse-solvers = { version = "=0.6.2", path = "crates/runmat-sparse-solvers" }
 # External dependencies used across multiple crates
 wgpu = "24.0.0"
 inventory = "0.1"
@@ -232,6 +234,27 @@ opt-level = 3
 opt-level = 3
 
 [profile.dev.package.runmat-cpu-execution]
+opt-level = 3
+
+[profile.dev.package.runmat-sparse-solvers]
+opt-level = 3
+
+[profile.dev.package.faer]
+opt-level = 3
+
+[profile.dev.package.gemm-common]
+opt-level = 3
+
+[profile.dev.package.gemm-f64]
+opt-level = 3
+
+[profile.dev.package.gemm-c64]
+opt-level = 3
+
+[profile.dev.package.pulp]
+opt-level = 3
+
+[profile.dev.package.nano-gemm-f64]
 opt-level = 3
 
 [profile.dev.package.runmat-canonical-codec]
