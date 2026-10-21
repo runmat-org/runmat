@@ -100,6 +100,18 @@ fn payload_bound(
         .ok_or(ResourcePlanningError::Overflow("nonlinear block payload"))
 }
 
+/// Construction residency of an encoded block artifact beyond its typed contents. The typed
+/// history (and its canonical materialization) is already charged to the nonlinear pipeline's
+/// persistent storage; encoding adds the wire buffer and fixed codec state, not another
+/// generic per-byte value tree.
+pub fn nonlinear_solid_block_output_construction_bytes(
+    encoded_bytes: u64,
+) -> Result<u64, ResourcePlanningError> {
+    encoded_bytes
+        .checked_add(runmat_canonical_codec::CANONICAL_MATERIALIZATION_FIXED_BYTES_PER_CONTRACT)
+        .ok_or(ResourcePlanningError::Overflow("nonlinear block encoding"))
+}
+
 pub fn nonlinear_solid_block_payload_bytes_upper_bound(
     workload: &NonlinearSolidWorkload,
     mesh: &SolverMeshArtifact,
@@ -131,11 +143,7 @@ pub fn build_nonlinear_solid_block_resource_plan(
         .map_err(|e| invalid(&e))?;
     let mut input = derive(workload, mesh, request.accepted_block_limit)?;
     let bytes = payload_bound(&input, request)?;
-    let materialization =
-        runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(
-            bytes, 1,
-        )
-        .ok_or(ResourcePlanningError::Overflow("nonlinear block encoding"))?;
+    let materialization = nonlinear_solid_block_output_construction_bytes(bytes)?;
     let receipt_bytes = crate::execution::NONLINEAR_SOLID_RECEIPT_MAX_ENCODED_BYTES;
     let receipt_materialization =
         runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(
