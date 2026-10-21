@@ -1,6 +1,6 @@
 use crate::contracts::FeaRunError;
 
-use super::{RandomResponseIntegrationEvidence, RandomResponseIntegrationPolicy};
+use super::RandomResponseIntegrationPolicy;
 
 pub(super) struct IntervalIntegration {
     pub values: Vec<f64>,
@@ -9,10 +9,6 @@ pub(super) struct IntervalIntegration {
     pub estimated_relative_error: f64,
 }
 
-pub(super) struct IntegratedResponse {
-    pub values: Vec<f64>,
-    pub evidence: RandomResponseIntegrationEvidence,
-}
 
 /// Gauss-Kronrod 7/15 abscissae on [-1, 1] (non-negative half, QUADPACK `qk15`).
 const KRONROD_NODES: [f64; 8] = [
@@ -205,70 +201,6 @@ where
     }
 }
 
-pub(super) fn integrate_breakpoints<F>(
-    breakpoints: &[f64],
-    authored_interval_count: usize,
-    policy: RandomResponseIntegrationPolicy,
-    mode_count: usize,
-    mut evaluate: F,
-) -> Result<IntegratedResponse, FeaRunError>
-where
-    F: FnMut(f64) -> Result<Vec<f64>, FeaRunError>,
-{
-    if breakpoints.len() < 2 || breakpoints.windows(2).any(|pair| pair[0] >= pair[1]) {
-        return Err(FeaRunError::Solve(
-            "random-response integration breakpoints are not strictly increasing".into(),
-        ));
-    }
-    let intervals = breakpoints
-        .windows(2)
-        .map(|interval| {
-            integrate_interval(interval[0], interval[1], policy, mode_count, &mut evaluate)
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let value_count = intervals
-        .first()
-        .map(|interval| interval.values.len())
-        .ok_or_else(|| FeaRunError::Solve("random-response integration is empty".into()))?;
-    let mut total = vec![0.0; value_count];
-    let mut compensation = vec![0.0; value_count];
-    for interval in &intervals {
-        if interval.values.len() != value_count {
-            return Err(FeaRunError::Solve(
-                "random-response interval results have unequal shapes".into(),
-            ));
-        }
-        compensated_add(&mut total, &mut compensation, &interval.values);
-    }
-    if total.iter().any(|value| !value.is_finite()) {
-        return Err(FeaRunError::Solve(
-            "random-response integration produced invalid variance".into(),
-        ));
-    }
-    Ok(IntegratedResponse {
-        values: total,
-        evidence: RandomResponseIntegrationEvidence {
-            authored_interval_count,
-            resonance_split_count: breakpoints
-                .len()
-                .saturating_sub(authored_interval_count + 1),
-            evaluated_frequency_count: intervals
-                .iter()
-                .map(|interval| interval.evaluated_frequency_count)
-                .sum(),
-            maximum_refinement_level_used: intervals
-                .iter()
-                .map(|interval| interval.refinement_level)
-                .max()
-                .unwrap_or(0),
-            maximum_estimated_relative_variance_error: intervals
-                .iter()
-                .map(|interval| interval.estimated_relative_error)
-                .fold(0.0_f64, f64::max),
-        },
-    })
-}
-
 pub(super) fn compensated_add(total: &mut [f64], compensation: &mut [f64], values: &[f64]) {
     for ((sum, correction), value) in total.iter_mut().zip(compensation).zip(values) {
         let corrected = value - *correction;
@@ -284,9 +216,9 @@ mod tests {
 
     #[test]
     fn adaptive_rule_integrates_quadratic_density() {
-        let integrated = integrate_breakpoints(
-            &[0.0, 0.5, 1.0],
-            2,
+        let integrated = integrate_interval(
+            0.0,
+            1.0,
             RandomResponseIntegrationPolicy {
                 modal_damping_ratio: 0.05,
                 minimum_cumulative_mass_ratio: 0.9,
@@ -298,14 +230,14 @@ mod tests {
         )
         .unwrap();
         assert!((integrated.values[0] - 1.0 / 3.0).abs() < 1.0e-7);
-        assert!(integrated.evidence.evaluated_frequency_count >= 60);
+        assert!(integrated.evaluated_frequency_count >= 30);
     }
 
     #[test]
     fn under_resolved_peak_fails_without_a_dimensioned_absolute_escape_hatch() {
-        let outcome = integrate_breakpoints(
-            &[0.0, 1.0],
-            1,
+        let outcome = integrate_interval(
+            0.0,
+            1.0,
             RandomResponseIntegrationPolicy {
                 modal_damping_ratio: 0.05,
                 minimum_cumulative_mass_ratio: 0.0,
@@ -323,5 +255,36 @@ mod tests {
             Err(error) => error,
         };
         assert!(error.to_string().contains("did not converge"));
+    }
+
+    #[test]
+    fn lightly_damped_resonance_integrates_to_the_closed_form_variance() {
+        // Unit-input SDOF transfer |H|^2 over hertz; its integral over all frequency is
+        // 1 / (8 zeta omega_n^3). The resonance sits at an interval end, as resonance splits
+        // place it in the planner.
+        let (natural_hz, zeta) = (81.3_f64, 0.01);
+        let omega_n = std::f64::consts::TAU * natural_hz;
+        let density = |frequency: f64| {
+            let omega = std::f64::consts::TAU * frequency;
+            let real = omega_n * omega_n - omega * omega;
+            let imaginary = 2.0 * zeta * omega_n * omega;
+            Ok(vec![1.0 / (real * real + imaginary * imaginary)])
+        };
+        let policy = RandomResponseIntegrationPolicy {
+            modal_damping_ratio: zeta,
+            minimum_cumulative_mass_ratio: 0.0,
+            relative_variance_tolerance: 1.0e-9,
+            maximum_refinement_levels: 24,
+        };
+        let below = integrate_interval(0.0, natural_hz, policy, 1, density).unwrap();
+        let above = integrate_interval(natural_hz, 1.0e4 * natural_hz, policy, 1, density).unwrap();
+        let exact = 1.0 / (8.0 * zeta * omega_n.powi(3));
+        let tail = 1.0 / (3.0 * (std::f64::consts::TAU * 1.0e4 * natural_hz).powi(3))
+            / std::f64::consts::TAU;
+        let total = below.values[0] + above.values[0];
+        assert!(
+            ((total + tail) - exact).abs() < 1.0e-7 * exact,
+            "total={total} exact={exact}"
+        );
     }
 }

@@ -5,9 +5,9 @@ use crate::{
 };
 
 use super::{
-    plan::RandomResponsePlan, quadrature::integrate_breakpoints, random_excitation_spectrum_digest,
-    ModalRandomResponseResult, ModalRandomResponseResultParts, RandomResponseFieldStatistics,
-    RandomResponseIntegrationPolicy,
+    interval::{assemble_described_random_response_intervals, describe_planned, solve_planned_interval},
+    plan::RandomResponsePlan,
+    ModalRandomResponseResult, RandomResponseIntegrationPolicy,
 };
 
 /// Solves a zero-mean stationary base-acceleration response in an exact structural modal basis.
@@ -23,44 +23,12 @@ pub fn solve_modal_random_response(
 ) -> Result<ModalRandomResponseResult, FeaRunError> {
     let plan = RandomResponsePlan::new(summary, basis, excitation, policy)?;
     let frequency_response = plan.frequency_response(summary, basis, excitation)?;
-    let integrated = integrate_breakpoints(
-        plan.breakpoints_hz(),
-        plan.authored_interval_count(),
-        policy,
-        frequency_response.mode_count(),
-        |frequency| frequency_response.modal_density(frequency),
-    )?;
-    let integrated_values = frequency_response.project(&integrated.values)?;
-    let layout = frequency_response.layout();
-    if integrated_values.len() != layout.total_length {
-        return Err(FeaRunError::Solve(
-            "random-response integrated values do not match their recovery layout".into(),
-        ));
-    }
-    let dof_variance = integrated_values[..layout.dof_count].to_vec();
-    let fields = layout
-        .fields
-        .iter()
-        .map(|field| {
-            let variance = integrated_values[field.offset..field.offset + field.length].to_vec();
-            let rms = variance.iter().map(|value| value.sqrt()).collect();
-            RandomResponseFieldStatistics {
-                quantity: field.quantity,
-                shape: field.shape.clone(),
-                variance,
-                rms,
-            }
+    let description = describe_planned(&plan, &frequency_response, basis, excitation)?;
+    // A whole solve is the deterministic fan-in of its canonical interval contributions.
+    let intervals = (0..description.interval_count())
+        .map(|ordinal| {
+            solve_planned_interval(&plan, &frequency_response, basis, excitation, ordinal)
         })
-        .collect();
-    ModalRandomResponseResult::from_parts(ModalRandomResponseResultParts {
-        basis: basis.identity(),
-        excitation: excitation.excitation_id.clone(),
-        excitation_digest: random_excitation_spectrum_digest(excitation)?,
-        policy: plan.policy(),
-        selected_mode_count: plan.selected_mode_count(),
-        captured_mass_ratio_by_channel: plan.captured_mass_ratio_by_channel().to_vec(),
-        dof_variance,
-        fields,
-        evidence: integrated.evidence,
-    })
+        .collect::<Result<Vec<_>, _>>()?;
+    assemble_described_random_response_intervals(&description, intervals)
 }

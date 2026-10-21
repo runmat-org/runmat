@@ -454,6 +454,16 @@ pub fn describe_modal_random_response(
 ) -> Result<RandomResponsePlanDescription, FeaRunError> {
     let plan = RandomResponsePlan::new(summary, basis, excitation, policy)?;
     let response = plan.frequency_response(summary, basis, excitation)?;
+    describe_planned(&plan, &response, basis, excitation)
+}
+
+pub(super) fn describe_planned(
+    plan: &RandomResponsePlan,
+    response: &super::recovery::FrequencyResponse<'_>,
+    basis: &ModalBasisArtifact,
+    excitation: &RandomExcitationSpectrum,
+) -> Result<RandomResponsePlanDescription, FeaRunError> {
+    let policy = plan.policy();
     let description = RandomResponsePlanDescription {
         basis: basis.identity(),
         excitation: excitation.excitation_id.clone(),
@@ -497,6 +507,20 @@ pub fn solve_modal_random_response_interval(
     ordinal: usize,
 ) -> Result<ModalRandomResponseIntervalResult, FeaRunError> {
     let plan = RandomResponsePlan::new(summary, basis, excitation, policy)?;
+    let response = plan.frequency_response(summary, basis, excitation)?;
+    solve_planned_interval(&plan, &response, basis, excitation, ordinal)
+}
+
+/// Integrates one canonical interval of an already prepared plan. Local whole solves and
+/// distributed interval tasks share this function, so both produce identical contributions.
+pub(super) fn solve_planned_interval(
+    plan: &RandomResponsePlan,
+    response: &super::recovery::FrequencyResponse<'_>,
+    basis: &ModalBasisArtifact,
+    excitation: &RandomExcitationSpectrum,
+    ordinal: usize,
+) -> Result<ModalRandomResponseIntervalResult, FeaRunError> {
+    let policy = plan.policy();
     let bounds = plan
         .breakpoints_hz()
         .get(ordinal..ordinal.saturating_add(2))
@@ -504,7 +528,6 @@ pub fn solve_modal_random_response_interval(
         .ok_or_else(|| {
             FeaRunError::Solve("random-response interval ordinal is outside the plan".into())
         })?;
-    let response = plan.frequency_response(summary, basis, excitation)?;
     let integrated = integrate_interval(
         bounds[0],
         bounds[1],
