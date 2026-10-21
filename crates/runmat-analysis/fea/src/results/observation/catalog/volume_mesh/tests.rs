@@ -108,7 +108,6 @@ fn source(
 fn maximum(id: &str, quantity: ObservationQuantity, complex: bool) -> ObservationRequest {
     let mut spec = crate::results::observation::tests::spec(id, ObservationTarget::WholeModel);
     spec.quantity = quantity;
-    spec.output_location = FieldLocation::Global;
     spec.reduction = Some(ReductionPolicy {
         spatial: SpatialReduction::Maximum,
         series: SeriesReduction::None,
