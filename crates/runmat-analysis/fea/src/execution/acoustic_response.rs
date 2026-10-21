@@ -194,8 +194,14 @@ impl AcousticResponseWorkload {
                     .map_err(invalid)?,
             ),
             AcousticResponseSolver::Transient { policy } => result::SolvedResponse::Transient(
-                solve_canonical_transient(&self.model, mesh, self.step_id.as_str(), policy)
-                    .map_err(invalid)?,
+                solve_canonical_transient(
+                    &self.model,
+                    mesh,
+                    self.step_id.as_str(),
+                    policy,
+                    &crate::physics::acoustic::TransientRetention::for_step(self.step()?),
+                )
+                .map_err(invalid)?,
             ),
         };
         AcousticResponseSolverResult::new(self, mesh, formulation, response)

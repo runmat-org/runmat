@@ -7,7 +7,7 @@ use crate::{
     topology::AnalysisProjection,
 };
 
-const PREFIX: &[u8] = b"runmat-acoustic-response-result/v1\0";
+const PREFIX: &[u8] = b"runmat-acoustic-response-result/v2\0";
 const LIMITS: CanonicalLimits = CanonicalLimits::new(1024 * 1024 * 1024, 8_000_000, 65_536, 64);
 
 pub(super) enum SolvedResponse {
@@ -29,7 +29,9 @@ pub enum AcousticResponseDiagnostics {
         linear_iterations: usize,
     },
     Transient {
-        /// 1/2 p'ᵀ M p' + 1/2 pᵀ K p (J) per time sample.
+        /// Every accepted time point; pressure fields are retained at the sampled subset.
+        time_points_s: Vec<f64>,
+        /// 1/2 p'ᵀ M p' + 1/2 pᵀ K p (J) per accepted time point.
         acoustic_energy_j: Vec<f64>,
         /// Cumulative energy absorbed by impedance and radiation boundaries (J).
         boundary_absorbed_energy_j: Vec<f64>,
@@ -100,13 +102,14 @@ impl AcousticResponseSolverResult {
             SolvedResponse::Transient(transient) => (
                 transient.projection,
                 transient
-                    .time_points_s
+                    .retained_time_points_s
                     .iter()
                     .copied()
                     .map(RecoveredFieldSample::TimeSeconds)
                     .collect(),
                 transient.pressure_pa,
                 AcousticResponseDiagnostics::Transient {
+                    time_points_s: transient.time_points_s,
                     acoustic_energy_j: transient.acoustic_energy_j,
                     boundary_absorbed_energy_j: transient.boundary_absorbed_energy_j,
                     linear_iterations: transient.linear_iterations,
@@ -198,6 +201,7 @@ impl AcousticResponseSolverResult {
             (
                 AcousticResponseSolver::Transient { .. },
                 AcousticResponseDiagnostics::Transient {
+                    time_points_s,
                     acoustic_energy_j,
                     boundary_absorbed_energy_j,
                     maximum_linear_relative_residual,
@@ -215,8 +219,11 @@ impl AcousticResponseSolverResult {
                 if times.is_none_or(|times| {
                     times.iter().any(|time| !time.is_finite())
                         || times.windows(2).any(|pair| pair[0] >= pair[1])
-                }) || acoustic_energy_j.len() != d.samples.len()
-                    || boundary_absorbed_energy_j.len() != d.samples.len()
+                        || times.iter().any(|time| !time_points_s.contains(time))
+                        || times.last() != time_points_s.last()
+                }) || time_points_s.windows(2).any(|pair| !(pair[0] < pair[1]))
+                    || acoustic_energy_j.len() != time_points_s.len()
+                    || boundary_absorbed_energy_j.len() != time_points_s.len()
                     || acoustic_energy_j
                         .iter()
                         .chain(boundary_absorbed_energy_j)
@@ -275,11 +282,22 @@ impl AcousticResponseSolverResult {
                 interval_count,
                 ..
             },
-        ) = (d.solver, &workload.step()?.independent_domain)
+            AcousticResponseDiagnostics::Transient { time_points_s, .. },
+        ) = (d.solver, &workload.step()?.independent_domain, &d.diagnostics)
         {
-            if d.samples.len() != interval_count + 1
-                || d.samples.first() != Some(&RecoveredFieldSample::TimeSeconds(*start))
-                || d.samples.last() != Some(&RecoveredFieldSample::TimeSeconds(*end))
+            // Fields are retained exactly at the sampled schedule points the step implies.
+            let retention =
+                crate::physics::acoustic::TransientRetention::for_step(workload.step()?);
+            let expected = retention
+                .retained_points(time_points_s)
+                .map_err(invalid)?
+                .into_iter()
+                .map(RecoveredFieldSample::TimeSeconds)
+                .collect::<Vec<_>>();
+            if time_points_s.len() != interval_count + 1
+                || time_points_s.first() != Some(start)
+                || time_points_s.last() != Some(end)
+                || d.samples != expected
             {
                 return Err(invalid(
                     "acoustic transient samples differ from the authored time schedule",

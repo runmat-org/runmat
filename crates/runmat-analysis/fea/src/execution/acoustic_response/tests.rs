@@ -72,7 +72,7 @@ fn cavity_modes_publish_exact_mode_samples_frequencies_and_state() {
 }
 
 #[test]
-fn transient_publishes_every_time_sample() {
+fn transient_retains_the_final_field_and_energy_at_every_step() {
     let mesh = quadratic_slab_mesh(2);
     let workload = AcousticResponseWorkload {
         model: model(ProcedureStep::acoustic_transient("pulse", 0.1, 10)),
@@ -82,7 +82,22 @@ fn transient_publishes_every_time_sample() {
         },
     };
     let result = workload.execute(&mesh).unwrap();
-    assert_eq!(result.samples().len(), 11);
+    // Without sampled outputs only the final field is retained; energy covers all 11 points.
+    assert_eq!(result.samples().len(), 1);
+    assert_eq!(
+        result.samples()[0],
+        crate::results::field::RecoveredFieldSample::TimeSeconds(0.1)
+    );
+    let crate::execution::AcousticResponseDiagnostics::Transient {
+        time_points_s,
+        acoustic_energy_j,
+        ..
+    } = result.diagnostics()
+    else {
+        panic!("transient diagnostics")
+    };
+    assert_eq!(time_points_s.len(), 11);
+    assert_eq!(acoustic_energy_j.len(), 11);
     AcousticResponseNumericalReceiptArtifact::new(&workload, &result, &mesh).unwrap();
     let mut with_output = workload.clone();
     with_output.model.sequence.steps[0]

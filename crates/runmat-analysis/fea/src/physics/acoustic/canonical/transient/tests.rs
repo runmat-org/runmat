@@ -90,7 +90,11 @@ fn duct(end: Option<f64>, end_time: f64, intervals: usize) -> AnalysisModel {
     model
 }
 
-fn line_error(result: &CanonicalAcousticTransient, index: usize, reference: impl Fn(f64) -> f64) -> f64 {
+fn line_error(
+    result: &CanonicalAcousticTransient,
+    index: usize,
+    reference: impl Fn(f64) -> f64,
+) -> f64 {
     let values = &result.pressure_pa[index];
     let squared = result
         .projection
@@ -112,6 +116,7 @@ fn matched_duct_pulse_travels_at_sound_speed_without_reflection() {
             &quadratic_slab_mesh(cells),
             "acoustic",
             AcousticTransientPolicy::default(),
+            &TransientRetention::Every,
         )
         .unwrap();
         let index = result
@@ -135,11 +140,17 @@ fn matched_duct_pulse_travels_at_sound_speed_without_reflection() {
             .max_by(|a, b| a.1.total_cmp(&b.1))
             .unwrap();
         let arrival = result.time_points_s[peak_index];
-        assert!((arrival - 0.7).abs() <= 0.0125, "cells={cells} arrival {arrival}");
+        assert!(
+            (arrival - 0.7).abs() <= 0.0125,
+            "cells={cells} arrival {arrival}"
+        );
         assert!((peak - 1.0).abs() < 0.1, "cells={cells} peak {peak}");
         // After the pulse leaves, almost nothing is reflected back into the duct.
         let last = result.pressure_pa.last().unwrap();
-        assert!(last.iter().all(|value| value.abs() < 0.05), "residual reflection");
+        assert!(
+            last.iter().all(|value| value.abs() < 0.05),
+            "residual reflection"
+        );
         // The termination absorbs what the inlet put in: energy stays bounded.
         assert!(result.boundary_absorbed_energy_j.last().unwrap() > &0.0);
     }
@@ -153,6 +164,7 @@ fn rigid_end_doubles_the_pulse_and_conserves_energy_once_the_drive_stops() {
         &quadratic_slab_mesh(8),
         "acoustic",
         AcousticTransientPolicy::default(),
+        &TransientRetention::Every,
     )
     .unwrap();
     let outlet = result
@@ -166,7 +178,10 @@ fn rigid_end_doubles_the_pulse_and_conserves_energy_once_the_drive_stops() {
         .iter()
         .map(|values| values[outlet])
         .fold(f64::NEG_INFINITY, f64::max);
-    assert!((peak - 2.0).abs() < 0.15, "rigid-wall pressure doubling {peak}");
+    assert!(
+        (peak - 2.0).abs() < 0.15,
+        "rigid-wall pressure doubling {peak}"
+    );
     // The inlet is held at zero after 0.4 s: no work, no absorption, energy is constant once
     // the imposed-history differences of the inlet kinematics (two steps) have cleared.
     let start = result
@@ -177,6 +192,9 @@ fn rigid_end_doubles_the_pulse_and_conserves_energy_once_the_drive_stops() {
         + 3;
     let reference = result.acoustic_energy_j[start];
     for energy in &result.acoustic_energy_j[start..] {
-        assert!(((energy - reference) / reference).abs() < 1e-8, "{energy} vs {reference}");
+        assert!(
+            ((energy - reference) / reference).abs() < 1e-8,
+            "{energy} vs {reference}"
+        );
     }
 }

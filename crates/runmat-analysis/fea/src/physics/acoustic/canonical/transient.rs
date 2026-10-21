@@ -62,7 +62,9 @@ pub struct CanonicalAcousticTransient {
     pub projection: AnalysisProjection,
     /// Start time and every accepted step end, ascending.
     pub time_points_s: Vec<f64>,
-    /// Real pressure in Pa at each time point, in projection node order.
+    /// The time points whose pressure is retained, ascending; a subset of `time_points_s`.
+    pub retained_time_points_s: Vec<f64>,
+    /// Real pressure in Pa at each retained time point, in projection node order.
     pub pressure_pa: Vec<Vec<f64>>,
     /// Acoustic energy 1/2 p'ᵀ M p' + 1/2 pᵀ K p (J) at each time point.
     pub acoustic_energy_j: Vec<f64>,
@@ -73,12 +75,92 @@ pub struct CanonicalAcousticTransient {
     pub maximum_linear_relative_residual: f64,
 }
 
+/// Which accepted time points keep their full pressure field. Scalar energy evidence is kept
+/// at every time point; fields are kept only where the study samples them, so memory and the
+/// retained result stay bounded by the authored outputs rather than the step count.
+#[derive(Clone, Debug, PartialEq)]
+pub enum TransientRetention {
+    /// Every accepted time point.
+    Every,
+    /// The final time point and the listed times, each of which must lie on the time grid.
+    FinalAnd(Vec<f64>),
+}
+
+impl TransientRetention {
+    /// Retention implied by an authored step: every increment when an observation samples every
+    /// accepted increment; otherwise the final state plus explicitly sampled times.
+    pub fn for_step(step: &runmat_analysis_core::ProcedureStep) -> Self {
+        use runmat_analysis_core::SamplingPolicy;
+        let mut times = Vec::new();
+        for observation in &step.observations {
+            let Some(spec) = observation.spec() else {
+                continue;
+            };
+            match &spec.sampling {
+                SamplingPolicy::EveryAcceptedIncrement => return Self::Every,
+                SamplingPolicy::TimeSeconds(values) => times.extend(values.iter().copied()),
+                SamplingPolicy::TimeIntervalSeconds {
+                    start,
+                    end,
+                    interval,
+                } if *interval > 0.0 && start.is_finite() && end.is_finite() => {
+                    let count = ((end - start) / interval + 1e-9).floor() as usize;
+                    times.extend((0..=count).map(|k| start + interval * k as f64));
+                }
+                _ => {}
+            }
+        }
+        times.sort_by(f64::total_cmp);
+        times.dedup();
+        Self::FinalAnd(times)
+    }
+
+    /// The retained subset of an accepted time grid, ascending.
+    pub fn retained_points(&self, times: &[f64]) -> Result<Vec<f64>, AcousticHarmonicError> {
+        Ok(times
+            .iter()
+            .zip(self.mask(times)?)
+            .filter(|(_, keep)| *keep)
+            .map(|(time, _)| *time)
+            .collect())
+    }
+
+    fn mask(&self, times: &[f64]) -> Result<Vec<bool>, AcousticHarmonicError> {
+        let mut mask = vec![false; times.len()];
+        match self {
+            Self::Every => mask.fill(true),
+            Self::FinalAnd(requested) => {
+                let step = times
+                    .windows(2)
+                    .map(|w| w[1] - w[0])
+                    .fold(f64::INFINITY, f64::min);
+                for &t in requested {
+                    let index = times
+                        .iter()
+                        .position(|grid| (grid - t).abs() <= 1e-9 * step.max(f64::MIN_POSITIVE))
+                        .ok_or_else(|| {
+                            AcousticHarmonicError::InvalidInput(format!(
+                                "sampled time {t} s is not an accepted transient time point"
+                            ))
+                        })?;
+                    mask[index] = true;
+                }
+                if let Some(last) = mask.last_mut() {
+                    *last = true;
+                }
+            }
+        }
+        Ok(mask)
+    }
+}
+
 /// Integrate an authored acoustic transient step from rest.
 pub fn solve_canonical_transient(
     model: &AnalysisModel,
     mesh: &SolverMeshArtifact,
     step_id: &str,
     policy: AcousticTransientPolicy,
+    retention: &TransientRetention,
 ) -> Result<CanonicalAcousticTransient, AcousticHarmonicError> {
     policy.validate()?;
     let step = transient_step(model, step_id)?;
@@ -108,6 +190,7 @@ pub fn solve_canonical_transient(
             }
         })
         .collect::<Vec<_>>();
+    let retained = retention.mask(&times)?;
     let projection = AnalysisProjection::derive(mesh)
         .map_err(|error| AcousticHarmonicError::Topology(error.to_string()))?;
     let properties = crate::properties::compile_solid_property_map(model, mesh)
@@ -115,9 +198,8 @@ pub fn solve_canonical_transient(
     // Unit angular frequency: every assembled source is then i g(t) with real g.
     let mut assembly = AcousticAssembly::assemble(projection, &properties, 1.0)?;
     let n = assembly.projection.nodes.len();
-    let sample = |assembly: AcousticAssembly, time: f64| {
-        sample_sources(assembly, model, step, time)
-    };
+    let sample =
+        |assembly: AcousticAssembly, time: f64| sample_sources(assembly, model, step, time);
     // Boundary admittance B does not depend on time; it is taken from the first sample.
     let (next, mut prescribed, mut g_previous) = sample(assembly, times[0])?;
     assembly = next;
@@ -193,10 +275,12 @@ pub fn solve_canonical_transient(
         Ok(0.5 * dot(velocity, &apply(&mass, velocity)?)
             + 0.5 * dot(pressure, &apply(&stiffness, pressure)?))
     };
-    let mut snapshots = Vec::with_capacity(times.len());
+    let mut snapshots = Vec::with_capacity(retained.iter().filter(|keep| **keep).count());
     let mut energies = Vec::with_capacity(times.len());
     let mut absorbed = Vec::with_capacity(times.len());
-    snapshots.push(pressure.clone());
+    if retained[0] {
+        snapshots.push(pressure.clone());
+    }
     energies.push(energy(&pressure, &velocity)?);
     absorbed.push(0.0);
     let mut absorbed_total = 0.0;
@@ -279,16 +363,25 @@ pub fn solve_canonical_transient(
         let dissipation = dot(&velocity, &apply(&damping, &velocity)?);
         absorbed_total += 0.5 * dt * (previous_dissipation + dissipation);
         previous_dissipation = dissipation;
-        snapshots.push(pressure.clone());
+        if retained[step_index] {
+            snapshots.push(pressure.clone());
+        }
         energies.push(energy(&pressure, &velocity)?);
         absorbed.push(absorbed_total);
         prescribed = next_prescribed;
         g_previous = g_next;
     }
     let _ = prescribed;
+    let retained_time_points_s = times
+        .iter()
+        .zip(&retained)
+        .filter(|(_, keep)| **keep)
+        .map(|(time, _)| *time)
+        .collect();
     Ok(CanonicalAcousticTransient {
         projection: assembly.projection,
         time_points_s: times,
+        retained_time_points_s,
         pressure_pa: snapshots,
         acoustic_energy_j: energies,
         boundary_absorbed_energy_j: absorbed,
@@ -357,9 +450,10 @@ fn sample_sources(
     let sample = ExcitationSamplePoint::time(time);
     let excitations = realize_step_excitations(model, step, sample)
         .map_err(|error| AcousticHarmonicError::Boundary(error.to_string()))?;
-    let assembly = assembly
-        .with_cleared_sources()
-        .with_boundaries(model, step, &excitations, sample)?;
+    let assembly =
+        assembly
+            .with_cleared_sources()
+            .with_boundaries(model, step, &excitations, sample)?;
     let prescribed = assembly
         .prescribed
         .iter()
@@ -376,7 +470,11 @@ fn sample_sources(
             "a time-domain acoustic source must be real".into(),
         ));
     }
-    let g = assembly.source.iter().map(|value| value.imaginary).collect();
+    let g = assembly
+        .source
+        .iter()
+        .map(|value| value.imaginary)
+        .collect();
     Ok((assembly, prescribed, g))
 }
 

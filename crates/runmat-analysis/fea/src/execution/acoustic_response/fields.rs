@@ -140,20 +140,13 @@ impl AcousticResponseSolverResult {
                 ),
             ],
             AcousticResponseDiagnostics::Transient {
+                time_points_s,
                 acoustic_energy_j,
                 boundary_absorbed_energy_j,
                 ..
             } => {
-                let times = self
-                    .samples()
-                    .iter()
-                    .filter_map(|sample| match sample {
-                        crate::results::field::RecoveredFieldSample::TimeSeconds(time) => {
-                            Some(*time)
-                        }
-                        _ => None,
-                    })
-                    .collect::<Vec<_>>();
+                // Energy evidence covers every accepted time point, not only retained fields.
+                let times = time_points_s.clone();
                 vec![
                     AnalysisField::host_f64("acoustic.time_s", vec![times.len()], times),
                     AnalysisField::host_f64(
