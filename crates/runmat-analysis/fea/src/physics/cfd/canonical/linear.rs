@@ -72,7 +72,24 @@ pub(super) fn solve(
         .zip(&action)
         .map(|(b, a)| b - a)
         .collect::<Vec<_>>();
+    // Near outer convergence the defect approaches the rounding level of the assembled
+    // system; a purely relative target on it would ask Krylov for digits below that level.
+    // The target is the larger of the relative defect reduction and a rounding floor of the
+    // original right-hand side and operator action.
+    let rounding_floor = 64.0
+        * f64::EPSILON
+        * b.iter()
+            .zip(&action)
+            .fold(0.0f64, |sum, (b, a)| sum.hypot(b.abs() + a.abs()));
     drop(action);
+    let defect_norm = defect.iter().fold(0.0f64, |sum, v| sum.hypot(*v));
+    if defect_norm <= rounding_floor {
+        return Ok((current.to_vec(), 0));
+    }
+    let relative_tolerance = p
+        .policy
+        .linear_relative_tolerance
+        .max(rounding_floor / defect_norm);
     let actual = SparseRightIluEnvelope::derive(a)
         .ok_or(Error::Resource("actual ILU component envelope"))?;
     let planned = SparseRightIluEnvelope::for_counts(
@@ -92,7 +109,7 @@ pub(super) fn solve(
         &defect,
         &vec![0.0; b.len()],
         GmresPolicy {
-            relative_tolerance: p.policy.linear_relative_tolerance,
+            relative_tolerance,
             restart: p.policy.gmres_restart,
             maximum_iterations: p.policy.maximum_linear_iterations,
         },

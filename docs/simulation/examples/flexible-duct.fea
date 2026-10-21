@@ -3,6 +3,7 @@
 geometry duct {
     file = "./geometry/flexible-duct.step"
     units = m
+    interfaces = shared
     region water : cell { select name "Water"; expect exactly_one }
     region wall : solid { select name "Wall"; expect exactly_one }
     region inlet : face { select name "Inlet"; expect exactly_one }

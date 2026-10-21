@@ -5,6 +5,7 @@
 geometry tube {
     file = "./geometry/compliant-tube.step"
     units = m
+    interfaces = shared
     region water : cell { select name "Water"; expect exactly_one }
     region wall : solid { select name "Tube"; expect exactly_one }
     region inlet : face { select name "Inlet"; expect exactly_one }

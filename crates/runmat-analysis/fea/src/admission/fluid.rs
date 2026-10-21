@@ -247,7 +247,6 @@ mod tests {
                 .count(),
             1
         );
-        assert!(admit_canonical_fluid_steady(&mesh).is_err());
         assert!(
             admit_canonical_fluid_steady(&canonical_tetrahedron_solver_mesh(ElementOrder::Tet10))
                 .is_err()

@@ -6,8 +6,6 @@ pub use resource::{
     build_structural_recovery_metadata_resource_plan, require_structural_recovery_decode_budget,
 };
 mod objects;
-#[cfg(test)]
-pub(crate) use objects::recovered_field_payload_partitions;
 pub use objects::{prepare_recovered_field_objects, recovered_field_transport_reservation_bytes};
 
 use runmat_analysis_fea::execution::{
