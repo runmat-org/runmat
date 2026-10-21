@@ -274,7 +274,8 @@ mod tests {
             store_root: directory.path().to_path_buf(),
             meshing_subtask_cache_root: None,
             worker_capabilities: BTreeSet::from([Capability::ProcessIsolation]),
-            worker_accelerators: Vec::new(),
+            accelerator_devices: Vec::new(),
+            host_inventory: crate::test_support::host_inventory(),
         })
         .unwrap();
         (directory, session)
