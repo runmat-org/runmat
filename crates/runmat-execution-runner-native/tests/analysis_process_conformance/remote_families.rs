@@ -48,7 +48,7 @@ model bar {
  constraint hot { thermal.temperature { target = geometry.part.region.hot; value = 350 K } }
 }
 study response {
- geometry = geometry.part; mesh = mesh.volume; model = model.bar; formulation = experimental
+ geometry = geometry.part; mesh = mesh.volume; model = model.bar
  analysis heat { thermal steady {} }
  output temperature = analysis.heat.field.node.temperature
 }
@@ -73,8 +73,8 @@ model electric {
  constraint high { electrical.potential { target = geometry.part.region.high; value = 2 V } }
 }
 study response {
- geometry = geometry.part; mesh = mesh.volume; model = model.electric; formulation = experimental
- analysis potential { electromagnetic static {}; accuracy { algebraic_relative_tolerance = 1e-10 } }
+ geometry = geometry.part; mesh = mesh.volume; model = model.electric
+ analysis potential { electromagnetic static {}; accuracy { algebraic_relative_tolerance = 1e-11 } }
  output potential = analysis.potential.field.node.electric_potential
 }
 "#;
@@ -99,7 +99,7 @@ model coil {
  load_case drive { include load.current }
 }
 study response {
- geometry = geometry.part; mesh = mesh.volume; model = model.coil; formulation = experimental
+ geometry = geometry.part; mesh = mesh.volume; model = model.coil
  analysis potential { electromagnetic static {}; accuracy { algebraic_relative_tolerance = 1e-10 } }
  output flux = analysis.potential.field.integration_point.magnetic_flux_density
 }
@@ -129,7 +129,7 @@ model field {
  load_case driven { include excitation.drive }
 }
 study response {
- geometry = geometry.part; mesh = mesh.volume; model = model.field; formulation = experimental
+ geometry = geometry.part; mesh = mesh.volume; model = model.field
  analysis phasor {
   electromagnetic harmonic { frequencies = [159154.94309189534 Hz] }
   accuracy { algebraic_relative_tolerance = 1e-10 }
@@ -161,7 +161,7 @@ model duct {
  load_case driven { include excitation.inlet }
 }
 study response {
- geometry = geometry.part; mesh = mesh.volume; model = model.duct; formulation = experimental
+ geometry = geometry.part; mesh = mesh.volume; model = model.duct
  analysis sound { acoustic harmonic { frequencies = [0.2 Hz, 0.3 Hz, 0.4 Hz] } }
 }
 "#;
@@ -189,14 +189,14 @@ model flow {
  load outlet { fluid.outlet_pressure { target = geometry.part.region.outlet; value = 0 Pa } }
 }
 study response {
- geometry = geometry.part; mesh = mesh.volume; model = model.flow; formulation = experimental
+ geometry = geometry.part; mesh = mesh.volume; model = model.flow
  analysis solve { fluid static {}; accuracy { algebraic_relative_tolerance = 1e-8 } }
  output velocity = analysis.solve.field.cell.fluid_velocity
 }
 "#;
 
 fn nonlinear_source() -> String {
-    include_str!("../../../../docs/simulation/examples/small-strain-j2-experimental.fea")
+    include_str!("../../../../docs/simulation/examples/small-strain-j2.fea")
         .replace("./geometry/box.brep", "./box.brep")
         .replace("study plastic", "study response")
 }
