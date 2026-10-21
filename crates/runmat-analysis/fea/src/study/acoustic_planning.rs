@@ -31,7 +31,9 @@ pub struct AcousticStudyPlanningPolicy {
     pub krylov_restart: usize,
     pub maximum_iterations: usize,
     pub power_balance_relative_tolerance: f64,
-    pub uniqueness: crate::solve::uniqueness::SparseUniquenessPolicy,
+    /// Optional column-wise inverse-existence proof. Its work grows with the square of the
+    /// unknown count, so authored studies rely on residual and power closure instead.
+    pub uniqueness: Option<crate::solve::uniqueness::SparseUniquenessPolicy>,
 }
 
 impl AcousticStudyPlanningPolicy {
@@ -41,14 +43,16 @@ impl AcousticStudyPlanningPolicy {
             krylov_restart: 64,
             maximum_iterations: 4096,
             power_balance_relative_tolerance: 1.0e-8,
-            uniqueness: crate::solve::uniqueness::SparseUniquenessPolicy::bounded(),
+            uniqueness: None,
         }
     }
 
     fn validate(self) -> Result<(), AcousticStudyPlanningError> {
-        self.uniqueness
-            .validate()
-            .map_err(|_| AcousticStudyPlanningError::InvalidNumericalPolicy)?;
+        if let Some(uniqueness) = self.uniqueness {
+            uniqueness
+                .validate()
+                .map_err(|_| AcousticStudyPlanningError::InvalidNumericalPolicy)?;
+        }
         if self.krylov_restart == 0
             || self.maximum_iterations == 0
             || !open_unit_interval(self.power_balance_relative_tolerance)
@@ -156,7 +160,7 @@ pub fn plan_acoustic_study(
         .filter(|value| open_unit_interval(*value))
         .ok_or(AcousticStudyPlanningError::MissingRelativeAlgebraicTarget)?;
     let solver = AcousticHarmonicPolicy {
-        uniqueness: Some(policy.uniqueness),
+        uniqueness: policy.uniqueness,
         preconditioner: crate::contracts::SolverPreconditioner::Ilu0,
         relative_tolerance,
         restart: policy.krylov_restart,

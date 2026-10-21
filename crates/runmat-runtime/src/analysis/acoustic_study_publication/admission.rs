@@ -76,11 +76,7 @@ pub(super) fn validate(
             krylov_restart: first.workload.solver.restart,
             maximum_iterations: first.workload.solver.maximum_iterations,
             power_balance_relative_tolerance: first.workload.power_balance_relative_tolerance,
-            uniqueness: first
-                .workload
-                .solver
-                .uniqueness
-                .ok_or("authored acoustic publication lacks uniqueness controls")?,
+            uniqueness: first.workload.solver.uniqueness,
         },
     )
     .map_err(|e| e.to_string())?;
