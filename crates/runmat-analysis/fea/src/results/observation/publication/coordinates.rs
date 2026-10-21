@@ -23,7 +23,8 @@ pub(super) fn validate_history_coordinates(
         | ObservationFieldCatalogSource::FiniteVolumeRecovery { .. } => {
             return Err(invalid("sampled native histories are not admitted"))
         }
-        ObservationFieldCatalogSource::Structural { manifest, .. } => {
+        ObservationFieldCatalogSource::Structural { manifest, .. }
+        | ObservationFieldCatalogSource::VolumeMeshRecovery { manifest, .. } => {
             for field in &manifest.fields {
                 visit(field)?;
             }

@@ -92,6 +92,11 @@ pub struct GeometryHealingPolicy {
     pub consolidate_duplicates: bool,
     pub repair_tolerance_scale_gaps: bool,
     pub simplify_short_edges_and_sliver_faces: bool,
+    /// Join touching solids so each pair of coincident faces becomes one shared interface face
+    /// (a conformal multi-body mesh: parts in air, fluid against a wall). Bodies may touch but
+    /// must not interpenetrate.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub shared_interfaces: bool,
 }
 
 impl GeometryHealingPolicy {

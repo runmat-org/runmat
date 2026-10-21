@@ -378,7 +378,11 @@ geometry part {
 }
 
 "#;
-    let host = TestHost::default().with_geometry("project/geometry/part.step", 8);
+    let host = TestHost::default().with_named_geometry(
+        "project/geometry/part.step",
+        8,
+        &[("solid", "Part body")],
+    );
     let program = FeaCompiler::new(&host).check(CheckRequest {
         modules: ModuleGraphRequest {
             source_root: LogicalSourcePath::new("project").unwrap(),
@@ -407,6 +411,64 @@ geometry part {
         geometry.regions[1].cardinality,
         runmat_geometry_core::GeometryRegionCardinality::OneOrMore
     );
+}
+
+#[test]
+fn name_selectors_must_match_names_the_source_carries() {
+    let source = r#"
+geometry part {
+    file = "./geometry/part.step"
+    units = mm
+    interfaces = shared
+    region body : solid { select name "Part body"; expect exactly_one }
+    region fixed : face { select name "Fixed edn"; expect exactly_one }
+}
+"#;
+    let host = TestHost::default().with_named_geometry(
+        "project/geometry/part.step",
+        8,
+        &[("solid", "Part body"), ("face", "Fixed end"), ("face", "Loaded end")],
+    );
+    let program = FeaCompiler::new(&host).check(CheckRequest {
+        modules: ModuleGraphRequest {
+            source_root: LogicalSourcePath::new("project").unwrap(),
+            root: source_module("project/main.fea", source, 1),
+        },
+    });
+    let messages = program
+        .diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.message.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(messages.len(), 1, "{messages:#?}");
+    assert!(messages[0].contains("\"Fixed edn\""), "{}", messages[0]);
+    assert!(messages[0].contains("\"Fixed end\", \"Loaded end\""), "{}", messages[0]);
+}
+
+#[test]
+fn shared_interfaces_reach_the_imported_geometry_definition() {
+    let source = r#"
+geometry cell {
+    file = "./geometry/cell.step"
+    units = mm
+    interfaces = shared
+    region air : solid { select name "Air"; expect one_or_more }
+}
+"#;
+    let host =
+        TestHost::default().with_named_geometry("project/geometry/cell.step", 8, &[("solid", "Air")]);
+    let program = FeaCompiler::new(&host).check(CheckRequest {
+        modules: ModuleGraphRequest {
+            source_root: LogicalSourcePath::new("project").unwrap(),
+            root: source_module("project/main.fea", source, 1),
+        },
+    });
+    assert!(program.is_valid(), "{:#?}", program.diagnostics);
+    let geometry = program.geometries.values().next().unwrap();
+    let runmat_geometry_core::GeometryDefinitionSource::Imported(imported) = &geometry.source else {
+        panic!("expected imported geometry");
+    };
+    assert!(imported.shared_interfaces);
 }
 
 #[test]
