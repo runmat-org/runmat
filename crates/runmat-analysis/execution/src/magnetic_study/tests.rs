@@ -44,6 +44,7 @@ fn preparation(order: ElementOrder) -> MagneticStudyPreparation {
     let policy = MagneticStudyPlanningPolicy {};
     let workload = plan_magnetic_study(&compiled, policy).unwrap();
     MagneticStudyPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         policy,
         product: MagneticStudyProduct { compiled, workload },
         mesh,

@@ -92,6 +92,8 @@ fn check(order: ElementOrder, publication_root: Option<&std::path::Path>) {
         .block_on(Box::pin(crate::analysis_frequency::execute_with_pool(
             &mut pool,
             crate::StructuralFrequencyExecutionPreparation {
+                local_execution:
+                    runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
                 workload: workload.clone(),
                 mesh: mesh.clone(),
                 prestress_state: None,

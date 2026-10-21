@@ -20,7 +20,10 @@ pub(super) fn recover(
         intensity: Vec::with_capacity(count),
         energy: Vec::with_capacity(count),
     };
-    for (index, element) in assembly.projection.elements.iter().enumerate() {
+    // Independent per-element recovery on the admitted pool, collected in element order.
+    let elements = &assembly.projection.elements;
+    let recovered = crate::algebra::element_assembly::ordered_map_range(count, |index| {
+        let element = &elements[index];
         let rho = assembly.density[index];
         let mut velocity = ProjectionVector3 {
             real: [0.0; 3],
@@ -80,6 +83,10 @@ pub(super) fn recover(
                 "nonfinite or negative acoustic recovery".into(),
             ));
         }
+        Ok((velocity, intensity, energy))
+    });
+    for item in recovered {
+        let (velocity, intensity, energy) = item?;
         result.velocity.push(velocity);
         result.intensity.push(intensity);
         result.energy.push(energy);

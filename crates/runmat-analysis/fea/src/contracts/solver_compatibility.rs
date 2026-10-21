@@ -129,16 +129,14 @@ const fn method_is_compatible(
     match temporal {
         TemporalImplementation::StructuralStaticLinearSolve => matches!(
             method,
-            SolverMethod::AssembledPcg
-                | SolverMethod::MatrixFreePcg
-                | SolverMethod::MatrixFreeSaddlePointGmres
+            SolverMethod::AssembledPcg | SolverMethod::SparseDirectCholesky
         ),
         TemporalImplementation::StructuralSubspaceIteration
         | TemporalImplementation::StructuralPrestressedSubspaceIteration => {
-            matches!(method, SolverMethod::MatrixFreeSubspaceIteration)
+            matches!(method, SolverMethod::ShiftInvertBlockLanczos)
         }
         TemporalImplementation::StructuralEigenvalueBuckling => {
-            matches!(method, SolverMethod::MatrixFreeBucklingSubspaceIteration)
+            matches!(method, SolverMethod::BucklingBlockLanczos)
         }
         TemporalImplementation::StructuralHarmonicSolve
         | TemporalImplementation::StructuralPrestressedHarmonicSolve => match solution_space {
@@ -176,7 +174,7 @@ const fn method_is_compatible(
         | TemporalImplementation::SteadyConductionPotentialLinearSolve => {
             matches!(
                 method,
-                SolverMethod::AssembledPcg | SolverMethod::MatrixFreePcg
+                SolverMethod::AssembledPcg | SolverMethod::SparseDirectCholesky
             )
         }
         TemporalImplementation::AcousticDomainGraphHarmonicSolve => {
@@ -199,10 +197,10 @@ const fn method_is_compatible(
         TemporalImplementation::PrescribedThermomechanicalProfileApplication
         | TemporalImplementation::SolvedThermalStateApplication => false,
         TemporalImplementation::MagnetostaticWeakCoulombSaddleSolve => {
-            matches!(method, SolverMethod::AssembledSaddlePointGmres)
+            matches!(method, SolverMethod::SparseDirectLdlt)
         }
         TemporalImplementation::MaxwellComplexElectricFieldGeneralSolve => {
-            matches!(method, SolverMethod::GeneralGmres)
+            matches!(method, SolverMethod::SparseDirectLu)
         }
         TemporalImplementation::FluidSteadyNonorthogonalPressureCorrection
         | TemporalImplementation::FluidBackwardEulerConservativeMomentumPressure => {
@@ -222,7 +220,7 @@ const fn preconditioner_is_compatible(
         temporal,
         TemporalImplementation::MaxwellComplexElectricFieldGeneralSolve
     ) {
-        return matches!(method, SolverMethod::GeneralGmres)
+        return matches!(method, SolverMethod::SparseDirectLu)
             && matches!(preconditioner, SolverPreconditioner::None);
     }
     match method {
@@ -232,13 +230,22 @@ const fn preconditioner_is_compatible(
         ),
         SolverMethod::AssembledPcg
         | SolverMethod::MatrixFreePcg
-        | SolverMethod::MatrixFreeSubspaceIteration
-        | SolverMethod::MatrixFreeBucklingSubspaceIteration
         | SolverMethod::NewmarkAverageAccelerationPcg
         | SolverMethod::IncrementalNewtonRaphson => matches!(
             preconditioner,
-            SolverPreconditioner::None | SolverPreconditioner::Jacobi | SolverPreconditioner::Ilu0
+            SolverPreconditioner::None
+                | SolverPreconditioner::Jacobi
+                | SolverPreconditioner::Ilu0
+                | SolverPreconditioner::Amg
+                | SolverPreconditioner::SparseCholesky
         ),
+        SolverMethod::ShiftInvertBlockLanczos | SolverMethod::BucklingBlockLanczos => matches!(
+            preconditioner,
+            SolverPreconditioner::SparseCholesky
+        ),
+        SolverMethod::SparseDirectCholesky
+        | SolverMethod::SparseDirectLdlt
+        | SolverMethod::SparseDirectLu => matches!(preconditioner, SolverPreconditioner::None),
         SolverMethod::AssembledSaddlePointGmres
         | SolverMethod::MatrixFreeSaddlePointGmres
         | SolverMethod::DenseDirect

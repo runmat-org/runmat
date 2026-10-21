@@ -4,23 +4,17 @@ use crate::{
     assembly::AssemblySummary,
     contracts::{SolverMethod, SolverPreconditioner},
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
-    solve::{
-        accelerator::prepare_accelerator_linear_system,
-        backend::kind::LinearAlgebraBackendKind,
-        preconditioner::{build_spd_preconditioner, SpdPreconditionerKind},
-        spd_linear::{solve_spd_system_cg, SpdCgSolveOptions},
-    },
+    planning::resource::LocalExecutionPlan,
+    solve::backend::kind::LinearAlgebraBackendKind,
     ComputeBackend,
 };
 
 mod capacity;
 mod diagnostics;
 mod math;
-pub(crate) mod subspace;
 mod truncation;
 
 use diagnostics::push_modal_quality_diagnostics;
-use subspace::solve_lowest_eigenspace;
 mod preparation;
 pub use preparation::solve_modal_system;
 use truncation::resolve_truncation_boundary;
@@ -69,7 +63,7 @@ pub(crate) fn solve_modal_system_reusing(
                     "modal solve skipped because assembled system has zero DOFs or requested mode_count is zero"
                         .to_string(),
             }],
-            solver_method: SolverMethod::MatrixFreeSubspaceIteration,
+            solver_method: SolverMethod::ShiftInvertBlockLanczos,
             solver_backend: LinearAlgebraBackendKind::CpuReference,
             preconditioner: SolverPreconditioner::None,
             solver_host_sync_count: 0,
@@ -118,7 +112,7 @@ pub(crate) fn solve_modal_system_reusing(
                     severity: FeaDiagnosticSeverity::Error,
                     message: format!("modal free-DOF reduction failed: {error:?}"),
                 }],
-                solver_method: SolverMethod::MatrixFreeSubspaceIteration,
+                solver_method: SolverMethod::ShiftInvertBlockLanczos,
                 solver_backend: LinearAlgebraBackendKind::CpuReference,
                 preconditioner: SolverPreconditioner::None,
                 solver_host_sync_count: 0,
@@ -144,7 +138,7 @@ pub(crate) fn solve_modal_system_reusing(
                     severity: FeaDiagnosticSeverity::Error,
                     message: format!("modal reduced system validation failed: {error:?}"),
                 }],
-                solver_method: SolverMethod::MatrixFreeSubspaceIteration,
+                solver_method: SolverMethod::ShiftInvertBlockLanczos,
                 solver_backend: LinearAlgebraBackendKind::CpuReference,
                 preconditioner: SolverPreconditioner::None,
                 solver_host_sync_count: 0,
@@ -172,7 +166,7 @@ pub(crate) fn solve_modal_system_reusing(
                         "modal stiffness admission failed on the constraint space: {error}"
                     ),
                 }],
-                solver_method: SolverMethod::MatrixFreeSubspaceIteration,
+                solver_method: SolverMethod::ShiftInvertBlockLanczos,
                 solver_backend: LinearAlgebraBackendKind::CpuReference,
                 preconditioner: SolverPreconditioner::None,
                 solver_host_sync_count: 0,
@@ -185,185 +179,98 @@ pub(crate) fn solve_modal_system_reusing(
             }
         }
     };
-    // Inverse stiffness applications use the same dimension-scaled PCG policy
-    // as structural solves. A fixed 64-step cap can abandon a valid modal
-    // problem immediately when ILU falls back to Jacobi.
-    let inverse_iteration_limit = crate::solve::linear::iteration_limit(&reduced_operator, 64);
-    let accelerator_requested = backend == ComputeBackend::Gpu;
-    let mut solver_backend = LinearAlgebraBackendKind::CpuReference;
-    let mut solver_host_sync_count = 0u32;
-    let mut device_apply_k_count = 0u32;
-    let mut device_apply_k_attempt_count = 0u32;
-
-    let unconstrained: Vec<usize> = (0..reduced_operator.dof_count()).collect();
-    let target_mode_count = requested_mode_count.min(unconstrained.len());
+    let mut linear_diagnostics = Vec::new();
+    if backend == ComputeBackend::Gpu {
+        linear_diagnostics.push(FeaDiagnostic {
+            code: "FEA_MODAL_ACCELERATOR_ADMISSION_FALLBACK".to_string(),
+            severity: FeaDiagnosticSeverity::Warning,
+            message: "the modal eigensolver runs on the shared CPU sparse layer (shift-invert block Lanczos); using cpu_reference".to_string(),
+        });
+    }
+    let unconstrained_count = reduced_operator.dof_count();
+    let target_mode_count = requested_mode_count.min(unconstrained_count);
     let maximum_subspace_dimension =
-        match convergence.admitted_subspace_dimension(unconstrained.len(), target_mode_count) {
+        match convergence.admitted_subspace_dimension(unconstrained_count, target_mode_count) {
             Ok(capacity) => capacity,
-            Err(error) => return capacity::failure(error, unconstrained.len()),
+            Err(error) => return capacity::failure(error, unconstrained_count),
         };
-
+    // The Cholesky factor that proved K coercive is the σ = 0 shift-invert operator.
+    let factor = prepared
+        .admissibility()
+        .and_then(|evidence| evidence.factor())
+        .map(|factor| factor.0.clone());
+    let stiffness = crate::solve::shared_sparse::CsrArrays::of(reduced_operator.operators().stiffness());
+    let mass = crate::solve::shared_sparse::CsrArrays::of(reduced_operator.operators().mass());
     let mut modes: Vec<ModalCandidate> = Vec::with_capacity(target_mode_count.saturating_add(4));
     let mut boundary_probe_count = 0usize;
     let mut complete_boundary_eigenspace = false;
     let mut boundary_probe_frequency_hz = None;
-    let mut accelerator_admission_fallback = None;
-    let prepared_accelerator_system = if accelerator_requested {
-        let prepared = prepare_accelerator_linear_system(
-            prepared.clone(),
-            crate::solve::linear::accelerator_iteration_limit(&reduced_operator, 64),
-        );
-        match prepared {
-            Ok(prepared) => Some(prepared),
-            Err(error) if error.permits_cpu_fallback() => {
-                accelerator_admission_fallback = Some(error.message);
-                None
-            }
-            Err(error) => {
-                return ModalSolveResult {
-                    converged: false,
-                    frequencies_hz: Vec::new(),
-                    mode_shapes: Vec::new(),
-                    residual_norms: Vec::new(),
-                    diagnostics: vec![FeaDiagnostic {
-                        code: "FEA_MODAL_ACCELERATOR_PREPARATION_FAILED".to_string(),
-                        severity: FeaDiagnosticSeverity::Error,
-                        message: error.message,
-                    }],
-                    solver_method: SolverMethod::MatrixFreeSubspaceIteration,
-                    solver_backend: LinearAlgebraBackendKind::Accelerator,
-                    preconditioner: SolverPreconditioner::Jacobi,
-                    solver_host_sync_count: 0,
-                    device_apply_k_count: 0,
-                    device_apply_k_attempt_count: 0,
-                    accelerator_evidence: error
-                        .evidence
-                        .into_iter()
-                        .map(|evidence| *evidence)
-                        .collect(),
-                    available_mode_count: unconstrained.len(),
-                    boundary_probe_count: 0,
-                    boundary_probe_frequency_hz: None,
-                };
-            }
-        }
-    } else {
-        None
-    };
-    let mut linear_diagnostics = Vec::new();
-    let (cpu_preconditioner_kind, cpu_preconditioner) = if prepared_accelerator_system.is_none() {
-        match build_spd_preconditioner(&prepared, SpdPreconditionerKind::Ilu0) {
-            Ok(preconditioner) => (Some(SolverPreconditioner::Ilu0), Some(preconditioner)),
-            Err(error) => {
-                linear_diagnostics.push(FeaDiagnostic {
-                    code: "FEA_MODAL_ILU0_FALLBACK".into(),
-                    severity: FeaDiagnosticSeverity::Warning,
-                    message: format!(
-                        "ILU(0) modal preconditioner was unavailable; using Jacobi: {error}"
-                    ),
-                });
-                match build_spd_preconditioner(&prepared, SpdPreconditionerKind::Jacobi) {
-                    Ok(preconditioner) => {
-                        (Some(SolverPreconditioner::Jacobi), Some(preconditioner))
-                    }
-                    Err(error) => {
-                        linear_diagnostics.push(FeaDiagnostic {
-                            code: "FEA_MODAL_PRECONDITIONER_FAILED".into(),
-                            severity: FeaDiagnosticSeverity::Error,
-                            message: error.to_string(),
-                        });
-                        (None, None)
-                    }
-                }
-            }
-        }
-    } else {
-        (Some(SolverPreconditioner::Jacobi), None)
-    };
-    if prepared_accelerator_system.is_none() && cpu_preconditioner.is_none() {
-        return ModalSolveResult {
-            converged: false,
-            frequencies_hz: Vec::new(),
-            mode_shapes: Vec::new(),
-            residual_norms: Vec::new(),
-            diagnostics: linear_diagnostics,
-            solver_method: SolverMethod::MatrixFreeSubspaceIteration,
-            solver_backend: LinearAlgebraBackendKind::CpuReference,
-            preconditioner: SolverPreconditioner::None,
-            solver_host_sync_count: 0,
-            device_apply_k_count: 0,
-            device_apply_k_attempt_count: 0,
-            accelerator_evidence: Vec::new(),
-            available_mode_count: unconstrained.len(),
-            boundary_probe_count: 0,
-            boundary_probe_frequency_hz: None,
-        };
-    }
-    let mut fallback_apply_count = 0u32;
-    let mut accelerator_evidence = Vec::new();
     let mut subspace_dimension = target_mode_count
         .saturating_add(MODAL_BOUNDARY_PROBE_WIDTH)
         .min(maximum_subspace_dimension);
     let mut subspace_iteration_count = 0usize;
     let mut subspace_maximum_residual = f64::INFINITY;
     let mut subspace_converged = false;
+    let mut sturm = None;
+    let tolerance = convergence.relative_residual_tolerance();
     while subspace_dimension > 0 && !crate::is_fea_cancelled() {
-        let result = solve_lowest_eigenspace(
-            &reduced_operator,
-            subspace_dimension,
-            target_mode_count.saturating_add(1),
-            convergence.relative_residual_tolerance(),
-            convergence.maximum_subspace_iterations(),
-            |rhs, initial_guess| {
-                if crate::is_fea_cancelled() {
-                    return None;
-                }
-                let attempt = solve_spd_system_cg(
-                    &reduced_operator,
-                    rhs,
-                    SpdCgSolveOptions {
-                        max_iters: inverse_iteration_limit,
-                        tol: crate::solve::linear::DEFAULT_RELATIVE_TOLERANCE,
-                        prepared_accelerator_system: prepared_accelerator_system.as_ref(),
-                        cpu_preconditioner: cpu_preconditioner.as_deref(),
-                        initial_guess,
-                    },
-                );
-                if let Some(solve) = &attempt.accelerator {
-                    solver_backend = solve.solver_backend;
-                    solver_host_sync_count =
-                        solver_host_sync_count.saturating_add(solve.host_sync_count);
-                    device_apply_k_count =
-                        device_apply_k_count.saturating_add(solve.device_apply_k_count);
-                    device_apply_k_attempt_count = device_apply_k_attempt_count
-                        .saturating_add(solve.device_apply_k_attempt_count);
-                    fallback_apply_count = fallback_apply_count.saturating_add(
-                        solve
-                            .device_apply_k_attempt_count
-                            .saturating_sub(solve.device_apply_k_count),
-                    );
-                    linear_diagnostics.extend(solve.diagnostics.clone());
-                    accelerator_evidence.extend(solve.accelerator_evidence.clone());
-                }
-                attempt.converged.then_some(attempt.vector)
-            },
-        );
-        subspace_iteration_count = subspace_iteration_count.saturating_add(result.iteration_count);
-        subspace_maximum_residual = result.maximum_residual;
-        subspace_converged = result.converged;
-        let mut candidates = Vec::with_capacity(result.candidates.len());
-        for candidate in result.candidates {
-            let Ok(expanded) = prepared_modal.expand(&candidate.vector) else {
+        let options = runmat_sparse_solvers::eigen::EigenOptions {
+            count: subspace_dimension,
+            shift: Some(0.0),
+            tolerance: (0.1 * tolerance).min(1.0e-10),
+            max_restarts: convergence.maximum_subspace_iterations().max(1),
+            sturm_check: true,
+            ..Default::default()
+        };
+        let solved = crate::solve::shared_sparse::with_plan(LocalExecutionPlan::serial(), || {
+            let (k, m) = (stiffness.view(), mass.view());
+            match factor.as_deref() {
+                Some(solver) => runmat_sparse_solvers::eigen::modal_with_factor(
+                    k,
+                    m,
+                    solver,
+                    0.0,
+                    &options,
+                    crate::solve::shared_sparse::control(),
+                ),
+                None => runmat_sparse_solvers::eigen::modal(
+                    k,
+                    m,
+                    &options,
+                    crate::solve::shared_sparse::control(),
+                ),
+            }
+        });
+        let result = match solved {
+            Ok(result) => result,
+            Err(error) => {
+                linear_diagnostics.push(FeaDiagnostic {
+                    code: "FEA_MODAL_EIGENSOLVER_FAILED".into(),
+                    severity: FeaDiagnosticSeverity::Error,
+                    message: error.to_string(),
+                });
+                break;
+            }
+        };
+        subspace_iteration_count = subspace_iteration_count.saturating_add(result.restarts.max(1));
+        subspace_maximum_residual = result.residuals.iter().copied().fold(0.0, f64::max);
+        subspace_converged = result.converged && subspace_maximum_residual <= tolerance;
+        sturm = result.sturm;
+        let n = unconstrained_count;
+        let mut candidates = Vec::with_capacity(result.values.len());
+        for (index, eigenvalue) in result.values.iter().copied().enumerate() {
+            let vector = &result.vectors[index * n..(index + 1) * n];
+            let Ok(expanded) = prepared_modal.expand(vector) else {
                 candidates.clear();
                 break;
             };
             candidates.push((
-                candidate.eigenvalue.sqrt() / (2.0 * std::f64::consts::PI),
+                eigenvalue.max(0.0).sqrt() / (2.0 * std::f64::consts::PI),
                 expanded,
-                candidate.residual,
+                result.residuals[index],
             ));
         }
-        let exhausted = subspace_dimension == unconstrained.len();
+        let exhausted = subspace_dimension == unconstrained_count;
         if !subspace_converged {
             modes = candidates;
             break;
@@ -388,6 +295,31 @@ pub(crate) fn solve_modal_system_reusing(
             .saturating_add(MODAL_BOUNDARY_PROBE_WIDTH)
             .min(maximum_subspace_dimension);
     }
+    if let Some(sturm) = sturm {
+        linear_diagnostics.push(FeaDiagnostic {
+            code: "FEA_MODAL_STURM_CHECK".into(),
+            severity: if sturm.complete() {
+                FeaDiagnosticSeverity::Info
+            } else {
+                FeaDiagnosticSeverity::Error
+            },
+            message: format!(
+                "eigenvalues_below_shift={} returned_below_shift={} shift={} complete={}",
+                sturm.counted,
+                sturm.returned,
+                sturm.shift,
+                sturm.complete()
+            ),
+        });
+        if !sturm.complete() {
+            subspace_converged = false;
+        }
+    }
+    let solver_backend = LinearAlgebraBackendKind::CpuReference;
+    let (solver_host_sync_count, device_apply_k_count, device_apply_k_attempt_count) = (0u32, 0u32, 0u32);
+    let fallback_apply_count = 0u32;
+    let accelerator_evidence = Vec::new();
+    let unconstrained: Vec<usize> = (0..unconstrained_count).collect();
 
     modes.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
     let mut frequencies_hz = Vec::with_capacity(modes.len());
@@ -406,18 +338,9 @@ pub(crate) fn solve_modal_system_reusing(
     let mut diagnostics = vec![FeaDiagnostic {
         code: "FEA_MODAL_METHOD".to_string(),
         severity: FeaDiagnosticSeverity::Info,
-        message: "solver=matrix_free_subspace_iteration inverse_k=true projection=rayleigh_ritz"
+        message: "solver=shift_invert_block_lanczos shift=0 factor=sparse_cholesky sturm_check=true"
             .to_string(),
     }];
-    if let Some(reason) = accelerator_admission_fallback {
-        diagnostics.push(FeaDiagnostic {
-            code: "FEA_MODAL_ACCELERATOR_ADMISSION_FALLBACK".to_string(),
-            severity: FeaDiagnosticSeverity::Warning,
-            message: format!(
-                "native sparse execution was rejected before provider allocation; using cpu_reference: {reason}"
-            ),
-        });
-    }
     diagnostics.extend(linear_diagnostics);
     diagnostics.push(FeaDiagnostic {
         code: "FEA_MODAL_CONVERGENCE".to_string(),
@@ -477,13 +400,9 @@ pub(crate) fn solve_modal_system_reusing(
         mode_shapes,
         residual_norms,
         diagnostics,
-        solver_method: SolverMethod::MatrixFreeSubspaceIteration,
+        solver_method: SolverMethod::ShiftInvertBlockLanczos,
         solver_backend,
-        preconditioner: if solver_backend == LinearAlgebraBackendKind::Accelerator {
-            SolverPreconditioner::Jacobi
-        } else {
-            cpu_preconditioner_kind.unwrap_or(SolverPreconditioner::None)
-        },
+        preconditioner: SolverPreconditioner::SparseCholesky,
         solver_host_sync_count,
         device_apply_k_count,
         device_apply_k_attempt_count,

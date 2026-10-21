@@ -289,6 +289,7 @@ fn execute_with_group_size(
                     prepared_inputs(),
                     prepared_output(payload),
                     prepared_output_set(),
+                    crate::planning::resource::LocalExecutionPlan::serial(),
                 )
                 .unwrap();
             let FeaResourceDemand::StructuralRandomResponseInterval(demand) = &plan.input.demand
@@ -332,6 +333,7 @@ fn execute_with_group_size(
                         prepared_inputs(),
                         prepared_output(payload - 1),
                         prepared_output_set(),
+                        crate::planning::resource::LocalExecutionPlan::serial(),
                     )
                     .is_err());
             }
@@ -374,7 +376,8 @@ fn execute_with_group_size(
                 assembly.scope().topology_digest(),
             ).unwrap().encoded_bytes_upper_bound),
             prepared_output_set(),
-        )
+crate::planning::resource::LocalExecutionPlan::serial(),
+)
         .unwrap();
     let FeaResourceDemand::StructuralRandomResponseAssembly(demand) = &assembly_plan.input.demand
     else {

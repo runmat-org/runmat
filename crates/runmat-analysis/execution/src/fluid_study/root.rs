@@ -45,6 +45,8 @@ const LIMITS: CanonicalLimits = CanonicalLimits::new(256 * 1024 * 1024, 8_000_00
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PreparationWire {
+    #[serde(default = "runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial")]
+    local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     policy: FluidStudyPlanningPolicy,
     compiled: CompiledAnalysisStudy,
     workload: FluidSteadyWorkload,
@@ -63,6 +65,7 @@ impl PreparationWire {
         let limits = preparation.output_policy.inventory_limits();
         let workload = preparation.workload().clone();
         Self {
+            local_execution: preparation.local_execution,
             policy: preparation.policy,
             compiled: preparation.product.compiled,
             workload,
@@ -99,6 +102,7 @@ impl PreparationWire {
             return Err(invalid("fluid root workload differs from authored plan"));
         }
         Ok(FluidStudyPreparation {
+            local_execution: self.local_execution,
             policy: self.policy,
             product: FluidStudyProduct {
                 compiled: self.compiled,

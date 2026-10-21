@@ -76,6 +76,7 @@ pub(super) fn preparation_with_encryption(
     };
     let limits = ObjectInventoryLimits::default();
     prepare_structural_transient_sequence(StructuralTransientSequencePreparationInput {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         workload: &workload,
         mesh: &mesh,
         modal_state: None,

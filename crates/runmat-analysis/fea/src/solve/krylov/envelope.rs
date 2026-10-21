@@ -187,10 +187,6 @@ mod tests {
                     calls.set(calls.get() + 1);
                     Ok::<_, ()>(value.to_vec())
                 },
-                |_, _| {
-                    calls.set(calls.get() + 1);
-                    Ok(1.0)
-                },
                 || false,
             )
             .unwrap();
@@ -204,10 +200,6 @@ mod tests {
                 |value| {
                     calls.set(calls.get() + 1);
                     Ok::<_, ()>(value.to_vec())
-                },
-                |_, _| {
-                    calls.set(calls.get() + 1);
-                    Ok(1.0)
                 },
                 || false
             )
@@ -223,7 +215,6 @@ mod tests {
             let policy = policy(restart, 7);
             let envelope = GmresWorkEnvelope::derive(3, policy).unwrap();
             let apply_calls = Cell::new(0_u64);
-            let dot_calls = Cell::new(0_u64);
             let result = super::super::restarted_gmres(
                 &[1.0, 2.0, 3.0],
                 &[0.0; 3],
@@ -236,17 +227,12 @@ mod tests {
                         2.0 * x[2] - x[1],
                     ])
                 },
-                |left, right| {
-                    dot_calls.set(dot_calls.get() + 1);
-                    Ok(left.iter().zip(right).map(|(a, b)| a * b).sum())
-                },
                 || false,
             )
             .unwrap()
             .unwrap();
             assert!(result.iterations <= envelope.maximum_iterations);
             assert!(apply_calls.get() <= envelope.operator_applications_upper_bound);
-            assert!(dot_calls.get() <= envelope.dot_calls_upper_bound);
         }
     }
 }

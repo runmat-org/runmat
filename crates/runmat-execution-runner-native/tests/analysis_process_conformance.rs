@@ -1979,6 +1979,7 @@ fn frequency_preparation(
     })
     .unwrap();
     StructuralFrequencyExecutionPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         workload,
         mesh,
         prestress_state: None,

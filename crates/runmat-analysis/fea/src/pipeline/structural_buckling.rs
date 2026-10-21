@@ -115,7 +115,7 @@ pub fn execute_structural_buckling_workload(
             linearization: linearization.identity(),
             run,
             solver_backend: LinearAlgebraBackendKind::CpuReference,
-            solver_method: SolverMethod::MatrixFreeBucklingSubspaceIteration,
+            solver_method: SolverMethod::BucklingBlockLanczos,
             preconditioner: SolverPreconditioner::from_spd(solved.preconditioner),
             iteration_count: solved.iteration_count,
             modes: solved

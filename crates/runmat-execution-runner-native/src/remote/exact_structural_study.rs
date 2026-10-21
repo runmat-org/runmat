@@ -499,7 +499,7 @@ mod tests {
             model,
             step_id,
             backend: ComputeBackend::Cpu,
-            preconditioner: SpdPreconditionerKind::Jacobi,
+            preconditioner: SpdPreconditionerKind::Auto,
             algebra_backend: LinearAlgebraBackendKind::CpuReference,
             observation_execution:
                 runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),

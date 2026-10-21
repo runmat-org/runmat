@@ -49,6 +49,10 @@ pub(super) fn execute_scope_preparation(
             modal_state.as_ref(),
             prepared_input_resource_facts_without_resource_plan(invocation.inputs)?,
             projected_output_set_resource_facts(),
+            runmat_analysis_fea::planning::resource::LocalExecutionPlan::from_cpu_millicores(
+                resource_plan.request.cpu_millicores,
+            )
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
         )
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let (study, step, execution_plan) =
@@ -63,12 +67,14 @@ pub(super) fn execute_scope_preparation(
             "transient scope task plan or authored identity does not converge on the worker",
         ));
     }
-    let scope = runmat_analysis_fea::pipeline::transient::prepare_transient_checkpoint_scope(
-        &workload,
-        &mesh,
-        modal_state.as_ref(),
-    )
-    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let scope = super::with_admitted_cpu_pool(&resource_plan, || {
+        runmat_analysis_fea::pipeline::transient::prepare_transient_checkpoint_scope(
+            &workload,
+            &mesh,
+            modal_state.as_ref(),
+        )
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
+    })?;
     if scope.study != study || scope.step != step {
         return Err(AnalysisBridgeError::Identity(
             "constructed transient scope differs from its admitted study or step",

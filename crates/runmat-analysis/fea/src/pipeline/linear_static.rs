@@ -128,6 +128,7 @@ fn run_linear_static_with_constraint_plan(
     );
     check_cancelled("fea.run_linear_static")?;
 
+    let phase_clock = crate::progress::phase_timer("structural_static.preflight");
     let preassembly = preflight::prepare_static_preassembly(
         model,
         execution_step,
@@ -160,6 +161,8 @@ fn run_linear_static_with_constraint_plan(
         Some(1),
         Some(5),
     );
+    drop(phase_clock);
+    let phase_clock = crate::progress::phase_timer("structural_static.assembly");
     let summary = assemble_structural_system_with_execution(
         model,
         &excitations,
@@ -232,8 +235,12 @@ fn run_linear_static_with_constraint_plan(
         Some(2),
         Some(5),
     );
+    drop(phase_clock);
+    let phase_clock = crate::progress::phase_timer("structural_static.solve");
     let solve_result =
         solve::solve_static_system(&summary, &options, preassembly.solver_admission.as_ref())?;
+    drop(phase_clock);
+    let phase_clock = crate::progress::phase_timer("structural_static.balance_and_reactions");
     let static_balance = solve::recover_static_balance(&summary, &solve_result.solution, &options)?;
     let structural_constraint_result =
         CanonicalStructuralConstraintResult::recover_for_model_from_solver_state(
@@ -294,6 +301,8 @@ fn run_linear_static_with_constraint_plan(
         Some(3),
         Some(5),
     );
+    drop(phase_clock);
+    let phase_clock = crate::progress::phase_timer("structural_static.field_recovery");
     let mut fields = recover_result_fields(&summary, &solve_result, options.local_execution)
         .map_err(|error| match error {
             crate::post::StructuralFieldRecoveryError::Cancelled => FeaRunError::Cancelled,
@@ -319,6 +328,8 @@ fn run_linear_static_with_constraint_plan(
     fields.extend(electro_thermal_fields.static_fields);
     fields.extend(electro_thermal_fields.temperature_snapshots);
     fields.extend(electro_thermal_fields.thermal_residual_snapshots);
+    drop(phase_clock);
+    let phase_clock = crate::progress::phase_timer("structural_static.observations");
     let observations = if execution_step.observations.is_empty() {
         Vec::new()
     } else {
@@ -369,6 +380,7 @@ fn run_linear_static_with_constraint_plan(
         );
         observations
     };
+    drop(phase_clock);
     emit_phase(
         "fea.run_linear_static",
         FeaProgressPhase::Postprocess,

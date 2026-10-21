@@ -18,7 +18,14 @@ fn governed_history(
     let terminal = u64::try_from(scope.schedule.points.len() - 1).unwrap();
     let request = StructuralTransientBlockRequest::new(scope, None, terminal).unwrap();
     let plan = crate::planning::resource::build_structural_transient_block_resource_plan(
-        workload, mesh, None, &request, None, None, None,
+        workload,
+        mesh,
+        None,
+        &request,
+        None,
+        None,
+        None,
+        crate::planning::resource::LocalExecutionPlan::serial(),
     )
     .unwrap_or_else(|error| panic!("finer continuum full-block admission rejected: {error}"));
     eprintln!(
@@ -92,7 +99,8 @@ fn qualify(quadratic: bool, damped: bool) {
         ).unwrap();
         let admission = crate::planning::resource::build_structural_transient_scope_resource_plan(
             &workload, &mesh, None, &prepared, None, None,
-        );
+crate::planning::resource::LocalExecutionPlan::serial(),
+);
         let admitted = admission.unwrap_or_else(|error| panic!(
             "finer continuum admission rejected quadratic={quadratic} damped={damped} cells={cells} original_ceiling={} error={error}",
             workload.model.sequence.steps[0].accuracy.resources.maximum_resident_bytes

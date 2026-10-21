@@ -73,7 +73,9 @@ pub(super) fn execute(
             "magnetostatic execution identity differs from numerical intent and allocation",
         ));
     }
-    let result = workload.execute_with_resource_plan(&mesh, &resource_plan)?;
+    let result = super::with_admitted_cpu_pool(&resource_plan, || {
+        Ok(workload.execute_with_resource_plan(&mesh, &resource_plan)?)
+    })?;
     let receipt = MagneticNumericalReceiptArtifact::new(&workload, &result, &mesh)?;
     let bytes = result.canonical_bytes()?;
     let bound =

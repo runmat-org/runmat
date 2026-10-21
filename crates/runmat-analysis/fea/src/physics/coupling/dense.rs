@@ -9,51 +9,21 @@ pub(crate) fn solve(matrix: &[Vec<f64>], rhs: &[f64]) -> Result<Vec<f64>, String
         return Err("dense coupling system must contain only finite values".into());
     }
 
-    let mut matrix = matrix.to_vec();
-    let mut rhs = rhs.to_vec();
-    for pivot in 0..n {
-        let mut pivot_row = pivot;
-        let mut pivot_abs = matrix[pivot][pivot].abs();
-        for (candidate, row) in matrix.iter().enumerate().skip(pivot + 1) {
-            let candidate_abs = row[pivot].abs();
-            if candidate_abs > pivot_abs {
-                pivot_row = candidate;
-                pivot_abs = candidate_abs;
+    let flat: Vec<f64> = matrix.iter().flatten().copied().collect();
+    let lu = runmat_sparse_solvers::dense::DenseLu::from_row_major(&flat, n, 1.0e-24).map_err(
+        |error| match error {
+            runmat_sparse_solvers::SolverError::Singular { pivot } => {
+                format!("dense coupling operator is singular at pivot {pivot}")
             }
-        }
-        if pivot_abs <= 1.0e-24 {
-            return Err(format!(
-                "dense coupling operator is singular at pivot {pivot}"
-            ));
-        }
-        if pivot_row != pivot {
-            matrix.swap(pivot, pivot_row);
-            rhs.swap(pivot, pivot_row);
-        }
-        let pivot_value = matrix[pivot][pivot];
-        for row in pivot + 1..n {
-            let factor = matrix[row][pivot] / pivot_value;
-            matrix[row][pivot] = 0.0;
-            for col in pivot + 1..n {
-                matrix[row][col] -= factor * matrix[pivot][col];
-            }
-            rhs[row] -= factor * rhs[pivot];
-        }
+            other => other.to_string(),
+        },
+    )?;
+    let mut solution = rhs.to_vec();
+    lu.solve_in_place(&mut solution);
+    if solution.iter().any(|value| !value.is_finite()) {
+        return Err("dense coupling solve produced a nonfinite value".into());
     }
-
-    let mut solution = vec![0.0; n];
-    for row in (0..n).rev() {
-        let mut accum = rhs[row];
-        for (col, value) in solution.iter().enumerate().skip(row + 1) {
-            accum -= matrix[row][col] * value;
-        }
-        solution[row] = accum / matrix[row][row];
-    }
-    if solution.iter().all(|value| value.is_finite()) {
-        Ok(solution)
-    } else {
-        Err("dense coupling solve produced a non-finite solution".into())
-    }
+    Ok(solution)
 }
 
 pub(crate) fn apply(matrix: &[Vec<f64>], x: &[f64]) -> Result<Vec<f64>, String> {

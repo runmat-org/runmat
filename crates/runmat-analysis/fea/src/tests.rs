@@ -1096,24 +1096,29 @@ fn beam_end_moment_solves_rotation_and_reaction_moment() {
                 .message
                 .contains("structural_beam_stiffness_matrix_symmetry_residual=0")
     }));
-    assert!(result.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_STRUCTURAL_MOMENT_BALANCE"
-            && diag
-                .message
-                .contains("structural_reaction_moment_norm_n_m=1.25")
-            && diag
-                .message
-                .contains("structural_moment_requested_norm_n_m=1.25")
-            && diag
-                .message
-                .contains("structural_moment_realized_norm_n_m=1.25")
-            && diag
-                .message
-                .contains("structural_moment_realization_ratio=1")
-            && diag
-                .message
-                .contains("structural_moment_balance_residual_ratio=")
-    }));
+    let balance = result
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_STRUCTURAL_MOMENT_BALANCE")
+        .expect("moment balance diagnostic");
+    let value = |key: &str| -> f64 {
+        balance
+            .message
+            .split_whitespace()
+            .find_map(|part| part.strip_prefix(key)?.strip_prefix('='))
+            .unwrap_or_else(|| panic!("{key} missing from {}", balance.message))
+            .parse()
+            .unwrap()
+    };
+    for key in [
+        "structural_reaction_moment_norm_n_m",
+        "structural_moment_requested_norm_n_m",
+        "structural_moment_realized_norm_n_m",
+    ] {
+        assert!((value(key) - 1.25).abs() <= 1.25e-12, "{}", balance.message);
+    }
+    assert!((value("structural_moment_realization_ratio") - 1.0).abs() <= 1.0e-12);
+    assert!(value("structural_moment_balance_residual_ratio") <= 1.0e-10);
 }
 
 #[test]
@@ -4198,7 +4203,7 @@ fn canonical_mesh_thermal_pipeline_enforces_exact_boundaries_and_reports_energy_
     );
     assert_eq!(
         result.run.solver_method,
-        crate::contracts::SolverMethod::MatrixFreePcg
+        crate::contracts::SolverMethod::SparseDirectCholesky
     );
     assert!(!result
         .run
@@ -5038,7 +5043,7 @@ fn admitted_affine_and_multiplier_static_solves_match_closed_form() {
     assert_eq!(rejected.iterations, 0);
     assert_eq!(
         rejected.diagnostics[0].code,
-        "FEA_INVALID_MULTIPLIER_SOLVER_ADMISSION"
+        "FEA_INVALID_AFFINE_SOLVER_ADMISSION"
     );
     assert!((multiplier_parallel.solution[0] - 3.0 / 8.0).abs() < 1.0e-12);
     assert!((multiplier_parallel.solution[1] - 3.0 / 8.0).abs() < 1.0e-12);

@@ -52,10 +52,12 @@ pub(super) fn initial_result(
         solver_host_sync_count: 0,
         device_apply_k_count: 0,
         device_apply_k_attempt_count: 0,
+        // Tangent corrections are factored by the shared sparse layer (Cholesky for the SPD
+        // solid tangent; strict ILU(0)-preconditioned GMRES for the general contact tangent).
         preconditioner: if contact.is_some() {
             SolverPreconditioner::Ilu0
         } else {
-            SolverPreconditioner::Jacobi
+            SolverPreconditioner::SparseCholesky
         },
         accelerator_evidence: Vec::new(),
     })

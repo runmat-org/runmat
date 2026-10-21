@@ -72,6 +72,7 @@ fn facts(
 ) -> PreparedMaxwellHarmonicResourceFacts {
     let input = (w.canonical_bytes().unwrap().len() + m.canonical_encode().unwrap().len()) as u64;
     PreparedMaxwellHarmonicResourceFacts {
+        local_execution: crate::planning::resource::LocalExecutionPlan::serial(),
         inputs: PreparedInputResourceFacts {
             encoded_payload_bytes: ByteCount(input),
             transport_closure_bytes: ByteCount(input + 2048),
@@ -194,8 +195,8 @@ fn shared_gmres_envelope_and_forged_exact_facts_are_rejected() {
         assert!(build_resource_plan(input).is_err());
     }
     assert_eq!(
-        estimate::maxwell_harmonic::krylov_envelope(0).unwrap(),
+        estimate::maxwell_harmonic::krylov_envelope(0, 0).unwrap(),
         MaxwellGmresResourceEnvelope::default()
     );
-    assert!(estimate::maxwell_harmonic::krylov_envelope(usize::MAX).is_err());
+    assert!(estimate::maxwell_harmonic::krylov_envelope(usize::MAX, u64::MAX).is_err());
 }

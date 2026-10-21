@@ -71,6 +71,7 @@ impl AcousticStudyResultClosure {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct AcousticStudyReplayContext {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub policy: AcousticStudyPlanningPolicy,
     pub mesh: SolverMeshArtifact,
     pub frozen_project_digest: Option<Digest>,
@@ -136,6 +137,7 @@ impl CompletedAcousticStudy {
             .publication
             .validate_for(&self.assembly.result.publication_authority()?)?;
         let preparation = AcousticStudyPreparation {
+            local_execution: self.replay.local_execution,
             policy: self.replay.policy,
             product: AcousticStudyProduct {
                 compiled: self.compiled.clone(),

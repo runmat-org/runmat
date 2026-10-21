@@ -80,18 +80,26 @@ impl SolidEnergyPreparation {
         Ok(())
     }
 
-    pub(super) fn capture<const N: usize, const D: usize>(
+    /// `dofs` are the element's global DOFs (three per node, node-major); `stiffness` is the
+    /// row-major element matrix over those DOFs.
+    pub(super) fn capture(
         &mut self,
-        offsets: &[usize; N],
-        stiffness: &[[f64; D]; D],
+        dofs: &[u32],
+        stiffness: &[f64],
     ) -> Result<(), SolverSolidAssemblyError> {
         if let Some((source, selection)) = self.capture.as_mut() {
-            let nodes = offsets.map(|offset| offset / 3);
+            let n = dofs.len() / 3;
+            let d = dofs.len();
+            let nodes = dofs
+                .iter()
+                .step_by(3)
+                .map(|&dof| dof as usize / 3)
+                .collect::<Vec<_>>();
             let values = source.capture_next(&nodes).map_err(energy_error)?;
             let axis = selection.axis();
-            for i in 0..N {
-                for j in 0..N {
-                    values[i * N + j] = stiffness[3 * i + axis][3 * j + axis];
+            for i in 0..n {
+                for j in 0..n {
+                    values[i * n + j] = stiffness[(3 * i + axis) * d + 3 * j + axis];
                 }
             }
         }

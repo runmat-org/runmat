@@ -56,6 +56,7 @@ pub(super) fn preparation() -> AcousticStudyPreparation {
     let policy = AcousticStudyPlanningPolicy::standard();
     let plan = plan_acoustic_study(&compiled, policy).unwrap();
     AcousticStudyPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         product: AcousticStudyProduct { compiled, plan },
         policy,
         mesh,

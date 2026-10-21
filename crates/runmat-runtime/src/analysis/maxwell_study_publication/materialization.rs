@@ -39,7 +39,7 @@ pub(super) fn admit(
         execution_backend: ExecutionBackend::Cpu,
         solver_backend: LinearAlgebraBackendKind::CpuReference,
         solver_device_apply_k_ratio: 0.0,
-        solver_method: SolverMethod::GeneralGmres,
+        solver_method: SolverMethod::SparseDirectLu,
         preconditioner: SolverPreconditioner::None,
         solver_host_sync_count: 0,
         accelerator_evidence: Vec::new(),

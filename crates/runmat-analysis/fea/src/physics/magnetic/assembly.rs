@@ -3,6 +3,10 @@ use super::{
 };
 use crate::{
     algebra::{
+        element_assembly::{
+            assemble_elements, no_visit, AssembledElements, ElementAssemblyError, ElementDofMap,
+            ElementOutputShape, ElementOutputs,
+        },
         ContributionDomain, ContributionId, ContributionProvenance, MatrixProperties, OperatorRole,
         RealSparseAssembler, RealSparseMatrix,
     },
@@ -95,8 +99,118 @@ impl<'a> MagneticAssembly<'a> {
                 "planned magnetic dimension mismatch".into(),
             ));
         }
-        let mut saddle = RealSparseAssembler::with_pattern(
+        let length = projection.characteristic_length_m;
+        if !length.is_finite() || length <= 0.0 {
+            return Err(MagnetostaticError::Topology("invalid length scale".into()));
+        }
+        let gauge_scale = 1.0 / (length * length);
+        validate_affine_geometry(projection)?;
+        // Dense row lookups (edge -> free row, node -> gauge row) for the element maps.
+        let mut edge_row = vec![None; edge_space.edges().len()];
+        for (&edge, &row) in &edge_rows {
+            edge_row[edge] = Some(row);
+        }
+        let mut gauge_row = vec![None; projection.nodes.len()];
+        for (&node, &row) in &gauge_rows {
+            gauge_row[node] = Some(row);
+        }
+        let element_count = projection.elements.len();
+        let execution = crate::planning::resource::LocalExecutionPlan::serial();
+        let operator_error = |e: ElementAssemblyError<MagnetostaticError>| match e {
+            ElementAssemblyError::Element { error, .. } => error,
+            other => MagnetostaticError::Operator(other.to_string()),
+        };
+        let edge_indices = |index: usize| {
+            edge_space.element_edge_indices(index).ok_or_else(|| {
+                MagnetostaticError::Topology("magnetic element has no edge indices".into())
+            })
+        };
+        // Physical curl-curl operator and current load on free edges.
+        let edge_map =
+            ElementDofMap::from_elements(edge_rows.len(), element_count, execution, |index, out| {
+                out.extend(edge_indices(index)?.iter().map(|&edge| edge_row[edge]));
+                Ok(())
+            })
+            .map_err(operator_error)?;
+        let physical = assemble_elements(
+            &edge_map,
+            plan.physical_pattern(),
+            ElementOutputShape {
+                matrices: 1,
+                vectors: 1,
+                scalars: 0,
+            },
+            execution,
+            |index, _, out: &mut ElementOutputs<'_, f64>| {
+                let moments = edge_space
+                    .element_moments(projection, index)
+                    .map_err(|e| MagnetostaticError::Topology(e.to_string()))?;
+                let data = &volumes[index];
+                let local = out.matrix(0);
+                for i in 0..6 {
+                    for j in 0..6 {
+                        local[i * 6 + j] = moments.curl_curl[i][j] / data.permeability_h_per_m;
+                    }
+                }
+                for (i, value) in out.vector(0).iter_mut().enumerate() {
+                    *value = moments.constant_vector_load[i]
+                        .iter()
+                        .zip(data.current_density_a_per_m2)
+                        .map(|(n, j)| n * j)
+                        .sum::<f64>();
+                }
+                Ok(())
+            },
+            no_visit,
+        )
+        .map_err(operator_error)?;
+        drop(edge_map);
+        // Scaled curl-curl plus weak Coulomb gauge coupling (edges then corner gauge nodes).
+        let saddle_map =
+            ElementDofMap::from_elements(dimension, element_count, execution, |index, out| {
+                out.extend(edge_indices(index)?.iter().map(|&edge| edge_row[edge]));
+                out.extend(
+                    projection.elements[index].node_indices[..4]
+                        .iter()
+                        .map(|&node| gauge_row[node]),
+                );
+                Ok(())
+            })
+            .map_err(operator_error)?;
+        let saddle_values = assemble_elements(
+            &saddle_map,
+            plan.saddle_pattern(),
+            ElementOutputShape {
+                matrices: 1,
+                ..Default::default()
+            },
+            execution,
+            |index, _, out: &mut ElementOutputs<'_, f64>| {
+                let moments = edge_space
+                    .element_moments(projection, index)
+                    .map_err(|e| MagnetostaticError::Topology(e.to_string()))?;
+                let data = &volumes[index];
+                let local = out.matrix(0);
+                for i in 0..6 {
+                    for j in 0..6 {
+                        local[i * 10 + j] = moments.curl_curl[i][j] / data.permeability_h_per_m
+                            * permeability_scale;
+                    }
+                    for j in 0..4 {
+                        let value = moments.gradient_coupling[i][j] * gauge_scale;
+                        local[i * 10 + 6 + j] = value;
+                        local[(6 + j) * 10 + i] = value;
+                    }
+                }
+                Ok(())
+            },
+            no_visit,
+        )
+        .map_err(operator_error)?;
+        drop(saddle_map);
+        let mut saddle = RealSparseAssembler::from_planned_values(
             plan.saddle_pattern().clone(),
+            saddle_values.matrices.into_iter().next().unwrap_or_default(),
             OperatorRole::Stiffness,
             MatrixProperties::SYMMETRIC_INDEFINITE,
         )
@@ -107,66 +221,33 @@ impl<'a> MagneticAssembly<'a> {
                 "magnetic_physical_curl_curl_and_weak_coulomb_gauge".into(),
             ),
         });
-        let mut stiffness = RealSparseAssembler::with_pattern(
+        let AssembledElements {
+            matrices: physical_matrices,
+            vectors: physical_vectors,
+            ..
+        } = physical;
+        let stiffness = RealSparseAssembler::from_planned_values(
             plan.physical_pattern().clone(),
+            physical_matrices.into_iter().next().unwrap_or_default(),
             OperatorRole::Stiffness,
             MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
         )
         .map_err(|e| MagnetostaticError::Operator(e.to_string()))?;
-        let mut load = vec![0.0; edge_rows.len()];
-        let length = projection.characteristic_length_m;
-        if !length.is_finite() || length <= 0.0 {
-            return Err(MagnetostaticError::Topology("invalid length scale".into()));
-        }
-        let gauge_scale = 1.0 / (length * length);
-        validate_affine_geometry(projection)?;
-        for (index, (element, data)) in projection.elements.iter().zip(&volumes).enumerate() {
-            let moments = edge_space
-                .element_moments(projection, index)
-                .map_err(|e| MagnetostaticError::Topology(e.to_string()))?;
-            let indices = edge_space.element_edge_indices(index).unwrap();
-            for (i, &edge) in indices.iter().enumerate() {
-                let Some(&row) = edge_rows.get(&edge) else {
-                    continue;
-                };
-                load[row] += moments.constant_vector_load[i]
-                    .iter()
-                    .zip(data.current_density_a_per_m2)
-                    .map(|(n, j)| n * j)
-                    .sum::<f64>();
-                for (j, &other) in indices.iter().enumerate() {
-                    if let Some(&column) = edge_rows.get(&other) {
-                        let value = moments.curl_curl[i][j] / data.permeability_h_per_m;
-                        stiffness.add(row, column, value);
-                        saddle.add(row, column, value * permeability_scale);
-                    }
-                }
-                for (j, &node) in element.node_indices[..4].iter().enumerate() {
-                    if let Some(&gauge) = gauge_rows.get(&node) {
-                        let value = moments.gradient_coupling[i][j] * gauge_scale;
-                        saddle.add(row, gauge, value);
-                        saddle.add(gauge, row, value);
-                    }
-                }
-            }
-        }
+        let load = physical_vectors.into_iter().next().unwrap_or_default();
         // No divergence cleaning or source projection is hidden here. Compatible
-        // volume current must annihilate each zero-boundary scalar gradient.
+        // volume current must annihilate each zero-boundary scalar gradient. One pass over
+        // the free edges (canonical edge order) accumulates every node's defect and scale.
+        let mut defect = vec![0.0_f64; projection.nodes.len()];
+        let mut scale = vec![0.0_f64; projection.nodes.len()];
+        for (&edge, &row) in &edge_rows {
+            let [a, b] = edge_space.edges()[edge].node_indices;
+            defect[b] += load[row];
+            scale[b] += load[row].abs();
+            defect[a] += -load[row];
+            scale[a] += (-load[row]).abs();
+        }
         for &node in &boundary.gauge_nodes {
-            let mut defect = 0.0;
-            let mut scale = 0.0;
-            for (&edge, &row) in &edge_rows {
-                let [a, b] = edge_space.edges()[edge].node_indices;
-                let sign = if b == node {
-                    1.0
-                } else if a == node {
-                    -1.0
-                } else {
-                    0.0
-                };
-                defect += sign * load[row];
-                scale += (sign * load[row]).abs();
-            }
+            let (defect, scale) = (defect[node], scale[node]);
             if defect.abs() > 1e-11 * scale {
                 return Err(MagnetostaticError::IncompatibleCurrent(if scale > 0.0 {
                     defect.abs() / scale

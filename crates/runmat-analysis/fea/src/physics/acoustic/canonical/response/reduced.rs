@@ -170,7 +170,6 @@ impl PreparedReduced {
                         spmv(&self.operator, &self.right_apply(value)?)
                             .map_err(|error| AcousticHarmonicError::Operator(error.to_string()))
                     },
-                    |a, b| Ok(a.iter().zip(b).map(|(a, b)| a * b).sum()),
                     crate::is_fea_cancelled,
                 )?
                 .ok_or(AcousticHarmonicError::Breakdown)?;

@@ -58,6 +58,7 @@ impl MagneticStudyResultClosure {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct MagneticStudyReplayContext {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub policy: MagneticStudyPlanningPolicy,
     pub mesh: SolverMeshArtifact,
     pub frozen_project_digest: Option<Digest>,
@@ -94,6 +95,7 @@ impl CompletedMagneticStudy {
             ));
         }
         Ok(MagneticStudyPreparation {
+            local_execution: self.replay.local_execution,
             policy: self.replay.policy,
             product: MagneticStudyProduct {
                 compiled: self.compiled.clone(),
