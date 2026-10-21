@@ -169,6 +169,21 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactSolverProject
                     &error.to_string(),
                 )
             })?;
+        if sources.volume.is_none() {
+            // The surface topology was built from owned vectors, not through the geometry
+            // allocator; charge its retained size to this scope before transferring it.
+            let bytes = projection
+                .retained_storage_bytes(u64::MAX, &mut || Ok(()))
+                .map_err(|error| {
+                    failure(MeshingFailureCategory::MemoryBudgetExceeded, &error.to_string())
+                })?;
+            runmat_geometry_core::GeometryEvaluationControl::consume_allocation_bytes(
+                &retained, bytes,
+            )
+            .map_err(|error| {
+                failure(crate::geometry_failure::category(error.kind), &error.reason)
+            })?;
+        }
         let projection = storage::admit(projection, &retained, &codec)?;
         log_phase(&control, "projection retained");
         drop(codec);
