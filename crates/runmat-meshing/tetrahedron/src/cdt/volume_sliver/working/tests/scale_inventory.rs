@@ -76,6 +76,7 @@ fn representative_grid_preserves_complete_topology_and_quality_through_working_t
         provenance.facets.len()
     );
     let mut request = MetricFieldRequest {
+        entity_supports: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(2.0).unwrap(),
         maximum_grading_ratio: 1.5,

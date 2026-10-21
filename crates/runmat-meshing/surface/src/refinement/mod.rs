@@ -21,10 +21,7 @@ use insertion::insert_exact_face_refinement_candidates;
 pub(crate) use insertion::insert_validated_face_refinement_candidates;
 pub use refine::refine_exact_face_until_blocked;
 pub use select::select_exact_face_refinement_candidate;
-pub(crate) use select::{
-    independent_candidate_batch, select_exact_face_refinement_candidates,
-    separate_refinement_candidate,
-};
+pub(crate) use select::{select_exact_face_refinement_candidates, separate_refinement_candidate};
 pub use types::{
     ExactChartCutSplit, ExactChartCutSplitImage, ExactFaceCandidateDisposition,
     ExactFaceChartRefinedMesh, ExactFaceChartRefinementOptions, ExactFaceChartRefinementOutcome,

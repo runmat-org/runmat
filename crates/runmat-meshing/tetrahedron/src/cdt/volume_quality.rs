@@ -325,6 +325,39 @@ fn protected_facet_identities(
         .collect()
 }
 
+/// Vertex pairs of a tetrahedron's six edges, in the bit order of [`protected_edge_mask`].
+pub(in crate::cdt) const TETRAHEDRON_EDGES: [(usize, usize); 6] =
+    [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)];
+
+/// Bit `k` is set when edge `TETRAHEDRON_EDGES[k]` lies on a protected facet: an edge of the
+/// published surface mesh, which the volume stage never splits.
+fn protected_edge_mask(
+    tetrahedron: [StableDigest; 4],
+    protected_facets: &BTreeSet<[StableDigest; 3]>,
+) -> u8 {
+    let mut mask = 0u8;
+    for opposite in 0..4 {
+        let mut facet = [StableDigest::ZERO; 3];
+        let mut cursor = 0;
+        for (index, identity) in tetrahedron.iter().copied().enumerate() {
+            if index != opposite {
+                facet[cursor] = identity;
+                cursor += 1;
+            }
+        }
+        facet.sort_unstable();
+        if !protected_facets.contains(&facet) {
+            continue;
+        }
+        for (bit, (left, right)) in TETRAHEDRON_EDGES.iter().enumerate() {
+            if *left != opposite && *right != opposite {
+                mask |= 1 << bit;
+            }
+        }
+    }
+    mask
+}
+
 fn protected_facet_count(
     tetrahedron: [StableDigest; 4],
     protected_facets: &BTreeSet<[StableDigest; 3]>,

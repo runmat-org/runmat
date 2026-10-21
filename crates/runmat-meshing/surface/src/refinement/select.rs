@@ -7,7 +7,9 @@ mod protected_edges;
 mod separation;
 mod vertices;
 use super::control::checkpoint;
+#[cfg(test)]
 pub(crate) use batch::independent_candidate_batch;
+pub(crate) use batch::independent_candidate_batch_in_metric;
 use domain::DomainQueries;
 use protected_edges::ProtectedEdges;
 use runmat_geometry_core::GeometryAllocationScope;

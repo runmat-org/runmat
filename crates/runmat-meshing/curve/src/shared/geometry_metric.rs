@@ -185,6 +185,15 @@ pub fn derive_curve_geometry_metric(
             SharedCurveError::invalid_request("curve proximity radius", error.to_string())
         })?
         * 2.0;
+    // Exact edge samples locate edge-local sizing; consumers grade it by distance from the
+    // edge instead of applying it across each face the edge bounds.
+    let supports = edge_witnesses
+        .iter()
+        .map(|witness| runmat_meshing_size::metric::MetricEntitySupport {
+            entity_id: witness.edge_id.clone(),
+            points_m: witness.points_m.clone(),
+        })
+        .collect::<Vec<_>>();
     contributions.extend(derive_proximity_contributions(
         edge_witnesses,
         &contact_pairs,
@@ -192,11 +201,22 @@ pub fn derive_curve_geometry_metric(
         search_radius_m,
         control,
     )?);
-    request
+    let mut resolved = request
         .intersect_contributions(contributions)
         .map_err(|error| {
             SharedCurveError::invalid_request("curve geometry metric", error.to_string())
-        })
+        })?;
+    // Every regular edge carries a support: edge-scoped sizing and the uniform sizing of a
+    // finer adjacent face both grade from it.
+    let mut entity_supports = std::mem::take(&mut resolved.entity_supports);
+    entity_supports.extend(supports);
+    entity_supports.sort_by(|left, right| left.entity_id.cmp(&right.entity_id));
+    entity_supports.dedup_by(|left, right| left.entity_id == right.entity_id);
+    resolved.entity_supports = entity_supports;
+    resolved.validate().map_err(|error| {
+        SharedCurveError::invalid_request("curve geometry metric supports", error.to_string())
+    })?;
+    Ok(resolved)
 }
 
 fn contact_proximity_pairs(

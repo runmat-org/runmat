@@ -1,4 +1,11 @@
-//! Shared constant-face resolution for surface consumers and boundary traces.
+//! Shared face sizing for surface consumers, boundary traces and validation.
+//!
+//! Without entity supports every face has one constant metric and fine faces constrain their
+//! graph neighbors to at most the grading ratio times their size. With supports, a face keeps
+//! only its own uniform contributions; entity-local sizing on its edges and vertices, and the
+//! uniform sizing of each finer neighbor across their shared edges, are graded by distance at
+//! each evaluated point. A fine fillet then refines its neighbors near the fillet, not across
+//! their whole extent.
 use super::*;
 use crate::{grading::grade_metric_evaluations, incidence::TopologyMetricIncidence};
 use runmat_geometry_core::{ExactBRepTopology, GeometryEvaluationControl, GeometryEvaluationError};
@@ -22,18 +29,22 @@ impl From<MetricContractError> for ExactFaceMetricResolutionError {
         Self::Metric(value)
     }
 }
+/// Uniform sizing of one exact face plus the sources graded from it pointwise.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExactFaceSizing {
+    pub uniform: ResolvedMetricEvaluation,
+    pub local: Vec<LocalMetricSource>,
+}
+
 impl ResolvedMetricField {
-    /// Resolve the exact same face incidence and graph grading for every
-    /// consumer. The supplied incidence belongs to the admitted topology.
+    /// Resolve the exact same face sizing for every consumer. The supplied incidence belongs to
+    /// the admitted topology.
     pub fn resolve_exact_faces(
         &self,
         topology: &ExactBRepTopology,
         incidence: &TopologyMetricIncidence,
         control: Option<&dyn GeometryEvaluationControl>,
-    ) -> Result<
-        BTreeMap<PersistentEntityId, ResolvedMetricEvaluation>,
-        ExactFaceMetricResolutionError,
-    > {
+    ) -> Result<BTreeMap<PersistentEntityId, ExactFaceSizing>, ExactFaceMetricResolutionError> {
         let checkpoint = || match control {
             Some(c) => c
                 .checkpoint()
@@ -66,11 +77,11 @@ impl ResolvedMetricField {
                 .into());
             }
         }
-        let mut faces = BTreeMap::new();
+        let mut uniform = BTreeMap::new();
         for face in &topology.faces {
             checkpoint()?;
-            let evaluation = self.resolve(&incidence.incident_face_entities(face))?;
-            if faces.insert(face.id.clone(), evaluation).is_some() {
+            let evaluation = self.resolve_constant(&incidence.incident_face_entities(face))?;
+            if uniform.insert(face.id.clone(), evaluation).is_some() {
                 return Err(MetricContractError::invalid(
                     "exact face inventory",
                     "contains duplicate identities",
@@ -79,12 +90,62 @@ impl ResolvedMetricField {
             }
         }
         checkpoint()?;
-        grade_metric_evaluations(
-            self.request.maximum_grading_ratio,
-            &TopologyMetricIncidence::face_adjacency(topology),
-            &mut faces,
-        )?;
-        checkpoint()?;
-        Ok(faces)
+        if !self.has_supports() {
+            grade_metric_evaluations(
+                self.request.maximum_grading_ratio,
+                &TopologyMetricIncidence::face_adjacency(topology),
+                &mut uniform,
+            )?;
+            return Ok(uniform
+                .into_iter()
+                .map(|(face, uniform)| {
+                    (
+                        face,
+                        ExactFaceSizing {
+                            uniform,
+                            local: Vec::new(),
+                        },
+                    )
+                })
+                .collect());
+        }
+        let mut sizing = BTreeMap::new();
+        for face in &topology.faces {
+            checkpoint()?;
+            let local = self.local_sources(&incidence.incident_face_entities(face))?;
+            sizing.insert(
+                face.id.clone(),
+                ExactFaceSizing {
+                    uniform: uniform[&face.id].clone(),
+                    local,
+                },
+            );
+        }
+        // A finer neighbor constrains a face from their shared edges, graded by distance.
+        for edge in &topology.edges {
+            checkpoint()?;
+            let mut faces = incidence.edge_face_ids(&edge.id).to_vec();
+            faces.sort_unstable();
+            faces.dedup();
+            for receiver in &faces {
+                for neighbor in &faces {
+                    if receiver == neighbor {
+                        continue;
+                    }
+                    let neighbor_metric = uniform[neighbor].metric;
+                    if intersection::dominates(uniform[receiver].metric, neighbor_metric) {
+                        continue;
+                    }
+                    if let Some(source) = self.source_on(&edge.id, neighbor_metric)? {
+                        sizing
+                            .get_mut(receiver)
+                            .expect("resolved every exact face")
+                            .local
+                            .push(source);
+                    }
+                }
+            }
+        }
+        Ok(sizing)
     }
 }
