@@ -168,6 +168,16 @@ impl AnalysisProjection {
             })
     }
 
+    /// Sign that turns the corner-ordered parametric normal `x,ξ × x,η` into the face's
+    /// oriented area vector, shared by reference and deformed-surface integration.
+    pub(crate) fn boundary_parametric_orientation(
+        &self,
+        face: &ProjectedBoundaryFace,
+    ) -> Result<f64, AnalysisProjectionError> {
+        self.boundary_coordinates_and_orientation(face)
+            .map(|(_, _, orientation)| orientation)
+    }
+
     fn boundary_coordinates_and_orientation(
         &self,
         face: &ProjectedBoundaryFace,

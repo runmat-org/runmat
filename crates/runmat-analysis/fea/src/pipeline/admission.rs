@@ -152,6 +152,7 @@ pub(super) fn admit_structural(
     let input = StructuralRealizationInput {
         assemblies,
         procedure: step.procedure,
+        kinematics: step.structural_kinematics(),
         coupling,
         sources: summary.structural_sources.clone(),
         boundary_transfers: summary.structural_boundary_transfers.clone(),

@@ -83,10 +83,10 @@ impl SolidNewtonProblem<'_> {
         work: &mut SolidAttemptWork,
     ) -> Result<AcceptedSolidState, SolidNewtonError> {
         let constitutive = self.basis.zero_state();
-        let displacement = self.reduction.offset.clone();
+        let displacement = vec![0.0; self.basis.dof_count()];
         let contact = self.initial_contact(&displacement)?;
         let evaluation = self
-            .evaluate_trial(&displacement, &constitutive, contact.as_ref())?
+            .evaluate_trial(&displacement, &constitutive, contact.as_ref(), 0.0)?
             .evaluation;
         let residual = self.residual(&evaluation, 0.0)?;
         // Fixed nonzero prescribed displacements need their own equilibrated initial
@@ -143,9 +143,16 @@ impl SolidNewtonProblem<'_> {
             .reduction
             .free_dof_indices
             .iter()
-            .map(|i| state.displacement[*i])
+            .map(|i| state.displacement[*i] - state.load_factor * self.prescribed[*i])
             .collect::<Vec<_>>();
-        let expanded = self.reduction.expand(&free).map_err(constraint_error)?;
+        let expanded = self
+            .reduction
+            .expand(&free)
+            .map_err(constraint_error)?
+            .into_iter()
+            .zip(&self.prescribed)
+            .map(|(u, p)| u + state.load_factor * p)
+            .collect::<Vec<_>>();
         if expanded.iter().any(|v| !v.is_finite())
             || expanded.iter().zip(&state.displacement).any(|(a, b)| {
                 (a - b).abs() > 128.0 * f64::EPSILON * a.abs().max(b.abs()).max(f64::MIN_POSITIVE)
@@ -184,6 +191,7 @@ impl SolidNewtonProblem<'_> {
             &state.displacement,
             &state.constitutive,
             state.contact.as_ref(),
+            state.load_factor,
         )?;
         if let (Some(energy), Some(current)) = (&state.contact_energy, &trial.contact_diagnostics) {
             if state.load_factor > 0. {
@@ -195,7 +203,7 @@ impl SolidNewtonProblem<'_> {
         let scale = norm(
             &self
                 .reduction
-                .transpose_apply(self.physical_force)
+                .transpose_apply(&self.scale_force)
                 .map_err(constraint_error)?,
         ) * state.load_factor;
         let relative_residual = relative_norm(&residual, scale);

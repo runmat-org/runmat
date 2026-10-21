@@ -234,9 +234,25 @@ pub(super) fn recover(
             )
         })
         .collect::<Vec<_>>();
-    // Contact is not part of the admitted J2 envelope; no synthetic contact entities.
-    let contact_pressure_snapshots = Vec::new();
-    let contact_gap_snapshots = Vec::new();
+    // One value per contact point of the prepared contact operator, in operator order.
+    let contact_point_fields = |snapshots: &[Vec<f64>], id: fn(usize) -> String| {
+        snapshots
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(index, values)| {
+                AnalysisField::host_f64(id(first_output_index + index), vec![values.len()], values)
+            })
+            .collect::<Vec<_>>()
+    };
+    let contact_pressure_snapshots = contact_point_fields(
+        &nonlinear.contact_pressure_snapshots,
+        crate::contracts::fea_nonlinear_contact_pressure_field_id,
+    );
+    let contact_gap_snapshots = contact_point_fields(
+        &nonlinear.contact_gap_snapshots,
+        crate::contracts::fea_nonlinear_contact_gap_field_id,
+    );
     let load_factor_snapshots = nonlinear
         .load_factors
         .iter()

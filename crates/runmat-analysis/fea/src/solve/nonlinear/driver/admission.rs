@@ -1,7 +1,7 @@
 use crate::FeaRunError;
 use runmat_analysis_core::{
     AnalysisModel, AnalysisProcedure, ExcitationAction, ExcitationKinematics, PhysicsFamily,
-    RestartPolicy, SignalDomainKind,
+    RestartPolicy, SignalDomainKind, StructuralKinematics,
 };
 
 pub(crate) fn require_fixed_structural_nonlinear(model: &AnalysisModel) -> Result<(), FeaRunError> {
@@ -28,6 +28,8 @@ pub(crate) fn require_fixed_structural_nonlinear(model: &AnalysisModel) -> Resul
             "J2 boundary operators are not realized in this envelope; use supported typed mechanical pressure/traction excitations".into(),
         ));
     }
+    let large_deformation =
+        model.sequence.steps[0].structural_kinematics() == StructuralKinematics::LargeDeformation;
     for action in &model.excitations {
         if !matches!(
             action,
@@ -35,9 +37,18 @@ pub(crate) fn require_fixed_structural_nonlinear(model: &AnalysisModel) -> Resul
                 | ExcitationAction::Traction(_)
                 | ExcitationAction::Pressure(_)
                 | ExcitationAction::BodyForce(_)
-        ) || action.excitation().kinematics != ExcitationKinematics::FixedFrame
+        ) {
+            return Err(FeaRunError::InvalidModel(
+                "structural nonlinear supports force, traction, pressure and body-force loads only"
+                    .into(),
+            ));
+        }
+        if action.excitation().kinematics == ExcitationKinematics::Follower
+            && !large_deformation
         {
-            return Err(FeaRunError::InvalidModel("J2 supports fixed-frame mechanical dead loads only; no follower or coupled actions".into()));
+            return Err(FeaRunError::InvalidModel(
+                "follower loads change direction with the deformed surface and require `kinematics = large_deformation`".into(),
+            ));
         }
         let signal = model
             .signals

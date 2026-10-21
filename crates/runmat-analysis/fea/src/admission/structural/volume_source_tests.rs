@@ -8,6 +8,7 @@ fn input(
     StructuralRealizationInput {
         assemblies: vec![StructuralFormulationRealization::new(operator, recovery)],
         procedure: AnalysisProcedure::TransientResponse,
+        kinematics: runmat_analysis_core::StructuralKinematics::SmallStrain,
         coupling: CouplingImplementation::Uncoupled,
         sources: vec![source],
         boundary_transfers: vec![valid_boundary(operator)],

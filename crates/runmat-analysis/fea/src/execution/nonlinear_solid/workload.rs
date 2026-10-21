@@ -27,7 +27,7 @@ impl NonlinearSolidWorkload {
         self.controls.validate_controls().map_err(invalid)?;
         if self.controls.formulation_requirement != FormulationRequirement::Experimental
             || self.controls.solver_mesh.is_some()
-            || self.controls.contact_context.is_some()
+            || self.controls.contact_enforcement.is_some()
             || !self.model.interfaces.is_empty()
         {
             return Err(invalid(

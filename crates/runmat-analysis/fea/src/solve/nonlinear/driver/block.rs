@@ -61,9 +61,14 @@ pub(crate) fn run_nonlinear_load_block(
             "J2 quasistatic solids are experimental, not production qualified".into(),
         ));
     }
-    if execution.backend != ComputeBackend::Cpu || options.contact_context.is_some() {
+    if execution.backend != ComputeBackend::Cpu {
         return Err(FeaRunError::InvalidModel(
-            "J2 quasistatic solids require CPU and do not support contact".into(),
+            "canonical nonlinear solids run on the CPU backend".into(),
+        ));
+    }
+    if execution.contact.is_none() && !model.interfaces.is_empty() {
+        return Err(FeaRunError::InvalidModel(
+            "authored contact interfaces need a prepared contact operator".into(),
         ));
     }
     if !start.is_finite() || start != 0.0 || !end.is_finite() || end <= start {
@@ -102,8 +107,21 @@ pub(crate) fn run_nonlinear_load_block(
         coupling.map(|c| c.operator),
     )
     .map_err(map_assembly_error)?;
+    // Follower loads are configuration dependent: they are realized from the same authored
+    // step, kept out of the dead-load vector, and integrated on the deformed boundary.
+    let excitations = crate::excitation::realize_step_excitations(
+        model,
+        &model.sequence.steps[0],
+        crate::excitation::ExcitationSamplePoint::Static,
+    )
+    .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+    let follower = basis
+        .prepare_follower_loads(mesh, &excitations)
+        .map_err(map_assembly_error)?;
     let mut policy = options.newton_policy();
     let problem = SolidNewtonProblem::prepare_with_contact(&basis, summary, policy, coupling)
+        .map_err(map_error)?
+        .with_follower_loads(follower.as_ref())
         .map_err(map_error)?
         .with_solver_admission(execution.solver_admission);
     let nominal = (end - start) / options.increment_count as f64;

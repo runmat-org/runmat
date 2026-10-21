@@ -151,6 +151,7 @@ fn registered_realizations(
                 structural_exact_realization(StructuralRealizationInput {
                     assemblies: vec![assembly],
                     procedure,
+                    kinematics: runmat_analysis_core::StructuralKinematics::SmallStrain,
                     coupling: CouplingImplementation::Uncoupled,
                     sources: vec![runmat_analysis_core::SourceImplementation::NotApplicable],
                     boundary_transfers: vec![

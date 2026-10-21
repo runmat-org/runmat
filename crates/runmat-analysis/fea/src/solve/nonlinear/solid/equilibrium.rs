@@ -10,18 +10,25 @@ impl SolidNewtonProblem<'_> {
         factor: f64,
         work: &mut SolidAttemptWork,
     ) -> Result<AcceptedSolidIncrement, SolidNewtonError> {
-        let mut displacement = committed.displacement.clone();
+        // Supports move with the load factor; free coordinates start from the accepted state.
+        let mut displacement = committed
+            .displacement
+            .iter()
+            .zip(&self.prescribed)
+            .map(|(u, p)| u + (factor - committed.load_factor) * p)
+            .collect::<Vec<_>>();
         let mut evaluation = self.evaluate_trial(
             &displacement,
             &committed.constitutive,
             committed.contact.as_ref(),
+            factor,
         )?;
         work.tangent_evaluations += 1;
         let mut residual = self.residual(&evaluation.evaluation, factor)?;
         let force_norm = norm(
             &self
                 .reduction
-                .transpose_apply(self.physical_force)
+                .transpose_apply(&self.scale_force)
                 .map_err(constraint_error)?,
         ) * factor;
         let scale = force_norm.max(norm(&residual));
@@ -44,11 +51,7 @@ impl SolidNewtonProblem<'_> {
             }
             let correction =
                 self.correction(&evaluation.evaluation.tangent, &residual, factor, work)?;
-            let motion_norm = |u: &[f64]| {
-                u.iter()
-                    .zip(&self.reduction.offset)
-                    .fold(0.0_f64, |n, (value, offset)| n.hypot(value - offset))
-            };
+            let motion_norm = |u: &[f64]| u.iter().fold(0.0_f64, |n, value| n.hypot(*value));
             let motion_scale = motion_norm(&displacement).max(motion_norm(&committed.displacement));
             let relative_increment = relative_norm(&correction, motion_scale);
             if relative_residual <= self.policy.relative_residual_tolerance
@@ -129,6 +132,7 @@ impl SolidNewtonProblem<'_> {
                     &trial_u,
                     &committed.constitutive,
                     committed.contact.as_ref(),
+                    factor,
                 )?;
                 work.tangent_evaluations += 1;
                 let trial_residual = self.residual(&trial.evaluation, factor)?;

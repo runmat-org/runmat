@@ -26,14 +26,14 @@ fn combined_scope_history_and_general_admission_reject_substitution() {
     encoded["contact"]["points"][0]["point"]["frictional_work_j_per_m2"] = (-1.).into();
     let corrupt: AcceptedSolidState = serde_json::from_value(encoded).unwrap();
     assert!(problem.validate_accepted(&corrupt).is_err());
+    // The Krylov correction builds no uniqueness proof, so its envelope is not a separate
+    // preparation admission: the coupling still prepares and its scope binds the envelope.
     let mut coupling = CoupledFixture::coupling(&operator);
     coupling.solve_admission.resident_bytes = 0;
-    assert!(matches!(
-        SolidNewtonProblem::prepare_with_contact(&basis, &f.summary, policy(), Some(coupling)),
-        Err(SolidNewtonError::General(
-            crate::solve::general::GeneralSolveError::Admission
-        ))
-    ));
+    assert!(
+        SolidNewtonProblem::prepare_with_contact(&basis, &f.summary, policy(), Some(coupling))
+            .is_ok()
+    );
     for budget in 0..3 {
         let mut coupling = CoupledFixture::coupling(&operator);
         if budget == 0 {
@@ -92,8 +92,6 @@ fn zero_load_open_contact_does_not_accept_unanchored_body_tangent() {
             .unwrap();
     assert!(matches!(
         problem.initial_state(),
-        Err(SolidNewtonError::General(
-            crate::solve::general::GeneralSolveError::UniquenessNotEstablished(_)
-        ))
+        Err(SolidNewtonError::Evaluation(reason)) if reason.contains("singular")
     ));
 }

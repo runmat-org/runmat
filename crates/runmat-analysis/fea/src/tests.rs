@@ -23,7 +23,7 @@ use crate::{
         nonlinear::NonlinearSolveOptions,
         transient::{StructuralTimeStepPolicy, TransientSolveOptions},
     },
-    ComputeBackend, FeaContactInterfaceContext, FeaRunResult, LinearStaticSolveOptions,
+    ComputeBackend, FeaContactEnforcement, FeaRunResult, LinearStaticSolveOptions,
     ModalSolveOptions, ModalTruncationPolicy, ThermalProcedureControl, ThermalSolveOptions,
     FEA_FIELD_MODAL_CUMULATIVE_EFFECTIVE_MASS, FEA_FIELD_MODAL_CUMULATIVE_MASS_RATIO,
     FEA_FIELD_MODAL_EFFECTIVE_MASS, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
@@ -4500,7 +4500,7 @@ fn nonlinear_contact_reference_is_explicitly_unsupported() {
         &model,
         ComputeBackend::Cpu,
         NonlinearSolveOptions {
-            contact_context: Some(FeaContactInterfaceContext {
+            contact_enforcement: Some(FeaContactEnforcement {
                 enabled: true,
                 penalty_stiffness_scale: 2.0,
                 max_penetration_ratio: 0.01,

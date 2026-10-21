@@ -168,6 +168,73 @@ pub fn solve_general_system(
         certificate,
     })
 }
+/// Newton correction with a general (nonsymmetric) tangent: right ILU(0)-preconditioned
+/// restarted GMRES. Used where the nonlinear residual, not the linear solve, accepts the
+/// iterate (follower loads, frictional contact), so no operator uniqueness proof is built.
+pub(crate) fn solve_newton_correction(
+    matrix: &RealSparseMatrix,
+    rhs: &[f64],
+    policy: GmresPolicy,
+) -> Result<GeneralCorrection, GeneralSolveError> {
+    cancelled()?;
+    if rhs.len() != matrix.rows() || rhs.iter().any(|v| !v.is_finite()) {
+        return Err(GeneralSolveError::Invalid);
+    }
+    let ilu = SparseRightIlu::factor(matrix, crate::is_fea_cancelled).map_err(ilu_error)?;
+    let result = restarted_gmres(
+        rhs,
+        &vec![0.0; rhs.len()],
+        policy,
+        |y| {
+            cancelled()?;
+            let x = ilu.apply(y, crate::is_fea_cancelled).map_err(ilu_error)?;
+            spmv(matrix, &x).map_err(|_| GeneralSolveError::Operator)
+        },
+        |a, b| {
+            let d = crate::algebra::dot_canonical(a, b);
+            if d.is_finite() {
+                Ok(d)
+            } else {
+                Err(GeneralSolveError::Operator)
+            }
+        },
+        crate::is_fea_cancelled,
+    )?
+    .ok_or(GeneralSolveError::Operator)?;
+    if result.cancelled {
+        return Err(GeneralSolveError::Cancelled);
+    }
+    let solution = ilu
+        .apply(&result.solution, crate::is_fea_cancelled)
+        .map_err(ilu_error)?;
+    let action = spmv(matrix, &solution).map_err(|_| GeneralSolveError::Operator)?;
+    let residual = action
+        .iter()
+        .zip(rhs)
+        .fold(0.0_f64, |norm, (a, b)| norm.hypot(a - b));
+    let load = rhs.iter().fold(0.0_f64, |norm, b| norm.hypot(*b));
+    let relative_residual = if load == 0.0 { residual } else { residual / load };
+    if !relative_residual.is_finite() || solution.iter().any(|v| !v.is_finite()) {
+        return Err(GeneralSolveError::Operator);
+    }
+    if !result.converged || result.breakdown || relative_residual > policy.relative_tolerance {
+        return Err(GeneralSolveError::NotConverged {
+            iterations: result.iterations,
+            relative_residual,
+        });
+    }
+    Ok(GeneralCorrection {
+        solution,
+        iterations: result.iterations,
+    })
+}
+
+#[derive(Debug)]
+pub(crate) struct GeneralCorrection {
+    pub solution: Vec<f64>,
+    pub iterations: u32,
+}
+
 fn cancelled() -> Result<(), GeneralSolveError> {
     if crate::is_fea_cancelled() {
         Err(GeneralSolveError::Cancelled)

@@ -25,6 +25,7 @@ fn input(operator: StructuralOperatorImplementation) -> StructuralRealizationInp
     StructuralRealizationInput {
         assemblies: vec![StructuralFormulationRealization::new(operator, recovery)],
         procedure: AnalysisProcedure::Nonlinear,
+        kinematics: runmat_analysis_core::StructuralKinematics::SmallStrain,
         coupling: CouplingImplementation::Uncoupled,
         sources: vec![SourceImplementation::CanonicalBoundaryPressureIntegration],
         boundary_transfers: vec![BoundaryTransferImplementation::CanonicalBoundaryProjection],
