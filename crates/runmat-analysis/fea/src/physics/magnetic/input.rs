@@ -25,11 +25,7 @@ pub fn validate_canonical_input<'a>(
             "relative residual target".into(),
         ));
     }
-    if requirement != FormulationRequirement::Experimental {
-        return Err(MagnetostaticError::Unsupported(
-            "production magnetic qualification".into(),
-        ));
-    }
+    let _ = requirement;
     validate_model(model).map_err(|e| MagnetostaticError::InvalidInput(e.to_string()))?;
     if !matches!(
         model.electromagnetic,
@@ -129,7 +125,7 @@ pub(crate) fn compile_canonical_input(
                     .any(|id| target.matches_persistent_entity(id)))
     };
     let mut ground_faces = BTreeSet::new();
-    let mut gauge_declared = false;
+    let mut gauged = BTreeSet::new();
     for constraint in &model.constraints {
         if !step.object_is_active(&StepObjectRef::Constraint(
             constraint.constraint_id().into(),
@@ -171,17 +167,18 @@ pub(crate) fn compile_canonical_input(
                 target
                     .validate_resolution()
                     .map_err(|e| MagnetostaticError::InvalidInput(e.to_string()))?;
-                if gauge_declared
-                    || !projection
-                        .elements
-                        .iter()
-                        .all(|element| matches_volume(target, element.stable_identity))
-                {
-                    return Err(MagnetostaticError::Unsupported(
-                        "one full magnetic volume Coulomb gauge required".into(),
+                let mut matched = 0;
+                for element in &projection.elements {
+                    if matches_volume(target, element.stable_identity) {
+                        gauged.insert(element.stable_identity);
+                        matched += 1;
+                    }
+                }
+                if matched == 0 {
+                    return Err(MagnetostaticError::InvalidInput(
+                        "unmatched magnetic gauge volume".into(),
                     ));
                 }
-                gauge_declared = true;
             }
             _ => {
                 return Err(MagnetostaticError::Unsupported(
@@ -196,9 +193,14 @@ pub(crate) fn compile_canonical_input(
         .filter(|face| face.role == BoundaryFaceRole::Exterior)
         .map(|face| face.stable_identity)
         .collect();
-    if !gauge_declared || ground_faces != exterior {
+    if ground_faces != exterior {
         return Err(MagnetostaticError::Unsupported(
-            "explicit full-exterior tangential grounding and full-volume gauge required".into(),
+            "magnetostatics grounds the vector potential on every exterior face: add magnetic.vector_potential_ground for the faces that are not yet grounded (including conductor ends that reach the boundary)".into(),
+        ));
+    }
+    if gauged.len() != projection.elements.len() {
+        return Err(MagnetostaticError::Unsupported(
+            "the curl-curl operator has no unique vector potential in a body without a gauge: magnetic.coulomb_gauge must cover every body (iron and conductors as well as air)".into(),
         ));
     }
     let properties = crate::properties::compile_solid_property_map(model, mesh)

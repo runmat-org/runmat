@@ -43,11 +43,17 @@ pub(super) fn registered_realizations() -> Vec<ExactFormulationRealization> {
                 [
                     CanonicalElectricalSource::SourceFree,
                     CanonicalElectricalSource::VolumeCharge,
+                    CanonicalElectricalSource::BoundaryCurrent,
                 ]
                 .into_iter()
-                .filter(move |source| {
-                    equation == StaticElectricalEquation::Electrostatics
-                        || *source == CanonicalElectricalSource::SourceFree
+                .filter(move |source| match source {
+                    CanonicalElectricalSource::SourceFree => true,
+                    CanonicalElectricalSource::VolumeCharge => {
+                        equation == StaticElectricalEquation::Electrostatics
+                    }
+                    CanonicalElectricalSource::BoundaryCurrent => {
+                        equation == StaticElectricalEquation::SteadyConduction
+                    }
                 })
                 .map(move |source| realization(equation, order, source))
             })
@@ -86,6 +92,9 @@ pub(crate) fn realization(
                 CanonicalElectricalSource::SourceFree => SourceImplementation::NotApplicable,
                 CanonicalElectricalSource::VolumeCharge => {
                     SourceImplementation::CanonicalVolumeProjection
+                }
+                CanonicalElectricalSource::BoundaryCurrent => {
+                    SourceImplementation::CanonicalBoundaryProjection
                 }
             }],
         }],

@@ -7,6 +7,7 @@
 mod acoustic_execution;
 mod assessment;
 mod callable;
+mod chain;
 mod electrical_execution;
 mod execution;
 mod fluid_execution;
@@ -193,16 +194,62 @@ pub async fn execute_checked_fea_locally(
         .resolve_root(options.root.as_ref())
         .map_err(|error| error.to_string())?;
     match root {
-        ResolvedFeaRoot::Study(study) => execute_case(source, study, Vec::new(), &options)
+        ResolvedFeaRoot::Study(study) => {
+            let frequencies = harmonic_frequency_cases(&study);
+            let chained = chain::heating_chain(&study).is_some()
+                || chain::electrothermal_analysis(&study).is_some();
+            if frequencies.len() <= 1 && !chained {
+                return execute_case(source, study, Vec::new(), &options)
+                    .await
+                    .map(Box::new)
+                    .map(LocalFeaExecution::Study);
+            }
+            // Every authored frequency of a harmonic electromagnetic analysis is an
+            // independent solve (and drives its own downstream heating analysis); run them
+            // as cases in parallel, each keyed by its frequency.
+            let sweep_id = format!("{}.cases", study.study.study_id);
+            let frequencies = if frequencies.is_empty() {
+                vec![f64::NAN]
+            } else {
+                frequencies
+            };
+            let available = std::thread::available_parallelism().map_or(1, usize::from);
+            let concurrency = available.min(frequencies.len()).max(1);
+            let groups = futures::stream::iter(frequencies.into_iter().enumerate().map(
+                |(index, frequency)| {
+                    let case = if frequency.is_nan() {
+                        study.clone()
+                    } else {
+                        single_frequency_study(&study, frequency)
+                    };
+                    let prefix = if frequency.is_nan() {
+                        String::new()
+                    } else {
+                        frequency_case_id(frequency)
+                    };
+                    let options = &options;
+                    async move {
+                        execute_study_cases(source, case, &prefix, options)
+                            .await
+                            .map(|cases| (index, cases))
+                    }
+                },
+            ))
+            .buffer_unordered(concurrency)
+            .collect::<Vec<_>>()
             .await
-            .map(Box::new)
-            .map(LocalFeaExecution::Study),
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?;
+            let mut groups = groups;
+            groups.sort_by_key(|(index, _)| *index);
+            Ok(LocalFeaExecution::Sweep {
+                sweep_id,
+                cases: groups.into_iter().flat_map(|(_, cases)| cases).collect(),
+            })
+        }
         ResolvedFeaRoot::Sweep(sweep) => {
-            if sweep.study.study.sequence.steps.iter().any(|step| {
-                step.family == runmat_analysis_core::PhysicsFamily::Electromagnetic
-                    && step.procedure == runmat_analysis_core::AnalysisProcedure::HarmonicResponse
-            }) {
-                return Err("authored Maxwell sweeps are outside the qualified singleton-frequency execution envelope".into());
+            if harmonic_frequency_cases(&sweep.study).len() > 1 {
+                return Err("a parameter sweep over a multi-frequency harmonic analysis is not supported; sweep one frequency per study or list the frequencies without a sweep".into());
             }
             let expanded = sweep
                 .sweep
@@ -247,6 +294,45 @@ pub async fn execute_checked_fea_locally(
     }
 }
 
+/// Authored frequencies of the study's harmonic electromagnetic analysis (empty if none).
+fn harmonic_frequency_cases(study: &runmat_analysis_language::ResolvedAnalysisStudy) -> Vec<f64> {
+    study
+        .study
+        .sequence
+        .steps
+        .iter()
+        .find(|step| {
+            step.family == runmat_analysis_core::PhysicsFamily::Electromagnetic
+                && step.procedure == runmat_analysis_core::AnalysisProcedure::HarmonicResponse
+        })
+        .and_then(|step| match &step.independent_domain {
+            runmat_analysis_core::IndependentDomain::FrequencyHertz(values) => Some(values.clone()),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
+/// The authored study restricted to one of its harmonic frequencies.
+fn single_frequency_study(
+    study: &runmat_analysis_language::ResolvedAnalysisStudy,
+    frequency: f64,
+) -> runmat_analysis_language::ResolvedAnalysisStudy {
+    let mut case = study.clone();
+    for step in &mut case.study.sequence.steps {
+        if step.family == runmat_analysis_core::PhysicsFamily::Electromagnetic
+            && step.procedure == runmat_analysis_core::AnalysisProcedure::HarmonicResponse
+        {
+            step.independent_domain =
+                runmat_analysis_core::IndependentDomain::FrequencyHertz(vec![frequency]);
+        }
+    }
+    case
+}
+
+fn frequency_case_id(frequency: f64) -> String {
+    format!("frequency={frequency}Hz")
+}
+
 fn sweep_concurrency(
     sweep: &runmat_analysis_language::ResolvedAnalysisSweep,
     options: &LocalFeaExecutionOptions,
@@ -286,6 +372,95 @@ fn sweep_concurrency(
         .min(available / workers_per_case.saturating_mul(threads_per_worker))
         .max(1)
         .min(case_count)
+}
+
+/// One study case, or the two analyses of a harmonic-heating chain run in order.
+async fn execute_study_cases(
+    source: &runmat_core::CheckedFeaSessionSource,
+    study: runmat_analysis_language::ResolvedAnalysisStudy,
+    prefix: &str,
+    options: &LocalFeaExecutionOptions,
+) -> Result<Vec<CompletedLocalFeaCase>, String> {
+    let label = |analysis: &str| {
+        if prefix.is_empty() {
+            analysis.to_string()
+        } else {
+            format!("{prefix}/{analysis}")
+        }
+    };
+    if let Some(analysis) = chain::electrothermal_analysis(&study) {
+        // Heat transfer iterated with conduction to the two-way fixed point, then the
+        // conduction field at the solved temperatures (final time of a transient).
+        let authority = format!("typed-fea-local:{}", uuid::Uuid::new_v4());
+        let prepared = preparation::prepare_study_with_role(
+            source,
+            study.clone(),
+            &[],
+            &authority,
+            options,
+            preparation::PreparationRole::ElectrothermalHeat,
+        )
+        .await?;
+        let mut heat = execute_prepared_with_source(prepared, options, Some(source)).await?;
+        heat.case_id = label(&analysis);
+        let CompletedFeaStudyResult::Thermal(thermal) = &heat.result else {
+            return Err("electrothermal heat transfer did not produce a thermal result".into());
+        };
+        let operating = thermal
+            .electrothermal
+            .as_ref()
+            .ok_or("electrothermal heat transfer did not report its operating point")?;
+        let authority = format!("typed-fea-local:{}", uuid::Uuid::new_v4());
+        let prepared = preparation::prepare_study_with_role(
+            source,
+            study,
+            &[],
+            &authority,
+            options,
+            preparation::PreparationRole::ElectrothermalConduction {
+                element_temperature_k: operating.element_temperature_k.clone(),
+                operating_time_s: operating.operating_time_s,
+            },
+        )
+        .await?;
+        let mut conduction = execute_prepared_with_source(prepared, options, Some(source)).await?;
+        conduction.case_id = label(&format!("{analysis}/conduction"));
+        return Ok(vec![heat, conduction]);
+    }
+    let Some(chain) = chain::heating_chain(&study) else {
+        let mut case = execute_case(source, study, Vec::new(), options).await?;
+        case.case_id = prefix.to_string();
+        return Ok(vec![case]);
+    };
+    let mut harmonic =
+        execute_case(source, chain::sub_study(&study, &chain.harmonic), Vec::new(), options)
+            .await?;
+    harmonic.case_id = label(&chain.harmonic);
+    let CompletedFeaStudyResult::Maxwell(maxwell) = &harmonic.result else {
+        return Err("the heat source of a thermal analysis must come from a harmonic electromagnetic analysis".into());
+    };
+    let density = maxwell
+        .completion
+        .result
+        .element_loss_density_w_per_m3(&maxwell.mesh)
+        .map_err(|error| error.to_string())?;
+    let authority = format!("typed-fea-local:{}", uuid::Uuid::new_v4());
+    let prepared = preparation::prepare_study_with_role(
+        source,
+        chain::sub_study(&study, &chain.thermal),
+        &[],
+        &authority,
+        options,
+        preparation::PreparationRole::Heated(preparation::PreparedHeatSource {
+            step_id: chain.thermal.clone(),
+            source_id: format!("{}.{}", chain.harmonic, chain.state_id),
+            element_density_w_per_m3: density,
+        }),
+    )
+    .await?;
+    let mut thermal = execute_prepared_with_source(prepared, options, Some(source)).await?;
+    thermal.case_id = label(&chain.thermal);
+    Ok(vec![harmonic, thermal])
 }
 
 async fn execute_case(

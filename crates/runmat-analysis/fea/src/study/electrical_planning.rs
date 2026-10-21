@@ -12,10 +12,17 @@ use crate::execution::ElectricalStaticWorkload;
 #[cfg(test)]
 mod tests;
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ElectricalStudyPlanningPolicy {
     pub formulation_requirement: FormulationRequirement,
+    /// Steady conduction at a solved temperature field (an electrothermal operating point):
+    /// one temperature per canonical volume element; conductivity follows each material's
+    /// temperature law. `None` uses the materials' reference conductivity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub element_temperature_k: Option<Vec<f64>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operating_time_s: Option<f64>,
 }
 
 /// Preserves the explicit equation, model and tightest authored relative algebraic target.
@@ -47,6 +54,8 @@ pub fn plan_electrical_study(
         step_id: step.step_id.clone(),
         formulation_requirement: policy.formulation_requirement,
         relative_residual_target,
+        element_temperature_k: policy.element_temperature_k.clone(),
+        operating_time_s: policy.operating_time_s,
     };
     workload
         .validate()

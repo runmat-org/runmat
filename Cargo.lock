@@ -6868,6 +6868,7 @@ name = "runmat-analysis-fea"
 version = "0.6.2"
 dependencies = [
  "anyhow",
+ "faer",
  "futures",
  "libc",
  "runmat-accelerate-api",

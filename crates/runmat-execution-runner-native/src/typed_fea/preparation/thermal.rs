@@ -11,6 +11,10 @@ use runmat_execution::{resource::AcceleratorRequest, Digest, ProgramRevision};
 use runmat_execution_artifact::ArtifactAccess;
 
 pub struct PreparedAuthoredThermalStudy {
+    /// Solved upstream heat source (for example an AC loss) bound after meshing.
+    pub heat_source: Option<super::PreparedHeatSource>,
+    /// Iterate this heat transfer with the study's conduction to the two-way fixed point.
+    pub electrothermal: bool,
     pub geometry_meshing: crate::PreparedGeometryMeshingRoot,
     pub authored_study_digest: Digest,
     pub frozen_project_digest: Option<Digest>,

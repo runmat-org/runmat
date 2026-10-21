@@ -96,15 +96,45 @@ pub(super) async fn execute(
         None,
         None,
     );
-    let product = build_electrical_study_product(ElectricalStudyProductInput {
-        study: &prepared.study,
-        geometry: &geometry.output.document,
-        regions: &geometry.output.regions,
-        materials: &prepared.materials,
-        mesh: &geometry.meshing.artifact,
-        planning: prepared.planning,
-    })
-    .map_err(|e| e.to_string())?;
+    let product = if prepared.electrothermal_conduction {
+        // The conduction side of an electrothermal analysis, at its solved temperatures.
+        let mut compiled = runmat_analysis_fea::study::compile_analysis_study(
+            runmat_analysis_fea::study::AnalysisStudyCompilationInput {
+                study: &prepared.study,
+                geometry: &geometry.output.document,
+                regions: &geometry.output.regions,
+                materials: &prepared.materials,
+                mesh: &geometry.meshing.artifact,
+            },
+        )
+        .map_err(|e| e.to_string())?;
+        let [step] = compiled.model.sequence.steps.as_slice() else {
+            return Err("electrothermal conduction requires one analysis".into());
+        };
+        let step = step.clone();
+        compiled.model = runmat_analysis_fea::execution::electrical_part(&compiled.model, &step);
+        runmat_analysis_core::retain_authored_outputs(
+            &mut compiled.outputs,
+            &mut compiled.assessments,
+            |_, quantity| is_electrical_quantity(quantity),
+        );
+        runmat_analysis_fea::study::plan_electrical_study_product(
+            compiled,
+            &geometry.meshing.artifact,
+            prepared.planning,
+        )
+        .map_err(|e| e.to_string())?
+    } else {
+        build_electrical_study_product(ElectricalStudyProductInput {
+            study: &prepared.study,
+            geometry: &geometry.output.document,
+            regions: &geometry.output.regions,
+            materials: &prepared.materials,
+            mesh: &geometry.meshing.artifact,
+            planning: prepared.planning,
+        })
+        .map_err(|e| e.to_string())?
+    };
     emit_local_progress(
         &observers,
         "fea.typed_study",
@@ -244,4 +274,16 @@ mod tests {
             Err(ElectricalNativeEnvelopeError::SourceMaterialization)
         );
     }
+}
+
+fn is_electrical_quantity(quantity: runmat_analysis_core::ObservationQuantity) -> bool {
+    use runmat_analysis_core::ObservationQuantity as Q;
+    matches!(
+        quantity,
+        Q::ElectricPotential
+            | Q::ElectricField
+            | Q::ElectricCurrentDensity
+            | Q::JoulePowerDensity
+            | Q::ElectricCurrent
+    )
 }

@@ -24,7 +24,15 @@ impl ElectricalAssembly {
         projection: AnalysisProjection,
         properties: &CompiledPropertyMap,
         equation: StaticElectricalEquation,
+        conductivity_override: Option<&[f64]>,
     ) -> Result<Self, ElectricalStaticError> {
+        if conductivity_override
+            .is_some_and(|values| values.len() != projection.elements.len())
+        {
+            return Err(ElectricalStaticError::Material(
+                "one conductivity per element is required".into(),
+            ));
+        }
         let count = projection.nodes.len();
         let mut stiffness = RealSparseAssembler::square(
             count,
@@ -54,7 +62,7 @@ impl ElectricalAssembly {
             crate::algebra::anchored_energy::AnchoredEnergySource::new(widths, source_bytes)
                 .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?;
         let mut coefficients = Vec::with_capacity(projection.elements.len());
-        for element in &projection.elements {
+        for (element_index, element) in projection.elements.iter().enumerate() {
             let material = &properties
                 .solid_material(element.stable_identity)
                 .ok_or_else(|| {
@@ -64,18 +72,20 @@ impl ElectricalAssembly {
             let electrical = material.electrical.as_ref().ok_or_else(|| {
                 ElectricalStaticError::Material("missing electrical constitutive model".into())
             })?;
-            if !electrical.conductivity_frequency_response.is_empty()
-                || electrical.resistive_heating_coefficient != 0.0
-            {
+            if !electrical.conductivity_frequency_response.is_empty() {
                 return Err(ElectricalStaticError::Unsupported(
-                    "dispersive or temperature-dependent electrical law".into(),
+                    "frequency-dependent conductivity in a static analysis".into(),
                 ));
             }
+            // A standalone static solve has no temperature field: conductivity is the
+            // material's value at its reference temperature. Coupled electrothermal solves
+            // pass the conductivity evaluated at each element's temperature.
             let coefficient = match equation {
                 StaticElectricalEquation::Electrostatics => {
                     VACUUM_PERMITTIVITY_F_PER_M * electrical.relative_permittivity
                 }
-                StaticElectricalEquation::SteadyConduction => electrical.conductivity_s_per_m,
+                StaticElectricalEquation::SteadyConduction => conductivity_override
+                    .map_or(electrical.conductivity_s_per_m, |values| values[element_index]),
             };
             if !coefficient.is_finite() || coefficient <= 0.0 {
                 return Err(ElectricalStaticError::Material(

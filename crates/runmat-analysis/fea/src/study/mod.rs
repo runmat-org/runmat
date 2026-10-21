@@ -35,7 +35,8 @@ pub use electrical_planning::{
     plan_electrical_study, ElectricalStudyPlanningError, ElectricalStudyPlanningPolicy,
 };
 pub use electrical_product::{
-    build_electrical_study_product, ElectricalStudyProduct, ElectricalStudyProductError,
+    build_electrical_study_product, plan_electrical_study_product, ElectricalStudyProduct,
+    ElectricalStudyProductError,
     ElectricalStudyProductInput,
 };
 pub use fluid_material::{derive_canonical_fluid_material, FluidMaterialCompilationError};

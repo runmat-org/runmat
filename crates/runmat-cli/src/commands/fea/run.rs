@@ -71,16 +71,26 @@ async fn execute_study(
             )
             .await
             .map_err(anyhow::Error::msg)?;
-            let runmat_execution_runner_native::LocalFeaExecution::Study(completed) = completed
-            else {
-                bail!("selected study resolved to a sweep during native execution");
-            };
-            print_completed_fea_result(
-                &completed.case_id,
-                &completed.result,
-                &completed.publication,
-                json,
-            )
+            match completed {
+                runmat_execution_runner_native::LocalFeaExecution::Study(completed) => {
+                    print_completed_fea_result(
+                        &completed.case_id,
+                        &completed.result,
+                        &completed.publication,
+                        json,
+                    )
+                }
+                // A multi-frequency harmonic study runs one case per frequency.
+                runmat_execution_runner_native::LocalFeaExecution::Sweep { sweep_id, cases } => {
+                    let summaries = cases
+                        .iter()
+                        .map(|case| {
+                            completed_summary(&case.case_id, &case.result, &case.publication)
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+                    print_sweep_result(&sweep_id, &summaries, json)
+                }
+            }
         }
         ExecutionTarget::Remote(target) => {
             execute_study_remotely(

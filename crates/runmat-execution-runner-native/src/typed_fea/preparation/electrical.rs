@@ -20,6 +20,9 @@ pub struct PreparedAuthoredElectricalStudy {
     pub artifact_access: ArtifactAccess,
     pub input_materializations: Vec<InputMaterializationPlan>,
     pub planning: ElectricalStudyPlanningPolicy,
+    /// Conduction side of an electrothermal analysis (the model's thermal parts are removed
+    /// after compilation and only electrical outputs are published).
+    pub electrothermal_conduction: bool,
     pub local_execution: LocalExecutionPlan,
     pub analysis_accelerator_requests: Vec<AcceleratorRequest>,
 }

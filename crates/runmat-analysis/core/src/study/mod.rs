@@ -18,7 +18,7 @@ pub use authored_observation::{
     LoweredAuthoredObservation,
 };
 pub use authored_output::{
-    authored_output_types, validate_authored_outputs, AuthoredExtremaTiePolicy,
+    authored_output_root, authored_output_types, retain_authored_outputs, validate_authored_outputs, AuthoredExtremaTiePolicy,
     AuthoredFieldDomain, AuthoredFieldProjection, AuthoredOutput, AuthoredOutputError,
     AuthoredOutputExpression, AuthoredOutputPolicy, AuthoredOutputType, AuthoredOutputValue,
     AuthoredPrincipalSelection, AuthoredSeriesDomain, AuthoredSeriesReduction,

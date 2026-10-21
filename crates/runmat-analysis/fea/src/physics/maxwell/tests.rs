@@ -2,6 +2,8 @@ use super::*;
 use runmat_meshing_core::ElementOrder;
 mod fixture;
 mod flux;
+pub(crate) mod layered;
+mod terminal;
 
 #[test]
 fn longitudinal_impressed_current_is_not_projected_to_a_solenoidal_source() {
@@ -27,7 +29,7 @@ fn longitudinal_impressed_current_is_not_projected_to_a_solenoidal_source() {
                 imaginary: -value,
             });
         }
-        let result = solve_full_pec_volume(&mesh, &input, 1e-10).unwrap();
+        let result = solve(&mesh, &input, 1e-10).unwrap();
         let mut defect = 0.0;
         let mut exact_norm = 0.0;
         for sample in &result.samples {
@@ -68,14 +70,14 @@ fn exact_sparse_plan_and_heterogeneous_element_laws_preserve_owned_assignment() 
         volume.conductivity_s_per_m = if index % 2 == 0 { 0.3 } else { 0.8 };
         volume.permittivity_f_per_m = if index % 2 == 0 { 1.0 } else { 2.0 };
     }
-    let plan = MaxwellSystemPlan::derive(&mesh).unwrap();
+    let plan = MaxwellSystemPlan::derive(&mesh, &input.grounded_faces).unwrap();
     let identity = plan.identity().unwrap();
     let cold = MaxwellSystemPlan::from_canonical_bytes(&plan.canonical_bytes().unwrap()).unwrap();
     assert_eq!(identity, cold.identity().unwrap());
     cold.validate_for(&mesh).unwrap();
-    let base = solve_full_pec_volume_with_plan(&mesh, &input, 1e-10, &cold).unwrap();
+    let base = solve_with_plan(&mesh, &input, 1e-10, &cold).unwrap();
     input.volumes.reverse();
-    let reordered = solve_full_pec_volume(&mesh, &input, 1e-10).unwrap();
+    let reordered = solve(&mesh, &input, 1e-10).unwrap();
     for (actual, expected) in reordered.samples.iter().zip(&base.samples) {
         for axis in 0..3 {
             assert!(
@@ -96,7 +98,7 @@ fn exact_sparse_plan_and_heterogeneous_element_laws_preserve_owned_assignment() 
         },
     );
     assert!(cold.validate_for(&foreign).is_err());
-    assert!(solve_full_pec_volume_with_plan(&foreign, &input, 1e-10, &cold).is_err());
+    assert!(solve_with_plan(&foreign, &input, 1e-10, &cold).is_err());
 }
 
 #[test]
@@ -110,7 +112,7 @@ fn manufactured_complex_pec_mode_has_independent_field_and_power_convergence() {
     let mut errors = Vec::new();
     for cells in [1, 2, 4, 6] {
         let (mesh, input) = fixture::problem(ElementOrder::Tet4, cells, phase);
-        let result = solve_full_pec_volume(&mesh, &input, 1e-10).unwrap();
+        let result = solve(&mesh, &input, 1e-10).unwrap();
         let mut electric = 0.0;
         let mut flux = 0.0;
         for sample in &result.samples {
@@ -153,7 +155,7 @@ fn phase_and_affine_geometry_order_preserve_signed_complex_fields() {
             imaginary: 0.0,
         },
     );
-    let base = solve_full_pec_volume(&mesh, &input, 1e-10).unwrap();
+    let base = solve(&mesh, &input, 1e-10).unwrap();
     for (order, phase) in [
         (
             ElementOrder::Tet4,
@@ -173,7 +175,7 @@ fn phase_and_affine_geometry_order_preserve_signed_complex_fields() {
         let (mesh, mut input) = fixture::problem(order, 2, phase);
         // Element ownership, not vector position, assigns coefficients.
         input.volumes.reverse();
-        let result = solve_full_pec_volume(&mesh, &input, 1e-10).unwrap();
+        let result = solve(&mesh, &input, 1e-10).unwrap();
         assert_eq!(base.samples.len(), result.samples.len());
         for (actual, expected) in result.samples.iter().zip(&base.samples) {
             for axis in 0..3 {
@@ -207,7 +209,7 @@ fn source_material_sampling_frequency_and_lossless_gates_fail_closed() {
         },
     );
     let reject = |changed: &MaxwellInput| {
-        assert!(solve_full_pec_volume(&mesh, changed, 1e-10).is_err());
+        assert!(solve(&mesh, changed, 1e-10).is_err());
     };
     let mut changed = input.clone();
     changed.angular_frequency_rad_per_s = 0.0;
@@ -218,7 +220,7 @@ fn source_material_sampling_frequency_and_lossless_gates_fail_closed() {
     changed.volumes[0].permittivity_f_per_m = -1.0;
     reject(&changed);
     changed.volumes[0].permittivity_f_per_m = 1.0;
-    changed.volumes[0].conductivity_s_per_m = 0.0;
+    changed.volumes[0].conductivity_s_per_m = -1.0;
     reject(&changed);
     let mut changed = input.clone();
     changed.volumes.push(changed.volumes[0]);
@@ -252,8 +254,8 @@ fn source_material_sampling_frequency_and_lossless_gates_fail_closed() {
             imaginary: 0.0,
         },
     );
-    assert!(solve_full_pec_volume(&other_mesh, &input, 1e-10).is_err());
-    assert!(solve_full_pec_volume(&mesh, &input, 0.0).is_err());
+    assert!(solve(&other_mesh, &input, 1e-10).is_err());
+    assert!(solve(&mesh, &input, 0.0).is_err());
     let mut zero = input.clone();
     for source in &mut zero.source_current {
         for value in &mut source.current_density_a_per_m2 {
@@ -261,7 +263,7 @@ fn source_material_sampling_frequency_and_lossless_gates_fail_closed() {
             value.imaginary = 0.0;
         }
     }
-    let zero = solve_full_pec_volume(&mesh, &zero, 1e-10).unwrap();
+    let zero = solve(&mesh, &zero, 1e-10).unwrap();
     assert_eq!(zero.ohmic_power_w, 0.0);
     assert!(zero.samples.iter().all(|sample| sample
         .electric_field_v_per_m

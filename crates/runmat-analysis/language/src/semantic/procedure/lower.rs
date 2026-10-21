@@ -6,10 +6,10 @@ use crate::{
 };
 use runmat_analysis_core::{
     validate_analysis_sequence, AnalysisProcedure, AnalysisSequence, AuthoredModel,
-    CoupledPhysicsFamily, IndependentDomain, PhysicsFamily, ProcedureStep, ProcedureStepId,
+    CoupledPhysicsFamily, IndependentDomain, InitialStateConflictPolicy, PhysicsFamily, ProcedureStep, ProcedureStepId,
     RandomExcitationId, ReferenceStatePolicy, ResponseSpectrumId, SequenceDependency,
     SequenceDependencyReason, SolutionSpace, StateCompleteness, StateId, StateKind, StateOutput,
-    StatePersistence, StateSource, StateTransition, StateTransitionMethod, StateUse,
+    StateInput, StatePersistence, StateSource, StateTransition, StateTransitionMethod, StateUse,
     StructuralRandomResponseSettings, TopologyTransitionPolicy, TransitionId,
 };
 use std::collections::BTreeSet;
@@ -74,16 +74,26 @@ pub fn lower_study(
             .filter(|statement| !super::load_cases::is_selection(statement))
             .cloned()
             .collect::<Vec<_>>();
-        let Some(mut step) = lower_procedure(
-            declaration,
-            &analysis,
-            &procedure.0,
-            &procedure_statements,
-            models,
-            diagnostics,
-        ) else {
+        let (lowered, read) = values::track_members(|| {
+            lower_procedure(
+                declaration,
+                &analysis,
+                &procedure.0,
+                &procedure_statements,
+                models,
+                diagnostics,
+            )
+        });
+        let Some(mut step) = lowered else {
             continue;
         };
+        reject_unknown_members(
+            declaration,
+            &procedure.0,
+            &procedure_statements,
+            &read,
+            diagnostics,
+        );
         step.excitation_case_selection = selection;
         if !super::accuracy::apply(declaration, statements, &mut step, diagnostics) {
             continue;
@@ -119,6 +129,56 @@ pub fn lower_study(
                 });
             }
         }
+        for input in &mut step.state_inputs {
+            let StateSource::Upstream {
+                producer_step,
+                state_id,
+            } = &input.source
+            else {
+                continue;
+            };
+            if input.use_as != StateUse::HeatSource {
+                continue;
+            }
+            match steps
+                .iter()
+                .find(|earlier: &&ProcedureStep| &earlier.step_id == producer_step)
+                .and_then(|producer| {
+                    producer
+                        .state_outputs
+                        .iter()
+                        .find(|output| &output.state_id == state_id)
+                }) {
+                Some(output)
+                    if matches!(
+                        output.kind,
+                        StateKind::ElectromagneticStatic | StateKind::ElectromagneticComplex
+                    ) =>
+                {
+                    input.required_kind = output.kind;
+                }
+                Some(_) => error(
+                    declaration,
+                    analysis.span,
+                    format!(
+                        "`heat_source` must name an electromagnetic state; `analysis.{}.state.{}` is not one",
+                        producer_step.as_str(),
+                        state_id.0
+                    ),
+                    diagnostics,
+                ),
+                None => error(
+                    declaration,
+                    analysis.span,
+                    format!(
+                        "`heat_source` names `analysis.{}.state.{}`, which no earlier analysis publishes (retain it with `retain <name>`)",
+                        producer_step.as_str(),
+                        state_id.0
+                    ),
+                    diagnostics,
+                ),
+            }
+        }
         steps.push(step);
     }
 
@@ -142,6 +202,36 @@ pub fn lower_study(
         return None;
     }
     Some(sequence)
+}
+
+/// A procedure member that no lowering rule reads would otherwise be silently ignored
+/// (for example a misspelled `time_step`); report it with its own source span.
+fn reject_unknown_members(
+    declaration: &CheckedFeaDeclaration,
+    header: &ProcedureHeader,
+    statements: &[CheckedFeaStatement],
+    read: &std::collections::BTreeSet<String>,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) {
+    for statement in statements {
+        let CheckedFeaStatementKind::Assignment { target, .. } = &statement.kind else {
+            continue;
+        };
+        let Some(name) = target.last() else {
+            continue;
+        };
+        if !read.contains(name) {
+            error(
+                declaration,
+                statement.span,
+                format!(
+                    "`{name}` is not a member of `{} {}`",
+                    header.family, header.procedure
+                ),
+                diagnostics,
+            );
+        }
+    }
 }
 
 fn procedure_block<'a>(
@@ -360,11 +450,16 @@ fn lower_procedure(
                 requirements::load_factor(declaration, procedure, statements, diagnostics)?;
             step
         }
-        ("thermal", "steady") => ProcedureStep::thermal_steady(id),
+        ("thermal", "steady") => {
+            let mut step = ProcedureStep::thermal_steady(id);
+            heat_source(declaration, procedure, statements, &mut step, diagnostics)?;
+            step
+        }
         ("thermal", "transient") => {
             let mut step = ProcedureStep::thermal_transient(id);
             step.independent_domain =
                 requirements::time(declaration, procedure, statements, diagnostics)?;
+            heat_source(declaration, procedure, statements, &mut step, diagnostics)?;
             step
         }
         (family, name) => generic_procedure(
@@ -385,6 +480,34 @@ fn lower_procedure(
         step,
         diagnostics,
     )
+}
+
+/// `heat_source = analysis.<producer>.state.<name>`: the Joule loss density of an upstream
+/// electromagnetic state heats this thermal step. The state kind is bound to the producer's
+/// published state after every analysis is lowered.
+fn heat_source(
+    declaration: &CheckedFeaDeclaration,
+    procedure: &ProcedureHeader,
+    statements: &[CheckedFeaStatement],
+    step: &mut ProcedureStep,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<()> {
+    if values::assignment(statements, "heat_source").is_none() {
+        return Some(());
+    }
+    let (producer, state) =
+        requirements::state(declaration, procedure, statements, "heat_source", diagnostics)?;
+    step.state_inputs.push(StateInput {
+        input_id: "heat_source".into(),
+        required_kind: StateKind::ElectromagneticComplex,
+        source: StateSource::Upstream {
+            producer_step: ProcedureStepId(producer),
+            state_id: StateId(state),
+        },
+        use_as: StateUse::HeatSource,
+        conflict: InitialStateConflictPolicy::Reject,
+    });
+    Some(())
 }
 
 fn generic_procedure(

@@ -73,22 +73,20 @@ pub(super) fn select_family(
         && sequence.transitions.is_empty()
         && sequence.branches.is_empty()
     {
-        let Some(ElectromagneticDomain::Harmonic {
-            reference_frequency,
-        }) = electromagnetic
-        else {
+        if !matches!(
+            electromagnetic,
+            None | Some(ElectromagneticDomain::Harmonic { .. })
+        ) {
             return Err(unsupported());
-        };
+        }
+        // Multi-frequency studies are fanned out into one case per frequency before
+        // preparation, so each prepared harmonic step carries exactly one frequency.
         let runmat_analysis_core::IndependentDomain::FrequencyHertz(frequencies) =
             &step.independent_domain
         else {
             return Err(unsupported());
         };
-        if frequencies.len() != 1
-            || !frequencies[0].is_finite()
-            || frequencies[0] <= 0.0
-            || frequencies[0] != reference_frequency.hertz
-        {
+        if frequencies.len() != 1 || !frequencies[0].is_finite() || frequencies[0] <= 0.0 {
             return Err(unsupported());
         }
         return Ok(PreparedFamily::Maxwell);
@@ -136,6 +134,18 @@ pub(super) fn select_family(
         return Err(unsupported());
     }
     Ok(PreparedFamily::Thermal)
+}
+
+/// One fresh electrothermal (Joule heating) analysis, steady or transient.
+pub(in crate::typed_fea) fn is_electrothermal(sequence: &AnalysisSequence) -> bool {
+    matches!(sequence.steps.as_slice(), [step]
+        if step.family == PhysicsFamily::Coupled(runmat_analysis_core::CoupledPhysicsFamily::Electrothermal)
+            && matches!(step.procedure, AnalysisProcedure::Static | AnalysisProcedure::TransientResponse)
+            && step.solution_space == SolutionSpace::Direct
+            && step.restart == RestartPolicy::Fresh
+            && sequence.dependencies.is_empty()
+            && sequence.transitions.is_empty()
+            && sequence.branches.is_empty())
 }
 
 fn unsupported() -> String {

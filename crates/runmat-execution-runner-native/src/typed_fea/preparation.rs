@@ -42,6 +42,34 @@ pub struct PreparedFeaStudy {
     pub realized: RealizedStudy,
 }
 
+/// A solved heat source bound to a thermal analysis: element loss density per canonical
+/// volume element of the mesh it was solved on. It is bound to the compiled thermal model
+/// after meshing, against that mesh's own identity.
+#[derive(Clone, Debug)]
+pub struct PreparedHeatSource {
+    pub step_id: String,
+    pub source_id: String,
+    pub element_density_w_per_m3: Vec<f64>,
+}
+
+/// How a prepared root executes an authored study.
+#[derive(Clone, Debug)]
+pub enum PreparationRole {
+    /// The authored study as written.
+    Authored,
+    /// A thermal analysis heated by a solved upstream loss field.
+    Heated(PreparedHeatSource),
+    /// The heat-transfer side of an electrothermal analysis: conduction and heat transfer
+    /// iterated to the two-way fixed point; publishes temperature and heat flux.
+    ElectrothermalHeat,
+    /// The conduction side of an electrothermal analysis at its solved temperature field;
+    /// publishes potential, current density and Joule loss.
+    ElectrothermalConduction {
+        element_temperature_k: Vec<f64>,
+        operating_time_s: Option<f64>,
+    },
+}
+
 pub async fn prepare_study(
     source: &runmat_core::CheckedFeaSessionSource,
     resolved: runmat_analysis_language::ResolvedAnalysisStudy,
@@ -49,12 +77,47 @@ pub async fn prepare_study(
     authority: &str,
     options: &LocalFeaExecutionOptions,
 ) -> Result<PreparedFeaStudy, String> {
+    prepare_study_with_role(
+        source,
+        resolved,
+        inputs,
+        authority,
+        options,
+        PreparationRole::Authored,
+    )
+    .await
+}
+
+pub async fn prepare_study_with_role(
+    source: &runmat_core::CheckedFeaSessionSource,
+    resolved: runmat_analysis_language::ResolvedAnalysisStudy,
+    inputs: &[AuthoredStudyInputBinding],
+    authority: &str,
+    options: &LocalFeaExecutionOptions,
+    role: PreparationRole,
+) -> Result<PreparedFeaStudy, String> {
     let realized: RealizedStudy = resolved
         .study
         .realize_with_models(&resolved.models, &resolved.geometry, inputs)
         .map_err(|error| error.to_string())?;
-    let family =
-        admission::select_family(&realized.sequence, realized.model.electromagnetic.as_ref())?;
+    let family = match &role {
+        PreparationRole::Authored | PreparationRole::Heated(_) => {
+            admission::select_family(&realized.sequence, realized.model.electromagnetic.as_ref())?
+        }
+        PreparationRole::ElectrothermalHeat => admission::PreparedFamily::Thermal,
+        PreparationRole::ElectrothermalConduction { .. } => admission::PreparedFamily::Electrical,
+    };
+    if matches!(
+        role,
+        PreparationRole::ElectrothermalHeat | PreparationRole::ElectrothermalConduction { .. }
+    ) && !admission::is_electrothermal(&realized.sequence)
+    {
+        return Err("an electrothermal role requires one fresh electrothermal analysis".into());
+    }
+    let heat_source = match &role {
+        PreparationRole::Heated(source) => Some(source.clone()),
+        _ => None,
+    };
     if matches!(
         family,
         admission::PreparedFamily::Acoustic
@@ -266,7 +329,24 @@ pub async fn prepare_study(
                 input_materializations,
                 planning: runmat_analysis_fea::study::ElectricalStudyPlanningPolicy {
                     formulation_requirement: resolved.study.formulation_requirement,
+                    element_temperature_k: match &role {
+                        PreparationRole::ElectrothermalConduction {
+                            element_temperature_k,
+                            ..
+                        } => Some(element_temperature_k.clone()),
+                        _ => None,
+                    },
+                    operating_time_s: match &role {
+                        PreparationRole::ElectrothermalConduction {
+                            operating_time_s, ..
+                        } => *operating_time_s,
+                        _ => None,
+                    },
                 },
+                electrothermal_conduction: matches!(
+                    role,
+                    PreparationRole::ElectrothermalConduction { .. }
+                ),
                 local_execution,
                 analysis_accelerator_requests: options.accelerators.clone(),
             })
@@ -315,6 +395,8 @@ pub async fn prepare_study(
             )
             .map_err(|error| error.to_string())?;
             PreparedFeaStudyRoot::Thermal(PreparedAuthoredThermalStudy {
+                heat_source: heat_source.clone(),
+                electrothermal: matches!(role, PreparationRole::ElectrothermalHeat),
                 geometry_meshing,
                 authored_study_digest,
                 frozen_project_digest,

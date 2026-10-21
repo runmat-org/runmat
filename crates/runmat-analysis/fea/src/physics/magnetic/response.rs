@@ -1,6 +1,5 @@
 use super::{assembly::MagneticAssembly, MagnetostaticError};
 use crate::algebra::{dot_canonical, spmv};
-use crate::solve::krylov::restarted_gmres;
 use runmat_meshing_core::StableDigest;
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -34,25 +33,30 @@ pub(super) fn solve(
     tolerance: f64,
 ) -> Result<MagnetostaticResponse, MagnetostaticError> {
     let n = assembled.saddle.rows();
+    // The curl-curl/gauge saddle is indefinite with a material-contrast-dependent spectrum
+    // (iron next to air); a sparse LU solves it exactly instead of an unpreconditioned Krylov.
     let (solution, iterations) = if n == 0 {
         (Vec::new(), 0)
     } else {
-        let result = restarted_gmres(
-            &assembled.scaled_rhs,
-            &vec![0.0; n],
-            super::resources::gmres_policy(n, tolerance)?,
-            |x| spmv(&assembled.saddle, x).map_err(|e| MagnetostaticError::Operator(e.into())),
-            |a, b| Ok(dot_canonical(a, b)),
-            || false,
-        )?
-        .ok_or_else(|| MagnetostaticError::NotConverged("invalid Krylov contract".into()))?;
-        if !result.converged {
+        let pattern = assembled.saddle.pattern();
+        let offsets = pattern.row_offsets();
+        let columns = pattern.column_indices();
+        let values = assembled.saddle.values();
+        let mut entries = Vec::with_capacity(values.len());
+        for row in 0..n {
+            for k in offsets[row] as usize..offsets[row + 1] as usize {
+                entries.push((row, columns[k] as usize, values[k]));
+            }
+        }
+        let solved = crate::solve::sparse_direct::solve_real(n, &entries, &assembled.scaled_rhs)
+            .map_err(|e| MagnetostaticError::NotConverged(e.to_string()))?;
+        if !solved.relative_residual.is_finite() || solved.relative_residual > tolerance {
             return Err(MagnetostaticError::NotConverged(format!(
-                "GMRES iterations={}, residual={:e}",
-                result.iterations, result.residual_norm
+                "sparse direct residual={:e}",
+                solved.relative_residual
             )));
         }
-        (result.solution, result.iterations)
+        (solved.solution, 1)
     };
     let free_count = assembled.boundary.free_edges.len();
     let free = &solution[..free_count];

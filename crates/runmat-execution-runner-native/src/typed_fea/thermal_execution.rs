@@ -27,6 +27,8 @@ pub struct CompletedAuthoredThermalStudy {
     pub source: ThermalStudyObjectSource,
     pub mesh: runmat_meshing_core::SolverMeshArtifact,
     pub meshing_evidence: runmat_meshing_core::MeshingEvidence,
+    /// Present for the heat-transfer side of an electrothermal analysis.
+    pub electrothermal: Option<ElectrothermalOperatingPoint>,
 }
 
 pub(super) async fn execute(
@@ -146,6 +148,30 @@ pub(super) async fn execute(
     .map_err(|e| e.to_string())?;
     crate::input_materialization::apply_to_model(&mut compiled.model, materialized)
         .map_err(|e| e.to_string())?;
+    if let Some(heat) = &prepared.heat_source {
+        let transient = compiled.model.sequence.steps.iter().any(|step| {
+            step.step_id.as_str() == heat.step_id
+                && step.procedure == runmat_analysis_core::AnalysisProcedure::TransientResponse
+        });
+        runmat_analysis_fea::execution::bind_element_heat_source(
+            &mut compiled.model,
+            &heat.step_id,
+            &heat.source_id,
+            runmat_execution::Digest::from_bytes(*geometry.meshing.artifact.canonical_digest.bytes()),
+            &[(0.0, heat.element_density_w_per_m3.clone())],
+            transient,
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    let electrothermal = if prepared.electrothermal {
+        Some(solve_electrothermal(
+            &mut compiled,
+            &geometry.meshing.artifact,
+            prepared.planning,
+        )?)
+    } else {
+        None
+    };
     let [step] = compiled.model.sequence.steps.as_slice() else {
         return Err("authored thermal execution requires a standalone step".into());
     };
@@ -252,5 +278,97 @@ pub(super) async fn execute(
         source,
         mesh: geometry.meshing.artifact,
         meshing_evidence: geometry.meshing.evidence,
+        electrothermal,
     })
+}
+
+/// The solved operating point of a two-way electrothermal analysis.
+#[derive(Debug, Clone)]
+pub struct ElectrothermalOperatingPoint {
+    pub sweeps: Vec<runmat_analysis_fea::execution::ElectrothermalSweep>,
+    /// Element temperatures at the last time point (canonical element order).
+    pub element_temperature_k: Vec<f64>,
+    /// Last time point of a transient analysis; `None` when steady.
+    pub operating_time_s: Option<f64>,
+    /// Joule power and terminal power (sum of terminal potential x current) at that point.
+    pub joule_power_w: f64,
+    pub terminal_power_w: f64,
+}
+
+/// Split the compiled electrothermal analysis into conduction and heat transfer, iterate them
+/// to the two-way fixed point, and leave `compiled` as the heat-transfer analysis with the
+/// converged Joule source bound (it is then solved and published by the thermal lifecycle).
+fn solve_electrothermal(
+    compiled: &mut runmat_analysis_fea::study::CompiledAnalysisStudy,
+    mesh: &runmat_meshing_core::SolverMeshArtifact,
+    policy: runmat_analysis_fea::study::ThermalStudyPlanningPolicy,
+) -> Result<ElectrothermalOperatingPoint, String> {
+    use runmat_analysis_fea::execution::{
+        electrical_part, element_temperatures, execute_coupled_electrothermal, thermal_part,
+        CoupledElectrothermalCompletion, ElectrothermalCouplingControls,
+    };
+    let [step] = compiled.model.sequence.steps.as_slice() else {
+        return Err("electrothermal execution requires one analysis".into());
+    };
+    let step = step.clone();
+    let electrical = electrical_part(&compiled.model, &step);
+    compiled.model = thermal_part(&compiled.model, &step);
+    runmat_analysis_core::retain_authored_outputs(
+        &mut compiled.outputs,
+        &mut compiled.assessments,
+        |_, quantity| is_thermal_quantity(quantity),
+    );
+    let template = runmat_analysis_fea::study::plan_thermal_study(compiled, policy)
+        .map_err(|error| error.to_string())?;
+    let completion = execute_coupled_electrothermal(
+        &electrical,
+        &template,
+        mesh,
+        template.residual_target,
+        ElectrothermalCouplingControls::default(),
+    )
+    .map_err(|error| error.to_string())?;
+    let projection = runmat_analysis_fea::topology::AnalysisProjection::derive(mesh)
+        .map_err(|error| error.to_string())?;
+    let last = completion
+        .thermal
+        .temperature_snapshots
+        .last()
+        .and_then(|snapshot| snapshot.as_host_f64())
+        .ok_or("electrothermal thermal history is empty")?;
+    let element_temperature_k =
+        element_temperatures(&projection, last).map_err(|error| error.to_string())?;
+    let sample = completion
+        .electrical
+        .last()
+        .ok_or("electrothermal conduction history is empty")?;
+    let operating = ElectrothermalOperatingPoint {
+        sweeps: completion.sweeps.clone(),
+        element_temperature_k,
+        operating_time_s: (completion.electrical.len() > 1).then_some(sample.time_s),
+        joule_power_w: CoupledElectrothermalCompletion::joule_power_w(sample),
+        terminal_power_w: CoupledElectrothermalCompletion::terminal_power_w(sample),
+    };
+    tracing::info!(
+        sweeps = operating.sweeps.len(),
+        joule_power_w = operating.joule_power_w,
+        terminal_power_w = operating.terminal_power_w,
+        last_temperature_change_k = operating.sweeps.last().map(|s| s.maximum_temperature_change_k),
+        maximum_temperature_rise_k = operating.sweeps.last().map(|s| s.maximum_temperature_rise_k),
+        "electrothermal two-way coupling converged"
+    );
+    compiled.model = completion.thermal_workload.model;
+    Ok(operating)
+}
+
+fn is_thermal_quantity(quantity: runmat_analysis_core::ObservationQuantity) -> bool {
+    use runmat_analysis_core::ObservationQuantity as Q;
+    matches!(
+        quantity,
+        Q::Temperature
+            | Q::TemperatureGradient
+            | Q::HeatFlux
+            | Q::HeatRate
+            | Q::ThermalEnergyStorageRateDensity
+    )
 }

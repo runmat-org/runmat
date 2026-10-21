@@ -41,6 +41,14 @@ pub struct ElectricalStaticWorkload {
     pub step_id: ProcedureStepId,
     pub formulation_requirement: FormulationRequirement,
     pub relative_residual_target: f64,
+    /// Solved element temperatures for steady conduction at an electrothermal operating
+    /// point (canonical element order); conductivity follows the material temperature law.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub element_temperature_k: Option<Vec<f64>>,
+    /// Time at which time-dependent terminal sources are sampled (the operating point of a
+    /// transient electrothermal analysis); `None` for a static source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operating_time_s: Option<f64>,
 }
 
 impl ElectricalStaticWorkload {
@@ -52,7 +60,56 @@ impl ElectricalStaticWorkload {
             self.relative_residual_target,
         )
         .map_err(invalid)?;
+        if let Some(temperatures) = &self.element_temperature_k {
+            if temperatures.is_empty()
+                || temperatures.iter().any(|t| !t.is_finite() || *t <= 0.0)
+                || !matches!(
+                    self.model.electromagnetic,
+                    Some(ElectromagneticDomain::Static {
+                        equation: StaticElectricalEquation::SteadyConduction
+                    })
+                )
+            {
+                return Err(invalid(
+                    "an element temperature field applies to steady conduction with finite absolute temperatures",
+                ));
+            }
+        }
         Ok(())
+    }
+    pub(crate) fn sample_point(&self) -> crate::excitation::ExcitationSamplePoint<'static> {
+        match self.operating_time_s {
+            Some(time) => crate::excitation::ExcitationSamplePoint::time(time),
+            None => crate::excitation::ExcitationSamplePoint::Static,
+        }
+    }
+    /// Element conductivities at the workload's temperature field, or `None` at reference.
+    pub(crate) fn element_conductivity(
+        &self,
+        mesh: &SolverMeshArtifact,
+    ) -> AnalysisExecutionResult<Option<Vec<f64>>> {
+        let Some(temperatures) = &self.element_temperature_k else {
+            return Ok(None);
+        };
+        let projection = crate::topology::AnalysisProjection::derive(mesh).map_err(invalid)?;
+        if temperatures.len() != projection.elements.len() {
+            return Err(invalid("element temperature field does not match the mesh"));
+        }
+        let properties =
+            crate::properties::compile_solid_property_map(&self.model, mesh).map_err(invalid)?;
+        projection
+            .elements
+            .iter()
+            .zip(temperatures)
+            .map(|(element, temperature)| {
+                let law = properties
+                    .solid_material(element.stable_identity)
+                    .and_then(|m| m.material.electrical.as_ref())
+                    .ok_or_else(|| invalid("element without an electrical law"))?;
+                super::conductivity_at(law, *temperature)
+            })
+            .collect::<AnalysisExecutionResult<Vec<_>>>()
+            .map(Some)
     }
     pub fn equation(&self) -> AnalysisExecutionResult<StaticElectricalEquation> {
         self.validate()?;
@@ -107,12 +164,16 @@ impl ElectricalStaticWorkload {
         mesh: &SolverMeshArtifact,
     ) -> AnalysisExecutionResult<ElectricalStaticSolverResult> {
         let formulation = self.formulation(mesh)?;
-        let response = crate::physics::electrical::solve_canonical_static(
+        let conductivity = self.element_conductivity(mesh)?;
+        let response = crate::physics::electrical::solve_canonical_static_with_admission(
             &self.model,
             mesh,
             self.step_id.as_str(),
             self.formulation_requirement,
             self.relative_residual_target,
+            None,
+            conductivity.as_deref(),
+            self.sample_point(),
         )
         .map_err(invalid)?;
         ElectricalStaticSolverResult::new(self, mesh, formulation, response)

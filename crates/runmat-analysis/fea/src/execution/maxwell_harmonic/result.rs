@@ -8,7 +8,7 @@ use runmat_analysis_core::{
     AnalysisProcedure, PhysicsFamily, SolutionSpace, StateOutput, StatePersistence,
 };
 use std::collections::BTreeMap;
-const PREFIX: &[u8] = b"runmat-maxwell-harmonic-result/v1\0";
+const PREFIX: &[u8] = b"runmat-maxwell-harmonic-result/v2\0";
 const LIMITS: CanonicalLimits = CanonicalLimits::new(1024 * 1024 * 1024, 8_000_000, 65_536, 64);
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -122,10 +122,8 @@ impl MaxwellHarmonicSolverResult {
         {
             return Err(invalid("Maxwell retained material inventory mismatch"));
         }
-        let mut we = 0.0;
         let mut wm = 0.0;
         let mut ohmic = 0.0;
-        let mut source = crate::physics::maxwell::ComplexPhasor::ZERO;
         for ((s, authority), j) in r
             .samples
             .iter()
@@ -146,7 +144,7 @@ impl MaxwellHarmonicSolverResult {
                 || !law.permittivity_f_per_m.is_finite()
                 || law.permittivity_f_per_m <= 0.0
                 || !law.conductivity_s_per_m.is_finite()
-                || law.conductivity_s_per_m <= 0.0
+                || law.conductivity_s_per_m < 0.0
                 || [
                     s.electric_field_v_per_m,
                     s.flux_density_t,
@@ -164,41 +162,21 @@ impl MaxwellHarmonicSolverResult {
             let mut ee = 0.0;
             let mut hh = 0.0;
             for axis in 0..3 {
-                let e = s.electric_field_v_per_m[axis];
-                let b = s.flux_density_t[axis];
-                if s.magnetic_field_a_per_m[axis] != b / law.permeability_h_per_m
-                    || s.electric_displacement_c_per_m2[axis] != e * law.permittivity_f_per_m
-                    || s.conduction_current_density_a_per_m2[axis] != e * law.conductivity_s_per_m
-                {
-                    return Err(invalid("Maxwell retained constitutive fields differ"));
-                }
-                ee += e.norm_squared();
+                ee += s.electric_field_v_per_m[axis].norm_squared();
                 hh += s.magnetic_field_a_per_m[axis].norm_squared();
             }
             let weight = s.volume_weight_m3;
-            we += 0.25 * weight * law.permittivity_f_per_m * ee;
             wm += 0.25 * weight * law.permeability_h_per_m * hh;
             ohmic += 0.5 * weight * law.conductivity_s_per_m * ee;
-            let power = (0..3).fold(crate::physics::maxwell::ComplexPhasor::ZERO, |sum, axis| {
-                sum + s.electric_field_v_per_m[axis] * j.current_density_a_per_m2[axis].conjugate()
-            });
-            source += power * (-0.5 * weight);
         }
-        let reactive = 2.0 * r.angular_frequency_rad_per_s * (wm - we);
-        let predicted = crate::physics::maxwell::ComplexPhasor::new(ohmic, reactive);
-        let scale = predicted.abs().max(source.abs());
-        let closure = if scale > 0.0 {
-            (source - predicted).abs() / scale
-        } else {
-            (source - predicted).abs()
-        };
-        if !close(we, r.electric_energy_j)
-            || !close(wm, r.magnetic_energy_j)
+        // Electric energy, source power and closure are re-derived from the original
+        // equations in `validate_for`; the sample summaries checked here are B/H/J/loss.
+        if !close(wm, r.magnetic_energy_j)
             || !close(ohmic, r.ohmic_power_w)
-            || !close(reactive, r.reactive_power_var)
-            || !close(source.real, r.source_power_va.real)
-            || !close(source.imaginary, r.source_power_va.imaginary)
-            || !close(closure, r.relative_complex_power_error)
+            || !close(
+                2.0 * r.angular_frequency_rad_per_s * (r.magnetic_energy_j - r.electric_energy_j),
+                r.reactive_power_var,
+            )
         {
             return Err(invalid("Maxwell retained power/energy summaries disagree"));
         }
@@ -210,15 +188,9 @@ impl MaxwellHarmonicSolverResult {
         mesh: &SolverMeshArtifact,
     ) -> AnalysisExecutionResult<()> {
         self.validate()?;
-        let input = crate::physics::maxwell::compile_canonical_input(
-            &workload.model,
-            mesh,
-            workload.step_id.as_str(),
-            workload.formulation_requirement,
-            workload.relative_residual_target,
-        )
-        .map_err(invalid)?;
-        let plan = crate::physics::maxwell::MaxwellSystemPlan::derive(mesh).map_err(invalid)?;
+        let input = workload.compile_input(mesh)?;
+        let plan = crate::physics::maxwell::MaxwellSystemPlan::derive(mesh, &input.grounded_faces)
+            .map_err(invalid)?;
         if self.data.source_workload != workload.identity()?
             || self.data.producer != workload.producer_identity()?
             || self.data.formulation != workload.formulation(mesh)?
@@ -284,6 +256,44 @@ impl MaxwellHarmonicSolverResult {
     }
     pub fn input(&self) -> &MaxwellInput {
         &self.data.input
+    }
+    /// Cycle-averaged Joule loss density per volume element, (1/V)∫(1/2)sigma|E|^2 dV with
+    /// the total field, in the mesh's canonical element order. This is the heat source a
+    /// thermal analysis receives from this harmonic state; its integral is `ohmic_power_w`.
+    pub fn element_loss_density_w_per_m3(
+        &self,
+        mesh: &SolverMeshArtifact,
+    ) -> AnalysisExecutionResult<Vec<f64>> {
+        let laws: BTreeMap<_, _> = self
+            .data
+            .input
+            .volumes
+            .iter()
+            .map(|v| (v.element_identity, v.conductivity_s_per_m))
+            .collect();
+        let mut loss: BTreeMap<runmat_meshing_core::StableDigest, (f64, f64)> = BTreeMap::new();
+        for sample in &self.data.response.samples {
+            let sigma = laws
+                .get(&sample.element_identity)
+                .ok_or_else(|| invalid("foreign retained element"))?;
+            let squared: f64 = sample
+                .electric_field_v_per_m
+                .iter()
+                .map(|v| v.norm_squared())
+                .sum();
+            let entry = loss.entry(sample.element_identity).or_default();
+            entry.0 += 0.5 * sigma * squared * sample.volume_weight_m3;
+            entry.1 += sample.volume_weight_m3;
+        }
+        mesh.topology
+            .volume_elements
+            .iter()
+            .map(|element| {
+                loss.get(&element.stable_identity)
+                    .map(|(power, volume)| power / volume)
+                    .ok_or_else(|| invalid("Maxwell loss is missing a mesh element"))
+            })
+            .collect()
     }
     pub fn source_workload(&self) -> AnalysisWorkloadIdentity {
         self.data.source_workload

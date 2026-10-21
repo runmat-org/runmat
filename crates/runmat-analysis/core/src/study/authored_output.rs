@@ -6,7 +6,9 @@ use crate::{
 };
 use runmat_types::PhysicalDimension;
 
+mod partition;
 mod types;
+pub use partition::{authored_output_root, retain_authored_outputs};
 
 pub use types::*;
 

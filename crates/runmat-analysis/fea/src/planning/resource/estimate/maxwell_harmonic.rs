@@ -1,40 +1,27 @@
 use super::host_phase::{build_host_phase_resource_plan, HostPhaseAccounting};
 use super::*;
-use crate::planning::resource::{MaxwellGmresResourceEnvelope, MaxwellHarmonicResourceDemand};
-use crate::solve::krylov::{GmresPolicy, GmresWorkEnvelope};
+use crate::planning::resource::{MaxwellDirectFactorEnvelope, MaxwellHarmonicResourceDemand};
 
 /// Same dimension/restart/counter policy as the general physical Maxwell solve.
 /// Representative tolerance affects stopping only, never its allocation bounds.
-pub(in crate::planning::resource) fn krylov_envelope(
-    dimension: usize,
-) -> Result<MaxwellGmresResourceEnvelope, ResourcePlanningError> {
+/// Direct-factor envelope for a complex operator of this dimension and support.
+pub(in crate::planning::resource) fn factor_envelope(
+    dimension: u64,
+    nonzeros: u64,
+) -> Result<MaxwellDirectFactorEnvelope, ResourcePlanningError> {
     if dimension == 0 {
-        return Ok(MaxwellGmresResourceEnvelope::default());
+        return Ok(MaxwellDirectFactorEnvelope::default());
     }
-    let maximum_iterations = dimension
-        .checked_mul(40)
-        .map(|n| n.max(128))
-        .filter(|n| u32::try_from(*n).is_ok())
-        .ok_or(ResourcePlanningError::Overflow(
-            "Maxwell GMRES iteration counter",
-        ))?;
-    let e = GmresWorkEnvelope::derive(
-        dimension,
-        GmresPolicy {
-            relative_tolerance: 1e-10,
-            restart: dimension.min(128),
-            maximum_iterations,
-        },
-    )
-    .map_err(|e| ResourcePlanningError::Invalid(format!("Maxwell shared GMRES envelope: {e:?}")))?;
-    Ok(MaxwellGmresResourceEnvelope {
-        dimension: Count(e.dimension),
-        restart: Count(e.restart),
-        maximum_iterations: Count(u64::from(e.maximum_iterations)),
-        resident_bytes: ByteCount(e.resident_bytes_upper_bound),
-        operator_applications: Count(e.operator_applications_upper_bound),
-        dot_calls: Count(e.dot_calls_upper_bound),
-        axpy_calls: Count(e.axpy_calls_upper_bound),
+    let fill = (dimension as f64).powf(4.0 / 3.0) * 16.0;
+    if !fill.is_finite() || fill > (u64::MAX / 64) as f64 {
+        return Err(ResourcePlanningError::Overflow("Maxwell factor fill"));
+    }
+    let entries = (fill as u64).max(nonzeros);
+    Ok(MaxwellDirectFactorEnvelope {
+        dimension: Count(dimension),
+        nonzeros: Count(nonzeros),
+        factor_entries_upper_bound: Count(entries),
+        resident_bytes: ByteCount(mul(entries, 2 * 16, "Maxwell factor bytes")?),
     })
 }
 
@@ -42,13 +29,7 @@ pub(super) fn build_maxwell_harmonic_plan(
     input: FeaResourcePlanningInput,
     demand: &MaxwellHarmonicResourceDemand,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
-    let dimension = mul(
-        demand.free_edge_count.0,
-        2,
-        "Maxwell complex block dimension",
-    )?;
-    let host_dimension = usize::try_from(dimension)
-        .map_err(|_| ResourcePlanningError::Overflow("Maxwell host dimension"))?;
+    let dimension = demand.complex_dimension.0;
     if demand.node_count.0 == 0
         || demand.element_count.0 == 0
         || demand.edge_count_upper_bound.0
@@ -56,12 +37,12 @@ pub(super) fn build_maxwell_harmonic_plan(
         || demand.quadrature_sample_count.0
             != mul(demand.element_count.0, 15, "Maxwell sample count")?
         || demand.free_edge_count > demand.edge_count_upper_bound
-        || demand.real_block_dimension.0 != dimension
-        || demand.block_nonzeros.0 > mul(demand.element_count.0, 144, "Maxwell block support")?
-        || (dimension == 0) != (demand.block_nonzeros.0 == 0)
-        || demand.krylov != krylov_envelope(host_dimension)?
+        || dimension < demand.free_edge_count.0
+        || demand.nonzeros.0 > mul(demand.element_count.0, 36, "Maxwell support")?
+        || (dimension == 0) != (demand.nonzeros.0 == 0)
+        || demand.factorization != factor_envelope(dimension, demand.nonzeros.0)?
         || demand.numerical_reservation_bytes.0 == 0
-        || demand.numerical_reservation_bytes < demand.krylov.resident_bytes
+        || demand.numerical_reservation_bytes < demand.factorization.resident_bytes
         || demand.system_plan_identity == Digest::sha256([])
         || demand.state_profiles_resident_bytes.0 == 0
         || demand.receipt_output.encoded_payload_bytes_upper_bound.0
@@ -80,7 +61,7 @@ pub(super) fn build_maxwell_harmonic_plan(
         || !input.worker.accelerators.is_empty()
     {
         return Err(ResourcePlanningError::Invalid(
-            "Maxwell exact sparse/GMRES or prepared host facts are inconsistent".into(),
+            "Maxwell exact sparse/factorization or prepared host facts are inconsistent".into(),
         ));
     }
     let retained = ByteCount(add(

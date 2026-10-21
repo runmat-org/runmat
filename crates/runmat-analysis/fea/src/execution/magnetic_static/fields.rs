@@ -20,21 +20,46 @@ pub(in crate::execution) enum NativeMagneticValues<'a> {
     Potential(&'a [MagneticFieldSample]),
     Flux(&'a [MagneticFieldSample]),
     Intensity(&'a [MagneticFieldSample]),
+    /// Element averages (1/V)∫ over each element's fifteen samples.
+    ElementFlux(&'a [MagneticFieldSample]),
+    ElementIntensity(&'a [MagneticFieldSample]),
 }
 impl<'a> NativeMagneticValues<'a> {
-    pub(in crate::execution) fn values(self) -> impl Iterator<Item = f64> + 'a {
+    pub(in crate::execution) fn values(self) -> Box<dyn Iterator<Item = f64> + 'a> {
+        let average = |samples: &'a [MagneticFieldSample],
+                       value: fn(&MagneticFieldSample) -> [f64; 3]|
+         -> Box<dyn Iterator<Item = f64> + 'a> {
+            Box::new(samples.chunks(15).flat_map(move |element| {
+                let volume: f64 = element.iter().map(|s| s.volume_weight_m3).sum();
+                let mut mean = [0.0; 3];
+                for sample in element {
+                    let v = value(sample);
+                    for axis in 0..3 {
+                        mean[axis] += v[axis] * sample.volume_weight_m3 / volume;
+                    }
+                }
+                mean
+            }))
+        };
+        match self {
+            Self::ElementFlux(v) => return average(v, |s| s.flux_density_t),
+            Self::ElementIntensity(v) => return average(v, |s| s.magnetic_field_a_per_m),
+            _ => {}
+        }
         let count = match self {
             Self::Circulation(values) => values.len(),
             Self::Potential(values) | Self::Flux(values) | Self::Intensity(values) => {
                 values.len() * 3
             }
+            Self::ElementFlux(_) | Self::ElementIntensity(_) => unreachable!(),
         };
-        (0..count).map(move |i| match self {
+        Box::new((0..count).map(move |i| match self {
             Self::Circulation(v) => v[i],
             Self::Potential(v) => v[i / 3].vector_potential_wb_per_m[i % 3],
             Self::Flux(v) => v[i / 3].flux_density_t[i % 3],
             Self::Intensity(v) => v[i / 3].magnetic_field_a_per_m[i % 3],
-        })
+            Self::ElementFlux(_) | Self::ElementIntensity(_) => unreachable!(),
+        }))
     }
 }
 impl Serialize for NativeMagneticValues<'_> {
@@ -49,7 +74,7 @@ pub(in crate::execution) struct NativeMagneticField<'a> {
 }
 pub(in crate::execution) fn native_magnetic_fields(
     result: &MagnetostaticSolverResult,
-) -> [NativeMagneticField<'_>; 4] {
+) -> [NativeMagneticField<'_>; 6] {
     let response = result.response();
     let count = response.samples.len();
     [
@@ -72,6 +97,16 @@ pub(in crate::execution) fn native_magnetic_fields(
             field_id: "magnetic.field_intensity",
             values: NativeMagneticValues::Intensity(&response.samples),
             shape: vec![count, 3],
+        },
+        NativeMagneticField {
+            field_id: "magnetic.element_flux_density",
+            values: NativeMagneticValues::ElementFlux(&response.samples),
+            shape: vec![count / 15, 3],
+        },
+        NativeMagneticField {
+            field_id: "magnetic.element_field_intensity",
+            values: NativeMagneticValues::ElementIntensity(&response.samples),
+            shape: vec![count / 15, 3],
         },
     ]
 }
@@ -174,6 +209,18 @@ fn native_magnetic_field_plan(
             RecoveredFieldEntityDomain::VolumeIntegrationPoints,
             result.response().samples.len(),
         ),
+        (
+            ObservationQuantity::MagneticFluxDensity,
+            FieldLocation::Element,
+            RecoveredFieldEntityDomain::VolumeElements,
+            result.response().samples.len() / 15,
+        ),
+        (
+            ObservationQuantity::MagneticFieldIntensity,
+            FieldLocation::Element,
+            RecoveredFieldEntityDomain::VolumeElements,
+            result.response().samples.len() / 15,
+        ),
     ];
     let requirements = specs
         .into_iter()
@@ -237,7 +284,7 @@ pub fn magnetic_native_field_definitions(
     let definitions = magnetic_native_field_definition_inventory()?;
     if request.plan.requirements.len() != definitions.len() {
         return Err(invalid(
-            "magnetic native inventory must contain all four original fields",
+            "magnetic native inventory must contain all original sampled and element fields",
         ));
     }
     let samples = request.plan.requirements[1].cost.output_entity_count;
@@ -246,9 +293,14 @@ pub fn magnetic_native_field_definitions(
         .ok_or_else(|| invalid("magnetic topology count overflow"))?;
     if samples == 0
         || !samples.is_multiple_of(15)
-        || request.plan.requirements[2..]
-            .iter()
-            .any(|r| r.cost.output_entity_count != samples)
+        || request.plan.requirements[2..].iter().any(|r| {
+            r.cost.output_entity_count
+                != if r.entity_domain == RecoveredFieldEntityDomain::VolumeElements {
+                    samples / 15
+                } else {
+                    samples
+                }
+        })
         || request.plan.requirements[0].cost.output_entity_count > edge_upper
     {
         return Err(invalid(
@@ -320,6 +372,18 @@ pub fn magnetic_native_field_definition_inventory(
             "magnetic.field_intensity",
             FieldLocation::IntegrationPoint,
             RecoveredFieldEntityDomain::VolumeIntegrationPoints,
+        ),
+        (
+            ObservationQuantity::MagneticFluxDensity,
+            "magnetic.element_flux_density",
+            FieldLocation::Element,
+            RecoveredFieldEntityDomain::VolumeElements,
+        ),
+        (
+            ObservationQuantity::MagneticFieldIntensity,
+            "magnetic.element_field_intensity",
+            FieldLocation::Element,
+            RecoveredFieldEntityDomain::VolumeElements,
         ),
     ]
     .into_iter()

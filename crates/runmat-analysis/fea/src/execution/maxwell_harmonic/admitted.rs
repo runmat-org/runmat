@@ -36,22 +36,17 @@ impl MaxwellHarmonicWorkload {
         if &expected != plan {
             return Err(invalid("Maxwell resource plan differs from original workload/topology/physical support/shared GMRES"));
         }
-        let system = crate::physics::maxwell::MaxwellSystemPlan::derive(mesh).map_err(invalid)?;
+        let input = self.compile_input(mesh)?;
+        let system =
+            crate::physics::maxwell::MaxwellSystemPlan::derive(mesh, &input.grounded_faces)
+                .map_err(invalid)?;
         if system.identity().map_err(invalid)? != demand.system_plan_identity {
             return Err(invalid(
                 "Maxwell physical support differs from admitted system plan",
             ));
         }
-        let input = crate::physics::maxwell::compile_canonical_input(
-            &self.model,
-            mesh,
-            self.step_id.as_str(),
-            self.formulation_requirement,
-            self.relative_residual_target,
-        )
-        .map_err(invalid)?;
         let formulation = self.formulation(mesh)?;
-        let response = crate::physics::maxwell::solve_full_pec_volume_with_plan(
+        let response = crate::physics::maxwell::solve_with_plan(
             mesh,
             &input,
             self.relative_residual_target,

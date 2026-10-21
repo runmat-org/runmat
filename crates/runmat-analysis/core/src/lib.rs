@@ -53,7 +53,7 @@ pub use execution_policy::{
     MAX_CPU_THREADS_PER_WORKER,
 };
 pub use study::{
-    attach_authored_outputs, authored_output_types, geometry_parameter_input_type,
+    attach_authored_outputs, authored_output_root, authored_output_types, retain_authored_outputs, geometry_parameter_input_type,
     lower_authored_observations, validate_authored_outputs, AuthoredCaseOutputRef,
     AuthoredExtremaTiePolicy, AuthoredFieldDomain, AuthoredFieldProjection,
     AuthoredGeometryArgument, AuthoredGeometryArgumentValue, AuthoredGeometryInstance,

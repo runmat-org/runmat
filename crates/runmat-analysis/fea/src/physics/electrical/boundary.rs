@@ -11,6 +11,7 @@ impl ElectricalAssembly {
         model: &AnalysisModel,
         mesh: &SolverMeshArtifact,
         step: &ProcedureStep,
+        sample: crate::excitation::ExcitationSamplePoint<'_>,
     ) -> Result<Self, ElectricalStaticError> {
         let indices = self
             .projection
@@ -42,7 +43,7 @@ impl ElectricalAssembly {
                     let sampled = crate::excitation::sample_prescribed_potential(
                         value,
                         &model.signals,
-                        crate::excitation::ExcitationSamplePoint::Static,
+                        sample,
                     )
                     .map_err(|error| ElectricalStaticError::Boundary(error.to_string()))?;
                     if sampled.imaginary != 0.0 || !sampled.real.is_finite() {

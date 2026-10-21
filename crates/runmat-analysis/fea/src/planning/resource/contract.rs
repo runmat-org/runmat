@@ -42,7 +42,7 @@ pub use acoustic_demand::AcousticHarmonicResourceDemand;
 pub use electrical_static_demand::ElectricalStaticResourceDemand;
 pub use magnetic_recovery_demand::MagneticFieldRecoveryResourceDemand;
 pub use magnetic_static_demand::{MagneticGmresResourceEnvelope, MagnetostaticResourceDemand};
-pub use maxwell_harmonic_demand::{MaxwellGmresResourceEnvelope, MaxwellHarmonicResourceDemand};
+pub use maxwell_harmonic_demand::{MaxwellDirectFactorEnvelope, MaxwellHarmonicResourceDemand};
 mod assembly_demand;
 pub use accuracy_demand::AccuracyEvaluationResourceDemand;
 mod error;

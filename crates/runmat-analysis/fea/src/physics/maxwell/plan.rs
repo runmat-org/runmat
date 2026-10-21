@@ -1,4 +1,4 @@
-//! Material-independent exact sparse complex-block support.
+//! Material-independent exact sparse complex support over the free (ungrounded) edges.
 //! Canonical geometry projection only; no physical matrices/form/source integration.
 use super::{geometry, invalid, topology, MaxwellError};
 use crate::{algebra::SparsePattern, topology::AnalysisProjection};
@@ -8,7 +8,7 @@ use runmat_meshing_core::{SolverMeshArtifact, StableDigest};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-const PREFIX: &[u8] = b"runmat-maxwell-system-plan/v1\0";
+const PREFIX: &[u8] = b"runmat-maxwell-system-plan/v2\0";
 const LIMITS: CanonicalLimits = CanonicalLimits::new(512 * 1024 * 1024, 64_000_000, 256, 16);
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -16,27 +16,28 @@ pub struct MaxwellSystemPlan {
     mesh_digest: StableDigest,
     projection_digest: Digest,
     edge_node_identities: Vec<[StableDigest; 2]>,
+    grounded_faces: Vec<StableDigest>,
     free_edge_indices: Vec<usize>,
-    block_pattern: SparsePattern,
+    /// Complex operator pattern over free edges (one entry per complex coefficient).
+    pattern: SparsePattern,
 }
 impl MaxwellSystemPlan {
-    pub fn derive(mesh: &SolverMeshArtifact) -> Result<Self, MaxwellError> {
+    pub fn derive(
+        mesh: &SolverMeshArtifact,
+        grounded_faces: &[StableDigest],
+    ) -> Result<Self, MaxwellError> {
         let projection = AnalysisProjection::derive(mesh).map_err(topology)?;
-        let (edges, exterior) = geometry::spaces(&projection)?;
-        let exterior: BTreeSet<_> = exterior.into_iter().collect();
+        let edges = geometry::spaces(&projection)?;
+        let grounded = geometry::grounded_edges(&projection, &edges, grounded_faces)?;
         let free_edge_indices: Vec<_> = (0..edges.edges().len())
-            .filter(|i| !exterior.contains(i))
+            .filter(|i| !grounded.contains(i))
             .collect();
-        let free = free_edge_indices.len();
-        let dimension = free
-            .checked_mul(2)
-            .ok_or_else(|| invalid("Maxwell dimension overflow"))?;
         let row_by_edge: BTreeMap<_, _> = free_edge_indices
             .iter()
             .enumerate()
             .map(|(row, &edge)| (edge, row))
             .collect();
-        let mut rows = vec![BTreeSet::new(); dimension];
+        let mut rows = vec![BTreeSet::new(); free_edge_indices.len()];
         for index in 0..projection.elements.len() {
             let local = edges
                 .element_edge_indices(index)
@@ -47,10 +48,7 @@ impl MaxwellSystemPlan {
                 };
                 for other in local {
                     if let Some(&column) = row_by_edge.get(&other) {
-                        for component in 0..2 {
-                            rows[row + component * free].insert(column);
-                            rows[row + component * free].insert(column + free);
-                        }
+                        rows[row].insert(column);
                     }
                 }
             }
@@ -63,7 +61,7 @@ impl MaxwellSystemPlan {
             }
             offsets.push(u64::try_from(columns.len()).map_err(invalid)?);
         }
-        let dimension = u64::try_from(dimension).map_err(invalid)?;
+        let dimension = u64::try_from(free_edge_indices.len()).map_err(invalid)?;
         Ok(Self {
             mesh_digest: mesh.canonical_digest,
             projection_digest: projection.projection_digest,
@@ -72,13 +70,14 @@ impl MaxwellSystemPlan {
                 .iter()
                 .map(|edge| edge.node_identities)
                 .collect(),
+            grounded_faces: grounded_faces.to_vec(),
             free_edge_indices,
-            block_pattern: SparsePattern::try_new(dimension, dimension, offsets, columns)
+            pattern: SparsePattern::try_new(dimension, dimension, offsets, columns)
                 .map_err(invalid)?,
         })
     }
     pub fn validate_for(&self, mesh: &SolverMeshArtifact) -> Result<(), MaxwellError> {
-        if self != &Self::derive(mesh)? {
+        if self != &Self::derive(mesh, &self.grounded_faces)? {
             return Err(invalid(
                 "Maxwell system plan differs from exact canonical support",
             ));
@@ -91,8 +90,11 @@ impl MaxwellSystemPlan {
     pub fn edge_node_identities(&self) -> &[[StableDigest; 2]] {
         &self.edge_node_identities
     }
-    pub fn block_pattern(&self) -> &SparsePattern {
-        &self.block_pattern
+    pub fn pattern(&self) -> &SparsePattern {
+        &self.pattern
+    }
+    pub fn grounded_faces(&self) -> &[StableDigest] {
+        &self.grounded_faces
     }
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, MaxwellError> {
         encode_contract(PREFIX, "maxwell-system-plan", self, LIMITS).map_err(invalid)
