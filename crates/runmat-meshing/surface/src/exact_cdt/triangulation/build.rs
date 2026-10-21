@@ -1,4 +1,3 @@
-#[cfg(test)]
 use std::collections::{BTreeMap, BTreeSet};
 
 mod working;
@@ -60,12 +59,119 @@ pub(crate) fn triangulate_validated_face_pslg(
         })
         .collect::<Vec<_>>();
     triangles.sort();
+    complete_convex_hull(&mut triangles, pslg, &mut budget)?;
     let result = ExactFaceDelaunay {
         source_face_id: pslg.source_face_id.clone(),
         triangles,
     };
     super::validate::validate_face_delaunay_topology(&result, pslg, cancellation, options)?;
     Ok(result)
+}
+
+/// A finite super triangle loses the hull triangles whose circumcircle reaches one of its
+/// vertices: a point just inside a long hull edge makes a sliver whose circle is far larger than
+/// the super triangle, so the cavity keeps a super vertex instead and the hull edge disappears.
+/// Fill each such pocket (a reflex turn of the boundary, which holds no point) and restore the
+/// Delaunay property by Lawson flips. The result triangulates the whole convex hull, as segment
+/// recovery requires.
+fn complete_convex_hull(
+    triangles: &mut Vec<ExactFaceDelaunayTriangle>,
+    pslg: &ExactFacePslg,
+    budget: &mut PredicateBudget<'_>,
+) -> Result<(), ExactFaceDelaunayError> {
+    use runmat_meshing_core::predicate::orient2d;
+    let uv = |vertex: u32| pslg.vertices[vertex as usize].uv;
+    let mut filled = false;
+    'pockets: loop {
+        budget.checkpoint()?;
+        let directed = triangles
+            .iter()
+            .flat_map(|triangle| {
+                let [a, b, c] = triangle.vertex_indices;
+                [[a, b], [b, c], [c, a]]
+            })
+            .collect::<BTreeSet<_>>();
+        let mut next = BTreeMap::<u32, u32>::new();
+        for &[a, b] in &directed {
+            if !directed.contains(&[b, a]) && next.insert(a, b).is_some() {
+                // A pinched boundary vertex: leave it to the topology validator.
+                break 'pockets;
+            }
+        }
+        for (&a, &b) in &next {
+            let Some(&c) = next.get(&b) else { continue };
+            budget.consume(1)?;
+            if orient2d([uv(a), uv(b), uv(c)]).map_err(|e| predicate_error(pslg, e))?
+                != PredicateSign::Negative
+            {
+                continue;
+            }
+            // The pocket triangle must hold no other boundary vertex (no point lies outside
+            // the triangulation, so only boundary vertices can).
+            let mut empty = true;
+            for &vertex in next.keys() {
+                if [a, b, c].contains(&vertex) {
+                    continue;
+                }
+                budget.consume(3)?;
+                let signs = [[a, c], [c, b], [b, a]].map(|[left, right]| {
+                    orient2d([uv(left), uv(right), uv(vertex)])
+                });
+                let mut inside = true;
+                for sign in signs {
+                    if sign.map_err(|e| predicate_error(pslg, e))? == PredicateSign::Negative {
+                        inside = false;
+                    }
+                }
+                if inside {
+                    empty = false;
+                    break;
+                }
+            }
+            if empty {
+                triangles.push(ExactFaceDelaunayTriangle {
+                    vertex_indices: canonical_triangle([a, c, b]),
+                });
+                filled = true;
+                continue 'pockets;
+            }
+        }
+        break;
+    }
+    if !filled {
+        return Ok(());
+    }
+    triangles.sort();
+    loop {
+        budget.checkpoint()?;
+        let edges = super::super::topology::edge_uses_with_checkpoint(triangles, || {
+            budget.checkpoint()
+        })?;
+        let mut flipped = false;
+        for (edge, uses) in &edges {
+            if uses.len() != 2 {
+                continue;
+            }
+            budget.consume(1)?;
+            let triangle = triangles[uses[0].triangle_index].vertex_indices;
+            let query = [triangle[0], triangle[1], triangle[2], uses[1].opposite_vertex]
+                .map(|index| predicate_point(pslg.vertices[index as usize], index).coordinates);
+            if incircle2d(query).map_err(|e| predicate_error(pslg, e))? != PredicateSign::Positive {
+                continue;
+            }
+            budget.consume(2)?;
+            if super::super::topology::flip_edge(triangles, pslg, *edge, uses, &edges)
+                .map_err(|e| predicate_error(pslg, e))?
+                .is_some()
+            {
+                flipped = true;
+                break;
+            }
+        }
+        if !flipped {
+            return Ok(());
+        }
+    }
 }
 
 fn validate_options(

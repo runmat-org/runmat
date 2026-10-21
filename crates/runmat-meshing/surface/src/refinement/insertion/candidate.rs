@@ -42,7 +42,10 @@ pub(super) fn validate_candidate(
         if sign == PredicateSign::Zero && within_segment_bounds(candidate.uv, endpoints) {
             return Err(invalid(
                 pslg,
-                "refinement candidate lies on a protected segment and requires a curve split",
+                &format!(
+                    "{:?} refinement candidate {:?} lies on protected segment {:?} ({:?}) and requires a curve split; source triangle {:?}",
+                    candidate.reason, candidate.uv, endpoints, segment.source, candidate.triangle.vertex_indices.map(|index| (index, pslg.vertices[index as usize].uv, pslg.vertices[index as usize].node_id))
+                ),
             ));
         }
     }

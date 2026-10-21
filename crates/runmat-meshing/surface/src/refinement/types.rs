@@ -32,6 +32,10 @@ pub struct ExactFaceRefinementCandidate {
 #[derive(Clone, Debug, PartialEq)]
 pub enum ExactFaceCandidateDisposition {
     Insert,
+    /// A shape-only point inside a shared exact curve segment's diametral disk: shape refinement
+    /// does not rewrite the curve, and the point would make a sliver against it, so it is
+    /// withdrawn.
+    Withdraw,
     SplitProtectedSegment(Box<ExactProtectedSegmentSplit>),
     SplitChartCut(Box<ExactChartCutSplit>),
 }

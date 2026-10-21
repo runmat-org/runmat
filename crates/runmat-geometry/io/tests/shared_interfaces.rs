@@ -17,6 +17,8 @@ const OVERLAPPING_PARTS: &[u8] = include_bytes!("fixtures/overlapping_parts_asse
 const FUSED_COMPOUND: &[u8] = include_bytes!("fixtures/fused_compound.step");
 const FREE_WIREFRAME: &[u8] = include_bytes!("fixtures/free_wireframe_part.step");
 const NAMED_CAVITY: &[u8] = include_bytes!("fixtures/named_cavity_part.step");
+/// Strip under an air box; each part carries its own imprinted copy of the contact face.
+const STRIP_LINE_IMPRINTED: &[u8] = include_bytes!("fixtures/strip_line_imprinted_assembly.step");
 
 fn import(name: &str, bytes: &[u8], shared: bool) -> Result<ImportedExactCad, String> {
     let mut options = ExactCadImportOptions::default();
@@ -153,4 +155,22 @@ fn face_names_on_a_cavity_shell_are_read() {
     assert_eq!(named(&imported, PersistentEntityKind::Face, "Electrode").len(), 6);
     assert_eq!(named(&imported, PersistentEntityKind::Face, "Ground plane").len(), 1);
     assert_eq!(named(&imported, PersistentEntityKind::Solid, "Insulator").len(), 1);
+}
+
+#[test]
+fn imprinted_coincident_faces_become_one_shared_face_with_one_source_identity() {
+    for shared in [false, true] {
+        let imported = import("strip-line.step", STRIP_LINE_IMPRINTED, shared).unwrap();
+        let mut seen = std::collections::BTreeSet::new();
+        for id in imported.source_face_ids.values() {
+            assert!(seen.insert(id), "shared={shared}: duplicate source face identity {id:?}");
+        }
+        let faces = imported.topology.faces.iter().map(|face| &face.id).collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(seen.len(), imported.source_face_ids.len());
+        assert!(seen.iter().all(|id| faces.contains(id)));
+        if shared {
+            assert_eq!(imported.topology.solids.len(), 2);
+            assert_eq!(interface_faces(&imported).len(), 1, "one contact face shared by both bodies");
+        }
+    }
 }

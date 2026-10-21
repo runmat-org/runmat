@@ -94,21 +94,35 @@ pub(crate) fn recover_validated_face_segments(
                                     / length_squared;
                                 let across = offset[0] * direction[1] - offset[1] * direction[0];
                                 !target.contains(&(*index as u32))
-                                    && along > 0.0
-                                    && along < 1.0
-                                    && across.abs() <= 1e-9 * length_squared
+                                    && along >= -1e-6
+                                    && along <= 1.0 + 1e-6
+                                    && across.abs() <= 1e-6 * length_squared
                             })
                             .map(|(index, vertex)| {
+                                let index = index as u32;
                                 let segment_count = pslg
                                     .segments
                                     .iter()
-                                    .filter(|segment| segment.vertex_indices.contains(&(index as u32)))
+                                    .filter(|segment| segment.vertex_indices.contains(&index))
                                     .count();
-                                (index, vertex.uv, segment_count)
+                                let triangle_count = triangles
+                                    .iter()
+                                    .filter(|triangle| triangle.vertex_indices.contains(&index))
+                                    .count();
+                                (index, vertex.uv, segment_count, triangle_count)
                             })
                             .collect::<Vec<_>>();
+                        let endpoint_triangles = target.map(|vertex| {
+                            triangles
+                                .iter()
+                                .filter(|triangle| triangle.vertex_indices.contains(&vertex))
+                                .map(|triangle| triangle.vertex_indices.map(|corner| (corner, uv(corner))))
+                                .collect::<Vec<_>>()
+                        });
                         return Err(control.unsatisfied(&format!(
-                            "protected segment {a:?} -> {b:?} has no valid deterministic recovery cavity: {reason}; vertices on the segment (index, uv, segment uses) {on_segment:?}",
+                            "protected segment {target:?} {a:?} -> {b:?} (endpoint triangles {endpoint_triangles:?}, {} vertices, {} triangles) has no valid deterministic recovery cavity: {reason}; vertices on or near the closed segment (index, uv, segment uses, triangle uses) {on_segment:?}",
+                            pslg.vertices.len(),
+                            triangles.len(),
                         )));
                     }
                 }

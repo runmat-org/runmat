@@ -106,9 +106,11 @@ pub(crate) fn classify_with_context(
     )?;
     let mut encroached_segments = BTreeSet::new();
     let mut insertions = Vec::new();
+    let mut withdrawn = 0;
     for candidate in candidates {
         checkpoint(Some(control), &pslg.source_face_id)?;
         let mut encroached = false;
+        let mut withdraw = false;
         let mut failure = None;
         influence.visit_bounds_with_checkpoint(
             spatial::point(candidate.uv),
@@ -126,7 +128,15 @@ pub(crate) fn classify_with_context(
                     // contract. Face-owned shape refinement may split chart cuts, but it must not
                     // repeatedly rewrite a global curve merely to improve a local triangle angle or
                     // aspect ratio. Geometric-deviation and metric-size candidates remain hard and
-                    // can request an exact-curve split.
+                    // can request an exact-curve split. A shape point inside the curve segment's
+                    // diametral disk is therefore withdrawn rather than inserted: inserted, it makes
+                    // a sliver against the curve whose own repair point lies closer still, and the
+                    // cascade ends with points within roundoff of the curve.
+                    if metric_diametral_disk_contains(candidate.uv, first.uv, second.uv, *metric)
+                        .unwrap_or(true)
+                    {
+                        withdraw = true;
+                    }
                     return;
                 }
                 // A CDT permits interior points inside a protected edge's diametral
@@ -164,7 +174,9 @@ pub(crate) fn classify_with_context(
         if let Some(failure) = failure {
             return Err(failure);
         }
-        if !encroached {
+        if withdraw && !encroached {
+            withdrawn += 1;
+        } else if !encroached {
             insertions.push(candidate.clone());
         }
     }
@@ -191,7 +203,7 @@ pub(crate) fn classify_with_context(
                     chart_cut_splits.push(split);
                 }
             }
-            ExactFaceCandidateDisposition::Insert => {
+            ExactFaceCandidateDisposition::Insert | ExactFaceCandidateDisposition::Withdraw => {
                 return Err(invalid(
                     &pslg.source_face_id,
                     "encroached segment classification did not request a split",
@@ -204,5 +216,7 @@ pub(crate) fn classify_with_context(
         protected_splits,
         chart_cut_splits,
         insertions,
+        withdrawn,
     })
 }
+
