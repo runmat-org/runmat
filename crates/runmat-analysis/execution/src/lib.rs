@@ -169,6 +169,10 @@ pub use fluid_study::{
     FluidStudyResultClosure, FluidStudyResultPhase, PreparedFluidStudyRoot,
 };
 mod sampled_study_observations;
+mod statistical_study_observations;
+pub use statistical_study_observations::{
+    StatisticalObservationSource, StatisticalStudyObservations,
+};
 mod steady_study;
 pub use magnetic_study::{
     import_magnetic_study_completion, import_magnetic_study_root, prepare_magnetic_study_root,
@@ -181,12 +185,13 @@ pub use maxwell_study::{
     MaxwellStudyResultClosure, MaxwellStudyResultPhase, PreparedMaxwellStudyRoot,
 };
 mod magnetic_field_recovery;
-mod random_response_field_recovery;
-pub use random_response_field_recovery::{
-    build_prepared_random_response_field_recovery_resource_plan,
-    decode_random_response_recovery_source, import_random_response_recovered_fields,
-    prepare_random_response_field_recovery, random_response_recovery_request,
-    PreparedRandomResponseFieldRecovery, RandomResponseFieldRecoveryPreparation,
+mod statistical_field_recovery;
+pub use statistical_field_recovery::{
+    build_prepared_statistical_field_recovery_resource_plan, decode_statistical_recovery_source,
+    import_statistical_recovered_fields, prepare_statistical_field_recovery,
+    statistical_procedure, statistical_recovery_execution_plan, statistical_recovery_request,
+    DecodedStatisticalSource, PreparedStatisticalFieldRecovery,
+    StatisticalFieldRecoveryPreparation,
 };
 mod magnetic_state_profiles;
 mod maxwell_field_recovery;

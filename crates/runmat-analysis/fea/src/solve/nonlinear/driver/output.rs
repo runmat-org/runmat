@@ -94,11 +94,8 @@ pub(super) fn append_increment(
     result.plastic_strain_snapshots.push(plastic);
     result.equivalent_plastic_strain_snapshots.push(alpha);
     result.von_mises_snapshots.push(von_mises);
-    // Contact histories exist only for models with a contact operator.
-    if contact.is_some() {
-        result.contact_pressure_snapshots.push(pressure);
-        result.contact_gap_snapshots.push(gap);
-    }
+    result.contact_pressure_snapshots.push(pressure);
+    result.contact_gap_snapshots.push(gap);
     result.residual_norms.push(increment.relative_residual);
     result.increment_norms.push(increment.correction_norm);
     result

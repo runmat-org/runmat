@@ -192,19 +192,39 @@ pub fn random_response_statistical_fields(
         .iter()
         .map(|field| StatisticalFieldValues {
             quantity: field.quantity(),
-            field_id: crate::contracts::RandomResponseFieldSelector::root_mean_square(
-                field.quantity(),
-            )
-            .field_id(),
+            field_id: StatisticalProcedure::RandomResponse.field_id(field.quantity()),
             shape: field.shape(),
             values: field.rms(),
         })
         .collect()
 }
 
-/// Field definitions a random-response recovery `request` publishes, in requirement order;
+/// The statistical procedure whose step fields a recovery copies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StatisticalProcedure {
+    /// Root-mean-square response to a random excitation.
+    RandomResponse,
+    /// Combined peak (envelope) response to a response spectrum.
+    ResponseSpectrum,
+}
+
+impl StatisticalProcedure {
+    pub fn field_id(self, quantity: StructuralLinearFieldQuantity) -> String {
+        match self {
+            Self::RandomResponse => {
+                crate::contracts::RandomResponseFieldSelector::root_mean_square(quantity).field_id()
+            }
+            Self::ResponseSpectrum => {
+                crate::contracts::ResponseSpectrumFieldSelector::Deformation(quantity).field_id()
+            }
+        }
+    }
+}
+
+/// Field definitions a statistical recovery `request` publishes, in requirement order;
 /// resource planning profiles these before any value is recovered.
-pub fn random_response_field_definitions(
+pub fn statistical_field_definitions(
+    procedure: StatisticalProcedure,
     request: &FieldRecoveryRequest,
 ) -> AnalysisExecutionResult<Vec<RecoveredFieldDefinition>> {
     request.validate()?;
@@ -217,13 +237,28 @@ pub fn random_response_field_definitions(
                 ObservationQuantity::Displacement => StructuralLinearFieldQuantity::Displacement,
                 ObservationQuantity::Strain => StructuralLinearFieldQuantity::Strain,
                 ObservationQuantity::Stress => StructuralLinearFieldQuantity::Stress,
-                _ => return Err(invalid("random-response recovery quantity is unsupported")),
+                _ => return Err(invalid("statistical recovery quantity is unsupported")),
             };
-            let field_id =
-                crate::contracts::RandomResponseFieldSelector::root_mean_square(quantity)
-                    .field_id();
-            definition(quantity, &field_id)?
-                .ok_or_else(|| invalid("random-response recovery quantity is unsupported"))
+            definition(quantity, &procedure.field_id(quantity))?
+                .ok_or_else(|| invalid("statistical recovery quantity is unsupported"))
+        })
+        .collect()
+}
+
+/// The combined-peak deformation fields of a response-spectrum recovery. A response that is not
+/// convertible to displacement has none, so its authored field outputs fail closed.
+pub fn response_spectrum_statistical_fields(
+    recovery: &crate::solve::dynamics::ResponseSpectrumFieldRecovery,
+) -> Vec<StatisticalFieldValues<'_>> {
+    recovery
+        .fields()
+        .unwrap_or_default()
+        .iter()
+        .map(|field| StatisticalFieldValues {
+            quantity: field.quantity(),
+            field_id: StatisticalProcedure::ResponseSpectrum.field_id(field.quantity()),
+            shape: field.shape(),
+            values: field.values(),
         })
         .collect()
 }

@@ -101,14 +101,20 @@ fn payload_bound(
 }
 
 /// Construction residency of an encoded block artifact beyond its typed contents. The typed
-/// history (and its canonical materialization) is already charged to the nonlinear pipeline's
-/// persistent storage; encoding adds the wire buffer and fixed codec state, not another
-/// generic per-byte value tree.
+/// history is already charged to the nonlinear pipeline's persistent storage. The direct
+/// encoder reserves the output once and holds out-of-order fields in separate buffers, never a
+/// value tree: at most the reserved output plus held copies of the same bytes, plus sorted-map
+/// metadata and fixed codec state.
 pub fn nonlinear_solid_block_output_construction_bytes(
     encoded_bytes: u64,
 ) -> Result<u64, ResourcePlanningError> {
     encoded_bytes
-        .checked_add(runmat_canonical_codec::CANONICAL_MATERIALIZATION_FIXED_BYTES_PER_CONTRACT)
+        .checked_mul(2)
+        .and_then(|bytes| {
+            bytes.checked_add(
+                2 * runmat_canonical_codec::CANONICAL_MATERIALIZATION_FIXED_BYTES_PER_CONTRACT,
+            )
+        })
         .ok_or(ResourcePlanningError::Overflow("nonlinear block encoding"))
 }
 

@@ -53,14 +53,7 @@ enum StudyPhase {
     AwaitingIntervals(BTreeSet<Digest>),
     ReadyForAssembly,
     AwaitingAssembly(Digest),
-    ReadyForFieldRecovery,
-    AwaitingFieldRecovery(Digest),
-    ReadyForObservationFanout,
-    AwaitingObservationPartitions,
-    ReadyForObservationReduction { ordinal: usize },
-    AwaitingObservationReduction { ordinal: usize },
-    ReadyForObservationAssembly,
-    AwaitingObservationAssembly,
+    Observing,
     ReadyForAccuracy,
     AwaitingAccuracy(Digest),
     ReadyForPublication,
@@ -87,9 +80,7 @@ pub struct StructuralRandomResponseStudyCoordinator {
     resource_usage: Option<PreparedResourceUsage>,
     publication: Option<ImportedPublishedResult>,
     statistics_state: Option<ImportedSemanticState>,
-    field_recovery: Option<crate::PreparedRandomResponseFieldRecovery>,
-    fields: Option<crate::ImportedRecoveredFields>,
-    observation_state: crate::sampled_study_observations::SampledStudyObservations,
+    observations: Option<crate::StatisticalStudyObservations>,
     phase: StudyPhase,
 }
 
@@ -154,9 +145,7 @@ impl StructuralRandomResponseStudyCoordinator {
             resource_usage: None,
             publication: None,
             statistics_state: None,
-            field_recovery: None,
-            fields: None,
-            observation_state: Default::default(),
+            observations: None,
             phase: StudyPhase::ReadyForModal,
         })
     }
@@ -403,11 +392,52 @@ impl StructuralRandomResponseStudyCoordinator {
             .cloned()
             .collect();
         // Authored outputs observe the step's recovered statistic fields before accuracy.
-        self.phase = if self.bound_workload()?.procedure_step()?.observations.is_empty() {
-            StudyPhase::ReadyForAccuracy
+        let step = self.bound_workload()?.procedure_step()?.clone();
+        if step.observations.is_empty() {
+            self.phase = StudyPhase::ReadyForAccuracy;
         } else {
-            StudyPhase::ReadyForFieldRecovery
-        };
+            let result = self
+                .result
+                .as_ref()
+                .ok_or_else(|| invalid("completed random-response result is absent"))?;
+            self.observations = Some(crate::StatisticalStudyObservations::new(
+                crate::StatisticalObservationSource {
+                    assembly_host: task.host.clone(),
+                    assembly_inputs: self.assembly_source_context_inputs.clone(),
+                    source_result: result.result_objects.clone(),
+                    source_fields: None,
+                    sequence: SequenceIdentity::from_solver_contract(
+                        &self.bound_workload()?.model().sequence,
+                    )?,
+                    step,
+                    mesh: self.preparation.mesh.clone(),
+                    program_revision: self.preparation.program_revision.clone(),
+                    chunk_bytes: self.preparation.chunk_bytes,
+                    inventory_limits: self.preparation.inventory_limits,
+                },
+            )?);
+            self.phase = StudyPhase::Observing;
+        }
+        Ok(())
+    }
+
+    /// The authored observations awaiting execution after assembly, if the step has any.
+    pub fn observations_mut(&mut self) -> Option<&mut crate::StatisticalStudyObservations> {
+        if self.phase == StudyPhase::Observing {
+            self.observations.as_mut()
+        } else {
+            None
+        }
+    }
+
+    /// Accept completed observations; accuracy and publication then bind their catalog.
+    pub fn finish_observations(&mut self) -> AnalysisBridgeResult<()> {
+        if self.phase != StudyPhase::Observing
+            || !self.observations.as_ref().is_some_and(|o| o.is_complete())
+        {
+            return Err(invalid("random-response observations are not complete"));
+        }
+        self.phase = StudyPhase::ReadyForAccuracy;
         Ok(())
     }
 
@@ -431,7 +461,7 @@ impl StructuralRandomResponseStudyCoordinator {
                 .clone(),
             source_kind: AccuracySourceKind::StructuralRandomResponse,
             source_numerical_receipt: result.receipt_objects.clone(),
-            source_observations: self.observation_state.catalog.clone(),
+            source_observations: self.observations.as_ref().and_then(|o| o.catalog()),
             sequence: SequenceIdentity::from_solver_contract(&workload.model().sequence)?,
             step: workload.procedure_step()?.clone(),
             program_revision: self.preparation.program_revision.clone(),
@@ -482,7 +512,7 @@ impl StructuralRandomResponseStudyCoordinator {
                 .objects
                 .clone(),
             source_resource_usage: resource_usage.objects.clone(),
-            source_observations: self.observation_state.catalog.clone(),
+            source_observations: self.observations.as_ref().and_then(|o| o.catalog()),
             program_revision: self.preparation.program_revision.clone(),
             chunk_bytes: self.preparation.chunk_bytes,
             inventory_limits: self.preparation.inventory_limits,
@@ -620,8 +650,6 @@ impl StructuralRandomResponseStudyCoordinator {
     }
 }
 
-#[path = "structural_random_response_study/observations.rs"]
-mod observations;
 
 fn invalid(message: impl Into<String>) -> AnalysisBridgeError {
     AnalysisBridgeError::Invalid(message.into())

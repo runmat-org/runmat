@@ -100,7 +100,17 @@ mod tests {
             )
             .unwrap();
             assert!(wire >= actual.encoded_bytes_upper_bound);
-            assert!(resident >= actual.materialization_resident_bytes_estimate);
+            // Results are encoded directly into reserved output; no value tree is built.
+            let encoding = runmat_canonical_codec::profile_canonical_encoding(
+                &result,
+                CanonicalLimits::new(1024 * 1024 * 1024, 100_000_000, 65_536, 32),
+            )
+            .unwrap();
+            assert!(
+                resident >= encoding.resident_workspace_bytes_estimate,
+                "{resident} < {}",
+                encoding.resident_workspace_bytes_estimate
+            );
             let larger =
                 projection(dofs, plan.elements().len(), 16, storage.point_history_bytes).unwrap();
             assert!(larger.0 > wire && larger.1 > resident);

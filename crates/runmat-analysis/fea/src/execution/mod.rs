@@ -133,9 +133,9 @@ pub use buckling_workload::{
 pub use error::{AnalysisExecutionError, AnalysisExecutionResult};
 pub use field::{FieldRecoveryRequest, FieldRecoverySource};
 pub use statistical_fields::{
-    random_response_field_definitions, random_response_statistical_fields,
-    statistical_field_request, statistical_recovered_fields,
-    StatisticalFieldValues,
+    random_response_statistical_fields, response_spectrum_statistical_fields,
+    statistical_field_definitions, statistical_field_request, statistical_recovered_fields,
+    StatisticalFieldValues, StatisticalProcedure,
 };
 pub use field_plan::{FieldRecoveryCost, FieldRecoveryPlan, FieldRecoveryRequirement};
 pub use field_topology::FieldTopologyIdentity;

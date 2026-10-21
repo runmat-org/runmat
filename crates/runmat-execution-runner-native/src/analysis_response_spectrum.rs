@@ -186,6 +186,21 @@ async fn execute_with_pool(
     coordinator
         .complete_assembly(pool, executed_assembly.response, &assembly)
         .map_err(protocol)?;
+    let mut accuracy_dependencies = vec![assembly_dependency];
+    if let Some(observations) = coordinator.observations_mut() {
+        // Authored outputs observe the combined-peak fields before accuracy and publication.
+        accuracy_dependencies = vec![
+            crate::analysis_statistical_observations::execute_statistical_observations(
+                pool,
+                observations,
+                &policy,
+                assembly_dependency,
+                &mut resource_attempts,
+            )
+            .await?,
+        ];
+        coordinator.finish_observations().map_err(protocol)?;
+    }
     let graph = PlannedResourceUsageGraph::new(
         resource_attempts,
         u64::try_from(workflow_started.elapsed().as_millis()).unwrap_or(u64::MAX),
@@ -219,7 +234,7 @@ async fn execute_with_pool(
             resource_plan: Some(&accuracy.resource_plan),
             prepared_closure: None,
             fallback_resources: policy.resources.clone(),
-            dependencies: vec![assembly_dependency],
+            dependencies: accuracy_dependencies,
         }],
         task_policy(&policy),
     )

@@ -1,23 +1,25 @@
 //! Retained native copies of statistical-step fields: catalog and partition materialization.
 use super::*;
-use crate::execution::{random_response_field_definitions, FieldRecoveryRequest};
+use crate::execution::{statistical_field_definitions, FieldRecoveryRequest, StatisticalProcedure};
 
-/// Canonical catalog and storage partitions of a random-response field recovery.
-pub fn random_response_field_recovery_shape(
+/// Canonical catalog and storage partitions of a statistical field recovery.
+pub fn statistical_field_recovery_shape(
+    procedure: StatisticalProcedure,
     request: &FieldRecoveryRequest,
 ) -> Result<(Vec<u64>, ByteCount), ResourcePlanningError> {
-    let definitions = random_response_field_definitions(request)
+    let definitions = statistical_field_definitions(procedure, request)
         .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
     super::recovered_field_shape::shape(request, definitions)
 }
 
-pub fn build_random_response_field_recovery_resource_plan(
+pub fn build_statistical_field_recovery_resource_plan(
+    procedure: StatisticalProcedure,
     request: &FieldRecoveryRequest,
     source_validation_workspace_bytes: ByteCount,
     facts: PreparedPhaseResourceFacts,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     let (partitions, construction_workspace_bytes) =
-        random_response_field_recovery_shape(request)?;
+        statistical_field_recovery_shape(procedure, request)?;
     let bytes = partitions.iter().try_fold(0u64, |n, v| {
         n.checked_add(*v)
             .ok_or(ResourcePlanningError::Overflow("statistical recovery output"))
