@@ -74,6 +74,7 @@ study steady { geometry = geometry.part; mesh = mesh.part; model = model.flow; f
             ],
             exchange: None,
             resolved_units: None,
+            authored_names: Default::default(),
         },
     );
     let program = FeaCompiler::new(&host).check(CheckRequest {

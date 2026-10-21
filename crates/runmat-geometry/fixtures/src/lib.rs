@@ -224,6 +224,7 @@ pub fn faceted_tetrahedron() -> (GeometryDocument, FacetedSolid) {
             consolidate_duplicates: false,
             repair_tolerance_scale_gaps: false,
             simplify_short_edges_and_sliver_faces: false,
+            shared_interfaces: false,
         },
         model: GeometryModel::FacetedSolid {
             model: FacetedSolidModel {
@@ -395,6 +396,7 @@ fn document(model: ExactBRepModel) -> GeometryDocument {
             consolidate_duplicates: true,
             repair_tolerance_scale_gaps: true,
             simplify_short_edges_and_sliver_faces: false,
+            shared_interfaces: false,
         },
         model: GeometryModel::ExactBRep { model },
         display_tessellations: Vec::new(),

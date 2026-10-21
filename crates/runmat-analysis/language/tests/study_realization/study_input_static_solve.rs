@@ -93,6 +93,7 @@ fn two_authored_force_inputs_compile_to_distinct_physical_static_solutions() {
             ],
             exchange: None,
             resolved_units: None,
+            authored_names: Default::default(),
         },
     );
     let program = FeaCompiler::new(&host).check(CheckRequest {

@@ -120,6 +120,8 @@ pub(crate) mod bridge {
         heal_duplicates: bool,
         heal_gaps: bool,
         heal_short_edges_and_sliver_faces: bool,
+        /// Join touching solids so their coincident faces become shared interfaces.
+        share_interfaces: bool,
         maximum_healing_displacement: f64,
         cancel_token_id: u64,
     }
@@ -291,6 +293,10 @@ pub(crate) mod bridge {
         periodic_u: bool,
         periodic_v: bool,
         singular: bool,
+        /// Authored names, in precedence order; selector metadata outside persistent identity.
+        names: Vec<String>,
+        /// Presentation layers (semantic tags); selector metadata outside persistent identity.
+        tags: Vec<String>,
     }
 
     #[derive(Debug, Clone)]
@@ -332,6 +338,10 @@ pub(crate) mod bridge {
         identity_digest: Vec<u8>,
         outer_shell_key: u64,
         void_shell_keys: Vec<u64>,
+        /// Authored solid or product names; selector metadata outside persistent identity.
+        names: Vec<String>,
+        /// Presentation layers (semantic tags); selector metadata outside persistent identity.
+        tags: Vec<String>,
     }
 
     #[derive(Debug, Clone)]

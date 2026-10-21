@@ -41,6 +41,14 @@ pub struct ImportedExactCad {
     /// Kernel-authored mapping from display-import face ordinals to exact persistent faces.
     /// This selector metadata does not enter canonical geometry identity.
     pub source_face_ids: BTreeMap<u64, runmat_geometry_core::PersistentEntityId>,
+    /// Names the CAD author gave to faces and solids (STEP face names, solid names, part product
+    /// names), in precedence order. A face that shared interfaces made from several authored
+    /// faces carries all of their names, the smallest owning solid's first. Like
+    /// `source_face_ids`, this selector metadata does not enter canonical geometry identity.
+    pub entity_names: BTreeMap<runmat_geometry_core::PersistentEntityId, Vec<String>>,
+    /// Presentation layers (STEP `PRESENTATION_LAYER_ASSIGNMENT`) on faces and solids; a solid
+    /// also carries its part's layers. Selector metadata outside canonical geometry identity.
+    pub entity_tags: BTreeMap<runmat_geometry_core::PersistentEntityId, Vec<String>>,
     /// Analysis identity and mutation policy admitted before the kernel import. Keeping this on
     /// the imported object prevents closure construction from claiming a different tolerance or
     /// healing policy than the one under which topology was produced.
@@ -60,6 +68,84 @@ pub struct ImportedExactCad {
 impl ImportedExactCad {
     pub fn analysis_options(&self) -> &ExactCadAnalysisOptions {
         &self.analysis
+    }
+
+    /// Entities of one region role whose authored names include `name` (exact, case-sensitive).
+    /// A `cell` is selected through the name of its solid. Naming nothing is an error that lists
+    /// the names the source does carry for that role, so a misspelled selector fails clearly.
+    pub fn entities_named(
+        &self,
+        role: runmat_geometry_core::GeometryRegionRole,
+        name: &str,
+    ) -> Result<Vec<runmat_geometry_core::PersistentEntityId>, String> {
+        self.select_authored(&self.entity_names, "named", role, name)
+    }
+
+    /// Entities of one region role carrying the presentation layer `tag`, selected like names.
+    pub fn entities_tagged(
+        &self,
+        role: runmat_geometry_core::GeometryRegionRole,
+        tag: &str,
+    ) -> Result<Vec<runmat_geometry_core::PersistentEntityId>, String> {
+        self.select_authored(&self.entity_tags, "tagged", role, tag)
+    }
+
+    fn select_authored(
+        &self,
+        authored: &BTreeMap<runmat_geometry_core::PersistentEntityId, Vec<String>>,
+        verb: &str,
+        role: runmat_geometry_core::GeometryRegionRole,
+        value: &str,
+    ) -> Result<Vec<runmat_geometry_core::PersistentEntityId>, String> {
+        use runmat_geometry_core::{GeometryRegionRole, PersistentEntityKind};
+        let kind = match role {
+            GeometryRegionRole::Vertex => PersistentEntityKind::Vertex,
+            GeometryRegionRole::Edge => PersistentEntityKind::Edge,
+            GeometryRegionRole::Face => PersistentEntityKind::Face,
+            GeometryRegionRole::Solid | GeometryRegionRole::Cell => PersistentEntityKind::Solid,
+        };
+        let candidates = authored
+            .iter()
+            .filter(|(id, _)| id.kind == kind)
+            .collect::<Vec<_>>();
+        let matched = candidates
+            .iter()
+            .filter(|(_, values)| values.iter().any(|candidate| candidate == value))
+            .map(|(id, _)| (*id).clone())
+            .collect::<Vec<_>>();
+        let mut selected = if role == GeometryRegionRole::Cell {
+            self.topology
+                .regions
+                .iter()
+                .filter(|region| matched.contains(&region.solid_id))
+                .map(|region| region.id.clone())
+                .collect::<Vec<_>>()
+        } else {
+            matched
+        };
+        if selected.is_empty() {
+            let role_name = format!("{role:?}").to_lowercase();
+            let mut available = candidates
+                .iter()
+                .flat_map(|(_, values)| values.iter().cloned())
+                .collect::<Vec<_>>();
+            available.sort();
+            available.dedup();
+            return Err(if available.is_empty() {
+                format!("no {role_name} is {verb} \"{value}\"; the source has no {verb} {role_name}s")
+            } else {
+                format!(
+                    "no {role_name} is {verb} \"{value}\"; {verb} {role_name}s: {}",
+                    available
+                        .iter()
+                        .map(|candidate| format!("\"{candidate}\""))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            });
+        }
+        selected.sort();
+        Ok(selected)
     }
 
     pub fn representation_digest(&self) -> [u8; 32] {
@@ -158,6 +244,7 @@ impl Default for ExactCadAnalysisOptions {
                 consolidate_duplicates: false,
                 repair_tolerance_scale_gaps: false,
                 simplify_short_edges_and_sliver_faces: false,
+                shared_interfaces: false,
             },
         }
     }
