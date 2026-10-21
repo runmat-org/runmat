@@ -8146,6 +8146,7 @@ dependencies = [
  "libm",
  "num-bigint",
  "num-integer",
+ "num-rational",
  "num-traits",
  "runmat-accelerate-api",
  "runmat-async",
