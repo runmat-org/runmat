@@ -153,6 +153,7 @@ pub(super) async fn execute(
     let executed = Box::pin(crate::analysis_nonlinear::execute_with_pool(
         &mut pool,
         NonlinearSolidStudyPreparation {
+            local_execution: prepared.local_execution,
             accepted_block_limit: prepared.accepted_block_limit,
             product,
             mesh: geometry.meshing.artifact.clone(),

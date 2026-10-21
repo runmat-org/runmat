@@ -27,6 +27,8 @@ fn native_acoustic_frequency_entries_fan_in_after_cold_reopen_for_both_orders() 
             // a cooperative/distributed Helmholtz solve.
             for entry in sweep.plan().entries().unwrap().into_iter().rev() {
                 let task = prepare_acoustic_harmonic_task(AcousticHarmonicTaskPreparation {
+                    local_execution:
+                        runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
                     authored_study_digest: digest,
                     frozen_project_digest: None,
                     program_revision: ProgramRevision::new(

@@ -102,6 +102,7 @@ pub(crate) fn build_structural_transient_scope_resource_plan(
     prepared: &PreparedTransientPreassembly,
     prepared_inputs: Option<PreparedInputResourceFacts>,
     output_set: Option<PreparedOutputSetResourceFacts>,
+    local_execution: super::LocalExecutionPlan,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     workload
         .validate()
@@ -373,7 +374,9 @@ pub(crate) fn build_structural_transient_scope_resource_plan(
         ),
         output_set: Some(output_set),
         worker: WorkerResourcePolicy {
-            cpu_millicores: 1_000,
+            cpu_millicores: local_execution
+                .checked_cpu_millicores()
+                .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
             maximum_wall_milliseconds: prepared
                 .execution_step
                 .accuracy

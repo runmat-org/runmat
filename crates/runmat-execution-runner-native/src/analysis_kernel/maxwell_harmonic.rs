@@ -99,7 +99,9 @@ pub(super) fn execute(
         ));
     }
     // The admitted path rederives allocation before quadrature, assembly, or shared GMRES.
-    let result = workload.execute_with_resource_plan(&mesh, &plan)?;
+    let result = super::with_admitted_cpu_pool(&plan, || {
+        Ok(workload.execute_with_resource_plan(&mesh, &plan)?)
+    })?;
     let receipt = MaxwellNumericalReceiptArtifact::new(&workload, &result, &mesh)?;
     let bytes = result.canonical_bytes()?;
     if bytes.len() as u64 > maxwell_harmonic_result_payload_bytes_upper_bound(&workload, &mesh)? {

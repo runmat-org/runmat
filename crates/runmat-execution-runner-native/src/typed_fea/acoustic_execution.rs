@@ -193,6 +193,7 @@ pub(super) async fn execute(
     let executed = Box::pin(crate::analysis_acoustic::execute_with_pool(
         &mut pool,
         AcousticStudyPreparation {
+            local_execution: prepared.local_execution,
             policy: prepared.planning,
             product,
             mesh: geometry.meshing.artifact.clone(),

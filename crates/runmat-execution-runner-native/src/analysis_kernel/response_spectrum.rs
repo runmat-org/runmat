@@ -39,13 +39,17 @@ pub(super) fn execute_direction(
         ));
     }
     request.validate_for(&decoded.workload)?;
-    let prepared = runmat_analysis_fea::prepare_structural_modal_response_spectrum(
-        &decoded.workload,
-        &decoded.mesh,
-        &decoded.state,
-        &decoded.constraints,
-        &decoded.resource_plan.request.accelerators,
-    )?;
+    let prepared = super::with_admitted_cpu_pool(&decoded.resource_plan, || {
+        Ok(
+            runmat_analysis_fea::prepare_structural_modal_response_spectrum(
+                &decoded.workload,
+                &decoded.mesh,
+                &decoded.state,
+                &decoded.constraints,
+                &decoded.resource_plan.request.accelerators,
+            )?,
+        )
+    })?;
     if request.scope() != prepared.scope() {
         return Err(AnalysisBridgeError::Identity(
             "response-spectrum direction request differs from the worker-reconstructed scope",
@@ -61,6 +65,10 @@ pub(super) fn execute_direction(
                     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
             )?,
             projected_output_set_resource_facts(),
+            runmat_analysis_fea::planning::resource::LocalExecutionPlan::from_cpu_millicores(
+                decoded.resource_plan.request.cpu_millicores,
+            )
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
         )
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if decoded.resource_plan != expected_plan
@@ -71,11 +79,15 @@ pub(super) fn execute_direction(
             "response-spectrum direction resource plan does not converge from authoritative inputs",
         ));
     }
-    let result = runmat_analysis_fea::execute_structural_modal_response_spectrum_direction(
-        &decoded.workload,
-        &prepared,
-        &request,
-    )?;
+    let result = super::with_admitted_cpu_pool(&decoded.resource_plan, || {
+        Ok(
+            runmat_analysis_fea::execute_structural_modal_response_spectrum_direction(
+                &decoded.workload,
+                &prepared,
+                &request,
+            )?,
+        )
+    })?;
     Ok(vec![AnalysisKernelOutput::whole(
         AnalysisNumericalObjectKind::StructuralModalResponseSpectrumDirectionResult,
         result.identity().digest(),
@@ -155,13 +167,17 @@ pub(super) fn execute_assembly(
             "response-spectrum assembly result inputs differ from its canonical request",
         ));
     }
-    let prepared = runmat_analysis_fea::prepare_structural_modal_response_spectrum(
-        &decoded.workload,
-        &decoded.mesh,
-        &decoded.state,
-        &decoded.constraints,
-        &decoded.resource_plan.request.accelerators,
-    )?;
+    let prepared = super::with_admitted_cpu_pool(&decoded.resource_plan, || {
+        Ok(
+            runmat_analysis_fea::prepare_structural_modal_response_spectrum(
+                &decoded.workload,
+                &decoded.mesh,
+                &decoded.state,
+                &decoded.constraints,
+                &decoded.resource_plan.request.accelerators,
+            )?,
+        )
+    })?;
     if request.scope() != prepared.scope() {
         return Err(AnalysisBridgeError::Identity(
             "response-spectrum assembly differs from the worker-reconstructed scope",
@@ -194,6 +210,10 @@ pub(super) fn execute_assembly(
             )?,
             },
             projected_output_set_resource_facts(),
+            runmat_analysis_fea::planning::resource::LocalExecutionPlan::from_cpu_millicores(
+                decoded.resource_plan.request.cpu_millicores,
+            )
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
         )
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if decoded.resource_plan != expected_plan
@@ -217,11 +237,15 @@ pub(super) fn execute_assembly(
         Digest::sha256(&payload),
         runmat_analysis_execution::StructuralStateProfileResult::ResponseSpectrum(&result),
     )?;
-    let field_recovery = runmat_analysis_fea::recover_structural_modal_response_spectrum_fields(
-        &decoded.workload,
-        &prepared,
-        result.numerical(),
-    )?;
+    let field_recovery = super::with_admitted_cpu_pool(&decoded.resource_plan, || {
+        Ok(
+            runmat_analysis_fea::recover_structural_modal_response_spectrum_fields(
+                &decoded.workload,
+                &prepared,
+                result.numerical(),
+            )?,
+        )
+    })?;
     field_recovery
         .validate_for_result(result.numerical())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;

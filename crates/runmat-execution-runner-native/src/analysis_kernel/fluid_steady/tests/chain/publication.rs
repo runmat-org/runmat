@@ -96,6 +96,7 @@ fn verify_original_publication(
     })
     .collect();
     let task = prepare_fluid_steady_task(FluidSteadyTaskPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         authored_study_digest: original.host.workload.study.digest(),
         frozen_project_digest: None,
         program_revision: original.program.request.recipe.program_revision.clone(),

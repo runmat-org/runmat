@@ -32,6 +32,7 @@ const RECEIPT_BYTES: u64 = 16 * 1024;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PreparedStructuralBucklingResourceFacts {
+    pub local_execution: super::LocalExecutionPlan,
     pub inputs: PreparedInputResourceFacts,
     pub result_output: PreparedOutputResourceFacts,
     pub receipt_output: PreparedOutputResourceFacts,
@@ -297,7 +298,10 @@ pub fn build_structural_buckling_resource_plan(
         }),
         output_set: Some(prepared.output_set),
         worker: WorkerResourcePolicy {
-            cpu_millicores: 1_000,
+            cpu_millicores: prepared
+                .local_execution
+                .checked_cpu_millicores()
+                .map_err(|error| invalid(error.to_string()))?,
             maximum_wall_milliseconds: step.accuracy.resources.maximum_wall_time_milliseconds,
             fixed_memory_bytes: ByteCount(FIXED_WORKER_MEMORY_BYTES),
             fixed_scratch_bytes: ByteCount(FIXED_WORKER_SCRATCH_BYTES),

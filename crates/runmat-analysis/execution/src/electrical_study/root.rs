@@ -47,6 +47,8 @@ mod tests;
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PreparationWire {
+    #[serde(default = "runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial")]
+    local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     policy: ElectricalStudyPlanningPolicy,
     compiled: CompiledAnalysisStudy,
     workload: ElectricalStaticWorkload,
@@ -65,6 +67,7 @@ impl PreparationWire {
         let limits = preparation.output_policy.inventory_limits();
         let workload = preparation.workload().clone();
         Self {
+            local_execution: preparation.local_execution,
             policy: preparation.policy,
             compiled: preparation.product.compiled,
             workload,
@@ -102,6 +105,7 @@ impl PreparationWire {
             ));
         }
         Ok(ElectricalStudyPreparation {
+            local_execution: self.local_execution,
             policy: self.policy,
             product: ElectricalStudyProduct {
                 compiled: self.compiled,

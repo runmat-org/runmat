@@ -107,6 +107,7 @@ pub(super) async fn cold_fixture(
         required_capabilities: BTreeSet::from([Capability::ProcessIsolation]),
     };
     let preparation = FluidStudyPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         policy,
         product,
         mesh: fixture.mesh.clone(),

@@ -80,6 +80,7 @@ fn incident_task(order: ElementOrder, chunk: usize) -> PreparedAcousticHarmonicT
     // Rebuild authenticated input authority after changing the physical source. The existing
     // face:3 impedance remains rho*c=6; inlet admittance belongs to canonical source lowering.
     prepare_acoustic_harmonic_task(AcousticHarmonicTaskPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         authored_study_digest: Digest::sha256("acoustic-native-incident-test"),
         frozen_project_digest: None,
         program_revision: original.program.request.recipe.program_revision,

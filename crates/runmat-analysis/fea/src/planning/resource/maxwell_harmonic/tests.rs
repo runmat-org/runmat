@@ -73,6 +73,7 @@ fn facts(
 ) -> PreparedMaxwellHarmonicResourceFacts {
     let input = (w.canonical_bytes().unwrap().len() + m.canonical_encode().unwrap().len()) as u64;
     PreparedMaxwellHarmonicResourceFacts {
+        local_execution: crate::planning::resource::LocalExecutionPlan::serial(),
         inputs: PreparedInputResourceFacts {
             encoded_payload_bytes: ByteCount(input),
             transport_closure_bytes: ByteCount(input + 2048),

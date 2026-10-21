@@ -152,6 +152,7 @@ pub(super) async fn execute(
     let executed = Box::pin(crate::analysis_maxwell::execute_with_pool(
         &mut pool,
         MaxwellStudyPreparation {
+            local_execution: prepared.local_execution,
             policy: prepared.planning,
             product,
             mesh: geometry.meshing.artifact.clone(),

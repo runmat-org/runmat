@@ -152,6 +152,7 @@ pub(super) async fn execute(
     let executed = Box::pin(crate::analysis_magnetic::execute_with_pool(
         &mut pool,
         MagneticStudyPreparation {
+            local_execution: prepared.local_execution,
             policy: prepared.planning,
             product,
             mesh: geometry.meshing.artifact.clone(),

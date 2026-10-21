@@ -1,6 +1,7 @@
 //! Original authored replay inputs; decoding does not certify physics.
 use super::*;
 pub(in crate::nonlinear_study) struct ReplayContext {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub mesh: SolverMeshArtifact,
     pub accepted_block_limit: usize,
     pub frozen_project_digest: Option<Digest>,
@@ -31,6 +32,7 @@ impl CompletedNonlinearSolidStudy {
         &self,
     ) -> AnalysisBridgeResult<NonlinearSolidStudyPreparation> {
         Ok(NonlinearSolidStudyPreparation {
+            local_execution: self.replay.local_execution,
             product: NonlinearSolidStudyProduct {
                 compiled: self.compiled.clone(),
                 workload: self.workload.clone(),
@@ -48,6 +50,8 @@ impl CompletedNonlinearSolidStudy {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct PreparationWire {
+    #[serde(default = "runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial")]
+    pub(super) local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub(super) accepted_block_limit: usize,
     pub(super) compiled: CompiledAnalysisStudy,
     pub(super) workload: NonlinearSolidWorkload,
@@ -65,6 +69,7 @@ impl PreparationWire {
         let limits = preparation.output_policy.inventory_limits();
         let workload = preparation.product.workload;
         Self {
+            local_execution: preparation.local_execution,
             accepted_block_limit: preparation.accepted_block_limit,
             compiled: preparation.product.compiled,
             workload,
@@ -106,6 +111,7 @@ impl PreparationWire {
             ));
         }
         Ok(NonlinearSolidStudyPreparation {
+            local_execution: self.local_execution,
             accepted_block_limit: self.accepted_block_limit,
             product: NonlinearSolidStudyProduct {
                 compiled: self.compiled,

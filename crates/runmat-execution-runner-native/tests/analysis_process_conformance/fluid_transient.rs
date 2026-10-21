@@ -195,6 +195,7 @@ pub(super) async fn run_block(
         end_interval,
     };
     let task = prepare_fluid_transient_task(FluidTransientTaskPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         authored_study_digest: digest("original-scheduled-fluid"),
         frozen_project_digest: None,
         program_revision: revision(),
@@ -251,6 +252,7 @@ pub(super) async fn run_block(
     // A valid output from another interval request is still foreign to this exact task.
     let foreign_end = if end_interval == 3 { 2 } else { 3 };
     let foreign = prepare_fluid_transient_task(FluidTransientTaskPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         authored_study_digest: digest("original-scheduled-fluid"),
         frozen_project_digest: None,
         program_revision: revision(),

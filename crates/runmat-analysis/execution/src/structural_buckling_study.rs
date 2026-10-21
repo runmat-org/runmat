@@ -48,6 +48,7 @@ enum ConsumerPhase {
 
 /// Resolves a buckling template only after the shared producer publishes its exact preload state.
 pub struct StructuralBucklingStudyCoordinator {
+    local_execution: LocalExecutionPlan,
     authored_study_digest: Digest,
     frozen_project_digest: Option<Digest>,
     mesh: SolverMeshArtifact,
@@ -119,6 +120,7 @@ impl StructuralBucklingStudyCoordinator {
             thermal_source,
         )?;
         Ok(Self {
+            local_execution: preparation.local_execution,
             authored_study_digest: preparation.authored_study_digest,
             frozen_project_digest: preparation.frozen_project_digest,
             mesh: preparation.mesh,
@@ -195,6 +197,7 @@ impl StructuralBucklingStudyCoordinator {
         )?;
         let workload = self.buckling_template.clone().bind(transition)?;
         let prepared = prepare_structural_buckling_task(StructuralBucklingTaskPreparation {
+            local_execution: self.local_execution,
             authored_study_digest: self.authored_study_digest,
             frozen_project_digest: self.frozen_project_digest,
             program_revision: self.program_revision.clone(),

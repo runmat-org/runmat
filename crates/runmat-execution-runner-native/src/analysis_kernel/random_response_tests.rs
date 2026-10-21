@@ -50,6 +50,7 @@ fn native_random_response_is_portable_order_independent_and_publishes_typed_stat
     .unwrap();
     let mut intervals =
         prepare_structural_random_response_fanout(StructuralRandomResponseFanoutPreparation {
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             authored_study_digest: digest("random-response-study"),
             frozen_project_digest: None,
             program_revision: revision(),
@@ -85,6 +86,7 @@ fn native_random_response_is_portable_order_independent_and_publishes_typed_stat
     completed_intervals.reverse();
     let assembly =
         prepare_structural_random_response_assembly(StructuralRandomResponseAssemblyPreparation {
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             authored_study_digest: digest("random-response-study"),
             frozen_project_digest: None,
             program_revision: revision(),

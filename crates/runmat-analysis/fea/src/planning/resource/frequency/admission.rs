@@ -83,6 +83,7 @@ pub fn build_structural_frequency_entry_resource_plan(
     states: StructuralFrequencyStateInputs<'_>,
     accelerator_requests: &[AcceleratorRequest],
     prepared: PreparedPhaseResourceFacts,
+    local_execution: LocalExecutionPlan,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     StructuralFrequencyEntryResourceProjection::new(
         mesh,
@@ -96,6 +97,7 @@ pub fn build_structural_frequency_entry_resource_plan(
         prepared.inputs,
         prepared.output,
         prepared.output_set,
+        local_execution,
     )
 }
 
@@ -108,6 +110,7 @@ pub fn build_structural_frequency_recovery_resource_plan(
     states: StructuralFrequencyStateInputs<'_>,
     accelerator_requests: &[AcceleratorRequest],
     prepared: PreparedPhaseResourceFacts,
+    local_execution: LocalExecutionPlan,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     StructuralFrequencyEntryResourceProjection::for_recovery(
         mesh,
@@ -122,6 +125,7 @@ pub fn build_structural_frequency_recovery_resource_plan(
         prepared.inputs,
         prepared.output,
         prepared.output_set,
+        local_execution,
     )
 }
 
@@ -134,6 +138,7 @@ pub fn build_structural_frequency_entry_resource_plan_from_compilation(
     states: StructuralFrequencyStateInputs<'_>,
     accelerator_requests: &[AcceleratorRequest],
     prepared: PreparedPhaseResourceFacts,
+    local_execution: LocalExecutionPlan,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     StructuralFrequencyEntryResourceProjection::new_from_compilation(
         mesh,
@@ -147,6 +152,7 @@ pub fn build_structural_frequency_entry_resource_plan_from_compilation(
         prepared.inputs,
         prepared.output,
         prepared.output_set,
+        local_execution,
     )
 }
 
@@ -159,6 +165,7 @@ pub fn build_structural_frequency_recovery_resource_plan_from_compilation(
     states: StructuralFrequencyStateInputs<'_>,
     accelerator_requests: &[AcceleratorRequest],
     prepared: PreparedPhaseResourceFacts,
+    local_execution: LocalExecutionPlan,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     StructuralFrequencyEntryResourceProjection::for_recovery_from_compilation(
         mesh,
@@ -173,5 +180,6 @@ pub fn build_structural_frequency_recovery_resource_plan_from_compilation(
         prepared.inputs,
         prepared.output,
         prepared.output_set,
+        local_execution,
     )
 }

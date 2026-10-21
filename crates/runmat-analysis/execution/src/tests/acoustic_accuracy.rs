@@ -78,6 +78,8 @@ fn acoustic_accuracy_admission_binds_retained_result_and_original_intent() {
             let workload = workload();
             let mesh = canonical_tetrahedron_solver_mesh(order);
             let task = prepare_acoustic_harmonic_task(AcousticHarmonicTaskPreparation {
+                local_execution:
+                    runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
                 authored_study_digest: digest("acoustic"),
                 frozen_project_digest: None,
                 program_revision: revision(),

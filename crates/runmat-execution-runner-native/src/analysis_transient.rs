@@ -111,6 +111,7 @@ pub(crate) async fn execute_structural_transient_with_pool(
     policy.validate()?;
     let prepared_scope =
         prepare_structural_transient_scope_task(StructuralTransientScopeTaskPreparation {
+            local_execution: plan.local_execution,
             workload: plan.workload.clone(),
             mesh: plan.mesh.clone(),
             modal_state: plan.modal_state.clone(),

@@ -57,6 +57,7 @@ pub struct CompletedFluidStudy {
 }
 
 pub struct FluidStudyPreparation {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub policy: FluidStudyPlanningPolicy,
     pub product: FluidStudyProduct,
     pub mesh: SolverMeshArtifact,
@@ -145,6 +146,7 @@ impl FluidStudyCoordinator {
     pub fn prepare_solve(&mut self) -> AnalysisBridgeResult<&PreparedFluidSteadyTask> {
         self.require(FluidStudyPhase::ReadyForSolve)?;
         let task = prepare_fluid_steady_task(FluidSteadyTaskPreparation {
+            local_execution: self.preparation.local_execution,
             authored_study_digest: self.definition_digest,
             frozen_project_digest: self.preparation.frozen_project_digest,
             program_revision: self.preparation.program_revision.clone(),
@@ -312,6 +314,7 @@ impl FluidStudyCoordinator {
         let tail = self.tail.expect("completed shared terminal lifecycle");
         Ok(CompletedFluidStudy {
             replay: completion::FluidStudyReplayContext {
+                local_execution: self.preparation.local_execution,
                 policy: self.preparation.policy,
                 mesh: self.preparation.mesh,
                 frozen_project_digest: self.preparation.frozen_project_digest,

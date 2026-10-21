@@ -83,6 +83,7 @@ fn execute_frequency(
         .unwrap()
     });
     let tasks = prepare_structural_frequency_fanout(StructuralFrequencyFanoutPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         workload,
         mesh,
         prestress_state: Some(prestress_state),

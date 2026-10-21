@@ -41,6 +41,7 @@ const TASK_PREFIX: &[u8] = b"runmat-analysis-structural-random-response-task/v1\
 const TASK_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
 
 pub struct StructuralRandomResponseFanoutPreparation {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub authored_study_digest: Digest,
     pub frozen_project_digest: Option<Digest>,
     pub program_revision: ProgramRevision,
@@ -165,6 +166,7 @@ pub fn prepare_structural_random_response_fanout(
                             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
                     )?,
                     projected_output_set_resource_facts(),
+                    preparation.local_execution,
                 )
                 .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
             let resource_objects = resource_plan_objects(
@@ -243,6 +245,7 @@ pub fn import_structural_random_response_interval(
 }
 
 pub struct StructuralRandomResponseAssemblyPreparation {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub authored_study_digest: Digest,
     pub frozen_project_digest: Option<Digest>,
     pub program_revision: ProgramRevision,
@@ -377,6 +380,7 @@ pub fn prepare_structural_random_response_assembly(
                 &[runmat_analysis_fea::execution::SemanticStatePublicationSource::StructuralRandomStatistics], request.scope().topology_digest(),
             )?,
             projected_output_set_resource_facts(),
+            preparation.local_execution,
         )
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let resource_plan_objects = resource_plan_objects(

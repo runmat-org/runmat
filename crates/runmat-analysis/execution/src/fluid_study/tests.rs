@@ -147,6 +147,7 @@ pub(crate) fn preparation() -> FluidStudyPreparation {
     };
     let product = plan_fluid_study_product(compiled, &mesh, policy).unwrap();
     FluidStudyPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         policy,
         product,
         mesh,
