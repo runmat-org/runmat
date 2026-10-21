@@ -47,8 +47,9 @@ pub struct ExecutionResourceLimits {
     /// This is distinct from `workers` (independent task slots) and cooperative operator
     /// partitions (distributed/domain decomposition). Numerical kernels must consume the
     /// corresponding admitted CPU resource rather than discovering host parallelism.
-    #[serde(default = "default_cpu_threads_per_worker")]
-    pub cpu_threads_per_worker: u32,
+    /// `None` (the default) admits every core of the worker; the host resolves it once.
+    #[serde(default)]
+    pub cpu_threads_per_worker: Option<u32>,
     pub maximum_memory_bytes_per_worker: Option<u64>,
     pub accelerators: AcceleratorPreference,
 }
@@ -131,8 +132,10 @@ impl AuthoredExecutionPolicy {
                 return Err(AuthoredExecutionPolicyError::InvalidWorkerRange);
             }
         }
-        if self.resources.cpu_threads_per_worker == 0
-            || self.resources.cpu_threads_per_worker > MAX_CPU_THREADS_PER_WORKER
+        if self
+            .resources
+            .cpu_threads_per_worker
+            .is_some_and(|threads| threads == 0 || threads > MAX_CPU_THREADS_PER_WORKER)
         {
             return Err(AuthoredExecutionPolicyError::InvalidCpuThreadsPerWorker);
         }
@@ -168,15 +171,11 @@ impl Default for ExecutionResourceLimits {
     fn default() -> Self {
         Self {
             workers: None,
-            cpu_threads_per_worker: default_cpu_threads_per_worker(),
+            cpu_threads_per_worker: None,
             maximum_memory_bytes_per_worker: None,
             accelerators: AcceleratorPreference::Disabled,
         }
     }
-}
-
-const fn default_cpu_threads_per_worker() -> u32 {
-    1
 }
 
 impl Default for FanoutPolicy {

@@ -164,6 +164,9 @@ pub struct CanonicalFluidProblem<'a> {
     pressure_reference_plan: pressure_reference::PressureReferencePlan,
     pressure_stencils: Vec<pressure_gradient::PressureGradientStencil>,
     velocity_stencils: Vec<velocity_gradient::VelocityGradientStencil>,
+    /// Cell-adjacency CSR support shared (by reference count) by every momentum/pressure
+    /// operator of this problem; derived once instead of per outer iteration.
+    operator_pattern: crate::algebra::SparsePattern,
 }
 
 /// Shared authored authorities are borrowed during preparation, never replaced by
@@ -360,6 +363,7 @@ impl<'a> CanonicalFluidProblem<'a> {
             pressure_reference_plan,
             pressure_stencils,
             velocity_stencils,
+            operator_pattern: linear::cell_operator_pattern(topology)?,
         })
     }
 

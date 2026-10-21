@@ -82,14 +82,27 @@ fn execute_in_pool<T: Send>(
     work: impl FnOnce() -> T + Send,
 ) -> Result<T, runmat_cpu_execution::CpuExecutionError> {
     let threads = usize::from(plan.thread_count().get());
-    let installed = runmat_cpu_execution::current_threads();
-    if installed > 1 {
-        if installed != threads {
-            return Err(runmat_cpu_execution::CpuExecutionError::InvalidThreadCount);
-        }
+    if runmat_cpu_execution::current_threads() > 1 {
         Ok(work())
     } else {
         runmat_cpu_execution::with_cpu_pool(threads, work)
+    }
+}
+
+/// The admitted pool a kernel installed for its whole step is the execution authority for
+/// every nested scoped operation; otherwise the caller's plan is. Scoped operations are
+/// required to be partition independent (fixed reduction blocks, canonical chunk order), so
+/// this choice never changes numerical results.
+fn effective_plan(plan: LocalExecutionPlan) -> LocalExecutionPlan {
+    let installed = runmat_cpu_execution::current_threads();
+    if installed > 1 {
+        u16::try_from(installed)
+            .ok()
+            .and_then(|threads| super::LocalThreadCount::new(threads).ok())
+            .and_then(|threads| LocalExecutionPlan::fixed(threads).ok())
+            .unwrap_or(plan)
+    } else {
+        plan
     }
 }
 
@@ -108,6 +121,7 @@ where
     E: Send,
     F: Fn(LocalWorkChunk) -> Result<T, E> + Sync,
 {
+    let plan = effective_plan(plan);
     let chunks = plan
         .chunks(item_count)
         .map_err(ScopedLocalExecutionError::InvalidPlan)?;
@@ -162,6 +176,7 @@ where
     if values.is_empty() {
         return Ok(());
     }
+    let plan = effective_plan(plan);
     let chunks = plan
         .chunks(values.len() as u64)
         .map_err(ScopedLocalExecutionError::InvalidPlan)?;
@@ -367,5 +382,21 @@ mod installed_pool_tests {
         .unwrap()
         .unwrap();
         assert_eq!(results, vec![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn installed_pool_is_the_authority_for_nested_serial_plans() {
+        let chunks = runmat_cpu_execution::with_cpu_pool(3, || {
+            execute_scoped_chunks(LocalExecutionPlan::serial(), 9, |chunk| {
+                Ok::<_, ()>((chunk.start(), chunk.end_exclusive()))
+            })
+        })
+        .unwrap()
+        .unwrap();
+        assert_eq!(chunks, vec![(0, 3), (3, 6), (6, 9)]);
+        let serial =
+            execute_scoped_chunks(LocalExecutionPlan::serial(), 9, |chunk| Ok::<_, ()>(chunk.len()))
+                .unwrap();
+        assert_eq!(serial, vec![9]);
     }
 }

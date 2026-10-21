@@ -487,3 +487,37 @@ mod numerical;
 mod signals;
 mod steady;
 mod target_resolution;
+
+#[test]
+fn thermal_operators_are_bitwise_independent_of_the_admitted_thread_count() {
+    let (model, _, _, _) = thermal_reference_model();
+    let mesh = runmat_meshing_core::fixtures::connected_quadratic_tetrahedron_solver_mesh();
+    let facts = crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh).unwrap();
+    let run = || {
+        assemble(
+            &model,
+            &mesh,
+            facts.support(),
+            &heat_generation(3.0),
+            ExcitationSamplePoint::Static,
+        )
+        .unwrap()
+    };
+    let serial = run();
+    for threads in [2, 3, 4] {
+        let parallel = runmat_cpu_execution::with_cpu_pool(threads, run).unwrap();
+        assert_eq!(parallel.conductivity, serial.conductivity, "{threads} threads");
+        assert_eq!(parallel.capacity, serial.capacity, "{threads} threads");
+        assert_eq!(parallel.applied_source, serial.applied_source);
+        let temperature = (0..mesh.topology.nodes.len())
+            .map(|node| 300.0 + node as f64)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            runmat_cpu_execution::with_cpu_pool(threads, || serial
+                .recover_element_heat_flux(&temperature)
+                .unwrap())
+            .unwrap(),
+            serial.recover_element_heat_flux(&temperature).unwrap()
+        );
+    }
+}

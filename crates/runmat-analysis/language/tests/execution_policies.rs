@@ -87,7 +87,7 @@ sweep loads over study.response {
     assert_eq!(policy.backend, BackendPreference::Accelerator);
     assert_eq!(policy.resources.workers.unwrap().minimum, 2);
     assert_eq!(policy.resources.workers.unwrap().maximum, 64);
-    assert_eq!(policy.resources.cpu_threads_per_worker, 4);
+    assert_eq!(policy.resources.cpu_threads_per_worker, Some(4));
     assert_eq!(
         policy.resources.maximum_memory_bytes_per_worker,
         Some(32 << 30)

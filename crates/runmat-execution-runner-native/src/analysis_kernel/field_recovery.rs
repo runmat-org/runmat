@@ -50,32 +50,36 @@ pub(super) fn recovered_field_output(
     let manifest = artifact
         .manifest()
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let storage_partition_count = artifact
-        .fields()
-        .iter()
-        .try_fold(0usize, |count, field| {
-            canonical_field_partitions(field)
-                .map(|partitions| count.saturating_add(partitions.len()))
-        })
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let mut partitions = Vec::with_capacity(storage_partition_count + 1);
+    // Each field's storage partitions are materialized and encoded once, independently per
+    // field (on the admitted pool when installed), and published in canonical field order.
+    let encoded = runmat_cpu_execution::ordered_map(artifact.fields(), |field| {
+        canonical_field_partitions(field)
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?
+            .into_iter()
+            .map(|partition| {
+                Ok(AnalysisKernelOutputPartition {
+                    logical_identity: partition.identity.digest(),
+                    payload: partition
+                        .canonical_bytes()
+                        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+                })
+            })
+            .collect::<AnalysisBridgeResult<Vec<_>>>()
+    });
+    let mut partitions = Vec::with_capacity(
+        1 + encoded
+            .iter()
+            .map(|field| field.as_ref().map_or(0, Vec::len))
+            .sum::<usize>(),
+    );
     partitions.push(AnalysisKernelOutputPartition {
         logical_identity: artifact.identity().digest(),
         payload: manifest
             .canonical_bytes()
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
     });
-    for field in artifact.fields() {
-        for partition in canonical_field_partitions(field)
-            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?
-        {
-            partitions.push(AnalysisKernelOutputPartition {
-                logical_identity: partition.identity.digest(),
-                payload: partition
-                    .canonical_bytes()
-                    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
-            });
-        }
+    for field in encoded {
+        partitions.extend(field?);
     }
     Ok(vec![AnalysisKernelOutput::partitioned(
         AnalysisNumericalObjectKind::Field,

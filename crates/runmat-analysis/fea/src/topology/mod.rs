@@ -62,3 +62,24 @@ pub use surface_search::{
     BoundarySurfaceBounds, BoundarySurfaceIndex, BoundarySurfaceMatch, BoundarySurfacePoint,
     ClosestBoundaryPoint, OrientedBoundarySurface, StationaryBoundaryProjection,
 };
+
+/// Node-based (one DOF per projected node) element incidence for parallel element assembly.
+pub(crate) fn projection_element_map(
+    projection: &AnalysisProjection,
+) -> Result<
+    crate::algebra::element_assembly::ElementDofMap,
+    crate::algebra::element_assembly::ElementAssemblyError<std::convert::Infallible>,
+> {
+    let mut offsets = Vec::with_capacity(projection.elements.len() + 1);
+    offsets.push(0);
+    let mut dofs = Vec::with_capacity(projection.elements.iter().map(|e| e.node_indices.len()).sum());
+    for element in &projection.elements {
+        for &node in &element.node_indices {
+            dofs.push(u32::try_from(node).map_err(|_| {
+                crate::algebra::element_assembly::ElementAssemblyError::DofIndexOverflow(node)
+            })?);
+        }
+        offsets.push(dofs.len());
+    }
+    crate::algebra::element_assembly::ElementDofMap::new(projection.nodes.len(), offsets, dofs)
+}
