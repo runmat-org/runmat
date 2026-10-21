@@ -99,7 +99,7 @@ pub(super) fn prepare_authored_root(
         authored_study_digest,
         study: realized,
         materials: resolved.material_catalog,
-        planning,
+        planning: crate::StudyRootPlanning::Structural(planning),
         analysis_accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         input_materializations: Vec::new(),

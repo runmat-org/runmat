@@ -7,7 +7,7 @@ use runmat_analysis_execution::{
     prepare_analysis_host_program, InputMaterializationPlan, InputMaterializationPlanExpectation,
 };
 use runmat_analysis_fea::{
-    planning::resource::LocalExecutionPlan, study::StructuralStudyPlanningPolicy,
+    planning::resource::LocalExecutionPlan,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::resource::AcceleratorRequest;
@@ -46,8 +46,8 @@ mod initial_fields;
 mod preparation;
 use contract::{StructuralStudyMaterial, StructuralStudyRootRequest};
 pub use contract::{
-    StructuralStudyMaterialExpectation, StructuralStudyResultExpectation,
-    StructuralStudyRootPreparation,
+    NonlinearSolidStudyPlanning, StructuralStudyMaterialExpectation,
+    StructuralStudyResultExpectation, StructuralStudyRootPreparation, StudyRootPlanning,
 };
 pub use preparation::prepare_structural_study_root;
 
@@ -210,7 +210,7 @@ pub struct DecodedStructuralStudyRoot {
     pub frozen_project_digest: Option<Digest>,
     pub study: RealizedStudy,
     pub materials: BTreeMap<AuthoredMaterialRef, MaterialModel>,
-    pub planning: StructuralStudyPlanningPolicy,
+    pub planning: StudyRootPlanning,
     pub local_execution: LocalExecutionPlan,
     pub analysis_accelerator_requests: Vec<AcceleratorRequest>,
     pub input_materializations: Vec<InputMaterializationPlan>,
@@ -379,10 +379,10 @@ fn validate_accelerator_requests(
     }
     match backend {
         runmat_analysis_fea::ComputeBackend::Cpu if !requests.is_empty() => Err(protocol(
-            "CPU structural planning cannot require analysis accelerators",
+            "CPU study planning cannot require analysis accelerators",
         )),
         runmat_analysis_fea::ComputeBackend::Gpu if requests.is_empty() => Err(protocol(
-            "accelerator structural planning requires an exact allocation request",
+            "accelerator study planning requires an exact allocation request",
         )),
         _ => Ok(()),
     }
