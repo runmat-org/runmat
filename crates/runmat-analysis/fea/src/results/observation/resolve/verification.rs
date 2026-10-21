@@ -52,19 +52,17 @@ where
     I::IntoIter: Clone,
 {
     verify_authored_observations(step, plan)?;
+    let fields = fields.into_iter();
     let (topology, remaining) = ObservationTopology::from_projection_admitted(
         projection,
         step.accuracy.resources.maximum_resident_bytes,
     )?;
-    verify_for_topology(
-        step,
-        &topology,
-        None,
-        None,
-        fields.into_iter(),
-        plan,
-        remaining,
-    )
+    let topology = if ObservationTopology::needs_faces(fields.clone()) {
+        topology.with_projection_faces()?
+    } else {
+        topology
+    };
+    verify_for_topology(step, &topology, None, None, fields, plan, remaining)
 }
 
 pub(crate) fn verify_sampled_observation_plan(

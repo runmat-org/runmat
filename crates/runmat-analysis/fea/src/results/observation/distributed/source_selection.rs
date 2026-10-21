@@ -17,7 +17,14 @@ pub fn solid_observation_partition_source_indices(
     partition: &ObservationPartition,
     projection: &AnalysisProjection,
 ) -> Result<Vec<usize>, ObservationError> {
-    let topology = ObservationTopology::from_projection(projection)?;
+    // Cell- and face-located observations address the mesh's owner-oriented faces too.
+    let faces = plan.observations.iter().any(|observation| {
+        matches!(
+            observation.spec.source_location,
+            runmat_analysis_core::FieldLocation::Cell | runmat_analysis_core::FieldLocation::Face
+        )
+    });
+    let topology = ObservationTopology::from_projection_for(projection, faces)?;
     observation_partition_source_indices(plan, partition_plan, partition, &topology)
 }
 
@@ -71,7 +78,10 @@ pub fn prepare_solid_observation_field_partition(
     projection: &AnalysisProjection,
     field: &RecoveredField,
 ) -> Result<RecoveredFieldPartitionSet, ObservationError> {
-    let topology = ObservationTopology::from_projection(projection)?;
+    let topology = ObservationTopology::from_projection_for(
+        projection,
+        ObservationTopology::needs_faces(std::iter::once(field.definition())),
+    )?;
     prepare_observation_field_partition(plan, partition_plan, partition, field, &topology)
 }
 
@@ -107,12 +117,28 @@ pub(in super::super) fn prepare_observation_field_partition(
         ));
     }
     let indices = required_source_indices(observation, partition, topology)?;
-    let partition = RecoveredFieldPartition::select(field, indices).map_err(|error| {
-        ObservationError::Field {
-            observation_id: observation.spec.observation_id.0.clone(),
-            reason: error.to_string(),
+    let field_error = |error: crate::results::field::RecoveredFieldError| ObservationError::Field {
+        observation_id: observation.spec.observation_id.0.clone(),
+        reason: error.to_string(),
+    };
+    let support = match topology.support_topology() {
+        Some(support_topology) => field
+            .definition()
+            .support()
+            .resolve(field.definition().entity_domain(), support_topology)
+            .map_err(field_error)?,
+        None if field.definition().support().is_complete() => None,
+        None => {
+            return Err(ObservationError::Identity(
+                "a region-supported field needs a mesh projection topology",
+            ))
         }
-    })?;
+    };
+    let partition = match support {
+        Some(support) => RecoveredFieldPartition::select_supported(field, indices, &support),
+        None => RecoveredFieldPartition::select(field, indices),
+    }
+    .map_err(field_error)?;
     RecoveredFieldPartitionSet::new(vec![partition]).map_err(|error| ObservationError::Field {
         observation_id: observation.spec.observation_id.0.clone(),
         reason: error.to_string(),

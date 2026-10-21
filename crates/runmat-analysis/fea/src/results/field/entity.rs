@@ -37,6 +37,160 @@ impl RecoveredFieldEntityDomain {
     }
 }
 
+/// What a field support is resolved against: the mesh projection and, when the topology has
+/// them, the owner and neighbor projection elements of its owner-oriented faces.
+#[derive(Clone, Copy)]
+pub struct SupportTopology<'a> {
+    pub projection: &'a crate::topology::AnalysisProjection,
+    pub face_elements: Option<&'a [(usize, Option<usize>)]>,
+}
+
+/// The entities of its domain a field carries values for.
+///
+/// `Complete` covers the whole domain. `Regions` covers the volume elements of the listed mesh
+/// regions, the nodes of those elements, their integration points and the faces they bound: for
+/// example the fluid cells of a conjugate model. `entities` is the resolved count, checked
+/// against the topology wherever the field meets it; values are stored in ascending global
+/// entity order.
+#[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecoveredFieldSupport {
+    #[default]
+    Complete,
+    Regions {
+        regions: Vec<runmat_meshing_core::PersistentEntityId>,
+        entities: usize,
+    },
+}
+
+impl RecoveredFieldSupport {
+    pub fn is_complete(&self) -> bool {
+        matches!(self, Self::Complete)
+    }
+
+    pub fn regions(
+        mut regions: Vec<runmat_meshing_core::PersistentEntityId>,
+        entities: usize,
+    ) -> Result<Self, RecoveredFieldError> {
+        regions.sort();
+        regions.dedup();
+        if regions.is_empty() || entities == 0 {
+            return Err(RecoveredFieldError::InvalidArtifact(
+                "a region-supported field needs regions and entities".into(),
+            ));
+        }
+        Ok(Self::Regions { regions, entities })
+    }
+
+    pub(super) fn validate(&self, domain: RecoveredFieldEntityDomain) -> Result<(), RecoveredFieldError> {
+        match self {
+            Self::Complete => Ok(()),
+            Self::Regions { regions, entities } => {
+                if regions.is_empty()
+                    || *entities == 0
+                    || regions.windows(2).any(|pair| pair[0] >= pair[1])
+                    || !matches!(
+                        domain,
+                        RecoveredFieldEntityDomain::Nodes
+                            | RecoveredFieldEntityDomain::VolumeElements
+                            | RecoveredFieldEntityDomain::VolumeIntegrationPoints
+                            | RecoveredFieldEntityDomain::OrientedFaces
+                    )
+                {
+                    return Err(RecoveredFieldError::InvalidArtifact(
+                        "field support regions are empty, unsorted or outside a volume domain"
+                            .into(),
+                    ));
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// Stored entity count: the complete domain or the resolved support.
+    pub fn stored_entities(&self, complete: usize) -> usize {
+        match self {
+            Self::Complete => complete,
+            Self::Regions { entities, .. } => *entities,
+        }
+    }
+
+    /// Ascending global entity indices of the support on a topology (`None` when complete).
+    pub fn resolve(
+        &self,
+        domain: RecoveredFieldEntityDomain,
+        topology: SupportTopology<'_>,
+    ) -> Result<Option<Vec<usize>>, RecoveredFieldError> {
+        let projection = topology.projection;
+        let Self::Regions { regions, entities } = self else {
+            return Ok(None);
+        };
+        let inside = |element: &crate::topology::ProjectedElement| {
+            regions.binary_search(&element.region_id).is_ok()
+        };
+        let indices: Vec<usize> = match domain {
+            RecoveredFieldEntityDomain::VolumeElements => projection
+                .elements
+                .iter()
+                .enumerate()
+                .filter(|(_, element)| inside(element))
+                .map(|(index, _)| index)
+                .collect(),
+            RecoveredFieldEntityDomain::Nodes => {
+                let mut covered = vec![false; projection.nodes.len()];
+                for element in projection.elements.iter().filter(|e| inside(e)) {
+                    for &node in &element.node_indices {
+                        covered[node] = true;
+                    }
+                }
+                covered
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, c)| **c)
+                    .map(|(index, _)| index)
+                    .collect()
+            }
+            RecoveredFieldEntityDomain::VolumeIntegrationPoints => {
+                const POINTS: usize = crate::topology::quadrature::TETRAHEDRON_FOUR_POINT_RULE.len();
+                projection
+                    .elements
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, element)| inside(element))
+                    .flat_map(|(index, _)| (0..POINTS).map(move |point| index * POINTS + point))
+                    .collect()
+            }
+            RecoveredFieldEntityDomain::OrientedFaces => {
+                let faces = topology.face_elements.ok_or_else(|| {
+                    RecoveredFieldError::InvalidArtifact(
+                        "face support needs the topology's oriented faces".into(),
+                    )
+                })?;
+                let inside_index = |index: usize| inside(&projection.elements[index]);
+                faces
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, (owner, neighbor))| {
+                        inside_index(*owner) || neighbor.is_some_and(inside_index)
+                    })
+                    .map(|(index, _)| index)
+                    .collect()
+            }
+            _ => {
+                return Err(RecoveredFieldError::InvalidArtifact(
+                    "field support resolves only volume and face domains".into(),
+                ))
+            }
+        };
+        if indices.len() != *entities {
+            return Err(RecoveredFieldError::InvalidArtifact(
+                "field support count differs from its regions on this topology".into(),
+            ));
+        }
+        Ok(Some(indices))
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RecoveredFieldEntityCounts {

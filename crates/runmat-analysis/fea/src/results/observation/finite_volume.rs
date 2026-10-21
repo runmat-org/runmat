@@ -251,6 +251,16 @@ impl<'a> ObservationTopology<'a> {
             .iter()
             .map(|f| f.boundary_source.map(|b| b.projection_boundary_index))
             .collect();
+        result.face_elements = geometry
+            .faces
+            .iter()
+            .map(|f| {
+                (
+                    geometry.cells[f.owner].source_element_index,
+                    f.neighbor.map(|n| geometry.cells[n].source_element_index),
+                )
+            })
+            .collect();
         result.finite_volume = Some(layout.clone());
         Ok(result)
     }
