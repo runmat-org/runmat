@@ -1,12 +1,76 @@
 //! Structural end state: capabilities the page claims.
 use crate::requirement::*;
-const STRUCT: &[Envelope] = cells!([Formulation::LinearStructural, Formulation::ModalStructural, Formulation::LinearStructuralDynamics, Formulation::StructuralStability], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const SHELLBEAM: &[Envelope] = cells!([Formulation::LinearStructural], [MeshOrder::Beam, MeshOrder::Shell], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const NONLIN: &[Envelope] = cells!([Formulation::NonlinearStructural, Formulation::SmallStrainJ2], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const CONTACT: &[Envelope] = cells!([Formulation::PenaltyCoulombContact, Formulation::SmallStrainJ2PenaltyCoulombContact], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const LINEAR: &[Envelope] = cells!([Formulation::LinearStructural, Formulation::ModalStructural], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const DYN: &[Envelope] = cells!([Formulation::LinearStructuralDynamics, Formulation::ModalStructural], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const LOADS: &[Envelope] = cells!([Formulation::LinearStructural, Formulation::LinearStructuralDynamics, Formulation::NonlinearStructural], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
+const STRUCT: &[Envelope] = cells!(
+    [
+        Formulation::LinearStructural,
+        Formulation::ModalStructural,
+        Formulation::LinearStructuralDynamics,
+        Formulation::StructuralStability
+    ],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const SHELLBEAM: &[Envelope] = cells!(
+    [Formulation::LinearStructural],
+    [MeshOrder::Beam, MeshOrder::Shell],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const NONLIN: &[Envelope] = cells!(
+    [Formulation::NonlinearStructural, Formulation::SmallStrainJ2],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const CONTACT: &[Envelope] = cells!(
+    [
+        Formulation::PenaltyCoulombContact,
+        Formulation::SmallStrainJ2PenaltyCoulombContact
+    ],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const LINEAR: &[Envelope] = cells!(
+    [Formulation::LinearStructural, Formulation::ModalStructural],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const DYN: &[Envelope] = cells!(
+    [
+        Formulation::LinearStructuralDynamics,
+        Formulation::ModalStructural
+    ],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const LOADS: &[Envelope] = cells!(
+    [
+        Formulation::LinearStructural,
+        Formulation::LinearStructuralDynamics,
+        Formulation::NonlinearStructural
+    ],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
 const FEA_STRUCTURAL_PUBLIC_001: Requirement = Requirement {
     id: "FEA-STRUCTURAL-PUBLIC-001",
     title: "Structural capabilities the page claims",
@@ -64,6 +128,12 @@ const FEA_STRUCTURAL_PUBLIC_001: Requirement = Requirement {
             STRUCT,
         ),
         obligation(
+            "independent_structural_references",
+            "Independent references exist and pass for a thick-walled cylinder under pressure (Lame), torsion of a prismatic bar, multi-point constraint and rigid-body coupling cases, and Euler column and plate buckling load factors, each with a mesh-convergence record.",
+            EvidenceKind::IndependentReference,
+            STRUCT,
+        ),
+        obligation(
             "vibration_qualification",
             "A random-response study driven by a PSD (GEVS-type) from modal data reports RMS and 3-sigma stress, matching an independent modal combination.",
             EvidenceKind::IndependentReference,
@@ -71,6 +141,4 @@ const FEA_STRUCTURAL_PUBLIC_001: Requirement = Requirement {
         ),
     ],
 };
-pub(crate) const REQUIREMENTS: &[Requirement] = &[
-    FEA_STRUCTURAL_PUBLIC_001,
-];
+pub(crate) const REQUIREMENTS: &[Requirement] = &[FEA_STRUCTURAL_PUBLIC_001];

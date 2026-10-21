@@ -330,15 +330,15 @@ const NUMERICS: Requirement = Requirement {
 };
 const ACCURACY: Requirement = Requirement {
     id: "FEA-ACOUSTIC-ACCURACY-001",
-    title: "Mandatory acoustic accuracy gates production publication",
+    title: "Mandatory acoustic accuracy gates publication",
     stages: &[Stage::Acoustics, Stage::ExecutionContracts],
     acceptance: concat!(
-        "Every production acoustic entry retains independently authenticated ",
+        "Every acoustic entry retains independently authenticated ",
         "original numerical evidence and its authored accuracy intent. Evaluate ",
         "mandatory field/convergence, physical balance, source realization and ",
         "requested resonance/uniqueness requirements without weakening tolerances or ",
         "inferring scientific adequacy from solver success. Missing, failed or ",
-        "indeterminate mandatory accuracy blocks dependent production state and ",
+        "indeterminate mandatory accuracy blocks dependent state and ",
         "semantic publication.",
     ),
     owners: &[
@@ -447,7 +447,7 @@ const EXECUTION_REQUIREMENT: Requirement = Requirement {
             concat!(
                 "Release evidence and usable examples document supported boundaries, ",
                 "sources, material/mesh/frequency limits, diagnostics and accuracy; all ",
-                "blocking release criteria pass before production advertisement.",
+                "blocking release criteria pass before advertisement.",
             ),
             EvidenceKind::AccuracyAcceptance,
             EXECUTION,

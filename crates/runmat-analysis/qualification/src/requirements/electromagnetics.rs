@@ -486,7 +486,7 @@ const FEA_EM_QUALIFICATION_001: Requirement = Requirement {
             concat!(
                 "Publish correct formulation and release documentation with original ",
                 "controls and evidence. Missing, failed or indeterminate mandatory accuracy ",
-                "prevents production publication; cold claims require authenticated original ",
+                "prevents publication; cold claims require authenticated original ",
                 "source lineage and never reconstruct lost physics by decoding summaries.",
             ),
             EvidenceKind::PublicationIntegrity,

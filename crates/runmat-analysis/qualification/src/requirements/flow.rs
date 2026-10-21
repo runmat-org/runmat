@@ -1,25 +1,184 @@
 //! Non-turbulent flow end state (REG-FLUID-001 to 022): solvers, boundaries, heat, materials, physics, outputs, verification and FSI.
 use crate::requirement::*;
-const FLOW: &[Envelope] = cells!([Formulation::IncompressibleLaminarSteady, Formulation::IncompressibleLaminarTransient], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const FLOWPAR: &[Envelope] = cells!([Formulation::IncompressibleLaminarSteady, Formulation::IncompressibleLaminarTransient], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy, ExecutionEnvelope::ParallelCpu]);
-const STEADY: &[Envelope] = cells!([Formulation::IncompressibleLaminarSteady], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const TRANSIENT: &[Envelope] = cells!([Formulation::IncompressibleLaminarTransient], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const HEAT: &[Envelope] = cells!([Formulation::ConjugateHeatTransfer], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const LOWMACH: &[Envelope] = cells!([Formulation::LowMachFlow], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const NEWT: &[Envelope] = cells!([Formulation::GeneralizedNewtonianFlow], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const VISCO: &[Envelope] = cells!([Formulation::ViscoelasticFlow], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const POROUS: &[Envelope] = cells!([Formulation::PorousMediaFlow], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const SCALAR: &[Envelope] = cells!([Formulation::ScalarTransport], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const FREE: &[Envelope] = cells!([Formulation::FreeSurfaceFlow], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const ROT: &[Envelope] = cells!([Formulation::RotatingFrameFlow], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const LUBE: &[Envelope] = cells!([Formulation::ThinFilmLubrication], [MeshOrder::CanonicalMixedTopology], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const EK: &[Envelope] = cells!([Formulation::Electrokinetics], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const PART: &[Envelope] = cells!([Formulation::ParticleTracing], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const COMP: &[Envelope] = cells!([Formulation::CompressibleLaminarFlow, Formulation::PipeNetwork], [MeshOrder::CanonicalMixedTopology], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const AXI: &[Envelope] = cells!([Formulation::IncompressibleLaminarSteady, Formulation::IncompressibleLaminarTransient], [MeshOrder::CanonicalMixedTopology], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const FSI: &[Envelope] = cells!([Formulation::FluidStructureInteraction], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const OUT: &[Envelope] = cells!([Formulation::IncompressibleLaminarSteady, Formulation::IncompressibleLaminarTransient, Formulation::ConjugateHeatTransfer], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const SUITE: &[Envelope] = cells!([Formulation::IncompressibleLaminarSteady, Formulation::IncompressibleLaminarTransient, Formulation::ConjugateHeatTransfer, Formulation::FluidStructureInteraction], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::PublicStudy]);
+const FLOW: &[Envelope] = cells!(
+    [
+        Formulation::IncompressibleLaminarSteady,
+        Formulation::IncompressibleLaminarTransient
+    ],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const FLOWPAR: &[Envelope] = cells!(
+    [
+        Formulation::IncompressibleLaminarSteady,
+        Formulation::IncompressibleLaminarTransient
+    ],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy,
+        ExecutionEnvelope::ParallelCpu
+    ]
+);
+const STEADY: &[Envelope] = cells!(
+    [Formulation::IncompressibleLaminarSteady],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const TRANSIENT: &[Envelope] = cells!(
+    [Formulation::IncompressibleLaminarTransient],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const HEAT: &[Envelope] = cells!(
+    [Formulation::ConjugateHeatTransfer],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const LOWMACH: &[Envelope] = cells!(
+    [Formulation::LowMachFlow],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const NEWT: &[Envelope] = cells!(
+    [Formulation::GeneralizedNewtonianFlow],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const VISCO: &[Envelope] = cells!(
+    [Formulation::ViscoelasticFlow],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const POROUS: &[Envelope] = cells!(
+    [Formulation::PorousMediaFlow],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const SCALAR: &[Envelope] = cells!(
+    [Formulation::ScalarTransport],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const FREE: &[Envelope] = cells!(
+    [Formulation::FreeSurfaceFlow],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const ROT: &[Envelope] = cells!(
+    [Formulation::RotatingFrameFlow],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const LUBE: &[Envelope] = cells!(
+    [Formulation::ThinFilmLubrication],
+    [MeshOrder::CanonicalMixedTopology],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const EK: &[Envelope] = cells!(
+    [Formulation::Electrokinetics],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const PART: &[Envelope] = cells!(
+    [Formulation::ParticleTracing],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const COMP: &[Envelope] = cells!(
+    [
+        Formulation::CompressibleLaminarFlow,
+        Formulation::PipeNetwork
+    ],
+    [MeshOrder::CanonicalMixedTopology],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const AXI: &[Envelope] = cells!(
+    [
+        Formulation::IncompressibleLaminarSteady,
+        Formulation::IncompressibleLaminarTransient
+    ],
+    [MeshOrder::CanonicalMixedTopology],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const FSI: &[Envelope] = cells!(
+    [Formulation::FluidStructureInteraction],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const OUT: &[Envelope] = cells!(
+    [
+        Formulation::IncompressibleLaminarSteady,
+        Formulation::IncompressibleLaminarTransient,
+        Formulation::ConjugateHeatTransfer
+    ],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const SUITE: &[Envelope] = cells!(
+    [
+        Formulation::IncompressibleLaminarSteady,
+        Formulation::IncompressibleLaminarTransient,
+        Formulation::ConjugateHeatTransfer,
+        Formulation::FluidStructureInteraction
+    ],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [ExecutionEnvelope::PublicStudy]
+);
 const FEA_FLUID_SOLVERS_001: Requirement = Requirement {
     id: "FEA-FLUID-SOLVERS-001",
     title: "Robust, scalable and accurate laminar flow solvers",

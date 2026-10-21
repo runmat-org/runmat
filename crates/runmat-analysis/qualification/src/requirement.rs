@@ -100,12 +100,18 @@ pub enum ExecutionEnvelope {
 }
 impl ExecutionEnvelope {
     pub const ALL: &'static [ExecutionEnvelope] = &[
-        ExecutionEnvelope::SourceCheck, ExecutionEnvelope::DesktopIntegration,
-        ExecutionEnvelope::ReleasePipeline, ExecutionEnvelope::PreparedController,
-        ExecutionEnvelope::NativeProcess, ExecutionEnvelope::NumericalKernel,
-        ExecutionEnvelope::PublicStudy, ExecutionEnvelope::Durable,
-        ExecutionEnvelope::ParallelCpu, ExecutionEnvelope::RemoteExecution,
-        ExecutionEnvelope::DomainDecomposed, ExecutionEnvelope::ClaimedAccelerator,
+        ExecutionEnvelope::SourceCheck,
+        ExecutionEnvelope::DesktopIntegration,
+        ExecutionEnvelope::ReleasePipeline,
+        ExecutionEnvelope::PreparedController,
+        ExecutionEnvelope::NativeProcess,
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy,
+        ExecutionEnvelope::Durable,
+        ExecutionEnvelope::ParallelCpu,
+        ExecutionEnvelope::RemoteExecution,
+        ExecutionEnvelope::DomainDecomposed,
+        ExecutionEnvelope::ClaimedAccelerator,
     ];
 }
 
@@ -139,26 +145,52 @@ macro_rules! wire_names {
 }
 impl Stage {
     pub const ALL: &'static [Stage] = &[
-        Stage::Prerequisite, Stage::Baseline, Stage::Authoring, Stage::ExecutionContracts,
-        Stage::SharedAuthorities, Stage::LinearStructures, Stage::Dynamics, Stage::Thermal,
-        Stage::NonlinearContact, Stage::Electromagnetics, Stage::Acoustics, Stage::Fluid,
-        Stage::FluidStructureInteraction, Stage::Adaptation, Stage::Release, Stage::Meshing, Stage::Scale, Stage::PublicSurface,
+        Stage::Prerequisite,
+        Stage::Baseline,
+        Stage::Authoring,
+        Stage::ExecutionContracts,
+        Stage::SharedAuthorities,
+        Stage::LinearStructures,
+        Stage::Dynamics,
+        Stage::Thermal,
+        Stage::NonlinearContact,
+        Stage::Electromagnetics,
+        Stage::Acoustics,
+        Stage::Fluid,
+        Stage::FluidStructureInteraction,
+        Stage::Adaptation,
+        Stage::Release,
+        Stage::Meshing,
+        Stage::Scale,
+        Stage::PublicSurface,
     ];
 }
 wire_names!(Stage);
 impl Formulation {
     pub const ALL: &'static [Formulation] = &[
-        Formulation::SharedInfrastructure, Formulation::LinearStructural,
-        Formulation::ModalStructural, Formulation::PrestressedStructural,
-        Formulation::StructuralStability, Formulation::LinearStructuralDynamics,
-        Formulation::NonlinearStructural, Formulation::PenaltyCoulombContact,
-        Formulation::AdaptiveAnalysis, Formulation::Electrostatic,
-        Formulation::ElectricalConduction, Formulation::Magnetostatic,
-        Formulation::HarmonicMaxwell, Formulation::Thermoelastic, Formulation::Electrothermal,
-        Formulation::ConjugateHeatTransfer, Formulation::FluidStructureInteraction,
-        Formulation::SmallStrainJ2, Formulation::SmallStrainJ2PenaltyCoulombContact,
-        Formulation::ThermalSteady, Formulation::ThermalTransient,
-        Formulation::AcousticHarmonic, Formulation::IncompressibleLaminarSteady,
+        Formulation::SharedInfrastructure,
+        Formulation::LinearStructural,
+        Formulation::ModalStructural,
+        Formulation::PrestressedStructural,
+        Formulation::StructuralStability,
+        Formulation::LinearStructuralDynamics,
+        Formulation::NonlinearStructural,
+        Formulation::PenaltyCoulombContact,
+        Formulation::AdaptiveAnalysis,
+        Formulation::Electrostatic,
+        Formulation::ElectricalConduction,
+        Formulation::Magnetostatic,
+        Formulation::HarmonicMaxwell,
+        Formulation::Thermoelastic,
+        Formulation::Electrothermal,
+        Formulation::ConjugateHeatTransfer,
+        Formulation::FluidStructureInteraction,
+        Formulation::SmallStrainJ2,
+        Formulation::SmallStrainJ2PenaltyCoulombContact,
+        Formulation::ThermalSteady,
+        Formulation::ThermalTransient,
+        Formulation::AcousticHarmonic,
+        Formulation::IncompressibleLaminarSteady,
         Formulation::IncompressibleLaminarTransient,
         Formulation::AcousticModal,
         Formulation::AcousticTransient,
@@ -182,8 +214,13 @@ impl Formulation {
 wire_names!(Formulation);
 impl MeshOrder {
     pub const ALL: &'static [MeshOrder] = &[
-        MeshOrder::MeshIndependent, MeshOrder::Beam, MeshOrder::Shell, MeshOrder::EdgeElements,
-        MeshOrder::CanonicalMixedTopology, MeshOrder::Tet4, MeshOrder::Tet10,
+        MeshOrder::MeshIndependent,
+        MeshOrder::Beam,
+        MeshOrder::Shell,
+        MeshOrder::EdgeElements,
+        MeshOrder::CanonicalMixedTopology,
+        MeshOrder::Tet4,
+        MeshOrder::Tet10,
         MeshOrder::CanonicalTetrahedra,
     ];
 }

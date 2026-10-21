@@ -1,7 +1,25 @@
 //! Chained studies and public adaptive analysis.
 use crate::requirement::*;
-const CHAIN: &[Envelope] = cells!([Formulation::Thermoelastic, Formulation::StructuralStability, Formulation::ModalStructural], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const ADAPT: &[Envelope] = cells!([Formulation::AdaptiveAnalysis], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::PublicStudy, ExecutionEnvelope::NumericalKernel]);
+const CHAIN: &[Envelope] = cells!(
+    [
+        Formulation::Thermoelastic,
+        Formulation::StructuralStability,
+        Formulation::ModalStructural
+    ],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const ADAPT: &[Envelope] = cells!(
+    [Formulation::AdaptiveAnalysis],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [
+        ExecutionEnvelope::PublicStudy,
+        ExecutionEnvelope::NumericalKernel
+    ]
+);
 const FEA_COUPLING_CHAIN_001: Requirement = Requirement {
     id: "FEA-COUPLING-CHAIN-001",
     title: "Chained thermal-structural studies",
@@ -40,7 +58,5 @@ const FEA_ADAPTATION_PUBLIC_001: Requirement = Requirement {
         ),
     ],
 };
-pub(crate) const REQUIREMENTS: &[Requirement] = &[
-    FEA_COUPLING_CHAIN_001,
-    FEA_ADAPTATION_PUBLIC_001,
-];
+pub(crate) const REQUIREMENTS: &[Requirement] =
+    &[FEA_COUPLING_CHAIN_001, FEA_ADAPTATION_PUBLIC_001];

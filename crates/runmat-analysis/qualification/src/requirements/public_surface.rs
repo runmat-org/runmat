@@ -1,15 +1,113 @@
 //! Public command surface: studies run, language forms, readable results and published validation.
 use crate::requirement::*;
-const STUDY: &[Envelope] = cells!([Formulation::SharedInfrastructure], [MeshOrder::CanonicalMixedTopology], [ExecutionEnvelope::PublicStudy]);
-const CHECK: &[Envelope] = cells!([Formulation::SharedInfrastructure], [MeshOrder::MeshIndependent], [ExecutionEnvelope::SourceCheck, ExecutionEnvelope::PublicStudy]);
-const FAMILIES: &[Envelope] = cells!([Formulation::LinearStructural, Formulation::ModalStructural, Formulation::LinearStructuralDynamics, Formulation::StructuralStability, Formulation::NonlinearStructural, Formulation::PenaltyCoulombContact, Formulation::ThermalSteady, Formulation::ThermalTransient, Formulation::Electrostatic, Formulation::ElectricalConduction, Formulation::Magnetostatic, Formulation::HarmonicMaxwell, Formulation::ElectromagneticTransient, Formulation::SaturatingMagnetics, Formulation::Thermoelastic, Formulation::Electrothermal, Formulation::ConjugateHeatTransfer, Formulation::FluidStructureInteraction, Formulation::AcousticHarmonic, Formulation::AcousticModal, Formulation::AcousticTransient, Formulation::IncompressibleLaminarSteady, Formulation::IncompressibleLaminarTransient], [MeshOrder::CanonicalTetrahedra], [ExecutionEnvelope::PublicStudy, ExecutionEnvelope::RemoteExecution]);
-const COUPLED: &[Envelope] = cells!([Formulation::Thermoelastic, Formulation::Electrothermal, Formulation::ConjugateHeatTransfer, Formulation::FluidStructureInteraction], [MeshOrder::CanonicalTetrahedra], [ExecutionEnvelope::PublicStudy, ExecutionEnvelope::RemoteExecution]);
-const TRANSIENT: &[Envelope] = cells!([Formulation::LinearStructuralDynamics], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::PublicStudy, ExecutionEnvelope::RemoteExecution]);
-const PRACTICAL: &[Envelope] = cells!([Formulation::StructuralStability, Formulation::LinearStructuralDynamics], [MeshOrder::Tet10], [ExecutionEnvelope::PublicStudy]);
-const CONDUCTION: &[Envelope] = cells!([Formulation::ThermalSteady], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::PublicStudy]);
-const SWEEPS: &[Envelope] = cells!([Formulation::ThermalSteady, Formulation::ConjugateHeatTransfer], [MeshOrder::CanonicalTetrahedra], [ExecutionEnvelope::PublicStudy, ExecutionEnvelope::RemoteExecution]);
-const BRACKET: &[Envelope] = cells!([Formulation::LinearStructural], [MeshOrder::Tet10], [ExecutionEnvelope::PublicStudy]);
-const DESKTOP: &[Envelope] = cells!([Formulation::SharedInfrastructure], [MeshOrder::CanonicalMixedTopology], [ExecutionEnvelope::DesktopIntegration, ExecutionEnvelope::PublicStudy]);
+const STUDY: &[Envelope] = cells!(
+    [Formulation::SharedInfrastructure],
+    [MeshOrder::CanonicalMixedTopology],
+    [ExecutionEnvelope::PublicStudy]
+);
+const CHECK: &[Envelope] = cells!(
+    [Formulation::SharedInfrastructure],
+    [MeshOrder::MeshIndependent],
+    [
+        ExecutionEnvelope::SourceCheck,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const FAMILIES: &[Envelope] = cells!(
+    [
+        Formulation::LinearStructural,
+        Formulation::ModalStructural,
+        Formulation::LinearStructuralDynamics,
+        Formulation::StructuralStability,
+        Formulation::NonlinearStructural,
+        Formulation::PenaltyCoulombContact,
+        Formulation::ThermalSteady,
+        Formulation::ThermalTransient,
+        Formulation::Electrostatic,
+        Formulation::ElectricalConduction,
+        Formulation::Magnetostatic,
+        Formulation::HarmonicMaxwell,
+        Formulation::ElectromagneticTransient,
+        Formulation::SaturatingMagnetics,
+        Formulation::Thermoelastic,
+        Formulation::Electrothermal,
+        Formulation::ConjugateHeatTransfer,
+        Formulation::FluidStructureInteraction,
+        Formulation::AcousticHarmonic,
+        Formulation::AcousticModal,
+        Formulation::AcousticTransient,
+        Formulation::IncompressibleLaminarSteady,
+        Formulation::IncompressibleLaminarTransient
+    ],
+    [MeshOrder::CanonicalTetrahedra],
+    [
+        ExecutionEnvelope::PublicStudy,
+        ExecutionEnvelope::RemoteExecution
+    ]
+);
+const COUPLED: &[Envelope] = cells!(
+    [
+        Formulation::Thermoelastic,
+        Formulation::Electrothermal,
+        Formulation::ConjugateHeatTransfer,
+        Formulation::FluidStructureInteraction
+    ],
+    [MeshOrder::CanonicalTetrahedra],
+    [
+        ExecutionEnvelope::PublicStudy,
+        ExecutionEnvelope::RemoteExecution
+    ]
+);
+const TRANSIENT: &[Envelope] = cells!(
+    [Formulation::LinearStructuralDynamics],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [
+        ExecutionEnvelope::PublicStudy,
+        ExecutionEnvelope::RemoteExecution
+    ]
+);
+const PRACTICAL: &[Envelope] = cells!(
+    [
+        Formulation::StructuralStability,
+        Formulation::LinearStructuralDynamics
+    ],
+    [MeshOrder::Tet10],
+    [ExecutionEnvelope::PublicStudy]
+);
+const CONDUCTION: &[Envelope] = cells!(
+    [Formulation::ThermalSteady],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [ExecutionEnvelope::PublicStudy]
+);
+const SWEEPS: &[Envelope] = cells!(
+    [
+        Formulation::ThermalSteady,
+        Formulation::ConjugateHeatTransfer
+    ],
+    [MeshOrder::CanonicalTetrahedra],
+    [
+        ExecutionEnvelope::PublicStudy,
+        ExecutionEnvelope::RemoteExecution
+    ]
+);
+const BRACKET: &[Envelope] = cells!(
+    [Formulation::LinearStructural],
+    [MeshOrder::Tet10],
+    [ExecutionEnvelope::PublicStudy]
+);
+const DESKTOP: &[Envelope] = cells!(
+    [Formulation::SharedInfrastructure],
+    [MeshOrder::CanonicalMixedTopology],
+    [
+        ExecutionEnvelope::DesktopIntegration,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const REGISTER: &[Envelope] = cells!(
+    [Formulation::SharedInfrastructure],
+    [MeshOrder::MeshIndependent],
+    [ExecutionEnvelope::SourceCheck]
+);
 const FEA_PUBLIC_STUDIES_001: Requirement = Requirement {
     id: "FEA-PUBLIC-STUDIES-001",
     title: "Published studies run from the public command",
@@ -119,6 +217,12 @@ const FEA_PUBLIC_LANGUAGE_001: Requirement = Requirement {
             STUDY,
         ),
         obligation(
+            "browser_check",
+            "`.fea` files type-check in the browser with the same diagnostics as the CLI, and the browser never runs or meshes silently.",
+            EvidenceKind::SemanticRealization,
+            CHECK,
+        ),
+        obligation(
             "matlab_generated_signals",
             "`import function` of a MATLAB function that generates a load over time checks, solves a transient with it and returns the response shown on the runtime page.",
             EvidenceKind::PublicRun,
@@ -171,6 +275,18 @@ const FEA_PUBLIC_RESULTS_001: Requirement = Requirement {
             STUDY,
         ),
         obligation(
+            "provenance_recorded",
+            "Every result records the requested and actual backend, precision, solver method, preconditioner and any fallback stage, and a fallback never reports the requested backend as used.",
+            EvidenceKind::PublicationIntegrity,
+            STUDY,
+        ),
+        obligation(
+            "desktop_study_surface",
+            "The Desktop study editor, geometry viewer, results pane and agent pane operate on the published studies in the released app, with the same checks and results as the CLI.",
+            EvidenceKind::PublicRun,
+            DESKTOP,
+        ),
+        obligation(
             "result_digest_determinism",
             "The same study yields identical result digests across runs, thread counts and worker counts, with the guarantee and its scope (same build, hardware class) stated.",
             EvidenceKind::ExecutionEquivalence,
@@ -211,10 +327,50 @@ const FEA_PUBLIC_VALIDATION_001: Requirement = Requirement {
             STUDY,
         ),
         obligation(
+            "guide_per_family",
+            "Each shippable physics family has a guide with a runnable example, including electrostatics, conduction, magnetostatics, harmonic Maxwell, acoustics and flow.",
+            EvidenceKind::PublicRun,
+            STUDY,
+        ),
+        obligation(
             "no_maturity_surface",
             "No `formulation = experimental` switch, maturity gate in admission or kernels, 'production qualification unsupported' rejection, or the word experimental in docs, examples and file names remains; a finished capability simply runs.",
             EvidenceKind::RejectionInvariant,
             CHECK,
+        ),
+    ],
+};
+const FEA_RELEASE_REGISTER_001: Requirement = Requirement {
+    id: "FEA-RELEASE-REGISTER-001",
+    title: "The register defines done and maintains itself",
+    stages: &[Stage::Release],
+    acceptance: "The register, its witness tags and its scope inventory are the definition of done: witnesses are declared at the tests, validated in CI, run to produce a generated evidence catalog, and every scope row the sources claim maps to an obligation or an explicit exclusion.",
+    owners: &["crates/runmat-analysis/qualification/src/witness.rs"],
+    dependencies: &[],
+    obligations: &[
+        obligation(
+            "witness_tags_valid",
+            "Every witness tag in the repository names an existing obligation, claims only envelopes that obligation requires, carries a non-empty boundary and sits on an existing test function; a stale or broken tag fails the qualification tests.",
+            EvidenceKind::PublicationIntegrity,
+            REGISTER,
+        ),
+        obligation(
+            "evidence_catalog_generated",
+            "The evidence catalog (markdown and JSON, per requirement, obligation and envelope with PASS, FAIL or OPEN and the test locator) is generated by running the tagged tests, never hand-edited, and a cell is PASS only when every tagged test for it passed in that run.",
+            EvidenceKind::PublicationIntegrity,
+            REGISTER,
+        ),
+        obligation(
+            "scope_inventory_complete",
+            "Every capability the website plans, end states, claim rows and FEA scope documents state has an inventory row that maps to existing obligations or to an explicit exclusion with its reason; no row is unmapped and every mapped obligation exists.",
+            EvidenceKind::PublicationIntegrity,
+            REGISTER,
+        ),
+        obligation(
+            "register_integrity",
+            "Requirement and obligation declarations are structurally valid: unique, non-empty, with distinct required envelopes drawn from the declared vocabulary, and owning sources exist.",
+            EvidenceKind::PublicationIntegrity,
+            REGISTER,
         ),
     ],
 };
@@ -223,4 +379,5 @@ pub(crate) const REQUIREMENTS: &[Requirement] = &[
     FEA_PUBLIC_LANGUAGE_001,
     FEA_PUBLIC_RESULTS_001,
     FEA_PUBLIC_VALIDATION_001,
+    FEA_RELEASE_REGISTER_001,
 ];

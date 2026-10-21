@@ -145,99 +145,89 @@ const FEA_THERMAL_INPUT_001: Requirement = Requirement {
 const FEA_THERMAL_SOLVE_001: Requirement = Requirement {
     id: "FEA-THERMAL-SOLVE-001",
     title: "Distinct steady and transient solves with nonlinear closure",
-    stages: &[
-        Stage::Thermal
-    ],
+    stages: &[Stage::Thermal],
     acceptance: concat!(
-"Use real heat-equation solves rather than graph diffusion or relaxation ",
-"proxies. Document transient integration and nonlinear treatment of ",
-"temperature-dependent coefficients and radiation. Retain actual residual, ",
-"increment and energy-closure evidence before acceptance.",
-),
-    owners: &[
-        "crates/runmat-analysis/fea/src/pipeline/thermal/physical.rs"
-    ],
-    dependencies: &[
-    ],
+        "Use real heat-equation solves rather than graph diffusion or relaxation ",
+        "proxies. Document transient integration and nonlinear treatment of ",
+        "temperature-dependent coefficients and radiation. Retain actual residual, ",
+        "increment and energy-closure evidence before acceptance.",
+    ),
+    owners: &["crates/runmat-analysis/fea/src/pipeline/thermal/physical.rs"],
+    dependencies: &[],
     obligations: &[
         obligation(
             "steady",
             concat!(
-"Solve stationary conductivity/source/boundary equilibrium and verify the ",
-"physical residual on the original operator.",
-),
+                "Solve stationary conductivity/source/boundary equilibrium and verify the ",
+                "physical residual on the original operator.",
+            ),
             EvidenceKind::IndependentReference,
-            STEADY_PUBLIC
+            STEADY_PUBLIC,
         ),
         obligation(
             "transient",
             concat!(
-"Document the transient integration method, initial-state semantics and ",
-"sampling; demonstrate its temporal order independently of spatial error.",
-),
+                "Document the transient integration method, initial-state semantics and ",
+                "sampling; demonstrate its temporal order independently of spatial error.",
+            ),
             EvidenceKind::TemporalConvergence,
-            TRANSIENT_PUBLIC
+            TRANSIENT_PUBLIC,
         ),
         obligation(
             "nonlinear",
             concat!(
-"Temperature-dependent property and radiation iterations meet documented ",
-"physical residual, field-increment and energy-closure criteria. Failed or ",
-"exhausted iterations cannot produce an accepted state.",
-),
+                "Temperature-dependent property and radiation iterations meet documented ",
+                "physical residual, field-increment and energy-closure criteria. Failed or ",
+                "exhausted iterations cannot produce an accepted state.",
+            ),
             EvidenceKind::AccuracyAcceptance,
-            PUBLIC
+            PUBLIC,
         ),
     ],
 };
 const FEA_THERMAL_FIELDS_001: Requirement = Requirement {
     id: "FEA-THERMAL-FIELDS-001",
     title: "Physical thermal recovery and energy accounting",
-    stages: &[
-        Stage::Thermal
-    ],
+    stages: &[Stage::Thermal],
     acceptance: concat!(
-"Publish original nodal and integration-point temperature, temperature ",
-"gradient, heat flux, actual authored/generated heat source and ",
-"boundary-face heat transfer with correct units and topology. Compute global ",
-"and per-region energy balances from the same physical transfers used in ",
-"assembly.",
-),
-    owners: &[
-        "crates/runmat-analysis/fea/src/physics/thermal/assembly/recovery.rs"
-    ],
-    dependencies: &[
-    ],
+        "Publish original nodal and integration-point temperature, temperature ",
+        "gradient, heat flux, actual authored/generated heat source and ",
+        "boundary-face heat transfer with correct units and topology. Compute global ",
+        "and per-region energy balances from the same physical transfers used in ",
+        "assembly.",
+    ),
+    owners: &["crates/runmat-analysis/fea/src/physics/thermal/assembly/recovery.rs"],
+    dependencies: &[],
     obligations: &[
         obligation(
             "fields",
             concat!(
-"Retain recoverable original thermal fields, integration inventories and ",
-"boundary-face transfers with explicit locations, components, units and ",
-"canonical topology; recover physical conductivity times temperature ",
-"gradient with the documented sign.",
-),
+                "Retain recoverable original thermal fields, integration inventories and ",
+                "boundary-face transfers with explicit locations, components, units and ",
+                "canonical topology; recover physical conductivity times temperature ",
+                "gradient with the documented sign.",
+            ),
             EvidenceKind::OriginalStateComparison,
-            PUBLIC
+            PUBLIC,
         ),
         obligation(
             "global_energy",
             concat!(
-"Account for supplied heat, boundary transfer, prescribed reactions and ",
-"transient stored energy without counting internal conduction as external ",
-"power or hiding opposing flows through cancellation.",
-),
+                "Account for supplied heat, boundary transfer, prescribed reactions and ",
+                "transient stored energy without counting internal conduction as external ",
+                "power or hiding opposing flows through cancellation.",
+            ),
             EvidenceKind::PhysicalBalance,
-            KERNEL
+            KERNEL,
         ),
         obligation(
             "regional_energy",
             concat!(
-"Compute per-region energy balances and consistent interface exchange so ",
-"regional totals reconcile with the global balance.",
-),
+                "Compute per-region energy balances and consistent interface exchange so ",
+                "regional totals reconcile with the global balance.",
+            ),
             EvidenceKind::PhysicalBalance,
-            PUBLIC
+            PUBLIC,
         ),
     ],
 };
@@ -289,7 +279,7 @@ const FEA_THERMAL_ACCURACY_001: Requirement = Requirement {
             "gate",
             concat!(
                 "Mandatory thermal accuracy assessments bind original fields, energy ",
-                "diagnostics and realization evidence to the result and block production ",
+                "diagnostics and realization evidence to the result and block ",
                 "acceptance when missing, failed or indeterminate.",
             ),
             EvidenceKind::AccuracyAcceptance,

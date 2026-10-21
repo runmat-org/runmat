@@ -81,3 +81,4 @@ pub fn write_inventory(mut output: impl std::io::Write) -> std::io::Result<()> {
     Ok(())
 }
 pub mod catalog;
+pub mod scope;

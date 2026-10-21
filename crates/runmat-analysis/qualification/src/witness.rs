@@ -93,7 +93,9 @@ pub fn parse_tag_text(text: &str) -> Result<(String, String, Vec<Envelope>, Stri
         }
         let fields: Vec<&str> = part.split('/').map(str::trim).collect();
         let [formulations, meshes, executions] = fields[..] else {
-            return Err(format!("envelope `{part}` is not formulation/mesh/execution"));
+            return Err(format!(
+                "envelope `{part}` is not formulation/mesh/execution"
+            ));
         };
         for formulation in formulations.split('|') {
             let formulation = Formulation::parse(formulation)
@@ -212,7 +214,10 @@ pub fn scan(root: &Path) -> (Vec<Tag>, Vec<Problem>) {
         let Ok(text) = fs::read_to_string(&file) else {
             continue;
         };
-        if !text.lines().any(|l| l.trim_start().starts_with("// witness:")) {
+        if !text
+            .lines()
+            .any(|l| l.trim_start().starts_with("// witness:"))
+        {
             continue;
         }
         let relative = file.strip_prefix(root).unwrap_or(&file).to_path_buf();
@@ -270,15 +275,11 @@ fn scan_file(
         });
         return;
     };
-    let Some((target, base_modules)) = file
-        .strip_prefix(&package_dir)
-        .ok()
-        .and_then(module_prefix)
+    let Some((target, base_modules)) = file.strip_prefix(&package_dir).ok().and_then(module_prefix)
     else {
         problems.push(Problem {
             location: display,
-            message: "witness tags are supported in library sources and tests/ targets only"
-                .into(),
+            message: "witness tags are supported in library sources and tests/ targets only".into(),
         });
         return;
     };
@@ -300,7 +301,11 @@ fn scan_file(
             last_comment_was_tag_text = true;
             continue;
         }
-        if in_block && trimmed.starts_with("//") && !trimmed.starts_with("///") && last_comment_was_tag_text {
+        if in_block
+            && trimmed.starts_with("//")
+            && !trimmed.starts_with("///")
+            && last_comment_was_tag_text
+        {
             let rest = trimmed.trim_start_matches('/').trim();
             if let Some((_, text)) = pending.last_mut() {
                 if !text.is_empty() {
@@ -321,9 +326,11 @@ fn scan_file(
                 .trim_start_matches("pub(super) ")
                 .trim_start_matches("pub ")
                 .trim_start_matches("async ");
-            let function = signature
-                .strip_prefix("fn ")
-                .map(|r| r.split(|c: char| !(c.is_alphanumeric() || c == '_')).next().unwrap_or(""));
+            let function = signature.strip_prefix("fn ").map(|r| {
+                r.split(|c: char| !(c.is_alphanumeric() || c == '_'))
+                    .next()
+                    .unwrap_or("")
+            });
             match function {
                 Some(function) if !function.is_empty() => {
                     let above_is_test = index > 0 && {
@@ -426,8 +433,14 @@ fn scan_file(
 }
 
 fn is_test_attr(attribute: &str) -> bool {
-    let inner = attribute.trim_start_matches("#[").trim_end_matches(']').trim();
-    inner == "test" || inner.ends_with("::test") || inner.starts_with("test(") || inner.contains("::test(")
+    let inner = attribute
+        .trim_start_matches("#[")
+        .trim_end_matches(']')
+        .trim();
+    inner == "test"
+        || inner.ends_with("::test")
+        || inner.starts_with("test(")
+        || inner.contains("::test(")
 }
 
 /// Check tags against the register: the obligation exists, every envelope is required for it,

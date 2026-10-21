@@ -121,122 +121,113 @@ const ALL: &[Envelope] = &[
 const TOPOLOGY_001: Requirement = Requirement {
     id: "FEA-FLUID-TOPOLOGY-001",
     title: "Canonical conservative finite-volume projection",
-    stages: &[
-        Stage::Fluid
-    ],
+    stages: &[Stage::Fluid],
     acceptance: concat!(
-"Flow uses complete canonical tetrahedral control-volume geometry and exact ",
-"cell/face authority. Meshes outside validated geometry and quality limits ",
-"are rejected; no channel reduction substitutes for the original domain.",
-),
-    owners: &[
-        "crates/runmat-analysis/fea/src/topology/finite_volume.rs"
-    ],
-    dependencies: &[
-    ],
+        "Flow uses complete canonical tetrahedral control-volume geometry and exact ",
+        "cell/face authority. Meshes outside validated geometry and quality limits ",
+        "are rejected; no channel reduction substitutes for the original domain.",
+    ),
+    owners: &["crates/runmat-analysis/fea/src/topology/finite_volume.rs"],
+    dependencies: &[],
     obligations: &[
         obligation(
             "inventory",
             concat!(
-"Retain canonical cell identities, complete reciprocal cell-face incidence, ",
-"owner/neighbour, oriented area vectors, cell volumes/centroids, centroid ",
-"distances, interpolation weights, non-orthogonality/skewness metrics and ",
-"exact original boundary provenance.",
-),
+                "Retain canonical cell identities, complete reciprocal cell-face incidence, ",
+                "owner/neighbour, oriented area vectors, cell volumes/centroids, centroid ",
+                "distances, interpolation weights, non-orthogonality/skewness metrics and ",
+                "exact original boundary provenance.",
+            ),
             EvidenceKind::PhysicalBalance,
-            CORE
+            CORE,
         ),
         obligation(
             "geometry",
             concat!(
-"Projection is deterministic under reordered source access and placement; ",
-"oriented surfaces satisfy the divergence theorem and exact source/region ",
-"ownership. Cache identity binds the original mesh and projection policy.",
-),
+                "Projection is deterministic under reordered source access and placement; ",
+                "oriented surfaces satisfy the divergence theorem and exact source/region ",
+                "ownership. Cache identity binds the original mesh and projection policy.",
+            ),
             EvidenceKind::ExecutionEquivalence,
-            CORE
+            CORE,
         ),
         obligation(
             "quality",
             concat!(
-"Admit supported tetrahedral order/geometry and governed ",
-"non-orthogonality/skewness limits before work. Reject inversion, ",
-"degeneracy, unsupported curvature, nonmanifold/missing/ambiguous boundaries ",
-"or mutated source geometry; never silently reduce the model.",
-),
+                "Admit supported tetrahedral order/geometry and governed ",
+                "non-orthogonality/skewness limits before work. Reject inversion, ",
+                "degeneracy, unsupported curvature, nonmanifold/missing/ambiguous boundaries ",
+                "or mutated source geometry; never silently reduce the model.",
+            ),
             EvidenceKind::RejectionInvariant,
-            CORE
+            CORE,
         ),
         obligation(
             "budget",
             concat!(
-"Count construction inventory and checked scratch/traversal work before ",
-"allocation; exact ceilings, overflow and cancellation govern topology work.",
-),
+                "Count construction inventory and checked scratch/traversal work before ",
+                "allocation; exact ceilings, overflow and cancellation govern topology work.",
+            ),
             EvidenceKind::ResourceAdmission,
-            CORE
+            CORE,
         ),
     ],
 };
 const EQUATIONS_001: Requirement = Requirement {
     id: "FEA-FLUID-EQUATIONS-001",
     title: "Original incompressible laminar mass and momentum equations",
-    stages: &[
-        Stage::Fluid
-    ],
+    stages: &[Stage::Fluid],
     acceptance: concat!(
-"The supported initial flow envelope is incompressible, Newtonian, laminar ",
-"and single phase. Steady and transient operators conserve original mass and ",
-"momentum, use documented interpolation/stabilization and governed ",
-"skew/non-orthogonal corrections, and solve pressure-velocity coupling with ",
-"admissible shared nonsymmetric algebra.",
-),
+        "The supported initial flow envelope is incompressible, Newtonian, laminar ",
+        "and single phase. Steady and transient operators conserve original mass and ",
+        "momentum, use documented interpolation/stabilization and governed ",
+        "skew/non-orthogonal corrections, and solve pressure-velocity coupling with ",
+        "admissible shared nonsymmetric algebra.",
+    ),
     owners: &[
         "crates/runmat-analysis/fea/src/physics/cfd/canonical/momentum.rs",
         "crates/runmat-analysis/fea/src/physics/cfd/canonical/pressure.rs",
-        "crates/runmat-analysis/fea/src/physics/cfd/canonical/iterate.rs"
+        "crates/runmat-analysis/fea/src/physics/cfd/canonical/iterate.rs",
     ],
-    dependencies: &[
-        concat!(
-"Shared canonical topology, exact material assignment and general sparse ",
-"solver/resource authorities.",
-)
-    ],
+    dependencies: &[concat!(
+        "Shared canonical topology, exact material assignment and general sparse ",
+        "solver/resource authorities.",
+    )],
     obligations: &[
         obligation(
             "flux",
             concat!(
-"Evaluate one original oriented owner-face mass flux and conservative ",
-"advective, viscous and pressure momentum actions with equal/opposite ",
-"internal-face contributions. Document interpolation, stabilization and ",
-"non-orthogonal/skewness corrections within validated mesh limits.",
-),
+                "Evaluate one original oriented owner-face mass flux and conservative ",
+                "advective, viscous and pressure momentum actions with equal/opposite ",
+                "internal-face contributions. Document interpolation, stabilization and ",
+                "non-orthogonal/skewness corrections within validated mesh limits.",
+            ),
             EvidenceKind::PhysicalBalance,
-            CORE
+            CORE,
         ),
         obligation(
             "coupling",
             concat!(
-"Pressure-velocity coupling solves original incompressibility and momentum ",
-"equations. Component gauges/nullspaces are explicit, invalid or ",
-"incompatible references reject, and physical residual checks cannot be ",
-"replaced by solver convergence. Incompressibility is part of the mixed ",
-"fluid formulation, never a generic user-authored equality constraint.",
-),
+                "Pressure-velocity coupling solves original incompressibility and momentum ",
+                "equations. Component gauges/nullspaces are explicit, invalid or ",
+                "incompatible references reject, and physical residual checks cannot be ",
+                "replaced by solver convergence. Incompressibility is part of the mixed ",
+                "fluid formulation, never a generic user-authored equality constraint.",
+            ),
             EvidenceKind::PhysicalBalance,
-            CORE
+            CORE,
         ),
         obligation(
             "pressure_state",
             concat!(
-"Keep original reference-relative pressure as governing state through ",
-"iteration, recovery and cold execution. Absolute pressure is a projection; ",
-"converting it back must not erase fluctuations. Bind pressure references ",
-"and retain owner-face flux rather than reconstructing missing original ",
-"state.",
-),
+                "Keep original reference-relative pressure as governing state through ",
+                "iteration, recovery and cold execution. Absolute pressure is a projection; ",
+                "converting it back must not erase fluctuations. Bind pressure references ",
+                "and retain owner-face flux rather than reconstructing missing original ",
+                "state.",
+            ),
             EvidenceKind::OriginalStateComparison,
-            CORE
+            CORE,
         ),
     ],
 };
@@ -314,109 +305,102 @@ const INPUTS_001: Requirement = Requirement {
 const TRANSIENT_001: Requirement = Requirement {
     id: "FEA-FLUID-TRANSIENT-001",
     title: "Physical transient integration and original cold chronology",
-    stages: &[
-        Stage::Fluid
-    ],
+    stages: &[Stage::Fluid],
     acceptance: concat!(
-"Transient flow integrates original fluid inertia and pressure-velocity ",
-"evolution over actual intervals. Immutable original cell velocity, pressure ",
-"reference/fluctuation and owner-face flux govern cold continuation; ",
-"schedules, events, work limits and outputs retain their original chronology.",
-),
+        "Transient flow integrates original fluid inertia and pressure-velocity ",
+        "evolution over actual intervals. Immutable original cell velocity, pressure ",
+        "reference/fluctuation and owner-face flux govern cold continuation; ",
+        "schedules, events, work limits and outputs retain their original chronology.",
+    ),
     owners: &[
         "crates/runmat-analysis/fea/src/physics/cfd/canonical/transient.rs",
-        "crates/runmat-analysis/fea/src/execution/fluid/time_block.rs"
+        "crates/runmat-analysis/fea/src/execution/fluid/time_block.rs",
     ],
-    dependencies: &[
-        concat!(
-"Mandatory independent transient accuracy, admitted task resources and ",
-"compatible complete state publication.",
-)
-    ],
+    dependencies: &[concat!(
+        "Mandatory independent transient accuracy, admitted task resources and ",
+        "compatible complete state publication.",
+    )],
     obligations: &[
         obligation(
             "inertia",
             concat!(
-"Integrate actual momentum time derivatives rather than return a terminal ",
-"steady profile; initial state and step interval bind the original inertial ",
-"operator.",
-),
+                "Integrate actual momentum time derivatives rather than return a terminal ",
+                "steady profile; initial state and step interval bind the original inertial ",
+                "operator.",
+            ),
             EvidenceKind::IndependentReference,
-            TRANSIENT
+            TRANSIENT,
         ),
         obligation(
             "convergence",
             concat!(
-"Show temporal convergence independently of spatial error on a nontrivial ",
-"transient reference, including a transient vortex; report field error and ",
-"conservative balance.",
-),
+                "Show temporal convergence independently of spatial error on a nontrivial ",
+                "transient reference, including a transient vortex; report field error and ",
+                "conservative balance.",
+            ),
             EvidenceKind::TemporalConvergence,
-            TRANSIENT
+            TRANSIENT,
         ),
         obligation(
             "history",
             concat!(
-"Preserve complete original interval state, scheduled observations, ",
-"one-sided discontinuities, predecessor order and cumulative admitted work. ",
-"Reject reordered/substituted state, invalid intervals, budgets and ",
-"cancellation without accepting a suffix.",
-),
+                "Preserve complete original interval state, scheduled observations, ",
+                "one-sided discontinuities, predecessor order and cumulative admitted work. ",
+                "Reject reordered/substituted state, invalid intervals, budgets and ",
+                "cancellation without accepting a suffix.",
+            ),
             EvidenceKind::ColdReplay,
-            TRANSIENT
+            TRANSIENT,
         ),
         obligation(
             "producer_exit",
             concat!(
-"After actual native producer termination a fresh consumer resumes original ",
-"transient fields and outputs without producer memory; split and ",
-"uninterrupted histories agree within the governed accuracy envelope.",
-),
+                "After actual native producer termination a fresh consumer resumes original ",
+                "transient fields and outputs without producer memory; split and ",
+                "uninterrupted histories agree within the governed accuracy envelope.",
+            ),
             EvidenceKind::ProcessLifecycle,
-            TRANSIENT_NATIVE
+            TRANSIENT_NATIVE,
         ),
     ],
 };
 const RECOVERY_001: Requirement = Requirement {
     id: "FEA-FLUID-RECOVERY-001",
     title: "Original fluid fields and physical conservation recovery",
-    stages: &[
-        Stage::Fluid
-    ],
+    stages: &[Stage::Fluid],
     acceptance: concat!(
-"Recover original cell and face pressure, velocity, flux, stress and wall ",
-"quantities consistently, retaining exact boundary ownership and signed ",
-"mass/momentum balance. Acceptance includes original equation residual, ",
-"continuity, constitutive face-flux closure and global/per-cell/per-boundary ",
-"physical balance.",
-),
+        "Recover original cell and face pressure, velocity, flux, stress and wall ",
+        "quantities consistently, retaining exact boundary ownership and signed ",
+        "mass/momentum balance. Acceptance includes original equation residual, ",
+        "continuity, constitutive face-flux closure and global/per-cell/per-boundary ",
+        "physical balance.",
+    ),
     owners: &[
         "crates/runmat-analysis/fea/src/physics/cfd/canonical/recovery.rs",
-        "crates/runmat-analysis/fea/src/physics/cfd/canonical/boundary_balances.rs"
+        "crates/runmat-analysis/fea/src/physics/cfd/canonical/boundary_balances.rs",
     ],
-    dependencies: &[
-    ],
+    dependencies: &[],
     obligations: &[
         obligation(
             "fields",
             concat!(
-"Retain original cell fields and owner-face flux; recover face traces, ",
-"stresses and wall quantities with declared location, units, frames and sign ",
-"conventions. Cold consumers validate original source and reject changed ",
-"fields/tractions rather than silently re-solving them.",
-),
+                "Retain original cell fields and owner-face flux; recover face traces, ",
+                "stresses and wall quantities with declared location, units, frames and sign ",
+                "conventions. Cold consumers validate original source and reject changed ",
+                "fields/tractions rather than silently re-solving them.",
+            ),
             EvidenceKind::OriginalStateComparison,
-            CORE
+            CORE,
         ),
         obligation(
             "balance",
             concat!(
-"Report global, per-cell and per-boundary signed mass and momentum ",
-"components from original forces/fluxes with physical normalization. ",
-"Algebraic residual convergence alone cannot pass physical acceptance.",
-),
+                "Report global, per-cell and per-boundary signed mass and momentum ",
+                "components from original forces/fluxes with physical normalization. ",
+                "Algebraic residual convergence alone cannot pass physical acceptance.",
+            ),
             EvidenceKind::PhysicalBalance,
-            CORE
+            CORE,
         ),
     ],
 };
@@ -425,7 +409,7 @@ const ACCURACY_001: Requirement = Requirement {
     title: "Independent flow benchmark and convergence acceptance",
     stages: &[Stage::Fluid],
     acceptance: concat!(
-        "Production flow requires independent Poiseuille, Couette, lid-driven ",
+        "Flow requires independent Poiseuille, Couette, lid-driven ",
         "cavity, backward-facing-step references within the declared Reynolds range, ",
         "a transient vortex, spatial/time convergence and conservation. Every ",
         "mandatory accuracy criterion must be satisfied by applicable current ",

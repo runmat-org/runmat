@@ -300,7 +300,7 @@ const FEA_DYNAMICS_MODAL_001: Requirement = Requirement {
         "must satisfy all applicable supported-envelope criteria. Independent ",
         "physical, semantic, accuracy, resource and publication evidence are ",
         "separate; missing, failed or indeterminate mandatory evidence prevents ",
-        "production acceptance.",
+        "acceptance.",
     ),
     owners: &["crates/runmat-analysis/fea/src/pipeline/modal.rs"],
     obligations: &[
@@ -360,7 +360,7 @@ const FEA_DYNAMICS_PRESTRESS_001: Requirement = Requirement {
         "Validated prestressed base states and stability perturbation must satisfy ",
         "all applicable supported-envelope criteria. Independent physical, semantic, ",
         "accuracy, resource and publication evidence are separate; missing, failed ",
-        "or indeterminate mandatory evidence prevents production acceptance.",
+        "or indeterminate mandatory evidence prevents acceptance.",
     ),
     owners: &["crates/runmat-analysis/fea/src/tests/prestressed_frequency.rs"],
     obligations: &[
@@ -401,7 +401,7 @@ const FEA_DYNAMICS_PRESTRESS_001: Requirement = Requirement {
                 "contact status, follower-load linearization, topology change, loss of ",
                 "tangent symmetry, or unstable base states rather than silently reverting to ",
                 "an unstressed operator. Keep geometric imperfection analysis, nonlinear ",
-                "buckling, collapse, and post-buckling outside the production envelope until ",
+                "buckling, collapse, and post-buckling outside the supported envelope until ",
                 "separately designed and validated.",
             ),
             EvidenceKind::IndependentReference,
@@ -428,91 +428,85 @@ const FEA_DYNAMICS_PRESTRESS_001: Requirement = Requirement {
 const FEA_DYNAMICS_RESPONSE_001: Requirement = Requirement {
     id: "FEA-DYNAMICS-RESPONSE-001",
     title: "Distinct second-order direct and modal dynamic procedures",
-    stages: &[
-        Stage::Dynamics
-    ],
+    stages: &[Stage::Dynamics],
     acceptance: concat!(
-"Distinct second-order direct and modal dynamic procedures must satisfy all ",
-"applicable supported-envelope criteria. Independent physical, semantic, ",
-"accuracy, resource and publication evidence are separate; missing, failed ",
-"or indeterminate mandatory evidence prevents production acceptance.",
-),
-    owners: &[
-        "crates/runmat-analysis/fea/src/solve/dynamics/mod.rs"
-    ],
+        "Distinct second-order direct and modal dynamic procedures must satisfy all ",
+        "applicable supported-envelope criteria. Independent physical, semantic, ",
+        "accuracy, resource and publication evidence are separate; missing, failed ",
+        "or indeterminate mandatory evidence prevents acceptance.",
+    ),
+    owners: &["crates/runmat-analysis/fea/src/solve/dynamics/mod.rs"],
     obligations: &[
         obligation(
             "second_order_equilibrium_excitation",
             concat!(
-"Replace first-order relaxation with a documented second-order integrator, ",
-"initially generalized-alpha or Newmark with explicit parameter policy. ",
-"Solve M a + C v + K u = f(t) with physical mass, damping, initial ",
-"displacement, initial velocity, and load history. Support force, moment, ",
-"traction, pressure, body/base displacement, velocity, and acceleration ",
-"histories through the shared typed excitation system.",
-),
+                "Replace first-order relaxation with a documented second-order integrator, ",
+                "initially generalized-alpha or Newmark with explicit parameter policy. ",
+                "Solve M a + C v + K u = f(t) with physical mass, damping, initial ",
+                "displacement, initial velocity, and load history. Support force, moment, ",
+                "traction, pressure, body/base displacement, velocity, and acceleration ",
+                "histories through the shared typed excitation system.",
+            ),
             EvidenceKind::IndependentReference,
-            DOMAIN
+            DOMAIN,
         ),
         obligation(
             "direct_modal_procedures",
             concat!(
-"Implement modal transient response, modal harmonic response, and modal ",
-"response-spectrum analysis as procedures distinct from eigenmode ",
-"extraction. Implement direct harmonic response from the documented complex ",
-"dynamic-stiffness operator, physical damping model, frequency-dependent ",
-"excitation, and reusable pattern/value identities; do not route it through ",
-"modal reduction implicitly. Support direct transient response independently ",
-"of modal transient response and compare both inside their shared validity ",
-"envelope.",
-),
+                "Implement modal transient response, modal harmonic response, and modal ",
+                "response-spectrum analysis as procedures distinct from eigenmode ",
+                "extraction. Implement direct harmonic response from the documented complex ",
+                "dynamic-stiffness operator, physical damping model, frequency-dependent ",
+                "excitation, and reusable pattern/value identities; do not route it through ",
+                "modal reduction implicitly. Support direct transient response independently ",
+                "of modal transient response and compare both inside their shared validity ",
+                "envelope.",
+            ),
             EvidenceKind::IndependentReference,
-            DOMAIN
+            DOMAIN,
         ),
         obligation(
             "spectrum_random_recovery",
             concat!(
-"Implement typed response spectra, modal and directional combination, ",
-"participation/mass capture, residual-mode and missing-mass policy, and ",
-"attributable combination evidence. Support random vibration only from ",
-"governed PSD/cross-PSD inputs with documented correlation and output ",
-"statistics. Recover velocity and acceleration from the integration state, ",
-"not post-hoc finite differences alone.",
-),
+                "Implement typed response spectra, modal and directional combination, ",
+                "participation/mass capture, residual-mode and missing-mass policy, and ",
+                "attributable combination evidence. Support random vibration only from ",
+                "governed PSD/cross-PSD inputs with documented correlation and output ",
+                "statistics. Recover velocity and acceleration from the integration state, ",
+                "not post-hoc finite differences alone.",
+            ),
             EvidenceKind::IndependentReference,
-            DOMAIN
+            DOMAIN,
         ),
         obligation(
             "time_policy_energy_checkpoints",
             concat!(
-"Support adaptive time stepping only through documented local error or ",
-"convergence criteria. Report energy behavior, numerical dissipation, ",
-"stability parameters, rejected steps, and solver convergence. Use ",
-"checkpointed temporal blocks for long durable/remote runs.",
-),
+                "Support adaptive time stepping only through documented local error or ",
+                "convergence criteria. Report energy behavior, numerical dissipation, ",
+                "stability parameters, rejected steps, and solver convergence. Use ",
+                "checkpointed temporal blocks for long durable/remote runs.",
+            ),
             EvidenceKind::IndependentReference,
-            DOMAIN
-        ) ,
+            DOMAIN,
+        ),
         obligation(
             "references",
             concat!(
-"Evidence includes undamped and damped oscillators, impulse and base-motion ",
-"response, callable/table equivalence, modal superposition comparisons, SRS ",
-"construction references, SRSS/CQC and directional-combination references, ",
-"missing-mass cases, random-response references where supported, energy ",
-"behavior, and time-step convergence.",
-),
+                "Evidence includes undamped and damped oscillators, impulse and base-motion ",
+                "response, callable/table equivalence, modal superposition comparisons, SRS ",
+                "construction references, SRSS/CQC and directional-combination references, ",
+                "missing-mass cases, random-response references where supported, energy ",
+                "behavior, and time-step convergence.",
+            ),
             EvidenceKind::IndependentReference,
-            DOMAIN
-        )
+            DOMAIN,
+        ),
     ],
-    dependencies: &[
-        concat!(
-"Shared typed authoring, canonical topology/material/constraint/excitation ",
-"authorities; governed resources and execution; independently qualified ",
-"accuracy and semantic publication.",
-)
-    ]
+    dependencies: &[concat!(
+        "Shared typed authoring, canonical topology/material/constraint/excitation ",
+        "authorities; governed resources and execution; independently qualified ",
+        "accuracy and semantic publication.",
+    )],
 };
 const FEA_DYNAMICS_GOVERNANCE_001: Requirement = Requirement {
     id: "FEA-DYNAMICS-GOVERNANCE-001",
@@ -522,7 +516,7 @@ const FEA_DYNAMICS_GOVERNANCE_001: Requirement = Requirement {
         "Governed dynamic procedures, checkpoints and distributed evidence must ",
         "satisfy all applicable supported-envelope criteria. Independent physical, ",
         "semantic, accuracy, resource and publication evidence are separate; ",
-        "missing, failed or indeterminate mandatory evidence prevents production ",
+        "missing, failed or indeterminate mandatory evidence prevents ",
         "acceptance.",
     ),
     owners: &["crates/runmat-analysis/fea/src/pipeline/modal.rs"],

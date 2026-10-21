@@ -245,7 +245,7 @@ const FEA_COUPLING_ELECTROTHERMAL_001: Requirement = Requirement {
             concat!(
                 "Cold transfer authenticates the complete original electrical result and ",
                 "intended thermal consumer before use; reject foreign lineage, altered ",
-                "power/inventory, unsupported equations, feedback and production intent.",
+                "power/inventory, unsupported equations, feedback and release intent.",
             ),
             EvidenceKind::ColdReplay,
             ELECTROTHERMAL_PUBLIC,
@@ -254,10 +254,10 @@ const FEA_COUPLING_ELECTROTHERMAL_001: Requirement = Requirement {
 };
 const FEA_COUPLING_CHT_001: Requirement = Requirement {
     id: "FEA-COUPLING-CHT-001",
-    title: "Production thermal/fluid conjugate heat transfer",
+    title: "Thermal/fluid conjugate heat transfer",
     stages: &[Stage::Fluid, Stage::Thermal],
     acceptance: concat!(
-        "CHT requires independently production-ready thermal and fluid operators and ",
+        "CHT requires independently complete thermal and fluid operators and ",
         "exact solid/fluid interfaces. Re-solve both domains until interface and ",
         "global energy closure pass rather than reporting an inferred terminal heat ",
         "profile.",
@@ -288,7 +288,7 @@ const FEA_COUPLING_CHT_001: Requirement = Requirement {
         obligation(
             "dependencies",
             concat!(
-                "Reject production CHT while either standalone operator, transfer, ",
+                "Reject CHT while either standalone operator, transfer, ",
                 "state/resource admission or mandatory accuracy is unqualified; shared ",
                 "signal/source and boundary energy attribution remain intact.",
             ),
@@ -299,10 +299,10 @@ const FEA_COUPLING_CHT_001: Requirement = Requirement {
 };
 const FEA_COUPLING_FSI_001: Requirement = Requirement {
     id: "FEA-COUPLING-FSI-001",
-    title: "Production dynamics/fluid interaction with stable conservative ALE execution",
+    title: "Dynamics/fluid interaction with stable conservative ALE execution",
     stages: &[Stage::FluidStructureInteraction],
     acceptance: concat!(
-        "FSI depends on independently production-ready structural dynamics and CFD. ",
+        "FSI depends on independently complete structural dynamics and CFD. ",
         "Exact interface mapping conserves traction, velocity and work while a ",
         "documented mesh-motion/ALE and partitioned iteration policy governs moving ",
         "domains.",

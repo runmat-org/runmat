@@ -1,12 +1,66 @@
 //! Electromagnetics end state (REG-EM-001 to 003, harmonic sweeps, outputs and electrothermal).
 use crate::requirement::*;
-const TRANS: &[Envelope] = cells!([Formulation::ElectromagneticTransient], [MeshOrder::EdgeElements], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const NONLIN: &[Envelope] = cells!([Formulation::SaturatingMagnetics], [MeshOrder::EdgeElements], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const INPUTS_SCALAR: &[Envelope] = cells!([Formulation::Electrostatic, Formulation::ElectricalConduction], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const INPUTS_MAG: &[Envelope] = cells!([Formulation::Magnetostatic, Formulation::HarmonicMaxwell], [MeshOrder::EdgeElements], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const FREQ: &[Envelope] = cells!([Formulation::HarmonicMaxwell], [MeshOrder::EdgeElements], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const OUT: &[Envelope] = cells!([Formulation::Electrostatic, Formulation::ElectricalConduction, Formulation::Magnetostatic, Formulation::HarmonicMaxwell], [MeshOrder::Tet4, MeshOrder::Tet10, MeshOrder::EdgeElements], [ExecutionEnvelope::PublicStudy]);
-const ETH: &[Envelope] = cells!([Formulation::Electrothermal], [MeshOrder::Tet4, MeshOrder::Tet10, MeshOrder::EdgeElements], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
+const TRANS: &[Envelope] = cells!(
+    [Formulation::ElectromagneticTransient],
+    [MeshOrder::EdgeElements],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const NONLIN: &[Envelope] = cells!(
+    [Formulation::SaturatingMagnetics],
+    [MeshOrder::EdgeElements],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const INPUTS_SCALAR: &[Envelope] = cells!(
+    [
+        Formulation::Electrostatic,
+        Formulation::ElectricalConduction
+    ],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const INPUTS_MAG: &[Envelope] = cells!(
+    [Formulation::Magnetostatic, Formulation::HarmonicMaxwell],
+    [MeshOrder::EdgeElements],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const FREQ: &[Envelope] = cells!(
+    [Formulation::HarmonicMaxwell],
+    [MeshOrder::EdgeElements],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const OUT: &[Envelope] = cells!(
+    [
+        Formulation::Electrostatic,
+        Formulation::ElectricalConduction,
+        Formulation::Magnetostatic,
+        Formulation::HarmonicMaxwell
+    ],
+    [MeshOrder::Tet4, MeshOrder::Tet10, MeshOrder::EdgeElements],
+    [ExecutionEnvelope::PublicStudy]
+);
+const ETH: &[Envelope] = cells!(
+    [Formulation::Electrothermal],
+    [MeshOrder::Tet4, MeshOrder::Tet10, MeshOrder::EdgeElements],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
 const FEA_EM_TRANSIENT_001: Requirement = Requirement {
     id: "FEA-EM-TRANSIENT-001",
     title: "Transient electromagnetics",

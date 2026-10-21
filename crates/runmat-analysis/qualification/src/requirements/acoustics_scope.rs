@@ -1,10 +1,48 @@
 //! Acoustics end state (REG-ACOUS-001 to 009 and the acoustics page studies).
 use crate::requirement::*;
-const MODAL: &[Envelope] = cells!([Formulation::AcousticModal], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const TRANS: &[Envelope] = cells!([Formulation::AcousticTransient], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const HARM: &[Envelope] = cells!([Formulation::AcousticHarmonic], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const HARMTRANS: &[Envelope] = cells!([Formulation::AcousticHarmonic, Formulation::AcousticTransient], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const COUPLED: &[Envelope] = cells!([Formulation::AcousticStructureCoupled], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
+const MODAL: &[Envelope] = cells!(
+    [Formulation::AcousticModal],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const TRANS: &[Envelope] = cells!(
+    [Formulation::AcousticTransient],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const HARM: &[Envelope] = cells!(
+    [Formulation::AcousticHarmonic],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const HARMTRANS: &[Envelope] = cells!(
+    [
+        Formulation::AcousticHarmonic,
+        Formulation::AcousticTransient
+    ],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const COUPLED: &[Envelope] = cells!(
+    [Formulation::AcousticStructureCoupled],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
 const FEA_ACOUSTIC_MODAL_001: Requirement = Requirement {
     id: "FEA-ACOUSTIC-MODAL-001",
     title: "Acoustic cavity modal analysis",

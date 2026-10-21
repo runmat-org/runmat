@@ -98,10 +98,7 @@ pub fn cells(
                     Verdict::Open
                 } else if results.is_none() {
                     Verdict::Tagged
-                } else if tests
-                    .iter()
-                    .all(|t| t.result == Some(TestResult::Passed))
-                {
+                } else if tests.iter().all(|t| t.result == Some(TestResult::Passed)) {
                     Verdict::Pass
                 } else {
                     Verdict::Fail

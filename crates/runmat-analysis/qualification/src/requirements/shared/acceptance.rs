@@ -199,7 +199,7 @@ pub(super) const FEA_SHARED_OWNERSHIP_001: Requirement = Requirement {
         obligation(
             "platform_capability_ownership",
             concat!(
-                "Before production remote, distributed, or GPU promotion, perform a ",
+                "Before remote, distributed, or GPU promotion, perform a ",
                 "mandatory convergence merge from the then-current `dev`, delete superseded ",
                 "compatibility ports, and prove there is one authority for every shared ",
                 "contract. Known incoming contracts that FEA should expect to consume ",

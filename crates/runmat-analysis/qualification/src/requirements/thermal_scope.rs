@@ -1,8 +1,29 @@
 //! Thermal end state: published thermal studies.
 use crate::requirement::*;
-const THERMAL: &[Envelope] = cells!([Formulation::ThermalSteady, Formulation::ThermalTransient], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const STEADY: &[Envelope] = cells!([Formulation::ThermalSteady], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
-const TRANSIENT: &[Envelope] = cells!([Formulation::ThermalTransient], [MeshOrder::Tet4, MeshOrder::Tet10], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::PublicStudy]);
+const THERMAL: &[Envelope] = cells!(
+    [Formulation::ThermalSteady, Formulation::ThermalTransient],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const STEADY: &[Envelope] = cells!(
+    [Formulation::ThermalSteady],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const TRANSIENT: &[Envelope] = cells!(
+    [Formulation::ThermalTransient],
+    [MeshOrder::Tet4, MeshOrder::Tet10],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
 const FEA_THERMAL_PUBLIC_001: Requirement = Requirement {
     id: "FEA-THERMAL-PUBLIC-001",
     title: "Thermal studies the pages run",
@@ -43,6 +64,4 @@ const FEA_THERMAL_PUBLIC_001: Requirement = Requirement {
         ),
     ],
 };
-pub(crate) const REQUIREMENTS: &[Requirement] = &[
-    FEA_THERMAL_PUBLIC_001,
-];
+pub(crate) const REQUIREMENTS: &[Requirement] = &[FEA_THERMAL_PUBLIC_001];

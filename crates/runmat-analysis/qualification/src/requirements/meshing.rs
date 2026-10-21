@@ -1,11 +1,47 @@
 //! Meshing requirements: exact CAD import, tetrahedral discretization, real-part success and distributed meshing.
 use crate::requirement::*;
-const IMPORT: &[Envelope] = cells!([Formulation::SharedInfrastructure], [MeshOrder::MeshIndependent], [ExecutionEnvelope::SourceCheck, ExecutionEnvelope::NativeProcess, ExecutionEnvelope::PublicStudy]);
-const MESH: &[Envelope] = cells!([Formulation::SharedInfrastructure], [MeshOrder::CanonicalMixedTopology], [ExecutionEnvelope::NumericalKernel, ExecutionEnvelope::NativeProcess, ExecutionEnvelope::PublicStudy]);
-const PUBLIC: &[Envelope] = cells!([Formulation::SharedInfrastructure], [MeshOrder::CanonicalMixedTopology], [ExecutionEnvelope::PublicStudy]);
-const WORKERS: &[Envelope] = cells!([Formulation::SharedInfrastructure], [MeshOrder::CanonicalMixedTopology], [ExecutionEnvelope::NativeProcess, ExecutionEnvelope::Durable, ExecutionEnvelope::RemoteExecution]);
-const DECOMP: &[Envelope] = cells!([Formulation::SharedInfrastructure], [MeshOrder::CanonicalMixedTopology], [ExecutionEnvelope::DomainDecomposed]);
-const PARALLEL: &[Envelope] = cells!([Formulation::SharedInfrastructure], [MeshOrder::CanonicalMixedTopology], [ExecutionEnvelope::ParallelCpu]);
+const IMPORT: &[Envelope] = cells!(
+    [Formulation::SharedInfrastructure],
+    [MeshOrder::MeshIndependent],
+    [
+        ExecutionEnvelope::SourceCheck,
+        ExecutionEnvelope::NativeProcess,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const MESH: &[Envelope] = cells!(
+    [Formulation::SharedInfrastructure],
+    [MeshOrder::CanonicalMixedTopology],
+    [
+        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::NativeProcess,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
+const PUBLIC: &[Envelope] = cells!(
+    [Formulation::SharedInfrastructure],
+    [MeshOrder::CanonicalMixedTopology],
+    [ExecutionEnvelope::PublicStudy]
+);
+const WORKERS: &[Envelope] = cells!(
+    [Formulation::SharedInfrastructure],
+    [MeshOrder::CanonicalMixedTopology],
+    [
+        ExecutionEnvelope::NativeProcess,
+        ExecutionEnvelope::Durable,
+        ExecutionEnvelope::RemoteExecution
+    ]
+);
+const DECOMP: &[Envelope] = cells!(
+    [Formulation::SharedInfrastructure],
+    [MeshOrder::CanonicalMixedTopology],
+    [ExecutionEnvelope::DomainDecomposed]
+);
+const PARALLEL: &[Envelope] = cells!(
+    [Formulation::SharedInfrastructure],
+    [MeshOrder::CanonicalMixedTopology],
+    [ExecutionEnvelope::ParallelCpu]
+);
 const FEA_MESH_GEOMETRY_001: Requirement = Requirement {
     id: "FEA-MESH-GEOMETRY-001",
     title: "Exact CAD import of real parts and assemblies",
@@ -94,6 +130,12 @@ const FEA_MESH_DISCRETIZATION_001: Requirement = Requirement {
             "solver_relevant_acceptance",
             "Mesh acceptance includes solver patch and convergence relevance on real parts: a recorded refinement series shows the target quantity converging, so coarse Tet4 meshes are flagged where stiffness is not credible.",
             EvidenceKind::SpatialConvergence,
+            MESH,
+        ),
+        obligation(
+            "mesh_evidence_artifact",
+            "Every mesh ships an evidence artifact with per-stage counters, invariants, quality distributions (minimum, mean, p95, p99, maximum of chordal deviation, normal deviation, metric edge length, radius-edge ratio and scaled Jacobian), peak memory and the seed and digest.",
+            EvidenceKind::PublicationIntegrity,
             MESH,
         ),
         obligation(

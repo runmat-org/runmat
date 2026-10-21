@@ -143,6 +143,8 @@ fn every_planned_formulation_and_stage_has_standing_obligations() {
     }
 }
 
+// witness: FEA-RELEASE-REGISTER-001/register_integrity @ shared_infrastructure/mesh_independent/source_check;
+//   boundary: Every requirement's owning source files exist in the repository; duplicate, empty and unknown-name checks are in the sibling tests.
 #[test]
 fn owning_sources_exist() {
     for requirement in requirements() {
@@ -152,6 +154,8 @@ fn owning_sources_exist() {
     }
 }
 
+// witness: FEA-RELEASE-REGISTER-001/register_integrity @ shared_infrastructure/mesh_independent/source_check;
+//   boundary: Every formulation, mesh order and execution name round-trips through its wire name and every required envelope is drawn from the declared vocabulary.
 #[test]
 fn every_declared_envelope_name_round_trips() {
     for f in Formulation::ALL {

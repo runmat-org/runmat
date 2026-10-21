@@ -1,4 +1,4 @@
-//! Standing acceptance for formulation-specific adaptive production workflows.
+//! Standing acceptance for formulation-specific adaptive workflows.
 use crate::requirement::*;
 const DOMAIN: &[Envelope] = &[
     envelope(
@@ -60,7 +60,7 @@ const FEA_ADAPTATION_LOOP_001: Requirement = Requirement {
         "Family-appropriate adaptive loops and separately qualified transfer must ",
         "satisfy all applicable supported-envelope criteria. Independent physical, ",
         "semantic, accuracy, resource and publication evidence are separate; ",
-        "missing, failed or indeterminate mandatory evidence prevents production ",
+        "missing, failed or indeterminate mandatory evidence prevents ",
         "acceptance.",
     ),
     owners: &["crates/runmat-analysis/fea/src/adaptation/iteration.rs"],
@@ -109,81 +109,75 @@ const FEA_ADAPTATION_LOOP_001: Requirement = Requirement {
 const FEA_ADAPTATION_GOVERNANCE_001: Requirement = Requirement {
     id: "FEA-ADAPTATION-GOVERNANCE-001",
     title: "Accuracy-driven adaptation, persistent constraints and durable lineage",
-    stages: &[
-        Stage::Adaptation
-    ],
+    stages: &[Stage::Adaptation],
     acceptance: concat!(
-"Accuracy-driven adaptation, persistent constraints and durable lineage must ",
-"satisfy all applicable supported-envelope criteria. Independent physical, ",
-"semantic, accuracy, resource and publication evidence are separate; ",
-"missing, failed or indeterminate mandatory evidence prevents production ",
-"acceptance.",
-),
-    owners: &[
-        "crates/runmat-analysis/fea/src/adaptation/iteration.rs"
-    ],
+        "Accuracy-driven adaptation, persistent constraints and durable lineage must ",
+        "satisfy all applicable supported-envelope criteria. Independent physical, ",
+        "semantic, accuracy, resource and publication evidence are separate; ",
+        "missing, failed or indeterminate mandatory evidence prevents ",
+        "acceptance.",
+    ),
+    owners: &["crates/runmat-analysis/fea/src/adaptation/iteration.rs"],
     obligations: &[
         obligation(
             "family_transfer_constraints",
             concat!(
-"Compose adaptive loops for each formulation with a validated estimator. ",
-"Validate field and state transfer. Rebuild constraint plans from persistent ",
-"identities and validate constraint-plan lineage after every h- or p-change.",
-),
+                "Compose adaptive loops for each formulation with a validated estimator. ",
+                "Validate field and state transfer. Rebuild constraint plans from persistent ",
+                "identities and validate constraint-plan lineage after every h- or p-change.",
+            ),
             EvidenceKind::AccuracyAcceptance,
-            DOMAIN
+            DOMAIN,
         ),
         obligation(
             "durable_accuracy_lineage",
             concat!(
-"Integrate adaptation graphs with durable and remote execution. Publish ",
-"iteration lineage and target-quantity convergence in results. Drive ",
-"stopping and acceptance through the shared accuracy plan, preserving family ",
-"estimator evidence rather than inventing a separate adaptive tolerance ",
-"model.",
-),
+                "Integrate adaptation graphs with durable and remote execution. Publish ",
+                "iteration lineage and target-quantity convergence in results. Drive ",
+                "stopping and acceptance through the shared accuracy plan, preserving family ",
+                "estimator evidence rather than inventing a separate adaptive tolerance ",
+                "model.",
+            ),
             EvidenceKind::AccuracyAcceptance,
-            DOMAIN
+            DOMAIN,
         ),
         obligation(
             "release_convergence_transfer",
             concat!(
-"Add release evidence and documentation. Adaptation reduces the governed ",
-"estimator and converges the selected target quantity. Transfer error ",
-"remains below family-specific limits.",
-),
+                "Add release evidence and documentation. Adaptation reduces the governed ",
+                "estimator and converges the selected target quantity. Transfer error ",
+                "remains below family-specific limits.",
+            ),
             EvidenceKind::AccuracyAcceptance,
-            DOMAIN
+            DOMAIN,
         ),
         obligation(
             "constraint_state_lifecycle",
             concat!(
-"Constraint targets, relations, reactions, and state remain valid across ",
-"adaptation. Cancellation, retry, restart, and replay preserve valid ",
-"iteration lineage.",
-),
+                "Constraint targets, relations, reactions, and state remain valid across ",
+                "adaptation. Cancellation, retry, restart, and replay preserve valid ",
+                "iteration lineage.",
+            ),
             EvidenceKind::AccuracyAcceptance,
-            DOMAIN
-        ) ,
+            DOMAIN,
+        ),
         obligation(
             "constraint_lineage",
             concat!(
-"Constraints bind to persistent geometry and topology identities rather than ",
-"incidental node numbers. After h- or p-adaptation, the analysis projection ",
-"rebuilds the canonical constraint plan, checks target coverage and pairing, ",
-"transfers necessary state, and records old/new plan lineage.",
-),
+                "Constraints bind to persistent geometry and topology identities rather than ",
+                "incidental node numbers. After h- or p-adaptation, the analysis projection ",
+                "rebuilds the canonical constraint plan, checks target coverage and pairing, ",
+                "transfers necessary state, and records old/new plan lineage.",
+            ),
             EvidenceKind::SemanticRealization,
-            DOMAIN
-        )
+            DOMAIN,
+        ),
     ],
-    dependencies: &[
-        concat!(
-"Shared typed authoring, canonical topology/material/constraint/excitation ",
-"authorities; governed resources and execution; independently qualified ",
-"accuracy and semantic publication.",
-)
-    ]
+    dependencies: &[concat!(
+        "Shared typed authoring, canonical topology/material/constraint/excitation ",
+        "authorities; governed resources and execution; independently qualified ",
+        "accuracy and semantic publication.",
+    )],
 };
 pub(crate) const REQUIREMENTS: &[Requirement] =
     &[FEA_ADAPTATION_LOOP_001, FEA_ADAPTATION_GOVERNANCE_001];

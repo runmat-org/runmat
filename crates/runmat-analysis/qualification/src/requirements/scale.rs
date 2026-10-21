@@ -1,13 +1,199 @@
 //! Performance at scale: one thread plan, remote and cooperative execution for every family, and published sizes and times.
 use crate::requirement::*;
-const PAR: &[Envelope] = cells!([Formulation::LinearStructural, Formulation::ModalStructural, Formulation::LinearStructuralDynamics, Formulation::StructuralStability, Formulation::NonlinearStructural, Formulation::PenaltyCoulombContact, Formulation::ThermalSteady, Formulation::ThermalTransient, Formulation::Electrostatic, Formulation::ElectricalConduction, Formulation::Magnetostatic, Formulation::HarmonicMaxwell, Formulation::ElectromagneticTransient, Formulation::SaturatingMagnetics, Formulation::Thermoelastic, Formulation::Electrothermal, Formulation::ConjugateHeatTransfer, Formulation::FluidStructureInteraction, Formulation::AcousticHarmonic, Formulation::AcousticModal, Formulation::AcousticTransient, Formulation::IncompressibleLaminarSteady, Formulation::IncompressibleLaminarTransient], [MeshOrder::CanonicalTetrahedra], [ExecutionEnvelope::ParallelCpu]);
-const REMOTE: &[Envelope] = cells!([Formulation::LinearStructural, Formulation::ModalStructural, Formulation::LinearStructuralDynamics, Formulation::StructuralStability, Formulation::NonlinearStructural, Formulation::PenaltyCoulombContact, Formulation::ThermalSteady, Formulation::ThermalTransient, Formulation::Electrostatic, Formulation::ElectricalConduction, Formulation::Magnetostatic, Formulation::HarmonicMaxwell, Formulation::ElectromagneticTransient, Formulation::SaturatingMagnetics, Formulation::Thermoelastic, Formulation::Electrothermal, Formulation::ConjugateHeatTransfer, Formulation::FluidStructureInteraction, Formulation::AcousticHarmonic, Formulation::AcousticModal, Formulation::AcousticTransient, Formulation::IncompressibleLaminarSteady, Formulation::IncompressibleLaminarTransient], [MeshOrder::CanonicalTetrahedra], [ExecutionEnvelope::RemoteExecution]);
-const DECOMP: &[Envelope] = cells!([Formulation::LinearStructural, Formulation::ModalStructural, Formulation::LinearStructuralDynamics, Formulation::StructuralStability, Formulation::NonlinearStructural, Formulation::PenaltyCoulombContact, Formulation::ThermalSteady, Formulation::ThermalTransient, Formulation::Electrostatic, Formulation::ElectricalConduction, Formulation::Magnetostatic, Formulation::HarmonicMaxwell, Formulation::ElectromagneticTransient, Formulation::SaturatingMagnetics, Formulation::Thermoelastic, Formulation::Electrothermal, Formulation::ConjugateHeatTransfer, Formulation::FluidStructureInteraction, Formulation::AcousticHarmonic, Formulation::AcousticModal, Formulation::AcousticTransient, Formulation::IncompressibleLaminarSteady, Formulation::IncompressibleLaminarTransient], [MeshOrder::CanonicalTetrahedra], [ExecutionEnvelope::DomainDecomposed]);
-const PUBLIC: &[Envelope] = cells!([Formulation::LinearStructural, Formulation::ModalStructural, Formulation::LinearStructuralDynamics, Formulation::StructuralStability, Formulation::NonlinearStructural, Formulation::PenaltyCoulombContact, Formulation::ThermalSteady, Formulation::ThermalTransient, Formulation::Electrostatic, Formulation::ElectricalConduction, Formulation::Magnetostatic, Formulation::HarmonicMaxwell, Formulation::ElectromagneticTransient, Formulation::SaturatingMagnetics, Formulation::Thermoelastic, Formulation::Electrothermal, Formulation::ConjugateHeatTransfer, Formulation::FluidStructureInteraction, Formulation::AcousticHarmonic, Formulation::AcousticModal, Formulation::AcousticTransient, Formulation::IncompressibleLaminarSteady, Formulation::IncompressibleLaminarTransient], [MeshOrder::CanonicalTetrahedra], [ExecutionEnvelope::PublicStudy]);
-const SWEEP: &[Envelope] = cells!([Formulation::LinearStructural, Formulation::ModalStructural, Formulation::LinearStructuralDynamics, Formulation::StructuralStability, Formulation::NonlinearStructural, Formulation::PenaltyCoulombContact, Formulation::ThermalSteady, Formulation::ThermalTransient, Formulation::Electrostatic, Formulation::ElectricalConduction, Formulation::Magnetostatic, Formulation::HarmonicMaxwell, Formulation::ElectromagneticTransient, Formulation::SaturatingMagnetics, Formulation::Thermoelastic, Formulation::Electrothermal, Formulation::ConjugateHeatTransfer, Formulation::FluidStructureInteraction, Formulation::AcousticHarmonic, Formulation::AcousticModal, Formulation::AcousticTransient, Formulation::IncompressibleLaminarSteady, Formulation::IncompressibleLaminarTransient], [MeshOrder::CanonicalTetrahedra], [ExecutionEnvelope::PublicStudy, ExecutionEnvelope::RemoteExecution]);
-const DURABLE: &[Envelope] = cells!([Formulation::LinearStructural, Formulation::ModalStructural, Formulation::LinearStructuralDynamics, Formulation::StructuralStability, Formulation::NonlinearStructural, Formulation::PenaltyCoulombContact, Formulation::ThermalSteady, Formulation::ThermalTransient, Formulation::Electrostatic, Formulation::ElectricalConduction, Formulation::Magnetostatic, Formulation::HarmonicMaxwell, Formulation::ElectromagneticTransient, Formulation::SaturatingMagnetics, Formulation::Thermoelastic, Formulation::Electrothermal, Formulation::ConjugateHeatTransfer, Formulation::FluidStructureInteraction, Formulation::AcousticHarmonic, Formulation::AcousticModal, Formulation::AcousticTransient, Formulation::IncompressibleLaminarSteady, Formulation::IncompressibleLaminarTransient], [MeshOrder::CanonicalTetrahedra], [ExecutionEnvelope::Durable]);
-const SHARED: &[Envelope] = cells!([Formulation::SharedInfrastructure], [MeshOrder::CanonicalMixedTopology], [ExecutionEnvelope::ParallelCpu, ExecutionEnvelope::RemoteExecution, ExecutionEnvelope::DomainDecomposed]);
-const FLUIDPUB: &[Envelope] = cells!([Formulation::IncompressibleLaminarSteady, Formulation::IncompressibleLaminarTransient], [MeshOrder::CanonicalTetrahedra], [ExecutionEnvelope::PublicStudy]);
+const PAR: &[Envelope] = cells!(
+    [
+        Formulation::LinearStructural,
+        Formulation::ModalStructural,
+        Formulation::LinearStructuralDynamics,
+        Formulation::StructuralStability,
+        Formulation::NonlinearStructural,
+        Formulation::PenaltyCoulombContact,
+        Formulation::ThermalSteady,
+        Formulation::ThermalTransient,
+        Formulation::Electrostatic,
+        Formulation::ElectricalConduction,
+        Formulation::Magnetostatic,
+        Formulation::HarmonicMaxwell,
+        Formulation::ElectromagneticTransient,
+        Formulation::SaturatingMagnetics,
+        Formulation::Thermoelastic,
+        Formulation::Electrothermal,
+        Formulation::ConjugateHeatTransfer,
+        Formulation::FluidStructureInteraction,
+        Formulation::AcousticHarmonic,
+        Formulation::AcousticModal,
+        Formulation::AcousticTransient,
+        Formulation::IncompressibleLaminarSteady,
+        Formulation::IncompressibleLaminarTransient
+    ],
+    [MeshOrder::CanonicalTetrahedra],
+    [ExecutionEnvelope::ParallelCpu]
+);
+const REMOTE: &[Envelope] = cells!(
+    [
+        Formulation::LinearStructural,
+        Formulation::ModalStructural,
+        Formulation::LinearStructuralDynamics,
+        Formulation::StructuralStability,
+        Formulation::NonlinearStructural,
+        Formulation::PenaltyCoulombContact,
+        Formulation::ThermalSteady,
+        Formulation::ThermalTransient,
+        Formulation::Electrostatic,
+        Formulation::ElectricalConduction,
+        Formulation::Magnetostatic,
+        Formulation::HarmonicMaxwell,
+        Formulation::ElectromagneticTransient,
+        Formulation::SaturatingMagnetics,
+        Formulation::Thermoelastic,
+        Formulation::Electrothermal,
+        Formulation::ConjugateHeatTransfer,
+        Formulation::FluidStructureInteraction,
+        Formulation::AcousticHarmonic,
+        Formulation::AcousticModal,
+        Formulation::AcousticTransient,
+        Formulation::IncompressibleLaminarSteady,
+        Formulation::IncompressibleLaminarTransient
+    ],
+    [MeshOrder::CanonicalTetrahedra],
+    [ExecutionEnvelope::RemoteExecution]
+);
+const DECOMP: &[Envelope] = cells!(
+    [
+        Formulation::LinearStructural,
+        Formulation::ModalStructural,
+        Formulation::LinearStructuralDynamics,
+        Formulation::StructuralStability,
+        Formulation::NonlinearStructural,
+        Formulation::PenaltyCoulombContact,
+        Formulation::ThermalSteady,
+        Formulation::ThermalTransient,
+        Formulation::Electrostatic,
+        Formulation::ElectricalConduction,
+        Formulation::Magnetostatic,
+        Formulation::HarmonicMaxwell,
+        Formulation::ElectromagneticTransient,
+        Formulation::SaturatingMagnetics,
+        Formulation::Thermoelastic,
+        Formulation::Electrothermal,
+        Formulation::ConjugateHeatTransfer,
+        Formulation::FluidStructureInteraction,
+        Formulation::AcousticHarmonic,
+        Formulation::AcousticModal,
+        Formulation::AcousticTransient,
+        Formulation::IncompressibleLaminarSteady,
+        Formulation::IncompressibleLaminarTransient
+    ],
+    [MeshOrder::CanonicalTetrahedra],
+    [ExecutionEnvelope::DomainDecomposed]
+);
+const PUBLIC: &[Envelope] = cells!(
+    [
+        Formulation::LinearStructural,
+        Formulation::ModalStructural,
+        Formulation::LinearStructuralDynamics,
+        Formulation::StructuralStability,
+        Formulation::NonlinearStructural,
+        Formulation::PenaltyCoulombContact,
+        Formulation::ThermalSteady,
+        Formulation::ThermalTransient,
+        Formulation::Electrostatic,
+        Formulation::ElectricalConduction,
+        Formulation::Magnetostatic,
+        Formulation::HarmonicMaxwell,
+        Formulation::ElectromagneticTransient,
+        Formulation::SaturatingMagnetics,
+        Formulation::Thermoelastic,
+        Formulation::Electrothermal,
+        Formulation::ConjugateHeatTransfer,
+        Formulation::FluidStructureInteraction,
+        Formulation::AcousticHarmonic,
+        Formulation::AcousticModal,
+        Formulation::AcousticTransient,
+        Formulation::IncompressibleLaminarSteady,
+        Formulation::IncompressibleLaminarTransient
+    ],
+    [MeshOrder::CanonicalTetrahedra],
+    [ExecutionEnvelope::PublicStudy]
+);
+const SWEEP: &[Envelope] = cells!(
+    [
+        Formulation::LinearStructural,
+        Formulation::ModalStructural,
+        Formulation::LinearStructuralDynamics,
+        Formulation::StructuralStability,
+        Formulation::NonlinearStructural,
+        Formulation::PenaltyCoulombContact,
+        Formulation::ThermalSteady,
+        Formulation::ThermalTransient,
+        Formulation::Electrostatic,
+        Formulation::ElectricalConduction,
+        Formulation::Magnetostatic,
+        Formulation::HarmonicMaxwell,
+        Formulation::ElectromagneticTransient,
+        Formulation::SaturatingMagnetics,
+        Formulation::Thermoelastic,
+        Formulation::Electrothermal,
+        Formulation::ConjugateHeatTransfer,
+        Formulation::FluidStructureInteraction,
+        Formulation::AcousticHarmonic,
+        Formulation::AcousticModal,
+        Formulation::AcousticTransient,
+        Formulation::IncompressibleLaminarSteady,
+        Formulation::IncompressibleLaminarTransient
+    ],
+    [MeshOrder::CanonicalTetrahedra],
+    [
+        ExecutionEnvelope::PublicStudy,
+        ExecutionEnvelope::RemoteExecution
+    ]
+);
+const DURABLE: &[Envelope] = cells!(
+    [
+        Formulation::LinearStructural,
+        Formulation::ModalStructural,
+        Formulation::LinearStructuralDynamics,
+        Formulation::StructuralStability,
+        Formulation::NonlinearStructural,
+        Formulation::PenaltyCoulombContact,
+        Formulation::ThermalSteady,
+        Formulation::ThermalTransient,
+        Formulation::Electrostatic,
+        Formulation::ElectricalConduction,
+        Formulation::Magnetostatic,
+        Formulation::HarmonicMaxwell,
+        Formulation::ElectromagneticTransient,
+        Formulation::SaturatingMagnetics,
+        Formulation::Thermoelastic,
+        Formulation::Electrothermal,
+        Formulation::ConjugateHeatTransfer,
+        Formulation::FluidStructureInteraction,
+        Formulation::AcousticHarmonic,
+        Formulation::AcousticModal,
+        Formulation::AcousticTransient,
+        Formulation::IncompressibleLaminarSteady,
+        Formulation::IncompressibleLaminarTransient
+    ],
+    [MeshOrder::CanonicalTetrahedra],
+    [ExecutionEnvelope::Durable]
+);
+const SHARED: &[Envelope] = cells!(
+    [Formulation::SharedInfrastructure],
+    [MeshOrder::CanonicalMixedTopology],
+    [
+        ExecutionEnvelope::ParallelCpu,
+        ExecutionEnvelope::RemoteExecution,
+        ExecutionEnvelope::DomainDecomposed
+    ]
+);
+const FLUIDPUB: &[Envelope] = cells!(
+    [
+        Formulation::IncompressibleLaminarSteady,
+        Formulation::IncompressibleLaminarTransient
+    ],
+    [MeshOrder::CanonicalTetrahedra],
+    [ExecutionEnvelope::PublicStudy]
+);
 const FEA_SCALE_PARALLEL_001: Requirement = Requirement {
     id: "FEA-SCALE-PARALLEL-001",
     title: "Every family saturates the machine through one thread plan",
@@ -111,6 +297,12 @@ const FEA_SCALE_SIZE_001: Requirement = Requirement {
         obligation(
             "whole_task_resource_measurement",
             "Whole-task peak resident memory is measured across worker processes and compared with the admitted estimate; admission never over-reserves a practical small model (buckling at 3,000 nodes, modal output, blade) and never admits a model that then exceeds its bound.",
+            EvidenceKind::ResourceAdmission,
+            PUBLIC,
+        ),
+        obligation(
+            "usage_reports_and_failure_classification",
+            "The plan reports cores, memory, wall time and core hours before a run; each run records per-stage usage and classifies failures (resource, numerical, input, infrastructure) in typed form, and the stated core-hour figure per guide is measured on the release.",
             EvidenceKind::ResourceAdmission,
             PUBLIC,
         ),
