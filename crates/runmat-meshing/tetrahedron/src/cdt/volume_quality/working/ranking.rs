@@ -13,7 +13,6 @@ pub(super) struct Ranking {
 
 #[derive(Clone)]
 pub(in crate::cdt) struct SpectrumDelta {
-    floor: Option<u64>,
     shape: BTreeMap<u64, i64>,
     refinement: BTreeMap<u64, i64>,
 }
@@ -28,20 +27,6 @@ impl SpectrumDelta {
     }
     pub(super) fn capture(owner: &WorkingVolumeQuality) -> Self {
         Self {
-            floor: owner
-                .shape
-                .priorities
-                .last_key_value()
-                .map(|(rank, _)| rank.0)
-                .into_iter()
-                .chain(
-                    owner
-                        .refinement
-                        .priorities
-                        .last_key_value()
-                        .map(|(rank, _)| rank.0),
-                )
-                .max(),
             shape: owner.shape.delta.clone(),
             refinement: owner.refinement.delta.clone(),
         }
@@ -194,16 +179,16 @@ impl WorkingVolumeQuality {
             floor,
         )
     }
-    pub(in crate::cdt) fn compare_joint_repair_target(&self, target: &SpectrumDelta) -> Ordering {
-        let Some(floor) = target.floor else {
-            return Ordering::Equal;
-        };
-        compare_joint_changes_above(
+    /// Joint (shape and size) defect histogram against `target`, compared from the highest
+    /// violation bin down. `Less` means the defects this change removed outrank every defect it
+    /// created: a strict descent in the multiset order over discrete violation bins, which is
+    /// well founded, so a sequence of such changes terminates.
+    pub(in crate::cdt) fn compare_joint_target(&self, target: &SpectrumDelta) -> Ordering {
+        compare_joint_changes(
             &self.shape.delta,
             &self.refinement.delta,
             &target.shape,
             &target.refinement,
-            floor,
         )
     }
 }
