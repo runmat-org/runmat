@@ -5,24 +5,24 @@ const KERNEL: &[Envelope] = &[
     envelope(
         Formulation::AcousticHarmonic,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::AcousticHarmonic,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
 ];
 const NATIVE: &[Envelope] = &[
     envelope(
         Formulation::AcousticHarmonic,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuNativeProcess,
+        ExecutionEnvelope::NativeProcess,
     ),
     envelope(
         Formulation::AcousticHarmonic,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuNativeProcess,
+        ExecutionEnvelope::NativeProcess,
     ),
 ];
 const TOPOLOGY: &[Envelope] = &[NATIVE[0], NATIVE[1], PUBLIC[0], PUBLIC[1]];
@@ -30,24 +30,24 @@ const BRIDGE: &[Envelope] = &[
     envelope(
         Formulation::AcousticHarmonic,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuPreparedController,
+        ExecutionEnvelope::PreparedController,
     ),
     envelope(
         Formulation::AcousticHarmonic,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuPreparedController,
+        ExecutionEnvelope::PreparedController,
     ),
 ];
 const PUBLIC: &[Envelope] = &[
     envelope(
         Formulation::AcousticHarmonic,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::AcousticHarmonic,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
 ];
 const EXECUTION: &[Envelope] = &[
@@ -63,12 +63,12 @@ const EXECUTION: &[Envelope] = &[
     envelope(
         Formulation::AcousticHarmonic,
         MeshOrder::CanonicalTetrahedra,
-        ExecutionEnvelope::EncryptedRemote,
+        ExecutionEnvelope::RemoteExecution,
     ),
     envelope(
         Formulation::AcousticHarmonic,
         MeshOrder::CanonicalTetrahedra,
-        ExecutionEnvelope::PartitionedCpu,
+        ExecutionEnvelope::DomainDecomposed,
     ),
     envelope(
         Formulation::AcousticHarmonic,
@@ -76,32 +76,6 @@ const EXECUTION: &[Envelope] = &[
         ExecutionEnvelope::ClaimedAccelerator,
     ),
 ];
-macro_rules! witness {
-    (
-        $id:expr,
-        $package:expr,
-        $name:expr,
-        $source:expr,
-        $obligation:expr,
-        $envelopes:expr,
-        $boundary:expr
-    ) => {
-        Witness {
-            id: $id,
-            locator: WitnessLocator::CargoTest {
-                package: $package,
-                target: CargoTarget::Library,
-                name: $name,
-                source: $source,
-            },
-            claims: &[CoverageClaim {
-                obligation: $obligation,
-                envelopes: $envelopes,
-                boundary: $boundary,
-            }],
-        }
-    };
-}
 const CANONICAL: Requirement = Requirement {
     id: "FEA-ACOUSTIC-OPERATOR-001",
     title: "Canonical material-region Helmholtz operator",
@@ -152,41 +126,6 @@ const CANONICAL: Requirement = Requirement {
             ),
             EvidenceKind::SemanticRealization,
             TOPOLOGY,
-        ),
-    ],
-    witnesses: &[
-        witness!(
-            "FEA-WITNESS-ACOUSTIC-INTEGRALS",
-            "runmat-analysis-fea",
-            concat!(
-                "physics::acoustic::canonical::tests::radiation::exact_operators::tet10_and_t",
-                "ri6_all_entries_match_independent_simplex_moments_on_every_face",
-            ),
-            concat!(
-                "crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/radiation/ex",
-                "act_operators.rs",
-            ),
-            "integrals",
-            &[KERNEL[1]],
-            concat!(
-                "Every Tet10/Tri6 matrix entry on all faces; independent simplex moments. No ",
-                "Tet4 or public topology audit credit.",
-            )
-        ),
-        witness!(
-            "FEA-WITNESS-ACOUSTIC-INTERFACE",
-            "runmat-analysis-fea",
-            concat!(
-                "physics::acoustic::canonical::tests::interface::two_fluid_interface_pressure",
-                "_mean_velocity_and_power_refine",
-            ),
-            "crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/interface.rs",
-            "regions",
-            KERNEL,
-            concat!(
-                "Aligned two-medium slab, phase rotation and spatial refinement; not ",
-                "arbitrary heterogeneous or curved-interface qualification.",
-            )
         ),
     ],
 };
@@ -251,68 +190,6 @@ const BOUNDARIES: Requirement = Requirement {
             KERNEL,
         ),
     ],
-    witnesses: &[
-        witness!(
-            "FEA-WITNESS-ACOUSTIC-LIFTING",
-            "runmat-analysis-fea",
-            concat!(
-                "physics::acoustic::canonical::tests::radiation::exact_operators::complex_pre",
-                "scribed_pressure_lifting_matches_independent_reduced_block_system",
-            ),
-            concat!(
-                "crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/radiation/ex",
-                "act_operators.rs",
-            ),
-            "lifting",
-            &[KERNEL[1]],
-            concat!(
-                "Tet10 lifted complex system checked against independent dense oracle; no ",
-                "generic solve or conditioning claim.",
-            )
-        ),
-        witness!(
-            "FEA-WITNESS-ACOUSTIC-BLOCH",
-            "runmat-analysis-fea",
-            concat!(
-                "physics::acoustic::canonical::tests::periodic::anchored_bloch_plane_wave_pre",
-                "ssure_mean_velocity_and_signed_intensity_refine",
-            ),
-            "crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/periodic.rs",
-            "phase",
-            KERNEL,
-            concat!(
-                "Anchored slab plane wave and declared paired planes; no unanchored ",
-                "pole/global conditioning credit.",
-            )
-        ),
-        witness!(
-            "FEA-WITNESS-ACOUSTIC-RADIATION",
-            "runmat-analysis-fea",
-            concat!(
-                "physics::acoustic::canonical::tests::radiation::local_radiation_pressure_pha",
-                "se_mean_velocity_and_signed_power_refine",
-            ),
-            "crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/radiation.rs",
-            "radiation",
-            KERNEL,
-            concat!(
-                "Local radiation reference and original spatial gates; witness linkage is ",
-                "not a passing verdict or nonlocal exterior-wave qualification.",
-            )
-        ),
-        witness!(
-            "FEA-WITNESS-ACOUSTIC-BOUNDARY-REJECT",
-            "runmat-analysis-fea",
-            concat!(
-                "physics::acoustic::canonical::tests::periodic::periodic_rejects_unmatched_na",
-                "tural_overlap_and_conflicting_pressure",
-            ),
-            "crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/periodic.rs",
-            "reject",
-            KERNEL,
-            "Periodic pairing, overlap and conflicting pressure rejection only."
-        ),
-    ],
 };
 const SOURCES: Requirement = Requirement {
     id: "FEA-ACOUSTIC-SOURCE-001",
@@ -365,32 +242,6 @@ const SOURCES: Requirement = Requirement {
             ),
             EvidenceKind::ExecutionEquivalence,
             PUBLIC,
-        ),
-    ],
-    witnesses: &[
-        witness!(
-            "FEA-WITNESS-ACOUSTIC-VOLUME",
-            "runmat-analysis-fea",
-            concat!(
-                "physics::acoustic::canonical::tests::volume_velocity::total_volume_flow_area",
-                "_phase_rotation_and_power_refine_against_continuum",
-            ),
-            "crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/volume_velocity.rs",
-            "resultant",
-            KERNEL,
-            "Area scaling, complex phase and independent flow/power refinement on slab fixtures."
-        ),
-        witness!(
-            "FEA-WITNESS-ACOUSTIC-INCIDENT",
-            "runmat-analysis-fea",
-            concat!(
-                "physics::acoustic::canonical::tests::incident::incoming_pressure_reflection_",
-                "transmission_and_net_power_refine",
-            ),
-            "crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/incident.rs",
-            "incident",
-            KERNEL,
-            "Planar incident/impedance fixture, phase and net-power refinement only."
         ),
     ],
 };
@@ -471,71 +322,6 @@ const NUMERICS: Requirement = Requirement {
             KERNEL,
         ),
     ],
-    witnesses: &[
-        witness!(
-            "FEA-WITNESS-ACOUSTIC-DUCT",
-            "runmat-analysis-fea",
-            concat!(
-                "physics::acoustic::canonical::tests::continuum::tet10_traveling_wave_phase_p",
-                "ressure_velocity_and_power_converge",
-            ),
-            "crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/continuum.rs",
-            "duct",
-            &[KERNEL[1]],
-            concat!(
-                "Tet10 slab at two frequencies, three refinements; exact traveling-wave ",
-                "references, not all acoustic geometries.",
-            )
-        ),
-        witness!(
-            "FEA-WITNESS-ACOUSTIC-CAVITY",
-            "runmat-analysis-fea",
-            concat!(
-                "physics::acoustic::canonical::tests::continuum::tet4_and_tet10_forced_rigid_",
-                "cavity_converge_on_both_sides_of_axial_resonance",
-            ),
-            "crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/continuum.rs",
-            "cavity",
-            KERNEL,
-            concat!(
-                "Forced axial cavity at 0.9/1.1 times first pole, phase/pressure/energy ",
-                "convergence; no complete multidimensional modal-spectrum credit.",
-            )
-        ),
-        witness!(
-            "FEA-WITNESS-ACOUSTIC-POLE",
-            "runmat-analysis-fea",
-            concat!(
-                "physics::acoustic::canonical::response::reduced::tests::uniqueness::original",
-                "_canonical_lossless_discrete_pole_is_not_proved_by_zero_rhs",
-            ),
-            concat!(
-                "crates/runmat-analysis/fea/src/physics/acoustic/canonical/response/reduced/t",
-                "ests/uniqueness.rs",
-            ),
-            "uniqueness",
-            &[KERNEL[0]],
-            concat!(
-                "Independent Tet4 antisymmetric discrete pole; requested diagnostic refuses ",
-                "zero-RHS residual acceptance, without asserting exact floating rank.",
-            )
-        ),
-        witness!(
-            "FEA-WITNESS-ACOUSTIC-COLD-CLAIM",
-            "runmat-analysis-fea",
-            concat!(
-                "execution::acoustic::tests::uniqueness::required_diagnostic_survives_solve_f",
-                "ree_cold_lineage_and_tampering_fails",
-            ),
-            "crates/runmat-analysis/fea/src/execution/acoustic/tests/uniqueness.rs",
-            "cold_claim",
-            &[KERNEL[0]],
-            concat!(
-                "Retained producer claim/receipt provenance and tamper rejection; no cold ",
-                "mathematical uniqueness reproof.",
-            )
-        ),
-    ],
 };
 const ACCURACY: Requirement = Requirement {
     id: "FEA-ACOUSTIC-ACCURACY-001",
@@ -581,22 +367,6 @@ const ACCURACY: Requirement = Requirement {
             PUBLIC,
         ),
     ],
-    witnesses: &[witness!(
-        "FEA-WITNESS-ACOUSTIC-ACCURACY-LINEAGE",
-        "runmat-analysis-execution",
-        concat!(
-            "tests::acoustic_accuracy::acoustic_accuracy_admission_binds_retained_result_",
-            "and_original_intent",
-        ),
-        "crates/runmat-analysis/execution/src/tests/acoustic_accuracy.rs",
-        "lineage",
-        BRIDGE,
-        concat!(
-            "Both-order accepted-output bridge fixture validates exact context and ",
-            "rejects production relabeling; not actual native worker or full public gate ",
-            "evidence.",
-        )
-    )],
 };
 const EXECUTION_REQUIREMENT: Requirement = Requirement {
     id: "FEA-ACOUSTIC-EXECUTION-001",
@@ -676,42 +446,6 @@ const EXECUTION_REQUIREMENT: Requirement = Requirement {
             ),
             EvidenceKind::AccuracyAcceptance,
             EXECUTION,
-        ),
-    ],
-    witnesses: &[
-        witness!(
-            "FEA-WITNESS-ACOUSTIC-FANIN",
-            "runmat-execution-runner-native",
-            concat!(
-                "analysis_kernel::acoustic_frequency_assembly::tests::native_admitted_frequen",
-                "cy_assembly_reopens_original_complete_fields_and_metadata",
-            ),
-            concat!(
-                "crates/runmat-execution-runner-native/src/analysis_kernel/acoustic_frequency",
-                "_assembly/tests.rs",
-            ),
-            "inventory",
-            NATIVE,
-            concat!(
-                "Tet4/Tet10, two/three serial-native frequencies, reversed completion and ",
-                "cold filesystem fields; no actual parallel/distributed/GPU or ",
-                "producer-termination claim.",
-            )
-        ),
-        witness!(
-            "FEA-WITNESS-ACOUSTIC-BUDGET",
-            "runmat-execution-runner-native",
-            concat!(
-                "analysis_kernel::acoustic_harmonic::tests::native_acoustic_rejects_valid_but",
-                "_substituted_resource_plan",
-            ),
-            "crates/runmat-execution-runner-native/src/analysis_kernel/acoustic_harmonic/tests.rs",
-            "admission",
-            &[NATIVE[0]],
-            concat!(
-                "Tet4 native worker plan substitution rejection; not measured RSS, ",
-                "whole-family lifetime or complete cancellation evidence.",
-            )
         ),
     ],
 };

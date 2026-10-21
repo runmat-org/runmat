@@ -1,5 +1,5 @@
 //! Standing shared acceptance acceptance.
-use super::{ALL, KERNEL};
+use super::ALL;
 use crate::requirement::*;
 pub(super) const FEA_SHARED_OWNERSHIP_001: Requirement = Requirement {
     id: "FEA-SHARED-OWNERSHIP-001",
@@ -478,7 +478,6 @@ pub(super) const FEA_SHARED_OWNERSHIP_001: Requirement = Requirement {
             ALL,
         ),
     ],
-    witnesses: &[],
 };
 pub(super) const FEA_SHARED_ACCURACY_001: Requirement = Requirement {
     id: "FEA-SHARED-ACCURACY-001",
@@ -578,27 +577,6 @@ pub(super) const FEA_SHARED_ACCURACY_001: Requirement = Requirement {
             ALL,
         ),
     ],
-    witnesses: &[Witness {
-        id: "FEA-WITNESS-SHARED-MISSING-ACCURACY",
-        locator: WitnessLocator::CargoTest {
-            package: "runmat-analysis-fea",
-            target: CargoTarget::Library,
-            name: concat!(
-                "results::accuracy::tests::missing_mandatory_evidence_is_indeterminate_and_bl",
-                "ocks_production",
-            ),
-            source: "crates/runmat-analysis/fea/src/results/accuracy/tests.rs",
-        },
-        claims: &[CoverageClaim {
-            obligation: "mandatory_acceptance_states",
-            envelopes: KERNEL,
-            boundary: concat!(
-                "Typed accuracy evaluator reports missing mandatory evidence as ",
-                "Indeterminate, blocks publication under fail and permits explicit markIndeterminate policy; ",
-                "no independent physical estimator or admitted publication receipt.",
-            ),
-        }],
-    }],
 };
 pub(super) const FEA_SHARED_EXTENSIONS_001: Requirement = Requirement {
     id: "FEA-SHARED-EXTENSIONS-001",
@@ -638,7 +616,6 @@ pub(super) const FEA_SHARED_EXTENSIONS_001: Requirement = Requirement {
         EvidenceKind::SemanticRealization,
         ALL,
     )],
-    witnesses: &[],
 };
 pub(super) const FEA_SHARED_BASELINE_001: Requirement = Requirement {
     id: "FEA-SHARED-BASELINE-001",
@@ -737,23 +714,6 @@ pub(super) const FEA_SHARED_BASELINE_001: Requirement = Requirement {
             ALL,
         ),
     ],
-    witnesses: &[Witness {
-        id: "FEA-WITNESS-SHARED-PRODUCTION-FORGERY",
-        locator: WitnessLocator::CargoTest {
-            package: "runmat-analysis-fea",
-            target: CargoTarget::Library,
-            name: "admission::tests::persisted_identity_is_revalidated_and_cannot_forge_production",
-            source: "crates/runmat-analysis/fea/src/admission/tests.rs",
-        },
-        claims: &[CoverageClaim {
-            obligation: "decode_revalidation_and_proxy_rejection",
-            envelopes: KERNEL,
-            boundary: concat!(
-                "Thermal-transient identity cold decode revalidates and rejects fields ",
-                "outside the registry identity; no end-to-end publication proof.",
-            ),
-        }],
-    }],
 };
 pub(super) const FEA_SHARED_AUTHORITIES_001: Requirement = Requirement {
     id: "FEA-SHARED-AUTHORITIES-001",
@@ -858,5 +818,4 @@ pub(super) const FEA_SHARED_AUTHORITIES_001: Requirement = Requirement {
             ALL,
         ),
     ],
-    witnesses: &[],
 };

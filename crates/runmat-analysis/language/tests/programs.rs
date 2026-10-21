@@ -3,6 +3,10 @@ mod support;
 use runmat_analysis_language::*;
 use support::{source_module, TestHost};
 
+// witness: FEA-AUTHORING-LANGUAGE-002/typed_expressions @
+//   shared_infrastructure/mesh_independent/source_check;
+//   boundary: Constructed geometry source with local/default quantity typing and one
+//   node-displacement output; source checking only.
 #[test]
 fn compiler_checks_inputs_defaults_locals_and_outputs_as_one_program() {
     let source = r#"
@@ -82,6 +86,9 @@ study load_study {
     );
 }
 
+// witness: FEA-AUTHORING-LANGUAGE-002/typed_expressions @
+//   shared_infrastructure/mesh_independent/source_check;
+//   boundary: Wrong dimension and duplicate-output diagnostic fixtures, not all invalid contracts.
 #[test]
 fn compiler_rejects_wrong_input_defaults_and_duplicate_outputs() {
     let source = r#"

@@ -1,5 +1,8 @@
 use super::*;
 
+// witness: FEA-THERMAL-DOMAIN-001/constraints @ thermal_steady/tet4|tet10/numerical_kernel;
+//   boundary: Three components with prescribed/convection anchoring; removal of an anchor rejects
+//   coercivity. Does not exercise tied, periodic or affine jumps.
 #[test]
 fn disconnected_bodies_have_independent_exact_steady_equilibria_and_require_each_anchor() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {

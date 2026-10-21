@@ -7,32 +7,32 @@ const TRANSIENT_FORMULATION: Formulation = Formulation::IncompressibleLaminarTra
 const STEADY_KERNEL: &[Envelope] = &[envelope(
     STEADY_FORMULATION,
     MeshOrder::CanonicalTetrahedra,
-    ExecutionEnvelope::SerialCpuNumericalKernel,
+    ExecutionEnvelope::NumericalKernel,
 )];
 const TRANSIENT_KERNEL: &[Envelope] = &[envelope(
     TRANSIENT_FORMULATION,
     MeshOrder::CanonicalTetrahedra,
-    ExecutionEnvelope::SerialCpuNumericalKernel,
+    ExecutionEnvelope::NumericalKernel,
 )];
 const STEADY_NATIVE: &[Envelope] = &[envelope(
     STEADY_FORMULATION,
     MeshOrder::CanonicalTetrahedra,
-    ExecutionEnvelope::SerialCpuNativeProcess,
+    ExecutionEnvelope::NativeProcess,
 )];
 const TRANSIENT_NATIVE: &[Envelope] = &[envelope(
     TRANSIENT_FORMULATION,
     MeshOrder::CanonicalTetrahedra,
-    ExecutionEnvelope::SerialCpuNativeProcess,
+    ExecutionEnvelope::NativeProcess,
 )];
 const STEADY_PUBLIC: &[Envelope] = &[envelope(
     STEADY_FORMULATION,
     MeshOrder::CanonicalTetrahedra,
-    ExecutionEnvelope::SerialCpuPublicStudy,
+    ExecutionEnvelope::PublicStudy,
 )];
 const TRANSIENT_PUBLIC: &[Envelope] = &[envelope(
     TRANSIENT_FORMULATION,
     MeshOrder::CanonicalTetrahedra,
-    ExecutionEnvelope::SerialCpuPublicStudy,
+    ExecutionEnvelope::PublicStudy,
 )];
 const STEADY_DURABLE: &[Envelope] = &[envelope(
     STEADY_FORMULATION,
@@ -80,22 +80,22 @@ const ALL: &[Envelope] = &[
     envelope(
         STEADY_FORMULATION,
         MeshOrder::CanonicalTetrahedra,
-        ExecutionEnvelope::EncryptedRemote,
+        ExecutionEnvelope::RemoteExecution,
     ),
     envelope(
         TRANSIENT_FORMULATION,
         MeshOrder::CanonicalTetrahedra,
-        ExecutionEnvelope::EncryptedRemote,
+        ExecutionEnvelope::RemoteExecution,
     ),
     envelope(
         STEADY_FORMULATION,
         MeshOrder::CanonicalTetrahedra,
-        ExecutionEnvelope::PartitionedCpu,
+        ExecutionEnvelope::DomainDecomposed,
     ),
     envelope(
         TRANSIENT_FORMULATION,
         MeshOrder::CanonicalTetrahedra,
-        ExecutionEnvelope::PartitionedCpu,
+        ExecutionEnvelope::DomainDecomposed,
     ),
     envelope(
         STEADY_FORMULATION,
@@ -167,87 +167,6 @@ const TOPOLOGY_001: Requirement = Requirement {
             CORE
         ),
     ],
-    witnesses: &[
-        Witness {
-            id: "FEA-WITNESS-FLUID-FV-GEOMETRY",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-"topology::finite_volume::tests::exact_two_cell_geometry_is_conservative_and_",
-"retains_original_boundary_mapping",
-),
-                source: "crates/runmat-analysis/fea/src/topology/finite_volume/tests.rs"
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "inventory",
-                    envelopes: STEADY_KERNEL,
-                    boundary: concat!(
-"Two affine Tet4 cells; oriented surface closure, volume and original face ",
-"mapping. No skew/curved mesh envelope proof.",
-)
-                }
-            ],
-        },
-        Witness {
-            id: "FEA-WITNESS-FLUID-FV-ORDER",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-"topology::finite_volume::tests::stable_cell_face_physics_is_invariant_to_reo",
-"rdered_source_access_indices",
-),
-                source: "crates/runmat-analysis/fea/src/topology/finite_volume/tests.rs"
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "geometry",
-                    envelopes: STEADY_KERNEL,
-                    boundary: "Two-cell source access reordering, not execution placement equivalence."
-                }
-            ],
-        },
-        Witness {
-            id: "FEA-WITNESS-FLUID-FV-REJECT",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-"topology::finite_volume::tests::rejects_nonmanifold_missing_boundary_inversi",
-"on_curvature_and_mutated_record",
-),
-                source: "crates/runmat-analysis/fea/src/topology/finite_volume/tests.rs"
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "quality",
-                    envelopes: STEADY_KERNEL,
-                    boundary: "Selected malformed source cases only, not complete quality-envelope convergence."
-                }
-            ],
-        },
-        Witness {
-            id: "FEA-WITNESS-FLUID-FV-BUDGET",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: "topology::finite_volume::tests::exact_admission_bounds_succeed_and_each_one_below_rejects",
-                source: "crates/runmat-analysis/fea/src/topology/finite_volume/tests.rs"
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "budget",
-                    envelopes: STEADY_KERNEL,
-                    boundary: concat!(
-"Exact finite-volume construction counts and one-below limits; requested byte",
-"s are not RSS.",
-)
-                }
-            ],
-        },
-    ],
 };
 const EQUATIONS_001: Requirement = Requirement {
     id: "FEA-FLUID-EQUATIONS-001",
@@ -309,97 +228,6 @@ const EQUATIONS_001: Requirement = Requirement {
             EvidenceKind::OriginalStateComparison,
             CORE
         ),
-    ],
-    witnesses: &[
-        Witness {
-            id: "FEA-WITNESS-FLUID-FLUX-AFFINE",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-"physics::cfd::canonical::tests::affine_skew_face_velocity_and_nonzero_convec",
-"tion_are_consistent",
-),
-                source: "crates/runmat-analysis/fea/src/physics/cfd/canonical/tests.rs"
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "flux",
-                    envelopes: STEADY_KERNEL,
-                    boundary: concat!(
-"Independent affine skew-face flux and integrated nonzero advection; no ",
-"general nonlinear field-convergence credit.",
-)
-                }
-            ],
-        },
-        Witness {
-            id: "FEA-WITNESS-FLUID-GAUGE-REJECT",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-"physics::cfd::canonical::tests::closed_reference::closed_gauge_admission_rej",
-"ects_missing_duplicate_outlet_and_incompatible_flux",
-),
-                source: "crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/closed_reference.rs"
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "coupling",
-                    envelopes: STEADY_KERNEL,
-                    boundary: "Closed gauge/reference and net flux rejection; not full pressure-velocity envelope proof."
-                }
-            ],
-        },
-        Witness {
-            id: "FEA-WITNESS-FLUID-PRESSURE-ORIGINAL",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-"physics::cfd::canonical::tests::pressure_reference::original_fluctuation_sur",
-"vives_absolute_rounding_fresh_solve_and_cold_recovery",
-),
-                source: "crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/pressure_reference.rs"
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "pressure_state",
-                    envelopes: STEADY_KERNEL,
-                    boundary: concat!(
-"Fourier duct scaling and two gauges retain bitwise original ",
-"velocity/fluctuation/flux with and without acceleration; cold JSON replay ",
-"only.",
-)
-                }
-            ],
-        },
-        Witness {
-            id: "FEA-WITNESS-FLUID-PRESSURE-NATIVE",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-execution-runner-native",
-                target: CargoTarget::Library,
-                name: concat!(
-"analysis_kernel::fluid_steady::tests::pressure_state::native_pressure_projec",
-"tion_preserves_original_governing_state",
-),
-                source: concat!(
-"crates/runmat-execution-runner-native/src/analysis_kernel/fluid_steady/tests",
-"/pressure_state.rs",
-)
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "pressure_state",
-                    envelopes: STEADY_NATIVE,
-                    boundary: concat!(
-"Native result/receipt preserves original governing fields under gauge ",
-"shift; not distributed algebra or producer-death transient evidence.",
-)
-                }
-            ],
-        },
     ],
 };
 const INPUTS_001: Requirement = Requirement {
@@ -472,65 +300,6 @@ const INPUTS_001: Requirement = Requirement {
             CORE,
         ),
     ],
-    witnesses: &[
-        Witness {
-            id: "FEA-WITNESS-FLUID-MASS-INTEGRAL",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-                    "physics::cfd::canonical::tests::mass_flow::signed_mass_sources_preserve_exac",
-                    "t_faces_partitions_and_cold_original_fields",
-                ),
-                source: "crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/mass_flow.rs",
-            },
-            claims: &[CoverageClaim {
-                obligation: "signals",
-                envelopes: STEADY_KERNEL,
-                boundary: concat!(
-                    "Signed rates across rotated exact faces; three modulo-index pieces ",
-                    "demonstrate additive realization only, not distributed cell assembly.",
-                ),
-            }],
-        },
-        Witness {
-            id: "FEA-WITNESS-FLUID-BODY-TIME",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-                    "physics::cfd::canonical::tests::time_signals::body_force_time_sampling_prese",
-                    "rves_independent_volume_resultant",
-                ),
-                source:
-                    "crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/time_signals.rs",
-            },
-            claims: &[CoverageClaim {
-                obligation: "signals",
-                envelopes: TRANSIENT_KERNEL,
-                boundary:
-                    "Independent volume-integrated time sampling; no partitioned algebra credit.",
-            }],
-        },
-        Witness {
-            id: "FEA-WITNESS-FLUID-INPUT-REJECT",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-                    "physics::cfd::canonical::tests::mass_flow::source_authority_conflicts_quanti",
-                    "ty_and_budget_reject_before_solve",
-                ),
-                source: "crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/mass_flow.rs",
-            },
-            claims: &[CoverageClaim {
-                obligation: "rejection",
-                envelopes: STEADY_KERNEL,
-                boundary:
-                    "Selected duplicate/wrong-quantity/source authority and budget rejection only.",
-            }],
-        },
-    ],
 };
 const TRANSIENT_001: Requirement = Requirement {
     id: "FEA-FLUID-TRANSIENT-001",
@@ -597,96 +366,6 @@ const TRANSIENT_001: Requirement = Requirement {
             TRANSIENT_NATIVE
         ),
     ],
-    witnesses: &[
-        Witness {
-            id: "FEA-WITNESS-FLUID-INERTIA",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-"physics::cfd::canonical::tests::transient::original_mass_term_matches_indepe",
-"ndent_cell_integral_on_every_axis",
-),
-                source: "crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/transient.rs"
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "inertia",
-                    envelopes: TRANSIENT_KERNEL,
-                    boundary: concat!(
-"Independent rho*volume*delta-U/dt cell action on every axis; not temporal fi",
-"eld convergence.",
-)
-                }
-            ],
-        },
-        Witness {
-            id: "FEA-WITNESS-FLUID-TIME-CONVERGENCE",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-"physics::cfd::canonical::tests::transient::exponential_translation_pressure_",
-"shows_first_order_time_convergence",
-),
-                source: "crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/transient.rs"
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "convergence",
-                    envelopes: TRANSIENT_KERNEL,
-                    boundary: concat!(
-"Uniform exponential translation pressure on three time steps; no vortex or ",
-"independent spatial sweep.",
-)
-                }
-            ],
-        },
-        Witness {
-            id: "FEA-WITNESS-FLUID-COLD-BLOCK",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-"physics::cfd::canonical::tests::time_block::authored_time_block_cold_recover",
-"y_and_split_match_original_acceleration",
-),
-                source: "crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/time_block.rs"
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "history",
-                    envelopes: TRANSIENT_KERNEL,
-                    boundary: concat!(
-"Original acceleration history and split replay; ",
-"chronology/tamper/budget/cancel checks, no native process credit.",
-)
-                }
-            ],
-        },
-        Witness {
-            id: "FEA-WITNESS-FLUID-TIME-PROCESS",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-execution-runner-native",
-                target: CargoTarget::Library,
-                name: concat!(
-"analysis_kernel::fluid_transient::tests::terminated_native_producers_preserv",
-"e_original_history_and_admission_rejects_substitution",
-),
-                source: "crates/runmat-execution-runner-native/src/analysis_kernel/fluid_transient/tests.rs"
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "producer_exit",
-                    envelopes: TRANSIENT_NATIVE,
-                    boundary: concat!(
-"Child actually exits before new consumers resume; uniform translation and ",
-"substitution/budget rejection only.",
-)
-                }
-            ],
-        },
-    ],
 };
 const RECOVERY_001: Requirement = Requirement {
     id: "FEA-FLUID-RECOVERY-001",
@@ -729,71 +408,6 @@ const RECOVERY_001: Requirement = Requirement {
             EvidenceKind::PhysicalBalance,
             CORE
         ),
-    ],
-    witnesses: &[
-        Witness {
-            id: "FEA-WITNESS-FLUID-BOUNDARY-BALANCE",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-"physics::cfd::canonical::tests::boundary_balances::grouped_original_translat",
-"ion_reports_signed_mass_and_pressure_forces",
-),
-                source: "crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/boundary_balances.rs"
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "balance",
-                    envelopes: STEADY_KERNEL,
-                    boundary: concat!(
-"Independent constant translation exact group signs/pressure forces; no ",
-"general wall-shear convergence.",
-)
-                }
-            ],
-        },
-        Witness {
-            id: "FEA-WITNESS-FLUID-WALL-SHEAR",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-"physics::cfd::canonical::tests::boundary_balances::original_couette_boundary",
-"_shear_and_cold_attribution_are_preserved",
-),
-                source: "crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/boundary_balances.rs"
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "fields",
-                    envelopes: STEADY_KERNEL,
-                    boundary: concat!(
-"Couette boundary shear/source attribution preserved under cold recovery; one",
-" fixture only.",
-)
-                }
-            ],
-        },
-        Witness {
-            id: "FEA-WITNESS-FLUID-FIELD-REJECT",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-"execution::fluid::tests::original_velocity_pressure_flux_traction_and_resour",
-"ce_substitution_reject",
-),
-                source: "crates/runmat-analysis/fea/src/execution/fluid/tests.rs"
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "fields",
-                    envelopes: STEADY_KERNEL,
-                    boundary: "Portable original field/traction/resource substitution rejection; no process termination."
-                }
-            ],
-        },
     ],
 };
 const ACCURACY_001: Requirement = Requirement {
@@ -849,48 +463,6 @@ const ACCURACY_001: Requirement = Requirement {
             EvidenceKind::AccuracyAcceptance,
             PUBLIC,
         ),
-    ],
-    witnesses: &[
-        Witness {
-            id: "FEA-WITNESS-FLUID-COUETTE",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-                    "physics::cfd::canonical::tests::affine_couette_uses_original_geometry_and_ba",
-                    "lanced_physical_fields",
-                ),
-                source: "crates/runmat-analysis/fea/src/physics/cfd/canonical/tests.rs",
-            },
-            claims: &[CoverageClaim {
-                obligation: "steady_references",
-                envelopes: STEADY_KERNEL,
-                boundary: concat!(
-                    "Independent affine Couette velocity, wall shear and original balance; not ",
-                    "cavity/backward-facing step.",
-                ),
-            }],
-        },
-        Witness {
-            id: "FEA-WITNESS-FLUID-DUCT-CONVERGENCE",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-                    "physics::cfd::canonical::tests::rectangular_duct_compares_fourier_reference_",
-                    "with_controlled_tail",
-                ),
-                source: "crates/runmat-analysis/fea/src/physics/cfd/canonical/tests.rs",
-            },
-            claims: &[CoverageClaim {
-                obligation: "spatial",
-                envelopes: STEADY_KERNEL,
-                boundary: concat!(
-                    "Controlled-tail non-affine Fourier duct: velocity, flow and wall shear ",
-                    "refinement; not pressure/cavity/backward-facing-step envelope.",
-                ),
-            }],
-        },
     ],
 };
 const EXECUTION_001: Requirement = Requirement {
@@ -958,51 +530,6 @@ const EXECUTION_001: Requirement = Requirement {
             EvidenceKind::PublicationIntegrity,
             PUBLIC,
         ),
-    ],
-    witnesses: &[
-        Witness {
-            id: "FEA-WITNESS-FLUID-RESOURCE-CEILING",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-                    "execution::fluid::tests::authored_resource_ceiling_and_original_wire_profile",
-                    "_are_enforced_before_expansion",
-                ),
-                source: "crates/runmat-analysis/fea/src/execution/fluid/tests.rs",
-            },
-            claims: &[CoverageClaim {
-                obligation: "resources",
-                envelopes: STEADY_KERNEL,
-                boundary: concat!(
-                    "Original payload and authored requested ceilings before expansion; no ",
-                    "measured RSS/GPU/distributed bound.",
-                ),
-            }],
-        },
-        Witness {
-            id: "FEA-WITNESS-FLUID-COLD-PUBLICATION",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-execution-runner-native",
-                target: CargoTarget::Library,
-                name: concat!(
-                    "analysis_kernel::fluid_steady::tests::chain::publication::original_native_fl",
-                    "uid_observation_complete_state_and_accuracy_cold_chain",
-                ),
-                source: concat!(
-                    "crates/runmat-execution-runner-native/src/analysis_kernel/fluid_steady/tests",
-                    "/chain/publication.rs",
-                ),
-            },
-            claims: &[CoverageClaim {
-                obligation: "publication",
-                envelopes: STEADY_DURABLE,
-                boundary: concat!(
-                    "Native durable complete-state/observation chain rejects missing mandatory ",
-                    "spatial evidence; not a qualified convergence certificate.",
-                ),
-            }],
-        },
     ],
 };
 pub(crate) const REQUIREMENTS: &[Requirement] = &[

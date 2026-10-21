@@ -4,47 +4,47 @@ const DOMAIN: &[Envelope] = &[
     envelope(
         Formulation::LinearStructural,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::LinearStructural,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::LinearStructural,
         MeshOrder::Beam,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::LinearStructural,
         MeshOrder::Shell,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::LinearStructural,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::LinearStructural,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::LinearStructural,
         MeshOrder::Beam,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::LinearStructural,
         MeshOrder::Shell,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::LinearStructural,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::SerialCpuNativeProcess,
+        ExecutionEnvelope::NativeProcess,
     ),
     envelope(
         Formulation::LinearStructural,
@@ -54,12 +54,12 @@ const DOMAIN: &[Envelope] = &[
     envelope(
         Formulation::LinearStructural,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::EncryptedRemote,
+        ExecutionEnvelope::RemoteExecution,
     ),
     envelope(
         Formulation::LinearStructural,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::PartitionedCpu,
+        ExecutionEnvelope::DomainDecomposed,
     ),
     envelope(
         Formulation::LinearStructural,
@@ -126,28 +126,6 @@ const FEA_STRUCTURAL_SOLID_001: Requirement = Requirement {
             DOMAIN,
         ),
     ],
-    witnesses: &[Witness {
-        id: "FEA-WITNESS-STRUCTURAL-MASS-MOMENTS",
-        locator: WitnessLocator::CargoTest {
-            package: "runmat-analysis-fea",
-            target: CargoTarget::Library,
-            name: concat!(
-                "assembly::elements::solid::tetrahedron10_mass::tests::affine_mass_preserves_",
-                "all_quadratic_kinetic_cross_moments_at_scale_and_translation",
-            ),
-            source:
-                "crates/runmat-analysis/fea/src/assembly/elements/solid/tetrahedron10_mass/tests.rs",
-        },
-        claims: &[CoverageClaim {
-            obligation: "quadrature_mass",
-            envelopes: &[DOMAIN[1]],
-            boundary: concat!(
-                "Affine Tet10 consistent mass preserves independent quadratic kinetic cross ",
-                "moments across scale/translation. No lumped mass, body-load, damping or ",
-                "mesh-convergence claim.",
-            ),
-        }],
-    }],
     dependencies: &[concat!(
         "Shared typed authoring, canonical topology/material/constraint/excitation ",
         "authorities; governed resources and execution; independently qualified ",
@@ -188,23 +166,6 @@ const FEA_STRUCTURAL_BEAM_001: Requirement = Requirement {
             DOMAIN,
         ),
     ],
-    witnesses: &[Witness {
-        id: "FEA-WITNESS-BEAM-FRAME",
-        locator: WitnessLocator::CargoTest {
-            package: "runmat-analysis-fea",
-            target: CargoTarget::Library,
-            name: "assembly::elements::beam::tests::beam_transformation_is_block_orthonormal",
-            source: "crates/runmat-analysis/fea/src/assembly/elements/beam.rs",
-        },
-        claims: &[CoverageClaim {
-            obligation: "physical_beam_mixed_dofs",
-            envelopes: &[DOMAIN[2]],
-            boundary: concat!(
-                "One oblique beam frame transformation orthonormality only; no mixed-model ",
-                "or global beam benchmark claim.",
-            ),
-        }],
-    }],
     dependencies: &[concat!(
         "Shared typed authoring, canonical topology/material/constraint/excitation ",
         "authorities; governed resources and execution; independently qualified ",
@@ -242,27 +203,6 @@ const FEA_STRUCTURAL_SHELL_001: Requirement = Requirement {
             DOMAIN,
         ),
     ],
-    witnesses: &[Witness {
-        id: "FEA-WITNESS-SHELL-NAVIER",
-        locator: WitnessLocator::CargoTest {
-            package: "runmat-analysis-fea",
-            target: CargoTarget::Library,
-            name: concat!(
-                "assembly::elements::shell::qualification_tests::simply_supported_sinusoidal_",
-                "plate_converges_to_the_navier_solution",
-            ),
-            source: "crates/runmat-analysis/fea/src/assembly/elements/shell/qualification_tests.rs",
-        },
-        claims: &[CoverageClaim {
-            obligation: "physical_shell_operator",
-            envelopes: &[DOMAIN[3]],
-            boundary: concat!(
-                "Dense test assembly of transverse simply-supported triangular plate; center ",
-                "displacement decreases toward independent Navier value and fine error ",
-                "below8%. No membrane, mixed-shell, native or complete locking qualification.",
-            ),
-        }],
-    }],
     dependencies: &[concat!(
         "Shared typed authoring, canonical topology/material/constraint/excitation ",
         "authorities; governed resources and execution; independently qualified ",
@@ -301,7 +241,6 @@ const FEA_STRUCTURAL_REFERENCE_001: Requirement = Requirement {
             DOMAIN,
         ),
     ],
-    witnesses: &[],
     dependencies: &[concat!(
         "Shared typed authoring, canonical topology/material/constraint/excitation ",
         "authorities; governed resources and execution; independently qualified ",
@@ -379,7 +318,6 @@ const FEA_STRUCTURAL_CONSTRAINT_001: Requirement = Requirement {
             DOMAIN,
         ),
     ],
-    witnesses: &[],
     dependencies: &[concat!(
         "Shared typed authoring, canonical topology/material/constraint/excitation ",
         "authorities; governed resources and execution; independently qualified ",
@@ -476,7 +414,6 @@ const FEA_STRUCTURAL_EXECUTION_001: Requirement = Requirement {
             DOMAIN,
         ),
     ],
-    witnesses: &[],
     dependencies: &[concat!(
         "Shared typed authoring, canonical topology/material/constraint/excitation ",
         "authorities; governed resources and execution; independently qualified ",

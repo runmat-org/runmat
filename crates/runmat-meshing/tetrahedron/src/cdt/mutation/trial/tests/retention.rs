@@ -12,6 +12,12 @@ fn undo_entries(journal: &TrialJournal) -> usize {
         + journal.dirty.len()
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Rejected nested flips across four and 64 distinct disconnected cavities leave zero
+//   parent undo records; a committed child remains reversible, with exact original topology,
+//   incidence and search authority restored. This bounds retained undo differences on these
+//   fixtures, not arbitrary connected propagation, allocator footprint or native study acceptance.
 #[test]
 fn parent_undo_drops_rejected_child_history_across_distinct_cavities() {
     for count in [4, 64] {

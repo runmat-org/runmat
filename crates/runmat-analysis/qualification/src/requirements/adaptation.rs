@@ -4,27 +4,27 @@ const DOMAIN: &[Envelope] = &[
     envelope(
         Formulation::AdaptiveAnalysis,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::AdaptiveAnalysis,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::AdaptiveAnalysis,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::AdaptiveAnalysis,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::AdaptiveAnalysis,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::SerialCpuNativeProcess,
+        ExecutionEnvelope::NativeProcess,
     ),
     envelope(
         Formulation::AdaptiveAnalysis,
@@ -34,12 +34,12 @@ const DOMAIN: &[Envelope] = &[
     envelope(
         Formulation::AdaptiveAnalysis,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::EncryptedRemote,
+        ExecutionEnvelope::RemoteExecution,
     ),
     envelope(
         Formulation::AdaptiveAnalysis,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::PartitionedCpu,
+        ExecutionEnvelope::DomainDecomposed,
     ),
     envelope(
         Formulation::AdaptiveAnalysis,
@@ -95,7 +95,6 @@ const FEA_ADAPTATION_LOOP_001: Requirement = Requirement {
             DOMAIN,
         ),
     ],
-    witnesses: &[],
     dependencies: &[concat!(
         "Shared typed authoring, canonical topology/material/constraint/excitation ",
         "authorities; governed resources and execution; independently qualified ",
@@ -172,66 +171,6 @@ const FEA_ADAPTATION_GOVERNANCE_001: Requirement = Requirement {
             EvidenceKind::SemanticRealization,
             DOMAIN
         )
-    ],
-    witnesses: &[
-        Witness {
-            id: "FEA-WITNESS-ADAPTATION-CONSTRAINTS",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-"adaptation::iteration::tests::constraint_lineage::persistent_clamp_rebuilds_",
-"new_midside_constraints_without_numeric_node_aliases",
-),
-                source: "crates/runmat-analysis/fea/src/adaptation/iteration/tests/constraint_lineage.rs"
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "family_transfer_constraints",
-                    envelopes: &[
-                        DOMAIN[
-                            0
-                        ],
-                        DOMAIN[
-                            1
-                        ]
-                    ],
-                    boundary: concat!(
-"Real Tet4 to Tet10 persistent face clamp rebuilds9 to18 rows, retains ",
-"entity identity and rejects foreign/missing lineage. No reaction/state ",
-"transfer or adaptive solve convergence claim.",
-)
-                }
-            ]
-        },
-        Witness {
-            id: "FEA-WITNESS-ADAPTATION-ITERATION",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-"adaptation::iteration::tests::governed::iteration_binds_canonical_solver_mes",
-"h_lineage_transfer_and_evidence",
-),
-                source: "crates/runmat-analysis/fea/src/adaptation/iteration/tests/governed.rs"
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "durable_accuracy_lineage",
-                    envelopes: &[
-                        DOMAIN[
-                            0
-                        ]
-                    ],
-                    boundary: concat!(
-"Canonical adaptation records use constructed converged solver facts and ",
-"quantities, real mesh refinement/transfer fixtures; rejects ",
-"missing/indeterminate evidence and capped refinement. No independently ",
-"solved adaptive target convergence or remote lifecycle claim.",
-)
-                }
-            ]
-        }
     ],
     dependencies: &[
         concat!(

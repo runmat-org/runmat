@@ -68,15 +68,90 @@ pub enum ExecutionEnvelope {
     SourceCheck,
     DesktopIntegration,
     ReleasePipeline,
-    SerialCpuPreparedController,
-    SerialCpuNativeProcess,
-    SerialCpuNumericalKernel,
-    SerialCpuPublicStudy,
+    PreparedController,
+    NativeProcess,
+    NumericalKernel,
+    PublicStudy,
     Durable,
-    EncryptedRemote,
-    PartitionedCpu,
+    ParallelCpu,
+    RemoteExecution,
+    DomainDecomposed,
     ClaimedAccelerator,
 }
+impl ExecutionEnvelope {
+    pub const ALL: &'static [ExecutionEnvelope] = &[
+        ExecutionEnvelope::SourceCheck, ExecutionEnvelope::DesktopIntegration,
+        ExecutionEnvelope::ReleasePipeline, ExecutionEnvelope::PreparedController,
+        ExecutionEnvelope::NativeProcess, ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::PublicStudy, ExecutionEnvelope::Durable,
+        ExecutionEnvelope::ParallelCpu, ExecutionEnvelope::RemoteExecution,
+        ExecutionEnvelope::DomainDecomposed, ExecutionEnvelope::ClaimedAccelerator,
+    ];
+}
+
+/// Wire name of a register enum value: the snake_case form of its variant name. This is
+/// the spelling used in witness tags and in exported JSON.
+pub fn snake_name(debug: &str) -> String {
+    let mut out = String::with_capacity(debug.len() + 4);
+    for (index, character) in debug.chars().enumerate() {
+        if character.is_ascii_uppercase() {
+            if index != 0 {
+                out.push('_');
+            }
+            out.push(character.to_ascii_lowercase());
+        } else {
+            out.push(character);
+        }
+    }
+    out
+}
+macro_rules! wire_names {
+    ($name:ident) => {
+        impl $name {
+            pub fn wire_name(self) -> String {
+                snake_name(&format!("{self:?}"))
+            }
+            pub fn parse(text: &str) -> Option<Self> {
+                Self::ALL.iter().copied().find(|v| v.wire_name() == text)
+            }
+        }
+    };
+}
+impl Stage {
+    pub const ALL: &'static [Stage] = &[
+        Stage::Prerequisite, Stage::Baseline, Stage::Authoring, Stage::ExecutionContracts,
+        Stage::SharedAuthorities, Stage::LinearStructures, Stage::Dynamics, Stage::Thermal,
+        Stage::NonlinearContact, Stage::Electromagnetics, Stage::Acoustics, Stage::Fluid,
+        Stage::FluidStructureInteraction, Stage::Adaptation, Stage::Release,
+    ];
+}
+wire_names!(Stage);
+impl Formulation {
+    pub const ALL: &'static [Formulation] = &[
+        Formulation::SharedInfrastructure, Formulation::LinearStructural,
+        Formulation::ModalStructural, Formulation::PrestressedStructural,
+        Formulation::StructuralStability, Formulation::LinearStructuralDynamics,
+        Formulation::NonlinearStructural, Formulation::PenaltyCoulombContact,
+        Formulation::AdaptiveAnalysis, Formulation::Electrostatic,
+        Formulation::ElectricalConduction, Formulation::Magnetostatic,
+        Formulation::HarmonicMaxwell, Formulation::Thermoelastic, Formulation::Electrothermal,
+        Formulation::ConjugateHeatTransfer, Formulation::FluidStructureInteraction,
+        Formulation::SmallStrainJ2, Formulation::SmallStrainJ2PenaltyCoulombContact,
+        Formulation::ThermalSteady, Formulation::ThermalTransient,
+        Formulation::AcousticHarmonic, Formulation::IncompressibleLaminarSteady,
+        Formulation::IncompressibleLaminarTransient,
+    ];
+}
+wire_names!(Formulation);
+impl MeshOrder {
+    pub const ALL: &'static [MeshOrder] = &[
+        MeshOrder::MeshIndependent, MeshOrder::Beam, MeshOrder::Shell, MeshOrder::EdgeElements,
+        MeshOrder::CanonicalMixedTopology, MeshOrder::Tet4, MeshOrder::Tet10,
+        MeshOrder::CanonicalTetrahedra,
+    ];
+}
+wire_names!(MeshOrder);
+wire_names!(ExecutionEnvelope);
 #[cfg_attr(feature = "docs-export", derive(serde::Serialize))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Envelope {
@@ -112,42 +187,6 @@ pub struct Obligation {
     pub required_envelopes: &'static [Envelope],
 }
 #[cfg_attr(feature = "docs-export", derive(serde::Serialize))]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CargoTarget {
-    Library,
-    Integration(&'static str),
-}
-#[cfg_attr(feature = "docs-export", derive(serde::Serialize))]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum WitnessLocator {
-    CargoTest {
-        package: &'static str,
-        target: CargoTarget,
-        name: &'static str,
-        /// Relative to the runmat-analysis repository.
-        source: &'static str,
-    },
-    GovernanceCheck {
-        source: &'static str,
-        check: &'static str,
-    },
-}
-#[cfg_attr(feature = "docs-export", derive(serde::Serialize))]
-#[derive(Clone, Copy, Debug)]
-pub struct CoverageClaim {
-    pub obligation: &'static str,
-    pub envelopes: &'static [Envelope],
-    /// What the assertions support, including important exclusions.
-    pub boundary: &'static str,
-}
-#[cfg_attr(feature = "docs-export", derive(serde::Serialize))]
-#[derive(Clone, Copy, Debug)]
-pub struct Witness {
-    pub id: &'static str,
-    pub locator: WitnessLocator,
-    pub claims: &'static [CoverageClaim],
-}
-#[cfg_attr(feature = "docs-export", derive(serde::Serialize))]
 #[derive(Clone, Copy, Debug)]
 pub struct Requirement {
     pub id: &'static str,
@@ -156,7 +195,6 @@ pub struct Requirement {
     pub acceptance: &'static str,
     pub owners: &'static [&'static str],
     pub obligations: &'static [Obligation],
-    pub witnesses: &'static [Witness],
     pub dependencies: &'static [&'static str],
 }
 /// Common declaration constructors keep domain inventories uniform.
@@ -190,17 +228,13 @@ pub const fn obligation(
 pub enum RegistryError {
     Empty(&'static str),
     Duplicate(&'static str),
-    UnknownObligation(&'static str),
-    UnsupportedClaim(&'static str),
-    ConflictingWitness(&'static str),
 }
-/// Structural integrity only. An obligation without witnesses is valid and open.
-/// Nothing here executes tests, reads results or promotes a requirement.
+/// Structural integrity of the declarations only. Witnesses are declared at the tests
+/// (see `witness`) and validated there; nothing here executes tests.
 pub fn validate<'a>(
     registry: impl IntoIterator<Item = &'a Requirement>,
 ) -> Result<(), RegistryError> {
     let mut requirements = std::collections::BTreeSet::new();
-    let mut witnesses = std::collections::BTreeMap::new();
     for requirement in registry {
         if requirement.id.is_empty()
             || requirement.title.is_empty()
@@ -231,53 +265,6 @@ pub fn validate<'a>(
             for (i, envelope) in obligation.required_envelopes.iter().enumerate() {
                 if obligation.required_envelopes[..i].contains(envelope) {
                     return Err(RegistryError::Duplicate(obligation.id));
-                }
-            }
-        }
-        let mut local_witnesses = std::collections::BTreeSet::new();
-        for witness in requirement.witnesses {
-            if witness.id.is_empty() || witness.claims.is_empty() {
-                return Err(RegistryError::Empty(witness.id));
-            }
-            if !local_witnesses.insert(witness.id) {
-                return Err(RegistryError::Duplicate(witness.id));
-            }
-            if let Some(prior) = witnesses.insert(witness.id, witness.locator) {
-                if prior != witness.locator {
-                    return Err(RegistryError::ConflictingWitness(witness.id));
-                }
-            }
-            match witness.locator {
-                WitnessLocator::CargoTest {
-                    package,
-                    name,
-                    source,
-                    ..
-                } if package.is_empty() || name.is_empty() || source.is_empty() => {
-                    return Err(RegistryError::Empty(witness.id))
-                }
-                WitnessLocator::GovernanceCheck { source, check }
-                    if source.is_empty() || check.is_empty() =>
-                {
-                    return Err(RegistryError::Empty(witness.id))
-                }
-                _ => (),
-            }
-            for claim in witness.claims {
-                let obligation = requirement
-                    .obligations
-                    .iter()
-                    .find(|obligation| obligation.id == claim.obligation)
-                    .ok_or(RegistryError::UnknownObligation(claim.obligation))?;
-                if claim.boundary.is_empty() || claim.envelopes.is_empty() {
-                    return Err(RegistryError::Empty(witness.id));
-                }
-                if claim
-                    .envelopes
-                    .iter()
-                    .any(|envelope| !obligation.required_envelopes.contains(envelope))
-                {
-                    return Err(RegistryError::UnsupportedClaim(witness.id));
                 }
             }
         }

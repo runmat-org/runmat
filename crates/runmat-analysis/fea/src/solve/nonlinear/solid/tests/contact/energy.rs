@@ -1,5 +1,9 @@
 use super::*;
 
+// witness: FEA-NONLINEAR-STATE-001/cold_validation @
+//   small_strain_j2_penalty_coulomb_contact/tet4|tet10/prepared_controller;
+//   boundary: Accepted contact energy/current point work validation; not proof of past
+//   numerical-loss trajectory.
 #[test]
 fn accepted_energy_rejects_missing_negative_foreign_and_changed_point_work() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {

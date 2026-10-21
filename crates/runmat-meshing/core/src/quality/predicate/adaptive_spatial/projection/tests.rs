@@ -1,5 +1,11 @@
 use super::*;
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Coordinate-only physical projection validates finite geometry, handles all three
+//   dominant planes and degeneracy, and agrees with the captured source triangle's constructed
+//   projection. It does not assign persistent identities or establish complete recovery
+//   correctness.
 #[test]
 fn physical_projection_requires_coordinates_without_inventing_point_identities() {
     for (points, expected) in [
@@ -79,6 +85,11 @@ fn original_bracket_split_preserves_exact_edge_and_facet_winding() {
         "the almost edge-on plane is not the stable projection"
     );
 }
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Projected predicates preserve original dyadic edge incidence and winding through five
+//   power-of-two scales and six coordinate-plane orders. This checks predicate authority used by
+//   local recovery, not query complexity, physical mesh acceptance or native throughput.
 #[test]
 fn dyadic_projection_preserves_edge_incidence_across_scale_and_plane_order() {
     for exponent in [-400, -40, 0, 40, 400] {

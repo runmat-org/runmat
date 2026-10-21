@@ -60,6 +60,11 @@ fn curved_boundary_face_rejects_a_folded_signed_jacobian() {
     ));
 }
 
+// witness: FEA-SHARED-TOPOLOGY-001/projection_inventory @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Single affine Tet10 tetrahedron checks node/element/face inventory, positive volume,
+//   integrated shapes and world gradient, outward normals and repeatable projection digest; no
+//   arbitrary mixed topology or distributed equivalence.
 #[test]
 fn canonical_tetrahedron_projection_has_indexed_oriented_geometry() {
     let mesh = fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
@@ -143,6 +148,10 @@ fn canonical_tetrahedron_projection_has_indexed_oriented_geometry() {
     assert!(projection.characteristic_length_m > 0.0);
 }
 
+// witness: FEA-SHARED-TOPOLOGY-001/projection_invariants @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Tet4 node-coordinate substitution without digest resealing rejects projection; no
+//   exhaustive provenance or interface invalid-case corpus.
 #[test]
 fn projection_rejects_a_substituted_mesh_digest() {
     let mut mesh = fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);

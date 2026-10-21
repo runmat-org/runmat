@@ -59,6 +59,12 @@ fn provider_without_a_preallocation_bound_never_falls_back_to_an_unbounded_read(
     ));
 }
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Filesystem reads admit the actual object buffer before allocation, within the caller
+//   bound. Denial, missing objects and poisoned bytes preserve bounded reads and content checks.
+//   This is declared buffer storage, not allocator overhead, measured process RSS or numerical
+//   qualification.
 #[test]
 fn admitted_reads_charge_actual_buffer_before_payload_and_preserve_hostile_bounds() {
     let directory = tempfile::tempdir().unwrap();

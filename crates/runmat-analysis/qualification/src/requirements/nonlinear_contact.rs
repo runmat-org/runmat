@@ -5,36 +5,36 @@ const J2: &[Envelope] = &[
     envelope(
         Formulation::SmallStrainJ2,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuPreparedController,
+        ExecutionEnvelope::PreparedController,
     ),
     envelope(
         Formulation::SmallStrainJ2,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuPreparedController,
+        ExecutionEnvelope::PreparedController,
     ),
 ];
 const CONTACT: &[Envelope] = &[
     envelope(
         Formulation::SmallStrainJ2PenaltyCoulombContact,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuPreparedController,
+        ExecutionEnvelope::PreparedController,
     ),
     envelope(
         Formulation::SmallStrainJ2PenaltyCoulombContact,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuPreparedController,
+        ExecutionEnvelope::PreparedController,
     ),
 ];
 const J2_NATIVE: &[Envelope] = &[
     envelope(
         Formulation::SmallStrainJ2,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuNativeProcess,
+        ExecutionEnvelope::NativeProcess,
     ),
     envelope(
         Formulation::SmallStrainJ2,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuNativeProcess,
+        ExecutionEnvelope::NativeProcess,
     ),
 ];
 const PREPARED: &[Envelope] = &[J2[0], J2[1], CONTACT[0], CONTACT[1]];
@@ -44,12 +44,12 @@ const NATIVE: &[Envelope] = &[
     envelope(
         Formulation::SmallStrainJ2PenaltyCoulombContact,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuNativeProcess,
+        ExecutionEnvelope::NativeProcess,
     ),
     envelope(
         Formulation::SmallStrainJ2PenaltyCoulombContact,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuNativeProcess,
+        ExecutionEnvelope::NativeProcess,
     ),
 ];
 pub(crate) const ACCEPTED_HISTORY: Requirement = Requirement {
@@ -157,370 +157,32 @@ pub(crate) const ACCEPTED_HISTORY: Requirement = Requirement {
             NATIVE
         ),
     ],
-    witnesses: &[
-        Witness {
-            id: "FEA-WITNESS-J2-BLOCKS",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-"solve::nonlinear::driver::tests::blocks::cold_blocks_preserve_original_point",
-"_history_schedule_and_physical_outputs",
-),
-                source: "crates/runmat-analysis/fea/src/solve/nonlinear/driver/tests/blocks.rs",
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "points",
-                    envelopes: J2,
-                    boundary: "Homogeneous core cold blocks; original histories and outputs, not continuum accuracy."
-                },
-                CoverageClaim {
-                    obligation: "initial_outputs",
-                    envelopes: J2,
-                    boundary: "Homogeneous core cold blocks; original histories and outputs, not continuum accuracy."
-                },
-                CoverageClaim {
-                    obligation: "chronology",
-                    envelopes: J2,
-                    boundary: "Homogeneous core cold blocks; original histories and outputs, not continuum accuracy."
-                },
-            ],
-        },
-        Witness {
-            id: "FEA-WITNESS-J2-TAMPER",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-"solve::nonlinear::driver::tests::blocks::altered_cold_controller_and_point_s",
-"tate_reject_without_mutating_original",
-),
-                source: "crates/runmat-analysis/fea/src/solve/nonlinear/driver/tests/blocks.rs",
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "cold_validation",
-                    envelopes: &[
-                        J2[
-                            1
-                        ]
-                    ],
-                    boundary: "Altered controller and original point state reject; no independent past-trajectory proof."
-                },
-            ],
-        },
-        Witness {
-            id: "FEA-WITNESS-J2-YIELDED-TAMPER",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-"solve::nonlinear::driver::tests::blocks::yielded_substitution::rehashed_cold",
-"_yielded_history_requires_physical_validation",
-),
-                source: concat!(
-"crates/runmat-analysis/fea/src/solve/nonlinear/driver/tests/blocks/yielded_s",
-"ubstitution.rs",
-),
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "cold_validation",
-                    envelopes: J2,
-                    boundary: concat!(
-"Rehashed yielded history substitution requires physical validation, beyond c",
-"ontent hashes.",
-)
-                },
-            ],
-        },
-        Witness {
-            id: "FEA-WITNESS-J2-ROLLBACK",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: "solve::nonlinear::solid::tests::failed_newton_and_cutback_do_not_commit_caller_history",
-                source: "crates/runmat-analysis/fea/src/solve/nonlinear/solid/tests.rs",
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "rollback",
-                    envelopes: &[
-                        J2[
-                            0
-                        ]
-                    ],
-                    boundary: "Caller history remains unchanged after failed Newton/cutback."
-                },
-            ],
-        },
-        Witness {
-            id: "FEA-WITNESS-J2-CANCEL",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-"solve::nonlinear::driver::tests::blocks::cancelled_continuation_does_not_mut",
-"ate_or_publish_an_accepted_suffix",
-),
-                source: "crates/runmat-analysis/fea/src/solve/nonlinear/driver/tests/blocks.rs",
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "rollback",
-                    envelopes: &[
-                        J2[
-                            0
-                        ]
-                    ],
-                    boundary: "Cancelled block preserves original prefix and publishes no accepted suffix."
-                },
-            ],
-        },
-        Witness {
-            id: "FEA-WITNESS-J2-POINT-CANCEL",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-"solve::nonlinear::solid::tests::cancelled_point_evaluation_reaches_newton_wi",
-"thout_mutating_history",
-),
-                source: "crates/runmat-analysis/fea/src/solve/nonlinear/solid/tests.rs",
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "rollback",
-                    envelopes: J2,
-                    boundary: concat!(
-"Both-order point-evaluation cancellation preserves caller history; not ",
-"complete failed-Newton, line-search or controller suffix coverage.",
-)
-                },
-            ],
-        },
-        Witness {
-            id: "FEA-WITNESS-J2-CAP",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-"solve::nonlinear::driver::tests::blocks::one_increment_blocks_count_replay_c",
-"ost_without_resetting_global_limits",
-),
-                source: "crates/runmat-analysis/fea/src/solve/nonlinear/driver/tests/blocks.rs",
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "chronology",
-                    envelopes: &[
-                        J2[
-                            0
-                        ]
-                    ],
-                    boundary: "One-increment cold replay costs count toward original global limits."
-                },
-            ],
-        },
-        Witness {
-            id: "FEA-WITNESS-J2-CUTBACK",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-"solve::nonlinear::driver::tests::blocks::cutback_boundary_retains_original_t",
-"arget_and_failed_work_across_cold_blocks",
-),
-                source: "crates/runmat-analysis/fea/src/solve/nonlinear/driver/tests/blocks.rs",
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "chronology",
-                    envelopes: J2,
-                    boundary: "Original cutback target and failed work survive cold blocks."
-                },
-            ],
-        },
-        Witness {
-            id: "FEA-WITNESS-CONTACT-BLOCKS",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-"solve::nonlinear::solid::tests::contact::blocks::full_authored_contact_cold_",
-"blocks_preserve_schedule_original_points_and_work",
-),
-                source: "crates/runmat-analysis/fea/src/solve/nonlinear/solid/tests/contact/blocks.rs",
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "points",
-                    envelopes: CONTACT,
-                    boundary: concat!(
-"Prepared constrained affine-body fixture; trusted test loads. No ",
-"public/native contact or generic contact convergence credit.",
-)
-                },
-                CoverageClaim {
-                    obligation: "initial_outputs",
-                    envelopes: CONTACT,
-                    boundary: concat!(
-"Prepared constrained affine-body fixture; trusted test loads. No ",
-"public/native contact or generic contact convergence credit.",
-)
-                },
-                CoverageClaim {
-                    obligation: "chronology",
-                    envelopes: CONTACT,
-                    boundary: concat!(
-"Prepared constrained affine-body fixture; trusted test loads. No ",
-"public/native contact or generic contact convergence credit.",
-)
-                },
-            ],
-        },
-        Witness {
-            id: "FEA-WITNESS-CONTACT-COLD",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-"solve::nonlinear::solid::tests::contact::cold::combined_scope_history_and_ge",
-"neral_admission_reject_substitution",
-),
-                source: "crates/runmat-analysis/fea/src/solve/nonlinear/solid/tests/contact/cold.rs",
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "cold_validation",
-                    envelopes: &[
-                        CONTACT[
-                            1
-                        ]
-                    ],
-                    boundary: "Combined scope/material/contact history and GENERAL admission substitution reject."
-                },
-            ],
-        },
-        Witness {
-            id: "FEA-WITNESS-CONTACT-ENERGY",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-"solve::nonlinear::solid::tests::contact::energy::accepted_energy_rejects_mis",
-"sing_negative_foreign_and_changed_point_work",
-),
-                source: "crates/runmat-analysis/fea/src/solve/nonlinear/solid/tests/contact/energy.rs",
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "cold_validation",
-                    envelopes: CONTACT,
-                    boundary: concat!(
-"Accepted contact energy/current point work validation; not proof of past ",
-"numerical-loss trajectory.",
-)
-                },
-            ],
-        },
-        Witness {
-            id: "FEA-WITNESS-CONTACT-ROLLBACK",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-"solve::nonlinear::solid::tests::contact::rollback::rejected_coupled_newton_a",
-"nd_cancellation_preserve_complete_original_histories",
-),
-                source: "crates/runmat-analysis/fea/src/solve/nonlinear/solid/tests/contact/rollback.rs",
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "rollback",
-                    envelopes: CONTACT,
-                    boundary: "Rejected/cancelled coupled trials preserve complete original history."
-                },
-            ],
-        },
-        Witness {
-            id: "FEA-WITNESS-J2-PROCESS",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-execution-runner-native",
-                target: CargoTarget::Library,
-                name: concat!(
-"analysis_kernel::nonlinear_block::tests::process::terminated_producers_resum",
-"e_original_history",
-),
-                source: concat!(
-"crates/runmat-execution-runner-native/src/analysis_kernel/nonlinear_block/te",
-"sts/process.rs",
-),
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "producer_exit",
-                    envelopes: J2_NATIVE,
-                    boundary: concat!(
-"Native producer actually exits before cold consumers resume; homogeneous unc",
-"oupled J2 only.",
-)
-                },
-            ],
-        },
-        Witness {
-            id: "FEA-WITNESS-J2-LAYERED-PROCESS",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-execution-runner-native",
-                target: CargoTarget::Library,
-                name: concat!(
-"analysis_kernel::nonlinear_block::tests::layered::terminated_native_blocks_p",
-"reserve_nonuniform_material_history",
-),
-                source: concat!(
-"crates/runmat-execution-runner-native/src/analysis_kernel/nonlinear_block/te",
-"sts/layered.rs",
-),
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "producer_exit",
-                    envelopes: J2_NATIVE,
-                    boundary: concat!(
-"Native exited-producer aligned nonuniform J2 reference; no uniform ",
-"moving-front accuracy or contact credit.",
-)
-                },
-            ],
-        },
-    ],
 };
 const NONLINEAR_DOMAIN: &[Envelope] = &[
     envelope(
         Formulation::NonlinearStructural,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::NonlinearStructural,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::NonlinearStructural,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::NonlinearStructural,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::NonlinearStructural,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::SerialCpuNativeProcess,
+        ExecutionEnvelope::NativeProcess,
     ),
     envelope(
         Formulation::NonlinearStructural,
@@ -530,12 +192,12 @@ const NONLINEAR_DOMAIN: &[Envelope] = &[
     envelope(
         Formulation::NonlinearStructural,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::EncryptedRemote,
+        ExecutionEnvelope::RemoteExecution,
     ),
     envelope(
         Formulation::NonlinearStructural,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::PartitionedCpu,
+        ExecutionEnvelope::DomainDecomposed,
     ),
     envelope(
         Formulation::NonlinearStructural,
@@ -547,27 +209,27 @@ const J2_OPERATOR_DOMAIN: &[Envelope] = &[
     envelope(
         Formulation::SmallStrainJ2,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::SmallStrainJ2,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::SmallStrainJ2,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::SmallStrainJ2,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::SmallStrainJ2,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::SerialCpuNativeProcess,
+        ExecutionEnvelope::NativeProcess,
     ),
     envelope(
         Formulation::SmallStrainJ2,
@@ -577,12 +239,12 @@ const J2_OPERATOR_DOMAIN: &[Envelope] = &[
     envelope(
         Formulation::SmallStrainJ2,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::EncryptedRemote,
+        ExecutionEnvelope::RemoteExecution,
     ),
     envelope(
         Formulation::SmallStrainJ2,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::PartitionedCpu,
+        ExecutionEnvelope::DomainDecomposed,
     ),
     envelope(
         Formulation::SmallStrainJ2,
@@ -594,27 +256,27 @@ const CONTACT_OPERATOR_DOMAIN: &[Envelope] = &[
     envelope(
         Formulation::PenaltyCoulombContact,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::PenaltyCoulombContact,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::PenaltyCoulombContact,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::PenaltyCoulombContact,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::PenaltyCoulombContact,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::SerialCpuNativeProcess,
+        ExecutionEnvelope::NativeProcess,
     ),
     envelope(
         Formulation::PenaltyCoulombContact,
@@ -624,12 +286,12 @@ const CONTACT_OPERATOR_DOMAIN: &[Envelope] = &[
     envelope(
         Formulation::PenaltyCoulombContact,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::EncryptedRemote,
+        ExecutionEnvelope::RemoteExecution,
     ),
     envelope(
         Formulation::PenaltyCoulombContact,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::PartitionedCpu,
+        ExecutionEnvelope::DomainDecomposed,
     ),
     envelope(
         Formulation::PenaltyCoulombContact,
@@ -691,29 +353,6 @@ const FEA_NONLINEAR_OPERATOR_001: Requirement = Requirement {
             J2_OPERATOR_DOMAIN,
         ),
     ],
-    witnesses: &[Witness {
-        id: "FEA-WITNESS-J2-CONTINUUM-TET4",
-        locator: WitnessLocator::CargoTest {
-            package: "runmat-analysis-fea",
-            target: CargoTarget::Library,
-            name: concat!(
-                "solve::nonlinear::solid::continuum_qualification::manufactured_fully_yielded",
-                "_cube_refines_and_checks_load_step_sensitivity",
-            ),
-            source:
-                "crates/runmat-analysis/fea/src/solve/nonlinear/solid/continuum_qualification.rs",
-        },
-        claims: &[CoverageClaim {
-            obligation: "references",
-            envelopes: &[J2_OPERATOR_DOMAIN[0]],
-            boundary: concat!(
-                "Original uniform Tet4 continuum gate asserts ",
-                "displacement/stress/point-history/energy/reaction refinement and load ",
-                "schedule sensitivity; linked executable is unassessed here and recorded ",
-                "scientific failures remain failures.",
-            ),
-        }],
-    }],
     dependencies: &[concat!(
         "Shared typed authoring, canonical topology/material/constraint/excitation ",
         "authorities; governed resources and execution; independently qualified ",
@@ -816,35 +455,6 @@ const FEA_CONTACT_OPERATOR_001: Requirement = Requirement {
             CONTACT_OPERATOR_DOMAIN
         )
     ],
-    witnesses: &[
-        Witness {
-            id: "FEA-WITNESS-CONTACT-OBJECTIVITY",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-"physics::structural::contact::penalty::tests::objectivity::material_attached",
-"_frame_and_point_traction_are_objective_under_proper_rotation",
-),
-                source: "crates/runmat-analysis/fea/src/physics/structural/contact/penalty/tests/objectivity.rs"
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "references",
-                    envelopes: &[
-                        CONTACT_OPERATOR_DOMAIN[
-                            0
-                        ]
-                    ],
-                    boundary: concat!(
-"Tri3 contact frame and penalty friction point-law proper-rotation ",
-"objectivity; no global Hertz, sliding body, action-reaction or mesh/penalty ",
-"convergence credit.",
-)
-                }
-            ]
-        }
-    ],
     dependencies: &[
         concat!(
 "Shared typed authoring, canonical topology/material/constraint/excitation ",
@@ -923,7 +533,6 @@ const FEA_NONLINEAR_GOVERNANCE_001: Requirement = Requirement {
             NONLINEAR_DOMAIN,
         ),
     ],
-    witnesses: &[],
     dependencies: &[concat!(
         "Shared typed authoring, canonical topology/material/constraint/excitation ",
         "authorities; governed resources and execution; independently qualified ",

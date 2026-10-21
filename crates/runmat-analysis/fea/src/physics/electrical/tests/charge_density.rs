@@ -97,6 +97,9 @@ fn tet10_charged_slab_matches_potential_field_charge_and_energy_with_both_signs_
     }
 }
 
+// witness: FEA-EM-QUALIFICATION-001/references @ electrostatic/tet4/numerical_kernel;
+//   boundary: Uniform-charge Tet4 slab on three meshes: independent quadratic potential, linear
+//   field, charge conservation and energy convergence; no Tet10 or nonlinear dielectric claim.
 #[test]
 fn tet4_charged_slab_has_independent_spatial_field_and_energy_convergence() {
     let epsilon = coefficient(StaticElectricalEquation::Electrostatics);
@@ -167,6 +170,10 @@ fn tet4_charged_slab_has_independent_spatial_field_and_energy_convergence() {
     assert!(finest.0 < 0.005 && finest.1 < 0.1 && finest.2 < 0.025);
 }
 
+// witness: FEA-EM-INPUT-001/excitation @ electrostatic/tet4|tet10/numerical_kernel;
+//   boundary: Both orders, constant real volume-charge exact target and signed superposition
+//   preserve potential, net/absolute charge and two projection records; no generated or frequency
+//   artifact equivalence.
 #[test]
 fn exact_volume_region_and_signed_superposition_preserve_charge_and_fields() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {

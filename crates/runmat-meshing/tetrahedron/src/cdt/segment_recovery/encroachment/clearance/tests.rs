@@ -30,6 +30,13 @@ fn problem(
     (endpoints, witness, context, interval)
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Off-centre dyadic rounding clears the original witness from both materialized child
+//   diametral spheres at 0.2/0.73/2 degrees and physical scales 0.001/1/1000. Independent analytic
+//   dot products verify the exact predicate verdicts; work remains charged to the original search
+//   ceiling. Excludes all-witness clearance, midpoint policy, complete recovery termination and
+//   native resource qualification.
 #[test]
 fn acute_offcentre_rounding_requires_exact_child_sphere_clearance_across_scales() {
     for scale in [1.0e-3, 1.0, 1.0e3] {
@@ -120,6 +127,13 @@ fn clearance_work_uses_the_original_search_ceiling_and_retries_after_rejection()
     assert!(choose(endpoints, witness, context, interval, [0.37; 3], None, &mut retry).is_ok());
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: An independent acute-ray discriminator exhibits coarse child-clearance-only radial
+//   erosion and requires the guarded split to retain the reference radius, clear both child spheres
+//   and approach the reference radius to floating-point resolution, in mirrored geometry at scales
+//   0.001, 1 and 1000. The intentionally smaller rejected-radius spacing rule, full simultaneous
+//   constraint recovery, cancellation and original native performance require separate evidence.
 #[test]
 fn acute_protection_radius_does_not_erode_through_dyadic_rounding() {
     for scale in [1.0e-3, 1., 1.0e3] {

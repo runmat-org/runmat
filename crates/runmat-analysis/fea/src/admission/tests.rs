@@ -369,6 +369,10 @@ fn unsupported_identity_and_solution_space_are_typed_rejections() {
     );
 }
 
+// witness: FEA-SHARED-BASELINE-001/decode_revalidation_and_proxy_rejection @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Thermal-transient identity cold decode revalidates and rejects fields outside the
+//   registry identity; no end-to-end publication proof.
 #[test]
 fn persisted_identity_is_revalidated_and_cannot_forge_production() {
     let family = PhysicsFamily::Thermal;

@@ -57,6 +57,12 @@ fn edge_is_affine(left: [f64; 3], right: [f64; 3], midpoint: [f64; 3]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+    //   boundary: Floating-roundoff affine detection is invariant across the tested translations/scales
+    //   and rejects material curvature and nonfinite coordinates. The production fast path retains
+    //   every coordinate and requires independent positive-Jacobian certification first; this primitive
+    //   test alone is not whole-study evidence.
     #[test]
     fn affine_detection_respects_scale_and_retains_material_curvature() {
         for scale in [1.0e-9_f64, 1.0, 1.0e9] {

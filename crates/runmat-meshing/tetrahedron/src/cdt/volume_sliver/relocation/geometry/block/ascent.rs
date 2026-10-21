@@ -170,6 +170,13 @@ fn proposal(samples: &[Sample], radius: f64) -> Option<Vec<f64>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+    //   boundary: The local linear maximin proposal includes constraint slack, improves competing
+    //   affine constraints within its radius, rejects stationary or fixed bottlenecks, and preserves
+    //   common scaling. The model supplies proposals only; independent complete geometry and current
+    //   scoped quality decide every accepted edit. This witness does not assert original-study
+    //   acceptance or measured speedup.
     #[test]
     fn linear_maximin_bundle_accounts_for_nearby_constraints_and_stationarity() {
         let sample = |value, x, y| Sample {

@@ -68,6 +68,9 @@ pub(super) fn workload() -> AcousticHarmonicWorkload {
     }
 }
 
+// witness: FEA-ACOUSTIC-ACCURACY-001/lineage @ acoustic_harmonic/tet4|tet10/prepared_controller;
+//   boundary: Both-order accepted-output bridge fixture validates exact context and rejects
+//   production relabeling; not actual native worker or full public gate evidence.
 #[test]
 fn acoustic_accuracy_admission_binds_retained_result_and_original_intent() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {

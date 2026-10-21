@@ -306,6 +306,10 @@ fn static_excitation_accepts_only_coordinate_independent_tables() {
     );
 }
 
+// witness: FEA-SHARED-EXCITATION-001/dimensioned_signal_contract @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Typed tabulated force signal at time 0.5 selects distinct left and right endpoint
+//   vectors; no generator freezing, spatial integration or placement equivalence.
 #[test]
 fn step_interpolation_selects_the_documented_side_of_an_interval() {
     let mut model = tabulated_force_model(

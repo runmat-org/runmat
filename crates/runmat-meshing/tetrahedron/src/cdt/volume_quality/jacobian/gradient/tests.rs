@@ -21,6 +21,13 @@ fn corner_value(points: [[f64; 3]; 4], corner: usize, m: MetricTensor3) -> f64 {
         .product::<f64>();
     2_f64.sqrt() * determinant * metric_det.sqrt() / product.sqrt()
 }
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Analytic per-corner derivatives agree with independent physical-coordinate metric
+//   finite differences across point ordering, translation, scale and off-diagonal anisotropy.
+//   Degenerate and nonfinite inputs reject derivative proposals. Exact orientation and full quality
+//   remain separate acceptance authorities; these arithmetic checks establish no whole-model
+//   convergence or throughput.
 #[test]
 fn corner_derivatives_match_independent_metric_differences_across_orders_and_scales() {
     let metric = MetricTensor3 {

@@ -1,4 +1,7 @@
 use super::*;
+// witness: FEA-NONLINEAR-STATE-001/rollback @
+//   small_strain_j2_penalty_coulomb_contact/tet4|tet10/prepared_controller;
+//   boundary: Rejected/cancelled coupled trials preserve complete original history.
 #[test]
 fn rejected_coupled_newton_and_cancellation_preserve_complete_original_histories() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {

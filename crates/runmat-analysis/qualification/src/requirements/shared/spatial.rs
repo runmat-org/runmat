@@ -1,5 +1,5 @@
 //! Standing shared spatial acceptance.
-use super::{ALL, KERNEL};
+use super::ALL;
 use crate::requirement::*;
 pub(super) const FEA_SHARED_TOPOLOGY_001: Requirement = Requirement {
     id: "FEA-SHARED-TOPOLOGY-001",
@@ -81,48 +81,6 @@ pub(super) const FEA_SHARED_TOPOLOGY_001: Requirement = Requirement {
             EvidenceKind::IndependentReference,
             ALL
         ),
-    ],
-    witnesses: &[
-        Witness {
-            id: "FEA-WITNESS-SHARED-PROJECTION-GEOMETRY",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: "topology::tests::canonical_tetrahedron_projection_has_indexed_oriented_geometry",
-                source: "crates/runmat-analysis/fea/src/topology/tests.rs"
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "projection_inventory",
-                    envelopes: KERNEL,
-                    boundary: concat!(
-"Single affine Tet10 tetrahedron checks node/element/face inventory, ",
-"positive volume, integrated shapes and world gradient, outward normals and ",
-"repeatable projection digest; no arbitrary mixed topology or distributed ",
-"equivalence.",
-)
-                }
-            ]
-        },
-        Witness {
-            id: "FEA-WITNESS-SHARED-PROJECTION-SUBSTITUTION",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: "topology::tests::projection_rejects_a_substituted_mesh_digest",
-                source: "crates/runmat-analysis/fea/src/topology/tests.rs"
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "projection_invariants",
-                    envelopes: KERNEL,
-                    boundary: concat!(
-"Tet4 node-coordinate substitution without digest resealing rejects ",
-"projection; no exhaustive provenance or interface invalid-case corpus.",
-)
-                }
-            ]
-        },
     ],
 };
 pub(super) const FEA_SHARED_PROPERTIES_001: Requirement = Requirement {
@@ -384,27 +342,6 @@ pub(super) const FEA_SHARED_PROPERTIES_001: Requirement = Requirement {
             ALL,
         ),
     ],
-    witnesses: &[Witness {
-        id: "FEA-WITNESS-SHARED-EXPLICIT-PROPERTY-CACHE",
-        locator: WitnessLocator::CargoTest {
-            package: "runmat-analysis-fea",
-            target: CargoTarget::Library,
-            name: concat!(
-                "properties::preparation::tests::explicit_cache_exact_ceiling_preserves_ident",
-                "ity_shape_and_bytes",
-            ),
-            source: "crates/runmat-analysis/fea/src/properties/preparation/tests.rs",
-        },
-        claims: &[CoverageClaim {
-            obligation: "independent_section_coverage",
-            envelopes: KERNEL,
-            boundary: concat!(
-                "Explicit beam and shell fixture topology cache preserves identities, ",
-                "borrowed source and exact resource ceiling; no material coverage, laminate ",
-                "physics or distributed semantic proof.",
-            ),
-        }],
-    }],
 };
 pub(super) const FEA_SHARED_CONSTRAINTS_001: Requirement = Requirement {
     id: "FEA-SHARED-CONSTRAINTS-001",
@@ -803,25 +740,4 @@ pub(super) const FEA_SHARED_CONSTRAINTS_001: Requirement = Requirement {
             ALL,
         ),
     ],
-    witnesses: &[Witness {
-        id: "FEA-WITNESS-SHARED-CONSTRAINT-COMPILER",
-        locator: WitnessLocator::CargoTest {
-            package: "runmat-analysis-fea",
-            target: CargoTarget::Library,
-            name: concat!(
-                "constraints::compilation::admission::tests::exact_caller_boundary_preserves_",
-                "original_plan_across_all_compiler_routes",
-            ),
-            source: "crates/runmat-analysis/fea/src/constraints/compilation/admission/tests.rs",
-        },
-        claims: &[CoverageClaim {
-            obligation: "canonical_plan_and_affine_reduction",
-            envelopes: KERNEL,
-            boundary: concat!(
-                "Prepared structural constraint fixtures compare original canonical plans ",
-                "and bytes at the exact requested workspace boundary and reject one byte ",
-                "below; no cross-family enforcement or whole-task memory proof.",
-            ),
-        }],
-    }],
 };

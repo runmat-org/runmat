@@ -81,6 +81,12 @@ fn geometry() -> PreparedExactGeometryObjects {
     .unwrap()
 }
 
+// witness: FEA-SHARED-RESOURCES-001/shared_immutable_inventories @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Eight concurrent consumers share one actual prepared metric and match independent
+//   derivation. Changes to requested sizing or curve/surface controls require fresh preparation.
+//   This covers one worker-scoped immutable authority, not cross-process caching or native meshing
+//   acceptance.
 #[test]
 fn concurrent_consumers_prepare_once_preserve_authority_and_admit_each_borrow() {
     let geometry = geometry();
@@ -132,6 +138,11 @@ fn concurrent_consumers_prepare_once_preserve_authority_and_admit_each_borrow() 
     assert_eq!(count.load(Ordering::Relaxed), 4);
 }
 
+// witness: FEA-SHARED-RESOURCES-001/shared_immutable_inventories @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Cancellation before and during derivation does not create a successful cached field;
+//   later preparation succeeds. Cached reuse still rejects cancellation and denied storage. This
+//   does not establish whole-task memory bounds or scientific accuracy.
 #[test]
 fn cancelled_preparation_is_not_cached_and_cache_hits_still_observe_cancellation() {
     let geometry = geometry();

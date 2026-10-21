@@ -3,6 +3,13 @@ use runmat_meshing_core::{
     MetricCombinationRule, MetricContribution, MetricContributionScope, MetricFieldRequest,
     MetricSourceKind,
 };
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Prepared surface support retains each edge/region tensor separately from the combined
+//   face envelope, without modifying the original request. Interior support proposals pass shared
+//   exact insertion and spacing; whole workflow and original CAD convergence require separate
+//   evidence. This witness does not prove universal boundary feasibility or whole-task memory
+//   demand.
 #[test]
 fn boundary_support_preserves_edge_local_tensors_instead_of_using_the_face_envelope() {
     let (_, topology, _) = runmat_geometry_fixtures::exact_tetrahedron();

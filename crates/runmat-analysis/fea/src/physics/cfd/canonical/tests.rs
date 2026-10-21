@@ -79,6 +79,10 @@ fn provisional_outlet_backflow_is_solver_only_not_original_physics() {
     // converged path without any additional authored inflow boundary authority.
 }
 
+// witness: FEA-FLUID-EQUATIONS-001/flux @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel;
+//   boundary: Independent affine skew-face flux and integrated nonzero advection; no general
+//   nonlinear field-convergence credit.
 #[test]
 fn affine_skew_face_velocity_and_nonzero_convection_are_consistent() {
     let f = case(2, ReferenceCase::Convective, false);
@@ -138,6 +142,10 @@ fn unknown_pressure_trace_reconstructs_affine_inlet_gradient_without_fake_neuman
     }
 }
 
+// witness: FEA-FLUID-ACCURACY-001/steady_references @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel;
+//   boundary: Independent affine Couette velocity, wall shear and original balance; not
+//   cavity/backward-facing step.
 #[test]
 fn affine_couette_uses_original_geometry_and_balanced_physical_fields() {
     let fixture = case(2, ReferenceCase::Couette, false);
@@ -243,6 +251,10 @@ fn affine_nonzero_convection_reproduces_independent_velocity_and_pressure() {
     );
 }
 
+// witness: FEA-FLUID-ACCURACY-001/spatial @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel;
+//   boundary: Controlled-tail non-affine Fourier duct: velocity, flow and wall shear refinement;
+//   not pressure/cavity/backward-facing-step envelope.
 #[test]
 fn rectangular_duct_compares_fourier_reference_with_controlled_tail() {
     assert!(reference::duct_tail(255) < 1e-5);

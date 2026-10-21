@@ -82,6 +82,9 @@ fn template(frequencies: Vec<f64>) -> AcousticHarmonicWorkload {
     }
 }
 
+// witness: FEA-ACOUSTIC-EXECUTION-001/inventory @ acoustic_harmonic/tet4|tet10/native_process;
+//   boundary: Tet4/Tet10, two/three serial-native frequencies, reversed completion and cold
+//   filesystem fields; no actual parallel/distributed/GPU or producer-termination claim.
 #[test]
 fn native_admitted_frequency_assembly_reopens_original_complete_fields_and_metadata() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {

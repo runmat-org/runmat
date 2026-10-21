@@ -66,6 +66,10 @@ geometry copy {
     );
 }
 
+// witness: FEA-AUTHORING-GEOMETRY-002/cad_parameter_admission @
+//   shared_infrastructure/mesh_independent/source_check;
+//   boundary: Fixture host parameter metadata: wrong dimensions/unqualified write rejection only;
+//   no CAD kernel regeneration.
 #[test]
 fn imported_cad_parameters_reject_wrong_dimensions_and_unqualified_writes() {
     for (physical_type, access, expected) in [

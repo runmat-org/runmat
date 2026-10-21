@@ -43,6 +43,12 @@ mod scene_tests {
         AnalysisRenderMesh, AnalysisRenderTopology, AnalysisRenderTopologySource,
     };
 
+    // witness: FEA-SHARED-OBSERVATIONS-001/governed_observation_corpus @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+    //   boundary: A modal scene's displayed positions are invariant under eigenvector rescaling while
+    //   its original field values and scalar range remain intact. Synthetic scene only; no modal
+    //   accuracy, mesh convergence, publication closure, distributed evaluation or whole-task resource
+    //   claim.
     #[test]
     fn original_modal_vectors_keep_their_values_while_display_shape_is_normalization_invariant() {
         let topology = AnalysisRenderTopology {

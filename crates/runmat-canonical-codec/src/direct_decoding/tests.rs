@@ -89,6 +89,12 @@ fn typed_decode_preserves_original_json_projection_and_wire() {
         bytes
     );
 }
+// witness: FEA-SHARED-RESOURCES-001/governed_path_equivalence @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: All truncations and single-bit edits of a mixed canonical fixture compare admission
+//   and decoded values with the original complete decode/re-encode oracle. The family covers
+//   representative hostile grammar; it does not establish exhaustive hostile-input coverage or
+//   measured native memory.
 #[test]
 fn hostile_byte_edits_and_truncation_match_original_acceptance() {
     let source = serde_json::json!({"a":[null,true,false,-1,0,u64::MAX,-0.0,1e200,"λ"],"b":{"first":[],"last":{}}});
@@ -121,6 +127,11 @@ fn hostile_byte_edits_and_truncation_match_original_acceptance() {
         compare(&edited);
     }
 }
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Byte, collection, string and depth rejection plus malformed terminal UTF-8 occur
+//   before an observable typed constructor is entered. This verifies admission ordering, not a
+//   universal typed allocation bound or a lower whole-task resource reservation.
 #[test]
 fn shape_limits_apply_before_any_typed_construction() {
     static CONSTRUCTED: AtomicUsize = AtomicUsize::new(0);

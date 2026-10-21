@@ -83,6 +83,11 @@ impl Fixture {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Elevation source preparation rejects denied storage and search work before
+//   constructing borrowed lookup tables. Its conservative component storage envelope is not
+//   measured RSS or a complete worker-memory proof.
 #[test]
 fn prepared_sources_reject_unadmitted_storage_and_search_before_construction() {
     let fixture = Fixture::new();
@@ -101,6 +106,11 @@ fn prepared_sources_reject_unadmitted_storage_and_search_before_construction() {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Prepared source images reject a present coedge identity belonging to another face or
+//   edge. All admitted periodic and singular images remain retained; this component ownership check
+//   does not replace original exact-geometry validation.
 #[test]
 fn source_chart_images_reject_coedges_from_another_face_or_edge() {
     let mut fixture = Fixture::new();

@@ -46,6 +46,11 @@ fn distinct_valid_octahedron_triangulations_are_not_pruned_as_one_state() {
     );
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: One valid octahedron cavity replacement compares the maintained ordered-key
+//   fingerprint with independent canonical reconstruction; a rejected duplicate-corner replacement
+//   preserves it. No general spatial-candidate, growth, cancellation or whole-mesh admission claim.
 #[test]
 fn cavity_commit_updates_streamed_keys_and_failed_replacement_preserves_them() {
     let original = octahedron(vec![[0, 5, 1, 2], [0, 5, 2, 4], [0, 5, 4, 3], [0, 5, 3, 1]]);

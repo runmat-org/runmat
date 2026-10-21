@@ -1,5 +1,8 @@
 use super::*;
 
+// witness: FEA-ACOUSTIC-NUMERICS-001/cold_claim @ acoustic_harmonic/tet4/numerical_kernel;
+//   boundary: Retained producer claim/receipt provenance and tamper rejection; no cold mathematical
+//   uniqueness reproof.
 #[test]
 fn required_diagnostic_survives_solve_free_cold_lineage_and_tampering_fails() {
     let mesh = slab_mesh(1);

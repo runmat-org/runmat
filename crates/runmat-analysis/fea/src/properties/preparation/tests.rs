@@ -335,6 +335,11 @@ fn invalid_last_laminate_ply_emits_no_selected_owner() {
     }
 }
 
+// witness: FEA-SHARED-PROPERTIES-001/independent_section_coverage @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Explicit beam and shell fixture topology cache preserves identities, borrowed source
+//   and exact resource ceiling; no material coverage, laminate physics or distributed semantic
+//   proof.
 #[test]
 fn explicit_cache_exact_ceiling_preserves_identity_shape_and_bytes() {
     use crate::physics::structural::topology::{

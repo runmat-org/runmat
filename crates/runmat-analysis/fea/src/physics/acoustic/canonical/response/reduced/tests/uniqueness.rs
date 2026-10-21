@@ -45,6 +45,9 @@ fn check_corrected_operator(
     certify_sparse_uniqueness(a, policy, envelope).unwrap()
 }
 
+// witness: FEA-ACOUSTIC-NUMERICS-001/uniqueness @ acoustic_harmonic/tet4/numerical_kernel;
+//   boundary: Independent Tet4 antisymmetric discrete pole; requested diagnostic refuses zero-RHS
+//   residual acceptance, without asserting exact floating rank.
 #[test]
 fn original_canonical_lossless_discrete_pole_is_not_proved_by_zero_rhs() {
     let model = acoustic_tests::model();

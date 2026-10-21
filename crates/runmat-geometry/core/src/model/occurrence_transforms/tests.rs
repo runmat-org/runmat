@@ -30,6 +30,11 @@ impl GeometryEvaluationControl for Control {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Prepared occurrence matrices match original ancestor composition bit for bit for
+//   repeated and nested placements. Repeated queries do not repeat preparation allocation or work
+//   charges. This covers occurrence lookup, not all geometric queries or whole-model memory.
 #[test]
 fn prepared_world_lookup_matches_original_composition_for_repeated_and_nested_instances() {
     let mut topology = crate::model::exact_topology_tests::topology();

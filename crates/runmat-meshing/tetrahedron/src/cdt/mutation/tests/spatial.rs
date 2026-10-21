@@ -64,6 +64,12 @@ fn reordered_topology() -> TopologyMutation {
     topology
 }
 
+// witness: FEA-SHARED-RESOURCES-001/shared_immutable_inventories @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A small admitted cavity introduces a node whose identity changes canonical ordering.
+//   The original point index storage is retained and queries match an independent exhaustive
+//   inventory before further append. No original heat acceptance, size-series or whole-task peak
+//   claim.
 #[test]
 fn canonical_reordering_reuses_original_point_inventory_and_matches_exhaustive_queries() {
     let mut topology = reordered_topology();

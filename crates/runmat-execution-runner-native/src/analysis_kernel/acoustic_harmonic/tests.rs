@@ -381,6 +381,9 @@ fn acoustic_task_submission_requires_the_exact_resource_allocation() {
     .is_err());
 }
 
+// witness: FEA-ACOUSTIC-EXECUTION-001/admission @ acoustic_harmonic/tet4/native_process;
+//   boundary: Tet4 native worker plan substitution rejection; not measured RSS, whole-family
+//   lifetime or complete cancellation evidence.
 #[test]
 fn native_acoustic_rejects_valid_but_substituted_resource_plan() {
     for substitution in 0..3 {

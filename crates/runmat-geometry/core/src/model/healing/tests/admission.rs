@@ -1,5 +1,11 @@
 use super::*;
 use crate::model::validation_storage::test_control::Budget;
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: The finite healing report prepares borrowed revision membership once per validation;
+//   repeated calls retain no scratch and exact/short budgets and deadline interruption preserve
+//   cleanup. This is not independent geometric healing certification or a whole-model performance
+//   measurement.
 #[test]
 fn healing_prepares_one_borrowed_revision_index_and_releases_it() {
     let report = report();

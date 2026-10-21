@@ -238,6 +238,9 @@ fn simplex_oracle_matches_literal_unit_tet10_and_tri6_entries() {
     assert_eq!(operators.radiation[3], [0.0; 10]);
 }
 
+// witness: FEA-ACOUSTIC-OPERATOR-001/integrals @ acoustic_harmonic/tet10/numerical_kernel;
+//   boundary: Every Tet10/Tri6 matrix entry on all faces; independent simplex moments. No Tet4 or
+//   public topology audit credit.
 #[test]
 fn tet10_and_tri6_all_entries_match_independent_simplex_moments_on_every_face() {
     for oblique in [false, true] {
@@ -303,6 +306,9 @@ fn dense_solve(mut matrix: Vec<Vec<f64>>, mut rhs: Vec<f64>) -> Vec<f64> {
     answer
 }
 
+// witness: FEA-ACOUSTIC-BOUNDARY-001/lifting @ acoustic_harmonic/tet10/numerical_kernel;
+//   boundary: Tet10 lifted complex system checked against independent dense oracle; no generic
+//   solve or conditioning claim.
 #[test]
 fn complex_prescribed_pressure_lifting_matches_independent_reduced_block_system() {
     let omega = std::f64::consts::TAU * 0.2;

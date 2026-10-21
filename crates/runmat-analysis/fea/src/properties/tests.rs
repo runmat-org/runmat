@@ -456,6 +456,12 @@ fn matching_model(
     model
 }
 
+// witness: FEA-SHARED-RESOURCES-001/shared_immutable_inventories @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Tet4/Tet10 fixtures verify that compiled property clones share original element and
+//   audit inventory storage, preserve wire bytes, survive original owner drop, and independently
+//   validate cold reconstruction. No whole publication admission, allocator peak or study scaling
+//   claim.
 #[test]
 fn clones_share_original_validated_properties_without_changing_cold_wire_authority() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
@@ -481,6 +487,11 @@ fn clones_share_original_validated_properties_without_changing_cold_wire_authori
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Original material/audit ownership is separate from shared clones, varies with
+//   retained display buffers and survives independent cold validation. Conservative typed component
+//   inventory, not RSS or whole-study scalability qualification.
 #[test]
 fn original_property_storage_charges_retained_materials_and_audit_once_per_owner() {
     let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);

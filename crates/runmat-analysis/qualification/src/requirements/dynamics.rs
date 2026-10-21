@@ -4,52 +4,52 @@ const DOMAIN: &[Envelope] = &[
     envelope(
         Formulation::LinearStructuralDynamics,
         MeshOrder::MeshIndependent,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::LinearStructuralDynamics,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::LinearStructuralDynamics,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::LinearStructuralDynamics,
         MeshOrder::Beam,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::LinearStructuralDynamics,
         MeshOrder::Shell,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::LinearStructuralDynamics,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::LinearStructuralDynamics,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::LinearStructuralDynamics,
         MeshOrder::Beam,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::LinearStructuralDynamics,
         MeshOrder::Shell,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::LinearStructuralDynamics,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::SerialCpuNativeProcess,
+        ExecutionEnvelope::NativeProcess,
     ),
     envelope(
         Formulation::LinearStructuralDynamics,
@@ -59,12 +59,12 @@ const DOMAIN: &[Envelope] = &[
     envelope(
         Formulation::LinearStructuralDynamics,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::EncryptedRemote,
+        ExecutionEnvelope::RemoteExecution,
     ),
     envelope(
         Formulation::LinearStructuralDynamics,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::PartitionedCpu,
+        ExecutionEnvelope::DomainDecomposed,
     ),
     envelope(
         Formulation::LinearStructuralDynamics,
@@ -76,47 +76,47 @@ const MODAL_DOMAIN: &[Envelope] = &[
     envelope(
         Formulation::ModalStructural,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::ModalStructural,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::ModalStructural,
         MeshOrder::Beam,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::ModalStructural,
         MeshOrder::Shell,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::ModalStructural,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::ModalStructural,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::ModalStructural,
         MeshOrder::Beam,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::ModalStructural,
         MeshOrder::Shell,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::ModalStructural,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::SerialCpuNativeProcess,
+        ExecutionEnvelope::NativeProcess,
     ),
     envelope(
         Formulation::ModalStructural,
@@ -126,12 +126,12 @@ const MODAL_DOMAIN: &[Envelope] = &[
     envelope(
         Formulation::ModalStructural,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::EncryptedRemote,
+        ExecutionEnvelope::RemoteExecution,
     ),
     envelope(
         Formulation::ModalStructural,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::PartitionedCpu,
+        ExecutionEnvelope::DomainDecomposed,
     ),
     envelope(
         Formulation::ModalStructural,
@@ -143,47 +143,47 @@ const PRESTRESS_DOMAIN: &[Envelope] = &[
     envelope(
         Formulation::PrestressedStructural,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::PrestressedStructural,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::PrestressedStructural,
         MeshOrder::Beam,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::PrestressedStructural,
         MeshOrder::Shell,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::PrestressedStructural,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::PrestressedStructural,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::PrestressedStructural,
         MeshOrder::Beam,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::PrestressedStructural,
         MeshOrder::Shell,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::PrestressedStructural,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::SerialCpuNativeProcess,
+        ExecutionEnvelope::NativeProcess,
     ),
     envelope(
         Formulation::PrestressedStructural,
@@ -193,12 +193,12 @@ const PRESTRESS_DOMAIN: &[Envelope] = &[
     envelope(
         Formulation::PrestressedStructural,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::EncryptedRemote,
+        ExecutionEnvelope::RemoteExecution,
     ),
     envelope(
         Formulation::PrestressedStructural,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::PartitionedCpu,
+        ExecutionEnvelope::DomainDecomposed,
     ),
     envelope(
         Formulation::PrestressedStructural,
@@ -208,47 +208,47 @@ const PRESTRESS_DOMAIN: &[Envelope] = &[
     envelope(
         Formulation::StructuralStability,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::StructuralStability,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::StructuralStability,
         MeshOrder::Beam,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::StructuralStability,
         MeshOrder::Shell,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::StructuralStability,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::StructuralStability,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::StructuralStability,
         MeshOrder::Beam,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::StructuralStability,
         MeshOrder::Shell,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::StructuralStability,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::SerialCpuNativeProcess,
+        ExecutionEnvelope::NativeProcess,
     ),
     envelope(
         Formulation::StructuralStability,
@@ -258,12 +258,12 @@ const PRESTRESS_DOMAIN: &[Envelope] = &[
     envelope(
         Formulation::StructuralStability,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::EncryptedRemote,
+        ExecutionEnvelope::RemoteExecution,
     ),
     envelope(
         Formulation::StructuralStability,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::PartitionedCpu,
+        ExecutionEnvelope::DomainDecomposed,
     ),
     envelope(
         Formulation::StructuralStability,
@@ -326,27 +326,6 @@ const FEA_DYNAMICS_MODAL_001: Requirement = Requirement {
             MODAL_DOMAIN,
         ),
     ],
-    witnesses: &[Witness {
-        id: "FEA-WITNESS-MODAL-ROD-TET4",
-        locator: WitnessLocator::CargoTest {
-            package: "runmat-analysis-fea",
-            target: CargoTarget::Library,
-            name: concat!(
-                "pipeline::modal::rod_qualification::solid_rod_modal_frequency_and_retained_r",
-                "esponse_have_independent_evidence",
-            ),
-            source: "crates/runmat-analysis/fea/src/pipeline/modal/rod_qualification.rs",
-        },
-        claims: &[CoverageClaim {
-            obligation: "physical_mass_base_state",
-            envelopes: &[MODAL_DOMAIN[4]],
-            boundary: concat!(
-                "Axial affine Tet4 slab rod frequency refinement and modal truncation ",
-                "against direct harmonic response. Does not cover beam/shell modes, repeated ",
-                "eigenspaces, every participation or remote envelope.",
-            ),
-        }],
-    }],
     dependencies: &[concat!(
         "Shared typed authoring, canonical topology/material/constraint/excitation ",
         "authorities; governed resources and execution; independently qualified ",
@@ -420,28 +399,6 @@ const FEA_DYNAMICS_PRESTRESS_001: Requirement = Requirement {
             PRESTRESS_DOMAIN,
         ),
     ],
-    witnesses: &[Witness {
-        id: "FEA-WITNESS-PRESTRESS-HARMONIC",
-        locator: WitnessLocator::CargoTest {
-            package: "runmat-analysis-fea",
-            target: CargoTarget::Library,
-            name: concat!(
-                "tests::prestressed_frequency::prestressed_direct_harmonic_uses_the_exact_tan",
-                "gent_and_rejects_state_substitution",
-            ),
-            source: "crates/runmat-analysis/fea/src/tests/prestressed_frequency.rs",
-        },
-        claims: &[CoverageClaim {
-            obligation: "complete_base_operator",
-            envelopes: &[PRESTRESS_DOMAIN[0]],
-            boundary: concat!(
-                "Fixed direct entry fixture compares preload response ordering and residual, ",
-                "canonical result roundtrip, and substituted topology rejection. No ",
-                "independent buckling reference, nonlinear producer or generic stability ",
-                "qualification.",
-            ),
-        }],
-    }],
     dependencies: &[concat!(
         "Shared typed authoring, canonical topology/material/constraint/excitation ",
         "authorities; governed resources and execution; independently qualified ",
@@ -528,63 +485,6 @@ const FEA_DYNAMICS_RESPONSE_001: Requirement = Requirement {
             EvidenceKind::IndependentReference,
             DOMAIN
         )
-    ],
-    witnesses: &[
-        Witness {
-            id: "FEA-WITNESS-HARMONIC-ROD-TET4",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-"pipeline::modal::rod_qualification::solid_rod_harmonic_face_traction_converg",
-"es_to_independent_continuum",
-),
-                source: "crates/runmat-analysis/fea/src/pipeline/modal/rod_qualification.rs"
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "direct_modal_procedures",
-                    envelopes: &[
-                        DOMAIN[
-                            1
-                        ]
-                    ],
-                    boundary: concat!(
-"Original axial Tet4 rod harmonic traction matrix at three frequencies on ",
-"both sides of resonance; independent complex displacement/reaction ",
-"refinement and phase resultant checks. Not transient, spectrum or ",
-"random-response evidence.",
-)
-                }
-            ]
-        },
-        Witness {
-            id: "FEA-WITNESS-SPECTRUM-COMBINATION",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-"solve::dynamics::response_spectrum::qualification::modal_combination_matches",
-"_independent_quadratic_form_references",
-),
-                source: "crates/runmat-analysis/fea/src/solve/dynamics/response_spectrum/qualification.rs"
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "spectrum_random_recovery",
-                    envelopes: &[
-                        DOMAIN[
-                            0
-                        ]
-                    ],
-                    boundary: concat!(
-"Scalar signed synthetic modal vectors verify SRSS, absolute sum and CQC ",
-"against independent formulas. Mesh-independent arithmetic only; no ",
-"missing-mass, directional or random-vibration claim.",
-)
-                }
-            ]
-        }
     ],
     dependencies: &[
         concat!(
@@ -722,7 +622,6 @@ const FEA_DYNAMICS_GOVERNANCE_001: Requirement = Requirement {
             DOMAIN,
         ),
     ],
-    witnesses: &[],
     dependencies: &[concat!(
         "Shared typed authoring, canonical topology/material/constraint/excitation ",
         "authorities; governed resources and execution; independently qualified ",

@@ -128,6 +128,9 @@ fn shared_velocity_and_gauge_histories_advance_original_state_without_absolute_r
     assert!(interval.recover(&corrupt).is_err());
 }
 
+// witness: FEA-FLUID-INPUTS-001/signals @
+//   incompressible_laminar_transient/canonical_tetrahedra/numerical_kernel;
+//   boundary: Independent volume-integrated time sampling; no partitioned algebra credit.
 #[test]
 fn body_force_time_sampling_preserves_independent_volume_resultant() {
     let mut f = case(2, ReferenceCase::Duct, false);

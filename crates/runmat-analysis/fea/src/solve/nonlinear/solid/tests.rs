@@ -232,6 +232,8 @@ fn small_force_defect_can_require_a_large_pending_correction() {
     assert_eq!(work.linear_solves, 1);
 }
 
+// witness: FEA-NONLINEAR-STATE-001/rollback @ small_strain_j2/tet4/prepared_controller;
+//   boundary: Caller history remains unchanged after failed Newton/cutback.
 #[test]
 fn failed_newton_and_cutback_do_not_commit_caller_history() {
     let (model, mesh, summary) = fixture(ElementOrder::Tet4, true);
@@ -255,6 +257,9 @@ fn failed_newton_and_cutback_do_not_commit_caller_history() {
     assert_eq!(accepted, before);
 }
 
+// witness: FEA-NONLINEAR-STATE-001/rollback @ small_strain_j2/tet4|tet10/prepared_controller;
+//   boundary: Both-order point-evaluation cancellation preserves caller history; not complete
+//   failed-Newton, line-search or controller suffix coverage.
 #[test]
 fn cancelled_point_evaluation_reaches_newton_without_mutating_history() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {

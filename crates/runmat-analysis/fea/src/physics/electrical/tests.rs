@@ -78,6 +78,14 @@ fn assert_relative(actual: f64, expected: f64, tolerance: f64) {
     );
 }
 
+// witness: FEA-EM-SCALAR-001/operator @ electrostatic/tet4|tet10/numerical_kernel,
+//   electrical_conduction/tet4|tet10/numerical_kernel;
+//   boundary: Tet4/Tet10 homogeneous slab capacitor and conductor potentials, fields, terminal
+//   flux, energy and Joule power; not arbitrary geometry or nonlinear material.
+// witness: FEA-EM-SCALAR-001/recovery @ electrostatic/tet4|tet10/numerical_kernel,
+//   electrical_conduction/tet4|tet10/numerical_kernel;
+//   boundary: Same slab constitutive vectors and global terminal/energy identities; no general
+//   charge-density reconstruction claim.
 #[test]
 fn homogeneous_capacitor_and_conductor_match_independent_slab_field_terminals_and_energy() {
     for equation in [
@@ -144,6 +152,10 @@ fn homogeneous_capacitor_and_conductor_match_independent_slab_field_terminals_an
     }
 }
 
+// witness: FEA-EM-SCALAR-001/operator @ electrostatic/tet4|tet10/numerical_kernel,
+//   electrical_conduction/tet4|tet10/numerical_kernel;
+//   boundary: Both orders, aligned two-material slab series capacitance/resistance and interface
+//   flux; no curved interface claim.
 #[test]
 fn layered_materials_match_series_capacitance_and_resistance_with_interface_flux_continuity() {
     for equation in [
@@ -274,6 +286,11 @@ fn constant_gauge_potential_produces_exactly_zero_field_and_power() {
     }
 }
 
+// witness: FEA-EM-QUALIFICATION-001/references @ electrostatic/tet4|tet10/numerical_kernel,
+//   electrical_conduction/tet4|tet10/numerical_kernel;
+//   boundary: Static harmonic polynomial potential x²-y² for both scalar equations: Tet10 exact
+//   field/energy and Tet4 refinement across three meshes; harmonic polynomial is not harmonic
+//   Maxwell.
 #[test]
 fn harmonic_quadratic_potential_has_tet10_exact_field_and_tet4_convergence() {
     // phi=x^2-y^2 is harmonic: no fabricated volume charge/current is needed.
@@ -357,6 +374,10 @@ fn harmonic_quadratic_potential_has_tet10_exact_field_and_tet4_convergence() {
     }
 }
 
+// witness: FEA-EM-INPUT-001/scalar_constraints @ electrical_conduction/tet4/numerical_kernel;
+//   boundary: Tet4 rejects missing anchor, conflicting potentials, floating conductor, bad
+//   material, target and wrong harmonic intent; rejection is not implementation of floating
+//   conductors.
 #[test]
 fn missing_anchors_conflicts_unsupported_intent_and_invalid_material_fail_closed() {
     let mesh = mesh(ElementOrder::Tet4, 2);

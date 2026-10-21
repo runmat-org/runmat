@@ -266,6 +266,12 @@ fn dense_round_trip(face: &ExactFaceMesh, typed: u64) {
     assert_eq!(memory.live.load(std::sync::atomic::Ordering::Relaxed), 0);
 }
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Lossless indexed surface transport preserves original identities, quality and
+//   signed-zero values, inventories typed reconstruction before decoding, and rejects denied
+//   admission. This finite representation fixture does not establish CAD or PDE acceptance,
+//   whole-task RSS, or arbitrary model capacity.
 #[test]
 fn indexed_surface_preserves_original_values_and_admits_before_decode() {
     use crate::surface_mesh::indexed_face::partition;

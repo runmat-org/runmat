@@ -1,5 +1,10 @@
 use super::*;
 
+// witness: FEA-SHARED-RESOURCES-001/governed_path_equivalence @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Serial and four-thread modal grants bind distinct resource identities and pool-stack
+//   storage while preserving the original accuracy ceiling. Native extraction uses the admitted
+//   reusable CPU pool; this witness does not assert parallel assembly or an arbitrary speedup.
 #[test]
 fn modal_cpu_grant_binds_identity_pool_storage_and_unchanged_accuracy_ceiling() {
     let (workload, mesh, constraints, observations) = modal_case(1, ComputeBackend::Cpu);

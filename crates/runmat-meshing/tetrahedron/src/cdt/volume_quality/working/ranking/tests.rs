@@ -10,6 +10,12 @@ fn counts(values: &[u64], baseline: &[u64]) -> BTreeMap<u64, i64> {
     map
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A complete-spectrum improvement confined below the selected defect class cannot
+//   discharge a repair pass. Reducing that class's multiplicity or priority is admitted; creating a
+//   higher defect is rejected. Shared sparse delta comparison needs no copied full spectrum.
+//   Physical acceptance still checks every unquantized bound independently.
 #[test]
 fn selected_class_progress_rejects_tail_only_stagnation_and_accepts_class_reduction() {
     let empty = BTreeMap::new();
@@ -36,6 +42,12 @@ fn selected_class_progress_rejects_tail_only_stagnation_and_accepts_class_reduct
         Ordering::Greater
     );
 }
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A four-stream sparse-delta merge matches independently sorted complete size/shape
+//   spectra and rejects cross-phase undo. The coupled scheduler requires shared strict progress;
+//   standalone subdivision retains its separate shape-preservation policy. This ordering proof is
+//   not a guarantee that an arbitrary protected boundary admits the requested mesh quality.
 #[test]
 fn joint_delta_order_matches_complete_spectra_and_rejects_cross_phase_undo() {
     for case in 0..128_u64 {

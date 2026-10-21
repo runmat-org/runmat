@@ -3,6 +3,10 @@ mod support;
 use runmat_analysis_language::*;
 use support::{source_module, TestHost};
 
+// witness: FEA-AUTHORING-COMPOSITION-001/explicit_imports @
+//   shared_infrastructure/mesh_independent/source_check;
+//   boundary: Mock host checks three-module transitive imports, explicit model/function binding and
+//   symbol-use provenance; no geometry execution, numerical result or remote equivalence.
 #[test]
 fn compiler_loads_transitive_modules_and_binds_explicit_symbols() {
     let host = TestHost::default()
@@ -54,6 +58,10 @@ fn compiler_loads_transitive_modules_and_binds_explicit_symbols() {
     assert_eq!(program.symbol_uses[0].target.name, "bracket");
 }
 
+// witness: FEA-AUTHORING-COMPOSITION-001/explicit_imports @
+//   shared_infrastructure/mesh_independent/source_check;
+//   boundary: Mock-host binding diagnostics identify cyclic imports, duplicate symbols and missing
+//   exports; no complete semantic or numerical qualification.
 #[test]
 fn compiler_reports_cycles_duplicates_and_missing_exports() {
     let host = TestHost::default()

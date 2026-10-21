@@ -25,6 +25,9 @@ fn slab() -> (AnalysisModel, runmat_meshing_core::SolverMeshArtifact) {
     (model, mesh)
 }
 
+// witness: FEA-THERMAL-INPUT-001/boundaries @ thermal_steady/tet4/numerical_kernel;
+//   boundary: Tet4 slab exact gray-surface law, finite-difference tangent and physical power; does
+//   not cover arbitrary enclosure radiation.
 #[test]
 fn exact_steady_slab_radiation_residual_tangent_and_prescribed_power_match_continuum() {
     let (mut model, mesh) = slab();

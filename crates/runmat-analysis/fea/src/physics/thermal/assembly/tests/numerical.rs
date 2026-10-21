@@ -64,6 +64,10 @@ fn transient_departures_retain_heating_below_absolute_temperature_resolution() {
     }
 }
 
+// witness: FEA-THERMAL-DOMAIN-001/assembly @ thermal_steady/tet10/numerical_kernel,
+//   thermal_transient/tet10/numerical_kernel;
+//   boundary: Single Tet10 conductivity constant patch, integrated capacity, linear gradient and
+//   flux; no general curved-mesh convergence.
 #[test]
 fn canonical_tet10_thermal_matrices_pass_constant_patch_and_capacity_integral() {
     let model = fixture_model(FixtureId::CantileverLinearStatic);

@@ -159,6 +159,10 @@ fn child(
     )
     .unwrap()
 }
+// witness: FEA-FLUID-TRANSIENT-001/producer_exit @
+//   incompressible_laminar_transient/canonical_tetrahedra/native_process;
+//   boundary: Child actually exits before new consumers resume; uniform translation and
+//   substitution/budget rejection only.
 #[test]
 fn terminated_native_producers_preserve_original_history_and_admission_rejects_substitution() {
     let (workload, mesh) = fixture();

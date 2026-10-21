@@ -1,26 +1,21 @@
 //! Standing cross-family acceptance with explicit domain boundaries. Required envelopes
 //! without a discovered witness remain open; declarations never imply a test verdict.
 use crate::requirement::*;
-const KERNEL: &[Envelope] = &[envelope(
-    Formulation::SharedInfrastructure,
-    MeshOrder::CanonicalMixedTopology,
-    ExecutionEnvelope::SerialCpuNumericalKernel,
-)];
 const ALL: &[Envelope] = &[
     envelope(
         Formulation::SharedInfrastructure,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::SharedInfrastructure,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::SharedInfrastructure,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::SerialCpuNativeProcess,
+        ExecutionEnvelope::NativeProcess,
     ),
     envelope(
         Formulation::SharedInfrastructure,
@@ -30,12 +25,12 @@ const ALL: &[Envelope] = &[
     envelope(
         Formulation::SharedInfrastructure,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::EncryptedRemote,
+        ExecutionEnvelope::RemoteExecution,
     ),
     envelope(
         Formulation::SharedInfrastructure,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::PartitionedCpu,
+        ExecutionEnvelope::DomainDecomposed,
     ),
     envelope(
         Formulation::SharedInfrastructure,
@@ -112,7 +107,6 @@ const FEA_RELEASE_PLATFORM_001: Requirement = Requirement {
             ALL,
         ),
     ],
-    witnesses: &[],
 };
 const FEA_RELEASE_EVIDENCE_001: Requirement = Requirement {
     id: "FEA-RELEASE-EVIDENCE-001",
@@ -171,7 +165,6 @@ const FEA_RELEASE_EVIDENCE_001: Requirement = Requirement {
             ALL,
         ),
     ],
-    witnesses: &[],
 };
 const FEA_RELEASE_CI_001: Requirement = Requirement {
     id: "FEA-RELEASE-CI-001",
@@ -259,7 +252,6 @@ const FEA_RELEASE_CI_001: Requirement = Requirement {
             ALL,
         ),
     ],
-    witnesses: &[],
 };
 const FEA_RELEASE_DOCUMENTATION_001: Requirement = Requirement {
     id: "FEA-RELEASE-DOCUMENTATION-001",
@@ -352,7 +344,6 @@ const FEA_RELEASE_DOCUMENTATION_001: Requirement = Requirement {
             ALL,
         ),
     ],
-    witnesses: &[],
 };
 const FEA_RELEASE_COMPLETION_001: Requirement = Requirement {
     id: "FEA-RELEASE-COMPLETION-001",
@@ -455,24 +446,6 @@ const FEA_RELEASE_COMPLETION_001: Requirement = Requirement {
             ALL,
         ),
     ],
-    witnesses: &[Witness {
-        id: "FEA-WITNESS-RELEASE-ACCURACY-BLOCK",
-        locator: WitnessLocator::CargoTest {
-            package: "runmat-analysis-fea",
-            target: CargoTarget::Library,
-            name: "results::accuracy::tests::production_accuracy_failure_produces_a_blocking_gate",
-            source: "crates/runmat-analysis/fea/src/results/accuracy/tests.rs",
-        },
-        claims: &[CoverageClaim {
-            obligation: "truthful_fields_operators_and_accuracy",
-            envelopes: KERNEL,
-            boundary: concat!(
-                "Scalar residual criterion failure remains blocking through a typed accuracy ",
-                "artifact; no complete governed family corpus, release attestation or public ",
-                "receipt qualification.",
-            ),
-        }],
-    }],
 };
 const FEA_RELEASE_ENGINEERING_001: Requirement = Requirement {
     id: "FEA-RELEASE-ENGINEERING-001",
@@ -509,7 +482,6 @@ const FEA_RELEASE_ENGINEERING_001: Requirement = Requirement {
         EvidenceKind::PublicationIntegrity,
         ALL,
     )],
-    witnesses: &[],
 };
 const FEA_RELEASE_SCOPE_001: Requirement = Requirement {
     id: "FEA-RELEASE-SCOPE-001",
@@ -646,7 +618,6 @@ const FEA_RELEASE_SCOPE_001: Requirement = Requirement {
             )],
         ),
     ],
-    witnesses: &[],
 };
 pub(crate) const REQUIREMENTS: &[Requirement] = &[
     FEA_RELEASE_SCOPE_001,

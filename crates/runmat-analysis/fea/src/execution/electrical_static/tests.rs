@@ -27,6 +27,11 @@ fn workload(equation: StaticElectricalEquation) -> ElectricalStaticWorkload {
     }
 }
 
+// witness: FEA-EM-QUALIFICATION-001/accuracy @ electrostatic/tet4|tet10/public_study,
+//   electrical_conduction/tet4|tet10/public_study;
+//   boundary: In-process both scalar equations and orders retain original slab fields and canonical
+//   source-bound cold identity; changed controls/equation/mesh reject. No producer death, remote or
+//   durable execution.
 #[test]
 fn equation_order_matrix_retains_exact_fields_and_cold_source_bound_identity() {
     let mut identities = Vec::new();

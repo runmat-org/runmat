@@ -22,6 +22,11 @@ impl GeometryEvaluationControl for Counter {
         Ok(())
     }
 }
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A complete cold exact-face partition prepares its producer metric field once across
+//   geometry and acceptance. Independent validation reconstructs its own input-derived reference;
+//   this fixture does not establish complete original CAD convergence or whole-study scalability.
 #[test]
 fn one_partition_reuses_one_prepared_producer_field_across_geometry_and_acceptance() {
     let (document, topology, registry) = runmat_geometry_fixtures::exact_circle();

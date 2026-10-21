@@ -99,6 +99,10 @@ fn original_uniform_acceleration_has_exact_inertia_pressure_and_cold_binding() {
     }
 }
 
+// witness: FEA-FLUID-TRANSIENT-001/convergence @
+//   incompressible_laminar_transient/canonical_tetrahedra/numerical_kernel;
+//   boundary: Uniform exponential translation pressure on three time steps; no vortex or
+//   independent spatial sweep.
 #[test]
 fn exponential_translation_pressure_shows_first_order_time_convergence() {
     // Independent continuum solution: u=exp(-t)e_x, gradp=rho exp(-t)e_x.
@@ -209,6 +213,10 @@ fn interval_admission_rejects_order_nonfinite_divergence_budget_and_cancellation
     ));
 }
 
+// witness: FEA-FLUID-TRANSIENT-001/inertia @
+//   incompressible_laminar_transient/canonical_tetrahedra/numerical_kernel;
+//   boundary: Independent rho*volume*delta-U/dt cell action on every axis; not temporal field
+//   convergence.
 #[test]
 fn original_mass_term_matches_independent_cell_integral_on_every_axis() {
     use super::super::{

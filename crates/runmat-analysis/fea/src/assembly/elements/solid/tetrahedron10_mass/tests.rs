@@ -52,6 +52,9 @@ fn monomial(point: [f64; 4], exponent: [u32; 4]) -> f64 {
         .product()
 }
 
+// witness: FEA-STRUCTURAL-SOLID-001/quadrature_mass @ linear_structural/tet10/numerical_kernel;
+//   boundary: Affine Tet10 consistent mass preserves independent quadratic kinetic cross moments
+//   across scale/translation. No lumped mass, body-load, damping or mesh-convergence claim.
 #[test]
 fn affine_mass_preserves_all_quadratic_kinetic_cross_moments_at_scale_and_translation() {
     let basis = [

@@ -13,6 +13,12 @@ fn change(value: f64) -> Change {
         }),
     )
 }
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Checkpoints over 32 and 65,536 deferred spatial updates retain no copied baseline
+//   records; changes retain only per-key undo. Nested rollback and committed child changes restore
+//   the entire original deferred inventory. This bounds journal entries, not allocator bytes,
+//   global spatial-tree rebuilding or native study memory.
 #[test]
 fn checkpoints_retain_only_changed_keys_across_large_pending_inventory() {
     for count in [32, 65536] {

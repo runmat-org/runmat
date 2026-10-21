@@ -12,6 +12,9 @@ const GENERATION: f64 = 80.0;
 const FINAL_TIME: f64 = 0.1;
 const RESIDUAL: f64 = 1e-12;
 
+// witness: FEA-THERMAL-ACCURACY-001/time @ thermal_transient/tet4|tet10/public_study;
+//   boundary: Both-order uniform ramp heating, independent continuum error and energy law; no
+//   nonuniform mesh convergence credit.
 #[test]
 fn uniform_ramp_heating_has_continuum_backward_euler_time_convergence() {
     // rho=c=k=1, q(t)=2Bt on an insulated unit cube: T=300+B t².
@@ -125,6 +128,9 @@ fn solved_heated_cube_cold_cooling_tet10_converges_to_continuum_diffusion() {
     cooling_convergence(true, [1, 2, 4]);
 }
 
+// witness: FEA-THERMAL-ACCURACY-001/space @ thermal_transient/tet4/public_study;
+//   boundary: Tet4 heated-cube cold cooling continuum temperature, flux, stored heat and power with
+//   temporal contamination bound; does not prove Tet10 spatial gate.
 #[test]
 fn resolved_tet4_heated_cube_cold_cooling_has_continuum_spatial_convergence() {
     // Separate, independently justified window. The original [1,2,4] failed witness

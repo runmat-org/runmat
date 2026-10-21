@@ -10,6 +10,11 @@ use runmat_analysis_core::{
 };
 use runmat_meshing_core::ElementOrder;
 
+// witness: FEA-EM-QUALIFICATION-001/accuracy @ electrostatic/tet4|tet10/public_study,
+//   electrical_conduction/tet4|tet10/public_study;
+//   boundary: Both equations/orders retained receipts provide only algebraic residual/closure
+//   evidence; independent spatial/convergence obligations remain indeterminate. Not field-accuracy
+//   qualification.
 #[test]
 fn electrical_receipts_supply_only_retained_algebraic_equilibrium_evidence() {
     for equation in [

@@ -62,6 +62,9 @@ fn heat_flux_signal(signal_id: &str, values: [f64; 2]) -> PhysicalSignal {
     })
 }
 
+// witness: FEA-THERMAL-INPUT-001/boundaries @ thermal_transient/tet4/numerical_kernel;
+//   boundary: Tet4 assembly samples prescribed temperature, flux and ambient-time signals; no
+//   generated/field-artifact equivalence credit.
 #[test]
 fn time_signals_drive_prescribed_temperature_flux_and_ambient_temperature() {
     let (mut model, mesh, _, base_region) = thermal_reference_model();

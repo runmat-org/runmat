@@ -25,6 +25,12 @@ use runmat_execution_artifact::{
 use runmat_meshing_core::ElementOrder;
 use std::collections::BTreeSet;
 
+// witness: FEA-SHARED-RESOURCES-001/governed_path_equivalence @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Tet4/Tet10 native scalar extraction, cold basis/receipt recovery and actual result
+//   codec profiles check the shared output reservation. One-byte construction understatement
+//   rejects. This finite workflow does not qualify arbitrary modal counts, realistic original
+//   studies or measured peak memory.
 #[test]
 fn native_scalar_modal_preserves_cold_basis_receipts_fields_and_rejects_missing_source_budget() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
