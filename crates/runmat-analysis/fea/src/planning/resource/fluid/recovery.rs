@@ -14,8 +14,19 @@ pub fn fluid_field_recovery_shape(
     request: &FieldRecoveryRequest,
 ) -> Result<(Vec<u64>, ByteCount), ResourcePlanningError> {
     request.validate().map_err(invalid)?;
+    // The original native plan names its coupled fields: conjugate studies add temperature.
+    let coupling = if request
+        .plan
+        .requirements
+        .iter()
+        .any(|r| r.quantity == runmat_analysis_core::ObservationQuantity::Temperature)
+    {
+        crate::execution::FluidCoupling::ConjugateHeat
+    } else {
+        crate::execution::FluidCoupling::Standalone
+    };
     let definitions =
-        crate::execution::fluid_native_field_definition_inventory().map_err(invalid)?;
+        crate::execution::fluid_field_definition_inventory(coupling).map_err(invalid)?;
     request
         .plan
         .validate_definitions(definitions.iter().cloned())

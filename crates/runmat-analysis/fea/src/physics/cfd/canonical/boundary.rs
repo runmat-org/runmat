@@ -17,6 +17,11 @@ pub(super) enum FaceBoundary<'a> {
         authority_id: &'a str,
         pressure: f64,
     },
+    /// Stationary impermeable plane without shear: zero normal velocity and zero
+    /// tangential traction. Authored slip walls and symmetry planes share this law.
+    Symmetry {
+        authority_id: &'a str,
+    },
 }
 
 mod mass_flow;
@@ -92,12 +97,18 @@ pub(super) fn compile<'a>(input: BoundaryInput<'a, '_>) -> Result<Vec<FaceBounda
                     moving_wall: false,
                 },
             ),
+            FluidConstraintKind::SlipWall { target } | FluidConstraintKind::Symmetry { target } => {
+                (
+                    target,
+                    FaceBoundary::Symmetry {
+                        authority_id: c.constraint_id.as_str(),
+                    },
+                )
+            }
             // Gauge authority is compiled separately; it supplies no face law.
             FluidConstraintKind::PressureReference { .. } => continue,
-            _ => {
-                return Err(Error::Unsupported(
-                    "slip, symmetry or periodic fluid boundary",
-                ))
+            FluidConstraintKind::Periodic(_) => {
+                return Err(Error::Unsupported("periodic fluid boundary"))
             }
         };
         bind(source, t, &mut out, target, law)?;
@@ -147,7 +158,8 @@ fn bind<'a>(
     let finite = match &law {
         FaceBoundary::Velocity { value, .. } => value.iter().all(|x| x.is_finite()),
         FaceBoundary::PressureOutlet { pressure, .. } => pressure.is_finite(),
-        _ => false,
+        FaceBoundary::Symmetry { .. } => true,
+        FaceBoundary::Interior => false,
     };
     if !finite {
         return Err(Error::Invalid("boundary value"));

@@ -98,23 +98,17 @@ impl AnalysisSolverOptions {
                 TransientResponse,
                 SolutionSpace::Direct | SolutionSpace::ModalReduced,
             ) => Ok(Self::StructuralTransient(AnalysisTransientRunOptions::default())),
-            (Fluid, Static, SolutionSpace::Direct) => Ok(Self::IncompressibleFlow(
-                AnalysisCfdRunOptions::default(),
-            )),
-            (
-                Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer),
+            // Flow studies, standalone or coupled to heat transfer or a structure, run the one
+            // canonical finite-volume flow lifecycle and share its solver options.
+            (Fluid, Static | TransientResponse, SolutionSpace::Direct)
+            | (
+                Coupled(
+                    CoupledPhysicsFamily::ConjugateHeatTransfer
+                    | CoupledPhysicsFamily::FluidStructureInteraction,
+                ),
                 Static | TransientResponse,
                 SolutionSpace::Direct,
-            ) => Ok(Self::ConjugateHeatTransfer(
-                AnalysisChtRunOptions::default(),
-            )),
-            (
-                Coupled(CoupledPhysicsFamily::FluidStructureInteraction),
-                TransientResponse,
-                SolutionSpace::Direct,
-            ) => Ok(Self::FluidStructureInteraction(
-                AnalysisFsiRunOptions::default(),
-            )),
+            ) => Ok(Self::IncompressibleFlow(AnalysisCfdRunOptions::default())),
             (Structural, Nonlinear, SolutionSpace::Direct)
             | (
                 Coupled(CoupledPhysicsFamily::Thermomechanical),

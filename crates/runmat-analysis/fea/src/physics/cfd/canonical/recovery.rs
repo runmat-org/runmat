@@ -173,7 +173,14 @@ pub(super) fn evaluate_with_time(
     let continuity_relative = continuity.relative.iter().copied().fold(0.0, f64::max);
     let momentum_relative = relative(momentum_norm, momentum_scale);
     let flux_constitutive_relative = relative(discrepancy, discrepancy_scale);
-    let face_forces = super::flux_evidence::evaluate(p, u, pressure_fluctuation_pa, q)?;
+    let face_forces = super::flux_evidence::evaluate(
+        p,
+        u,
+        pressure_fluctuation_pa,
+        q,
+        time.and_then(|t| t.motion)
+            .map(|m| m.face_mesh_flux_m3_per_s),
+    )?;
     let mut independent_cells = vec![[0.0; 3]; n];
     let mut local_scales = vec![0.0; n];
     let mut global_momentum = [0.0; 3];

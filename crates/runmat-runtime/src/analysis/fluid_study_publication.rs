@@ -83,11 +83,17 @@ pub fn prepare_fluid_study_publication(
         )
         .map_err(invalid)?
     };
-    let run_id = publication_identity.local_run_id(
-        runmat_analysis_core::PhysicsFamily::Fluid,
-        definition,
-        &completed.workload.step_id,
-    );
+    // The admitted step family names the run: standalone flow or a coupled flow study.
+    let family = completed
+        .workload
+        .model
+        .sequence
+        .steps
+        .first()
+        .map_or(runmat_analysis_core::PhysicsFamily::Fluid, |step| {
+            step.family
+        });
+    let run_id = publication_identity.local_run_id(family, definition, &completed.workload.step_id);
     let run = materialization::admit(completed, mesh, options, fields, &run_id, &context)
         .map_err(invalid)?;
     let object_artifact_paths = source
@@ -185,7 +191,9 @@ impl FluidLayoutEvidence {
         Ok(Self {
             identity: layout.identity(),
             content_digest: runmat_execution::Digest::sha256(
-                layout.canonical_bytes().map_err(|error| error.to_string())?,
+                layout
+                    .canonical_bytes()
+                    .map_err(|error| error.to_string())?,
             ),
             entity_counts: layout.entity_counts(),
         })

@@ -227,6 +227,7 @@ const fn boundary_transfer_order(transfer: BoundaryTransferImplementation) -> u8
         BoundaryTransferImplementation::UnmappedFallback => 7,
         BoundaryTransferImplementation::FullExteriorTangentialPotentialGroundWithWeakCoulombGauge => 8,
         BoundaryTransferImplementation::FullExteriorElectricPerfectConductor => 9,
+        BoundaryTransferImplementation::DeclaredConformalInterfaceLaw => 10,
     }
 }
 

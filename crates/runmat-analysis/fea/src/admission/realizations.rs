@@ -193,22 +193,27 @@ fn coupled_realizations(
     family: CoupledPhysicsFamily,
     procedure: AnalysisProcedure,
 ) -> Vec<ExactFormulationRealization> {
-    let temporal = match procedure {
-        AnalysisProcedure::Static => TemporalImplementation::CoupledSinglePassProfileTransfer,
-        AnalysisProcedure::TransientResponse => TemporalImplementation::CoupledFixedPointRelaxation,
-        AnalysisProcedure::Nonlinear => TemporalImplementation::CoupledScalarResidualIteration,
-        _ => return Vec::new(),
-    };
     match family {
         CoupledPhysicsFamily::Thermomechanical => thermomechanical_realizations(procedure),
         CoupledPhysicsFamily::Electrothermal => Vec::new(),
-        CoupledPhysicsFamily::ConjugateHeatTransfer => flow_thermal_realizations(
-            temporal,
-            CouplingImplementation::PartitionedConjugateProjection,
-        ),
-        // The former synthetic scalar branch is not a genuine structural constitutive solve.
-        // Do not assign the new J2 identity to that unrelated reduced coupling implementation.
-        CoupledPhysicsFamily::FluidStructureInteraction => Vec::new(),
+        CoupledPhysicsFamily::ConjugateHeatTransfer => match procedure {
+            AnalysisProcedure::Static => {
+                vec![super::fluid::canonical_conjugate_heat_steady_realization()]
+            }
+            AnalysisProcedure::TransientResponse => {
+                vec![super::fluid::canonical_conjugate_heat_transient_realization()]
+            }
+            _ => Vec::new(),
+        },
+        CoupledPhysicsFamily::FluidStructureInteraction => match procedure {
+            AnalysisProcedure::Static => {
+                vec![super::fluid::canonical_fluid_structure_steady_realization()]
+            }
+            AnalysisProcedure::TransientResponse => {
+                vec![super::fluid::canonical_fluid_structure_transient_realization()]
+            }
+            _ => Vec::new(),
+        },
     }
 }
 
@@ -272,91 +277,4 @@ fn thermomechanical_realizations(procedure: AnalysisProcedure) -> Vec<ExactFormu
             })
         })
         .collect()
-}
-
-fn flow_thermal_realizations(
-    temporal: TemporalImplementation,
-    coupling: CouplingImplementation,
-) -> Vec<ExactFormulationRealization> {
-    domain_topology_branches()
-        .into_iter()
-        .map(|branch| ExactFormulationRealization {
-            components: vec![fluid_component(&branch), thermal_component(&branch)],
-            temporals: vec![temporal],
-            coupling,
-            boundary_transfers: vec![BoundaryTransferImplementation::HeuristicInterfaceTransfer],
-        })
-        .collect()
-}
-
-#[derive(Clone)]
-struct DomainTopologyBranch {
-    primary_topology: TopologyImplementation,
-    sources: Vec<SourceImplementation>,
-}
-
-impl DomainTopologyBranch {
-    fn is_canonical(&self) -> bool {
-        matches!(
-            self.primary_topology,
-            TopologyImplementation::CanonicalSolverMeshTet4
-                | TopologyImplementation::CanonicalSolverMeshTet10
-        )
-    }
-}
-
-fn domain_topology_branches() -> Vec<DomainTopologyBranch> {
-    let mut branches = Vec::new();
-    for primary_topology in [
-        TopologyImplementation::CanonicalSolverMeshTet4,
-        TopologyImplementation::CanonicalSolverMeshTet10,
-    ] {
-        branches.extend([
-            DomainTopologyBranch {
-                primary_topology,
-                sources: vec![SourceImplementation::CanonicalBoundaryProjection],
-            },
-            DomainTopologyBranch {
-                primary_topology,
-                sources: vec![SourceImplementation::OrdinalDistribution],
-            },
-            DomainTopologyBranch {
-                primary_topology,
-                sources: vec![SourceImplementation::UnmappedFallback],
-            },
-        ]);
-    }
-    branches.push(DomainTopologyBranch {
-        primary_topology: TopologyImplementation::ImplicitChannel,
-        sources: vec![SourceImplementation::OrdinalDistribution],
-    });
-    branches
-}
-
-fn fluid_component(branch: &DomainTopologyBranch) -> ExactFormulationComponent {
-    ExactFormulationComponent {
-        spatial_operator: SpatialOperatorImplementation::ReducedChannelFlow,
-        constitutive: ConstitutiveImplementation::ReducedIncompressibleFlowClosure,
-        recovery: RecoveryImplementation::CfdReducedChannelProfile,
-        topologies: vec![branch.primary_topology],
-        sources: branch.sources.clone(),
-    }
-}
-
-fn thermal_component(branch: &DomainTopologyBranch) -> ExactFormulationComponent {
-    ExactFormulationComponent {
-        spatial_operator: SpatialOperatorImplementation::ReducedThermalDiffusion,
-        constitutive: ConstitutiveImplementation::ReducedThermalCoefficientProfile,
-        recovery: if branch.is_canonical() {
-            RecoveryImplementation::ThermalSolverMeshGradient
-        } else {
-            RecoveryImplementation::ThermalInferredAxisGradient
-        },
-        topologies: vec![if branch.is_canonical() {
-            branch.primary_topology
-        } else {
-            TopologyImplementation::InferredLattice
-        }],
-        sources: branch.sources.clone(),
-    }
 }

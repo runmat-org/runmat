@@ -52,9 +52,47 @@ pub fn fluid_native_field_definition_inventory(
     .collect()
 }
 
-fn plan(topology: &FiniteVolumeFieldTopology) -> AnalysisExecutionResult<FieldRecoveryPlan> {
+/// Native fields of one workload: the flow fields, plus the conjugate node temperature when
+/// the study couples heat transfer. Temperature is the solved nodal unknown, not a transfer.
+pub fn field_definition_inventory(
+    coupling: super::workload::FluidCoupling,
+) -> AnalysisExecutionResult<Vec<RecoveredFieldDefinition>> {
+    let mut definitions = fluid_native_field_definition_inventory()?;
+    if coupling == super::workload::FluidCoupling::FluidStructure {
+        definitions.push(
+            RecoveredFieldDefinition::new(
+                "fsi.displacement",
+                ObservationQuantity::Displacement,
+                FieldLocation::Node,
+                RecoveredFieldEntityDomain::Nodes,
+                ObservationQuantity::Displacement.canonical_value_shape(),
+                RecoveredFieldNumericRepresentation::Real,
+            )
+            .map_err(invalid)?,
+        );
+    }
+    if coupling == super::workload::FluidCoupling::ConjugateHeat {
+        definitions.push(
+            RecoveredFieldDefinition::new(
+                "cht.temperature",
+                ObservationQuantity::Temperature,
+                FieldLocation::Node,
+                RecoveredFieldEntityDomain::Nodes,
+                ObservationQuantity::Temperature.canonical_value_shape(),
+                RecoveredFieldNumericRepresentation::Real,
+            )
+            .map_err(invalid)?,
+        );
+    }
+    Ok(definitions)
+}
+
+fn plan(
+    topology: &FiniteVolumeFieldTopology,
+    coupling: super::workload::FluidCoupling,
+) -> AnalysisExecutionResult<FieldRecoveryPlan> {
     let counts = topology.entity_counts();
-    let requirements = fluid_native_field_definition_inventory()?
+    let requirements = field_definition_inventory(coupling)?
         .into_iter()
         .map(|d| {
             let n = u64::try_from(counts.entity_count(d.entity_domain())).map_err(invalid)?;
@@ -116,7 +154,7 @@ impl FluidSteadySolverResult {
             self.producer_identity(),
             FieldRecoverySource::SolverResult(self.identity()?),
             topology.identity(),
-            plan(&topology)?,
+            plan(&topology, workload.coupling())?,
         )
     }
 
@@ -131,7 +169,7 @@ impl FluidSteadySolverResult {
             self.producer_identity(),
             FieldRecoverySource::SolverResult(self.identity()?),
             topology.identity(),
-            plan(&topology)?,
+            plan(&topology, workload.coupling())?,
         )?;
         if request != &expected {
             return Err(invalid(
@@ -146,13 +184,19 @@ impl FluidSteadySolverResult {
             .ok_or_else(|| invalid("fluid velocity count overflow"))?;
         let mut velocity = Vec::with_capacity(velocity_count);
         velocity.extend(original.velocity_m_per_s.iter().flatten().copied());
-        let mut values = [
+        let mut values = vec![
             velocity,
             original.pressure_pa.clone(),
             original.face_volume_flux_m3_per_s.clone(),
-        ]
-        .into_iter();
-        let definitions = fluid_native_field_definition_inventory()?;
+        ];
+        if let Some(energy) = self.conjugate_heat() {
+            values.push(energy.temperature_k.clone());
+        }
+        if let Some(displacement) = self.coupled_displacement() {
+            values.push(displacement.iter().flatten().copied().collect());
+        }
+        let mut values = values.into_iter();
+        let definitions = field_definition_inventory(workload.coupling())?;
         let mut fields = Vec::with_capacity(definitions.len());
         for definition in definitions {
             let shape = definition

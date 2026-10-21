@@ -274,7 +274,7 @@ fn run_operation_for_procedure(
         ) => Some(AnalysisOperation::Cht),
         (
             Coupled(CoupledPhysicsFamily::FluidStructureInteraction),
-            TransientResponse,
+            Static | TransientResponse,
             SolutionSpace::Direct,
         ) => Some(AnalysisOperation::Fsi),
         (Structural, Nonlinear, SolutionSpace::Direct)

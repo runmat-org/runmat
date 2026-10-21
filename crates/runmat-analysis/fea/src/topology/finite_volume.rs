@@ -45,12 +45,45 @@ pub struct FiniteVolumeReservation {
     pub traversal_operations: usize,
 }
 
+/// The source volume elements that become cells. A region subset makes every face it shares
+/// with an excluded region an exterior face of the cell complex; that face must be an original
+/// conformal-interface face, so its exact CAD provenance remains the boundary authority.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FiniteVolumeCellSelection {
+    AllElements,
+    /// Sorted, unique mesh region identities.
+    Regions(Vec<PersistentEntityId>),
+}
+
+impl FiniteVolumeCellSelection {
+    pub fn regions(
+        mut regions: Vec<PersistentEntityId>,
+    ) -> Result<Self, FiniteVolumeProjectionError> {
+        regions.sort();
+        regions.dedup();
+        if regions.is_empty() {
+            return Err(FiniteVolumeProjectionError::Invalid(
+                "empty region selection",
+            ));
+        }
+        Ok(Self::Regions(regions))
+    }
+    pub fn includes(&self, region: &PersistentEntityId) -> bool {
+        match self {
+            Self::AllElements => true,
+            Self::Regions(regions) => regions.binary_search(region).is_ok(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct FiniteVolumeTopology {
     pub mesh_digest: StableDigest,
     pub projection_digest: Digest,
     pub geometry_digest: Digest,
     pub policy: FiniteVolumeProjectionPolicy,
+    pub selection: FiniteVolumeCellSelection,
     pub reservation: FiniteVolumeReservation,
     pub cells: Vec<FiniteVolumeCell>,
     pub faces: Vec<FiniteVolumeFace>,
@@ -123,7 +156,16 @@ impl FiniteVolumeTopology {
         source: &AnalysisProjection,
         policy: FiniteVolumeProjectionPolicy,
     ) -> Result<Self, FiniteVolumeProjectionError> {
-        derive::derive(source, policy)
+        derive::derive(source, policy, FiniteVolumeCellSelection::AllElements)
+    }
+
+    /// Cells of the selected mesh regions only, such as the fluid of a conjugate model.
+    pub fn derive_selected(
+        source: &AnalysisProjection,
+        policy: FiniteVolumeProjectionPolicy,
+        selection: FiniteVolumeCellSelection,
+    ) -> Result<Self, FiniteVolumeProjectionError> {
+        derive::derive(source, policy, selection)
     }
 
     /// Revalidate externally constructible/mutable records before using geometry in a kernel.
@@ -132,7 +174,7 @@ impl FiniteVolumeTopology {
         &self,
         source: &AnalysisProjection,
     ) -> Result<(), FiniteVolumeProjectionError> {
-        if self != &Self::derive(source, self.policy)? {
+        if self != &Self::derive_selected(source, self.policy, self.selection.clone())? {
             return Err(FiniteVolumeProjectionError::SourceMismatch);
         }
         Ok(())

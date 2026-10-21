@@ -34,6 +34,7 @@ pub(super) fn h_flux(
             } else {
                 match p.boundaries[i] {
                     FaceBoundary::Velocity { value, .. } => Ok(dot(value, f.owner_area_vector_m2)),
+                    FaceBoundary::Symmetry { .. } => Ok(0.0),
                     FaceBoundary::PressureOutlet { .. } => Ok(dot(
                         add(
                             face_velocity_trace(p, i, f.owner, u, &gu),
@@ -78,7 +79,9 @@ pub(super) fn corrected_flux(
                     + dot(interpolate(gp[f.owner], gp[n], w), tangent)
             } else {
                 match p.boundaries[i] {
-                    FaceBoundary::Velocity { .. } => return Ok(qh[i]),
+                    FaceBoundary::Velocity { .. } | FaceBoundary::Symmetry { .. } => {
+                        return Ok(qh[i])
+                    }
                     FaceBoundary::PressureOutlet { pressure: pb, .. } => {
                         alpha * ((pb - p.pressure_reference_pa[f.owner]) - pressure[f.owner])
                             + dot(gp[f.owner], tangent)
@@ -139,7 +142,9 @@ pub(super) fn solve(
                 b[n] -= explicit;
             } else {
                 match p.boundaries[i] {
-                    FaceBoundary::Velocity { .. } => b[f.owner] -= qh[i],
+                    FaceBoundary::Velocity { .. } | FaceBoundary::Symmetry { .. } => {
+                        b[f.owner] -= qh[i]
+                    }
                     FaceBoundary::PressureOutlet { pressure: pb, .. } => {
                         a.add(f.owner, f.owner, d);
                         b[f.owner] += -qh[i]

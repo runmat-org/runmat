@@ -223,8 +223,7 @@ pub fn prepare_observation_fanout(
                 let mesh = admitted.mesh.as_ref().ok_or(AnalysisBridgeError::Identity("finite-volume observation mesh absent"))?;
                 let projection = runmat_analysis_fea::topology::AnalysisProjection::derive(mesh)
                     .map_err(|e| AnalysisBridgeError::Invalid(e.to_string()))?;
-                let geometry = runmat_analysis_fea::topology::FiniteVolumeTopology::derive(&projection, fluid.geometry_policy)
-                    .map_err(|e| AnalysisBridgeError::Invalid(e.to_string()))?;
+                let geometry = fluid.fluid_cell_complex(mesh, &projection)?;
                 runmat_analysis_fea::results::observation::finite_volume_observation_partition_source_indices(
                     &admitted.request.plan, &plan, partition,
                     runmat_analysis_fea::results::observation::FiniteVolumeObservationSource { layout, projection: &projection, geometry: &geometry }, preparation.limits)

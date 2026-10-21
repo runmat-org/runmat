@@ -138,7 +138,8 @@ pub(super) fn admit_finite_volume(
     };
     fluid.validate()?;
     let mesh = mesh.ok_or_else(|| fail("finite-volume observation mesh absent"))?;
-    let definitions = runmat_analysis_fea::execution::fluid_native_field_definition_inventory()?;
+    let definitions =
+        runmat_analysis_fea::execution::fluid_field_definition_inventory(fluid.coupling())?;
     if request.producer != fluid.producer_identity()?
         || fluid.model.sequence.steps.as_slice() != [p.step.clone()]
         || fields
@@ -156,8 +157,7 @@ pub(super) fn admit_finite_volume(
     }
     let projection = AnalysisProjection::derive(&mesh)
         .map_err(|e| AnalysisBridgeError::Invalid(e.to_string()))?;
-    let geometry = FiniteVolumeTopology::derive(&projection, fluid.geometry_policy)
-        .map_err(|e| AnalysisBridgeError::Invalid(e.to_string()))?;
+    let geometry = fluid.fluid_cell_complex(&mesh, &projection)?;
     layout
         .validate_for(&projection, &geometry)
         .map_err(|e| AnalysisBridgeError::Invalid(e.to_string()))?;

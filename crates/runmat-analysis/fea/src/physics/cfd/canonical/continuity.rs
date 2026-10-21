@@ -22,6 +22,9 @@ pub(super) fn evaluate(p: &CanonicalFluidProblem<'_>, q: &[f64]) -> Result<Conti
                 } if *value != dot(velocity, face.owner_area_vector_m2) => {
                     return Err(Error::Invalid("retained prescribed boundary flux"))
                 }
+                FaceBoundary::Symmetry { .. } if *value != 0.0 => {
+                    return Err(Error::Invalid("retained symmetry-plane flux"))
+                }
                 FaceBoundary::PressureOutlet { .. } if *value < 0.0 => {
                     return Err(Error::Unsupported("pressure outlet backflow"))
                 }

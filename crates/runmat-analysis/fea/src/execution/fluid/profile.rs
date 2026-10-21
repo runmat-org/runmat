@@ -120,6 +120,54 @@ fn original_profile<I>(cells: usize, faces: usize, authorities: I) -> OriginalPr
     }
 }
 
+/// Same variant names as the retained `FluidRetainedOriginal` wire enum.
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+enum RetainedShape<S, T, F = (), E = (), G = ()> {
+    Steady(S),
+    Transient(T),
+    FluidStructure(G),
+    FluidStructureTransient(G),
+    ConjugateHeatTransient(G),
+    ConjugateHeat { flow: F, energy: E },
+}
+
+/// Field order of `ConjugateHeatTransientResult`, with maximum-width placeholder values.
+#[derive(Serialize)]
+struct ConjugateHeatTransientShape<F> {
+    flow: F,
+    departure_time_s: f64,
+    departure: crate::physics::conjugate_heat::ConjugateHeatResult,
+    energy: crate::physics::conjugate_heat::ConjugateHeatResult,
+    steps: Repeated<crate::physics::conjugate_heat::ConjugateHeatStep>,
+}
+
+/// Field order of `FluidStructureTransientResult`, with maximum-width placeholder values.
+#[derive(Serialize)]
+struct FluidStructureTransientShape<F> {
+    start_time_s: f64,
+    departure_time_s: f64,
+    departure_displacement_m: Repeated<[f64; 3]>,
+    departure_structure: crate::physics::fluid_structure::NewmarkState,
+    departure_flow: crate::physics::fluid_structure::FluidStructureFlowState,
+    departure_load: Repeated<f64>,
+    displacement_m: Repeated<[f64; 3]>,
+    structure: crate::physics::fluid_structure::NewmarkState,
+    flow: F,
+    steps: Repeated<crate::physics::fluid_structure::FluidStructureStepEvidence>,
+    energy_relative_residual: f64,
+}
+
+/// Field order of `FluidStructureResult`, with maximum-width placeholder values.
+#[derive(Serialize)]
+struct FluidStructureShape<F> {
+    displacement_m: Repeated<[f64; 3]>,
+    structural_response_m: Repeated<[f64; 3]>,
+    flow: F,
+    coupling_iterations: usize,
+    evidence: crate::physics::fluid_structure::FluidStructureEvidence,
+}
+
 pub(super) fn original_block_profile<'a>(
     cells: usize,
     faces: usize,
@@ -168,18 +216,129 @@ impl FluidSteadyWorkload {
         let source = self.prepare(mesh)?;
         let problem = source.problem(self)?;
         let reservation = problem.reservation();
+        let identity = Digest::from_bytes([0; 32]);
+        if self.coupling() == super::workload::FluidCoupling::FluidStructure && self.is_transient()
+        {
+            let coupled = source.fluid_structure(self, mesh)?;
+            let schedule =
+                super::FluidTransientSchedule::derive(&self.model, &self.model.sequence.steps[0])?;
+            let cells = source.topology.cells.len();
+            let faces = source.topology.faces.len();
+            let structural = 3 * coupled.structural_node_count();
+            let flow = original_profile(cells, faces, problem.boundary_balance_authorities());
+            let state = || crate::physics::fluid_structure::NewmarkState {
+                displacement: vec![0.0; structural],
+                velocity: vec![0.0; structural],
+                acceleration: vec![0.0; structural],
+            };
+            let shape = RetainedShape::<(), (), (), (), _>::FluidStructureTransient(
+                FluidStructureTransientShape {
+                    start_time_s: 0.0,
+                    departure_time_s: 0.0,
+                    departure_displacement_m: vector(source.source.nodes.len()),
+                    departure_structure: state(),
+                    departure_flow: crate::physics::fluid_structure::FluidStructureFlowState {
+                        velocity_m_per_s: vec![[0.0; 3]; cells],
+                        pressure_reference_pa: vec![0.0; cells],
+                        pressure_fluctuation_pa: vec![0.0; cells],
+                        face_volume_flux_m3_per_s: vec![0.0; faces],
+                    },
+                    departure_load: scalar(structural),
+                    displacement_m: vector(source.source.nodes.len()),
+                    structure: state(),
+                    flow,
+                    steps: Repeated {
+                        sample: crate::physics::fluid_structure::FluidStructureStepEvidence {
+                            time_s: 0.0,
+                            coupling_iterations: 0,
+                            interface_displacement_relative_residual: 0.0,
+                            interface_force_n: [0.0; 3],
+                            interface_work_j: 0.0,
+                            strain_energy_j: 0.0,
+                            kinetic_energy_j: 0.0,
+                            structural_dynamic_relative_residual: 0.0,
+                        },
+                        count: schedule.points_s().len() - 1,
+                    },
+                    energy_relative_residual: 0.0,
+                },
+            );
+            let data = source_data(self, &source, reservation, identity, shape)?;
+            return profile_serialized_shape(&FluidResultWire { data }, LIMITS).map_err(invalid);
+        }
+        if self.is_transient() && self.coupling() == super::workload::FluidCoupling::Standalone {
+            drop(problem);
+            let view = self.transient_view();
+            let prepared = view.prepare(mesh)?;
+            let shape = RetainedShape::<(), _>::Transient(prepared.result_shape()?);
+            let data = source_data(self, &source, reservation, identity, shape)?;
+            return profile_serialized_shape(&FluidResultWire { data }, LIMITS).map_err(invalid);
+        }
         let original = original_profile(
             source.topology.cells.len(),
             source.topology.faces.len(),
             problem.boundary_balance_authorities(),
         );
-        let data = source_data(
-            self,
-            &source,
-            reservation,
-            original.numerical_input_identity,
-            original,
-        )?;
+        if self.coupling() == super::workload::FluidCoupling::FluidStructure {
+            let coupled = source.fluid_structure(self, mesh)?;
+            let shape = RetainedShape::<(), (), (), (), _>::FluidStructure(FluidStructureShape {
+                displacement_m: vector(source.source.nodes.len()),
+                structural_response_m: vector(coupled.structural_node_count()),
+                flow: original,
+                coupling_iterations: 0,
+                evidence: crate::physics::fluid_structure::FluidStructureEvidence {
+                    iteration_residuals: vec![0.0; coupled.maximum_coupling_iterations()],
+                    interface_displacement_relative_residual: 0.0,
+                    interface_force_n: [0.0; 3],
+                    interface_work_j: 0.0,
+                    structural_strain_energy_j: 0.0,
+                    work_energy_relative_residual: 0.0,
+                    structural_equilibrium_relative_residual: 0.0,
+                    mesh_motion_relative_residual: 0.0,
+                    largest_interface_displacement_m: 0.0,
+                },
+            });
+            let data = source_data(self, &source, reservation, identity, shape)?;
+            return profile_serialized_shape(&FluidResultWire { data }, LIMITS).map_err(invalid);
+        }
+        if self.coupling() == super::workload::FluidCoupling::ConjugateHeat && self.is_transient() {
+            let flux = vec![0.0; source.topology.faces.len()];
+            let energy = source.conjugate_heat(self, &flux)?.result_shape();
+            let schedule =
+                super::FluidTransientSchedule::derive(&self.model, &self.model.sequence.steps[0])?;
+            let shape = RetainedShape::<(), (), (), (), _>::ConjugateHeatTransient(
+                ConjugateHeatTransientShape {
+                    flow: original,
+                    departure_time_s: 0.0,
+                    departure: energy.clone(),
+                    energy,
+                    steps: Repeated {
+                        sample: crate::physics::conjugate_heat::ConjugateHeatStep {
+                            time_s: 0.0,
+                            peak_temperature_k: 0.0,
+                            stored_heat_rate_w: 0.0,
+                            relative_imbalance: 0.0,
+                        },
+                        count: schedule.points_s().len() - 1,
+                    },
+                },
+            );
+            let data = source_data(self, &source, reservation, identity, shape)?;
+            return profile_serialized_shape(&FluidResultWire { data }, LIMITS).map_err(invalid);
+        }
+        if self.coupling() == super::workload::FluidCoupling::ConjugateHeat {
+            // Zero flux fixes every cardinality of the energy result without a solve.
+            let flux = vec![0.0; source.topology.faces.len()];
+            let energy = source.conjugate_heat(self, &flux)?.result_shape();
+            let shape = RetainedShape::<(), (), _, _, ()>::ConjugateHeat {
+                flow: original,
+                energy,
+            };
+            let data = source_data(self, &source, reservation, identity, shape)?;
+            return profile_serialized_shape(&FluidResultWire { data }, LIMITS).map_err(invalid);
+        }
+        let shape = RetainedShape::<_, ()>::Steady(original);
+        let data = source_data(self, &source, reservation, identity, shape)?;
         let wire = FluidResultWire { data };
         profile_serialized_shape(&wire, LIMITS).map_err(invalid)
     }

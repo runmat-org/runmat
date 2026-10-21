@@ -55,14 +55,21 @@ struct Fields<'a> {
     definitions: &'a [RecoveredFieldDefinition],
     counts: &'a [usize],
     original: &'a crate::physics::cfd::canonical::CanonicalFluidResult,
+    extra: Option<Values<'a>>,
 }
 impl Serialize for Fields<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let values = [
+        let mut values = vec![
             Values::Velocity(&self.original.velocity_m_per_s),
             Values::Scalar(&self.original.pressure_pa),
             Values::Scalar(&self.original.face_volume_flux_m3_per_s),
         ];
+        if let Some(extra) = &self.extra {
+            values.push(match extra {
+                Values::Velocity(v) => Values::Velocity(v),
+                Values::Scalar(v) => Values::Scalar(v),
+            });
+        }
         let mut seq = serializer.serialize_seq(Some(self.definitions.len()))?;
         for ((definition, count), values) in self.definitions.iter().zip(self.counts).zip(values) {
             let shape = definition
@@ -94,10 +101,16 @@ fn artifact_profile(
     definitions: &[RecoveredFieldDefinition],
     counts: &[usize],
     original: &crate::physics::cfd::canonical::CanonicalFluidResult,
+    extra: Option<Values<'_>>,
     entity_counts: RecoveredFieldEntityCounts,
 ) -> AnalysisExecutionResult<SerializedCanonicalProfile> {
-    if definitions.len() != 3
-        || counts.len() != 3
+    let expected = 3 + usize::from(extra.is_some());
+    if definitions.len() != expected
+        || counts.len() != expected
+        || extra.as_ref().is_some_and(|values| match values {
+            Values::Velocity(v) => v.len() != counts[3],
+            Values::Scalar(v) => v.len() != counts[3],
+        })
         || original.velocity_m_per_s.len() != counts[0]
         || original.pressure_pa.len() != counts[1]
         || original.pressure_fluctuation_pa.len() != counts[1]
@@ -120,6 +133,7 @@ fn artifact_profile(
                 definitions,
                 counts,
                 original,
+                extra,
             },
         },
         LIMITS,
@@ -132,11 +146,24 @@ pub(super) fn requested_bytes(
     workload: &FluidSteadyWorkload,
     source: &super::super::workload::PreparedFluidSource,
 ) -> AnalysisExecutionResult<u64> {
-    let definitions = fluid_native_field_definition_inventory()?;
+    let definitions = super::field_definition_inventory(workload.coupling())?;
     let nodes = source.source.nodes.len();
     let cells = source.topology.cells.len();
     let faces = source.topology.faces.len();
-    let counts = [cells, cells, faces];
+    let extra = match (result.conjugate_heat(), result.coupled_displacement()) {
+        (Some(energy), _) => Some(Values::Scalar(&energy.temperature_k)),
+        (_, Some(displacement)) => Some(Values::Velocity(displacement)),
+        _ => None,
+    };
+    let extra_components = match &extra {
+        Some(Values::Velocity(_)) => 3,
+        Some(Values::Scalar(_)) => 1,
+        None => 0,
+    };
+    let mut counts = vec![cells, cells, faces];
+    if extra.is_some() {
+        counts.push(nodes);
+    }
     let entity_counts = RecoveredFieldEntityCounts {
         nodes,
         volume_elements: cells,
@@ -148,7 +175,13 @@ pub(super) fn requested_bytes(
         connectors: 0,
         constraint_groups: 0,
     };
-    let artifact = artifact_profile(&definitions, &counts, result.original(), entity_counts)?;
+    let artifact = artifact_profile(
+        &definitions,
+        &counts,
+        result.original(),
+        extra,
+        entity_counts,
+    )?;
     let catalog = RecoveredFieldArtifactEntry::profile_sampled_catalog_shape(
         &definitions,
         &counts,
@@ -185,6 +218,11 @@ pub(super) fn requested_bytes(
         )?,
         vector_bytes::<f64>(cells)?,
         vector_bytes::<f64>(faces)?,
+        vector_bytes::<f64>(
+            nodes
+                .checked_mul(extra_components)
+                .ok_or_else(|| invalid("coupled node field count overflow"))?,
+        )?,
     ] {
         required = add(required, bytes)?;
     }
@@ -336,7 +374,8 @@ mod tests {
             fields,
         )
         .unwrap();
-        let projected = artifact_profile(&definitions, &counts, &original, entity_counts).unwrap();
+        let projected =
+            artifact_profile(&definitions, &counts, &original, None, entity_counts).unwrap();
         assert_eq!(projected, profile_serialized(&artifact, LIMITS).unwrap());
         let bytes = artifact.canonical_bytes().unwrap();
         assert!(bytes.len() as u64 <= projected.encoded_bytes_upper_bound);

@@ -103,7 +103,8 @@ fn coupled_procedure_is_supported(
         ),
         CoupledPhysicsFamily::FluidStructureInteraction => matches!(
             procedure,
-            AnalysisProcedure::TransientResponse
+            AnalysisProcedure::Static
+                | AnalysisProcedure::TransientResponse
                 | AnalysisProcedure::Nonlinear
                 | AnalysisProcedure::Adaptive
         ),

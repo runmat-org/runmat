@@ -63,7 +63,7 @@ pub(super) fn validate(
     // Publication consumes original governed recovery partitions, not a second
     // numerical-to-field copy outside the retained recovery execution authority.
     let fields = source.materialize_fields(completed)?;
-    validate_original_values(&fields, completed.result.original())?;
+    validate_original_values(&fields, &completed.workload, &completed.result)?;
     if fields.manifest().map_err(|e| e.to_string())? != completed.fields {
         return Err(
             "Fluid projection differs from original signed Cell U/p and all owner-face q".into(),
@@ -75,10 +75,13 @@ pub(super) fn validate(
 /// Borrow original solver arrays: no second field recovery or numeric clone.
 fn validate_original_values(
     fields: &RecoveredFieldArtifact,
-    original: &runmat_analysis_fea::physics::cfd::canonical::CanonicalFluidResult,
+    workload: &runmat_analysis_fea::execution::FluidSteadyWorkload,
+    result: &runmat_analysis_fea::execution::FluidSteadySolverResult,
 ) -> Result<(), String> {
-    let definitions = runmat_analysis_fea::execution::fluid_native_field_definition_inventory()
-        .map_err(|error| error.to_string())?;
+    let original = result.original();
+    let definitions =
+        runmat_analysis_fea::execution::fluid_field_definition_inventory(workload.coupling())
+            .map_err(|error| error.to_string())?;
     if fields.fields().len() != definitions.len() {
         return Err("fluid publication omitted or added an original native field".into());
     }
@@ -117,6 +120,19 @@ fn validate_original_values(
             .all(|(a, b)| a.to_bits() == b.to_bits())
         || !exact(values(1)?, &original.pressure_pa)
         || !exact(values(2)?, &original.face_volume_flux_m3_per_s)
+        || result
+            .conjugate_heat()
+            .map(|energy| values(3).map(|t| exact(t, &energy.temperature_k)))
+            .transpose()?
+            == Some(false)
+        || result
+            .coupled_displacement()
+            .map(|displacement| {
+                let flat = displacement.iter().flatten().copied().collect::<Vec<_>>();
+                values(3).map(|d| exact(d, &flat))
+            })
+            .transpose()?
+            == Some(false)
     {
         return Err("fluid recovered artifact substituted original signed U/p/q values".into());
     }

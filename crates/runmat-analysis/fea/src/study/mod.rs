@@ -38,7 +38,10 @@ pub use electrical_product::{
     build_electrical_study_product, ElectricalStudyProduct, ElectricalStudyProductError,
     ElectricalStudyProductInput,
 };
-pub use fluid_material::{derive_canonical_fluid_material, FluidMaterialCompilationError};
+pub use fluid_material::{
+    derive_canonical_fluid_material, derive_fluid_cells, is_flow_step, FluidCells,
+    FluidMaterialCompilationError,
+};
 pub use fluid_planning::{plan_fluid_study, FluidStudyPlanningError, FluidStudyPlanningPolicy};
 pub use fluid_product::{
     build_fluid_study_product, plan_fluid_study_product, FluidStudyProduct, FluidStudyProductError,

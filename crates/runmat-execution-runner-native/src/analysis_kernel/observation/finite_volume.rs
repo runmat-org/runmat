@@ -43,7 +43,6 @@ pub(super) fn admit_source(
     }
     let projection = AnalysisProjection::derive(mesh)
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let geometry = FiniteVolumeTopology::derive(&projection, workload.geometry_policy)
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let geometry = workload.fluid_cell_complex(mesh, &projection)?;
     Ok((workload.model, projection, geometry))
 }

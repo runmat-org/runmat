@@ -205,7 +205,11 @@ const fn method_is_compatible(
             matches!(method, SolverMethod::GeneralGmres)
         }
         TemporalImplementation::FluidSteadyNonorthogonalPressureCorrection
-        | TemporalImplementation::FluidBackwardEulerConservativeMomentumPressure => {
+        | TemporalImplementation::FluidBackwardEulerConservativeMomentumPressure
+        | TemporalImplementation::ConjugateSteadyFlowMonolithicEnergy
+        | TemporalImplementation::ConjugateSteadyFlowBackwardEulerEnergy
+        | TemporalImplementation::FluidStructureSteadyAitkenPartitioned
+        | TemporalImplementation::FluidStructureTransientAitkenPartitioned => {
             matches!(method, SolverMethod::GeneralGmres)
         }
     }

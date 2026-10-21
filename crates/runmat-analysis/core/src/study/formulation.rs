@@ -39,6 +39,9 @@ pub enum SpatialOperatorImplementation {
     MaxwellLowestOrderEdgeCurlCurlComplexMass,
     ReducedChannelFlow,
     FluidCellCenteredConservativeMomentumPressure,
+    /// Nodal Galerkin energy over fluid and solid, with conservative Raviart–Thomas advection
+    /// of the solved fluid face fluxes and streamline-upwind stabilization in the fluid.
+    ConjugateEnergyGalerkinConservativeAdvection,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -66,6 +69,16 @@ pub enum TemporalImplementation {
     AcousticCanonicalHarmonicSolve,
     FluidSteadyNonorthogonalPressureCorrection,
     FluidBackwardEulerConservativeMomentumPressure,
+    /// Steady finite-volume flow, then one monolithic energy solve across fluid and solid.
+    ConjugateSteadyFlowMonolithicEnergy,
+    /// Steady finite-volume flow advecting a backward-Euler monolithic energy march.
+    ConjugateSteadyFlowBackwardEulerEnergy,
+    /// Steady flow on the deformed fluid domain and a small-strain structure, iterated with
+    /// Aitken-relaxed interface displacement until both sides agree.
+    FluidStructureSteadyAitkenPartitioned,
+    /// Moving-mesh backward-Euler flow and average-acceleration Newmark structure, iterated
+    /// within every interval with Aitken-relaxed interface displacement.
+    FluidStructureTransientAitkenPartitioned,
     CoupledSinglePassProfileTransfer,
     CoupledFixedPointRelaxation,
     CoupledScalarResidualIteration,
@@ -100,6 +113,8 @@ pub enum CouplingImplementation {
     StaggeredElectrothermalConductanceLine,
     PartitionedConjugateProjection,
     PartitionedFluidStructureRelaxation,
+    /// Flow advects heat; fluid and solid energy share one system through declared interfaces.
+    FlowAdvectedMonolithicConjugateEnergy,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -128,6 +143,8 @@ pub enum RecoveryImplementation {
     MaxwellSolverMeshElectricFluxFieldPower,
     CfdReducedChannelProfile,
     FluidOriginalCellVelocityPressureOwnerFaceFlux,
+    ConjugateNodalTemperatureInterfaceHeat,
+    FluidStructureNodalDisplacementInterfaceEvidence,
     CoupledResampledFields,
 }
 
@@ -179,6 +196,8 @@ pub enum BoundaryTransferImplementation {
     FullExteriorTangentialPotentialGroundWithWeakCoulombGauge,
     FullExteriorElectricPerfectConductor,
     HeuristicInterfaceTransfer,
+    /// Declared conformal interface: shared nodes or an exact conductance jump.
+    DeclaredConformalInterfaceLaw,
     UnmappedFallback,
 }
 

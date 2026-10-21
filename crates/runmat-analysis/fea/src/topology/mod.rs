@@ -25,9 +25,9 @@ pub use contract::{
 };
 pub use edge_space::{EdgeElementMoments, EdgeQuadraturePoint, OrientedEdge, TetrahedralEdgeSpace};
 pub use finite_volume::{
-    FiniteVolumeBoundarySource, FiniteVolumeCell, FiniteVolumeFace, FiniteVolumeIncidence,
-    FiniteVolumeProjectionError, FiniteVolumeProjectionPolicy, FiniteVolumeReservation,
-    FiniteVolumeTopology,
+    FiniteVolumeBoundarySource, FiniteVolumeCell, FiniteVolumeCellSelection, FiniteVolumeFace,
+    FiniteVolumeIncidence, FiniteVolumeProjectionError, FiniteVolumeProjectionPolicy,
+    FiniteVolumeReservation, FiniteVolumeTopology,
 };
 pub use flow::FlowTopologyProjection;
 pub use solid_integration::{

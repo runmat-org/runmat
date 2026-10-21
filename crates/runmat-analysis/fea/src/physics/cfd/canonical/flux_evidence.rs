@@ -22,6 +22,7 @@ pub(super) fn evaluate(
     u: &[V],
     pressure_fluctuation: &[f64],
     q: &[f64],
+    mesh_flux: Option<&[f64]>,
 ) -> Result<CanonicalFluidFaceForces, Error> {
     let gu = velocity_gradients(p, u)?;
     let gp = pressure_gradient(p, pressure_fluctuation)?;
@@ -30,22 +31,28 @@ pub(super) fn evaluate(
     let mut pressure_force = Vec::with_capacity(q.len());
     let mut fluctuation = Vec::with_capacity(q.len());
     for (i, f) in p.topology.faces.iter().enumerate() {
-        let (diffusion, remainder) = viscous_parts(p, i, &gu)?;
-        let delta = if let Some(n) = f.neighbor {
-            sub(u[n], u[f.owner])
-        } else {
-            match p.boundaries[i] {
-                FaceBoundary::Velocity { value, .. } => sub(value, u[f.owner]),
-                FaceBoundary::PressureOutlet { .. } => [0.0; 3],
-                _ => return Err(Error::Invalid("missing traction boundary")),
-            }
-        };
         let pf = face_pressure_offset(p, i, pressure_fluctuation, &gp)?;
-        advective.push(scale(
-            face_upwind_velocity(p, i, u, q[i], &gu)?,
-            p.density * q[i],
-        ));
-        viscous.push(add(scale(delta, diffusion), remainder));
+        if let FaceBoundary::Symmetry { .. } = p.boundaries[i] {
+            advective.push([0.0; 3]);
+            viscous.push(symmetry_traction(p, i, u[f.owner])?.1);
+        } else {
+            let (diffusion, remainder) = viscous_parts(p, i, &gu)?;
+            let delta = if let Some(n) = f.neighbor {
+                sub(u[n], u[f.owner])
+            } else {
+                match p.boundaries[i] {
+                    FaceBoundary::Velocity { value, .. } => sub(value, u[f.owner]),
+                    FaceBoundary::PressureOutlet { .. } => [0.0; 3],
+                    _ => return Err(Error::Invalid("missing traction boundary")),
+                }
+            };
+            let transported = q[i] - mesh_flux.map_or(0.0, |w| w[i]);
+            advective.push(scale(
+                face_upwind_velocity(p, i, u, transported, &gu)?,
+                p.density * transported,
+            ));
+            viscous.push(add(scale(delta, diffusion), remainder));
+        }
         pressure_force.push(scale(
             f.owner_area_vector_m2,
             -(pf + p.pressure_reference_pa[f.owner]),

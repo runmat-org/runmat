@@ -88,6 +88,29 @@ impl FluidTransientSolverResult {
     }
 }
 impl PreparedFluidTransient<'_> {
+    /// Maximum-width serializable shape of the retained result, for wire profiles that
+    /// embed it. Exact topology and schedule fix every cardinality; values are placeholders.
+    pub(in crate::execution::fluid) fn result_shape(
+        &self,
+    ) -> AnalysisExecutionResult<impl Serialize + '_> {
+        let source = &self.source;
+        let model = &self.workload.model;
+        let schedule =
+            super::super::FluidTransientSchedule::derive(model, self.workload.selected_step()?)?;
+        let authorities = crate::physics::cfd::canonical::potential_boundary_authorities(
+            &source.constraints,
+            &model.boundaries,
+            &model.excitations,
+        );
+        let original = super::super::profile::original_block_profile(
+            source.topology.cells.len(),
+            source.topology.faces.len(),
+            authorities,
+            schedule.points_s().len() - 1,
+        );
+        data(self, &self.initial, original)
+    }
+
     pub fn result_encoding_profile(
         &self,
     ) -> AnalysisExecutionResult<runmat_canonical_codec::SerializedCanonicalProfile> {

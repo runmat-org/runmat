@@ -1,9 +1,8 @@
 //! Authenticated native cell/all-face catalog authority, without numerical arrays.
 use super::*;
 use crate::{
-    execution::FluidSteadyWorkload,
-    results::field::FiniteVolumeFieldTopology,
-    topology::{AnalysisProjection, FiniteVolumeTopology},
+    execution::FluidSteadyWorkload, results::field::FiniteVolumeFieldTopology,
+    topology::AnalysisProjection,
 };
 
 impl ObservationFieldCatalog {
@@ -55,7 +54,7 @@ impl ObservationFieldCatalog {
                 "finite-volume catalog differs from original authored producer",
             ));
         }
-        let definitions = crate::execution::fluid_native_field_definition_inventory()?;
+        let definitions = crate::execution::fluid_field_definition_inventory(workload.coupling())?;
         if manifest
             .fields
             .iter()
@@ -67,8 +66,7 @@ impl ObservationFieldCatalog {
             ));
         }
         let projection = AnalysisProjection::derive(mesh).map_err(invalid)?;
-        let geometry =
-            FiniteVolumeTopology::derive(&projection, workload.geometry_policy).map_err(invalid)?;
+        let geometry = workload.fluid_cell_complex(mesh, &projection)?;
         layout
             .validate_for(&projection, &geometry)
             .map_err(invalid)?;

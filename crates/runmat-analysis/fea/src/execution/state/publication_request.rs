@@ -66,7 +66,7 @@ impl SemanticStatePublicationRequest {
                         | StateKind::StructuralStressStrain
                 ) | (
                     SemanticStatePublicationSource::FluidPrimaryFields,
-                    StateKind::Fluid
+                    StateKind::Fluid | StateKind::CoupledInterface
                 ) | (
                     SemanticStatePublicationSource::StructuralPrimaryFields,
                     StateKind::StructuralPrimary

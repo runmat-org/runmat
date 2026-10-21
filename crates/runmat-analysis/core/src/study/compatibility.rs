@@ -69,6 +69,10 @@ pub fn is_exposed_analysis_identity(
             )
             | (
                 PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction),
+                AnalysisProcedure::Static
+            )
+            | (
+                PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction),
                 AnalysisProcedure::TransientResponse
             )
             | (
@@ -132,6 +136,10 @@ mod tests {
             (
                 PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer),
                 AnalysisProcedure::TransientResponse,
+            ),
+            (
+                PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction),
+                AnalysisProcedure::Static,
             ),
             (
                 PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction),

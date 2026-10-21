@@ -53,10 +53,22 @@ pub(super) fn assemble_with_time(
         .collect::<Vec<_>>();
     let mut diagonal = vec![0.0; n];
     for (i, f) in p.topology.faces.iter().enumerate() {
+        if let FaceBoundary::Symmetry { .. } = p.boundaries[i] {
+            // Impermeable and shear-free: no advective flux. The normal viscous
+            // stress is implicit on every component; the tangential part of the
+            // same coefficient is returned explicitly so only u·n̂ is penalized.
+            let (coefficient, traction) = symmetry_traction(p, i, u[f.owner])?;
+            a.add(f.owner, f.owner, coefficient);
+            diagonal[f.owner] += coefficient;
+            rhs[f.owner] = add(rhs[f.owner], add(scale(u[f.owner], coefficient), traction));
+            continue;
+        }
         let (diffusion, correction) = viscous_parts(p, i, &gu)?;
-        let mass_flux = p.density * q[i];
+        // Convection carries the flux relative to a moving mesh; continuity keeps q itself.
+        let transported = q[i] - time.map_or(0.0, |t| t.mesh_flux(i));
+        let mass_flux = p.density * transported;
         let provisional_backflow =
-            matches!(p.boundaries[i], FaceBoundary::PressureOutlet { .. }) && q[i] < 0.0;
+            matches!(p.boundaries[i], FaceBoundary::PressureOutlet { .. }) && transported < 0.0;
         let correction = if provisional_backflow {
             if mode == MomentumMode::Original {
                 return Err(Error::Unsupported("pressure outlet backflow"));
@@ -69,7 +81,7 @@ pub(super) fn assemble_with_time(
                 scale(face_velocity_trace(p, i, f.owner, u, &gu), mass_flux),
             )
         } else {
-            sub(correction, advection_remainder(p, i, u, q[i], &gu)?)
+            sub(correction, advection_remainder(p, i, u, transported, &gu)?)
         };
         if let Some(other) = f.neighbor {
             let owner = diffusion + mass_flux.max(0.0);
@@ -101,7 +113,9 @@ pub(super) fn assemble_with_time(
                     }
                     rhs[f.owner] = add(rhs[f.owner], correction);
                 }
-                FaceBoundary::Interior => return Err(Error::Invalid("missing exterior law")),
+                FaceBoundary::Symmetry { .. } | FaceBoundary::Interior => {
+                    return Err(Error::Invalid("missing exterior law"))
+                }
             }
         }
     }
@@ -110,7 +124,10 @@ pub(super) fn assemble_with_time(
             let coefficient = time.coefficient(p, c)?;
             a.add(c, c, coefficient);
             diagonal[c] += coefficient;
-            rhs[c] = add(rhs[c], scale(time.previous_velocity[c], coefficient));
+            rhs[c] = add(
+                rhs[c],
+                scale(time.previous_velocity[c], time.previous_coefficient(p, c)?),
+            );
         }
     }
     if mode == MomentumMode::SolverTrial {

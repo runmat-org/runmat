@@ -41,10 +41,13 @@ execution after pre-execution driver/worker replacement and cold import from dec
 including foreign-source and missing-object rejection. Full outer-root consumer/order coverage
 and genuine mid-phase restart remain open; this is not production qualification.
 
-Acoustic, electromagnetic, fluid, electro-thermal, conjugate heat-transfer and fluid-structure
-procedure contracts are represented and checked by the language but are not yet admitted by the
-typed native whole-study executor. Runtime object-level operations and solver components are not
-a substitute for that complete path.
+Fluid flow (steady and transient), conjugate heat transfer (steady and transient with steady
+flow) and fluid–structure interaction (steady and transient) run through the typed native
+whole-study executor on conformal Tet4 meshes; see [fluid flow](./physics/fluid),
+[conjugate heat transfer](./physics/conjugate-heat-transfer) and
+[fluid–structure interaction](./physics/fluid-structure-interaction) for their envelopes and
+[fluid validation](./validation/fluid) for the reference comparisons. Electro-thermal procedure
+contracts are checked by the language but not admitted by the executor.
 
 `docs/simulation/examples/acoustic-production-rejected.fea` is a fail-closed example: it checks as an authored contract and rejects execution because the requested production family is unavailable.
 

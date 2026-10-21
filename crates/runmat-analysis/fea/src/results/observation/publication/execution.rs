@@ -162,11 +162,9 @@ impl ObservationPublicationCatalog {
                         };
                         let projection =
                             crate::topology::AnalysisProjection::derive(mesh).map_err(invalid)?;
-                        let geometry = crate::topology::FiniteVolumeTopology::derive(
-                            &projection,
-                            workload.geometry_policy,
-                        )
-                        .map_err(invalid)?;
+                        let geometry = workload
+                            .fluid_cell_complex(mesh, &projection)
+                            .map_err(invalid)?;
                         super::super::finite_volume_observation_partition_source_indices(
                             &source.plan,
                             &plan,
