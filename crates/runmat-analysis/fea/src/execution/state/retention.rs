@@ -75,15 +75,19 @@ impl<'a, I: Iterator<Item = &'a CanonicalSemanticState> + Clone> Serialize for I
     }
 }
 
-/// Bound retained typed state storage using the shared schema profiler. Independently decoded
-/// equal payloads remain charged separately until actual pointer sharing is established.
-/// This is neither wire-output admission nor decoder-workspace admission, and is not measured RSS.
+/// Bound retained typed state storage at its typed resident size (states are held as typed
+/// Rust values, never as a JSON value tree). Independently decoded equal payloads remain charged
+/// separately until actual pointer sharing is established. This is neither wire-output admission
+/// nor decoder-workspace admission, and is not measured RSS. `limits` bounds the traversal size.
 pub fn semantic_state_retained_storage_bytes<'a>(
     states: impl Iterator<Item = &'a CanonicalSemanticState> + Clone,
     limits: CanonicalLimits,
 ) -> AnalysisExecutionResult<u64> {
-    Ok(
-        runmat_canonical_codec::profile_serialized(&Inventory(states), limits)?
-            .materialization_resident_bytes_estimate,
-    )
+    let bytes = runmat_canonical_codec::typed_resident_bytes_estimate(&Inventory(states))?;
+    if bytes > limits.maximum_encoded_bytes as u64 {
+        return Err(crate::execution::AnalysisExecutionError::Limit(
+            "retained semantic state typed storage exceeds the admitted limit",
+        ));
+    }
+    Ok(bytes)
 }
