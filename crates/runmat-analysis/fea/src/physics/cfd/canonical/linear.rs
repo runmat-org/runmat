@@ -133,6 +133,18 @@ pub(super) fn solve(
     if result.cancelled {
         return Err(Error::Cancelled);
     }
+    if std::env::var_os("QFLUID_DEBUG_LINEAR").is_some() {
+        eprintln!(
+            "qfluid-linear n={} defect={:e} floor={:e} tol={:e} its={} rel={:?} conv={}",
+            b.len(),
+            defect_norm,
+            rounding_floor,
+            relative_tolerance,
+            result.iterations,
+            result.relative_residual,
+            result.converged
+        );
+    }
     if !result.converged || result.breakdown {
         return Err(Error::LinearNotConverged {
             iterations: result.iterations,
