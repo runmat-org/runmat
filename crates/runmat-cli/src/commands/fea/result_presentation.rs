@@ -5,7 +5,8 @@ use serde::Serialize;
 use crate::presentation;
 
 mod local;
-pub(super) use local::{completed_summary, print_completed_fea_result};
+pub(super) use local::print_completed_fea_result;
+use local::completed_summary;
 
 #[derive(Serialize)]
 pub(super) struct LocalRunSummary {
@@ -72,12 +73,11 @@ pub(super) fn local_summary(
 
 pub(crate) fn print_fea_result(
     study_id: &str,
-    completed: &runmat_runtime::analysis::StructuralStudyResult,
+    completed: &runmat_execution_runner_native::CompletedFeaStudyResult,
     publication: &runmat_runtime::analysis::AnalysisStudyRunData,
     json: bool,
 ) -> Result<()> {
-    let summary = local_summary(study_id, completed, publication)?;
-    print_summary(study_id, summary, json)
+    print_completed_fea_result(study_id, completed, publication, json)
 }
 
 fn print_summary(study_id: &str, summary: LocalRunSummary, json: bool) -> Result<()> {
@@ -152,7 +152,7 @@ pub(crate) fn print_fea_sweep_result(
                     serde_json::json!({
                         "case_id": case_id,
                         "status": "succeeded",
-                        "result": local_summary(case_id, &study.result, &study.publication)?,
+                        "result": completed_summary(case_id, &study.result, &study.publication)?,
                     })
                 }
                 super::remote::MaterializedFeaSweepTerminal::Failed(message) => serde_json::json!({
@@ -202,37 +202,6 @@ pub(crate) fn print_fea_sweep_result(
                 summary["procedure"].as_str().unwrap_or("unknown")
             ),
             None => println!("  {id}: {status}"),
-        }
-    }
-    Ok(())
-}
-
-pub(super) fn print_sweep_result(
-    id: &str,
-    summaries: &[LocalRunSummary],
-    json: bool,
-) -> Result<()> {
-    if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "sweep_id": id,
-                "cases": summaries,
-            }))?
-        );
-    } else {
-        let styles = presentation::stdout();
-        println!(
-            "{} {} ({} cases)",
-            styles.success("FEA sweep complete"),
-            styles.identifier(id),
-            summaries.len()
-        );
-        for summary in summaries {
-            println!(
-                "  {}: {} tetrahedra, {}",
-                summary.root_id, summary.elements, summary.procedure
-            );
         }
     }
     Ok(())

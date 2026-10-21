@@ -149,8 +149,9 @@ async fn checked_named_thermal_inputs_match_tables_and_independent_source_bounda
     assert!(matches!(
         authored
             .expect("prepare standalone authored thermal study")
-            .root,
-        crate::PreparedFeaStudyRoot::Thermal(_)
+            .root
+            .planning,
+        crate::StudyRootPlanning::Thermal(_)
     ));
     let realized = resolved
         .study

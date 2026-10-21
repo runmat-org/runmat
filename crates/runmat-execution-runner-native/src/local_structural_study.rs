@@ -46,11 +46,36 @@ pub async fn execute_prepared_structural_study_locally(
 }
 
 pub async fn execute_prepared_structural_study_locally_with_observers(
-    mut config: NativeExecutionConfig,
+    config: NativeExecutionConfig,
     prepared: PreparedStructuralStudyRoot,
     workers: u32,
     observers: LocalStructuralStudyObservers,
 ) -> NativeExecutionResult<runmat_runtime::analysis::StructuralStudyResult> {
+    match execute_prepared_study_locally_with_observers(config, prepared, workers, observers)
+        .await?
+    {
+        LocalStudyCompletion::Structural(result) => Ok(*result),
+        LocalStudyCompletion::Family(_) => Err(protocol(
+            "a family study root was executed as a structural study",
+        )),
+    }
+}
+
+/// Local completion of any authored study root.
+#[derive(Debug)]
+pub enum LocalStudyCompletion {
+    Structural(Box<runmat_runtime::analysis::StructuralStudyResult>),
+    Family(Box<crate::CompletedFeaStudyResult>),
+}
+
+/// Execute any portable typed study root locally: geometry, exact meshing, compilation and the
+/// family's governed task graph, all through process-isolated workers.
+pub async fn execute_prepared_study_locally_with_observers(
+    mut config: NativeExecutionConfig,
+    prepared: PreparedStructuralStudyRoot,
+    workers: u32,
+    observers: LocalStructuralStudyObservers,
+) -> NativeExecutionResult<LocalStudyCompletion> {
     const OPERATION: &str = "fea.typed_study";
     emit_local_progress(
         &observers,
@@ -101,6 +126,24 @@ pub async fn execute_prepared_structural_study_locally_with_observers(
         None,
         None,
     );
+    if crate::StudyFamilyKind::of(&decoded.planning).is_some() {
+        return Box::pin(execute_family_locally(
+            decoded,
+            output,
+            meshing,
+            analysis_config,
+            composition_store,
+            workers,
+            &observers,
+        ))
+        .await
+        .map(Box::new)
+        .map(LocalStudyCompletion::Family);
+    }
+    let planning = decoded
+        .planning
+        .structural()
+        .ok_or_else(|| protocol("structural study root carries family planning"))?;
     let mut compiled = compile_analysis_study(AnalysisStudyCompilationInput {
         study: &decoded.study,
         geometry: &output.document,
@@ -128,7 +171,7 @@ pub async fn execute_prepared_structural_study_locally_with_observers(
     .await?;
     crate::input_materialization::apply_to_model(&mut compiled.model, completed_inputs)?;
     let workloads =
-        plan_structural_study_with_fields(&compiled, decoded.planning, &decoded.initial_fields)
+        plan_structural_study_with_fields(&compiled, planning, &decoded.initial_fields)
             .map_err(protocol)?;
     emit_local_progress(
         &observers,
@@ -187,12 +230,123 @@ pub async fn execute_prepared_structural_study_locally_with_observers(
         numerical,
     )
     .map_err(protocol)?;
+    let result = LocalStudyCompletion::Structural(Box::new(result));
     emit_local_progress(
         &observers,
         OPERATION,
         FeaProgressPhase::Postprocess,
         FeaProgressStatus::Completed,
         "Study results are ready for publication",
+        Some(1),
+        Some(1),
+    );
+    Ok(result)
+}
+
+async fn execute_family_locally(
+    decoded: crate::DecodedStructuralStudyRoot,
+    output: runmat_analysis_execution::GeometryMaterializationOutput,
+    meshing: runmat_meshing_execution::ExactMeshingDagRunResult,
+    mut analysis_config: NativeExecutionConfig,
+    composition_store: crate::FilesystemObjectStore,
+    workers: u32,
+    observers: &LocalStructuralStudyObservers,
+) -> NativeExecutionResult<crate::CompletedFeaStudyResult> {
+    const OPERATION: &str = "fea.typed_study";
+    let resolved_inputs = decoded
+        .input_materializations
+        .iter()
+        .map(|plan| plan.resolve(&meshing.artifact).map_err(protocol))
+        .collect::<NativeExecutionResult<Vec<_>>>()?;
+    let mut completed_inputs = Some(
+        crate::input_materialization::execute_locally(
+            analysis_config.clone(),
+            &resolved_inputs,
+            &composition_store,
+            &decoded.artifact_access,
+            workers,
+            &meshing.artifact,
+        )
+        .await?,
+    );
+    let planned = crate::study_family::plan_family_study(
+        crate::study_family::FamilyStudyContext {
+            study: &decoded.study,
+            materials: &decoded.materials,
+            planning: &decoded.planning,
+            document: &output.document,
+            regions: &output.regions,
+            mesh: &meshing.artifact,
+            initial_fields: &decoded.initial_fields,
+            frozen_project_digest: decoded.frozen_project_digest,
+            artifact_access: &decoded.artifact_access,
+            program_revision: &decoded.geometry_meshing.recipe.program_revision,
+            local_execution: decoded.local_execution,
+        },
+        &mut |model| {
+            let completed = completed_inputs.take().unwrap_or_default();
+            crate::input_materialization::apply_to_model(model, completed)
+                .map(drop)
+                .map_err(|error| error.to_string())
+        },
+    )
+    .map_err(NativeExecutionError::Protocol)?;
+    drop(output);
+    emit_local_progress(
+        observers,
+        OPERATION,
+        FeaProgressPhase::ModelAssembly,
+        FeaProgressStatus::Completed,
+        "Study operators and inputs assembled",
+        Some(1),
+        Some(1),
+    );
+    let inventory = ObjectInventoryLimits::default();
+    let resources = planned
+        .local_resources(decoded.local_execution, inventory)
+        .map_err(NativeExecutionError::Protocol)?;
+    analysis_config.max_workers = workers.max(1);
+    crate::analysis_task_pool::configure_local_analysis_envelope(&mut analysis_config, &resources);
+    let session = crate::NativeProgramSession::new(analysis_config)?;
+    // Publication outlives the executing pool. A writable store clone does not retain the
+    // session directory; the shared object source carries that lifetime authority.
+    let source = session.object_source();
+    let mut result_store = session.object_store();
+    let mut pool = crate::analysis_task_pool::LocalAnalysisTaskPool::new(session);
+    emit_local_progress(
+        observers,
+        OPERATION,
+        FeaProgressPhase::Solve,
+        FeaProgressStatus::Started,
+        "Executing the analysis sequence",
+        None,
+        None,
+    );
+    let completed = crate::study_family::execute_family_study(
+        &mut pool,
+        planned,
+        crate::study_family::FamilyStudyExecutionPolicy {
+            resources,
+            retry: runmat_execution::task::RetryPolicy::IdempotentInfrastructure,
+            deadline_unix_millis: None,
+            priority: 0,
+        },
+    )
+    .await?;
+    let result = crate::typed_fea::local_family_result(
+        completed,
+        source,
+        &mut result_store,
+        meshing.artifact,
+        meshing.evidence,
+    )
+    .map_err(NativeExecutionError::Protocol)?;
+    emit_local_progress(
+        observers,
+        OPERATION,
+        FeaProgressPhase::Solve,
+        FeaProgressStatus::Completed,
+        "Analysis sequence completed",
         Some(1),
         Some(1),
     );

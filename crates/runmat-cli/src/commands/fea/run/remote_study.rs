@@ -1,4 +1,4 @@
-//! Remote authored study submission remains restricted to portable structural roots.
+//! Remote authored study submission through the portable root shared by every family.
 use super::*;
 
 pub(super) async fn execute_study_remotely(
@@ -10,7 +10,6 @@ pub(super) async fn execute_study_remotely(
     config: &RunMatRuntimeConfig,
     json: bool,
 ) -> Result<()> {
-    ensure_remote_structural(&study.study.sequence)?;
     let frozen = source
         .frozen_project
         .as_ref()
@@ -24,7 +23,7 @@ pub(super) async fn execute_study_remotely(
         config,
     )
     .await?;
-    let prepared_root = require_remote_root(placeholder.root)?;
+    let prepared_root = portable_root(placeholder.root)?;
     let saved_expectation = prepared_root.result_expectation();
     let assessment_functions = runmat_execution_runner_native::freeze_fea_assessment_functions(
         &source.session_source,

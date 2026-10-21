@@ -18,6 +18,23 @@ async fn main() -> ExitCode {
         }
         Ok(Some(runmat_process_host::HiddenMode::ExecutionWorker)) => {
             let _otel = runmat::observability::init_from_env();
+            if runmat_execution_runner_native::cooperative::is_cooperative_rank_process() {
+                let result = tokio::task::spawn_blocking(
+                    runmat_execution_runner_native::cooperative::run_cooperative_rank_from_env,
+                )
+                .await;
+                return match result {
+                    Ok(Ok(())) => ExitCode::SUCCESS,
+                    Ok(Err(error)) => {
+                        eprintln!("runmat cooperative rank failed: {error}");
+                        ExitCode::from(2)
+                    }
+                    Err(error) => {
+                        eprintln!("runmat cooperative rank panicked: {error}");
+                        ExitCode::from(2)
+                    }
+                };
+            }
             let remote = std::env::var_os("RUNMAT_EXECUTION_WORKER_REMOTE").is_some();
             let result = if remote {
                 runmat_execution_runner_native::run_remote_worker_from_env().await

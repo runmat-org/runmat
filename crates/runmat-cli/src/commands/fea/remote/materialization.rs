@@ -11,7 +11,7 @@ use runmat_execution_artifact::{
 };
 use runmat_execution_runner_native::{
     import_exact_structural_study_result, import_exact_structural_sweep_result,
-    import_structural_study_result, import_structural_sweep_result,
+    import_structural_study_result, StudySweepTerminal,
     ExactStructuralStudyResultExpectation, ExactStructuralSweepResultExpectation,
     ExactStructuralSweepTerminal, StructuralStudyResultExpectation,
     StructuralSweepResultExpectation,
@@ -43,7 +43,7 @@ pub(crate) enum MaterializedFeaSweepTerminal {
 }
 
 pub(crate) struct MaterializedFeaStudy {
-    pub result: runmat_runtime::analysis::StructuralStudyResult,
+    pub result: runmat_execution_runner_native::CompletedFeaStudyResult,
     pub publication: AnalysisStudyRunData,
 }
 
@@ -66,18 +66,37 @@ pub(crate) async fn materialize_fea_study(
     expectation.artifact_access = artifact_access(run_id);
     expectation.validate()?;
     let cache = DownloadedResultCache::from_objects(objects);
-    let exact = import_structural_study_result(
-        &cache,
-        response,
-        &expectation,
-        ObjectInventoryLimits::default(),
-    )?;
-    let result = exact_result(exact, cache)?;
+    let result = import_study_result(&cache, response, &expectation)?;
     let publication = publish_materialized_result(&result, run_id, functions).await?;
     Ok(MaterializedFeaStudy {
         result,
         publication,
     })
+}
+
+/// Import any family from its remote closure; structural and family roots share one contract.
+fn import_study_result(
+    cache: &DownloadedResultCache,
+    response: ProgramExecutionResponse,
+    expectation: &StructuralStudyResultExpectation,
+) -> Result<runmat_execution_runner_native::CompletedFeaStudyResult> {
+    if expectation.planning.structural().is_none() {
+        return Ok(runmat_execution_runner_native::import_family_study_result(
+            cache.clone(),
+            response,
+            expectation,
+            ObjectInventoryLimits::default(),
+        )?);
+    }
+    let exact = import_structural_study_result(
+        cache,
+        response,
+        expectation,
+        ObjectInventoryLimits::default(),
+    )?;
+    Ok(runmat_execution_runner_native::CompletedFeaStudyResult::Structural(Box::new(
+        exact_result(exact, cache.clone())?,
+    )))
 }
 
 pub(crate) async fn materialize_fea_sweep(
@@ -94,17 +113,17 @@ pub(crate) async fn materialize_fea_sweep(
     }
     expectation.validate()?;
     let cache = DownloadedResultCache::from_objects(objects);
-    let imported = import_structural_sweep_result(
-        &cache,
-        response,
-        &expectation,
-        ObjectInventoryLimits::default(),
-    )?;
-    let mut entries = Vec::with_capacity(imported.entries.len());
-    for entry in imported.entries {
+    let (_, entries) =
+        runmat_execution_runner_native::import_study_sweep_entries(&cache, response, &expectation)?;
+    let mut materialized = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let study = expectation
+            .studies
+            .get(entry.study_index)
+            .context("remote sweep entry has no submitted study")?;
         let terminal = match entry.terminal {
-            ExactStructuralSweepTerminal::Succeeded(result) => {
-                let result = exact_result(*result, cache.clone())?;
+            StudySweepTerminal::Succeeded(response) => {
+                let result = import_study_result(&cache, response, study)?;
                 let publication = publish_materialized_result(
                     &result,
                     &format!("{run_id}_study_{}", entry.study_index),
@@ -119,35 +138,32 @@ pub(crate) async fn materialize_fea_sweep(
                     publication,
                 }))
             }
-            ExactStructuralSweepTerminal::Failed(message) => {
-                MaterializedFeaSweepTerminal::Failed(message)
-            }
-            ExactStructuralSweepTerminal::Cancelled => MaterializedFeaSweepTerminal::Cancelled,
-            ExactStructuralSweepTerminal::Indeterminate(message) => {
+            StudySweepTerminal::Failed(message) => MaterializedFeaSweepTerminal::Failed(message),
+            StudySweepTerminal::Cancelled => MaterializedFeaSweepTerminal::Cancelled,
+            StudySweepTerminal::Indeterminate(message) => {
                 MaterializedFeaSweepTerminal::Indeterminate(message)
             }
         };
-        entries.push(MaterializedFeaSweepEntry {
+        materialized.push(MaterializedFeaSweepEntry {
             study_index: entry.study_index,
             terminal,
         });
     }
-    Ok(MaterializedFeaSweep { entries })
+    Ok(MaterializedFeaSweep {
+        entries: materialized,
+    })
 }
 
 async fn publish_materialized_result(
-    result: &runmat_runtime::analysis::StructuralStudyResult,
+    result: &runmat_execution_runner_native::CompletedFeaStudyResult,
     run_id: &str,
     functions: &[runmat_analysis_execution::assessment_program::FrozenAssessmentCallable],
 ) -> Result<AnalysisStudyRunData> {
-    let publication = runmat_runtime::analysis::AnalysisStudyCompletionIdentity::new(run_id)
-        .map_err(anyhow::Error::msg)?;
-    let prepared = runmat_runtime::analysis::prepare_structural_study_publication(
+    let prepared = runmat_execution_runner_native::prepare_study_publication(
         result,
-        runmat_runtime::operations::OperationContext::new(None, Some(run_id.to_string())),
-        publication,
+        &format!("typed-remote:{run_id}"),
     )
-    .map_err(super::super::report_operation_error)?;
+    .map_err(anyhow::Error::msg)?;
     runmat_execution_runner_native::complete_frozen_fea_assessments(prepared, functions)
         .await
         .map_err(anyhow::Error::msg)

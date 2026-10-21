@@ -51,7 +51,7 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
         + usize::from(magnetic_workload.is_some())
         + usize::from(maxwell_workload.is_some())
         + usize::from(fluid_workload.is_some())
-        != 1
+        > 1
     {
         return Err(AnalysisBridgeError::Invalid(
             "observation partition requires exactly one typed workload source".into(),
@@ -87,6 +87,29 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
         runmat_analysis_fea::results::observation::ObservationFieldCatalog::from_canonical_bytes(
             &field_catalog.payload(),
         )?;
+    // Native node/element fields of any family carry their producing step in the catalog;
+    // the producing workload input is provenance of a family-specific kind.
+    let volume_mesh = matches!(
+        catalog.source(),
+        runmat_analysis_fea::results::observation::ObservationFieldCatalogSource::VolumeMeshRecovery { .. }
+    );
+    let typed_workloads = [
+        nonlinear_workload.is_some(),
+        linear_workload.is_some(),
+        frequency_workload.is_some(),
+        thermal_workload.is_some(),
+        magnetic_workload.is_some(),
+        maxwell_workload.is_some(),
+        fluid_workload.is_some(),
+    ]
+    .into_iter()
+    .filter(|present| *present)
+    .count();
+    if (volume_mesh && typed_workloads != 0) || (!volume_mesh && typed_workloads != 1) {
+        return Err(AnalysisBridgeError::Invalid(
+            "observation partition requires exactly one workload source of its catalog kind".into(),
+        ));
+    }
     if catalog.identity() != field_catalog.manifest.logical_identity {
         return Err(AnalysisBridgeError::Identity(
             "observation source catalog identity differs from its input",
@@ -123,7 +146,7 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
                 .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
         })
         .transpose()?;
-    let mut thermal_projection = None;
+    let mut solid_projection = None;
     let mut sampled_topology = None;
     let mut finite_volume_topology = None;
     let (model, backend) = if let Some(workload_objects) = fluid_workload {
@@ -135,7 +158,7 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
             mesh.as_ref(),
         )?;
         finite_volume_topology = Some((projection, geometry));
-        (model, runmat_analysis_fea::ComputeBackend::Cpu)
+        (Some(model), runmat_analysis_fea::ComputeBackend::Cpu)
     } else if let Some(workload_objects) = magnetic_workload.or(maxwell_workload) {
         let (model, sampling) = sampled::admit_source(
             workload_objects,
@@ -145,7 +168,38 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
             mesh.as_ref(),
         )?;
         sampled_topology = Some(sampling);
-        (model, runmat_analysis_fea::ComputeBackend::Cpu)
+        (Some(model), runmat_analysis_fea::ComputeBackend::Cpu)
+    } else if volume_mesh {
+        let mesh = mesh.as_ref().ok_or(AnalysisBridgeError::Identity(
+            "volume-mesh observation requires its exact mesh",
+        ))?;
+        let step = catalog.volume_mesh_step()?;
+        if request.event_attribution.is_some()
+            || !resource_plan.request.accelerators.is_empty()
+            || step.step_id != source_request.plan.step_id
+        {
+            return Err(AnalysisBridgeError::Identity(
+                "volume-mesh observation step or serial envelope differs",
+            ));
+        }
+        catalog.validate_volume_mesh_selection(&source_request.selection, mesh)?;
+        catalog.validate_volume_mesh_plan(&source_request.plan, mesh)?;
+        let expected_partitions = ObservationPartitionPlan::derive(
+            &source_request.plan,
+            &partition_plan.observation_id,
+            runmat_analysis_fea::results::observation::ObservationExecutionPolicy::serial(),
+        )
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+        if partition_plan != expected_partitions {
+            return Err(AnalysisBridgeError::Identity(
+                "volume-mesh observation partition policy differs",
+            ));
+        }
+        solid_projection = Some(
+            runmat_analysis_fea::topology::AnalysisProjection::derive(mesh)
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+        );
+        (None, runmat_analysis_fea::ComputeBackend::Cpu)
     } else if let Some(workload_objects) = thermal_workload {
         let workload = runmat_analysis_fea::execution::ThermalWorkload::from_canonical_bytes(
             &workload_objects.payload(),
@@ -173,11 +227,11 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
                 "thermal observation partition policy differs from its workload",
             ));
         }
-        thermal_projection = Some(
+        solid_projection = Some(
             runmat_analysis_fea::topology::AnalysisProjection::derive(mesh)
                 .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
         );
-        (workload.model, workload.backend)
+        (Some(workload.model), workload.backend)
     } else if let Some(workload_objects) = nonlinear_workload {
         let workload =
             runmat_analysis_fea::execution::NonlinearSolidWorkload::from_canonical_bytes(
@@ -209,11 +263,11 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
                 "nonlinear observation partition policy differs",
             ));
         }
-        (workload.model, runmat_analysis_fea::ComputeBackend::Cpu)
+        (Some(workload.model), runmat_analysis_fea::ComputeBackend::Cpu)
     } else if let Some(workload) = linear_workload {
         catalog.validate_structural_selection(&source_request.selection)?;
         let workload = StructuralLinearWorkload::from_canonical_bytes(&workload.payload())?;
-        (workload.model, workload.backend)
+        (Some(workload.model), workload.backend)
     } else {
         catalog.validate_structural_selection(&source_request.selection)?;
         let workload = StructuralFrequencyWorkload::from_canonical_bytes(
@@ -221,8 +275,20 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
                 .expect("exclusive source checked")
                 .payload(),
         )?;
-        (workload.model().clone(), workload.backend())
+        (Some(workload.model().clone()), workload.backend())
     };
+    // Only structural evaluation reads the authored model; the other sources carry their
+    // own topology. A missing model outside those sources is rejected here.
+    if model.is_none()
+        && solid_projection.is_none()
+        && sampled_topology.is_none()
+        && finite_volume_topology.is_none()
+    {
+        return Err(AnalysisBridgeError::Identity(
+            "structural observation evaluation requires its authored model",
+        ));
+    }
+    let structural_model = || model.as_ref().expect("structural sources carry their model");
     let FeaResourceDemand::StructuralObservationPartition(_) = &resource_plan.input.demand else {
         return Err(AnalysisBridgeError::Identity(
             "observation partition requires its exact phase resource demand",
@@ -297,12 +363,12 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
                 &fields,
             )
         }
-        [] if thermal_projection.is_some() => {
+        [] if solid_projection.is_some() => {
             runmat_analysis_fea::results::observation::evaluate_solid_observation_partition(
                 &source_request.plan,
                 &partition_plan,
                 partition,
-                thermal_projection.as_ref().expect("thermal branch"),
+                solid_projection.as_ref().expect("solid-projection branch"),
                 &fields,
                 request.event_attribution,
             )
@@ -311,7 +377,7 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
             &source_request.plan,
             &partition_plan,
             partition,
-            &model,
+            structural_model(),
             mesh.as_ref(),
             &fields,
             request.event_attribution,
@@ -333,7 +399,7 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
                 &partition_plan,
                 partition,
                 StructuralObservationAccelerationInput {
-                    model: &model,
+                    model: structural_model(),
                     mesh: mesh.as_ref(),
                     field: &fields,
                     event_attribution: request.event_attribution,

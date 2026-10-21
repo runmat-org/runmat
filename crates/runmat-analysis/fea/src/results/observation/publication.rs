@@ -265,6 +265,27 @@ impl ObservationPublicationCatalog {
                 }
             }
             (
+                ObservationFieldCatalogSource::VolumeMeshRecovery {
+                    recovery_request,
+                    step: producing_step,
+                    ..
+                },
+                ObservationHistorySourceContext::VolumeMesh { mesh },
+            ) => {
+                if recovery_request.producer != self.producer || producing_step.as_ref() != step {
+                    return Err(invalid(
+                        "volume-mesh publication producer or authored step differs",
+                    ));
+                }
+                self.source.validate_volume_mesh_plan(&self.plan, mesh)?;
+                for entry in &self.entries {
+                    if let ObservationPublicationEntry::Sample(value) = entry {
+                        self.source
+                            .validate_volume_mesh_selection(&value.request.selection, mesh)?;
+                    }
+                }
+            }
+            (
                 ObservationFieldCatalogSource::Thermal { manifest },
                 ObservationHistorySourceContext::Thermal { workload, mesh },
             ) => {

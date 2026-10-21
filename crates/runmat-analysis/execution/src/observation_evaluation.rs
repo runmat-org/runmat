@@ -55,6 +55,11 @@ pub enum ObservationPublishedSource {
         layout: runmat_analysis_fea::results::field::FiniteVolumeFieldTopology,
         resource_plan: PreparedAnalysisObjects,
     },
+    /// Native nodal/element fields recovered on the canonical solver mesh.
+    VolumeMeshRecovery {
+        recovery_request: FieldRecoveryRequest,
+        fields: ImportedRecoveredFields,
+    },
     Thermal {
         manifest: ThermalSolverResultManifest,
         output: AnalysisOutputRoot,
@@ -68,6 +73,7 @@ impl ObservationPublishedSource {
         match self {
             Self::Structural { fields, .. }
             | Self::SampledRecovery { fields, .. }
+            | Self::VolumeMeshRecovery { fields, .. }
             | Self::FiniteVolumeRecovery { fields, .. } => &fields.output,
             Self::Thermal { output, .. } => output,
         }
@@ -76,6 +82,7 @@ impl ObservationPublishedSource {
         match self {
             Self::Structural { .. }
             | Self::SampledRecovery { .. }
+            | Self::VolumeMeshRecovery { .. }
             | Self::FiniteVolumeRecovery { .. } => &host.artifact_access,
             Self::Thermal { access, .. } => access,
         }
@@ -88,6 +95,8 @@ mod finite_volume;
 mod sampled;
 #[path = "observation_thermal.rs"]
 mod thermal;
+#[path = "observation_volume_mesh.rs"]
+mod volume_mesh;
 
 pub(crate) struct AdmittedObservation {
     pub request: ObservationEvaluationRequest,
@@ -131,6 +140,10 @@ pub(crate) fn admit_observation(
             fields,
             sampling,
         } => sampled::admit_sampled(preparation, recovery_request, fields, sampling),
+        ObservationPublishedSource::VolumeMeshRecovery {
+            recovery_request,
+            fields,
+        } => volume_mesh::admit_volume_mesh(preparation, recovery_request, fields),
         ObservationPublishedSource::Thermal { .. } => thermal::admit_thermal(preparation),
     }
 }
@@ -210,6 +223,7 @@ fn admit_recovery_source(
         | (AdmittedObservationWorkload::FluidSteady(_), FieldRecoverySource::SolverResult(_))
         | (AdmittedObservationWorkload::Magnetostatic(_), FieldRecoverySource::SolverResult(_))
         | (AdmittedObservationWorkload::MaxwellHarmonic(_), FieldRecoverySource::SolverResult(_))
+        | (AdmittedObservationWorkload::VolumeMesh, FieldRecoverySource::SolverResult(_))
         | (
             AdmittedObservationWorkload::Frequency(_),
             FieldRecoverySource::StructuralFrequencyEntry(_),
@@ -237,7 +251,8 @@ fn admit_structural(
     source_fields: &ImportedRecoveredFields,
 ) -> AnalysisBridgeResult<AdmittedObservation> {
     let (workload, mesh) = admit_recovery_source(preparation, source_request, source_fields)?;
-    let topology = StructuralRecoveredFieldTopology::derive(workload.model(), mesh.as_ref())
+    let model = workload.model()?;
+    let topology = StructuralRecoveredFieldTopology::derive(model, mesh.as_ref())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if source_request.topology
         != (runmat_analysis_fea::execution::FieldTopologyIdentity::Structural {
@@ -264,13 +279,13 @@ fn admit_structural(
         .collect::<Vec<_>>();
     let constraint_plan =
         runmat_analysis_fea::constraints::CanonicalStructuralConstraintPlan::compile_for_model(
-            workload.model(),
+            model,
             mesh.as_ref(),
         )
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let plan = resolve_structural_observation_plan(
         &preparation.step,
-        workload.model(),
+        model,
         mesh.as_ref(),
         &constraint_plan,
         &definitions,
