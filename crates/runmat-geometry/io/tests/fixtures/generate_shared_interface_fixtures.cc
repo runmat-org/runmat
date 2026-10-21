@@ -17,6 +17,9 @@
 //                                 5 mm, which shared interfaces must reject.
 //   free_wireframe_part.step      One product: a 10 mm cube plus a free construction line that
 //                                 starts at one of its corners (no face uses the line).
+//   named_cavity_part.step        One product: a 20 mm block ("Insulator") with a closed 6 mm cavity
+//                                 (BREP_WITH_VOIDS); the 6 cavity faces are named "Electrode" and
+//                                 the bottom face "Ground plane".
 //   fused_compound.step           One product whose shape is the General Fuse of a cube and its
 //                                 air box: two solids that already share the cavity faces, named by
 //                                 their solid entities ("Part", "Air").
@@ -189,6 +192,18 @@ int main(int argc, char** argv) {
     Handle(XCAFDoc_ShapeTool) shapes = XCAFDoc_DocumentTool::ShapeTool(doc->Main());
     TDataStd_Name::Set(shapes->AddShape(part, Standard_False), "Cube");
     ok = ok && write(doc, dir + "free_wireframe_part.step");
+  }
+
+  {
+    const TopoDS_Shape block = BRepAlgoAPI_Cut(box(-10, -10, -10, 20, 20, 20), box(-3, -3, -3, 6, 6, 6)).Shape();
+    Handle(TDocStd_Document) doc = new_document();
+    Handle(XCAFDoc_ShapeTool) shapes = XCAFDoc_DocumentTool::ShapeTool(doc->Main());
+    TDF_Label label = shapes->AddShape(block, Standard_False);
+    TDataStd_Name::Set(label, "Insulator");
+    name_faces(shapes, label, block,
+               {{"Electrode", [](const gp_Pnt& c) { return std::abs(c.X()) < 3.1 && std::abs(c.Y()) < 3.1 && std::abs(c.Z()) < 3.1; }},
+                {"Ground plane", [](const gp_Pnt& c) { return c.Z() < -9.9; }}});
+    ok = ok && write(doc, dir + "named_cavity_part.step");
   }
 
   // One product: the General Fuse of the cube and the air box shares the cube faces.

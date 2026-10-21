@@ -251,6 +251,31 @@ fn boolean_history_projects_authored_regions_to_the_final_exact_topology() {
 }
 
 #[test]
+fn boundary_introduced_by_an_instance_follows_its_copies_through_a_subtraction() {
+    let provider = provider();
+    let definition = pinned_block_definition();
+    let materialized = runmat_geometry_ops::materialize_geometry_definition(
+        &definition,
+        &BTreeMap::new(),
+        None,
+        &provider,
+        &RejectingSourceHost,
+        GeometryFeaturePlanLimits::default(),
+    )
+    .unwrap();
+    let regions = runmat_geometry_ops::resolve_geometry_regions(
+        &definition,
+        &materialized.geometry.topology,
+        &materialized.feature_history,
+        &NoRegionEvidence,
+    )
+    .unwrap();
+    // Two pins cut through the block leave two bore walls.
+    assert_eq!(regions["pin_bores"].entity_ids.len(), 2);
+    materialized.geometry.build_closure().unwrap();
+}
+
+#[test]
 fn feature_lineage_merges_shared_ancestors_across_boolean_branches() {
     let provider = provider();
     let definition = branched_union_definition();
@@ -458,6 +483,65 @@ fn bored_block_definition() -> GeometryDefinition {
                 cardinality: GeometryRegionCardinality::ExactlyOne,
             },
         ],
+        cad_parameters: Vec::new(),
+    }
+}
+
+fn pinned_block_definition() -> GeometryDefinition {
+    let translation = |x: f64| {
+        [1.0, 0.0, 0.0, x, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+            .into_iter()
+            .map(Into::into)
+            .collect::<Vec<_>>()
+    };
+    GeometryDefinition {
+        module_path: "main.fea".into(),
+        geometry_id: "pinned_block".into(),
+        parameters: Vec::new(),
+        source: GeometryDefinitionSource::Constructed(GeometryFeatureGraph {
+            features: vec![
+                GeometryFeature {
+                    feature_id: "stock".into(),
+                    operation: GeometryFeatureOperation::Box {
+                        width_m: 2.0.into(),
+                        depth_m: 2.0.into(),
+                        height_m: 2.0.into(),
+                    },
+                },
+                GeometryFeature {
+                    feature_id: "pin".into(),
+                    operation: GeometryFeatureOperation::Cylinder {
+                        radius_m: 0.2.into(),
+                        height_m: 4.0.into(),
+                        axis: [0.0.into(), 0.0.into(), 1.0.into()],
+                        origin_m: [0.5.into(), 1.0.into(), (-1.0).into()],
+                    },
+                },
+                GeometryFeature {
+                    feature_id: "pins".into(),
+                    operation: GeometryFeatureOperation::Instance {
+                        source: GeometryFeatureRef("pin".into()),
+                        transforms: vec![translation(0.0), translation(1.0)],
+                    },
+                },
+                GeometryFeature {
+                    feature_id: "cut".into(),
+                    operation: GeometryFeatureOperation::Subtract {
+                        base: GeometryFeatureRef("stock".into()),
+                        tools: vec![GeometryFeatureRef("pins".into())],
+                    },
+                },
+            ],
+            result: GeometryFeatureRef("cut".into()),
+        }),
+        regions: vec![GeometryRegionDefinition {
+            region_id: "pin_bores".into(),
+            role: GeometryRegionRole::Face,
+            selector: GeometryRegionSelector::BoundaryIntroducedBy(GeometryFeatureRef(
+                "pins".into(),
+            )),
+            cardinality: GeometryRegionCardinality::OneOrMore,
+        }],
         cad_parameters: Vec::new(),
     }
 }

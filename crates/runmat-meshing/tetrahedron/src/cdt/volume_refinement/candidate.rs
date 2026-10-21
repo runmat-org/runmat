@@ -77,6 +77,7 @@ pub(in crate::cdt::volume_refinement) fn construct_candidate_on_topology(
     // order must instead be invariant under a source-revision identity change.
     points.sort_by(compare_points);
     let mut choices = Vec::new();
+    let mut picking_center = None;
     if let Some(center) = metric_circumcenter(points, quality.resolved_metric) {
         // A Delaunay insertion removes the complete circumsphere cavity; it does
         // not split only the source tetrahedron. Consequently, the source's four
@@ -96,6 +97,7 @@ pub(in crate::cdt::volume_refinement) fn construct_candidate_on_topology(
                 construction_node_identities: quality.node_identities,
                 construction_point_index: 0,
             });
+            picking_center = Some(center);
         } else if quality.metric_radius_edge_ratio / quality_options.maximum_radius_edge_ratio
             > quality.maximum_metric_edge_length / quality_options.maximum_metric_edge_length
         {
@@ -124,7 +126,36 @@ pub(in crate::cdt::volume_refinement) fn construct_candidate_on_topology(
     work.evaluate()?;
     // Preserve the original family order, but construct only the prefix needed
     // to find an available point. A valid circumcenter needs no interior lattice.
-    let choices = choices.into_iter().map(Ok).chain(
+    // Picking region (Li and Teng): when the circumcenter's cavity would leave a sliver, a point
+    // near it splits the same oversized cell without that sliver. Deterministic offsets of 0.2
+    // and 0.4 circumradii along 14 directions follow the circumcenter, each admitted only when
+    // it lies strictly inside the source region and passes the unchanged progress policy.
+    let picking = picking_center
+        .into_iter()
+        .flat_map(|center| {
+            (0..PICKING_POINT_COUNT)
+                .filter_map(move |index| Some((index, picking_point(points, center, index)?)))
+        })
+        .filter_map(|(index, coordinates_m)| {
+            let construction_point_index = u16::try_from(PICKING_INDEX_OFFSET + index).ok()?;
+            match strictly_inside_region_from(
+                topology,
+                tetrahedron_index,
+                &quality.region_id,
+                coordinates_m,
+                work.cancellation,
+            ) {
+                Ok(true) => Some(Ok(CandidateChoice {
+                    kind: DelaunayRefinementCandidateKind::MetricOffcenter,
+                    coordinates_m,
+                    construction_node_identities: quality.node_identities,
+                    construction_point_index,
+                })),
+                Ok(false) => None,
+                Err(error) => Some(Err(error)),
+            }
+        });
+    let choices = choices.into_iter().map(Ok).chain(picking).chain(
         interior::CanonicalInteriorPoints::new(points)
             .enumerate()
             .filter_map(|(index, coordinates)| {
@@ -179,6 +210,48 @@ pub(in crate::cdt::volume_refinement) fn construct_candidate_on_topology(
         source_violation_ratio: quality.refinement_violation_ratio,
     })
 }
+
+const PICKING_FRACTIONS: [f64; 2] = [0.2, 0.4];
+/// Picking points use construction indices above every off-center index.
+pub(super) const PICKING_INDEX_OFFSET: usize = 1024;
+const PICKING_POINT_COUNT: usize = PICKING_FRACTIONS.len() * PICKING_DIRECTIONS.len();
+
+/// Picking point `index` around the metric circumcenter `center` of the canonically sorted
+/// source points: a fixed fraction of the circumradius (measured to the first sorted corner)
+/// along a fixed direction.
+pub(super) fn picking_point(
+    sorted_points: [[f64; 3]; 4],
+    center: [f64; 3],
+    index: usize,
+) -> Option<[f64; 3]> {
+    let fraction = *PICKING_FRACTIONS.get(index / PICKING_DIRECTIONS.len())?;
+    let direction = PICKING_DIRECTIONS[index % PICKING_DIRECTIONS.len()];
+    let [x, y, z]: [f64; 3] = std::array::from_fn(|axis| sorted_points[0][axis] - center[axis]);
+    let radius = (x * x + y * y + z * z).sqrt();
+    let norm = (direction[0] * direction[0]
+        + direction[1] * direction[1]
+        + direction[2] * direction[2])
+        .sqrt();
+    let point: [f64; 3] =
+        std::array::from_fn(|axis| center[axis] + direction[axis] / norm * fraction * radius);
+    point.iter().all(|value| value.is_finite()).then_some(point)
+}
+const PICKING_DIRECTIONS: [[f64; 3]; 14] = [
+    [1.0, 0.0, 0.0],
+    [-1.0, 0.0, 0.0],
+    [0.0, 1.0, 0.0],
+    [0.0, -1.0, 0.0],
+    [0.0, 0.0, 1.0],
+    [0.0, 0.0, -1.0],
+    [1.0, 1.0, 1.0],
+    [1.0, 1.0, -1.0],
+    [1.0, -1.0, 1.0],
+    [1.0, -1.0, -1.0],
+    [-1.0, 1.0, 1.0],
+    [-1.0, 1.0, -1.0],
+    [-1.0, -1.0, 1.0],
+    [-1.0, -1.0, -1.0],
+];
 
 fn compare_points(left: &[f64; 3], right: &[f64; 3]) -> std::cmp::Ordering {
     left.iter()

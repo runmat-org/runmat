@@ -105,7 +105,9 @@ fn check_case(permuted: bool, scoped: bool, scale: [f64; 3]) -> bool {
             if trial
                 .insert_prepared(insertion, controls, &NeverCancelled)
                 .is_err()
-                || !working_progress(trial.quality(), &parent)
+                || RefinementProgressPolicy::PreserveShape
+                    .rejection(trial.quality(), &parent)
+                    .is_some()
             {
                 continue;
             }
