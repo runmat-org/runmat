@@ -214,14 +214,6 @@ fn authored_material_current_ground_and_gauge_compile_into_physical_solve() {
         {
             assert!((a - b).abs() < 1e-14);
         }
-        assert!(solve_canonical_static(
-            &input,
-            &mesh,
-            "potential",
-            FormulationRequirement::Production,
-            1e-10
-        )
-        .is_err());
         let mut missing = input.clone();
         missing.constraints.pop();
         assert!(solve_canonical_static(

@@ -86,6 +86,18 @@ pub(crate) fn mesh(
             }
         }
     }
+    // Each node belongs to the bodies of the elements that use it.
+    for element in &elements {
+        for &node in &element.node_ids {
+            nodes[node as usize - 1]
+                .provenance
+                .extend(element.provenance.iter().cloned());
+        }
+    }
+    for node in &mut nodes {
+        node.provenance.sort();
+        node.provenance.dedup();
+    }
     let mut owners = BTreeMap::<[u64; 3], Vec<(u64, usize)>>::new();
     for (e, element) in elements.iter().enumerate() {
         for local in FACES {

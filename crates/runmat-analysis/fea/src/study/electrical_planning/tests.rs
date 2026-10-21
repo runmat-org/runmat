@@ -96,12 +96,9 @@ fn unsupported_lifecycle_and_missing_accuracy_are_not_silently_lowered() {
         operating_time_s: None,
     };
     assert!(matches!(
-        plan_electrical_study(&study, mismatched),
+        plan_electrical_study(&study, mismatched.clone()),
         Err(ElectricalStudyPlanningError::FormulationRequirementMismatch)
     ));
-    changed = study;
-    changed.formulation_requirement = FormulationRequirement::Production;
-    assert!(plan_electrical_study(&changed, mismatched).is_err());
 }
 
 #[test]

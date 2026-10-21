@@ -26,8 +26,8 @@ pub(super) fn through_authored_product(
         formulation_requirement: expected.formulation_requirement,
         element_heat_source: None,
     };
-    mixed::verify_source_selection(&compiled, &expected.initial_fields, policy);
-    assert!(crate::study::plan_thermal_study(&compiled, policy).is_err());
+    mixed::verify_source_selection(&compiled, &expected.initial_fields, policy.clone());
+    assert!(crate::study::plan_thermal_study(&compiled, policy.clone()).is_err());
     let product = crate::study::plan_thermal_study_product_with_fields(
         compiled,
         mesh,

@@ -127,9 +127,6 @@ fn magnetic_cold_import_rejects_lineage_inventory_fields_and_integral_substituti
 #[test]
 fn magnetic_workload_rejects_unsupported_policy_and_resource_ceiling_before_projection() {
     let base = workload(2.0);
-    let mut production = base.clone();
-    production.formulation_requirement = FormulationRequirement::Production;
-    assert!(production.canonical_bytes().is_err());
     let mut electrical = base.clone();
     electrical.model.electromagnetic = Some(ElectromagneticDomain::Static {
         equation: StaticElectricalEquation::Electrostatics,

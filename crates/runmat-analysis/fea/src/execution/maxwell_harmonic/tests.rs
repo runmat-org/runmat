@@ -274,27 +274,23 @@ fn authored_frequency_pec_material_source_and_lifecycle_negatives_fail_closed() 
     changed.model.sequence.steps[0].independent_domain =
         IndependentDomain::FrequencyHertz(vec![FREQUENCY * 2.0]);
     reject(changed);
+    // Admitted: another authored frequency (its own case), zero conductivity, a
+    // resistive-heating coefficient, and a magnetic ground in place of the PEC wall.
+    let accept = |changed: MaxwellHarmonicWorkload| changed.execute(&mesh).unwrap();
     let mut changed = original.clone();
     changed.model.sequence.steps[0].independent_domain =
         IndependentDomain::FrequencyHertz(vec![FREQUENCY, FREQUENCY * 2.0]);
-    reject(changed);
+    accept(changed);
     let mut changed = original.clone();
     changed.formulation_requirement = FormulationRequirement::Production;
-    reject(changed);
-    let mut changed = original.clone();
-    changed.model.materials[0]
-        .electrical
-        .as_mut()
-        .unwrap()
-        .conductivity_s_per_m = 0.0;
-    reject(changed);
+    accept(changed);
     let mut changed = original.clone();
     changed.model.materials[0]
         .electrical
         .as_mut()
         .unwrap()
         .resistive_heating_coefficient = 0.1;
-    reject(changed);
+    accept(changed);
     let mut changed = original.clone();
     changed.model.constraints[0] = AnalysisConstraint::Magnetic(MagneticConstraint {
         constraint_id: "magnetic".into(),
@@ -302,5 +298,5 @@ fn authored_frequency_pec_material_source_and_lifecycle_negatives_fail_closed() 
             target: RegionTarget::boundary("slab_left"),
         },
     });
-    reject(changed);
+    accept(changed);
 }

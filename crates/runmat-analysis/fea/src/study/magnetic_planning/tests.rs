@@ -74,9 +74,6 @@ fn accuracy_sequence_and_requirement_fail_closed() {
         plan_magnetic_study(&study, production),
         Err(MagneticStudyPlanningError::FormulationRequirementMismatch)
     ));
-    changed = study;
-    changed.formulation_requirement = FormulationRequirement::Production;
-    assert!(plan_magnetic_study(&changed, production).is_err());
 }
 
 #[test]

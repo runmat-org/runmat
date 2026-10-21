@@ -74,7 +74,9 @@ fn explicit_pec_positive_loss_and_original_current_are_not_inferred() {
         panic!()
     };
     source.signal_id = SignalId("missing-current".into());
-    for changed in [missing_pec, magnetic_ground, lossless, foreign_source] {
+    // Zero conductivity (air) needs no artificial loss.
+    assert!(plan_maxwell_study_product(compiled(lossless, &mesh), &mesh, policy()).is_ok());
+    for changed in [missing_pec, magnetic_ground, foreign_source] {
         assert!(plan_maxwell_study_product(compiled(changed, &mesh), &mesh, policy()).is_err());
     }
 }

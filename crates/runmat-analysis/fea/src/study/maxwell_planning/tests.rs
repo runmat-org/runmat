@@ -144,7 +144,9 @@ fn accuracy_static_sequence_frequency_and_restart_fail_closed() {
         .sequence
         .steps
         .push(sequence.model.sequence.steps[0].clone());
-    for changed in [static_intent, sweep, foreign_frequency, restart, sequence] {
+    // Several authored frequencies are one case each, not an error.
+    assert!(plan_maxwell_study(&sweep, policy()).is_ok());
+    for changed in [static_intent, foreign_frequency, restart, sequence] {
         assert!(plan_maxwell_study(&changed, policy()).is_err());
     }
     assert!(matches!(

@@ -41,8 +41,8 @@ fn policy() -> ThermalStudyPlanningPolicy {
     ThermalStudyPlanningPolicy {
         backend: ComputeBackend::Cpu,
         formulation_requirement: FormulationRequirement::Experimental,
-    },
-    element_heat_source: None,
+        element_heat_source: None,
+    }
 }
 
 #[test]

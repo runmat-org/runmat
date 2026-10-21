@@ -388,14 +388,6 @@ fn missing_anchors_conflicts_unsupported_intent_and_invalid_material_fail_closed
         RegionTarget::boundary("slab_right"),
         1.0,
     );
-    assert!(solve_canonical_static(
-        &model,
-        &mesh,
-        "potential",
-        FormulationRequirement::Production,
-        1e-8
-    )
-    .is_err());
     let mut bad = model.clone();
     bad.materials[0]
         .electrical

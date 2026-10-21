@@ -61,7 +61,7 @@ impl CanonicalElectricalStaticStatePayload {
             || !unique(&self.ordered_node_ids)
             || !unique(&self.ordered_element_ids)
             || self.recovery_request.plan != plan
-            || self.fields.fields().len() != 4
+            || self.fields.fields().len() != expected_request.plan.requirements.len()
             || self.recovery_request.producer != producer
             || self.recovery_request.source != FieldRecoverySource::SolverResult(source_result)
             || self.fields.source != self.recovery_request.source

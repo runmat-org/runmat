@@ -41,10 +41,9 @@ fn physical_volume_owner_materials_are_required_for_each_equation_and_order() {
             let study = compiled(order, equation, false);
             study.validate_against(&mesh(order, 2)).unwrap();
             validate_materials(&study, equation).unwrap();
-            assert!(matches!(
-                validate_materials(&compiled(order, equation, true), equation),
-                Err(ElectricalStudyProductError::UnsupportedMaterial)
-            ));
+            // A resistive-heating coefficient is ordinary material data (used by
+            // electrothermal analyses), not an unsupported material.
+            validate_materials(&compiled(order, equation, true), equation).unwrap();
         }
     }
 }

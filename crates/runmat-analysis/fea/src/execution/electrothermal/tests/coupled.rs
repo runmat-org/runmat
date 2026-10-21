@@ -82,6 +82,10 @@ fn coupled_model() -> AnalysisModel {
             relative_tolerance: 1e-12,
         },
     }));
+    // Every excitation belongs to a declared case when the model declares cases.
+    if let Some(case) = model.excitation_cases.first_mut() {
+        case.action_ids.push(ExcitationId("supply".into()));
+    }
     model
 }
 

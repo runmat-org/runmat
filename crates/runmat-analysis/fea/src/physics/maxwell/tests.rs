@@ -208,35 +208,35 @@ fn source_material_sampling_frequency_and_lossless_gates_fail_closed() {
             imaginary: 0.0,
         },
     );
-    let reject = |changed: &MaxwellInput| {
-        assert!(solve(&mesh, changed, 1e-10).is_err());
+    let reject = |changed: &MaxwellInput, case: u32| {
+        assert!(solve(&mesh, changed, 1e-10).is_err(), "case {case}");
     };
     let mut changed = input.clone();
     changed.angular_frequency_rad_per_s = 0.0;
-    reject(&changed);
+    reject(&changed, 1);
     changed.angular_frequency_rad_per_s = f64::NAN;
-    reject(&changed);
+    reject(&changed, 2);
     let mut changed = input.clone();
     changed.volumes[0].permittivity_f_per_m = -1.0;
-    reject(&changed);
+    reject(&changed, 3);
     changed.volumes[0].permittivity_f_per_m = 1.0;
     changed.volumes[0].conductivity_s_per_m = -1.0;
-    reject(&changed);
+    reject(&changed, 4);
     let mut changed = input.clone();
     changed.volumes.push(changed.volumes[0]);
-    reject(&changed);
+    reject(&changed, 5);
     let mut changed = input.clone();
     changed.source_current.pop();
-    reject(&changed);
+    reject(&changed, 6);
     let mut changed = input.clone();
     changed.source_current[0] = changed.source_current[1].clone();
-    reject(&changed);
+    reject(&changed, 7);
     let mut changed = input.clone();
     changed.source_current[0].current_density_a_per_m2[0].real = f64::INFINITY;
-    reject(&changed);
+    reject(&changed, 8);
     let mut changed = input.clone();
     changed.angular_frequency_rad_per_s = 1e-200;
-    reject(&changed);
+    reject(&changed, 9);
     let mut changed = input.clone();
     for source in &mut changed.source_current {
         for value in &mut source.current_density_a_per_m2 {
@@ -245,7 +245,7 @@ fn source_material_sampling_frequency_and_lossless_gates_fail_closed() {
         }
     }
     // Nonzero forcing must never be mistaken for zero through squared-norm underflow.
-    reject(&changed);
+    reject(&changed, 10);
     let (other_mesh, _) = fixture::problem(
         ElementOrder::Tet4,
         2,

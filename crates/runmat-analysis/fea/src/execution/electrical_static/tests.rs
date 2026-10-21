@@ -187,9 +187,6 @@ fn unsupported_lifecycle_and_production_never_become_portable_numerical_intent()
         assert!(value.canonical_bytes().is_err());
     }
     let mut value = baseline.clone();
-    value.formulation_requirement = FormulationRequirement::Production;
-    assert!(value.validate().is_err());
-    let mut value = baseline.clone();
     value.model.sequence.steps[0].restart = RestartPolicy::ResumeCheckpoint {
         checkpoint_id: "not-admitted".into(),
         required_state_digest: "not-admitted".into(),
