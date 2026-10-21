@@ -218,3 +218,24 @@ fn readonly_recovery_has_distinct_identity_and_rejects_forged_solve_or_work() {
         );
     }
 }
+
+#[test]
+fn diag_resource_scaling_with_mesh_size() {
+    for cells in [2, 4, 6] {
+        let (model, mesh, _) = fixture::prepare(cells, true);
+        let mut model = model;
+        model.sequence.steps[0].accuracy.resources.maximum_resident_bytes = u64::MAX / 4;
+        let options = NonlinearSolveOptions {
+            formulation_requirement: FormulationRequirement::Experimental,
+            solver_mesh: Some(mesh.clone()),
+            ..NonlinearSolveOptions::default()
+        };
+        for limit in [8usize, 4096] {
+            let plan = prepare_with_output_limit(&model, &model.sequence.steps[0], ComputeBackend::Cpu, &options, limit).unwrap();
+            let FeaResourceDemand::StructuralNonlinearPipeline(demand) = &plan.input.demand else { panic!() };
+            eprintln!("DIAG cells={cells} limit={limit} request_memory={} breakdown={:?} persistent={} artifact={} solve={:?}",
+                plan.request.memory_bytes, plan.breakdown, demand.additional_persistent_bytes.0,
+                demand.operator.publication.result_artifact_bytes.0, demand.operator.solve);
+        }
+    }
+}
