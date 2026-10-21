@@ -223,6 +223,9 @@ fn problem<'a>(c: &'a Case, p: &'a Prepared, tolerance: f64) -> FluidStructurePr
             policy: CanonicalFluidPolicy {
                 fixed_point_acceleration: None,
                 maximum_outer_iterations: 3000,
+                // Tight outer and linear targets on the coupled reference raise the
+                // conservative work bound past the interactive default.
+                maximum_operator_work: u64::MAX / 4,
                 linear_relative_tolerance: 1e-11,
                 physical_relative_tolerance: 1e-8,
                 ..CanonicalFluidPolicy::default()

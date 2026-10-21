@@ -299,7 +299,9 @@ pub(super) fn evaluate(
         let rho_c = system.elements[element].volumetric_capacity_j_per_m3k;
         enthalpy_outflow += rho_c * q * mean / weight;
     }
-    let reaction = (0..n)
+    // The residual at a prescribed node is the heat the constraint supplies to the domain;
+    // the balance books the heat leaving through prescribed temperatures, its negative.
+    let reaction = -(0..n)
         .filter(|&d| system.dirichlet[d].is_some())
         .map(|d| action[d] + storage.as_ref().map_or(0.0, |s| s[d]) - system.rhs[d])
         .sum::<f64>();

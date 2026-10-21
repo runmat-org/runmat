@@ -21,8 +21,6 @@ use runmat_analysis_fea::{
     AnalysisRunIdentity, ComputeBackend, ExecutionBackend, FeaBucklingRunResult,
     FeaProgressHandler, FeaRunResult, ModalSolveOptions,
 };
-#[cfg(test)]
-use runmat_analysis_fea::{SolverMethod, SolverPreconditioner};
 use runmat_geometry_core::UnitSystem;
 use runmat_meshing_core::SolverMeshArtifact;
 
