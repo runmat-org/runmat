@@ -34,6 +34,10 @@ pub struct AcousticStudyEntryCompletion {
     pub host_workload_digest: Digest,
     pub result: AcousticHarmonicSolverResult,
     pub numerical_receipt: AcousticNumericalReceiptArtifact,
+    /// Authored outputs evaluated at this frequency, with their publication catalog.
+    pub observation_catalog:
+        Option<runmat_analysis_fea::results::observation::ObservationPublicationCatalog>,
+    pub observation_results: Vec<runmat_analysis_fea::results::observation::ObservationResult>,
     pub accuracy: runmat_analysis_fea::results::accuracy::AccuracyArtifact,
     pub states: Vec<CanonicalSemanticState>,
     pub baseline_usage: runmat_analysis_fea::planning::resource::ResourceUsageEvidence,

@@ -2254,6 +2254,7 @@ fn execute_acoustic_with_options(
             &boundary.operator,
             BoundaryOperator::AcousticRigidWall
                 | BoundaryOperator::AcousticRadiation
+                | BoundaryOperator::AcousticSphericalRadiation { .. }
                 | BoundaryOperator::AcousticImpedance { .. }
         )
     }) {

@@ -21,6 +21,7 @@ fn assembly(amplitude: f64) -> AcousticAssembly {
         ))
         .unwrap(),
         stiffness: matrix([1., 2., 3., 4.], OperatorRole::Stiffness),
+        volume_stiffness: matrix([1., 2., 3., 4.], OperatorRole::Stiffness),
         mass: matrix([0.; 4], OperatorRole::Mass),
         impedance: matrix([0.1, 0.5, 0.8, 1.], OperatorRole::Damping),
         omega: 1.,

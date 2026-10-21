@@ -50,16 +50,16 @@ pub(crate) async fn execute_with_pool(
     {
         validate_pool(pool, scope_id, pool_id)?;
         let mut ordinals = Vec::new();
-        for (ordinal, entry) in coordinator
-            .entries_mut()
-            .map_err(protocol)?
-            .iter_mut()
-            .enumerate()
-        {
-            if !entry.is_complete() {
-                entry.prepare_next().map_err(protocol)?;
-                ordinals.push(ordinal);
+        let count = coordinator.entries().len();
+        for ordinal in 0..count {
+            if coordinator.entries()[ordinal].is_complete() {
+                continue;
             }
+            // Observation fan-out imports retained field partitions through the pool.
+            coordinator.entries_mut().map_err(protocol)?[ordinal]
+                .prepare_next(&*pool)
+                .map_err(protocol)?;
+            ordinals.push(ordinal);
         }
         let tasks = ordinals
             .iter()

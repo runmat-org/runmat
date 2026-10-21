@@ -11,7 +11,10 @@ use crate::{
 
 pub(super) struct AcousticAssembly {
     pub projection: AnalysisProjection,
+    /// Volume stiffness plus the reactive boundary stiffness of spherical radiation.
     pub stiffness: RealSparseMatrix,
+    /// Volume stiffness only; boundary resampling rebuilds `stiffness` from it.
+    pub volume_stiffness: RealSparseMatrix,
     pub mass: RealSparseMatrix,
     pub impedance: RealSparseMatrix,
     pub omega: f64,
@@ -90,9 +93,11 @@ impl AcousticAssembly {
                 })
                 .map_err(|e| AcousticHarmonicError::Topology(e.to_string()))?;
         }
+        let stiffness = finish(stiffness)?;
         Ok(Self {
             projection,
-            stiffness: finish(stiffness)?,
+            volume_stiffness: stiffness.clone(),
+            stiffness,
             mass: finish(mass)?,
             impedance: finish(assembler(
                 size,
@@ -114,6 +119,21 @@ impl AcousticAssembly {
             incident_faces: Vec::new(),
             reduction: None,
         })
+    }
+
+    /// Reset sources and prescribed values before resampling boundaries at another time.
+    /// Operators and projection are retained; the boundary admittance is rebuilt.
+    pub(super) fn with_cleared_sources(mut self) -> Self {
+        self.source.iter_mut().for_each(|value| {
+            *value = ProjectionScalar {
+                real: 0.0,
+                imaginary: 0.0,
+            }
+        });
+        self.prescribed.iter_mut().for_each(|value| *value = None);
+        self.source_evidence.clear();
+        self.incident_faces.clear();
+        self
     }
 
     pub(super) fn apply(&self, real: &[f64], imaginary: &[f64]) -> (Vec<f64>, Vec<f64>) {

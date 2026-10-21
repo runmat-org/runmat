@@ -36,6 +36,8 @@ mod nonlinear_recovery_demand;
 pub use nonlinear_recovery_demand::NonlinearFieldRecoveryResourceDemand;
 mod maxwell_recovery_demand;
 pub use maxwell_recovery_demand::MaxwellFieldRecoveryResourceDemand;
+mod acoustic_recovery_demand;
+pub use acoustic_recovery_demand::AcousticFieldRecoveryResourceDemand;
 mod magnetic_static_demand;
 mod maxwell_harmonic_demand;
 pub use acoustic_demand::AcousticHarmonicResourceDemand;

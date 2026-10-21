@@ -22,6 +22,12 @@ mod magnetic_recovery;
 mod magnetic_static;
 mod maxwell_harmonic;
 mod maxwell_recovery;
+mod acoustic_recovery;
+pub use acoustic_recovery::{
+    acoustic_field_recovery_partition_count, acoustic_field_recovery_shape,
+    acoustic_recovery_source_validation_workspace, build_acoustic_field_recovery_resource_plan,
+};
+pub use contract::AcousticFieldRecoveryResourceDemand;
 pub use acoustic::{
     acoustic_harmonic_result_payload_bytes_upper_bound, build_acoustic_resource_plan,
     PreparedAcousticResourceFacts,
