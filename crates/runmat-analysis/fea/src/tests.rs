@@ -5117,11 +5117,26 @@ fn modal_extraction_reduces_a_homogeneous_equation_constraint() {
         .expect("unconstrained-equation modal solve");
     let first = free.mode_shapes[0].as_host_f64().unwrap();
     let nodes = free.mode_shapes[0].shape[0];
-    // Tie the axial motion of the two nodes that move most differently in the first mode.
+    // Tie, in the component that varies most in the first mode, the two nodes that move most
+    // differently.
+    let (component, dof) = [
+        (0, StructuralTranslationDof::Ux),
+        (1, StructuralTranslationDof::Uy),
+        (2, StructuralTranslationDof::Uz),
+    ]
+    .into_iter()
+    .max_by(|(a, _), (b, _)| {
+        let spread = |c: usize| {
+            let values = (0..nodes).map(|n| first[n * 3 + c]);
+            values.clone().fold(f64::MIN, f64::max) - values.fold(f64::MAX, f64::min)
+        };
+        spread(*a).total_cmp(&spread(*b))
+    })
+    .unwrap();
     let (left, right) = {
-        let ux = |node: usize| first[node * 3];
-        let max = (0..nodes).max_by(|a, b| ux(*a).total_cmp(&ux(*b))).unwrap();
-        let min = (0..nodes).min_by(|a, b| ux(*a).total_cmp(&ux(*b))).unwrap();
+        let value = |node: usize| first[node * 3 + component];
+        let max = (0..nodes).max_by(|a, b| value(*a).total_cmp(&value(*b))).unwrap();
+        let min = (0..nodes).min_by(|a, b| value(*a).total_cmp(&value(*b))).unwrap();
         (max, min)
     };
     assert_ne!(left, right);
@@ -5134,12 +5149,12 @@ fn modal_extraction_reduces_a_homogeneous_equation_constraint() {
                 terms: vec![
                     StructuralConstraintEquationTerm {
                         target: RegionTarget::point(format!("node:{}", left + 1)),
-                        dof: StructuralTranslationDof::Ux,
+                        dof,
                         coefficient: 1.0,
                     },
                     StructuralConstraintEquationTerm {
                         target: RegionTarget::point(format!("node:{}", right + 1)),
-                        dof: StructuralTranslationDof::Ux,
+                        dof,
                         coefficient: -1.0,
                     },
                 ],
@@ -5152,7 +5167,7 @@ fn modal_extraction_reduces_a_homogeneous_equation_constraint() {
     for mode in &tied.mode_shapes {
         let shape = mode.as_host_f64().unwrap();
         let scale = shape.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
-        assert!((shape[left * 3] - shape[right * 3]).abs() <= 1.0e-9 * scale);
+        assert!((shape[left * 3 + component] - shape[right * 3 + component]).abs() <= 1.0e-9 * scale);
     }
     for (constrained, unconstrained) in tied.frequencies_hz().iter().zip(free.frequencies_hz()) {
         assert!(*constrained >= unconstrained * (1.0 - 1.0e-9));

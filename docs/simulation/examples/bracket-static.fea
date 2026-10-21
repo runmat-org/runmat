@@ -11,6 +11,8 @@ geometry bracket {
 mesh bracket on geometry.bracket {
     tetrahedra {
         order = quadratic
+        target_size = 10 mm
+        maximum_deviation = 0.1 mm
     }
 }
 
