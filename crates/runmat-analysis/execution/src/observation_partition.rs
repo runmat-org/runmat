@@ -241,9 +241,12 @@ pub fn prepare_observation_fanout(
             } else if matches!(
                 &admitted.workload,
                 super::observation_source::AdmittedObservationWorkload::Thermal(_)
+            ) || matches!(
+                &preparation.source,
+                crate::ObservationPublishedSource::VolumeMeshRecovery { .. }
             ) {
                 let mesh = admitted.mesh.as_ref().ok_or(AnalysisBridgeError::Identity(
-                    "thermal observation requires exact mesh",
+                    "solid-projection observation requires exact mesh",
                 ))?;
                 let projection = runmat_analysis_fea::topology::AnalysisProjection::derive(mesh)
                     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
@@ -258,7 +261,7 @@ pub fn prepare_observation_fanout(
                     &admitted.request.plan,
                     &plan,
                     partition,
-                    admitted.workload.model(),
+                    admitted.workload.model()?,
                     admitted.mesh.as_ref(),
                 )
             }

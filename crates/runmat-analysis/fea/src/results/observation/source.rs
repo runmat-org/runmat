@@ -44,6 +44,15 @@ pub enum ObservationFieldSource {
         numerical_source: FieldRecoverySource,
         topology: CanonicalStructuralTopologyIdentity,
     },
+    /// Native nodal/element fields on the canonical solver mesh. Plans address the mesh's
+    /// analysis projection, so the projection digest is the observation topology.
+    VolumeMeshRecovery {
+        recovery_request: FieldRecoveryRequestIdentity,
+        artifact: RecoveredFieldArtifactIdentity,
+        numerical_source: FieldRecoverySource,
+        topology: FieldTopologyIdentity,
+        projection_digest: Digest,
+    },
     ThermalResult {
         workload: AnalysisWorkloadIdentity,
         result: SolverResultIdentity,
@@ -66,6 +75,9 @@ impl ObservationFieldSource {
             Self::StructuralRecovery {
                 numerical_source, ..
             } => numerical_source.solver_result(),
+            Self::VolumeMeshRecovery {
+                numerical_source, ..
+            } => numerical_source.solver_result(),
             Self::ThermalResult { result, .. } => Some(result),
         }
     }
@@ -75,6 +87,9 @@ impl ObservationFieldSource {
             Self::FiniteVolumeRecovery { topology, .. } => topology.discretization_digest(),
             Self::SampledRecovery { topology, .. } => topology.discretization_digest(),
             Self::StructuralRecovery { topology, .. } => topology.discretization_digest(),
+            Self::VolumeMeshRecovery {
+                projection_digest, ..
+            } => projection_digest,
             Self::ThermalResult {
                 projection_digest, ..
             } => projection_digest,
@@ -87,8 +102,10 @@ pub(super) use thermal::ThermalFieldSourceAuthority;
 
 mod finite_volume;
 mod sampled;
+mod volume_mesh;
 pub(crate) use finite_volume::validate_finite_volume_authority;
 pub(crate) use sampled::validate_sampled_authority;
+pub(crate) use volume_mesh::validate_volume_mesh_authority;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -320,6 +337,20 @@ impl ObservationFieldSelection {
                 || numerical_source.solver_result().is_none()
             {
                 return Err(invalid("sampled selection requires genuine sampled topology and original solver result"));
+            }
+        }
+        if let ObservationFieldSource::VolumeMeshRecovery {
+            topology,
+            numerical_source,
+            ..
+        } = self.source
+        {
+            if !matches!(topology, FieldTopologyIdentity::VolumeMesh { .. })
+                || numerical_source.solver_result().is_none()
+            {
+                return Err(invalid(
+                    "volume-mesh selection requires canonical mesh topology and solver result",
+                ));
             }
         }
         if self.schema_version != 1

@@ -1,6 +1,7 @@
 #include "runmat-geometry-io/src/occt/ffi.rs.h"
 #include "exact_assembly.hxx"
 #include "exact_identity.hxx"
+#include "exact_names.hxx"
 #include "exact_topology.hxx"
 
 #include <BRepTools.hxx>
@@ -198,11 +199,14 @@ void append_occurrence(
       throw std::runtime_error(
           "OCCT exact assembly occurrence definition is absent from the canonical B-rep shape table");
     }
+    const ExactNameTable names =
+        ExactNameTable::from_definition(definition_label, occurrence_label);
     append_exact_topology(result,
                           shape_set.Shape(body_shape_key),
                           shape_set,
                           identity_context,
                           occurrence_index,
+                          &names,
                           options);
   }
   active_definitions.erase(definition_key);
@@ -228,6 +232,7 @@ void append_exact_occurrences(OcctExactShapePayload& result,
                               const Handle(XCAFDoc_ShapeTool)& shape_tool,
                               bool has_xcaf,
                               const std::string& representation,
+                              const ExactNameTable* root_names,
                               const OcctImportOptions& options) {
   BRepTools_ShapeSet shape_set(Standard_False);
   shape_set.Add(root_shape);
@@ -246,7 +251,8 @@ void append_exact_occurrences(OcctExactShapePayload& result,
     if (body_shape_key <= 0) {
       throw std::runtime_error("OCCT exact root shape is absent from its B-rep shape table");
     }
-    append_exact_topology(result, root_shape, shape_set, identity_context, 1, options);
+    append_exact_topology(
+        result, root_shape, shape_set, identity_context, 1, root_names, options);
     return;
   }
 

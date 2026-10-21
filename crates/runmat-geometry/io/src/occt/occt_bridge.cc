@@ -1,6 +1,7 @@
 #include "runmat-geometry-io/src/occt/ffi.rs.h"
 #include "exact_assembly.hxx"
 #include "exact_healing.hxx"
+#include "exact_shared_interfaces.hxx"
 #include "exact_xcaf_healing.hxx"
 
 #include <BRep_Builder.hxx>
@@ -26,6 +27,9 @@
 #include <Poly_Triangulation.hxx>
 #include <Quantity_Color.hxx>
 #include <STEPCAFControl_Reader.hxx>
+#include <StepData_StepModel.hxx>
+#include <XSControl_Reader.hxx>
+#include <XSControl_WorkSession.hxx>
 #include <STEPControl_Reader.hxx>
 #include <TCollection_AsciiString.hxx>
 #include <TCollection_ExtendedString.hxx>
@@ -76,6 +80,7 @@
 #include <memory>
 #include <mutex>
 #include <set>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -303,6 +308,15 @@ CadDocument read_step_shape(const std::string& path,
   if (status != IFSelect_RetDone) {
     throw std::runtime_error("OCCT STEP reader did not return IFSelect_RetDone");
   }
+  // CAD tools write face and body names on STEP representation items. OCCT reads them into
+  // XCAF sub-shape labels only when the model asks for it; set it on this file's model so
+  // `select name` resolves authored face names without touching process-global settings.
+  Handle(StepData_StepModel) step_model =
+      Handle(StepData_StepModel)::DownCast(reader.Reader().WS()->Model());
+  if (step_model.IsNull()) {
+    throw std::runtime_error("OCCT STEP reader produced no STEP model");
+  }
+  step_model->InternalParameters.ReadSubshapeNames = true;
   // STEP declares physical units. Exact imports request a stable millimetre
   // kernel representation to preserve tolerance-scale features; preview imports
   // request their display coordinate unit. Rust projects exact contracts to SI.
@@ -1176,6 +1190,18 @@ OcctExactShapePayload import_exact_cad_bytes(
     check_cancelled(options);
   }
 
+  // Shared interfaces replace the part structure with one compound of placed solids whose
+  // coincident faces are shared; names travel with the kernel shapes instead of XCAF labels.
+  std::optional<ExactNameTable> shared_names;
+  if (options.share_interfaces) {
+    ExactSharedInterfaces shared = share_exact_interfaces(
+        document.shape, document.shape_tool, document.has_xcaf, options);
+    document.shape = shared.shape;
+    shared_names.emplace(std::move(shared.names));
+    BRepTools::Clean(document.shape);
+    check_cancelled(options);
+  }
+
   const std::string representation = serialize_exact_shape(document.shape, options);
   if (static_cast<std::uint64_t>(representation.size()) >
       options.max_exact_representation_bytes) {
@@ -1270,8 +1296,9 @@ OcctExactShapePayload import_exact_cad_bytes(
   append_exact_occurrences(result,
                            document.shape,
                            document.shape_tool,
-                           document.has_xcaf,
+                           document.has_xcaf && !shared_names.has_value(),
                            representation,
+                           shared_names.has_value() ? &*shared_names : nullptr,
                            options);
   const std::uint64_t projected_entity_count =
       static_cast<std::uint64_t>(result.occurrences.size()) +

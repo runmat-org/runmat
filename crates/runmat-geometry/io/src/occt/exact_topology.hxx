@@ -11,12 +11,14 @@ namespace occt_backend {
 struct OcctExactShapePayload;
 struct OcctImportOptions;
 class ExactIdentityContext;
+class ExactNameTable;
 
 void append_exact_topology(OcctExactShapePayload& result,
                            const TopoDS_Shape& root,
                            const BRepTools_ShapeSet& shape_set,
                            ExactIdentityContext& identity_context,
                            std::uint64_t occurrence_index,
+                           const ExactNameTable* names,
                            const OcctImportOptions& options);
 
 } // namespace occt_backend

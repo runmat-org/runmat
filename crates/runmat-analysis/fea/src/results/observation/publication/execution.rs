@@ -207,7 +207,8 @@ impl ObservationPublicationCatalog {
                         mesh,
                     )
                     .map_err(invalid)?,
-                    ObservationHistorySourceContext::Thermal { mesh, .. } => {
+                    ObservationHistorySourceContext::Thermal { mesh, .. }
+                    | ObservationHistorySourceContext::VolumeMesh { mesh } => {
                         let projection =
                             crate::topology::AnalysisProjection::derive(mesh).map_err(invalid)?;
                         solid_observation_partition_source_indices(
@@ -299,6 +300,9 @@ impl ObservationPublicationCatalog {
                             }
                             ObservationFieldCatalogSource::Structural { .. } => {
                                 ObservationSelectionCoordinate::StructuralRecovery
+                            }
+                            ObservationFieldCatalogSource::VolumeMeshRecovery { .. } => {
+                                ObservationSelectionCoordinate::VolumeMeshRecovery
                             }
                             ObservationFieldCatalogSource::StructuralFrequencyHistory {
                                 samples,
