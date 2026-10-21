@@ -3,14 +3,28 @@ use super::*;
 use crate::topology::AnalysisProjection;
 
 impl ObservationFieldCatalog {
+    /// `step` is the producing authored step (with its observations); `sequence` names its
+    /// authored sequence. Both are bound to the recovery request's producer identity.
     pub fn volume_mesh_recovery(
         request: FieldRecoveryRequest,
         manifest: RecoveredFieldArtifactManifest,
+        sequence: crate::execution::SequenceIdentity,
+        step: runmat_analysis_core::ProcedureStep,
     ) -> AnalysisExecutionResult<Self> {
         Self::new(ObservationFieldCatalogSource::VolumeMeshRecovery {
             recovery_request: Box::new(request),
             manifest: Box::new(manifest),
+            sequence,
+            step: Box::new(step),
         })
+    }
+
+    /// The producing authored step of a volume-mesh catalog.
+    pub fn volume_mesh_step(&self) -> AnalysisExecutionResult<&runmat_analysis_core::ProcedureStep> {
+        match &self.source {
+            ObservationFieldCatalogSource::VolumeMeshRecovery { step, .. } => Ok(step),
+            _ => Err(invalid("expected native volume-mesh catalog")),
+        }
     }
 
     pub fn validate_volume_mesh_selection(
@@ -22,6 +36,7 @@ impl ObservationFieldCatalog {
         let ObservationFieldCatalogSource::VolumeMeshRecovery {
             recovery_request,
             manifest,
+            ..
         } = &self.source
         else {
             return Err(invalid("expected native volume-mesh catalog"));
@@ -40,6 +55,7 @@ impl ObservationFieldCatalog {
         let ObservationFieldCatalogSource::VolumeMeshRecovery {
             recovery_request,
             manifest,
+            ..
         } = &self.source
         else {
             return Err(invalid("expected native volume-mesh catalog"));
@@ -51,13 +67,14 @@ impl ObservationFieldCatalog {
     pub fn validate_volume_mesh_plan(
         &self,
         plan: &ResolvedObservationPlan,
-        step: &runmat_analysis_core::ProcedureStep,
         mesh: &SolverMeshArtifact,
     ) -> AnalysisExecutionResult<()> {
         self.validate()?;
         let ObservationFieldCatalogSource::VolumeMeshRecovery {
             recovery_request,
             manifest,
+            step,
+            ..
         } = &self.source
         else {
             return Err(invalid("expected native volume-mesh catalog"));
@@ -87,3 +104,6 @@ impl ObservationFieldCatalog {
             .map_err(invalid)
     }
 }
+
+#[cfg(test)]
+mod tests;

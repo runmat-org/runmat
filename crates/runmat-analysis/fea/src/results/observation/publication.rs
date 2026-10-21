@@ -266,26 +266,18 @@ impl ObservationPublicationCatalog {
             }
             (
                 ObservationFieldCatalogSource::VolumeMeshRecovery {
-                    recovery_request, ..
+                    recovery_request,
+                    step: producing_step,
+                    ..
                 },
-                ObservationHistorySourceContext::AcousticHarmonic { workload, mesh },
+                ObservationHistorySourceContext::VolumeMesh { mesh },
             ) => {
-                if recovery_request.producer != self.producer
-                    || workload.producer_identity()? != self.producer
-                    || workload.step_id != step.step_id
-                    || !workload
-                        .model
-                        .sequence
-                        .steps
-                        .iter()
-                        .any(|authored| authored == step)
-                {
+                if recovery_request.producer != self.producer || producing_step.as_ref() != step {
                     return Err(invalid(
                         "volume-mesh publication producer or authored step differs",
                     ));
                 }
-                self.source
-                    .validate_volume_mesh_plan(&self.plan, step, mesh)?;
+                self.source.validate_volume_mesh_plan(&self.plan, mesh)?;
                 for entry in &self.entries {
                     if let ObservationPublicationEntry::Sample(value) = entry {
                         self.source

@@ -88,10 +88,7 @@ pub(super) fn validate(
         )?;
         catalog.validate_for(
             step,
-            ObservationHistorySourceContext::AcousticHarmonic {
-                workload: &workload,
-                mesh: &mesh,
-            },
+            ObservationHistorySourceContext::VolumeMesh { mesh: &mesh },
         )?;
         let ObservationFieldCatalogSource::VolumeMeshRecovery {
             recovery_request, ..

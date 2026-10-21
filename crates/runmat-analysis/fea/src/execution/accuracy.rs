@@ -98,6 +98,7 @@ impl ObservationPublicationCatalog {
                 crate::results::observation::ObservationFieldCatalogSource::VolumeMeshRecovery {
                     recovery_request,
                     manifest,
+                    ..
                 },
             ) if recovery_request.producer == producer
                 && recovery_request.source.solver_result() == Some(result)

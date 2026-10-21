@@ -70,6 +70,7 @@ impl ObservationFieldCatalog {
                 ObservationFieldCatalogSource::VolumeMeshRecovery {
                     recovery_request,
                     manifest,
+                    ..
                 },
                 ObservationSelectionCoordinate::VolumeMeshRecovery,
             ) => ObservationFieldSelection::volume_mesh_recovery(

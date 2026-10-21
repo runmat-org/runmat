@@ -161,7 +161,7 @@ pub fn prepare_observation_history_finalization_task(
                 AdmittedObservationWorkload::Thermal(_)
                 | AdmittedObservationWorkload::FluidSteady(_)
                 | AdmittedObservationWorkload::Magnetostatic(_)
-                | AdmittedObservationWorkload::AcousticHarmonic(_)
+                | AdmittedObservationWorkload::VolumeMesh
                 | AdmittedObservationWorkload::MaxwellHarmonic(_) => {
                     return Err(invalid(
                         "structural history cannot use a nonstructural workload",
@@ -226,7 +226,7 @@ pub fn prepare_observation_history_finalization_task(
         }
         AdmittedObservationWorkload::Magnetostatic(_)
         | AdmittedObservationWorkload::FluidSteady(_)
-        | AdmittedObservationWorkload::AcousticHarmonic(_)
+        | AdmittedObservationWorkload::VolumeMesh
         | AdmittedObservationWorkload::MaxwellHarmonic(_) => {
             return Err(invalid(
                 "sampled electromagnetic, fluid and acoustic history finalization is not admitted",

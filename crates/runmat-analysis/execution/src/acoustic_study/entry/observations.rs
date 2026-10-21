@@ -116,7 +116,7 @@ impl AcousticStudyEntryCoordinator {
                     recovery_request: recovery.request.clone(),
                     fields: fields.clone(),
                 },
-                source_workload: ObservationWorkloadSource::AcousticHarmonic(
+                source_workload: ObservationWorkloadSource::VolumeMesh(
                     self.input(Kind::AcousticHarmonicWorkload)?,
                 ),
                 mesh: Some(self.input(Kind::Mesh)?),
@@ -304,10 +304,11 @@ impl AcousticStudyEntryCoordinator {
             ObservationFieldCatalog::volume_mesh_recovery(
                 recovery.request.clone(),
                 fields.manifest.clone(),
+                SequenceIdentity::from_solver_contract(&self.workload().model.sequence)?,
+                self.preparation.selected_step().clone(),
             )?,
             self.preparation.selected_step(),
-            ObservationHistorySourceContext::AcousticHarmonic {
-                workload: self.workload(),
+            ObservationHistorySourceContext::VolumeMesh {
                 mesh: &self.preparation.mesh,
             },
         )?;

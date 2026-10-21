@@ -26,8 +26,9 @@ pub enum ObservationHistorySourceContext<'a> {
         workload: &'a super::MaxwellHarmonicWorkload,
         mesh: &'a SolverMeshArtifact,
     },
-    AcousticHarmonic {
-        workload: &'a super::AcousticHarmonicWorkload,
+    /// Native node/element fields on the canonical solver mesh of any family. The producing
+    /// step and identity are carried by the volume-mesh catalog itself.
+    VolumeMesh {
         mesh: &'a SolverMeshArtifact,
     },
     Magnetostatic {
@@ -49,7 +50,7 @@ impl ObservationHistorySourceContext<'_> {
         match self {
             Self::Magnetostatic { .. }
             | Self::MaxwellHarmonic { .. }
-            | Self::AcousticHarmonic { .. }
+            | Self::VolumeMesh { .. }
             | Self::FluidSteady { .. } => ObservationExecutionPolicy::serial(),
             Self::Structural { source, .. } => source.observation_execution(),
             Self::Thermal { .. } => ObservationExecutionPolicy::serial(),
@@ -61,7 +62,10 @@ impl ObservationHistorySourceContext<'_> {
             Self::FluidSteady { workload, .. } => workload.validate(),
             Self::Magnetostatic { workload, .. } => workload.validate(),
             Self::MaxwellHarmonic { workload, .. } => workload.validate(),
-            Self::AcousticHarmonic { workload, .. } => workload.validate(),
+            Self::VolumeMesh { mesh } => {
+                runmat_meshing_core::CanonicalMeshingContract::validate_canonical(mesh)
+                    .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))
+            }
             Self::Structural { source, .. } => source.validate(),
             Self::Thermal { workload, .. } => workload.validate(),
         }

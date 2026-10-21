@@ -136,7 +136,9 @@ pub fn solve_canonical_modal(
         }
         match boundary.operator {
             BoundaryOperator::AcousticRigidWall => {}
-            BoundaryOperator::AcousticImpedance { .. } | BoundaryOperator::AcousticRadiation => {
+            BoundaryOperator::AcousticImpedance { .. }
+            | BoundaryOperator::AcousticRadiation
+            | BoundaryOperator::AcousticSphericalRadiation { .. } => {
                 return Err(AcousticHarmonicError::Unsupported(
                     "impedance and radiation boundaries absorb energy and have complex modes; \
                      cavity modes admit rigid walls and pressure release (use a harmonic sweep \

@@ -210,7 +210,7 @@ impl ObservationPublicationCatalog {
                     )
                     .map_err(invalid)?,
                     ObservationHistorySourceContext::Thermal { mesh, .. }
-                    | ObservationHistorySourceContext::AcousticHarmonic { mesh, .. } => {
+                    | ObservationHistorySourceContext::VolumeMesh { mesh } => {
                         let projection =
                             crate::topology::AnalysisProjection::derive(mesh).map_err(invalid)?;
                         solid_observation_partition_source_indices(

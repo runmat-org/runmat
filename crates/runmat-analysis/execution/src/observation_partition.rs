@@ -262,7 +262,7 @@ pub fn prepare_observation_fanout(
                     &admitted.request.plan,
                     &plan,
                     partition,
-                    admitted.workload.model(),
+                    admitted.workload.model()?,
                     admitted.mesh.as_ref(),
                 )
             }

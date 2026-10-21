@@ -223,7 +223,7 @@ fn admit_recovery_source(
         | (AdmittedObservationWorkload::FluidSteady(_), FieldRecoverySource::SolverResult(_))
         | (AdmittedObservationWorkload::Magnetostatic(_), FieldRecoverySource::SolverResult(_))
         | (AdmittedObservationWorkload::MaxwellHarmonic(_), FieldRecoverySource::SolverResult(_))
-        | (AdmittedObservationWorkload::AcousticHarmonic(_), FieldRecoverySource::SolverResult(_))
+        | (AdmittedObservationWorkload::VolumeMesh, FieldRecoverySource::SolverResult(_))
         | (
             AdmittedObservationWorkload::Frequency(_),
             FieldRecoverySource::StructuralFrequencyEntry(_),
@@ -251,7 +251,8 @@ fn admit_structural(
     source_fields: &ImportedRecoveredFields,
 ) -> AnalysisBridgeResult<AdmittedObservation> {
     let (workload, mesh) = admit_recovery_source(preparation, source_request, source_fields)?;
-    let topology = StructuralRecoveredFieldTopology::derive(workload.model(), mesh.as_ref())
+    let model = workload.model()?;
+    let topology = StructuralRecoveredFieldTopology::derive(model, mesh.as_ref())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if source_request.topology
         != (runmat_analysis_fea::execution::FieldTopologyIdentity::Structural {
@@ -278,13 +279,13 @@ fn admit_structural(
         .collect::<Vec<_>>();
     let constraint_plan =
         runmat_analysis_fea::constraints::CanonicalStructuralConstraintPlan::compile_for_model(
-            workload.model(),
+            model,
             mesh.as_ref(),
         )
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let plan = resolve_structural_observation_plan(
         &preparation.step,
-        workload.model(),
+        model,
         mesh.as_ref(),
         &constraint_plan,
         &definitions,

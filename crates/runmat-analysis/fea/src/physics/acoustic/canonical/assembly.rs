@@ -11,7 +11,10 @@ use crate::{
 
 pub(super) struct AcousticAssembly {
     pub projection: AnalysisProjection,
+    /// Volume stiffness plus the reactive boundary stiffness of spherical radiation.
     pub stiffness: RealSparseMatrix,
+    /// Volume stiffness only; boundary resampling rebuilds `stiffness` from it.
+    pub volume_stiffness: RealSparseMatrix,
     pub mass: RealSparseMatrix,
     pub impedance: RealSparseMatrix,
     pub omega: f64,
@@ -90,9 +93,11 @@ impl AcousticAssembly {
                 })
                 .map_err(|e| AcousticHarmonicError::Topology(e.to_string()))?;
         }
+        let stiffness = finish(stiffness)?;
         Ok(Self {
             projection,
-            stiffness: finish(stiffness)?,
+            volume_stiffness: stiffness.clone(),
+            stiffness,
             mass: finish(mass)?,
             impedance: finish(assembler(
                 size,

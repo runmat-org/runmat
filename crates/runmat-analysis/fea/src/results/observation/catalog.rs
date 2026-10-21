@@ -48,9 +48,14 @@ pub enum ObservationFieldCatalogSource {
     Thermal {
         manifest: Box<ThermalSolverResultManifest>,
     },
+    /// Native node/element fields on the canonical solver mesh, for any physics family.
+    /// The producing authored step is carried and bound to the request's producer, so
+    /// plans re-resolve without decoding the family-specific workload.
     VolumeMeshRecovery {
         recovery_request: Box<FieldRecoveryRequest>,
         manifest: Box<RecoveredFieldArtifactManifest>,
+        sequence: crate::execution::SequenceIdentity,
+        step: Box<runmat_analysis_core::ProcedureStep>,
     },
 }
 
@@ -226,7 +231,18 @@ impl ObservationFieldCatalog {
             ObservationFieldCatalogSource::VolumeMeshRecovery {
                 recovery_request,
                 manifest,
-            } => super::source::validate_volume_mesh_authority(recovery_request, manifest)?,
+                sequence,
+                step,
+            } => {
+                super::source::validate_volume_mesh_authority(recovery_request, manifest)?;
+                if crate::execution::StepIdentity::from_solver_contract(*sequence, step)?
+                    != recovery_request.producer
+                {
+                    return Err(invalid(
+                        "volume-mesh catalog step differs from its recovery producer",
+                    ));
+                }
+            }
             ObservationFieldCatalogSource::StructuralFrequencyHistory { samples } => {
                 frequency::validate_samples(samples)?;
             }
