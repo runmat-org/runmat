@@ -121,7 +121,7 @@ pub(super) async fn execute(
         runmat_analysis_fea::study::plan_electrical_study_product(
             compiled,
             &geometry.meshing.artifact,
-            prepared.planning,
+            prepared.planning.clone(),
         )
         .map_err(|e| e.to_string())?
     } else {
@@ -131,7 +131,7 @@ pub(super) async fn execute(
             regions: &geometry.output.regions,
             materials: &prepared.materials,
             mesh: &geometry.meshing.artifact,
-            planning: prepared.planning,
+            planning: prepared.planning.clone(),
         })
         .map_err(|e| e.to_string())?
     };
