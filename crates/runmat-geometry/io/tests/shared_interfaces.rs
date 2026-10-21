@@ -15,6 +15,7 @@ const TWO_CAVITY_AIR: &[u8] = include_bytes!("fixtures/two_cavity_air_assembly.s
 const TOUCHING_PARTS: &[u8] = include_bytes!("fixtures/touching_parts_assembly.step");
 const OVERLAPPING_PARTS: &[u8] = include_bytes!("fixtures/overlapping_parts_assembly.step");
 const FUSED_COMPOUND: &[u8] = include_bytes!("fixtures/fused_compound.step");
+const FREE_WIREFRAME: &[u8] = include_bytes!("fixtures/free_wireframe_part.step");
 
 fn import(name: &str, bytes: &[u8], shared: bool) -> Result<ImportedExactCad, String> {
     let mut options = ExactCadImportOptions::default();
@@ -133,4 +134,13 @@ fn a_general_fuse_compound_imports_with_its_shared_faces_and_solid_names() {
         assert_eq!(named(imported, PersistentEntityKind::Face, "Outer boundary").len(), 6);
     }
     shared.build_closure().unwrap();
+}
+
+#[test]
+fn construction_wireframe_beside_a_solid_is_not_part_of_the_model() {
+    let imported = import("free_wireframe_part.step", FREE_WIREFRAME, false).unwrap();
+    assert_eq!(imported.topology.solids.len(), 1);
+    assert_eq!(imported.topology.faces.len(), 6);
+    assert_eq!(imported.topology.edges.len(), 12, "the free line is dropped");
+    assert_eq!(imported.topology.vertices.len(), 8, "its coincident corner vertex too");
 }
