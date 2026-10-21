@@ -39,6 +39,11 @@ const ALL: &[Envelope] = &[
     envelope(
         Formulation::SharedInfrastructure,
         MeshOrder::CanonicalMixedTopology,
+        ExecutionEnvelope::ParallelCpu,
+    ),
+    envelope(
+        Formulation::SharedInfrastructure,
+        MeshOrder::CanonicalMixedTopology,
         ExecutionEnvelope::DomainDecomposed,
     ),
     envelope(

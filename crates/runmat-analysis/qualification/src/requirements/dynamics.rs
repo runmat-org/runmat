@@ -64,6 +64,11 @@ const DOMAIN: &[Envelope] = &[
     envelope(
         Formulation::LinearStructuralDynamics,
         MeshOrder::CanonicalMixedTopology,
+        ExecutionEnvelope::ParallelCpu,
+    ),
+    envelope(
+        Formulation::LinearStructuralDynamics,
+        MeshOrder::CanonicalMixedTopology,
         ExecutionEnvelope::DomainDecomposed,
     ),
     envelope(
@@ -127,6 +132,11 @@ const MODAL_DOMAIN: &[Envelope] = &[
         Formulation::ModalStructural,
         MeshOrder::CanonicalMixedTopology,
         ExecutionEnvelope::RemoteExecution,
+    ),
+    envelope(
+        Formulation::ModalStructural,
+        MeshOrder::CanonicalMixedTopology,
+        ExecutionEnvelope::ParallelCpu,
     ),
     envelope(
         Formulation::ModalStructural,
@@ -198,6 +208,11 @@ const PRESTRESS_DOMAIN: &[Envelope] = &[
     envelope(
         Formulation::PrestressedStructural,
         MeshOrder::CanonicalMixedTopology,
+        ExecutionEnvelope::ParallelCpu,
+    ),
+    envelope(
+        Formulation::PrestressedStructural,
+        MeshOrder::CanonicalMixedTopology,
         ExecutionEnvelope::DomainDecomposed,
     ),
     envelope(
@@ -259,6 +274,11 @@ const PRESTRESS_DOMAIN: &[Envelope] = &[
         Formulation::StructuralStability,
         MeshOrder::CanonicalMixedTopology,
         ExecutionEnvelope::RemoteExecution,
+    ),
+    envelope(
+        Formulation::StructuralStability,
+        MeshOrder::CanonicalMixedTopology,
+        ExecutionEnvelope::ParallelCpu,
     ),
     envelope(
         Formulation::StructuralStability,

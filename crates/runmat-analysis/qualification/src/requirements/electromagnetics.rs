@@ -153,6 +153,11 @@ const ALL_EXECUTION: &[Envelope] = &[
     envelope(
         Formulation::Electrostatic,
         MeshOrder::CanonicalMixedTopology,
+        ExecutionEnvelope::ParallelCpu,
+    ),
+    envelope(
+        Formulation::Electrostatic,
+        MeshOrder::CanonicalMixedTopology,
         ExecutionEnvelope::DomainDecomposed,
     ),
     envelope(
@@ -178,6 +183,11 @@ const ALL_EXECUTION: &[Envelope] = &[
     envelope(
         Formulation::ElectricalConduction,
         MeshOrder::CanonicalMixedTopology,
+        ExecutionEnvelope::ParallelCpu,
+    ),
+    envelope(
+        Formulation::ElectricalConduction,
+        MeshOrder::CanonicalMixedTopology,
         ExecutionEnvelope::DomainDecomposed,
     ),
     envelope(
@@ -203,6 +213,11 @@ const ALL_EXECUTION: &[Envelope] = &[
     envelope(
         Formulation::Magnetostatic,
         MeshOrder::CanonicalMixedTopology,
+        ExecutionEnvelope::ParallelCpu,
+    ),
+    envelope(
+        Formulation::Magnetostatic,
+        MeshOrder::CanonicalMixedTopology,
         ExecutionEnvelope::DomainDecomposed,
     ),
     envelope(
@@ -224,6 +239,11 @@ const ALL_EXECUTION: &[Envelope] = &[
         Formulation::HarmonicMaxwell,
         MeshOrder::CanonicalMixedTopology,
         ExecutionEnvelope::RemoteExecution,
+    ),
+    envelope(
+        Formulation::HarmonicMaxwell,
+        MeshOrder::CanonicalMixedTopology,
+        ExecutionEnvelope::ParallelCpu,
     ),
     envelope(
         Formulation::HarmonicMaxwell,

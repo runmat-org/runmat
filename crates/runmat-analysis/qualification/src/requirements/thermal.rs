@@ -15,6 +15,7 @@ const PUBLIC: &[Envelope] = &scopes(ExecutionEnvelope::PublicStudy);
 const NATIVE: &[Envelope] = &scopes(ExecutionEnvelope::NativeProcess);
 const DURABLE: [Envelope; 4] = scopes(ExecutionEnvelope::Durable);
 const REMOTE: [Envelope; 4] = scopes(ExecutionEnvelope::RemoteExecution);
+const PARALLEL: [Envelope; 4] = scopes(ExecutionEnvelope::ParallelCpu);
 const PARTITIONED: [Envelope; 4] = scopes(ExecutionEnvelope::DomainDecomposed);
 const ACCELERATOR: [Envelope; 4] = scopes(ExecutionEnvelope::ClaimedAccelerator);
 const EXECUTION: &[Envelope] = &[
@@ -34,6 +35,10 @@ const EXECUTION: &[Envelope] = &[
     REMOTE[1],
     REMOTE[2],
     REMOTE[3],
+    PARALLEL[0],
+    PARALLEL[1],
+    PARALLEL[2],
+    PARALLEL[3],
     PARTITIONED[0],
     PARTITIONED[1],
     PARTITIONED[2],

@@ -90,7 +90,17 @@ const ALL: &[Envelope] = &[
     envelope(
         STEADY_FORMULATION,
         MeshOrder::CanonicalTetrahedra,
+        ExecutionEnvelope::ParallelCpu,
+    ),
+    envelope(
+        STEADY_FORMULATION,
+        MeshOrder::CanonicalTetrahedra,
         ExecutionEnvelope::DomainDecomposed,
+    ),
+    envelope(
+        TRANSIENT_FORMULATION,
+        MeshOrder::CanonicalTetrahedra,
+        ExecutionEnvelope::ParallelCpu,
     ),
     envelope(
         TRANSIENT_FORMULATION,

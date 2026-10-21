@@ -68,6 +68,11 @@ const EXECUTION: &[Envelope] = &[
     envelope(
         Formulation::AcousticHarmonic,
         MeshOrder::CanonicalTetrahedra,
+        ExecutionEnvelope::ParallelCpu,
+    ),
+    envelope(
+        Formulation::AcousticHarmonic,
+        MeshOrder::CanonicalTetrahedra,
         ExecutionEnvelope::DomainDecomposed,
     ),
     envelope(

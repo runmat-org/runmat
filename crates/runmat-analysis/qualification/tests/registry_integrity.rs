@@ -88,6 +88,23 @@ fn every_planned_formulation_and_stage_has_standing_obligations() {
         Formulation::ConjugateHeatTransfer,
         Formulation::FluidStructureInteraction,
         Formulation::AdaptiveAnalysis,
+        Formulation::AcousticModal,
+        Formulation::AcousticTransient,
+        Formulation::AcousticStructureCoupled,
+        Formulation::ElectromagneticTransient,
+        Formulation::SaturatingMagnetics,
+        Formulation::LowMachFlow,
+        Formulation::GeneralizedNewtonianFlow,
+        Formulation::ViscoelasticFlow,
+        Formulation::PorousMediaFlow,
+        Formulation::ScalarTransport,
+        Formulation::FreeSurfaceFlow,
+        Formulation::RotatingFrameFlow,
+        Formulation::ThinFilmLubrication,
+        Formulation::Electrokinetics,
+        Formulation::ParticleTracing,
+        Formulation::CompressibleLaminarFlow,
+        Formulation::PipeNetwork,
     ] {
         assert!(
             requirements().any(
@@ -115,6 +132,9 @@ fn every_planned_formulation_and_stage_has_standing_obligations() {
         Stage::FluidStructureInteraction,
         Stage::Adaptation,
         Stage::Release,
+        Stage::Meshing,
+        Stage::Scale,
+        Stage::PublicSurface,
     ] {
         assert!(
             requirements().any(|requirement| requirement.stages.contains(&stage)),

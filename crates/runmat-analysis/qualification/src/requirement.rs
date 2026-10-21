@@ -18,6 +18,9 @@ pub enum Stage {
     FluidStructureInteraction,
     Adaptation,
     Release,
+    Meshing,
+    Scale,
+    PublicSurface,
 }
 #[cfg_attr(feature = "docs-export", derive(serde::Serialize))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -47,6 +50,23 @@ pub enum Formulation {
     AcousticHarmonic,
     IncompressibleLaminarSteady,
     IncompressibleLaminarTransient,
+    AcousticModal,
+    AcousticTransient,
+    AcousticStructureCoupled,
+    ElectromagneticTransient,
+    SaturatingMagnetics,
+    LowMachFlow,
+    GeneralizedNewtonianFlow,
+    ViscoelasticFlow,
+    PorousMediaFlow,
+    ScalarTransport,
+    FreeSurfaceFlow,
+    RotatingFrameFlow,
+    ThinFilmLubrication,
+    Electrokinetics,
+    ParticleTracing,
+    CompressibleLaminarFlow,
+    PipeNetwork,
 }
 #[cfg_attr(feature = "docs-export", derive(serde::Serialize))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -122,7 +142,7 @@ impl Stage {
         Stage::Prerequisite, Stage::Baseline, Stage::Authoring, Stage::ExecutionContracts,
         Stage::SharedAuthorities, Stage::LinearStructures, Stage::Dynamics, Stage::Thermal,
         Stage::NonlinearContact, Stage::Electromagnetics, Stage::Acoustics, Stage::Fluid,
-        Stage::FluidStructureInteraction, Stage::Adaptation, Stage::Release,
+        Stage::FluidStructureInteraction, Stage::Adaptation, Stage::Release, Stage::Meshing, Stage::Scale, Stage::PublicSurface,
     ];
 }
 wire_names!(Stage);
@@ -140,6 +160,23 @@ impl Formulation {
         Formulation::ThermalSteady, Formulation::ThermalTransient,
         Formulation::AcousticHarmonic, Formulation::IncompressibleLaminarSteady,
         Formulation::IncompressibleLaminarTransient,
+        Formulation::AcousticModal,
+        Formulation::AcousticTransient,
+        Formulation::AcousticStructureCoupled,
+        Formulation::ElectromagneticTransient,
+        Formulation::SaturatingMagnetics,
+        Formulation::LowMachFlow,
+        Formulation::GeneralizedNewtonianFlow,
+        Formulation::ViscoelasticFlow,
+        Formulation::PorousMediaFlow,
+        Formulation::ScalarTransport,
+        Formulation::FreeSurfaceFlow,
+        Formulation::RotatingFrameFlow,
+        Formulation::ThinFilmLubrication,
+        Formulation::Electrokinetics,
+        Formulation::ParticleTracing,
+        Formulation::CompressibleLaminarFlow,
+        Formulation::PipeNetwork,
     ];
 }
 wire_names!(Formulation);
@@ -177,6 +214,10 @@ pub enum EvidenceKind {
     AccuracyAcceptance,
     ResourceAdmission,
     PublicationIntegrity,
+    /// Measured wall time, memory or scaling on stated hardware with the method recorded.
+    PerformanceMeasurement,
+    /// The public command runs the published study to its published outputs.
+    PublicRun,
 }
 #[cfg_attr(feature = "docs-export", derive(serde::Serialize))]
 #[derive(Clone, Copy, Debug)]
@@ -209,6 +250,43 @@ pub const fn envelope(
         execution,
     }
 }
+
+/// Cross product of formulations, mesh orders and executions, for compact declarations.
+pub const fn cross<const N: usize>(
+    formulations: &[Formulation],
+    meshes: &[MeshOrder],
+    executions: &[ExecutionEnvelope],
+) -> [Envelope; N] {
+    let mut out = [envelope(formulations[0], meshes[0], executions[0]); N];
+    let mut k = 0;
+    let mut i = 0;
+    while i < formulations.len() {
+        let mut j = 0;
+        while j < meshes.len() {
+            let mut l = 0;
+            while l < executions.len() {
+                out[k] = envelope(formulations[i], meshes[j], executions[l]);
+                k += 1;
+                l += 1;
+            }
+            j += 1;
+        }
+        i += 1;
+    }
+    out
+}
+/// `cells!([formulations], [meshes], [executions])` is the full cross product as a
+/// `&'static [Envelope]`, valid as the initializer of a `const`.
+macro_rules! cells {
+    ([$($f:expr),+ $(,)?], [$($m:expr),+ $(,)?], [$($e:expr),+ $(,)?]) => {
+        &$crate::requirement::cross::<{ [$($f),+].len() * [$($m),+].len() * [$($e),+].len() }>(
+            &[$($f),+],
+            &[$($m),+],
+            &[$($e),+],
+        )
+    };
+}
+pub(crate) use cells;
 pub const fn obligation(
     id: &'static str,
     criterion: &'static str,

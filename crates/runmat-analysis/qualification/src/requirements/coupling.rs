@@ -84,6 +84,11 @@ const FSI_GOVERNED: &[Envelope] = &[
     envelope(
         Formulation::FluidStructureInteraction,
         MeshOrder::CanonicalMixedTopology,
+        ExecutionEnvelope::ParallelCpu,
+    ),
+    envelope(
+        Formulation::FluidStructureInteraction,
+        MeshOrder::CanonicalMixedTopology,
         ExecutionEnvelope::DomainDecomposed,
     ),
     envelope(

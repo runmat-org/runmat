@@ -197,6 +197,11 @@ const NONLINEAR_DOMAIN: &[Envelope] = &[
     envelope(
         Formulation::NonlinearStructural,
         MeshOrder::CanonicalMixedTopology,
+        ExecutionEnvelope::ParallelCpu,
+    ),
+    envelope(
+        Formulation::NonlinearStructural,
+        MeshOrder::CanonicalMixedTopology,
         ExecutionEnvelope::DomainDecomposed,
     ),
     envelope(
@@ -244,6 +249,11 @@ const J2_OPERATOR_DOMAIN: &[Envelope] = &[
     envelope(
         Formulation::SmallStrainJ2,
         MeshOrder::CanonicalMixedTopology,
+        ExecutionEnvelope::ParallelCpu,
+    ),
+    envelope(
+        Formulation::SmallStrainJ2,
+        MeshOrder::CanonicalMixedTopology,
         ExecutionEnvelope::DomainDecomposed,
     ),
     envelope(
@@ -287,6 +297,11 @@ const CONTACT_OPERATOR_DOMAIN: &[Envelope] = &[
         Formulation::PenaltyCoulombContact,
         MeshOrder::CanonicalMixedTopology,
         ExecutionEnvelope::RemoteExecution,
+    ),
+    envelope(
+        Formulation::PenaltyCoulombContact,
+        MeshOrder::CanonicalMixedTopology,
+        ExecutionEnvelope::ParallelCpu,
     ),
     envelope(
         Formulation::PenaltyCoulombContact,

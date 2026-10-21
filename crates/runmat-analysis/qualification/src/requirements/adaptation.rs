@@ -39,6 +39,11 @@ const DOMAIN: &[Envelope] = &[
     envelope(
         Formulation::AdaptiveAnalysis,
         MeshOrder::CanonicalMixedTopology,
+        ExecutionEnvelope::ParallelCpu,
+    ),
+    envelope(
+        Formulation::AdaptiveAnalysis,
+        MeshOrder::CanonicalMixedTopology,
         ExecutionEnvelope::DomainDecomposed,
     ),
     envelope(
