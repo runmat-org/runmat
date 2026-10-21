@@ -383,6 +383,24 @@ bool wire(const std::string& dir) {
   return write_cell(dir + "wire.step", {{zcylinder(1, 0, 100), "Wire", kCopper}}, faces);
 }
 
+
+// Parallel-plate strip line: a copper strip 10 mm wide, 20 mm long and 2 mm thick under a 1 mm
+// air gap to a grounded return plane (the top face). Current flows along y.
+bool strip_line(const std::string& dir) {
+  std::vector<FaceRule> faces = {
+      {"Strip", "Strip in", [](const gp_Pnt& c, const gp_Dir&) { return c.Y() < 0.01; }},
+      {"Strip", "Strip out", [](const gp_Pnt& c, const gp_Dir&) { return c.Y() > 19.99; }},
+      {"Strip", "Strip floor", [](const gp_Pnt& c, const gp_Dir&) { return c.Z() < 0.01; }},
+      {"Air", "Air in", [](const gp_Pnt& c, const gp_Dir&) { return c.Y() < 0.01; }},
+      {"Air", "Air out", [](const gp_Pnt& c, const gp_Dir&) { return c.Y() > 19.99; }},
+      {"Air", "Return plane", [](const gp_Pnt& c, const gp_Dir&) { return c.Z() > 2.99; }},
+  };
+  return write_cell(dir + "strip-line.step",
+                    {{BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 10, 20, 2).Shape(), "Strip", kCopper},
+                     {BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 2), 10, 20, 1).Shape(), "Air", kAir}},
+                    faces);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -390,6 +408,6 @@ int main(int argc, char** argv) {
   const std::string dir = argv[1];
   bool ok = induction_cell(dir) && current_sensor(dir) && hv_electrode(dir, 0, "hv-electrode-sharp.step") &&
             hv_electrode(dir, 2, "hv-electrode-rounded.step") && coax(dir) && solenoid(dir) &&
-            parallel_plate(dir) && coax_dielectric(dir) && wire(dir);
+            parallel_plate(dir) && coax_dielectric(dir) && wire(dir) && strip_line(dir);
   return ok ? 0 : 2;
 }
