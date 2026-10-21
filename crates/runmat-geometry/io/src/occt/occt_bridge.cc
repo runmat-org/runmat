@@ -26,6 +26,9 @@
 #include <Poly_Triangulation.hxx>
 #include <Quantity_Color.hxx>
 #include <STEPCAFControl_Reader.hxx>
+#include <StepData_StepModel.hxx>
+#include <XSControl_Reader.hxx>
+#include <XSControl_WorkSession.hxx>
 #include <STEPControl_Reader.hxx>
 #include <TCollection_AsciiString.hxx>
 #include <TCollection_ExtendedString.hxx>
@@ -303,6 +306,15 @@ CadDocument read_step_shape(const std::string& path,
   if (status != IFSelect_RetDone) {
     throw std::runtime_error("OCCT STEP reader did not return IFSelect_RetDone");
   }
+  // CAD tools write face and body names on STEP representation items. OCCT reads them into
+  // XCAF sub-shape labels only when the model asks for it; set it on this file's model so
+  // `select name` resolves authored face names without touching process-global settings.
+  Handle(StepData_StepModel) step_model =
+      Handle(StepData_StepModel)::DownCast(reader.Reader().WS()->Model());
+  if (step_model.IsNull()) {
+    throw std::runtime_error("OCCT STEP reader produced no STEP model");
+  }
+  step_model->InternalParameters.ReadSubshapeNames = true;
   // STEP declares physical units. Exact imports request a stable millimetre
   // kernel representation to preserve tolerance-scale features; preview imports
   // request their display coordinate unit. Rust projects exact contracts to SI.
