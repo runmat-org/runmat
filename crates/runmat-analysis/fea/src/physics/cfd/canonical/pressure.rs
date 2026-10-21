@@ -158,7 +158,13 @@ pub(super) fn solve(
         let a = a.finish().map_err(|e| Error::Operator(e.to_string()))?;
         let roots = p.pressure_reference_plan.roots();
         let (mut next, count) = if roots.is_empty() {
-            linear::solve(p, &a, &b, &pressure)?
+            linear::solve(
+                p,
+                &a,
+                &b,
+                &pressure,
+                linear::LinearSystem::PressureCorrection,
+            )?
         } else {
             let (prepared, rhs) = crate::algebra::prepare_scalar_component_gauges(
                 &a,
@@ -170,7 +176,13 @@ pub(super) fn solve(
                     .collect::<Vec<_>>(),
             )
             .map_err(|e| Error::Operator(e.to_string()))?;
-            linear::solve(p, &prepared, &rhs, &pressure)?
+            linear::solve(
+                p,
+                &prepared,
+                &rhs,
+                &pressure,
+                linear::LinearSystem::PressureCorrection,
+            )?
         };
         p.pressure_reference_plan.normalize(p, &mut next)?;
         pressure = next;

@@ -1,6 +1,6 @@
 use super::{CanonicalFluidError as Error, CanonicalFluidPolicy};
 use crate::{
-    solve::krylov::{right_ilu::SparseRightIluEnvelope, GmresPolicy, GmresWorkEnvelope},
+    solve::krylov::{GmresPolicy, GmresWorkEnvelope},
     topology::{AnalysisProjection, FiniteVolumeReservation, FiniteVolumeTopology},
 };
 use runmat_analysis_core::{
@@ -266,8 +266,8 @@ impl CanonicalFluidReservation {
         let f = u64::try_from(face_count).map_err(|_| Error::Resource("face count"))?;
         // A tetrahedral cell has at most four distinct face-neighbours plus its diagonal.
         let nnz = mul(n, 5)?;
-        let ilu = SparseRightIluEnvelope::for_counts(n, nnz, 5)
-            .ok_or(Error::Resource("shared ILU envelope"))?;
+        let ilu = super::linear::PreconditionerEnvelope::for_counts(n, nnz)
+            .ok_or(Error::Resource("shared preconditioner envelope"))?;
         // Three coexisting CSR operators/pattern clones plus assembly/output temporaries,
         // immutable boundary/bodyforce, all cell vectors/gradients/3x3 LS stencils, and
         // shared GMRES peak. Includes doubled Vec payload/header growth allowances.

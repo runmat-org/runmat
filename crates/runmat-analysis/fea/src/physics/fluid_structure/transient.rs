@@ -184,7 +184,7 @@ impl FluidStructureProblem<'_> {
         let mut load = vec![0.0; dofs];
         let mut steps = Vec::new();
         let mut work = 0.0;
-        let mut operator: Option<(f64, crate::algebra::RealSparseMatrix)> = None;
+        let mut operator: Option<(f64, super::SpdSystem)> = None;
         for window in times.windows(2) {
             let (t0, t1) = (window[0], window[1]);
             let dt = t1 - t0;

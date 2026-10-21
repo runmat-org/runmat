@@ -614,21 +614,24 @@ fn fea_check_and_run_materialize_a_named_project_signal_generator() {
 }
 
 #[test]
-fn acoustic_cavity_example_is_not_yet_dispatched_by_the_typed_executor() {
+fn acoustic_cavity_example_runs_its_certified_frequency_sweep() {
     let temp = TempDir::new().unwrap();
     let path = "docs/simulation/examples/acoustic-cavity-harmonic.fea";
     let output = runmat_from_repository(&temp, &["run", path, "--json"]);
-
     assert!(
-        !output.status.success(),
-        "{path} is not yet dispatched by the typed executor"
+        output.status.success(),
+        "{path} failed run:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("RM.FEA.TYPED_EXECUTION.UNSUPPORTED_PHYSICS_FAMILY"),
-        "unexpected rejection for {path}:\nstdout={}\nstderr={stderr}",
-        String::from_utf8_lossy(&output.stdout)
-    );
+    let payload: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(payload["root_id"], "acoustic_cavity_harmonic");
+    let manifest_path = payload["result_manifest_artifact_path"]
+        .as_str()
+        .expect("acoustic study manifest path");
+    let manifest: Value = serde_json::from_slice(&fs::read(manifest_path).unwrap()).unwrap();
+    assert_eq!(manifest["public_run"]["run_status"], "completed");
+    assert_eq!(manifest["public_run"]["numerically_acceptable"], true);
 }
 
 #[test]

@@ -274,8 +274,6 @@ impl PreparedFluidSource {
                 sample,
                 policy: crate::physics::conjugate_heat::ConjugateHeatPolicy {
                     linear_relative_tolerance: workload.policy.linear_relative_tolerance,
-                    maximum_linear_iterations: workload.policy.maximum_linear_iterations,
-                    gmres_restart: workload.policy.gmres_restart,
                 },
             },
         )

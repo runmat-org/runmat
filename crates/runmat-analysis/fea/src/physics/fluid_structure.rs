@@ -25,17 +25,13 @@ pub use transient::{
 mod tests;
 
 use crate::{
-    algebra::{spmv, RealSparseMatrix},
+    algebra::RealSparseMatrix,
     physics::cfd::canonical::{
         CanonicalFluidError, CanonicalFluidInput, CanonicalFluidPolicy, CanonicalFluidProblem,
         CanonicalFluidResult,
     },
     properties::CompiledPropertyMap,
-    solve::krylov::{
-        restarted_gmres,
-        right_ilu::{SparseRightIlu, SparseRightIluError},
-        GmresPolicy,
-    },
+    solve::shared_sparse::{ambient_plan, control, with_plan, CsrArrays},
     topology::{
         AnalysisProjection, FiniteVolumeCellSelection, FiniteVolumeProjectionPolicy,
         FiniteVolumeTopology,
@@ -97,9 +93,8 @@ impl Default for FluidStructurePolicy {
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct LinearPolicy {
+    /// Relative residual the refined direct solve must reach on the original operator.
     pub relative_tolerance: f64,
-    pub maximum_iterations: usize,
-    pub restart: usize,
 }
 
 /// Borrowed authored flow authority, as compiled by the fluid source owner.
@@ -215,8 +210,6 @@ impl<'a> FluidStructureProblem<'a> {
         let motion = mesh_motion::MeshMotion::assemble(projection, &reference_fluid, &prescribed)?;
         let linear = LinearPolicy {
             relative_tolerance: input.fluid.policy.linear_relative_tolerance,
-            maximum_iterations: input.fluid.policy.maximum_linear_iterations.max(1000),
-            restart: input.fluid.policy.gmres_restart,
         };
         Ok(Self {
             input,
@@ -663,58 +656,79 @@ fn interface_faces(
     Ok(faces)
 }
 
-pub(crate) fn solve_linear(
-    a: &RealSparseMatrix,
-    b: &[f64],
-    policy: LinearPolicy,
-) -> Result<(Vec<f64>, u64), FluidStructureError> {
-    if b.iter().all(|v| *v == 0.0) {
-        return Ok((vec![0.0; b.len()], 0));
-    }
-    let preconditioner = SparseRightIlu::factor(a, crate::is_fea_cancelled).map_err(ilu_error)?;
-    let result = restarted_gmres(
-        b,
-        &vec![0.0; b.len()],
-        GmresPolicy {
-            relative_tolerance: policy.relative_tolerance,
-            restart: policy.restart,
-            maximum_iterations: policy.maximum_iterations,
-        },
-        |v| {
-            let x = preconditioner
-                .apply(v, crate::is_fea_cancelled)
-                .map_err(ilu_error)?;
-            spmv(a, &x).map_err(|e| FluidStructureError::Operator(e.to_string()))
-        },
-        |x, y| {
-            let sum = crate::algebra::dot_canonical(x, y);
-            if sum.is_finite() {
-                Ok(sum)
-            } else {
-                Err(FluidStructureError::Invalid("nonfinite Krylov dot"))
-            }
-        },
-        crate::is_fea_cancelled,
-    )?
-    .ok_or(FluidStructureError::Invalid("GMRES returned no solution"))?;
-    if result.cancelled {
-        return Err(FluidStructureError::Cancelled);
-    }
-    if !result.converged || result.breakdown {
-        return Err(FluidStructureError::LinearNotConverged {
-            iterations: result.iterations,
-            relative_residual: result.relative_residual,
-        });
-    }
-    let x = preconditioner
-        .apply(&result.solution, crate::is_fea_cancelled)
-        .map_err(ilu_error)?;
-    Ok((x, u64::from(result.iterations)))
+/// A symmetric positive definite operator (structure stiffness, Newmark operator, mesh-motion
+/// Laplacian) factored once by the shared sparse Cholesky and reused for every right-hand side.
+pub(crate) struct SpdSystem {
+    matrix: RealSparseMatrix,
+    factor: std::sync::OnceLock<runmat_sparse_solvers::direct::DirectSolver<f64>>,
 }
 
-fn ilu_error(error: SparseRightIluError) -> FluidStructureError {
+impl SpdSystem {
+    pub(crate) fn new(matrix: RealSparseMatrix) -> Self {
+        Self {
+            matrix,
+            factor: std::sync::OnceLock::new(),
+        }
+    }
+
+    pub(crate) fn matrix(&self) -> &RealSparseMatrix {
+        &self.matrix
+    }
+
+    fn factor(
+        &self,
+    ) -> Result<&runmat_sparse_solvers::direct::DirectSolver<f64>, FluidStructureError> {
+        if let Some(factor) = self.factor.get() {
+            return Ok(factor);
+        }
+        let arrays = CsrArrays::of(&self.matrix);
+        let factor = with_plan(ambient_plan(), || {
+            runmat_sparse_solvers::direct::DirectSolver::<f64>::new(
+                arrays.view().into(),
+                runmat_sparse_solvers::direct::DirectOptions::new(
+                    runmat_sparse_solvers::direct::FactorKind::Cholesky,
+                ),
+                control(),
+            )
+        })
+        .map_err(solver_error)?;
+        Ok(self.factor.get_or_init(|| factor))
+    }
+
+    /// Solves with iterative refinement; acceptance is the residual on the original operator.
+    pub(crate) fn solve(
+        &self,
+        b: &[f64],
+        policy: LinearPolicy,
+    ) -> Result<(Vec<f64>, u64), FluidStructureError> {
+        if b.len() != self.matrix.rows() || b.iter().any(|v| !v.is_finite()) {
+            return Err(FluidStructureError::Invalid("linear right-hand side"));
+        }
+        if b.iter().all(|v| *v == 0.0) {
+            return Ok((vec![0.0; b.len()], 0));
+        }
+        let factor = self.factor()?;
+        let arrays = CsrArrays::of(&self.matrix);
+        let mut x = vec![0.0; b.len()];
+        let report = with_plan(ambient_plan(), || {
+            factor.solve_refined(arrays.view().into(), b, &mut x, 1)
+        })
+        .map_err(solver_error)?;
+        if !(report.relative_residual <= policy.relative_tolerance)
+            || x.iter().any(|v| !v.is_finite())
+        {
+            return Err(FluidStructureError::LinearNotConverged {
+                iterations: u32::try_from(report.refinement_steps).unwrap_or(u32::MAX),
+                relative_residual: Some(report.relative_residual),
+            });
+        }
+        Ok((x, report.refinement_steps as u64))
+    }
+}
+
+fn solver_error(error: runmat_sparse_solvers::SolverError) -> FluidStructureError {
     match error {
-        SparseRightIluError::Cancelled => FluidStructureError::Cancelled,
+        runmat_sparse_solvers::SolverError::Cancelled => FluidStructureError::Cancelled,
         other => FluidStructureError::Operator(other.to_string()),
     }
 }

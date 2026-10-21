@@ -4,11 +4,12 @@ use crate::{
         spmv, ContributionDomain, ContributionId, ContributionProvenance, MatrixProperties,
         OperatorRole, RealSparseAssembler, RealSparseMatrix, SparsePattern,
     },
-    solve::krylov::{
-        restarted_gmres,
-        right_ilu::{SparseRightIlu, SparseRightIluEnvelope, SparseRightIluError},
-        GmresPolicy,
-    },
+    solve::shared_sparse::{ambient_plan, control, with_plan, CsrArrays},
+};
+use runmat_sparse_solvers::{
+    krylov::{gmres, GmresOptions, KrylovOptions, PreconditionerSide, StopFlag},
+    precond::{Amg, AmgOptions, Ilu0},
+    Preconditioner, SolverError,
 };
 
 pub(super) fn assembler(
@@ -49,11 +50,55 @@ pub(super) fn assembler(
     Ok(assembler)
 }
 
+/// The two cell-centred linear systems of the canonical flow solve.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum LinearSystem {
+    /// Momentum predictor: convection-diffusion, preconditioned by ILU(0).
+    Momentum,
+    /// Pressure correction: a Laplacian-like system, preconditioned by smoothed-aggregation AMG.
+    PressureCorrection,
+}
+
+/// Conservative preconditioner reservation for one cell system (`n` rows, `nnz` entries):
+/// ILU(0) on the pattern, or an AMG hierarchy with operator complexity at most
+/// [`AMG_OPERATOR_COMPLEXITY_LIMIT`], prolongation/restriction of at most `nnz` entries each,
+/// smoother vectors and a sparse coarse factor of at most `AmgOptions::coarse_size` rows.
+pub(super) struct PreconditionerEnvelope {
+    pub resident_bytes_upper_bound: u64,
+    pub factor_scalar_operations: u64,
+    pub application_scalar_operations: u64,
+}
+
+pub(super) const AMG_OPERATOR_COMPLEXITY_LIMIT: f64 = 3.0;
+
+impl PreconditionerEnvelope {
+    pub(super) fn for_counts(n: u64, nnz: u64) -> Option<Self> {
+        let coarse = AmgOptions::default().coarse_size as u64;
+        let coarse_bytes = runmat_sparse_solvers::estimate::direct_reservation_bytes(
+            usize::try_from(coarse).ok()?,
+            usize::try_from(coarse.checked_mul(27)?).ok()?,
+            true,
+        );
+        let hierarchy = nnz
+            .checked_mul(3)?
+            .checked_add(nnz.checked_mul(2)?)?
+            .checked_mul(24)?
+            .checked_add(n.checked_mul(3 * 8 * 8)?)?;
+        let ilu = nnz.checked_mul(24)?.checked_add(n.checked_mul(24)?)?;
+        Some(Self {
+            resident_bytes_upper_bound: hierarchy.max(ilu).checked_add(coarse_bytes)?,
+            factor_scalar_operations: nnz.checked_mul(400)?,
+            application_scalar_operations: nnz.checked_mul(40)?,
+        })
+    }
+}
+
 pub(super) fn solve(
     p: &CanonicalFluidProblem<'_>,
     a: &RealSparseMatrix,
     b: &[f64],
     current: &[f64],
+    system: LinearSystem,
 ) -> Result<(Vec<f64>, u64), Error> {
     if current.len() != b.len()
         || a.rows() != b.len()
@@ -90,71 +135,70 @@ pub(super) fn solve(
         .policy
         .linear_relative_tolerance
         .max(rounding_floor / defect_norm);
-    let actual = SparseRightIluEnvelope::derive(a)
-        .ok_or(Error::Resource("actual ILU component envelope"))?;
-    let planned = SparseRightIluEnvelope::for_counts(
+    let planned = PreconditionerEnvelope::for_counts(
         p.topology.cells.len() as u64,
         p.reservation.sparse_entries,
-        5,
     )
-    .ok_or(Error::Resource("planned ILU component envelope"))?;
-    if actual.resident_bytes_upper_bound > planned.resident_bytes_upper_bound
-        || actual.factor_scalar_operations > planned.factor_scalar_operations
-        || actual.application_scalar_operations > planned.application_scalar_operations
-    {
-        return Err(Error::Resource("ILU component exceeds original admission"));
-    }
-    let preconditioner = SparseRightIlu::factor(a, crate::is_fea_cancelled).map_err(ilu_error)?;
-    let result = restarted_gmres(
-        &defect,
-        &vec![0.0; b.len()],
-        GmresPolicy {
-            relative_tolerance,
-            restart: p.policy.gmres_restart,
-            maximum_iterations: p.policy.maximum_linear_iterations,
-        },
-        |v| {
-            let x = preconditioner
-                .apply(v, crate::is_fea_cancelled)
-                .map_err(ilu_error)?;
-            spmv(a, &x).map_err(|e| Error::Operator(e.to_string()))
-        },
-        |x, y| {
-            let sum = crate::algebra::dot_canonical(x, y);
-            if sum.is_finite() {
-                Ok(sum)
-            } else {
-                Err(Error::Invalid("nonfinite Krylov dot"))
+    .ok_or(Error::Resource("planned preconditioner envelope"))?;
+    let arrays = CsrArrays::of(a);
+    let view = arrays.view();
+    let maximum_iterations = p.policy.maximum_linear_iterations;
+    let restart = p.policy.gmres_restart;
+    let solved = with_plan(ambient_plan(), || {
+        let preconditioner: Box<dyn Preconditioner<f64>> = match system {
+            LinearSystem::Momentum => Box::new(Ilu0::new(view, false)?),
+            LinearSystem::PressureCorrection => {
+                let amg = Amg::new(view, AmgOptions::default(), control())?;
+                let statistics = amg.statistics();
+                let entries = statistics.level_nnz.iter().sum::<usize>() as u64;
+                let rows = statistics.level_rows.iter().sum::<usize>() as u64;
+                if statistics.operator_complexity > AMG_OPERATOR_COMPLEXITY_LIMIT
+                    || entries
+                        .saturating_mul(24)
+                        .saturating_add(rows.saturating_mul(64))
+                        > planned.resident_bytes_upper_bound
+                {
+                    return Err(SolverError::OverBudget {
+                        required: entries.saturating_mul(24),
+                        budget: planned.resident_bytes_upper_bound,
+                    });
+                }
+                Box::new(amg)
             }
-        },
-        crate::is_fea_cancelled,
-    )?
-    .ok_or(Error::Invalid("GMRES returned no correction inventory"))?;
-    if result.cancelled {
-        return Err(Error::Cancelled);
-    }
-    if std::env::var_os("QFLUID_DEBUG_LINEAR").is_some() {
-        eprintln!(
-            "qfluid-linear n={} defect={:e} floor={:e} tol={:e} its={} rel={:?} conv={}",
-            b.len(),
-            defect_norm,
-            rounding_floor,
-            relative_tolerance,
-            result.iterations,
-            result.relative_residual,
-            result.converged
-        );
-    }
-    if !result.converged || result.breakdown {
+        };
+        let mut correction = vec![0.0; b.len()];
+        let report = gmres(
+            &view,
+            Some(preconditioner.as_ref()),
+            &defect,
+            &mut correction,
+            &KrylovOptions {
+                rtol: relative_tolerance,
+                max_iterations: maximum_iterations,
+                ..KrylovOptions::default()
+            },
+            &GmresOptions {
+                restart,
+                side: PreconditionerSide::Right,
+            },
+            control(),
+        )?;
+        Ok::<_, SolverError>((correction, report))
+    });
+    let (correction, report) = solved.map_err(|error| match error {
+        SolverError::Cancelled => Error::Cancelled,
+        SolverError::OverBudget { .. } => {
+            Error::Resource("preconditioner exceeds original admission")
+        }
+        other => Error::Operator(other.to_string()),
+    })?;
+    if !report.converged() {
         return Err(Error::LinearNotConverged {
-            iterations: result.iterations,
-            relative_residual: result.relative_residual,
-            breakdown: result.breakdown,
+            iterations: u32::try_from(report.iterations).unwrap_or(u32::MAX),
+            relative_residual: Some(report.relative_residual),
+            breakdown: report.flag == StopFlag::Breakdown,
         });
     }
-    let correction = preconditioner
-        .apply(&result.solution, crate::is_fea_cancelled)
-        .map_err(ilu_error)?;
     let x = current
         .iter()
         .zip(correction)
@@ -163,12 +207,5 @@ pub(super) fn solve(
     if x.iter().any(|v| !v.is_finite()) {
         return Err(Error::Invalid("nonfinite linear correction"));
     }
-    Ok((x, u64::from(result.iterations)))
-}
-
-fn ilu_error(error: SparseRightIluError) -> Error {
-    match error {
-        SparseRightIluError::Cancelled => Error::Cancelled,
-        other => Error::Operator(other.to_string()),
-    }
+    Ok((x, report.iterations as u64))
 }

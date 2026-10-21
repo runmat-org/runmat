@@ -25,7 +25,7 @@ pub(super) struct ElasticStructure {
     /// Consistent mass, for structural dynamics.
     pub mass: RealSparseMatrix,
     pub constrained: Vec<bool>,
-    pub reduced: RealSparseMatrix,
+    pub reduced: super::SpdSystem,
 }
 
 impl ElasticStructure {
@@ -232,7 +232,7 @@ impl ElasticStructure {
             stiffness,
             mass,
             constrained,
-            reduced,
+            reduced: super::SpdSystem::new(reduced),
         })
     }
 
@@ -247,7 +247,7 @@ impl ElasticStructure {
             .zip(&self.constrained)
             .map(|(f, &c)| if c { 0.0 } else { *f })
             .collect::<Vec<_>>();
-        super::solve_linear(&self.reduced, &rhs, policy)
+        self.reduced.solve(&rhs, policy)
     }
 
     /// ||K u − f|| / ||f|| over the unsupported dofs: equilibrium of a retained displacement.
@@ -269,7 +269,7 @@ impl ElasticStructure {
     }
 
     /// Average-acceleration Newmark operator K + 4 M / Δt², with the supports eliminated.
-    pub(super) fn newmark_operator(&self, dt: f64) -> Result<RealSparseMatrix, Error> {
+    pub(super) fn newmark_operator(&self, dt: f64) -> Result<super::SpdSystem, Error> {
         let effective = RealSparseMatrix::scaled_sum(
             &[(1.0, &self.stiffness), (4.0 / (dt * dt), &self.mass)],
             OperatorRole::EffectiveTangent,
@@ -278,6 +278,7 @@ impl ElasticStructure {
         .map_err(|e| Error::Operator(e.to_string()))?;
         effective
             .with_identity_constraints(&self.constrained)
+            .map(super::SpdSystem::new)
             .map_err(|e| Error::Operator(e.to_string()))
     }
 
@@ -285,7 +286,7 @@ impl ElasticStructure {
     /// `load`, from the departure state (u, v, a). Returns (u, v, a) at arrival.
     pub(super) fn newmark_step(
         &self,
-        operator: &RealSparseMatrix,
+        operator: &super::SpdSystem,
         dt: f64,
         departure: &NewmarkState,
         load: &[f64],
@@ -305,7 +306,7 @@ impl ElasticStructure {
             .zip(&self.constrained)
             .map(|((f, m), &c)| if c { 0.0 } else { f + m })
             .collect::<Vec<_>>();
-        let (displacement, _) = super::solve_linear(operator, &rhs, policy)?;
+        let (displacement, _) = operator.solve(&rhs, policy)?;
         Ok(departure.advance(dt, displacement))
     }
 

@@ -264,7 +264,8 @@ fn run(c: &Case) -> (FluidStructureResult, f64) {
 
 #[test]
 fn compliant_channel_widens_and_drops_pressure_as_lubrication_theory_predicts() {
-    let youngs_modulus = 25.0;
+    // Soft enough that the lubrication reference departs clearly from the rigid channel.
+    let youngs_modulus = 10.0;
     let (rigid, rigid_inlet) = run(&case(1e9));
     let (compliant, compliant_inlet) = run(&case(youngs_modulus));
     assert!(rigid.evidence.largest_interface_displacement_m < 1e-9);

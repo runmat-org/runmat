@@ -5,7 +5,7 @@ use super::FluidStructureError as Error;
 use crate::{
     algebra::{
         spmv, ContributionDomain, ContributionId, ContributionProvenance, MatrixProperties,
-        OperatorRole, RealSparseAssembler, RealSparseMatrix, SparsePattern,
+        OperatorRole, RealSparseAssembler, SparsePattern,
     },
     topology::{AnalysisProjection, FiniteVolumeTopology},
 };
@@ -14,7 +14,7 @@ pub(super) struct MeshMotion {
     pub free_nodes: Vec<usize>,
     /// Interior coupling to prescribed nodes, by free row: (prescribed node, coefficient).
     pub prescribed_coupling: Vec<Vec<(usize, f64)>>,
-    pub operator: RealSparseMatrix,
+    pub operator: super::SpdSystem,
 }
 
 impl MeshMotion {
@@ -104,7 +104,7 @@ impl MeshMotion {
         Ok(Self {
             free_nodes,
             prescribed_coupling: coupling,
-            operator,
+            operator: super::SpdSystem::new(operator),
         })
     }
 
@@ -134,7 +134,7 @@ impl MeshMotion {
                 }
                 continue;
             }
-            let (x, _) = super::solve_linear(&self.operator, &rhs, policy)?;
+            let (x, _) = self.operator.solve(&rhs, policy)?;
             for (&node, value) in self.free_nodes.iter().zip(x) {
                 result[node][k] = value;
             }
@@ -152,7 +152,8 @@ impl MeshMotion {
                 .iter()
                 .map(|&node| displacement[node][k])
                 .collect::<Vec<_>>();
-            let action = spmv(&self.operator, &x).map_err(|e| Error::Operator(e.to_string()))?;
+            let action =
+                spmv(self.operator.matrix(), &x).map_err(|e| Error::Operator(e.to_string()))?;
             for (row, a) in action.iter().enumerate() {
                 let b = -self.prescribed_coupling[row]
                     .iter()

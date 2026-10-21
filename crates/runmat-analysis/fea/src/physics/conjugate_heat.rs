@@ -25,11 +25,7 @@ use crate::{
     algebra::{spmv, RealSparseMatrix},
     excitation::ExcitationSamplePoint,
     properties::CompiledPropertyMap,
-    solve::krylov::{
-        restarted_gmres,
-        right_ilu::{SparseRightIlu, SparseRightIluError},
-        GmresPolicy,
-    },
+    solve::shared_sparse::{ambient_plan, control, with_plan, CsrArrays},
     topology::{AnalysisProjection, FiniteVolumeTopology},
 };
 use runmat_analysis_core::AnalysisModel;
@@ -41,17 +37,14 @@ pub use evidence::{ConjugateEnergyBalance, ConjugateHeatEvidence, ConjugateInter
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConjugateHeatPolicy {
+    /// Relative residual the refined direct solve must reach on the original operator.
     pub linear_relative_tolerance: f64,
-    pub maximum_linear_iterations: usize,
-    pub gmres_restart: usize,
 }
 
 impl Default for ConjugateHeatPolicy {
     fn default() -> Self {
         Self {
             linear_relative_tolerance: 1e-10,
-            maximum_linear_iterations: 4000,
-            gmres_restart: 64,
         }
     }
 }
@@ -61,8 +54,6 @@ impl ConjugateHeatPolicy {
         if !self.linear_relative_tolerance.is_finite()
             || self.linear_relative_tolerance <= 0.0
             || self.linear_relative_tolerance >= 1.0
-            || self.maximum_linear_iterations == 0
-            || self.gmres_restart == 0
         {
             return Err(ConjugateHeatError::Invalid("conjugate heat linear policy"));
         }
@@ -346,9 +337,7 @@ impl<'a> ConjugateHeatProblem<'a> {
             &original.temperature_k,
             &original.interface_second_side_temperature_k,
         )?;
-        if original.linear_iterations
-            > (self.input.policy.maximum_linear_iterations as u64).saturating_add(1)
-        {
+        if original.linear_iterations > MAXIMUM_REFINEMENT_STEPS {
             return Err(ConjugateHeatError::Invalid(
                 "retained linear iteration count",
             ));
@@ -368,52 +357,43 @@ impl<'a> ConjugateHeatProblem<'a> {
     }
 }
 
-/// Identity rows hold prescribed temperatures exactly: the Krylov iterate meets them only to
-/// the solver tolerance, so they are restored to their authored values after the solve.
+/// Refinement steps of one direct solve never exceed the shared layer's own bound.
+const MAXIMUM_REFINEMENT_STEPS: u64 = 64;
+
+/// One sparse LU of the shared solver layer with iterative refinement; acceptance is the
+/// residual on the original operator. Identity rows hold prescribed temperatures exactly: the
+/// refined iterate meets them only to rounding, so they are restored to their authored values.
 fn solve_linear(
     a: &RealSparseMatrix,
     b: &[f64],
     prescribed: &[Option<f64>],
     policy: ConjugateHeatPolicy,
 ) -> Result<(Vec<f64>, u64), ConjugateHeatError> {
-    let preconditioner = SparseRightIlu::factor(a, crate::is_fea_cancelled).map_err(ilu_error)?;
-    let result = restarted_gmres(
-        b,
-        &vec![0.0; b.len()],
-        GmresPolicy {
-            relative_tolerance: policy.linear_relative_tolerance,
-            restart: policy.gmres_restart,
-            maximum_iterations: policy.maximum_linear_iterations,
-        },
-        |v| {
-            let x = preconditioner
-                .apply(v, crate::is_fea_cancelled)
-                .map_err(ilu_error)?;
-            spmv(a, &x).map_err(|e| ConjugateHeatError::Operator(e.to_string()))
-        },
-        |x, y| {
-            let sum = crate::algebra::dot_canonical(x, y);
-            if sum.is_finite() {
-                Ok(sum)
-            } else {
-                Err(ConjugateHeatError::Invalid("nonfinite Krylov dot"))
-            }
-        },
-        crate::is_fea_cancelled,
-    )?
-    .ok_or(ConjugateHeatError::Invalid("GMRES returned no solution"))?;
-    if result.cancelled {
+    if crate::is_fea_cancelled() {
         return Err(ConjugateHeatError::Cancelled);
     }
-    if !result.converged || result.breakdown {
+    let arrays = CsrArrays::of(a);
+    let mut x = vec![0.0; b.len()];
+    let report = with_plan(ambient_plan(), || {
+        let factor = runmat_sparse_solvers::direct::DirectSolver::<f64>::new(
+            arrays.view().into(),
+            runmat_sparse_solvers::direct::DirectOptions::new(
+                runmat_sparse_solvers::direct::FactorKind::Lu,
+            ),
+            control(),
+        )?;
+        factor.solve_refined(arrays.view().into(), b, &mut x, 1)
+    })
+    .map_err(|error| match error {
+        runmat_sparse_solvers::SolverError::Cancelled => ConjugateHeatError::Cancelled,
+        other => ConjugateHeatError::Operator(other.to_string()),
+    })?;
+    if !(report.relative_residual <= policy.linear_relative_tolerance) {
         return Err(ConjugateHeatError::LinearNotConverged {
-            iterations: result.iterations,
-            relative_residual: result.relative_residual,
+            iterations: u32::try_from(report.refinement_steps).unwrap_or(u32::MAX),
+            relative_residual: Some(report.relative_residual),
         });
     }
-    let mut x = preconditioner
-        .apply(&result.solution, crate::is_fea_cancelled)
-        .map_err(ilu_error)?;
     for (value, prescribed) in x.iter_mut().zip(prescribed) {
         if let Some(prescribed) = prescribed {
             *value = *prescribed;
@@ -424,12 +404,5 @@ fn solve_linear(
             "nonfinite temperature solution",
         ));
     }
-    Ok((x, u64::from(result.iterations)))
-}
-
-fn ilu_error(error: SparseRightIluError) -> ConjugateHeatError {
-    match error {
-        SparseRightIluError::Cancelled => ConjugateHeatError::Cancelled,
-        other => ConjugateHeatError::Operator(other.to_string()),
-    }
+    Ok((x, report.refinement_steps as u64))
 }
