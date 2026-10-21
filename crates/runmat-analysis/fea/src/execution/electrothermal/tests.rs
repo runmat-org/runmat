@@ -22,7 +22,6 @@ fn electrical_workload(voltage: f64, gauge: f64) -> ElectricalStaticWorkload {
     ElectricalStaticWorkload {
         model,
         step_id: ProcedureStepId("potential".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         relative_residual_target: 1e-11,
     }
 }
@@ -57,7 +56,6 @@ fn thermal() -> ThermalWorkload {
         model,
         step_id: ProcedureStepId("heat".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         procedure: ThermalProcedureControl::Steady,
         residual_target: 1e-11,
         initial_fields: vec![],
@@ -273,9 +271,6 @@ fn retained_transfer_and_unsupported_compositions_fail_closed() {
         AnalysisSequence::from_steps("heat", vec![ProcedureStep::thermal_transient("heat")]);
     transient.procedure = ThermalProcedureControl::BackwardEuler { snapshot_count: 2 };
     assert!(bind_retained_joule_heat(&electrical, &result, source, &transient, &mesh).is_err());
-    let mut production = thermal();
-    production.formulation_requirement = FormulationRequirement::Production;
-    assert!(bind_retained_joule_heat(&electrical, &result, source, &production, &mesh).is_err());
     let mut external_heat = thermal();
     external_heat.model.boundaries.push(AnalysisBoundary {
         boundary_id: "external_heat".into(),

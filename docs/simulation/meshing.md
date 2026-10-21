@@ -78,7 +78,6 @@ study bracket_static {
     geometry = geometry.bracket
     mesh = mesh.bracket
     model = model.bracket_model
-    formulation = experimental
     analysis static { structural static {} }
 }
 ```

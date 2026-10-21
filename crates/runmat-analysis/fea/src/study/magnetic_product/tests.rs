@@ -1,8 +1,6 @@
 use super::*;
 use crate::physics::magnetic::test_support::authored_model;
-use runmat_analysis_core::{
-    AnalysisConstraint, FormulationRequirement, MagneticConstraintKind, RegionTarget,
-};
+use runmat_analysis_core::{AnalysisConstraint, MagneticConstraintKind, RegionTarget};
 use runmat_meshing_core::{ElementOrder, SolverMeshArtifact};
 
 fn mesh(order: ElementOrder, cells: usize) -> SolverMeshArtifact {
@@ -17,7 +15,6 @@ fn compiled(
     CompiledAnalysisStudy {
         module_path: "tests/magnetic.fea".into(),
         study_id: "magnetic".into(),
-        formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: vec![],
         assessments: Vec::new(),
         outputs: vec![],
@@ -28,9 +25,7 @@ fn compiled(
 }
 
 fn policy() -> MagneticStudyPlanningPolicy {
-    MagneticStudyPlanningPolicy {
-        formulation_requirement: FormulationRequirement::Experimental,
-    }
+    MagneticStudyPlanningPolicy {}
 }
 
 #[test]

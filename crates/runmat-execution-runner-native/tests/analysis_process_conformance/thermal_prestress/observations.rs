@@ -50,7 +50,6 @@ fn preparation(
         &compiled,
         StructuralStudyPlanningPolicy {
             backend: ComputeBackend::Cpu,
-            formulation_requirement: FormulationRequirement::Experimental,
             numerics: StructuralNumericalPlanningPolicy::production(),
         },
     )

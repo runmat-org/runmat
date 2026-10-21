@@ -128,8 +128,14 @@ function parseDeclarations(files, options = {}) {
     for (const match of source.matchAll(pattern)) {
       const kind = match[1];
       const name = match[2];
-      const attrs = attributesBefore(source, match.index);
-      if (!/\bSerialize\b/.test(attrs)) continue;
+      let attrs = attributesBefore(source, match.index);
+      if (!/\bSerialize\b/.test(attrs)) {
+        // A single-field tuple struct with a hand-written `impl Serialize` that delegates to its
+        // field (for example an interned `Arc` handle) has its field's wire format.
+        const delegating = new RegExp(`impl\\s+Serialize\\s+for\\s+${name}\\s*\\{[\\s\\S]*?self\\.0\\.serialize\\(serializer\\)`);
+        if (kind !== "struct" || !delegating.test(source)) continue;
+        attrs = `${attrs}\n#[serde(transparent)]`;
+      }
       let cursor = match.index + match[0].length;
       while (/\s/.test(source[cursor])) cursor += 1;
       let body = "";

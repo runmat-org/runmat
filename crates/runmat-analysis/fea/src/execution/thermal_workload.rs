@@ -1,7 +1,5 @@
 //! Path-free numerical intent for one explicitly selected thermal procedure.
-use runmat_analysis_core::{
-    AnalysisModel, FormulationRequirement, PhysicsFamily, ProcedureStep, ProcedureStepId,
-};
+use runmat_analysis_core::{AnalysisModel, PhysicsFamily, ProcedureStep, ProcedureStepId};
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 use runmat_meshing_core::SolverMeshArtifact;
@@ -29,7 +27,6 @@ pub struct ThermalWorkload {
     pub model: AnalysisModel,
     pub step_id: ProcedureStepId,
     pub backend: ComputeBackend,
-    pub formulation_requirement: FormulationRequirement,
     pub procedure: ThermalProcedureControl,
     pub residual_target: f64,
     pub initial_fields: Vec<super::InitialFieldBinding>,
@@ -112,7 +109,6 @@ impl ThermalWorkload {
             &self.model,
             &self.step_id,
             self.backend,
-            self.formulation_requirement,
             self.procedure,
             self.residual_target,
             &self.initial_fields,
@@ -125,7 +121,6 @@ impl ThermalWorkload {
         model: &AnalysisModel,
         step_id: &ProcedureStepId,
         backend: ComputeBackend,
-        formulation_requirement: FormulationRequirement,
         procedure: ThermalProcedureControl,
         residual_target: f64,
         initial_fields: &[super::InitialFieldBinding],
@@ -135,7 +130,6 @@ impl ThermalWorkload {
             model: &'a AnalysisModel,
             step_id: &'a ProcedureStepId,
             backend: ComputeBackend,
-            formulation_requirement: FormulationRequirement,
             procedure: ThermalProcedureControl,
             residual_target: f64,
             initial_fields: &'a [super::InitialFieldBinding],
@@ -147,7 +141,6 @@ impl ThermalWorkload {
                 model,
                 step_id,
                 backend,
-                formulation_requirement,
                 procedure,
                 residual_target,
                 initial_fields,
@@ -267,7 +260,6 @@ impl ThermalWorkload {
         Ok((
             step,
             crate::ThermalSolveOptions {
-                formulation_requirement: self.formulation_requirement,
                 procedure: self.procedure,
                 residual_target: self.residual_target,
                 solver_mesh: None,

@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     AccuracyLimitAction, AccuracyPlan, AccuracyTarget, AccuracyTolerance, AnalysisValidationError,
     ErrorContributionKind, NumericalEquivalencePolicy, ObservationRequest, ProcedureStep,
-    RequiredAccuracyEvidence, UnavailableEvidencePolicy,
+    RequiredAccuracyEvidence,
 };
 
 pub(crate) fn validate_accuracy(step: &ProcedureStep) -> Result<(), AnalysisValidationError> {
@@ -335,17 +335,13 @@ fn validate_limit_actions(plan: &AccuracyPlan) -> Result<(), AnalysisValidationE
         AccuracyLimitAction::TightenSolver => resources.maximum_solver_tightenings > 0,
         AccuracyLimitAction::ExtendSampling => resources.maximum_samples > 0,
         AccuracyLimitAction::Fail => true,
-        AccuracyLimitAction::WarnExperimental => matches!(
-            plan.unavailable_evidence,
-            UnavailableEvidencePolicy::MarkIndeterminateExperimental
-        ),
     };
     if valid {
         Ok(())
     } else {
         accuracy_error(
             plan,
-            "accuracy-limit action lacks the required resource allowance or experimental policy",
+            "accuracy-limit action lacks the required resource allowance",
         )
     }
 }
@@ -409,7 +405,7 @@ mod tests {
     }
 
     #[test]
-    fn experimental_baseline_is_valid() {
+    fn baseline_is_valid() {
         validate_accuracy(&ProcedureStep::structural_static("structural"))
             .expect("constructor must produce a valid accuracy plan");
     }

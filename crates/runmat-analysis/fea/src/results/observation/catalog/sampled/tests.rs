@@ -20,9 +20,9 @@ use crate::{
     },
 };
 use runmat_analysis_core::{
-    AnalysisField, ExtremaTiePolicy, FieldLocation, FormulationRequirement, ObservationQuantity,
-    ObservationRequest, ObservationTarget, ObservationValueShape, ProcedureStepId, ReductionPolicy,
-    SeriesReduction, SpatialReduction,
+    AnalysisField, ExtremaTiePolicy, FieldLocation, ObservationQuantity, ObservationRequest,
+    ObservationTarget, ObservationValueShape, ProcedureStepId, ReductionPolicy, SeriesReduction,
+    SpatialReduction,
 };
 use runmat_meshing_core::fixtures::{quadratic_slab_mesh, slab_mesh};
 
@@ -121,7 +121,6 @@ fn fixture(
     let mut workload = MagnetostaticWorkload {
         model: authored_model(-2.0),
         step_id: ProcedureStepId("potential".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         relative_residual_target: 1e-10,
     };
     let mut flux = spec("flux", ObservationTarget::WholeModel);

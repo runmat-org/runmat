@@ -1,5 +1,5 @@
 //! Standing physical acceptance requirements. Witness links describe assertion scope,
-//! not successful execution or production qualification.
+//! not successful execution or release qualification.
 use crate::requirement::*;
 const THERMOELASTIC: &[Envelope] = &[
     envelope(
@@ -308,7 +308,7 @@ const FEA_COUPLING_ELECTROTHERMAL_001: Requirement = Requirement {
                 obligation: "heat",
                 envelopes: ELECTROTHERMAL_PUBLIC,
                 boundary: concat!(
-                    "Experimental both-order constant-conductivity same-mesh steady one-way ",
+                    "Both-order constant-conductivity same-mesh steady one-way ",
                     "conduction to thermal slab; 12 W terminal/supplied/boundary power, Tet10 ",
                     "quadratic temperature and cold transfer. No feedback or harmonic Maxwell ",
                     "coupling.",

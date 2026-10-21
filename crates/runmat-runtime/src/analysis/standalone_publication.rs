@@ -73,12 +73,11 @@ pub(super) fn publish_standalone_run(
 pub fn analysis_run_modal_with_options_op(
     model: &AnalysisModel,
     backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
     options: AnalysisModalRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     publish_standalone_run(
-        execute_modal_with_options(model, backend, formulation_requirement, options, context)?,
+        execute_modal_with_options(model, backend, options, context)?,
         "RM.FEA.RUN_MODAL.ARTIFACT_STORE_FAILED",
     )
 }
@@ -86,12 +85,11 @@ pub fn analysis_run_modal_with_options_op(
 pub fn analysis_run_acoustic_with_options_op(
     model: &AnalysisModel,
     backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
     options: AnalysisAcousticRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     publish_standalone_run(
-        execute_acoustic_with_options(model, backend, formulation_requirement, options, context)?,
+        execute_acoustic_with_options(model, backend, options, context)?,
         "RM.FEA.RUN_ACOUSTIC.ARTIFACT_STORE_FAILED",
     )
 }
@@ -99,12 +97,11 @@ pub fn analysis_run_acoustic_with_options_op(
 pub fn analysis_run_cht_with_options_op(
     model: &AnalysisModel,
     backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
     options: AnalysisChtRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     publish_standalone_run(
-        execute_cht_with_options(model, backend, formulation_requirement, options, context)?,
+        execute_cht_with_options(model, backend, options, context)?,
         "RM.FEA.RUN_CHT.ARTIFACT_STORE_FAILED",
     )
 }
@@ -112,12 +109,11 @@ pub fn analysis_run_cht_with_options_op(
 pub fn analysis_run_fsi_with_options_op(
     model: &AnalysisModel,
     backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
     options: AnalysisFsiRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     publish_standalone_run(
-        execute_fsi_with_options(model, backend, formulation_requirement, options, context)?,
+        execute_fsi_with_options(model, backend, options, context)?,
         "RM.FEA.RUN_FSI.ARTIFACT_STORE_FAILED",
     )
 }
@@ -125,12 +121,11 @@ pub fn analysis_run_fsi_with_options_op(
 pub fn analysis_run_transient_with_options_op(
     model: &AnalysisModel,
     backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
     options: AnalysisTransientRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     publish_standalone_run(
-        execute_transient_with_options(model, backend, formulation_requirement, options, context)?,
+        execute_transient_with_options(model, backend, options, context)?,
         "RM.FEA.RUN_TRANSIENT.ARTIFACT_STORE_FAILED",
     )
 }
@@ -138,12 +133,11 @@ pub fn analysis_run_transient_with_options_op(
 pub fn analysis_run_nonlinear_with_options_op(
     model: &AnalysisModel,
     backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
     options: AnalysisNonlinearRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     publish_standalone_run(
-        execute_nonlinear_with_options(model, backend, formulation_requirement, options, context)?,
+        execute_nonlinear_with_options(model, backend, options, context)?,
         "RM.FEA.RUN_NONLINEAR.ARTIFACT_STORE_FAILED",
     )
 }

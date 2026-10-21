@@ -1,5 +1,4 @@
 use super::*;
-use runmat_analysis_core::FormulationRequirement;
 
 #[test]
 fn shared_compiled_clone_preserves_definition_and_cold_validation_under_bounded_inventory() {
@@ -8,7 +7,6 @@ fn shared_compiled_clone_preserves_definition_and_cold_validation_under_bounded_
     let compiled = CompiledAnalysisStudy {
         module_path: "tests/shared-definition.fea".into(),
         study_id: "shared-definition".into(),
-        formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: Vec::new(),
         outputs: Vec::new(),
         assessments: Vec::new(),

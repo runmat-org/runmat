@@ -1,4 +1,4 @@
-//! Experimental partitioned fluid-structure coupling.
+//! Partitioned fluid-structure coupling.
 
 mod diagnostics;
 mod interface;

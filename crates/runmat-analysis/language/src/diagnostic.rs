@@ -64,6 +64,9 @@ pub struct FeaDiagnostic {
     pub severity: FeaDiagnosticSeverity,
     pub phase: FeaDiagnosticPhase,
     pub location: Option<FeaDiagnosticLocation>,
+    /// Short label printed under the located span, such as the expected unit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
     pub related: Vec<FeaRelatedDiagnostic>,
     pub availability: SourceAvailability,
 }
@@ -81,9 +84,15 @@ impl FeaDiagnostic {
             severity: FeaDiagnosticSeverity::Error,
             phase,
             location,
+            label: None,
             related: Vec::new(),
             availability: SourceAvailability::Available,
         }
+    }
+
+    pub fn with_label(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
+        self
     }
 
     pub fn unavailable(mut self) -> Self {

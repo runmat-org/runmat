@@ -24,6 +24,27 @@ The command reports one of three states:
 Machine output includes the root module, selectable studies and sweeps, status, and structured
 diagnostics. Planning is a separate command.
 
+`runmat check` accepts `.fea` files as well as `.m` files and prints located diagnostics in the
+same form for both: the code and message, the `file:line:column` location, the source line with its
+leading indentation removed, a caret underline with a label, and a summary line. A unit mismatch
+names what the value must measure, what was found, and the expected SI unit:
+
+```text
+$ runmat check cantilever.fea
+error[fea.semantic.model]: traction must be force per area, found N
+ --> cantilever.fea:28:48
+   |
+28 | traction on geometry.beam.region.tip = [0, 0, -100000] N
+   |                                        ^^^^^^^^^^^^^^^^^ expected Pa
+checked cantilever.fea: 1 error(s), 0 warning(s)
+```
+
+A failure is reported once, where it occurs. A study that depends on a model which failed to check
+is not reported again, and a value whose unit or reference already failed is not re-reported by
+the declaration that uses it. `runmat fea check`, `plan`, and `run` print the same located
+diagnostics to standard error before any geometry, meshing, or solve work starts; `--json` keeps the
+structured form, including each diagnostic's span and label.
+
 ## Inspect the logical plan
 
 ```sh
@@ -129,8 +150,8 @@ than suppressing it downstream. Typical failures include:
 - a sweep case outside an input bound;
 - a placement request unavailable to the selected procedure.
 
-For example, this assignment fails because a bulk material requires a solid, shell, beam, or cell
-domain; a face is a boundary target:
+For example, this assignment fails in a study: a material on a face declares a shell domain, and
+the model gives that shell no section or layup, so the solid body would be left without material:
 
 ```fea
 model incorrect {
@@ -151,4 +172,4 @@ model corrected {
 ```
 
 Warnings do not convert unsupported execution into support. The [current status](../status) page
-separates language coverage, executable procedure coverage, and production qualification.
+separates language coverage, executable procedure coverage, and validation evidence.

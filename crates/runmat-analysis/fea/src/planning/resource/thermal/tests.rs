@@ -3,9 +3,7 @@ use crate::{
     fixtures::{fixture_model, FixtureId},
     ComputeBackend, ThermalProcedureControl,
 };
-use runmat_analysis_core::{
-    AnalysisSequence, FormulationRequirement, ProcedureStep, Temperature, ThermalDomain,
-};
+use runmat_analysis_core::{AnalysisSequence, ProcedureStep, Temperature, ThermalDomain};
 use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
 
 fn fixture(
@@ -28,7 +26,6 @@ fn fixture(
         model,
         step_id,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         procedure: ThermalProcedureControl::BackwardEuler {
             snapshot_count: samples,
         },

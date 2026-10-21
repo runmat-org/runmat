@@ -19,11 +19,11 @@ fn authored_transient_and_frequency_assessments_reopen_without_re_solving_the_nu
     for (source, study) in [
         (
             include_str!("../fixtures/typed_box_transient_assessments.fea"),
-            "structural_transient_experimental",
+            "structural_transient",
         ),
         (
             include_str!("../fixtures/typed_box_frequency_assessments.fea"),
-            "structural_harmonic_experimental",
+            "structural_harmonic",
         ),
     ] {
         let project = TempDir::new().unwrap();

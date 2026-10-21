@@ -46,11 +46,10 @@ model random_environment {
     }
 }
 
-study modal_random_response_experimental {
+study modal_random_response {
     geometry = geometry.bracket
     mesh = mesh.bracket
     model = model.random_environment
-    formulation = experimental
     analysis modes {
         structural modal { modes = 10 }
         retain basis

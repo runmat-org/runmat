@@ -62,5 +62,5 @@ artifact or atomic transient publication exists by implication. Those contracts,
 source property admission, selected object activation, inlet/wall/mass-flow/generated
 inputs, mandatory spatial/time accuracy and independent vortex/cavity/backward-step
 qualification remain required. CHT/FSI still need canonical original-field physics and
-conservative transfer replacing their reduced/profile paths. No production, coupled,
+conservative transfer replacing their reduced/profile paths. No qualification, coupled,
 accelerator, distributed, measured-resource or full-release promotion is claimed.

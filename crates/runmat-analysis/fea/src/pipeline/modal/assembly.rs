@@ -18,7 +18,7 @@ pub(super) fn assemble(
             model,
             excitations,
             mesh.cloned(),
-            StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+            StructuralFormulationRequirement::SyntheticOperator,
         )
     } else if SolidEnergyPreparation::supports_model(model) {
         assemble_structural_modal_system(model, excitations, mesh, capture)
@@ -27,7 +27,7 @@ pub(super) fn assemble(
             model,
             excitations,
             mesh,
-            StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+            StructuralFormulationRequirement::SyntheticOperator,
         )
     }
     .map_err(|error| FeaRunError::Assembly(error.to_string()))

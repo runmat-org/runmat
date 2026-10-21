@@ -63,7 +63,6 @@ mod tests {
         topology::{CanonicalSolidIntegrationPlan, CanonicalSolidIntegrationRule},
         ComputeBackend,
     };
-    use runmat_analysis_core::FormulationRequirement;
     use runmat_canonical_codec::{profile_serialized, CanonicalLimits};
 
     #[test]
@@ -71,7 +70,6 @@ mod tests {
         for quadratic in [false, true] {
             let (model, mesh, summary) = fixture::prepare(1, quadratic);
             let options = NonlinearSolveOptions {
-                formulation_requirement: FormulationRequirement::Experimental,
                 solver_mesh: Some(mesh.clone()),
                 increment_count: 4,
                 max_accepted_increments: 8,

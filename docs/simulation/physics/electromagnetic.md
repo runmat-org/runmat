@@ -7,7 +7,7 @@ unitless scalar boundary values.
 
 The `.fea` language can check static, transient, harmonic, and nonlinear electromagnetic procedure
 contracts. The numerical library currently has one admitted electromagnetic realization: an
-**experimental harmonic reduced edge-graph curl–curl solve** on canonical Tet4/Tet10 edge topology.
+**harmonic reduced edge-graph curl–curl solve** on canonical Tet4/Tet10 edge topology.
 The typed `.fea` executor does not yet connect this family end to end, and no other procedure has an
 admitted realization. This distinction is part of the API contract, not a documentation caveat.
 
@@ -23,7 +23,7 @@ $$
 $$
 
 subject to vector-potential ground/gauge conditions and magnetic-insulation natural boundaries. The
-implemented experimental realization builds oriented edge incidence from the canonical tetrahedral
+implemented realization builds oriented edge incidence from the canonical tetrahedral
 mesh, assembles a reduced edge-graph curl–curl operator, applies frequency-dependent conductivity,
 permittivity, and permeability terms, projects typed current/current-density sources to edges, and
 solves the real/imaginary block system with BiCGSTAB.
@@ -37,8 +37,8 @@ $$
 
 The realization evidence identifies `ReducedEdgeGraphCurlCurl`,
 `ReducedFrequencyMaterialResponse`, the exact topology/source/boundary projection, and any fallback.
-Ordinal, synthetic, or unmapped fallback realizations are experimental evidence outcomes and must
-not be represented as full production Maxwell finite elements.
+Ordinal, synthetic, or unmapped fallback realizations are recorded as such in the evidence and are
+never represented as full Maxwell finite elements.
 
 ## Which electromagnetic procedures are defined?
 
@@ -46,7 +46,7 @@ not be represented as full production Maxwell finite elements.
 | --- | --- | --- |
 | `electromagnetic static` | Static sources and reference/gauge | None |
 | `electromagnetic transient` | Explicit time samples and compatible initial field | None |
-| `electromagnetic harmonic` | Ordered frequency samples and complex field state | Experimental reduced edge-graph curl–curl |
+| `electromagnetic harmonic` | Ordered frequency samples and complex field state | Reduced edge-graph curl–curl |
 | `electromagnetic nonlinear` | Explicit load-factor domain | None |
 
 The static, transient, and nonlinear rows are typed contracts only. A study requiring them fails
@@ -73,7 +73,6 @@ study ac_busbar {
     geometry = geometry.busbar
     mesh = mesh.busbar
     model = model.conductor
-    formulation = experimental
     analysis field {
         electromagnetic harmonic { frequencies = [50, 60, 400] Hz }
     }
@@ -89,7 +88,7 @@ frequencies and become part of result identity.
 - `terminal_voltage` applies an electric-potential signal to a terminal region.
 - `electric_current` applies a total current and preserves its resultant during projection.
 - `electric_charge` applies a total charge.
-- `current_density` applies amperes per square metre and preserves intensity.
+- `current_density` applies amperes per square meter and preserves intensity.
 - `magnetic_vector_potential` applies a vector-potential signal.
 
 Use direct `load` syntax for constant data and `signal` plus `excitation` for frequency- or
@@ -127,7 +126,7 @@ reference/gauge. RunMat exposes these explicitly:
 - periodic and phase-shifted periodic constraints pair repeating boundaries;
 - `magnetic.insulation` is a natural boundary.
 
-A numerical penalty is not a substitute for declaring the physical reference. The experimental
+A numerical penalty is not a substitute for declaring the physical reference. The
 low-level solver reports boundary anchor, localization, penalty contribution, conditioning, flux
 divergence, source realization, and source-region coverage evidence.
 
@@ -162,7 +161,7 @@ $$
 $$
 
 but the current reduced realization must be qualified on its own evidence rather than assumed to
-inherit production edge-element convergence properties.
+inherit full edge-element convergence properties.
 
 See [electromagnetic constraints](../constraints/electromagnetic),
 [electromagnetic loads](../loads/electromagnetic), [electrothermal analysis](./electrothermal),

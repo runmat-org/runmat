@@ -4,7 +4,7 @@ use super::{
     StepIdentity,
 };
 use crate::admission::AnalysisRunIdentity;
-use runmat_analysis_core::{AnalysisModel, FormulationRequirement, ProcedureStepId};
+use runmat_analysis_core::{AnalysisModel, ProcedureStepId};
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 use runmat_meshing_core::SolverMeshArtifact;
@@ -31,7 +31,6 @@ const LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 1_000_000
 pub struct MagnetostaticWorkload {
     pub model: AnalysisModel,
     pub step_id: ProcedureStepId,
-    pub formulation_requirement: FormulationRequirement,
     pub relative_residual_target: f64,
 }
 
@@ -40,7 +39,6 @@ impl MagnetostaticWorkload {
         crate::physics::magnetic::validate_canonical_input(
             &self.model,
             self.step_id.as_str(),
-            self.formulation_requirement,
             self.relative_residual_target,
         )
         .map_err(invalid)?;
@@ -95,8 +93,7 @@ impl MagnetostaticWorkload {
             )
             .map_err(invalid)?;
         }
-        crate::admission::admit_canonical_magnetostatic(mesh, self.formulation_requirement)
-            .map_err(invalid)
+        crate::admission::admit_canonical_magnetostatic(mesh).map_err(invalid)
     }
     /// Serial numerical execution only. No scheduler reservation or state publication implied.
     pub fn execute(
@@ -108,7 +105,6 @@ impl MagnetostaticWorkload {
             &self.model,
             mesh,
             self.step_id.as_str(),
-            self.formulation_requirement,
             self.relative_residual_target,
         )
         .map_err(invalid)?;

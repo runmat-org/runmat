@@ -53,7 +53,6 @@ study heated_modes {
     geometry = geometry.part
     mesh = mesh.volume
     model = model.structure
-    formulation = experimental
     analysis heat { thermal steady {} retain heated }
     analysis preload after analysis.heat {
         thermomechanical preload { temperature = analysis.heat.state.heated }

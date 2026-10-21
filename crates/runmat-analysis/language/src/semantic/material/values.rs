@@ -104,6 +104,12 @@ fn quantity(
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<f64> {
     if value.value_type != FeaType::Quantity(dimension) {
+        if let Some((message, label)) =
+            crate::semantic::units::unit_mismatch(name, value, dimension)
+        {
+            diagnostics.push(diagnostic(declaration, value.span, message).with_label(label));
+            return None;
+        }
         invalid(
             declaration,
             name,
@@ -143,6 +149,7 @@ fn canonical_scalar(value: &CheckedExpression) -> Option<f64> {
             value,
             scale_bits,
             offset_bits,
+            ..
         } => Some(
             canonical_scalar(value)? * f64::from_bits(*scale_bits) + f64::from_bits(*offset_bits),
         ),

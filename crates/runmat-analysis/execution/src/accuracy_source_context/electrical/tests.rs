@@ -50,7 +50,6 @@ fn workload(
     ElectricalStaticWorkload {
         model,
         step_id: ProcedureStepId("potential".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         relative_residual_target: 1e-11,
     }
 }
@@ -84,7 +83,6 @@ fn electrical_context_cold_authenticates_original_three_inputs_and_authored_requ
                 AccuracySourceKind::ElectricalStatic,
                 receipt.source_result(),
                 None,
-                workload.formulation_requirement,
                 workload.model.sequence.steps[0].accuracy.clone(),
             )
             .unwrap();
@@ -127,7 +125,6 @@ fn electrical_context_cold_authenticates_original_three_inputs_and_authored_requ
                 request.source_kind,
                 request.source_result,
                 None,
-                request.formulation_requirement,
                 changed_plan,
             )
             .unwrap();
@@ -137,7 +134,6 @@ fn electrical_context_cold_authenticates_original_three_inputs_and_authored_requ
                 request.source_kind,
                 request.source_result,
                 None,
-                FormulationRequirement::Production,
                 request.plan.clone(),
             )
             .unwrap();
@@ -149,7 +145,6 @@ fn electrical_context_cold_authenticates_original_three_inputs_and_authored_requ
                 request.source_kind,
                 request.source_result,
                 None,
-                request.formulation_requirement,
                 request.plan.clone(),
             )
             .unwrap();

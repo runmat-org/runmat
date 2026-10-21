@@ -19,10 +19,10 @@ pub(super) const LIMIT_ACTION_CLASS: &str = classes::ACCURACY_LIMIT_ACTION.displ
 macro_rules! choice {
     ($function:ident, $builtin:literal, $class:expr, $value:expr $(,)?) => {
         #[runtime_builtin(
-                            name = $builtin,
-                            binding_variant = "default",
-                            builtin_path = "crate::builtins::fea::study_policies::accuracy"
-                        )]
+                                    name = $builtin,
+                                    binding_variant = "default",
+                                    builtin_path = "crate::builtins::fea::study_policies::accuracy"
+                                )]
         pub async fn $function() -> BuiltinResult<Value> {
             to_typed_value($builtin, $class, $value)
         }
@@ -169,9 +169,9 @@ choices!(
         UnavailableEvidencePolicy::Fail
     ),
     (
-        unavailable_experimental,
-        "fea.UnavailableEvidencePolicy.markIndeterminateExperimental",
-        UnavailableEvidencePolicy::MarkIndeterminateExperimental
+        unavailable_mark_indeterminate,
+        "fea.UnavailableEvidencePolicy.markIndeterminate",
+        UnavailableEvidencePolicy::MarkIndeterminate
     ),
 );
 choices!(
@@ -195,11 +195,6 @@ choices!(
         limit_fail,
         "fea.AccuracyLimitAction.fail",
         AccuracyLimitAction::Fail
-    ),
-    (
-        limit_warn,
-        "fea.AccuracyLimitAction.warnExperimental",
-        AccuracyLimitAction::WarnExperimental
     ),
 );
 
@@ -248,8 +243,8 @@ const ACCURACY_POLICY_CLASSES: [ImmutableStudyClass; 4] = [
         methods: &[
             ("fail", "fea.UnavailableEvidencePolicy.fail"),
             (
-                "markIndeterminateExperimental",
-                "fea.UnavailableEvidencePolicy.markIndeterminateExperimental",
+                "markIndeterminate",
+                "fea.UnavailableEvidencePolicy.markIndeterminate",
             ),
         ],
     },
@@ -262,10 +257,6 @@ const ACCURACY_POLICY_CLASSES: [ImmutableStudyClass; 4] = [
             ("tightenSolver", "fea.AccuracyLimitAction.tightenSolver"),
             ("extendSampling", "fea.AccuracyLimitAction.extendSampling"),
             ("fail", "fea.AccuracyLimitAction.fail"),
-            (
-                "warnExperimental",
-                "fea.AccuracyLimitAction.warnExperimental",
-            ),
         ],
     },
 ];

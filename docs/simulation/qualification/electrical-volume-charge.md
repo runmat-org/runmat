@@ -3,7 +3,7 @@
 This extends the retained canonical scalar electrical chain with typed real volume
 charge density. It does not qualify Maxwell, magnetostatics, conduction sources,
 coupling, imported-state sequencing, restart, GPU or distributed operators.
-Production remains closed; the largest existing Tet10 proof-resource gate remains
+Qualification remains open; the largest existing Tet10 proof-resource gate remains
 executable and failed, with its limits unchanged.
 
 ## Equation and independent reference
@@ -32,7 +32,7 @@ shared complex signal realization does not imply a complex static solve. Unmatch
 regions, surface targets, vector/directional/follower loads and conduction charge fail
 closed. Each action must belong to a declared load case.
 
-Declared charge, including zero or inactive charge, has a distinct experimental
+Declared charge, including zero or inactive charge, has a distinct
 registry identity from source-free electrostatics. No new source-private quadrature
 owner or live callback is introduced. Weak outward flux is `b-K*delta_phi`; conservation
 compares summed terminal flux to integrated charge using physical cancellation scale.
@@ -60,4 +60,4 @@ to check actual region resolution, worker solve, four persisted full/partial fie
 receipt/state/root closure and independent analytic data after cold import: both signed
 producer processes,686 nodes/347 elements, test138.22s. Strict core/FEA/language/bridge/
 native library/test lint passes without suppressions. The ledger records final evidence.
-No whole-stage, release, restart or production qualification follows from this slice.
+No whole-stage, release, restart or family qualification follows from this slice.

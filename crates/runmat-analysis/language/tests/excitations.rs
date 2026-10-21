@@ -149,6 +149,10 @@ model unassigned {
     load force {
         force on geometry.part.region.wall = [0 N, 1 N, 0 N]
     }
+    load other {
+        force on geometry.part.region.wall = [0 N, 2 N, 0 N]
+    }
+    load_case service { include load.other }
 }
 model unknown_member {
     load_case service { include load.missing }
@@ -162,12 +166,116 @@ model unknown_member {
     });
     assert!(!program.is_valid());
     assert!(program.models.is_empty());
-    assert!(program.diagnostics.iter().any(|diagnostic| {
-        diagnostic.message.contains("topology")
-            || diagnostic.message.contains("physical quantity")
-            || diagnostic.message.contains("at least one declared case")
-            || diagnostic.message.contains("declared excitations")
-    }));
+    let messages = program
+        .diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.message.as_str())
+        .collect::<Vec<_>>();
+    assert!(
+        messages.contains(&"force must be force, found Pa"),
+        "{messages:#?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("at least one declared case")),
+        "a model that declares a case must place every load in a declared case: {messages:#?}"
+    );
+    assert!(
+        messages.iter().any(|message| message.contains("topology")
+            || message.contains("entity")
+            || message.contains("face")),
+        "{messages:#?}"
+    );
+}
+
+const FIGURE_GEOMETRY: &str = r#"
+geometry beam {
+    construct {
+        feature body = box(width = 1 m, depth = 0.1 m, height = 0.1 m)
+        result = feature.body
+    }
+    region body : solid {
+        select result
+        expect exactly_one
+    }
+    region tip : face {
+        select result
+        expect one_or_more
+    }
+}
+mesh beam on geometry.beam {
+    tetrahedra {
+        order = linear
+        target_size = 0.1 m
+        maximum_deviation = 0.01 m
+    }
+}
+material steel {
+    mass_density = 7850 kg/m^3
+    elastic {
+        youngs_modulus = 200 GPa
+        poisson_ratio = 0.3
+    }
+}
+"#;
+
+const FIGURE_STUDY: &str = r#"
+study cantilever_static {
+    geometry = geometry.beam
+    mesh = mesh.beam
+    model = model.loaded_beam
+    analysis static { structural static {} }
+    output displacement = analysis.static.field.node.displacement
+}
+"#;
+
+fn figure_source(traction: &str) -> String {
+    format!(
+        "{FIGURE_GEOMETRY}model loaded_beam {{\n    assign material.steel to geometry.beam.region.body\n    load end_traction {{\n        traction on geometry.beam.region.tip = {traction}\n    }}\n}}\n{FIGURE_STUDY}"
+    )
+}
+
+fn check_figure(source: &str) -> CheckedFeaProgram {
+    FeaCompiler::new(&TestHost::default()).check(CheckRequest {
+        modules: ModuleGraphRequest {
+            source_root: LogicalSourcePath::new("project").unwrap(),
+            root: source_module("project/main.fea", source, 1),
+        },
+    })
+}
+
+#[test]
+fn a_model_without_load_cases_applies_its_loads_in_one_default_case() {
+    let program = check_figure(&figure_source("[0, 0, -100000] Pa"));
+    assert!(program.is_valid(), "{:#?}", program.diagnostics);
+    let model = program.models.values().next().unwrap();
+    assert_eq!(model.excitation_cases.len(), 1);
+    assert_eq!(model.excitation_cases[0].case_id, "load_case.default");
+    assert_eq!(
+        model.excitation_cases[0].excitation_ids,
+        ["load.end_traction"]
+    );
+    assert_eq!(program.studies.len(), 1);
+}
+
+#[test]
+fn a_unit_mismatch_is_located_at_the_value_and_names_expected_and_found_units() {
+    let source = figure_source("[0, 0, -100000] N");
+    let program = check_figure(&source);
+    assert!(!program.is_valid());
+    assert_eq!(
+        program.diagnostics.len(),
+        1,
+        "the dependent study must not repeat the model failure: {:#?}",
+        program.diagnostics
+    );
+    let diagnostic = &program.diagnostics[0];
+    assert_eq!(diagnostic.code, "fea.semantic.model");
+    assert_eq!(diagnostic.message, "traction must be force per area, found N");
+    assert_eq!(diagnostic.label.as_deref(), Some("expected Pa"));
+    let span = diagnostic.location.as_ref().unwrap().span;
+    assert_eq!(&source[span.start..span.end], "[0, 0, -100000] N");
 }
 
 #[test]

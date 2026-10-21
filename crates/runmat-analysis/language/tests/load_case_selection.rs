@@ -31,7 +31,6 @@ study selected {
     geometry = geometry.part
     mesh = mesh.volume
     model = model.loaded
-    formulation = experimental
     analysis implicit { structural static {} }
     analysis unloaded { structural static { load_cases = [] } }
     analysis loaded { structural static { load_cases = [load_case.service] } }

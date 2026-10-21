@@ -43,7 +43,6 @@ pub(crate) fn fixture(
         model,
         step_id: ProcedureStepId("heat".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         procedure: ThermalProcedureControl::Steady,
         residual_target: 1e-11,
         initial_fields: vec![],

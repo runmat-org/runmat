@@ -48,7 +48,7 @@ comparison passes with its unchanged `1e-10` criterion. A source-projection roun
 change exposed that comparison's sensitivity; the exact affine Jacobian resolves it
 without changing the reference. The full isolated numerical candidate finished with 1,663 passing and 14 failing
 tests. Original scientific and resource gates remain open; no whole-suite pass or
-production promotion is claimed. That run predates the solver-ownership refactor.
+qualification promotion is claimed. That run predates the solver-ownership refactor.
 
 The cantilever refinement test contains two independent gates. Its stress-recovery
 estimator decreases from about 373 to 270 to 196, satisfying the original estimator

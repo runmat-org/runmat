@@ -134,7 +134,6 @@ fn run_forced(mesh: &SolverMeshArtifact, damped: bool, intervals: usize) -> FeaT
         &forced_model(mesh, damped),
         ComputeBackend::Cpu,
         TransientSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             time_step_policy: StructuralTimeStepPolicy::Fixed {
                 interval_count: intervals,
             },

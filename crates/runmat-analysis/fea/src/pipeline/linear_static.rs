@@ -94,16 +94,8 @@ fn run_linear_static_with_constraint_plan(
     thermal_source: Option<thermal_state::ThermalStateSelection<'_>>,
 ) -> Result<LinearStaticComputation, FeaRunError> {
     let execution_step = match thermal_source.as_ref() {
-        Some(selection) => thermal_state::require_selected_step(
-            model,
-            selection.consumer_step_id,
-            options.formulation_requirement,
-        )?,
-        None => super::admission::require_structural(
-            model,
-            AnalysisProcedure::Static,
-            options.formulation_requirement,
-        )?,
+        Some(selection) => thermal_state::require_selected_step(model, selection.consumer_step_id)?,
+        None => super::admission::require_structural(model, AnalysisProcedure::Static)?,
     };
     if thermal_source.is_none()
         && execution_step
@@ -176,7 +168,7 @@ fn run_linear_static_with_constraint_plan(
         {
             StructuralFormulationRequirement::PhysicalDiscretization
         } else {
-            StructuralFormulationRequirement::ExperimentalSyntheticOperator
+            StructuralFormulationRequirement::SyntheticOperator
         },
         assembly_constraint_plan,
         options.local_execution,
@@ -201,11 +193,7 @@ fn run_linear_static_with_constraint_plan(
         &preassembly,
         &summary,
     )?;
-    let identity = super::admission::admit_structural(
-        &summary,
-        execution_step,
-        options.formulation_requirement,
-    )?;
+    let identity = super::admission::admit_structural(&summary, execution_step)?;
     super::validate_rotational_dof_targets(model, &summary)?;
     if options.require_solver_mesh_for_solid
         && options.solver_mesh.is_none()

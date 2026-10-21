@@ -1,6 +1,5 @@
 use super::*;
 use crate::solve::nonlinear::{solid::continuum_qualification::fixture, NonlinearSolveOptions};
-use runmat_analysis_core::FormulationRequirement;
 
 #[test]
 fn cold_blocks_bind_original_history_predecessor_and_output_order() {
@@ -9,7 +8,6 @@ fn cold_blocks_bind_original_history_predecessor_and_output_order() {
         let workload = NonlinearSolidWorkload {
             model,
             controls: NonlinearSolveOptions {
-                formulation_requirement: FormulationRequirement::Experimental,
                 increment_count: 2,
                 max_accepted_increments: 8,
                 max_newton_iters: 32,
@@ -143,7 +141,6 @@ fn original_recovery_rejects_rehashed_terminal_projection_substitutions() {
         let workload = NonlinearSolidWorkload {
             model,
             controls: NonlinearSolveOptions {
-                formulation_requirement: FormulationRequirement::Experimental,
                 increment_count: 1,
                 max_accepted_increments: 8,
                 tolerance: 1e-9,

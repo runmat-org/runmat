@@ -383,7 +383,7 @@ mod tests {
             &model,
             &excitations,
             None,
-            crate::assembly::StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+            crate::assembly::StructuralFormulationRequirement::SyntheticOperator,
         )
         .unwrap();
         let real = vec![0.1; summary.dof_count];

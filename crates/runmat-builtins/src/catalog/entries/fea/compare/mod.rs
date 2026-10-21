@@ -41,7 +41,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
     sections: &[
         BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
             "Both arguments are run id strings of solved procedure steps, typically `run.steps(k).run_id` or `stepRun.run_id`. The runs are read from the analysis artifact store.",
-            "The `fea.Compare` result reports `baseline_run_id` and `candidate_run_id`; logical flags `run_status_changed`, `numerically_acceptable_changed`, and `production_publishable_changed`; `quality_reason_count_delta` (candidate minus baseline); and `solve_ms_delta` in milliseconds when both runs recorded a solve time.",
+            "The `fea.Compare` result reports `baseline_run_id` and `candidate_run_id`; logical flags `run_status_changed` and `numerically_acceptable_changed`; `quality_reason_count_delta` (candidate minus baseline); and `solve_ms_delta` in milliseconds when both runs recorded a solve time.",
             "For nonlinear runs it also reports `failed_increment_delta`, `max_iteration_delta`, `nonlinear_spike_count_delta`, and `nonlinear_stall_count_delta`. These deltas are empty when either run has no nonlinear results. Count deltas are exact signed integers.",
             "Comparison only reads stored runs; it does not re-solve or modify either run.",
         ] },

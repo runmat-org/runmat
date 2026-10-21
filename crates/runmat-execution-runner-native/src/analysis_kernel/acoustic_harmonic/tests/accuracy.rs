@@ -86,7 +86,6 @@ fn native_acoustic_cold_receipt_shared_accuracy_and_exact_source_matrix() {
                 source_context_inputs: context.clone(),
                 sequence: SequenceIdentity::from_solver_contract(&workload.model.sequence).unwrap(),
                 step: workload.model.sequence.steps[0].clone(),
-                formulation_requirement: workload.formulation_requirement,
                 program_revision: task.program.request.recipe.program_revision.clone(),
                 chunk_bytes: chunk,
                 inventory_limits: limits,

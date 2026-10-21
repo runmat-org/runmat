@@ -1,4 +1,4 @@
-//! Public Experimental CPU route, independently checked against the manufactured cube.
+//! Public CPU route, independently checked against the manufactured cube.
 //! This is not native-worker, process-restart, contact, or production evidence.
 use super::run_nonlinear_with_options;
 use crate::{
@@ -6,12 +6,10 @@ use crate::{
     solve::nonlinear::{solid::continuum_qualification as reference, NonlinearSolveOptions},
     topology::AnalysisProjection,
 };
-use runmat_analysis_core::FormulationRequirement;
 use runmat_meshing_core::SolverMeshArtifact;
 
 fn options(mesh: &SolverMeshArtifact, increments: usize) -> NonlinearSolveOptions {
     NonlinearSolveOptions {
-        formulation_requirement: FormulationRequirement::Experimental,
         solver_mesh: Some(mesh.clone()),
         increment_count: increments,
         max_newton_iters: 32,

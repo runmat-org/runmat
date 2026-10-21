@@ -70,7 +70,7 @@ impl Case {
 }
 
 const SOURCE: &str =
-    include_str!("../../../../../../docs/simulation/examples/thermal-prestress-experimental.fea");
+    include_str!("../../../../../../docs/simulation/examples/thermal-prestress.fea");
 const STOP: &str = r#"    constraint expansion_stop {
         structural.prescribed {
             target = geometry.part.region.hot

@@ -345,6 +345,7 @@ fn numerical_tree(expression: &CheckedExpression) -> Option<NumericalTree> {
             value,
             scale_bits,
             offset_bits,
+            ..
         } => scale_tree(
             numerical_tree(value)?,
             f64::from_bits(*scale_bits),

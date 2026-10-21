@@ -46,7 +46,6 @@ impl ElectricalStaticWorkload {
             &self.model,
             mesh,
             self.step_id.as_str(),
-            self.formulation_requirement,
             self.relative_residual_target,
             Some(&demand.solver_admission),
         )

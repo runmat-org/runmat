@@ -41,7 +41,6 @@ fn scalar_modal_source_is_explicit_identity_bound_and_missing_inventory_rejects(
         model,
         step_id: ProcedureStepId("modes".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: ObservationExecutionPolicy::scalable(),
         truncation: ModalTruncationPolicy::requested(1),
         convergence: ModalConvergencePolicy::exploratory(),

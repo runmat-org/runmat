@@ -2,7 +2,7 @@
 
 This Stage 5 case qualifies the shared named-callable input bridge against explicit
 thermal signals and an independent heat balance. It is not full authored thermal
-entry, spatial field-artifact, process-restart or production qualification.
+entry, spatial field-artifact, process-restart or family qualification.
 
 ## Reference and scope
 

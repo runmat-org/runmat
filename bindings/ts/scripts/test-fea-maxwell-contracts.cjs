@@ -38,7 +38,7 @@ for (const retired of ["FeaElectromagneticPotentialOptions", "electromagnetic_po
 assert.match(fs.readFileSync(path.resolve(__dirname, "../src/fea-contracts.ts"), "utf8"),
   /export \* from "\.\/generated\/fea-analysis-contracts\.js"/);
 assert.match(fs.readFileSync(path.resolve(__dirname, "../src/index.ts"), "utf8"), /\bFeaMaxwellHarmonicOptions,/);
-const aliases = ["FeaPrecisionMode", "FeaQualityPolicy", "FeaComputeBackend", "FeaFormulationRequirement"]
+const aliases = ["FeaPrecisionMode", "FeaQualityPolicy", "FeaComputeBackend"]
   .map((name) => generated.match(new RegExp(`^export type ${name} = .+;$`, "m"))?.[0]);
 assert.ok(aliases.every(Boolean));
 const otherOptions = [...execution.matchAll(/options: (Fea\w+Options)/g)]

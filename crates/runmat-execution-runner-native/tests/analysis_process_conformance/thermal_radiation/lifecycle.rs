@@ -52,7 +52,6 @@ pub(super) async fn run(
     let compiled = CompiledAnalysisStudy {
         module_path: "qualification/thermal-radiation.fea".into(),
         study_id: "thermal-radiation".into(),
-        formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: Vec::new(),
         assessments: Vec::new(),
         outputs: Vec::new(),
@@ -64,7 +63,6 @@ pub(super) async fn run(
         &compiled,
         ThermalStudyPlanningPolicy {
             backend: input.backend,
-            formulation_requirement: input.formulation_requirement,
         },
         input.initial_fields,
     )
@@ -135,7 +133,6 @@ pub(super) async fn run(
     );
     let gate = runmat_analysis_fea::results::accuracy::publication_gate(
         &cold.workload.model.sequence.steps[0].accuracy,
-        FormulationRequirement::Production,
         cold.accuracy.artifact.evaluation(),
     )
     .unwrap();

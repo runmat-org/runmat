@@ -73,11 +73,43 @@ pub(super) fn lower(
             _ => {}
         }
     }
+    if cases.is_empty() && !excitations.is_empty() && !declares_load_case(declaration) {
+        cases.push(default_case(&excitations));
+    }
     LoweredExcitations {
         signals,
         parameterized_signals,
         excitations,
         cases,
+    }
+}
+
+/// Case id of the implicit case that holds every load of a model that declares no `load_case`.
+pub const DEFAULT_LOAD_CASE_ID: &str = "load_case.default";
+
+fn declares_load_case(declaration: &CheckedFeaDeclaration) -> bool {
+    declaration.statements.iter().any(|statement| {
+        matches!(
+            &statement.kind,
+            CheckedFeaStatementKind::ModelDefinition {
+                kind: FeaModelDefinitionKind::LoadCase,
+                ..
+            }
+        )
+    })
+}
+
+/// A model without any `load_case` applies all of its loads together in one default case, so a
+/// minimal model needs no case declaration. Once a model declares a case, every load must be
+/// placed in a declared case explicitly.
+fn default_case(excitations: &[AuthoredExcitation]) -> AuthoredExcitationCase {
+    AuthoredExcitationCase {
+        case_id: DEFAULT_LOAD_CASE_ID.to_string(),
+        excitation_ids: excitations
+            .iter()
+            .map(|excitation| excitation.excitation_id.clone())
+            .collect(),
+        activation: ExcitationCaseActivation::Always,
     }
 }
 

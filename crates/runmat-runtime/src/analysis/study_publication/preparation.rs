@@ -111,7 +111,6 @@ mod tests {
         let run = analysis::analysis_run_linear_static_with_options(
             &analysis::tests::sample_model(),
             runmat_analysis_fea::ComputeBackend::Cpu,
-            runmat_analysis_core::FormulationRequirement::Experimental,
             analysis::AnalysisRunOptions::default(),
             crate::operations::OperationContext::new(None, None),
         )

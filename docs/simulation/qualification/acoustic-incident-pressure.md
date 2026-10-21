@@ -1,11 +1,11 @@
 # Normally incoming acoustic pressure
 
-This bounded experimental CPU FP64 canonical Tet4/Tet10 source uses the shared
+This bounded CPU FP64 canonical Tet4/Tet10 source uses the shared
 typed `AcousticIncidentPressure` action and scalar pressure signal. DSL spelling
 is `incident_pressure`; canonical serialized kind is `acoustic_incident_pressure`.
 It supplies incoming pressure, unlike `acoustic_pressure`, which fixes total
 pressure. No acoustic-private amplitude, phase, generator or field-recovery path
-is introduced. This is not Stage8 completion or production qualification.
+is introduced. This is not Stage 8 completion or qualification.
 
 ## Physical contract
 

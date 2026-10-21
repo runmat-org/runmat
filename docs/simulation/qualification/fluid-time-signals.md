@@ -46,7 +46,7 @@ Cold recovery rederives the source reference, compares the retained reference,
 checks its exact absolute projection, and independently reevaluates the original
 physical equations. Missing or substituted references and obsolete result schema
 are rejected. Steady retained-result schema is 4; numerical-input domain is v6 and
-backward-Euler interval domain is v2. These experimental contracts do not accept a
+backward-Euler interval domain is v2. These contracts do not accept a
 legacy payload with missing original coordinates as restart authority.
 
 ## Resources and independent evidence
@@ -82,5 +82,5 @@ Inlet/wall/mass-flow excitation actions and generated input materialization must
 also be connected through their shared authorities; the current canonical kernel's
 explicit body-force-action restriction remains visible. A one-sided input test does
 not qualify time integration across a velocity jump or an impulsive boundary change.
-No transient native task, production CFD, CHT, FSI, accelerator or distributed
+No transient native task, CFD, CHT, FSI, accelerator or distributed
 qualification is inferred from these numerical and steady-native checks.

@@ -114,7 +114,6 @@ fn execute_structural_modal_workload_with_state(
         &active_model,
         workload.backend(),
         ModalSolveOptions {
-            formulation_requirement: workload.formulation_requirement(),
             truncation: workload.truncation(),
             convergence: workload.convergence(),
             residual_vector_directions: workload.residual_vector_directions().to_vec(),
@@ -138,11 +137,8 @@ fn execute_modal_numerics(
     backend: ComputeBackend,
     options: ModalSolveOptions,
 ) -> Result<FeaModalRunResult, FeaRunError> {
-    let execution_step = super::admission::require_structural(
-        model,
-        AnalysisProcedure::ModalExtraction,
-        options.formulation_requirement,
-    )?;
+    let execution_step =
+        super::admission::require_structural(model, AnalysisProcedure::ModalExtraction)?;
     let solver_mesh = options.solver_mesh.clone();
     let core = execute_modal_core(
         model,
@@ -163,8 +159,7 @@ fn execute_modal_core(
         &crate::pipeline::structural_linearization::StructuralLinearizationArtifact,
     >,
 ) -> Result<CompletedModalCore, FeaRunError> {
-    let execution_step =
-        super::admission::require_structural(model, procedure, options.formulation_requirement)?;
+    let execution_step = super::admission::require_structural(model, procedure)?;
     emit_phase(
         "fea.run_modal",
         FeaProgressPhase::RegionResolution,
@@ -223,11 +218,7 @@ fn execute_modal_core(
     } else {
         summary
     };
-    let identity = super::admission::admit_structural(
-        &summary,
-        execution_step,
-        options.formulation_requirement,
-    )?;
+    let identity = super::admission::admit_structural(&summary, execution_step)?;
     super::validate_rotational_dof_targets(model, &summary)?;
     emit_phase(
         "fea.run_modal",
@@ -466,9 +457,7 @@ mod rod_qualification;
 
 #[cfg(test)]
 mod tests {
-    use runmat_analysis_core::{
-        FormulationRequirement, IndependentDomain, ProcedureStep, ProcedureStepId,
-    };
+    use runmat_analysis_core::{IndependentDomain, ProcedureStep, ProcedureStepId};
     use runmat_meshing_core::CanonicalMeshingContract;
 
     use super::*;
@@ -492,7 +481,6 @@ mod tests {
             model,
             step_id: ProcedureStepId("modes".into()),
             backend: ComputeBackend::Cpu,
-            formulation_requirement: FormulationRequirement::Experimental,
             observation_execution: ObservationExecutionPolicy::scalable(),
             truncation,
             convergence: ModalConvergencePolicy::exploratory(),
@@ -510,7 +498,6 @@ mod tests {
             workload.model(),
             workload.backend(),
             ModalSolveOptions {
-                formulation_requirement: workload.formulation_requirement(),
                 truncation: workload.truncation(),
                 convergence: workload.convergence(),
                 residual_vector_directions: workload.residual_vector_directions().to_vec(),

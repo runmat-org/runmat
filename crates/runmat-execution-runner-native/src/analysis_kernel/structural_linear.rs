@@ -214,7 +214,6 @@ pub(super) fn execute(
         })
         .transpose()?;
     let solve_options = LinearStaticSolveOptions {
-        formulation_requirement: solve.formulation_requirement,
         preconditioner_kind: solve.preconditioner,
         algebra_backend_kind: solve.algebra_backend,
         solver_mesh_artifact_path: None,

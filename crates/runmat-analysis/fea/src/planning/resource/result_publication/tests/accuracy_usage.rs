@@ -113,9 +113,8 @@ fn terminal_usage(
 
 #[test]
 fn unrelated_accuracy_cannot_satisfy_publication_even_after_rehashing_every_boundary() {
-    let (request, accuracy, usage) =
-        fixture(1, "residual", FormulationRequirement::Production, true);
-    let (_, _, foreign) = fixture(1, "different", FormulationRequirement::Production, true);
+    let (request, accuracy, usage) = fixture(1, "residual", true);
+    let (_, _, foreign) = fixture(1, "different", true);
     assert_eq!(usage.result_digest, foreign.result_digest);
     assert_eq!(usage.attempts.len(), foreign.attempts.len());
     foreign.validate_identity().unwrap();
@@ -139,9 +138,8 @@ fn unrelated_accuracy_cannot_satisfy_publication_even_after_rehashing_every_boun
 
 #[test]
 fn accuracy_request_in_receipt_is_bound_to_the_original_publication_request() {
-    let (request, accuracy, usage) =
-        fixture(1, "residual", FormulationRequirement::Production, true);
-    let (other, _, _) = fixture(1, "different", FormulationRequirement::Production, true);
+    let (request, accuracy, usage) = fixture(1, "residual", true);
+    let (other, _, _) = fixture(1, "different", true);
     let mut receipt = PublishedAnalysisResult::new(&request, &accuracy, &usage).unwrap();
     let mut omitted = serde_json::to_value(&receipt).unwrap();
     omitted.as_object_mut().unwrap().remove("accuracy_request");
@@ -159,8 +157,7 @@ fn accuracy_request_in_receipt_is_bound_to_the_original_publication_request() {
 
 #[test]
 fn matching_request_with_substituted_result_cannot_hide_beside_valid_accounting() {
-    let (request, accuracy, usage) =
-        fixture(1, "residual", FormulationRequirement::Production, true);
+    let (request, accuracy, usage) = fixture(1, "residual", true);
     let mut input = usage.primary_plan().unwrap().input.clone();
     let FeaResourceDemand::AccuracyEvaluation(demand) = &mut input.demand else {
         panic!("accuracy demand")
@@ -201,8 +198,7 @@ fn matching_request_with_substituted_result_cannot_hide_beside_valid_accounting(
 
 #[test]
 fn repeated_accuracy_attempts_are_preserved_in_terminal_usage() {
-    let (request, accuracy, usage) =
-        fixture(3, "residual", FormulationRequirement::Production, true);
+    let (request, accuracy, usage) = fixture(3, "residual", true);
     let receipt = PublishedAnalysisResult::new(&request, &accuracy, &usage).unwrap();
     receipt.validate_sources(&accuracy, &usage).unwrap();
     let terminal = terminal_usage(&request, &accuracy, &usage, &usage, &request);

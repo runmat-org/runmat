@@ -267,17 +267,17 @@ pub async fn plan(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
     )
 }
 #[runtime_builtin(
-    name = "fea.AccuracyPlan.experimentalBaseline",
+    name = "fea.AccuracyPlan.baseline",
     binding_variant = "default",
     builtin_path = "crate::builtins::fea::accuracy"
 )]
-pub async fn experimental_plan(id: String) -> BuiltinResult<Value> {
-    const NAME: &str = "fea.AccuracyPlan.experimentalBaseline";
+pub async fn baseline_plan(id: String) -> BuiltinResult<Value> {
+    const NAME: &str = "fea.AccuracyPlan.baseline";
     serializable_to_object(
         NAME,
         &ERROR_INTERNAL,
         PLAN_CLASS,
-        &AccuracyPlan::experimental_baseline(nonempty_id(NAME, "accuracy plan id", id)?),
+        &AccuracyPlan::baseline(nonempty_id(NAME, "accuracy plan id", id)?),
     )
 }
 
@@ -348,10 +348,7 @@ const ACCURACY_STUDY_CLASSES: [ImmutableStudyClass; 6] = [
         fields: PLAN_FIELDS,
         methods: &[
             ("new", "fea.AccuracyPlan.new"),
-            (
-                "experimentalBaseline",
-                "fea.AccuracyPlan.experimentalBaseline",
-            ),
+            ("baseline", "fea.AccuracyPlan.baseline"),
         ],
     },
 ];
@@ -581,13 +578,13 @@ mod tests {
     }
 
     #[test]
-    fn experimental_baseline_matches_the_core_baseline() {
+    fn baseline_matches_the_core_baseline() {
         registered();
-        let value = block_on(experimental_plan("bracket.accuracy".into())).unwrap();
+        let value = block_on(baseline_plan("bracket.accuracy".into())).unwrap();
         assert_eq!(
             accuracy_plan("test", &value).unwrap(),
-            AccuracyPlan::experimental_baseline("bracket.accuracy")
+            AccuracyPlan::baseline("bracket.accuracy")
         );
-        assert!(block_on(experimental_plan(String::new())).is_err());
+        assert!(block_on(baseline_plan(String::new())).is_err());
     }
 }

@@ -1,4 +1,4 @@
-//! Experimental conjugate heat-transfer coupling built on thermal and CFD results.
+//! Conjugate heat-transfer coupling built on thermal and CFD results.
 
 mod diagnostics;
 mod interface;

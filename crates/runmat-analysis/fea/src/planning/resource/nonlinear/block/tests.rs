@@ -1,6 +1,5 @@
 use super::*;
 use crate::solve::nonlinear::{solid::continuum_qualification::fixture, NonlinearSolveOptions};
-use runmat_analysis_core::FormulationRequirement;
 
 #[test]
 fn block_admission_binds_inputs_output_and_cumulative_history() {
@@ -9,7 +8,6 @@ fn block_admission_binds_inputs_output_and_cumulative_history() {
         let workload = NonlinearSolidWorkload {
             model,
             controls: NonlinearSolveOptions {
-                formulation_requirement: FormulationRequirement::Experimental,
                 increment_count: 2,
                 max_accepted_increments: 8,
                 tolerance: 1e-9,

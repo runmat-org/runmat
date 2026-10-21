@@ -55,7 +55,6 @@ pub(super) fn validate(
         || receipt.source_result() != request.source_result
         || workload.producer_identity()? != request.producer
         || request.plan != step.accuracy
-        || request.formulation_requirement != workload.controls.formulation_requirement
         || observations.is_some() == step.observations.is_empty()
     {
         return Err(AnalysisBridgeError::Identity(

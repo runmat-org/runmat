@@ -71,7 +71,6 @@ fn damped_modal_cold_state_entry_and_recovered_field_preserve_analytic_phase() {
             model,
             step_id: ProcedureStepId("rod_response".into()),
             backend: ComputeBackend::Cpu,
-            formulation_requirement: FormulationRequirement::Experimental,
             observation_execution: ObservationExecutionPolicy::scalable(),
             plan: FrequencyResponsePlan::new(f, &[], &[]).unwrap(),
             solver: StructuralFrequencySolverPlan::ModalReduced {

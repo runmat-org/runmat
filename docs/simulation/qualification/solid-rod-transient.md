@@ -3,7 +3,7 @@
 This bounded Stage 4 qualification connects physical Tet4/straight Tet10 solid
 assembly, direct second-order integration, authored initial conditions, block
 continuation and recovered histories to an independent continuum solution.
-It does not promote the formulation to production.
+It does not qualify the whole formulation.
 
 ## Independent problem
 

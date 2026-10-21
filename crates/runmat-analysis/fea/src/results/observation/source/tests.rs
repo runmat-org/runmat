@@ -1,8 +1,7 @@
 use super::*;
 use crate::{ComputeBackend, ThermalProcedureControl};
 use runmat_analysis_core::{
-    AnalysisSequence, FormulationRequirement, ProcedureStep, ProcedureStepId, Temperature,
-    ThermalDomain,
+    AnalysisSequence, ProcedureStep, ProcedureStepId, Temperature, ThermalDomain,
 };
 use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
 
@@ -19,7 +18,6 @@ fn workload() -> ThermalWorkload {
         model,
         step_id: ProcedureStepId("heat_a".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
         residual_target: 1e-4,
     }

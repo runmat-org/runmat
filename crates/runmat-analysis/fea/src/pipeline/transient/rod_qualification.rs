@@ -129,7 +129,6 @@ fn run(mesh: &SolverMeshArtifact, damped: bool, intervals: usize) -> FeaTransien
         &model(mesh, damped),
         ComputeBackend::Cpu,
         TransientSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             time_step_policy: StructuralTimeStepPolicy::Fixed {
                 interval_count: intervals,
             },
