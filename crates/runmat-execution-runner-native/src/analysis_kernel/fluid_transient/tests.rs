@@ -59,6 +59,7 @@ fn task(
 ) -> PreparedFluidTransientTask {
     let d = Digest::sha256("native-original-transient");
     prepare_fluid_transient_task(FluidTransientTaskPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         authored_study_digest: d,
         frozen_project_digest: None,
         program_revision: ProgramRevision::new(

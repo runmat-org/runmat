@@ -1,6 +1,10 @@
 use super::AcousticHarmonicError;
 use crate::{
     algebra::{
+        element_assembly::{
+            assemble_elements, no_visit, ElementAssemblyError, ElementOutputShape,
+            ElementOutputs,
+        },
         spmv, ContributionDomain, ContributionId, ContributionProvenance, MatrixProperties,
         OperatorRole, RealSparseAssembler, RealSparseMatrix,
     },
@@ -34,10 +38,9 @@ impl AcousticAssembly {
         omega: f64,
     ) -> Result<Self, AcousticHarmonicError> {
         let size = projection.nodes.len();
-        let mut stiffness = assembler(size, OperatorRole::Stiffness, "pressure_gradient");
-        let mut mass = assembler(size, OperatorRole::Mass, "pressure_compressibility");
         let mut density = Vec::with_capacity(projection.elements.len());
         let mut compressibility = Vec::with_capacity(projection.elements.len());
+        let mut sound_speed = Vec::with_capacity(projection.elements.len());
         for element in &projection.elements {
             let material = &properties
                 .solid_material(element.stable_identity)
@@ -68,37 +71,76 @@ impl AcousticAssembly {
                 ));
             }
             compressibility.push(beta);
-            projection
-                .visit_element_quadrature(element, |point| {
-                    for (i, &row) in element.node_indices.iter().enumerate() {
-                        for (j, &column) in element.node_indices.iter().enumerate() {
-                            let gradient = point.physical_shape_gradients()[i]
-                                .iter()
-                                .zip(point.physical_shape_gradients()[j])
-                                .map(|(a, b)| a * b)
-                                .sum::<f64>();
-                            stiffness.add(row, column, gradient * point.volume_weight_m3 / rho);
-                            mass.add(
-                                row,
-                                column,
-                                point.shape_values()[i]
-                                    * point.shape_values()[j]
-                                    * point.volume_weight_m3
-                                    / rho
-                                    / c
-                                    / c,
-                            );
-                        }
-                    }
-                })
-                .map_err(|e| AcousticHarmonicError::Topology(e.to_string()))?;
+            sound_speed.push(c);
         }
-        let stiffness = finish(stiffness)?;
+        // Element kernels run on the admitted CPU pool; scatter order is canonical.
+        let map = crate::topology::projection_element_map(&projection)
+            .map_err(|e| AcousticHarmonicError::Operator(e.to_string()))?;
+        let plan = crate::planning::resource::LocalExecutionPlan::serial();
+        let pattern = map
+            .symbolic_pattern(plan)
+            .map_err(|e| AcousticHarmonicError::Operator(e.to_string()))?;
+        let assembled = assemble_elements(
+            &map,
+            &pattern,
+            ElementOutputShape {
+                matrices: 2,
+                ..Default::default()
+            },
+            plan,
+            |index, _, out: &mut ElementOutputs<'_, f64>| {
+                let element = &projection.elements[index];
+                let (rho, c) = (density[index], sound_speed[index]);
+                let n = element.node_indices.len();
+                let mut local_stiffness = vec![0.0; n * n];
+                let mut local_mass = vec![0.0; n * n];
+                projection
+                    .visit_element_quadrature(element, |point| {
+                        let gradients = point.physical_shape_gradients();
+                        let shapes = point.shape_values();
+                        for i in 0..n {
+                            for j in 0..n {
+                                let gradient = gradients[i]
+                                    .iter()
+                                    .zip(gradients[j])
+                                    .map(|(a, b)| a * b)
+                                    .sum::<f64>();
+                                local_stiffness[i * n + j] +=
+                                    gradient * point.volume_weight_m3 / rho;
+                                local_mass[i * n + j] +=
+                                    shapes[i] * shapes[j] * point.volume_weight_m3 / rho / c / c;
+                            }
+                        }
+                    })
+                    .map_err(|e| AcousticHarmonicError::Topology(e.to_string()))?;
+                out.matrix(0).copy_from_slice(&local_stiffness);
+                out.matrix(1).copy_from_slice(&local_mass);
+                Ok(())
+            },
+            no_visit,
+        )
+        .map_err(|error| match error {
+            ElementAssemblyError::Element { error, .. } => error,
+            other => AcousticHarmonicError::Operator(other.to_string()),
+        })?;
+        let mut matrices = assembled.matrices.into_iter();
+        let stiffness = planned(
+            &pattern,
+            matrices.next().unwrap_or_default(),
+            OperatorRole::Stiffness,
+            "pressure_gradient",
+        )?;
+        let mass = planned(
+            &pattern,
+            matrices.next().unwrap_or_default(),
+            OperatorRole::Mass,
+            "pressure_compressibility",
+        )?;
         Ok(Self {
             projection,
             volume_stiffness: stiffness.clone(),
             stiffness,
-            mass: finish(mass)?,
+            mass,
             impedance: finish(assembler(
                 size,
                 OperatorRole::Damping,
@@ -165,6 +207,26 @@ pub(super) fn assembler(size: usize, role: OperatorRole, id: &str) -> RealSparse
         contribution_id: ContributionId(id.into()),
     });
     result
+}
+
+fn planned(
+    pattern: &crate::algebra::SparsePattern,
+    values: Vec<f64>,
+    role: OperatorRole,
+    id: &str,
+) -> Result<RealSparseAssembler, AcousticHarmonicError> {
+    let mut result = RealSparseAssembler::from_planned_values(
+        pattern.clone(),
+        values,
+        role,
+        MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+    )
+    .map_err(|e| AcousticHarmonicError::Operator(e.to_string()))?;
+    result.add_contribution(ContributionProvenance {
+        domain: ContributionDomain::Acoustic,
+        contribution_id: ContributionId(id.into()),
+    });
+    Ok(result)
 }
 
 pub(super) fn finish(

@@ -205,14 +205,7 @@ impl StructuralFrequencyEntryResourceProjection {
             modal_operator_digest,
             recovery_layout,
             constraint_group_count: constraints.groups.len(),
-            worker: WorkerResourcePolicy {
-                cpu_millicores: 1_000,
-                maximum_wall_milliseconds: step.accuracy.resources.maximum_wall_time_milliseconds,
-                fixed_memory_bytes: ByteCount(FIXED_WORKER_MEMORY_BYTES),
-                fixed_scratch_bytes: ByteCount(FIXED_WORKER_SCRATCH_BYTES),
-                required_capabilities: BTreeSet::new(),
-                accelerators: Vec::new(),
-            },
+            maximum_wall_milliseconds: step.accuracy.resources.maximum_wall_time_milliseconds,
             accuracy_ceiling: step.accuracy.resources,
         })
     }
@@ -327,14 +320,7 @@ impl StructuralFrequencyEntryResourceProjection {
             modal_operator_digest: None,
             recovery_layout,
             constraint_group_count: constraints.groups.len(),
-            worker: WorkerResourcePolicy {
-                cpu_millicores: 1_000,
-                maximum_wall_milliseconds: step.accuracy.resources.maximum_wall_time_milliseconds,
-                fixed_memory_bytes: ByteCount(FIXED_WORKER_MEMORY_BYTES),
-                fixed_scratch_bytes: ByteCount(FIXED_WORKER_SCRATCH_BYTES),
-                required_capabilities: BTreeSet::new(),
-                accelerators: Vec::new(),
-            },
+            maximum_wall_milliseconds: step.accuracy.resources.maximum_wall_time_milliseconds,
             accuracy_ceiling: step.accuracy.resources,
         })
     }

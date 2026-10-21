@@ -17,8 +17,8 @@ impl From<CoercivityWorkEnvelope> for EnergyAdmission {
     fn from(value: CoercivityWorkEnvelope) -> Self {
         Self {
             dimension: value.dimension(),
-            operations: value.update_limit(),
-            resident: value.resident_bytes_limit(),
+            operations: value.energy_operation_limit(),
+            resident: value.energy_resident_limit(),
         }
     }
 }
@@ -53,7 +53,7 @@ impl SourceEnergyDemand {
         let mut scratch = 0_u64;
         let mut cache_entry = 0_u64;
         let mut blocks = 0_u64;
-        let mut operations = matrix.update_limit();
+        let mut operations = matrix.energy_operation_limit();
         for width in widths {
             check_cancelled()?;
             let block_bytes = block_storage_bytes(width)?;
@@ -100,7 +100,7 @@ impl SourceEnergyDemand {
             admission: EnergyAdmission {
                 dimension: matrix.dimension(),
                 operations,
-                resident: add(matrix.resident_bytes_limit(), additional_resident_bytes)?,
+                resident: add(matrix.energy_resident_limit(), additional_resident_bytes)?,
             },
             additional_resident_bytes,
         })

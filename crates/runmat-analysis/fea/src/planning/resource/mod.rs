@@ -245,6 +245,7 @@ pub use response_spectrum::{
     PreparedStructuralResponseSpectrumAssemblyOutputs,
     StructuralModalResponseSpectrumResourceProjection,
 };
+pub(crate) use scoped_execution::local_chunk_active;
 pub use scoped_execution::{
     execute_scoped_chunks, execute_scoped_slices_mut, ScopedLocalExecutionError,
 };

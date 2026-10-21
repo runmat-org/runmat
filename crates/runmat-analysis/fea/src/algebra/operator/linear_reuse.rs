@@ -5,6 +5,9 @@ use crate::algebra::CoercivityCertificate;
 #[derive(Default)]
 pub(crate) struct LinearPreparationReuse {
     certificate: Option<CoercivityCertificate>,
+    /// Factorization behind a sparse Cholesky certificate; reused for every solve with the same
+    /// operator (time steps, eigen iterations, load cases).
+    factor: Option<crate::algebra::coercivity::SharedFactor>,
     local_energy: Option<LocalEnergySource>,
 }
 
@@ -25,6 +28,7 @@ impl LinearPreparationReuse {
 
     pub(crate) fn clear(&mut self) {
         self.certificate = None;
+        self.factor = None;
         self.local_energy = None;
     }
 
@@ -36,6 +40,7 @@ impl LinearPreparationReuse {
     ) -> Self {
         Self {
             certificate: None,
+            factor: None,
             local_energy: Some(LocalEnergySource::Identity(
                 source,
                 prescribed,
@@ -50,6 +55,7 @@ impl LinearPreparationReuse {
     ) -> Self {
         Self {
             certificate: None,
+            factor: None,
             local_energy: Some(LocalEnergySource::Selection(source, rows)),
         }
     }
@@ -67,6 +73,7 @@ impl LinearPreparationReuse {
         {
             return PreparedSolverAdmissibility::bind_existing_with_source(
                 certificate.clone(),
+                self.factor.clone(),
                 matrix,
                 rhs,
                 source,
@@ -91,6 +98,7 @@ impl LinearPreparationReuse {
             };
             PreparedSolverAdmissibility::bind_existing_with_source(
                 certificate,
+                None,
                 matrix,
                 rhs,
                 source,
@@ -99,6 +107,7 @@ impl LinearPreparationReuse {
             PreparedSolverAdmissibility::prove(matrix, rhs, source)?
         };
         self.certificate = Some(evidence.coercivity().clone());
+        self.factor = evidence.factor().cloned();
         Ok(evidence)
     }
 }

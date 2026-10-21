@@ -154,7 +154,7 @@ fn linear_workload(
         model: study.model.clone(),
         step_id: step.step_id.clone(),
         backend: policy.backend,
-        preconditioner: SpdPreconditionerKind::Jacobi,
+        preconditioner: SpdPreconditionerKind::Auto,
         algebra_backend,
         observation_execution: ObservationExecutionPolicy::scalable(),
         require_solver_mesh_for_solid: true,

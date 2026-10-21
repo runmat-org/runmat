@@ -65,6 +65,7 @@ fn facts(
         .unwrap()
         .encoded_bytes_upper_bound;
     PreparedAcousticResourceFacts {
+        local_execution: crate::planning::resource::LocalExecutionPlan::serial(),
         inputs: PreparedInputResourceFacts {
             encoded_payload_bytes: ByteCount(input),
             transport_closure_bytes: ByteCount(input + 2048),

@@ -158,6 +158,7 @@ impl AcousticStudyEntryCoordinator {
     pub fn prepare_solve(&mut self) -> AnalysisBridgeResult<&PreparedAcousticHarmonicTask> {
         self.require(AcousticStudyPhase::ReadyForSolve)?;
         let task = prepare_acoustic_harmonic_task(AcousticHarmonicTaskPreparation {
+            local_execution: self.preparation.local_execution,
             authored_study_digest: self.definition_digest,
             frozen_project_digest: self.preparation.frozen_project_digest,
             program_revision: self.preparation.program_revision.clone(),

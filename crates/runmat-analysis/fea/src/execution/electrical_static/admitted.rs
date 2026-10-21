@@ -1,7 +1,7 @@
 //! Exact pre-assembly resource-plan rederivation, not scheduler allocation or placement.
 use super::*;
 use crate::planning::resource::{
-    build_electrical_static_resource_plan, FeaResourceDemand, FeaResourcePlan,
+    build_electrical_static_resource_plan, FeaResourceDemand, FeaResourcePlan, LocalExecutionPlan,
     PreparedElectricalStaticResourceFacts,
 };
 
@@ -26,6 +26,10 @@ impl ElectricalStaticWorkload {
             self,
             mesh,
             PreparedElectricalStaticResourceFacts {
+                local_execution: LocalExecutionPlan::from_cpu_millicores(
+                    plan.request.cpu_millicores,
+                )
+                .map_err(invalid)?,
                 inputs: demand.inputs.clone(),
                 result_output: demand.result_output.clone(),
                 receipt_output: demand.receipt_output.clone(),

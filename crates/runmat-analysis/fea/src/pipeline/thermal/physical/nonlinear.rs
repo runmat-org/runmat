@@ -128,6 +128,7 @@ pub(super) fn solve(input: NonlinearSolveInput<'_>) -> Result<NonlinearOutcome, 
             None,
             &input.facts.operators,
             linear_target,
+            None,
         )?;
         maximum_linear_residual = maximum_linear_residual.max(linear_residual(&correction)?);
         add_count(&mut host_sync_count, correction.host_sync_count)?;

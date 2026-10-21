@@ -12,18 +12,19 @@ use runmat_sparse_solvers::{
     Preconditioner, SolverError,
 };
 
-pub(super) fn assembler(
-    p: &CanonicalFluidProblem<'_>,
-    label: &str,
-) -> Result<RealSparseAssembler, Error> {
-    let n = p.topology.cells.len();
+pub(super) fn cell_operator_pattern(
+    topology: &crate::topology::FiniteVolumeTopology,
+) -> Result<SparsePattern, Error> {
+    let n = topology.cells.len();
     let mut offsets = Vec::with_capacity(n + 1);
     let mut columns = Vec::with_capacity(n * 5);
     offsets.push(0);
-    for (c, cell) in p.topology.cells.iter().enumerate() {
-        let mut row = vec![c];
+    let mut row = Vec::new();
+    for (c, cell) in topology.cells.iter().enumerate() {
+        row.clear();
+        row.push(c);
         for incidence in cell.faces {
-            let face = &p.topology.faces[incidence.face_index];
+            let face = &topology.faces[incidence.face_index];
             if face.owner != c {
                 row.push(face.owner);
             } else if let Some(other) = face.neighbor {
@@ -32,11 +33,18 @@ pub(super) fn assembler(
         }
         row.sort_unstable();
         row.dedup();
-        columns.extend(row.into_iter().map(|v| v as u64));
+        columns.extend(row.iter().map(|&v| v as u64));
         offsets.push(columns.len() as u64);
     }
-    let pattern = SparsePattern::try_new(n as u64, n as u64, offsets, columns)
-        .map_err(|e| Error::Operator(e.to_string()))?;
+    SparsePattern::try_new(n as u64, n as u64, offsets, columns)
+        .map_err(|e| Error::Operator(e.to_string()))
+}
+
+pub(super) fn assembler(
+    p: &CanonicalFluidProblem<'_>,
+    label: &str,
+) -> Result<RealSparseAssembler, Error> {
+    let pattern = p.operator_pattern.clone();
     let mut assembler = RealSparseAssembler::with_pattern(
         pattern,
         OperatorRole::EffectiveTangent,

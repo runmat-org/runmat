@@ -60,12 +60,9 @@ fn derive_resource_input(
     let mesh = input.mesh.ok_or_else(|| {
         ResourcePlanningError::Invalid("nonlinear preflight requires its canonical mesh".into())
     })?;
-    if input.backend != crate::ComputeBackend::Cpu
-        || !input.local_execution.is_serial()
-        || !input.accelerator_requests.is_empty()
-    {
+    if input.backend != crate::ComputeBackend::Cpu || !input.accelerator_requests.is_empty() {
         return Err(ResourcePlanningError::Invalid(
-            "nonlinear execution envelope is serial CPU".into(),
+            "nonlinear execution envelope is accelerator-free CPU".into(),
         ));
     }
     let integration_storage = CanonicalSolidIntegrationPlan::derivation_resident_bytes_estimate(

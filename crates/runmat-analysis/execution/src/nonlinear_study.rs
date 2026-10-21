@@ -27,6 +27,7 @@ pub use root::{
 };
 
 pub struct NonlinearSolidStudyPreparation {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub product: NonlinearSolidStudyProduct,
     pub mesh: SolverMeshArtifact,
     /// Limits one task's new outputs; it never replaces the original global accepted cap.
@@ -194,6 +195,7 @@ impl NonlinearSolidStudyCoordinator {
         let tail = self.tail.expect("completed tail");
         Ok(CompletedNonlinearSolidStudy {
             replay: root::ReplayContext {
+                local_execution: self.preparation.local_execution,
                 mesh: self.preparation.mesh,
                 accepted_block_limit: self.preparation.accepted_block_limit,
                 frozen_project_digest: self.preparation.frozen_project_digest,

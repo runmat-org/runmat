@@ -10,8 +10,17 @@ pub enum SolverMethod {
     GeneralGmres,
     MatrixFreePcg,
     MatrixFreeSaddlePointGmres,
-    MatrixFreeSubspaceIteration,
-    MatrixFreeBucklingSubspaceIteration,
+    /// Supernodal sparse Cholesky (nested dissection) with iterative refinement.
+    SparseDirectCholesky,
+    /// Sparse symmetric indefinite factorization (Bunch–Kaufman LBLᵀ, signed-regularized LDLᵀ
+    /// fallback for saddle points) with refinement.
+    SparseDirectLdlt,
+    /// Sparse LU with partial pivoting (general and complex-symmetric systems).
+    SparseDirectLu,
+    /// Shift-invert thick-restart block Lanczos on `(K − σM)⁻¹M` with a Sturm check.
+    ShiftInvertBlockLanczos,
+    /// Block Lanczos on `K⁻¹(−K_G)` in the `K` inner product (linear buckling).
+    BucklingBlockLanczos,
     NewmarkAverageAccelerationPcg,
     StructuralModalTransientNewmarkDenseFactorization,
     StructuralDirectHarmonicGmres,
@@ -37,8 +46,11 @@ impl SolverMethod {
             Self::GeneralGmres => "general_gmres",
             Self::MatrixFreePcg => "matrix_free_pcg",
             Self::MatrixFreeSaddlePointGmres => "matrix_free_saddle_point_gmres",
-            Self::MatrixFreeSubspaceIteration => "matrix_free_subspace_iteration",
-            Self::MatrixFreeBucklingSubspaceIteration => "matrix_free_buckling_subspace_iteration",
+            Self::SparseDirectCholesky => "sparse_direct_cholesky",
+            Self::SparseDirectLdlt => "sparse_direct_ldlt",
+            Self::SparseDirectLu => "sparse_direct_lu",
+            Self::ShiftInvertBlockLanczos => "shift_invert_block_lanczos",
+            Self::BucklingBlockLanczos => "buckling_block_lanczos",
             Self::NewmarkAverageAccelerationPcg => "newmark_average_acceleration_pcg",
             Self::StructuralModalTransientNewmarkDenseFactorization => {
                 "structural_modal_transient_newmark_dense_factorization"

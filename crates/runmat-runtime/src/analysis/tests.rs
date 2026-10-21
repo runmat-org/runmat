@@ -6171,11 +6171,11 @@ fn analysis_run_modal_returns_native_modal_result() {
     assert_eq!(envelope.op_version, "fea.run_modal/v1");
     assert_eq!(
         envelope.data.run.solver_method,
-        SolverMethod::MatrixFreeSubspaceIteration
+        SolverMethod::ShiftInvertBlockLanczos
     );
     assert_eq!(
         envelope.data.provenance.solver_method,
-        SolverMethod::MatrixFreeSubspaceIteration
+        SolverMethod::ShiftInvertBlockLanczos
     );
     assert_eq!(envelope.data.run_status, RunStatus::Completed);
     assert!(envelope.data.numerically_acceptable);

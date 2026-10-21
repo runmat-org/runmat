@@ -112,7 +112,9 @@ pub(super) fn execute(
         .block_transport
         .as_ref()
         .ok_or_else(|| invalid("nonlinear block budget missing"))?;
-    let result = workload.execute_block(mesh, &request, previous.as_ref())?;
+    let result = super::with_admitted_cpu_pool(&plan, || {
+        Ok(workload.execute_block(mesh, &request, previous.as_ref())?)
+    })?;
     let receipt = NonlinearSolidNumericalReceiptArtifact::new(&workload, &result)?;
     let receipt_bytes = receipt.canonical_bytes()?;
     let bytes = result.canonical_bytes()?;

@@ -85,7 +85,7 @@ impl SolidNewtonProblem<'_> {
         .map_err(constraint_error)?;
         let solved = solve_operator_system_scoped(
             &operator,
-            SpdPreconditionerKind::Jacobi,
+            SpdPreconditionerKind::Auto,
             LinearAlgebraBackendKind::CpuReference,
             &CpuReferenceBackend,
             None,

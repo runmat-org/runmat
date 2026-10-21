@@ -16,7 +16,6 @@ use super::{
 };
 use crate::{
     algebra::{spmv, MatrixProperties, OperatorRole, RealSparseMatrix},
-    solve::symmetric_eigen::symmetric_eigendecomposition,
     topology::AnalysisProjection,
 };
 use runmat_analysis_core::{
@@ -370,11 +369,13 @@ fn lowest_eigenpairs(
                 projected[column * m + row] = value;
             }
         }
-        let (values, rotations) = symmetric_eigendecomposition(projected, m);
+        // Ascending Ritz values; column-major eigenvectors (`rotations[ritz * m + index]`).
+        let (values, rotations) = runmat_sparse_solvers::dense::symmetric_eigen(&projected, m)
+            .map_err(|e| AcousticHarmonicError::Operator(e.to_string()))?;
         let combine = |source: &[Vec<f64>], ritz: usize| {
             let mut result = vec![0.0; n];
             for (index, vector) in source.iter().enumerate() {
-                let weight = rotations[index * m + ritz];
+                let weight = rotations[ritz * m + index];
                 if weight != 0.0 {
                     for (value, basis_value) in result.iter_mut().zip(vector) {
                         *value += weight * basis_value;

@@ -429,8 +429,10 @@ temperature or ambient boundary when available. The increment equation forms Rob
 before multiplication and retains the original nullspace/anchor checks. Reconstruction restores
 authoritative prescribed temperatures exactly; free-node increments are not clamped or overwritten.
 Thermal solver stopping uses the tighter of the shared default and authored acceptance target;
-the latter cannot relax the established numerical stopping policy. The shared PCG path propagates
-this tolerance through its CPU and accelerator request/final-residual checks. No new successful
+the latter cannot relax the established numerical stopping policy. The shared sparse solver layer
+(see [Linear solvers](../linear-solvers)) propagates this tolerance through its direct-refinement,
+CG and accelerator final-residual checks. Fixed-step transients reuse one Cholesky factorization
+for every step whose effective operator is unchanged. No new successful
 GPU execution envelope is inferred. Linear and global energy normalizations differ, so converged
 linear solves must still pass the separate energy gate. Producer validation now runs before final
 completion; its uniqueness-validation scratch remains outside complete producer-memory admission.
@@ -473,8 +475,8 @@ dummy numerical arrays or retained message strings. Actual initial evidence and 
 are checked against their projected encoded and resident estimates. These are size checks, not
 independent semantic validation. Material-assignment conflict diagnostics now share their borrowed
 selection, message templates, and wire schema with preassembly profiling; matching assignments
-produce no diagnostic. Successful shared PCG diagnostics are bounded across CPU, admission fallback,
-accelerator, Jacobi, and ILU0 alternatives. Thermal checks the last successful solve's list before
+produce no diagnostic. Successful shared SPD solve diagnostics are bounded across CPU, admission
+fallback, accelerator, sparse Cholesky, AMG, Jacobi and ILU0 alternatives. Thermal checks the last successful solve's list before
 cloning it for output and reserves two lists for previous/current solve or final-report overlap.
 Arbitrary provider failure strings are not part of this bound: thermal rejects nonconverged solves.
 Successful backend evidence now has a producer-owned profile through its derived serializer, with

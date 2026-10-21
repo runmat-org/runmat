@@ -79,6 +79,288 @@ pub(crate) fn control() -> SolveControl<'static> {
     }
 }
 
+/// Concrete SPD strategy after policy resolution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SpdStrategy {
+    /// Supernodal Cholesky with nested dissection (exact solve plus refinement).
+    Cholesky,
+    /// Conjugate gradients with the named preconditioner.
+    Pcg(runmat_sparse_solvers::policy::PreconditionerChoice),
+}
+
+/// Outcome of a shared SPD solve in the prepared equation space.
+pub(crate) struct SpdSolveOutcome {
+    pub solution: Vec<f64>,
+    pub iterations: u32,
+    pub residual_norm: f64,
+    pub reference_norm: f64,
+    pub converged: bool,
+    pub cancelled: bool,
+    pub failure: Option<String>,
+}
+
+/// Inputs of a shared SPD solve.
+pub(crate) struct SpdSolveRequest<'a> {
+    pub matrix: &'a RealSparseMatrix,
+    pub rhs: &'a [f64],
+    pub initial_guess: Option<&'a [f64]>,
+    pub relative_tolerance: f64,
+    pub plan: LocalExecutionPlan,
+    pub strategy: SpdStrategy,
+    /// Degrees of freedom per node for block smoothing in multigrid (1 when unknown).
+    pub block_size: usize,
+    /// A factorization of exactly `matrix` (from the coercivity proof) to reuse.
+    pub factor: Option<&'a runmat_sparse_solvers::direct::DirectSolver<f64>>,
+}
+
+fn reference_norm(rhs: &[f64], residual: f64) -> f64 {
+    let b = runmat_sparse_solvers::par::norm2(rhs);
+    if b > 0.0 {
+        b
+    } else {
+        residual
+    }
+}
+
+/// Solves a prepared SPD system with the requested strategy on the admitted plan.
+pub(crate) fn solve_spd(request: SpdSolveRequest<'_>) -> SpdSolveOutcome {
+    use runmat_sparse_solvers::{
+        direct::{DirectOptions, DirectSolver, FactorKind},
+        krylov::{pcg, KrylovOptions},
+        policy::PreconditionerChoice,
+        precond::{Amg, AmgOptions, BlockJacobi, Ilu0, Jacobi},
+        Preconditioner,
+    };
+    let SpdSolveRequest {
+        matrix,
+        rhs,
+        initial_guess,
+        relative_tolerance,
+        plan,
+        strategy,
+        block_size,
+        factor,
+    } = request;
+    let n = matrix.rows();
+    let arrays = CsrArrays::of(matrix);
+    let failure = |message: String| SpdSolveOutcome {
+        solution: vec![0.0; n],
+        iterations: 0,
+        residual_norm: f64::INFINITY,
+        reference_norm: runmat_sparse_solvers::par::norm2(rhs),
+        converged: false,
+        cancelled: crate::is_fea_cancelled(),
+        failure: Some(message),
+    };
+    with_plan(plan, || {
+        let a = arrays.view();
+        match strategy {
+            SpdStrategy::Cholesky => {
+                // Warm starts are corrections: x = x0 + A⁻¹(b − A x0); an initial guess that
+                // already meets the tolerance is returned unchanged (zero iterations).
+                let mut x = match initial_guess {
+                    Some(guess) if guess.len() == n => guess.to_vec(),
+                    _ => vec![0.0; n],
+                };
+                let mut ax = vec![0.0; n];
+                a.spmv(&x, &mut ax);
+                let initial: Vec<f64> = rhs.iter().zip(&ax).map(|(b, v)| b - v).collect();
+                let initial_norm = runmat_sparse_solvers::par::norm2(&initial);
+                let reference = reference_norm(rhs, initial_norm);
+                if initial_norm <= relative_tolerance * reference {
+                    return SpdSolveOutcome {
+                        converged: true,
+                        solution: x,
+                        iterations: 0,
+                        residual_norm: initial_norm,
+                        reference_norm: reference,
+                        cancelled: false,
+                        failure: None,
+                    };
+                }
+                let owned;
+                let solver = match factor {
+                    Some(solver) => solver,
+                    None => {
+                        owned = match DirectSolver::<f64>::new(
+                            a.into(),
+                            DirectOptions {
+                                refinement_steps: 2,
+                                ..DirectOptions::new(FactorKind::Cholesky)
+                            },
+                            control(),
+                        ) {
+                            Ok(solver) => solver,
+                            Err(error) => return failure(format!("sparse Cholesky failed: {error}")),
+                        };
+                        &owned
+                    }
+                };
+                let mut correction = vec![0.0; n];
+                if let Err(error) = solver.solve_refined(a.into(), &initial, &mut correction, 1) {
+                    return failure(format!("sparse Cholesky solve failed: {error}"));
+                }
+                for (value, delta) in x.iter_mut().zip(&correction) {
+                    *value += delta;
+                }
+                a.spmv(&x, &mut ax);
+                let residual: Vec<f64> = rhs.iter().zip(&ax).map(|(b, v)| b - v).collect();
+                let residual_norm = runmat_sparse_solvers::par::norm2(&residual);
+                SpdSolveOutcome {
+                    converged: residual_norm <= relative_tolerance.max(1e-14) * reference || residual_norm == 0.0,
+                    solution: x,
+                    iterations: 1,
+                    residual_norm,
+                    reference_norm: reference,
+                    cancelled: false,
+                    failure: None,
+                }
+            }
+            SpdStrategy::Pcg(choice) => {
+                let preconditioner: Box<dyn Preconditioner<f64>> = match choice {
+                    PreconditionerChoice::Amg => match Amg::new(
+                        a,
+                        AmgOptions {
+                            block_size: block_size.max(1),
+                            strength_threshold: if block_size > 1 { 0.02 } else { 0.0 },
+                            ..Default::default()
+                        },
+                        control(),
+                    ) {
+                        Ok(amg) => Box::new(amg),
+                        Err(error) => return failure(format!("multigrid setup failed: {error}")),
+                    },
+                    PreconditionerChoice::Ilu0 => match Ilu0::new(a, true) {
+                        Ok(ilu) => Box::new(ilu),
+                        Err(error) => return failure(format!("ILU(0) setup failed: {error}")),
+                    },
+                    PreconditionerChoice::BlockJacobi if block_size > 1 => match BlockJacobi::new(a, block_size) {
+                        Ok(p) => Box::new(p),
+                        Err(error) => return failure(format!("block Jacobi setup failed: {error}")),
+                    },
+                    _ => match Jacobi::new(a) {
+                        Ok(p) => Box::new(p),
+                        Err(error) => return failure(format!("Jacobi setup failed: {error}")),
+                    },
+                };
+                let mut x = match initial_guess {
+                    Some(guess) if guess.len() == n => guess.to_vec(),
+                    _ => vec![0.0; n],
+                };
+                let options = KrylovOptions {
+                    rtol: relative_tolerance,
+                    max_iterations: n.saturating_mul(2).clamp(256, 100_000),
+                    ..Default::default()
+                };
+                match pcg(&a, Some(preconditioner.as_ref()), rhs, &mut x, &options, control()) {
+                    Ok(report) => {
+                        let reference = reference_norm(rhs, report.residual_norm);
+                        SpdSolveOutcome {
+                            converged: report.converged(),
+                            solution: x,
+                            iterations: u32::try_from(report.iterations).unwrap_or(u32::MAX),
+                            residual_norm: report.residual_norm,
+                            reference_norm: reference,
+                            cancelled: false,
+                            failure: (!report.converged()).then(|| {
+                                format!(
+                                    "pcg stopped with flag {} after {} iterations at relative residual {:.3e}",
+                                    report.flag.code(),
+                                    report.iterations,
+                                    report.relative_residual
+                                )
+                            }),
+                        }
+                    }
+                    Err(runmat_sparse_solvers::SolverError::Cancelled) => SpdSolveOutcome {
+                        cancelled: true,
+                        ..failure("cancelled".into())
+                    },
+                    Err(error) => failure(error.to_string()),
+                }
+            }
+        }
+    })
+}
+
+/// Bytes a single solve may plan for when the study gives no explicit budget: half the host.
+pub(crate) fn default_memory_budget() -> Option<u64> {
+    runmat_sparse_solvers::estimate::host_memory_bytes().map(|bytes| bytes / 2)
+}
+
+/// Resolves the requested SPD selection into a concrete strategy.
+pub(crate) fn resolve_spd_strategy(
+    kind: crate::solve::preconditioner::SpdPreconditionerKind,
+    n: usize,
+    nnz: usize,
+    block_size: usize,
+    factor_available: bool,
+) -> SpdStrategy {
+    use crate::solve::preconditioner::SpdPreconditionerKind;
+    use runmat_sparse_solvers::policy::{
+        choose, PreconditionerChoice, ProblemClass, ProblemDescriptor, SolverOverride,
+    };
+    match kind {
+        SpdPreconditionerKind::Direct => SpdStrategy::Cholesky,
+        SpdPreconditionerKind::Amg => SpdStrategy::Pcg(PreconditionerChoice::Amg),
+        SpdPreconditionerKind::Jacobi => SpdStrategy::Pcg(PreconditionerChoice::Jacobi),
+        SpdPreconditionerKind::Ilu0 => SpdStrategy::Pcg(PreconditionerChoice::Ilu0),
+        SpdPreconditionerKind::Auto if factor_available => SpdStrategy::Cholesky,
+        SpdPreconditionerKind::Auto => {
+            let decision = choose(
+                &ProblemDescriptor {
+                    n,
+                    nnz,
+                    class: ProblemClass::SymmetricPositiveDefinite,
+                    block_size: block_size.max(1),
+                    complex: false,
+                    spatial_dimension: 3,
+                    near_nullspace_available: false,
+                    solves_per_factorization: 1,
+                    memory_budget_bytes: default_memory_budget(),
+                },
+                SolverOverride::Auto,
+            );
+            if decision.strategy.is_direct() {
+                SpdStrategy::Cholesky
+            } else {
+                SpdStrategy::Pcg(PreconditionerChoice::Amg)
+            }
+        }
+    }
+}
+
+impl SpdStrategy {
+    /// Provenance labels: (method for generic SPD families, preconditioner).
+    pub(crate) fn provenance(self) -> (crate::contracts::SolverMethod, crate::contracts::SolverPreconditioner) {
+        use crate::contracts::{SolverMethod, SolverPreconditioner};
+        use runmat_sparse_solvers::policy::PreconditionerChoice;
+        match self {
+            SpdStrategy::Cholesky => (SolverMethod::SparseDirectCholesky, SolverPreconditioner::None),
+            SpdStrategy::Pcg(choice) => (
+                SolverMethod::AssembledPcg,
+                match choice {
+                    PreconditionerChoice::Amg => SolverPreconditioner::Amg,
+                    PreconditionerChoice::Ilu0 => SolverPreconditioner::Ilu0,
+                    PreconditionerChoice::BlockJacobi => SolverPreconditioner::BlockJacobi,
+                    PreconditionerChoice::None => SolverPreconditioner::None,
+                    _ => SolverPreconditioner::Jacobi,
+                },
+            ),
+        }
+    }
+
+    pub(crate) fn label(self) -> &'static str {
+        use runmat_sparse_solvers::policy::PreconditionerChoice;
+        match self {
+            SpdStrategy::Cholesky => "solver=sparse_cholesky ordering=nested_dissection",
+            SpdStrategy::Pcg(PreconditionerChoice::Amg) => "solver=pcg preconditioner=amg",
+            SpdStrategy::Pcg(PreconditionerChoice::Ilu0) => "solver=pcg preconditioner=ilu0",
+            SpdStrategy::Pcg(_) => "solver=pcg preconditioner=jacobi",
+        }
+    }
+}
+
 thread_local! {
     static AMBIENT_PLAN: std::cell::Cell<Option<LocalExecutionPlan>> = const { std::cell::Cell::new(None) };
 }
@@ -114,3 +396,113 @@ pub(crate) fn effective_plan(requested: LocalExecutionPlan) -> LocalExecutionPla
     }
 }
 
+/// `Σ c_k A_k` for real FEA matrices of equal shape and complex coefficients (dynamic stiffness
+/// `K − ω²M + iωC`), on the union pattern.
+pub(crate) fn complex_combination(
+    terms: &[(runmat_sparse_solvers::c64, &RealSparseMatrix)],
+) -> Result<runmat_sparse_solvers::CsrMatrix<runmat_sparse_solvers::c64>, runmat_sparse_solvers::SolverError> {
+    use runmat_sparse_solvers::{c64, CsrMatrix};
+    let Some((_, first)) = terms.first() else {
+        return Err(runmat_sparse_solvers::SolverError::Dimension("empty combination".into()));
+    };
+    let (rows, columns) = (first.rows(), first.columns());
+    if terms.iter().any(|(_, m)| m.rows() != rows || m.columns() != columns) {
+        return Err(runmat_sparse_solvers::SolverError::Dimension("combination shapes differ".into()));
+    }
+    let arrays: Vec<CsrArrays<'_>> = terms.iter().map(|(_, m)| CsrArrays::of(m)).collect();
+    let mut row_ptr = Vec::with_capacity(rows + 1);
+    row_ptr.push(0usize);
+    let mut col_idx = Vec::new();
+    let mut values: Vec<c64> = Vec::new();
+    let mut merged: Vec<(usize, c64)> = Vec::new();
+    for row in 0..rows {
+        merged.clear();
+        for ((coefficient, _), array) in terms.iter().zip(&arrays) {
+            let view = array.view();
+            let (cols, vals) = view.row(row);
+            merged.extend(cols.iter().zip(vals).map(|(&c, &v)| (c, coefficient.scale(v))));
+        }
+        merged.sort_by_key(|entry| entry.0);
+        for &(c, v) in &merged {
+            if col_idx.len() > row_ptr[row] && *col_idx.last().unwrap() == c {
+                *values.last_mut().unwrap() += v;
+            } else {
+                col_idx.push(c);
+                values.push(v);
+            }
+        }
+        row_ptr.push(col_idx.len());
+    }
+    CsrMatrix::try_new(rows, columns, row_ptr, col_idx, values)
+}
+
+/// Direct solve of a general real system (LU) or a symmetric indefinite / saddle-point system
+/// (Bunch–Kaufman, then signed-regularized LDLᵀ for saddle points whose leading `primal_count`
+/// unknowns form a semidefinite block). Returns the solution and `‖b − A x‖ / ‖b‖`.
+pub(crate) fn solve_direct_real(
+    matrix: &RealSparseMatrix,
+    rhs: &[f64],
+    structure: DirectStructure,
+) -> Result<(Vec<f64>, f64), runmat_sparse_solvers::SolverError> {
+    use runmat_sparse_solvers::direct::{DirectOptions, DirectSolver, FactorKind};
+    let arrays = CsrArrays::of(matrix);
+    let n = matrix.rows();
+    with_plan(LocalExecutionPlan::serial(), || {
+        let a = arrays.view();
+        let attempts: Vec<DirectOptions> = match structure {
+            DirectStructure::General => vec![DirectOptions::new(FactorKind::Lu)],
+            DirectStructure::SaddlePoint { primal_count } => {
+                let scale = a.diagonal().iter().fold(0.0f64, |m, v| m.max(v.abs())).max(1.0);
+                let mut signs = vec![1i8; n];
+                for sign in signs.iter_mut().skip(primal_count) {
+                    *sign = -1;
+                }
+                vec![
+                    DirectOptions::new(FactorKind::BunchKaufman),
+                    DirectOptions {
+                        pivot_signs: Some(signs),
+                        regularization_delta: 1e-10 * scale,
+                        regularization_epsilon: 1e-13 * scale,
+                        refinement_steps: 10,
+                        ..DirectOptions::new(FactorKind::Ldlt)
+                    },
+                ]
+            }
+        };
+        let mut last_error = runmat_sparse_solvers::SolverError::Breakdown("no factorization attempted".into());
+        let b_norm = runmat_sparse_solvers::par::norm2(rhs);
+        for options in attempts {
+            control().check()?;
+            let solver = match DirectSolver::<f64>::new(a.into(), options, control()) {
+                Ok(solver) => solver,
+                Err(error @ runmat_sparse_solvers::SolverError::Cancelled) => return Err(error),
+                Err(error) => {
+                    last_error = error;
+                    continue;
+                }
+            };
+            let mut x = vec![0.0; n];
+            match solver.solve_refined(a.into(), rhs, &mut x, 1) {
+                Ok(report) if report.relative_residual.is_finite() && report.relative_residual <= 1e-9 => {
+                    return Ok((x, if b_norm > 0.0 { report.relative_residual } else { 0.0 }));
+                }
+                Ok(report) => {
+                    last_error = runmat_sparse_solvers::SolverError::Breakdown(format!(
+                        "{} relative residual {:.3e}",
+                        solver.kind().as_str(),
+                        report.relative_residual
+                    ))
+                }
+                Err(error) => last_error = error,
+            }
+        }
+        Err(last_error)
+    })
+}
+
+/// Algebraic structure that selects the direct factorization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DirectStructure {
+    General,
+    SaddlePoint { primal_count: usize },
+}

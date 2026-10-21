@@ -306,6 +306,31 @@ fn constraint_plan_manifest_identity(
     )
 }
 
+/// Runs one kernel's numerical work on the admitted CPU pool sized by its resource plan.
+///
+/// The declared plan's CPU request is the single thread authority: host planning derived it
+/// from the admitted local execution plan and the kernel has already proven it converges
+/// from authoritative inputs. Progress context and tracing span follow the work onto the pool.
+fn with_admitted_cpu_pool<T: Send>(
+    resource_plan: &FeaResourcePlan,
+    work: impl FnOnce() -> AnalysisBridgeResult<T> + Send,
+) -> AnalysisBridgeResult<T> {
+    let threads = usize::from(
+        runmat_analysis_fea::planning::resource::LocalThreadCount::from_cpu_millicores(
+            resource_plan.request.cpu_millicores,
+        )
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?
+        .get(),
+    );
+    let progress = runmat_analysis_fea::progress::capture_fea_progress_context();
+    let span = tracing::Span::current();
+    runmat_cpu_execution::with_cpu_pool(threads, || {
+        let _progress = runmat_analysis_fea::replace_fea_progress_context(progress);
+        span.in_scope(work)
+    })
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?
+}
+
 fn unique_input<'a>(
     invocation: &'a AnalysisKernelInvocation<'_>,
     kind: AnalysisNumericalObjectKind,

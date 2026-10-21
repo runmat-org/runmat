@@ -19,6 +19,7 @@ impl StructuralFrequencyEntryResourceProjection {
         inputs: PreparedInputResourceFacts,
         output: PreparedOutputResourceFacts,
         output_set: PreparedOutputSetResourceFacts,
+        local_execution: super::LocalExecutionPlan,
     ) -> Result<FeaResourcePlan, ResourcePlanningError> {
         request
             .validate()
@@ -146,7 +147,7 @@ impl StructuralFrequencyEntryResourceProjection {
                 },
             ),
             output_set: Some(output_set),
-            worker: self.worker.clone(),
+            worker: self.worker(local_execution)?,
             accuracy_ceiling: self.accuracy_ceiling,
         })
     }

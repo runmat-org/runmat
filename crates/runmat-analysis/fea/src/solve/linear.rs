@@ -8,22 +8,19 @@ mod settings;
 use diagnostics::SuccessfulDiagnostic;
 pub(crate) use diagnostics::{successful_diagnostic_record_count, successful_diagnostics_profile};
 pub(crate) use settings::ScopedLinearSolveSettings;
-pub(crate) use settings::{
-    accelerator_iteration_limit, iteration_limit, DEFAULT_RELATIVE_TOLERANCE,
-};
+pub(crate) use settings::accelerator_iteration_limit;
 
 use admission::{incompatible_system_result, invalid_system_result, rejected_system_result};
 
 use crate::{
     algebra::{
-        validate_prepared_solver_compatibility, AssembledRealSystem, PreparedRealLinearSystem,
-        RealPreconditioner, RealSolver, ScopedSpmvError,
+        validate_prepared_solver_compatibility, AssembledRealSystem, RealPreconditioner, RealSolver, ScopedSpmvError,
     },
     assembly::AssemblySummary,
     contracts::{SolverMethod, SolverPreconditioner},
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     planning::resource::{LocalExecutionPlan, SolverAdmissionResourcePolicy},
-    solve::preconditioner::{build_spd_preconditioner, SpdPreconditionerKind},
+    solve::{preconditioner::SpdPreconditionerKind, shared_sparse},
     solve::{
         accelerator::{prepare_accelerator_linear_system, solve_prepared_accelerator_system},
         backend::{kind::LinearAlgebraBackendKind, linear_algebra::LinearAlgebraBackend},
@@ -109,34 +106,15 @@ pub(crate) fn solve_operator_system_scoped(
     operator: &AssembledRealSystem,
     preconditioner_kind: SpdPreconditionerKind,
     backend_kind: LinearAlgebraBackendKind,
-    algebra_backend: &dyn LinearAlgebraBackend,
+    _algebra_backend: &dyn LinearAlgebraBackend,
     initial_guess: Option<&[f64]>,
     settings: ScopedLinearSolveSettings<'_>,
 ) -> Result<LinearSolveResult, ScopedSpmvError> {
-    let plan = settings.plan;
-    solve_operator_system_with_apply(
+    solve_operator_system_with_settings(
         operator,
         preconditioner_kind,
         backend_kind,
-        algebra_backend,
         initial_guess,
-        (
-            |prepared: &PreparedRealLinearSystem, x: &[f64]| {
-                if plan.is_serial() {
-                    Ok(crate::algebra::apply_prepared(prepared, x))
-                } else {
-                    crate::algebra::spmv_scoped(prepared.matrix(), x, plan)
-                }
-            },
-            |left: &[f64], right: &[f64]| {
-                if plan.is_serial() {
-                    Ok(algebra_backend.dot(left, right))
-                } else {
-                    crate::algebra::dot_scoped(left, right, plan)
-                }
-            },
-            Some(plan),
-        ),
         settings,
     )
 }
@@ -145,41 +123,26 @@ pub fn solve_operator_system(
     operator: &AssembledRealSystem,
     preconditioner_kind: SpdPreconditionerKind,
     backend_kind: LinearAlgebraBackendKind,
-    algebra_backend: &dyn LinearAlgebraBackend,
+    _algebra_backend: &dyn LinearAlgebraBackend,
     initial_guess: Option<&[f64]>,
 ) -> LinearSolveResult {
-    solve_operator_system_with_apply(
+    solve_operator_system_with_settings(
         operator,
         preconditioner_kind,
         backend_kind,
-        algebra_backend,
         initial_guess,
-        (
-            |prepared: &PreparedRealLinearSystem, x: &[f64]| {
-                Ok(crate::algebra::apply_prepared(prepared, x))
-            },
-            |left: &[f64], right: &[f64]| Ok(algebra_backend.dot(left, right)),
-            None,
-        ),
         ScopedLinearSolveSettings::with_default_tolerance(LocalExecutionPlan::serial(), None),
     )
-    .expect("reference sparse application is infallible for a prepared system")
+    .expect("shared sparse solves report failures in the result")
 }
 
-fn solve_operator_system_with_apply(
+fn solve_operator_system_with_settings(
     operator: &AssembledRealSystem,
     preconditioner_kind: SpdPreconditionerKind,
     backend_kind: LinearAlgebraBackendKind,
-    algebra_backend: &dyn LinearAlgebraBackend,
     initial_guess: Option<&[f64]>,
-    operations: (
-        impl Fn(&PreparedRealLinearSystem, &[f64]) -> Result<Vec<f64>, ScopedSpmvError>,
-        impl Fn(&[f64], &[f64]) -> Result<f64, ScopedSpmvError>,
-        Option<LocalExecutionPlan>,
-    ),
     settings: ScopedLinearSolveSettings<'_>,
 ) -> Result<LinearSolveResult, ScopedSpmvError> {
-    let (apply, dot, vector_plan) = operations;
     let tol = settings.relative_tolerance;
     if !tol.is_finite() || tol <= 0.0 {
         return Ok(rejected_system_result(
@@ -205,8 +168,8 @@ fn solve_operator_system_with_apply(
             device_apply_k_attempt_count: 0,
             accelerator_evidence: None,
             solution: Vec::new(),
-            solver_method: SolverMethod::MatrixFreePcg,
-            preconditioner: SolverPreconditioner::from_spd(preconditioner_kind),
+            solver_method: admission::requested_provenance(preconditioner_kind).0,
+            preconditioner: admission::requested_provenance(preconditioner_kind).1,
             diagnostics: vec![FeaDiagnostic {
                 code: "FEA_EMPTY_SYSTEM".to_string(),
                 severity: FeaDiagnosticSeverity::Warning,
@@ -215,10 +178,13 @@ fn solve_operator_system_with_apply(
         });
     }
 
-    let preparation = match settings.preparation {
+    let plan = settings.plan;
+    let reuse = settings.preparation;
+    // The coercivity proof factors the operator; run it on the admitted plan.
+    let preparation = shared_sparse::with_plan(plan, move || match reuse {
         Some(reuse) => operator.prepare_linear_reusing(reuse),
         None => operator.prepare_linear(),
-    };
+    });
     let prepared = match preparation {
         Ok(prepared) => prepared,
         Err(error) => {
@@ -250,6 +216,9 @@ fn solve_operator_system_with_apply(
         match preconditioner_kind {
             SpdPreconditionerKind::Jacobi => RealPreconditioner::Jacobi,
             SpdPreconditionerKind::Ilu0 => RealPreconditioner::Ilu0,
+            SpdPreconditionerKind::Auto
+            | SpdPreconditionerKind::Direct
+            | SpdPreconditionerKind::Amg => RealPreconditioner::None,
         },
     ) {
         return Ok(incompatible_system_result(
@@ -270,9 +239,10 @@ fn solve_operator_system_with_apply(
             },
         ) {
             Ok(output) => {
+                // The provider path is Jacobi-preconditioned CG.
                 return Ok(linear_result_from_accelerator_output(
                     output,
-                    preconditioner_kind,
+                    SpdPreconditionerKind::Jacobi,
                 ))
             }
             Err(error) if error.permits_cpu_fallback() => {
@@ -283,7 +253,7 @@ fn solve_operator_system_with_apply(
                 return Ok(linear_result_from_accelerator_error(
                     operator.dof_count(),
                     operator.load(),
-                    preconditioner_kind,
+                    SpdPreconditionerKind::Jacobi,
                     error,
                 ))
             }
@@ -293,19 +263,6 @@ fn solve_operator_system_with_apply(
     if accelerator_fallback {
         initial_diagnostics.push(SuccessfulDiagnostic::AdmissionFallback.diagnostic());
     }
-    let max_iters = iteration_limit(operator, 64);
-    let preconditioner = match build_spd_preconditioner(&prepared, preconditioner_kind) {
-        Ok(preconditioner) => preconditioner,
-        Err(error) => {
-            return Ok(rejected_system_result(
-                operator,
-                effective_backend_kind,
-                preconditioner_kind,
-                "FEA_PRECONDITIONER_SETUP_FAILED",
-                error.to_string(),
-            ))
-        }
-    };
     let b = prepared.rhs();
     let mut x = match initial_guess {
         Some(values)
@@ -330,140 +287,65 @@ fn solve_operator_system_with_apply(
             x[index] = b[index];
         }
     }
-
-    let applied_initial = apply(&prepared, &x)?;
-    let mut r = if let Some(plan) = vector_plan.filter(|plan| !plan.is_serial()) {
-        crate::algebra::vector_sub_scoped(b, &applied_initial, plan)?
-    } else {
-        algebra_backend.vec_sub(b, &applied_initial)
-    };
-    drop(applied_initial);
-    let mut z = if let Some(plan) = vector_plan.filter(|plan| !plan.is_serial()) {
-        preconditioner.apply_with_execution(&r, plan)?
-    } else {
-        preconditioner.apply(&r)
-    };
-    let mut p = z.clone();
-    let mut rz_old = dot(&r, &z)?;
-    let b_norm = dot(b, b)?.sqrt();
-
+    // One canonical SPD path: the shared sparse layer solves with the coercivity-proving
+    // Cholesky factor when one exists, otherwise with the policy's strategy.
+    let factor = prepared
+        .admissibility()
+        .and_then(|evidence| evidence.factor())
+        .map(|factor| factor.0.clone());
+    let strategy = shared_sparse::resolve_spd_strategy(
+        preconditioner_kind,
+        prepared.dof_count(),
+        prepared.matrix().values().len(),
+        1,
+        factor.is_some(),
+    );
+    let outcome = shared_sparse::solve_spd(shared_sparse::SpdSolveRequest {
+        matrix: prepared.matrix(),
+        rhs: b,
+        initial_guess: Some(&x),
+        relative_tolerance: tol,
+        plan,
+        strategy,
+        block_size: 1,
+        factor: factor.as_deref(),
+    });
     let mut diagnostics = initial_diagnostics;
-    diagnostics.push(SuccessfulDiagnostic::CpuMethod(preconditioner.kind()).diagnostic());
-
-    let initial_residual_norm = dot(&r, &r)?.sqrt();
-    let reference_norm = if b_norm > 0.0 {
-        b_norm
-    } else {
-        initial_residual_norm
-    };
-    if initial_residual_norm <= tol * reference_norm {
-        return Ok(LinearSolveResult {
-            iterations: 0,
-            residual_norm: initial_residual_norm,
-            relative_residual: crate::solve::convergence::relative_residual(
-                initial_residual_norm,
-                reference_norm,
-            ),
-            converged: true,
-            host_sync_count: 0,
-            solver_backend: effective_backend_kind,
-            device_apply_k_count: 0,
-            device_apply_k_attempt_count: 0,
-            accelerator_evidence: None,
-            solution: x,
-            solver_method: SolverMethod::MatrixFreePcg,
-            preconditioner: SolverPreconditioner::from_spd(preconditioner.kind()),
-            diagnostics,
+    diagnostics.push(SuccessfulDiagnostic::CpuMethod(strategy).diagnostic());
+    if outcome.cancelled {
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_SOLVER_CANCELLED".to_string(),
+            severity: FeaDiagnosticSeverity::Warning,
+            message: "linear solve cancelled".to_string(),
         });
-    }
-
-    let mut iterations = 0u32;
-    for _ in 0..max_iters {
-        if crate::is_fea_cancelled() {
-            break;
-        }
-        let ap = apply(&prepared, &p)?;
-        let denom = dot(&p, &ap)?;
-        // PCG is scale invariant. An absolute cutoff here rejects valid systems when the
-        // preconditioned search direction is small (a common case for dynamics operators and a
-        // good warm start). For an admitted SPD operator only non-positive or non-finite
-        // curvature is a breakdown.
-        if !denom.is_finite() || denom <= 0.0 {
-            break;
-        }
-        let alpha = rz_old / denom;
-        if let Some(plan) = vector_plan.filter(|plan| !plan.is_serial()) {
-            crate::algebra::axpy_scoped(alpha, &p, &mut x, plan)?;
-            crate::algebra::axpy_scoped(-alpha, &ap, &mut r, plan)?;
-        } else {
-            algebra_backend.axpy(alpha, &p, &mut x);
-            algebra_backend.axpy(-alpha, &ap, &mut r);
-        }
-        let residual_norm = dot(&r, &r)?.sqrt();
-        iterations += 1;
-        if residual_norm <= tol * reference_norm {
-            break;
-        }
-
-        z = if let Some(plan) = vector_plan.filter(|plan| !plan.is_serial()) {
-            preconditioner.apply_with_execution(&r, plan)?
-        } else {
-            preconditioner.apply(&r)
-        };
-        let rz_new = dot(&r, &z)?;
-        if !rz_new.is_finite() || !rz_old.is_finite() || rz_old <= 0.0 || rz_new < 0.0 {
-            break;
-        }
-        let beta = rz_new / rz_old;
-        if let Some(plan) = vector_plan.filter(|plan| !plan.is_serial()) {
-            crate::algebra::direction_update_scoped(&z, &mut p, beta, plan)?;
-        } else {
-            for i in 0..p.len() {
-                p[i] = z[i] + beta * p[i];
-            }
-        }
-        rz_old = rz_new;
-    }
-
-    // Recurrence residuals can drift from b - A*x. Make the public convergence decision from a
-    // freshly evaluated equation residual so downstream physics never inherits a false positive
-    // or false negative from recurrence roundoff.
-    let applied_final = apply(&prepared, &x)?;
-    if let Some(plan) = vector_plan.filter(|plan| !plan.is_serial()) {
-        crate::algebra::subtract_into_scoped(b, &applied_final, &mut r, plan)?;
-    } else {
-        r = algebra_backend.vec_sub(b, &applied_final);
-    }
-    drop(applied_final);
-    let residual_norm = dot(&r, &r)?.sqrt();
-    let converged = residual_norm <= tol * reference_norm;
-    if !converged {
+    } else if !outcome.converged {
         diagnostics.push(FeaDiagnostic {
             code: "FEA_CG_NOT_CONVERGED".to_string(),
             severity: FeaDiagnosticSeverity::Warning,
             message: format!(
-                "matrix-free cg stopped after {iterations}/{max_iters} iterations with residual_norm={residual_norm} relative_residual={} tolerance={tol}",
-                residual_norm / reference_norm,
+                "{} did not reach tolerance {tol}: {}",
+                strategy.label(),
+                outcome.failure.as_deref().unwrap_or("residual above tolerance"),
             ),
         });
     }
-
+    let (solver_method, preconditioner) = strategy.provenance();
     Ok(LinearSolveResult {
-        iterations,
-        residual_norm,
+        iterations: outcome.iterations,
+        residual_norm: outcome.residual_norm,
         relative_residual: crate::solve::convergence::relative_residual(
-            residual_norm,
-            reference_norm,
+            outcome.residual_norm,
+            outcome.reference_norm,
         ),
-        converged,
+        converged: outcome.converged && !outcome.cancelled,
         host_sync_count: 0,
         solver_backend: effective_backend_kind,
         device_apply_k_count: 0,
         device_apply_k_attempt_count: 0,
         accelerator_evidence: None,
-        solution: x,
-        solver_method: SolverMethod::MatrixFreePcg,
-        preconditioner: SolverPreconditioner::from_spd(preconditioner.kind()),
+        solution: outcome.solution,
+        solver_method,
+        preconditioner,
         diagnostics,
     })
 }

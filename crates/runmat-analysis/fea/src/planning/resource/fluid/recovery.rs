@@ -193,7 +193,8 @@ pub fn build_fluid_field_recovery_resource_plan(
             output: facts.output,
         }),
         output_set: Some(facts.output_set),
-        worker: governed::worker(workload),
+        // Recovery publishes retained solve arrays on one thread; it performs no numerical solve.
+        worker: governed::worker(workload, LocalExecutionPlan::serial())?,
         accuracy_ceiling: governed::ceiling(workload)?,
     })
 }

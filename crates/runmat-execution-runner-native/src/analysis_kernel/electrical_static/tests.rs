@@ -26,6 +26,7 @@ fn task(
     let (workload, mesh) = fixture::electrical_fixture(order, equation);
     let digest = Digest::sha256("native-anchored-electrical");
     prepare_electrical_static_task(ElectricalStaticTaskPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         authored_study_digest: digest,
         frozen_project_digest: None,
         program_revision: ProgramRevision::new(

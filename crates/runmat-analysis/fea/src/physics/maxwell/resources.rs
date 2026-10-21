@@ -6,7 +6,6 @@
 use super::{MaxwellCurrentSample, MaxwellError, MaxwellFieldSample, MaxwellVolumeData};
 use crate::{
     results::field::{SampledOrientedEdge, VolumeFieldIntegrationSample},
-    solve::krylov::{GmresPolicy, GmresWorkEnvelope},
     topology::AnalysisProjection,
 };
 use runmat_analysis_core::AnalysisModel;
@@ -143,24 +142,15 @@ fn from_counts(
     // All four real complex blocks per local 6x6 contribution. Charge support
     // BTree nodes, exact/rederived plans, planned assemblers and finished CSR.
     let matrices = sum(&[mul(entries, 1024)?, mul(add(dimension, 1)?, 512)?])?;
+    // The complete real block is factored by sparse LU in the shared sparse layer.
     let recurrence = if host_dimension == 0 {
         0
     } else {
-        let iterations = host_dimension
-            .checked_mul(40)
-            .map(|n| n.max(128))
-            .filter(|n| u32::try_from(*n).is_ok())
-            .ok_or_else(|| resource("shared GMRES iteration counter overflow"))?;
-        GmresWorkEnvelope::derive(
+        runmat_sparse_solvers::estimate::direct_reservation_bytes(
             host_dimension,
-            GmresPolicy {
-                relative_tolerance: 1e-10,
-                restart: host_dimension.min(128),
-                maximum_iterations: iterations,
-            },
+            usize::try_from(entries).map_err(|_| resource("block entry count overflow"))?,
+            true,
         )
-        .map_err(|e| resource(format!("shared GMRES envelope: {e:?}")))?
-        .resident_bytes_upper_bound
     };
     // Element basis/moment quadrature, source sums, corner-gradient charge tests,
     // all original RHS/solution/SpMV/residual buffers outside shared recurrence.

@@ -38,12 +38,14 @@ pub(super) fn execute_intervals(
         ));
     }
     request.validate_for(&decoded.workload)?;
-    let prepared = runmat_analysis_fea::prepare_structural_random_response(
-        &decoded.workload,
-        &decoded.mesh,
-        &decoded.state,
-        &decoded.constraints,
-    )?;
+    let prepared = super::with_admitted_cpu_pool(&decoded.resource_plan, || {
+        Ok(runmat_analysis_fea::prepare_structural_random_response(
+            &decoded.workload,
+            &decoded.mesh,
+            &decoded.state,
+            &decoded.constraints,
+        )?)
+    })?;
     if request.scope() != prepared.scope() {
         return Err(AnalysisBridgeError::Identity(
             "random-response interval request differs from the worker-reconstructed scope",
@@ -59,6 +61,10 @@ pub(super) fn execute_intervals(
                     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
             )?,
             projected_output_set_resource_facts(),
+            runmat_analysis_fea::planning::resource::LocalExecutionPlan::from_cpu_millicores(
+                decoded.resource_plan.request.cpu_millicores,
+            )
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
         )
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if decoded.resource_plan != expected_plan
@@ -69,11 +75,15 @@ pub(super) fn execute_intervals(
             "random-response interval resource plan does not converge from authoritative inputs",
         ));
     }
-    let result = runmat_analysis_fea::execute_structural_random_response_intervals(
-        &decoded.workload,
-        &prepared,
-        &request,
-    )?;
+    let result = super::with_admitted_cpu_pool(&decoded.resource_plan, || {
+        Ok(
+            runmat_analysis_fea::execute_structural_random_response_intervals(
+                &decoded.workload,
+                &prepared,
+                &request,
+            )?,
+        )
+    })?;
     Ok(vec![AnalysisKernelOutput::whole(
         AnalysisNumericalObjectKind::StructuralRandomResponseIntervalResult,
         result.identity().digest(),
@@ -150,12 +160,14 @@ pub(super) fn execute_assembly(
             "random-response assembly result inputs differ from its canonical request",
         ));
     }
-    let prepared = runmat_analysis_fea::prepare_structural_random_response(
-        &decoded.workload,
-        &decoded.mesh,
-        &decoded.state,
-        &decoded.constraints,
-    )?;
+    let prepared = super::with_admitted_cpu_pool(&decoded.resource_plan, || {
+        Ok(runmat_analysis_fea::prepare_structural_random_response(
+            &decoded.workload,
+            &decoded.mesh,
+            &decoded.state,
+            &decoded.constraints,
+        )?)
+    })?;
     if request.scope() != prepared.scope() {
         return Err(AnalysisBridgeError::Identity(
             "random-response assembly differs from the worker-reconstructed scope",
@@ -180,6 +192,10 @@ pub(super) fn execute_assembly(
                 request.scope().topology_digest(),
             )?,
             projected_output_set_resource_facts(),
+            runmat_analysis_fea::planning::resource::LocalExecutionPlan::from_cpu_millicores(
+                decoded.resource_plan.request.cpu_millicores,
+            )
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
         )
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if decoded.resource_plan != expected_plan

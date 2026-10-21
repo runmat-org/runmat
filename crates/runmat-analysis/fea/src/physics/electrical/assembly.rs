@@ -1,11 +1,15 @@
 use super::{ElectricalStaticError, VACUUM_PERMITTIVITY_F_PER_M};
 use crate::{
     algebra::{
+        element_assembly::{
+            assemble_elements, ElementAssemblyError, ElementOutputShape, ElementOutputs,
+            ElementView,
+        },
         ContributionDomain, ContributionId, ContributionProvenance, MatrixProperties, OperatorRole,
         RealSparseAssembler, RealSparseMatrix,
     },
     properties::CompiledPropertyMap,
-    topology::AnalysisProjection,
+    topology::{projection_element_map, AnalysisProjection},
 };
 use runmat_analysis_core::StaticElectricalEquation;
 
@@ -26,12 +30,7 @@ impl ElectricalAssembly {
         equation: StaticElectricalEquation,
     ) -> Result<Self, ElectricalStaticError> {
         let count = projection.nodes.len();
-        let mut stiffness = RealSparseAssembler::square(
-            count,
-            OperatorRole::Stiffness,
-            MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
-        );
-        stiffness.add_contribution(ContributionProvenance {
+        let contribution = ContributionProvenance {
             domain: ContributionDomain::Electromagnetic,
             contribution_id: ContributionId(
                 match equation {
@@ -40,7 +39,7 @@ impl ElectricalAssembly {
                 }
                 .into(),
             ),
-        });
+        };
         let widths = projection
             .elements
             .iter()
@@ -83,27 +82,65 @@ impl ElectricalAssembly {
                 ));
             }
             coefficients.push(coefficient);
-            let local_values = local_energy
-                .capture_next(&element.node_indices)
-                .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?;
-            let width = element.node_indices.len();
-            projection
-                .visit_element_quadrature(element, |point| {
-                    for (i, &row) in element.node_indices.iter().enumerate() {
-                        for (j, &column) in element.node_indices.iter().enumerate() {
-                            let dot = point.physical_shape_gradients()[i]
-                                .iter()
-                                .zip(point.physical_shape_gradients()[j])
-                                .map(|(a, b)| a * b)
-                                .sum::<f64>();
-                            let contribution = coefficient * dot * point.volume_weight_m3;
-                            stiffness.add(row, column, contribution);
-                            local_values[i * width + j] += contribution;
-                        }
-                    }
-                })
-                .map_err(|error| ElectricalStaticError::Topology(error.to_string()))?;
         }
+        // Element gradient kernels run on the admitted CPU pool; the ordered visitor retains each
+        // original local matrix, and the scatter is thread-count independent.
+        let map = projection_element_map(&projection)
+            .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?;
+        let plan = crate::planning::resource::LocalExecutionPlan::serial();
+        let pattern = map
+            .symbolic_pattern(plan)
+            .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?;
+        let assembled = assemble_elements(
+            &map,
+            &pattern,
+            ElementOutputShape {
+                matrices: 1,
+                ..Default::default()
+            },
+            plan,
+            |index, _, out: &mut ElementOutputs<'_, f64>| {
+                let element = &projection.elements[index];
+                let coefficient = coefficients[index];
+                let width = element.node_indices.len();
+                let local = out.matrix(0);
+                projection
+                    .visit_element_quadrature(element, |point| {
+                        let gradients = point.physical_shape_gradients();
+                        for i in 0..width {
+                            for j in 0..width {
+                                let dot = gradients[i]
+                                    .iter()
+                                    .zip(gradients[j])
+                                    .map(|(a, b)| a * b)
+                                    .sum::<f64>();
+                                local[i * width + j] += coefficient * dot * point.volume_weight_m3;
+                            }
+                        }
+                    })
+                    .map_err(|error| ElectricalStaticError::Topology(error.to_string()))
+            },
+            |view: &ElementView<'_, f64>| {
+                let element = &projection.elements[view.element];
+                local_energy
+                    .capture_next(&element.node_indices)
+                    .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?
+                    .copy_from_slice(view.matrix(0));
+                Ok(())
+            },
+        )
+        .map_err(|error| match error {
+            ElementAssemblyError::Element { error, .. } => error,
+            other => ElectricalStaticError::Operator(other.to_string()),
+        })?;
+        let mut stiffness = RealSparseAssembler::from_planned_values(
+            pattern,
+            assembled.matrices.into_iter().next().unwrap_or_default(),
+            OperatorRole::Stiffness,
+            MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+        )
+        .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?;
+        stiffness.add_contribution(contribution);
         Ok(Self {
             projection,
             stiffness: stiffness
