@@ -38,12 +38,38 @@ pub(super) fn separate_with_queries(
     minimum_separation: f64,
     control: Option<&dyn GeometryEvaluationControl>,
 ) -> Result<Option<[f64; 2]>, ExactFaceRefinementError> {
+    let Some(triangle) = geometry.triangles.get(triangle_index) else {
+        return Ok(None);
+    };
+    let metric = triangle.deviation_samples[3].sizing_metric;
+    separate_in_metric(
+        witness,
+        triangle_index,
+        geometry,
+        vertices,
+        minimum_separation,
+        control,
+        &|_| Ok(metric),
+    )
+}
+
+/// As `separate_with_queries`, measuring each trial point in the sizing metric that
+/// `metric_at` reports at that point.
+pub(super) fn separate_in_metric(
+    witness: [f64; 2],
+    triangle_index: usize,
+    geometry: &ExactFaceGeometry,
+    vertices: &super::vertices::VertexQueries<'_>,
+    minimum_separation: f64,
+    control: Option<&dyn GeometryEvaluationControl>,
+    metric_at: &dyn Fn([f64; 2]) -> Result<ParametricMetricTensor, ExactFaceRefinementError>,
+) -> Result<Option<[f64; 2]>, ExactFaceRefinementError> {
     checkpoint(control, &geometry.source_face_id)?;
     let Some(triangle) = geometry.triangles.get(triangle_index) else {
         return Ok(None);
     };
     let centroid = triangle.deviation_samples[3].uv;
-    let metric = triangle.deviation_samples[3].sizing_metric;
+    let metric = metric_at(witness)?;
     for toward_centroid in [0.0, 0.25, 0.5, 0.75, 1.0] {
         let candidate = std::array::from_fn(|axis| {
             witness[axis] * (1.0 - toward_centroid) + centroid[axis] * toward_centroid
@@ -52,7 +78,7 @@ pub(super) fn separate_with_queries(
             candidate,
             vertices,
             geometry,
-            metric,
+            metric_at(candidate)?,
             minimum_separation,
             control,
         )? {
@@ -81,7 +107,7 @@ pub(super) fn separate_with_queries(
                 candidate,
                 vertices,
                 geometry,
-                metric,
+                metric_at(candidate)?,
                 minimum_separation,
                 control,
             )? && best.is_none_or(|current| {

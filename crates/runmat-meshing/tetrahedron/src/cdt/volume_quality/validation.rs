@@ -23,6 +23,8 @@ struct IndependentTetrahedronQuality {
     rejected_contribution_count: u32,
     boundary_node_count: u8,
     protected_facet_count: u8,
+    /// Longest metric edge not on a protected facet: the size criterion's measure.
+    refinement_metric_edge_length: f64,
     values: [f64; 7],
 }
 
@@ -111,8 +113,16 @@ pub fn validate_delaunay_volume_quality(
             .filter(|identity| boundary_nodes.contains(identity))
             .count() as u8;
         let protected_facet_count = super::protected_facet_count(identities, &protected_facets);
-        let size_violation_ratio =
-            saturated_ratio(local_maximum_edge, options.maximum_metric_edge_length);
+        let refinement_metric_edge_length =
+            super::evaluation::volume_owned_maximum_metric_edge_length(
+                points,
+                resolved.metric,
+                super::protected_edge_mask(identities, &protected_facets),
+            );
+        let size_violation_ratio = saturated_ratio(
+            refinement_metric_edge_length,
+            options.maximum_metric_edge_length,
+        );
         let radius_edge_violation_ratio =
             saturated_ratio(radius_edge_ratio, options.maximum_radius_edge_ratio);
         let jacobian_violation_ratio =
@@ -136,6 +146,7 @@ pub fn validate_delaunay_volume_quality(
             rejected_contribution_count: resolved.rejected_contribution_count,
             boundary_node_count,
             protected_facet_count,
+            refinement_metric_edge_length,
             values: [
                 minimum_edge,
                 local_maximum_edge,
@@ -371,7 +382,7 @@ fn validate_tetrahedron(
         ));
     }
     let size_violation = saturated_ratio(
-        observed.maximum_metric_edge_length,
+        independent.refinement_metric_edge_length,
         options.maximum_metric_edge_length,
     );
     let radius_edge_violation = saturated_ratio(

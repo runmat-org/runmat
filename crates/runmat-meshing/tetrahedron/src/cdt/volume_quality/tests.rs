@@ -134,6 +134,7 @@ fn sliver_topology() -> DelaunayVolumeTopology {
 
 pub(super) fn metric_request() -> MetricFieldRequest {
     MetricFieldRequest {
+        entity_supports: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(2.0).unwrap(),
         maximum_grading_ratio: 1.5,
@@ -267,6 +268,7 @@ fn anisotropic_metric_reports_a_sliver_without_scheduling_size_refinement() {
         facets: Vec::new(),
     };
     let request = MetricFieldRequest {
+        entity_supports: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3 {
             xx: 2.0,
@@ -350,6 +352,7 @@ fn constrained_boundary_radius_edge_is_reported_but_shape_drives_admission() {
     let quality = evaluate_delaunay_volume_quality(
         &topology,
         &MetricFieldRequest {
+            entity_supports: Vec::new(),
             combination: MetricCombinationRule::MostRestrictiveIntersection,
             global_metric: MetricTensor3::isotropic_length_m(1.0).unwrap(),
             maximum_grading_ratio: 1.5,
@@ -471,4 +474,32 @@ fn quality_rejects_unassigned_topology_limits_bad_policy_and_cancellation() {
         .kind,
         DelaunayVolumeQualityErrorKind::InvalidMetricContext
     );
+}
+
+#[test]
+fn size_criterion_measures_only_edges_the_volume_stage_can_split() {
+    use runmat_meshing_core::StableDigest;
+    let identity = |byte: u8| StableDigest::from_bytes([byte; 32]);
+    let tetrahedron = [identity(1), identity(2), identity(3), identity(4)];
+    // The facet opposite vertex 3 (vertices 0, 1, 2) belongs to the published surface.
+    let mut facet = [identity(1), identity(2), identity(3)];
+    facet.sort_unstable();
+    let protected = std::collections::BTreeSet::from([facet]);
+    let mask = super::protected_edge_mask(tetrahedron, &protected);
+    assert_eq!(mask, 0b001011, "edges (0,1), (0,2) and (1,2) lie on the protected facet");
+    assert_eq!(super::protected_edge_mask(tetrahedron, &Default::default()), 0);
+
+    // A long surface edge (0,1) of 1.25 metric units over a 0.5-unit-high apex: the surface owns
+    // the long edge, so only the interior edges count toward refinement.
+    let points = [[0.0, 0.0, 0.0], [1.25, 0.0, 0.0], [0.6, 0.5, 0.0], [0.6, 0.2, 0.5]];
+    let metric = runmat_meshing_size::metric::MetricTensor3::isotropic_length_m(1.0).unwrap();
+    let all = super::evaluation::volume_owned_maximum_metric_edge_length(points, metric, 0);
+    assert!((all - 1.25).abs() < 1e-12);
+    let owned = super::evaluation::volume_owned_maximum_metric_edge_length(points, metric, mask);
+    assert!(owned < 1.0, "{owned}");
+    let options = super::DelaunayVolumeQualityOptions::default();
+    let (refinement, _) = super::violation_ratios(owned, 1.0, 1.0, 3, options);
+    assert!(refinement <= 1.0);
+    let (refinement, _) = super::violation_ratios(all, 1.0, 1.0, 3, options);
+    assert!(refinement > 1.0);
 }

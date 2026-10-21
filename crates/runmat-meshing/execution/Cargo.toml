@@ -27,6 +27,9 @@ sha2 = { workspace = true }
 serde_json = { workspace = true }
 runmat-canonical-codec = { workspace = true }
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 runmat-geometry-fixtures = { workspace = true }
 

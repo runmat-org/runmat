@@ -1,0 +1,67 @@
+// A copper block stacked on a steel block, exported as two separate CAD parts. `interfaces =
+// shared` joins them, so the mesh shares nodes across the 20 x 20 mm contact face and heat
+// crosses it with continuous temperature. Hot face at 350 K, cold face at 300 K, sides insulated.
+//
+// Series resistance check (L = 10 mm per block): q = 50 K / (L/400 + L/45) = 202,247 W/m^2 and the
+// interface sits at 300 K + q L / 45 = 344.94 K. Linear tetrahedra reproduce this piecewise-linear
+// field exactly when the interface is conformal.
+geometry stack {
+    file = "./geometry/stacked-blocks.step"
+    units = mm
+    interfaces = shared
+    region copper : solid { select name "Copper"; expect exactly_one }
+    region steel : solid { select name "Steel"; expect exactly_one }
+    region hot_face : face { select name "Hot face"; expect exactly_one }
+    region cold_face : face { select name "Cold face"; expect exactly_one }
+}
+
+mesh stack on geometry.stack {
+    tetrahedra {
+        order = linear
+        target_size = 5 mm
+        maximum_deviation = 0.1 mm
+    }
+}
+
+material copper {
+    mass_density = 8960 kg/m^3
+    thermal {
+        reference_temperature = 300 K
+        modulus_temperature_coefficient = 0 K^-1
+        expansion_coefficient = 0.0000165 K^-1
+        conductivity = 400 W/m/K
+        specific_heat = 385 J/kg/K
+    }
+}
+
+material steel {
+    mass_density = 7850 kg/m^3
+    thermal {
+        reference_temperature = 300 K
+        modulus_temperature_coefficient = 0 K^-1
+        expansion_coefficient = 0.000012 K^-1
+        conductivity = 45 W/m/K
+        specific_heat = 500 J/kg/K
+    }
+}
+
+model stacked_conduction {
+    thermal { reference_temperature = 300 K }
+    assign material.copper to geometry.stack.region.copper
+    assign material.steel to geometry.stack.region.steel
+    constraint hot {
+        thermal.temperature { target = geometry.stack.region.hot_face; value = 350 K }
+    }
+    constraint cold {
+        thermal.temperature { target = geometry.stack.region.cold_face; value = 300 K }
+    }
+}
+
+study conduction {
+    geometry = geometry.stack
+    mesh = mesh.stack
+    model = model.stacked_conduction
+    analysis heat { thermal steady {} }
+    output temperature = analysis.heat.field.node.temperature
+    output heat_flux = analysis.heat.field.element.heat_flux
+}

@@ -36,6 +36,7 @@ fn request(order: ElementOrder) -> MeshingRequest {
             maximum_healing_displacement_m: 1.0e-6,
         },
         metric: MetricFieldRequest {
+            entity_supports: Vec::new(),
             combination: MetricCombinationRule::MostRestrictiveIntersection,
             global_metric: MetricTensor3::isotropic_length_m(2.0).unwrap(),
             maximum_grading_ratio: 1.5,

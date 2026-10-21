@@ -1,8 +1,8 @@
 geometry heatsink {
     file = "./geometry/electronics-heatsink.step"
     units = mm
-    region body : solid { select id "solid_000001"; expect exactly_one }
-    region heater_face : face { select id "face_000001"; expect exactly_one }
+    region body : solid { select name "Heat sink"; expect exactly_one }
+    region heater_face : face { select name "Mounting face"; expect exactly_one }
     region outer_surface : face { select result; expect one_or_more }
 }
 mesh heatsink on geometry.heatsink {

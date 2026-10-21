@@ -79,8 +79,9 @@ pub(super) fn validate_planar_edges(
             payload: *edge,
         })
         .collect();
+    let mut probes = 0u32;
     let index = PackedBoundsSpatialIndex::from_entries_with_checkpoint(entries, &mut || {
-        checkpoint(cancellation, pslg)
+        sampled_checkpoint(&mut probes, cancellation, pslg)
     })?
     .ok_or_else(|| {
         error(
@@ -115,7 +116,7 @@ pub(super) fn validate_planar_edges(
                 }
                 Ok(())
             },
-            &mut || checkpoint(cancellation, pslg),
+            &mut || sampled_checkpoint(&mut probes, cancellation, pslg),
         )?;
     }
     Ok(predicates)
@@ -239,6 +240,22 @@ fn error(
     reason: impl Into<String>,
 ) -> ExactFaceDelaunayError {
     ExactFaceDelaunayError::new(kind, &pslg.source_face_id, reason)
+}
+
+/// Index callbacks fire for every visited node, including empty subtrees. Each edge query
+/// already starts with a full probe; inside a query, probe cancellation every 256 callbacks.
+/// A probe reads the execution clock, and per-node probes dominated large face validations.
+fn sampled_checkpoint(
+    probes: &mut u32,
+    cancellation: &dyn MeshingCancellationSignal,
+    pslg: &ExactFacePslg,
+) -> Result<(), ExactFaceDelaunayError> {
+    *probes = probes.wrapping_add(1);
+    if *probes % 256 == 0 {
+        checkpoint(cancellation, pslg)
+    } else {
+        Ok(())
+    }
 }
 
 #[track_caller]

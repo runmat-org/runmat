@@ -1,8 +1,8 @@
 geometry fork {
     file = "./geometry/tuning-fork.step"
     units = mm
-    region body : solid { select id "solid_000001"; expect exactly_one }
-    region fixed_end : face { select id "face_000001"; expect exactly_one }
+    region body : solid { select name "Tuning fork"; expect exactly_one }
+    region fixed_end : face { select name "Stem end"; expect exactly_one }
 }
 
 mesh fork on geometry.fork {

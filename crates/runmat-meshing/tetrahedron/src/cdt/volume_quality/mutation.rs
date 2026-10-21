@@ -124,7 +124,12 @@ fn evaluate(
                 retained.refinement_violation_ratio,
                 retained.optimization_violation_ratio,
             ) = evaluation::violation_ratios(
-                retained.maximum_metric_edge_length,
+                evaluation::volume_owned_maximum_metric_edge_length(
+                    cell.vertex_indices
+                        .map(|vertex| topology.nodes[vertex as usize].coordinates_m),
+                    retained.resolved_metric,
+                    protected_edge_mask(identities, &protected_facets),
+                ),
                 retained.metric_radius_edge_ratio,
                 retained.metric_scaled_jacobian,
                 retained.boundary_node_count,
@@ -150,6 +155,7 @@ fn evaluate(
                     .filter(|id| boundary_nodes.contains(id))
                     .count() as u8,
                 protected_facet_count: protected_facet_count(identities, &protected_facets),
+                protected_edges: protected_edge_mask(identities, &protected_facets),
                 incident_metric_entity_ids: context.parts().1.to_vec(),
                 metric: metric.clone(),
             },
