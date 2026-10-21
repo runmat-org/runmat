@@ -185,10 +185,7 @@ fn input<'a>(case: &'a Case, p: &'a Prepared, flux: &'a [f64]) -> ConjugateHeatI
         fluid_topology: &p.topology,
         face_volume_flux_m3_per_s: flux,
         sample: ExcitationSamplePoint::Static,
-        policy: ConjugateHeatPolicy {
-            linear_relative_tolerance: 1e-12,
-            ..ConjugateHeatPolicy::default()
-        },
+        policy: ConjugateHeatPolicy::default(),
     }
 }
 

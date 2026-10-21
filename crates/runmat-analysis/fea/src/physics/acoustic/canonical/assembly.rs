@@ -136,11 +136,12 @@ impl AcousticAssembly {
             OperatorRole::Mass,
             "pressure_compressibility",
         )?;
+        let stiffness = finish(stiffness)?;
         Ok(Self {
             projection,
             volume_stiffness: stiffness.clone(),
             stiffness,
-            mass,
+            mass: finish(mass)?,
             impedance: finish(assembler(
                 size,
                 OperatorRole::Damping,

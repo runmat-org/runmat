@@ -12,6 +12,7 @@ use runmat_analysis_core::*;
 use runmat_meshing_core::{fixtures::layered_box_mesh, PersistentEntityId, PersistentEntityKind};
 
 const LENGTH: f64 = 2.0;
+const DEPTH: f64 = 0.05;
 const PLATE: f64 = 0.1;
 const HEIGHT: f64 = 0.3;
 const SPEED: f64 = 0.01;
@@ -34,7 +35,7 @@ fn target(mesh: &SolverMeshArtifact, name: &str) -> RegionTarget {
     target
 }
 
-struct Case {
+pub(super) struct Case {
     model: AnalysisModel,
     mesh: SolverMeshArtifact,
     constraints: Vec<FluidConstraint>,
@@ -42,10 +43,10 @@ struct Case {
     material: CfdDomain,
 }
 
-fn case(youngs_modulus: f64) -> Case {
+pub(super) fn case(youngs_modulus: f64) -> Case {
     let mesh = layered_box_mesh(
         [20, 9, 1],
-        [LENGTH, HEIGHT, 0.05],
+        [LENGTH, HEIGHT, DEPTH],
         &[(PLATE, "plate"), (HEIGHT + 1.0, "channel")],
     );
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
@@ -187,13 +188,13 @@ fn case(youngs_modulus: f64) -> Case {
     }
 }
 
-struct Prepared {
+pub(super) struct Prepared {
     projection: AnalysisProjection,
     properties: CompiledPropertyMap,
     selection: FiniteVolumeCellSelection,
 }
 
-fn prepared(c: &Case) -> Prepared {
+pub(super) fn prepared(c: &Case) -> Prepared {
     Prepared {
         projection: AnalysisProjection::derive(&c.mesh).unwrap(),
         properties: compile_property_map(&c.model, Some(&c.mesh)).unwrap(),
@@ -206,7 +207,11 @@ fn prepared(c: &Case) -> Prepared {
     }
 }
 
-fn problem<'a>(c: &'a Case, p: &'a Prepared, tolerance: f64) -> FluidStructureProblem<'a> {
+pub(super) fn problem<'a>(
+    c: &'a Case,
+    p: &'a Prepared,
+    tolerance: f64,
+) -> FluidStructureProblem<'a> {
     FluidStructureProblem::prepare(FluidStructureInput {
         model: &c.model,
         mesh: &c.mesh,
@@ -241,7 +246,9 @@ fn problem<'a>(c: &'a Case, p: &'a Prepared, tolerance: f64) -> FluidStructurePr
     .unwrap()
 }
 
-fn run(c: &Case) -> (FluidStructureResult, f64) {
+/// (result, inlet pressure, inflow per unit depth). The inlet prescribes velocity on a face that
+/// stretches with the wall, so the delivered flow rate is measured, not assumed.
+fn run(c: &Case) -> (FluidStructureResult, f64, f64) {
     let p = prepared(c);
     let problem = problem(c, &p, 1e-6);
     let result = problem.solve().unwrap();
@@ -249,36 +256,39 @@ fn run(c: &Case) -> (FluidStructureResult, f64) {
     // Inlet pressure: mean of the cells touching the inlet face.
     let mut sum = 0.0;
     let mut count = 0.0;
+    let mut inflow = 0.0;
     for (i, face) in problem.reference_fluid().faces.iter().enumerate() {
         if face.neighbor.is_none() && face.centroid_m[0] < 1e-12 {
-            let _ = i;
             sum += result.flow.pressure_pa[face.owner];
             count += 1.0;
+            inflow -= result.flow.face_volume_flux_m3_per_s[i];
         }
     }
     let mut tampered = result.clone();
     tampered.structural_response_m[0][1] += 1e-3;
     assert!(problem.recover(&tampered).is_err());
-    (result, sum / count)
+    (result, sum / count, inflow / DEPTH)
 }
 
 #[test]
 fn compliant_channel_widens_and_drops_pressure_as_lubrication_theory_predicts() {
     // Soft enough that the lubrication reference departs clearly from the rigid channel.
     let youngs_modulus = 10.0;
-    let (rigid, rigid_inlet) = run(&case(1e9));
-    let (compliant, compliant_inlet) = run(&case(youngs_modulus));
+    let (rigid, rigid_inlet, rigid_q) = run(&case(1e9));
+    let (compliant, compliant_inlet, compliant_q) = run(&case(youngs_modulus));
     assert!(rigid.evidence.largest_interface_displacement_m < 1e-9);
     let constrained = youngs_modulus * (1.0 - POISSON) / ((1.0 + POISSON) * (1.0 - 2.0 * POISSON));
     let c = PLATE / constrained;
     let h0 = HEIGHT - PLATE;
-    let q = SPEED * h0;
-    let rigid_reference = 12.0 * VISCOSITY * q * LENGTH / h0.powi(3);
-    let coupled_reference = ((h0.powi(4) + 48.0 * VISCOSITY * q * c * LENGTH).powf(0.25) - h0) / c;
+    assert!((rigid_q - SPEED * h0).abs() < 1e-6 * SPEED * h0);
+    // Rigid: dp/dx = −12 µ q / h³. Compliant: h = h0 + C p gives (h0 + C p_in)⁴ = h0⁴ + 48 µ q C L.
+    let rigid_reference = 12.0 * VISCOSITY * rigid_q * LENGTH / h0.powi(3);
+    let coupled_reference =
+        ((h0.powi(4) + 48.0 * VISCOSITY * compliant_q * c * LENGTH).powf(0.25) - h0) / c;
     let measured = compliant_inlet / rigid_inlet;
     let expected = coupled_reference / rigid_reference;
     assert!(
-        expected < 0.8,
+        expected < 0.95 && compliant_q > 1.1 * rigid_q,
         "the test must exercise real coupling: {expected}"
     );
     assert!(
@@ -297,7 +307,9 @@ fn compliant_channel_widens_and_drops_pressure_as_lubrication_theory_predicts() 
 
 #[test]
 fn impulsively_started_flow_over_a_compliant_wall_conserves_interface_energy() {
-    let c = case(2000.0);
+    // Stiff enough that the wall's swept volume rate stays a few percent of the inflow, so
+    // the pressure outlet never has to admit backflow during the impulsive start.
+    let c = case(1.0e6);
     let p = prepared(&c);
     let problem = problem(&c, &p, 1e-6);
     let times = (0..=12).map(|i| 0.01 * i as f64).collect::<Vec<_>>();

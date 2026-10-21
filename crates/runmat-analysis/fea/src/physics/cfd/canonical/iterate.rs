@@ -105,29 +105,6 @@ pub(super) fn solve_with_time(
                 )
                 && q[i] < 0.0
         }) {
-            if std::env::var_os("QFLUID_DEBUG_LINEAR").is_some() && iteration % 250 == 1 {
-                let outlet = p
-                    .topology
-                    .faces
-                    .iter()
-                    .enumerate()
-                    .filter(|(i, f)| {
-                        f.neighbor.is_none()
-                            && matches!(
-                                p.boundaries[*i],
-                                super::boundary::FaceBoundary::PressureOutlet { .. }
-                            )
-                    })
-                    .map(|(i, _)| q[i])
-                    .collect::<Vec<_>>();
-                eprintln!(
-                    "qfluid-backflow it={iteration} outlet_faces={} negative={} min={:e} sum={:e}",
-                    outlet.len(),
-                    outlet.iter().filter(|v| **v < 0.0).count(),
-                    outlet.iter().copied().fold(f64::INFINITY, f64::min),
-                    outlet.iter().sum::<f64>()
-                );
-            }
             acceleration_history = None;
             continue;
         }
