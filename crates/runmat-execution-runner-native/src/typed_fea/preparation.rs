@@ -89,7 +89,9 @@ pub async fn prepare_study(
                 .and_then(|policy| policy.resources.workers)
                 .map(|range| range.maximum.max(1))
         })
-        .unwrap_or_else(|| (crate::machine_capacity::cpu_millicores() / 1_000).min(32));
+        // One worker by default: a single study's numerical tasks take every core through the
+        // thread plan; additional co-located workers are an explicit fan-out choice.
+        .unwrap_or(1);
     let cpu_threads_per_worker = crate::machine_capacity::study_allocation(
         workers,
         resolved

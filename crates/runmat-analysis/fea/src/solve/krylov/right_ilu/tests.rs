@@ -35,7 +35,7 @@ fn signed_nonsymmetric_lu_matches_independent_literal_factors_not_ldlt() {
     // U=[[-2,3,1],[0,4,-2],[0,0,-5]]. Explicit zero support is retained.
     let a = full(&[-2., 3., 1., -4., 10., 0., 2., -1., -7.], 3);
     let ilu = SparseRightIlu::factor(&a, || false).unwrap();
-    assert_eq!(ilu.factors, vec![-2., 3., 1., 2., 4., -2., -1., 0.5, -5.]);
+    assert_eq!(ilu.factors(), vec![-2., 3., 1., 2., 4., -2., -1., 0.5, -5.]);
     let actual = ilu.apply(&[-5., -24., -17.], || false).unwrap();
     for (value, expected) in actual.into_iter().zip([1., -2., 3.]) {
         near(value, expected);
@@ -60,9 +60,9 @@ fn missing_fill_is_dropped_and_original_csr_support_preserved() {
     let original = a.clone();
     let ilu = SparseRightIlu::factor(&a, || false).unwrap();
     assert_eq!(a, original);
-    assert_eq!(ilu.row_offsets, vec![0, 2, 5, 7]);
-    assert_eq!(ilu.column_indices, vec![0, 1, 0, 1, 2, 0, 2]);
-    assert_eq!(ilu.factors, vec![4., 1., 0.25, 3.75, 1., 0.25, 4.]);
+    assert_eq!(ilu.row_offsets(), vec![0, 2, 5, 7]);
+    assert_eq!(ilu.column_indices(), vec![0, 1, 0, 1, 2, 0, 2]);
+    assert_eq!(ilu.factors(), vec![4., 1., 0.25, 3.75, 1., 0.25, 4.]);
     let answer = ilu.apply(&[3., 7., 9.], || false).unwrap();
     // Literal forward substitution y=[3,25/4,33/4], followed by true U solve.
     let x2 = 33. / 16.;
@@ -236,7 +236,6 @@ fn right_gmres_recovers_original_solution_and_residual_across_load_scales() {
                 maximum_iterations: 4,
             },
             |y| apply(&ilu.apply(y, || false)?),
-            |a, b| Ok(a.iter().zip(b).map(|(a, b)| a * b).sum()),
             || false,
         )
         .unwrap()

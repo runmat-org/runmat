@@ -203,19 +203,19 @@ fn structural_temporals_admit_only_their_solver_families() {
         (
             AnalysisProcedure::ModalExtraction,
             SolutionSpace::Direct,
-            SolverMethod::MatrixFreeSubspaceIteration,
+            SolverMethod::ShiftInvertBlockLanczos,
             SolverPreconditioner::Ilu0,
         ),
         (
             AnalysisProcedure::PrestressedModalExtraction,
             SolutionSpace::Direct,
-            SolverMethod::MatrixFreeSubspaceIteration,
+            SolverMethod::ShiftInvertBlockLanczos,
             SolverPreconditioner::Jacobi,
         ),
         (
             AnalysisProcedure::EigenvalueBuckling,
             SolutionSpace::Direct,
-            SolverMethod::MatrixFreeBucklingSubspaceIteration,
+            SolverMethod::BucklingBlockLanczos,
             SolverPreconditioner::Ilu0,
         ),
         (
@@ -320,7 +320,7 @@ fn nonstructural_temporals_admit_only_their_solver_families() {
             .expect("the exact nonstructural solver matrix must admit its implemented pair");
         assert!(validate_solver_formulation_compatibility(
             &identity,
-            SolverMethod::MatrixFreeSubspaceIteration,
+            SolverMethod::ShiftInvertBlockLanczos,
             SolverPreconditioner::None,
         )
         .is_err());
@@ -416,7 +416,7 @@ fn persisted_run_rejects_solver_or_preconditioner_substitution() {
     let mut unexpected_static_evidence = run.clone();
     unexpected_static_evidence.identity =
         structural_identity(AnalysisProcedure::ModalExtraction, SolutionSpace::Direct);
-    unexpected_static_evidence.solver_method = SolverMethod::MatrixFreeSubspaceIteration;
+    unexpected_static_evidence.solver_method = SolverMethod::ShiftInvertBlockLanczos;
     unexpected_static_evidence.preconditioner = SolverPreconditioner::Ilu0;
     assert_eq!(
         unexpected_static_evidence.validate_solver_formulation(),

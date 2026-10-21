@@ -95,7 +95,6 @@ pub(crate) struct SpdSolveOutcome {
     pub residual_norm: f64,
     pub reference_norm: f64,
     pub converged: bool,
-    pub strategy: SpdStrategy,
     pub cancelled: bool,
     pub failure: Option<String>,
 }
@@ -144,13 +143,12 @@ pub(crate) fn solve_spd(request: SpdSolveRequest<'_>) -> SpdSolveOutcome {
     } = request;
     let n = matrix.rows();
     let arrays = CsrArrays::of(matrix);
-    let failure = |message: String, strategy| SpdSolveOutcome {
+    let failure = |message: String| SpdSolveOutcome {
         solution: vec![0.0; n],
         iterations: 0,
         residual_norm: f64::INFINITY,
         reference_norm: runmat_sparse_solvers::par::norm2(rhs),
         converged: false,
-        strategy,
         cancelled: crate::is_fea_cancelled(),
         failure: Some(message),
     };
@@ -171,7 +169,7 @@ pub(crate) fn solve_spd(request: SpdSolveRequest<'_>) -> SpdSolveOutcome {
                             control(),
                         ) {
                             Ok(solver) => solver,
-                            Err(error) => return failure(format!("sparse Cholesky failed: {error}"), strategy),
+                            Err(error) => return failure(format!("sparse Cholesky failed: {error}")),
                         };
                         &owned
                     }
@@ -179,7 +177,7 @@ pub(crate) fn solve_spd(request: SpdSolveRequest<'_>) -> SpdSolveOutcome {
                 let mut x = vec![0.0; n];
                 let report = match solver.solve_refined(a.into(), rhs, &mut x, 1) {
                     Ok(report) => report,
-                    Err(error) => return failure(format!("sparse Cholesky solve failed: {error}"), strategy),
+                    Err(error) => return failure(format!("sparse Cholesky solve failed: {error}")),
                 };
                 let mut ax = vec![0.0; n];
                 a.spmv(&x, &mut ax);
@@ -193,7 +191,6 @@ pub(crate) fn solve_spd(request: SpdSolveRequest<'_>) -> SpdSolveOutcome {
                     iterations: 1,
                     residual_norm,
                     reference_norm: reference,
-                    strategy,
                     cancelled: false,
                     failure: None,
                 }
@@ -210,19 +207,19 @@ pub(crate) fn solve_spd(request: SpdSolveRequest<'_>) -> SpdSolveOutcome {
                         control(),
                     ) {
                         Ok(amg) => Box::new(amg),
-                        Err(error) => return failure(format!("multigrid setup failed: {error}"), strategy),
+                        Err(error) => return failure(format!("multigrid setup failed: {error}")),
                     },
                     PreconditionerChoice::Ilu0 => match Ilu0::new(a, true) {
                         Ok(ilu) => Box::new(ilu),
-                        Err(error) => return failure(format!("ILU(0) setup failed: {error}"), strategy),
+                        Err(error) => return failure(format!("ILU(0) setup failed: {error}")),
                     },
                     PreconditionerChoice::BlockJacobi if block_size > 1 => match BlockJacobi::new(a, block_size) {
                         Ok(p) => Box::new(p),
-                        Err(error) => return failure(format!("block Jacobi setup failed: {error}"), strategy),
+                        Err(error) => return failure(format!("block Jacobi setup failed: {error}")),
                     },
                     _ => match Jacobi::new(a) {
                         Ok(p) => Box::new(p),
-                        Err(error) => return failure(format!("Jacobi setup failed: {error}"), strategy),
+                        Err(error) => return failure(format!("Jacobi setup failed: {error}")),
                     },
                 };
                 let mut x = match initial_guess {
@@ -243,7 +240,6 @@ pub(crate) fn solve_spd(request: SpdSolveRequest<'_>) -> SpdSolveOutcome {
                             iterations: u32::try_from(report.iterations).unwrap_or(u32::MAX),
                             residual_norm: report.residual_norm,
                             reference_norm: reference,
-                            strategy,
                             cancelled: false,
                             failure: (!report.converged()).then(|| {
                                 format!(
@@ -257,9 +253,9 @@ pub(crate) fn solve_spd(request: SpdSolveRequest<'_>) -> SpdSolveOutcome {
                     }
                     Err(runmat_sparse_solvers::SolverError::Cancelled) => SpdSolveOutcome {
                         cancelled: true,
-                        ..failure("cancelled".into(), strategy)
+                        ..failure("cancelled".into())
                     },
-                    Err(error) => failure(error.to_string(), strategy),
+                    Err(error) => failure(error.to_string()),
                 }
             }
         }
@@ -333,14 +329,6 @@ impl SpdStrategy {
         }
     }
 
-    /// Preconditioner label for composite methods (Newmark, Newton, eigen inner solves).
-    pub(crate) fn inner_preconditioner(self) -> crate::contracts::SolverPreconditioner {
-        match self {
-            SpdStrategy::Cholesky => crate::contracts::SolverPreconditioner::SparseCholesky,
-            other => other.provenance().1,
-        }
-    }
-
     pub(crate) fn label(self) -> &'static str {
         use runmat_sparse_solvers::policy::PreconditionerChoice;
         match self {
@@ -392,7 +380,7 @@ pub(crate) fn effective_plan(requested: LocalExecutionPlan) -> LocalExecutionPla
 pub(crate) fn complex_combination(
     terms: &[(runmat_sparse_solvers::c64, &RealSparseMatrix)],
 ) -> Result<runmat_sparse_solvers::CsrMatrix<runmat_sparse_solvers::c64>, runmat_sparse_solvers::SolverError> {
-    use runmat_sparse_solvers::{c64, CsrMatrix, Scalar};
+    use runmat_sparse_solvers::{c64, CsrMatrix};
     let Some((_, first)) = terms.first() else {
         return Err(runmat_sparse_solvers::SolverError::Dimension("empty combination".into()));
     };
@@ -442,10 +430,6 @@ pub(crate) fn solve_direct_real(
         let a = arrays.view();
         let attempts: Vec<DirectOptions> = match structure {
             DirectStructure::General => vec![DirectOptions::new(FactorKind::Lu)],
-            DirectStructure::SymmetricIndefinite => vec![
-                DirectOptions::new(FactorKind::BunchKaufman),
-                DirectOptions::new(FactorKind::Lu),
-            ],
             DirectStructure::SaddlePoint { primal_count } => {
                 let scale = a.diagonal().iter().fold(0.0f64, |m, v| m.max(v.abs())).max(1.0);
                 let mut signs = vec![1i8; n];
@@ -499,6 +483,5 @@ pub(crate) fn solve_direct_real(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DirectStructure {
     General,
-    SymmetricIndefinite,
     SaddlePoint { primal_count: usize },
 }

@@ -297,39 +297,29 @@ fn sweep_concurrency(
     options: &LocalFeaExecutionOptions,
     case_count: usize,
 ) -> usize {
-    let available = std::thread::available_parallelism().map_or(1, usize::from);
-    let requested = sweep
-        .study
-        .execution_policy
-        .as_ref()
+    let policy = sweep.study.execution_policy.as_ref();
+    let requested = policy
         .map(|policy| policy.fanout.sweep_cases)
         .and_then(|limit| match limit {
             runmat_analysis_core::ParallelismLimit::Auto => None,
             runmat_analysis_core::ParallelismLimit::Fixed(value) => Some(value as usize),
-        })
-        .unwrap_or(available);
+        });
     let workers_per_case = options
         .workers
         .or_else(|| {
-            sweep
-                .study
-                .execution_policy
-                .as_ref()
+            policy
                 .and_then(|policy| policy.resources.workers)
                 .map(|range| range.maximum)
         })
         .unwrap_or(1)
-        .max(1) as usize;
-    let threads_per_worker = sweep
-        .study
-        .execution_policy
-        .as_ref()
-        .and_then(|policy| policy.resources.cpu_threads_per_worker)
-        .map_or(available, |threads| threads as usize);
-    requested
-        .min(available / workers_per_case.saturating_mul(threads_per_worker))
-        .max(1)
-        .min(case_count)
+        .max(1);
+    // Per-case threads come from the same authority as the case's own plan.
+    let threads_per_worker = crate::machine_capacity::study_allocation(
+        workers_per_case,
+        policy.and_then(|policy| policy.resources.cpu_threads_per_worker),
+    )
+    .unwrap_or(1);
+    crate::machine_capacity::case_concurrency(workers_per_case, threads_per_worker, case_count, requested)
 }
 
 async fn execute_case(

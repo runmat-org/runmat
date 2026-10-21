@@ -42,9 +42,12 @@ fn successful_profile_bounds_each_supported_placement_outcome() {
 #[test]
 fn extracted_templates_preserve_existing_diagnostic_content() {
     for (message, code, severity, expected) in [
-        (SuccessfulDiagnostic::CpuMethod(SpdPreconditionerKind::Jacobi),
+        (SuccessfulDiagnostic::CpuMethod(SpdStrategy::Pcg(runmat_sparse_solvers::policy::PreconditionerChoice::Jacobi)),
          "FEA_SOLVER_METHOD", FeaDiagnosticSeverity::Info,
-         "solver=pcg preconditioner=jacobi matrix_free=true"),
+         "solver=pcg preconditioner=jacobi"),
+        (SuccessfulDiagnostic::CpuMethod(SpdStrategy::Cholesky),
+         "FEA_SOLVER_METHOD", FeaDiagnosticSeverity::Info,
+         "solver=sparse_cholesky ordering=nested_dissection"),
         (SuccessfulDiagnostic::AcceleratorMethod(SpdPreconditionerKind::Ilu0),
          "FEA_SOLVER_METHOD", FeaDiagnosticSeverity::Info,
          "solver=pcg preconditioner=ilu0 matrix_free=false backend=accelerator_native_sparse"),

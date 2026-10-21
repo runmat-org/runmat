@@ -3,7 +3,6 @@
 //! The borrowed model/mesh and canonical result encoding are outside this view.
 
 use super::MagnetostaticError;
-use crate::solve::krylov::{GmresPolicy, GmresWorkEnvelope};
 use crate::topology::AnalysisProjection;
 use runmat_analysis_core::AnalysisModel;
 use runmat_canonical_codec::{profile_serialized, CanonicalLimits};

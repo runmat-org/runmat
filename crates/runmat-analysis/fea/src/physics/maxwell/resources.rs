@@ -6,7 +6,6 @@
 use super::{MaxwellCurrentSample, MaxwellError, MaxwellFieldSample, MaxwellVolumeData};
 use crate::{
     results::field::{SampledOrientedEdge, VolumeFieldIntegrationSample},
-    solve::krylov::{GmresPolicy, GmresWorkEnvelope},
     topology::AnalysisProjection,
 };
 use runmat_analysis_core::AnalysisModel;

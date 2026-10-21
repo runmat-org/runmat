@@ -1,11 +1,9 @@
 //! Sparse direct LU over the complete real complex block; physical acceptance.
 use super::{
-    assembly::MaxwellAssembly, complex::ComplexVector3, invalid, operator, recovery, ComplexPhasor,
+    assembly::MaxwellAssembly, complex::ComplexVector3, operator, recovery, ComplexPhasor,
     MaxwellError,
 };
-use crate::{
-    algebra::{dot_canonical, spmv},
-};
+use crate::algebra::{dot_canonical, spmv};
 use runmat_execution::Digest;
 use runmat_meshing_core::StableDigest;
 use serde::{Deserialize, Serialize};

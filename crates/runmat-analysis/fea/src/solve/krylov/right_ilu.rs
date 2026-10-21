@@ -71,6 +71,23 @@ impl SparseRightIlu {
         })
     }
 
+    #[cfg(test)]
+    pub(crate) fn factors(&self) -> Vec<f64> {
+        self.factor.values().to_vec()
+    }
+    #[cfg(test)]
+    pub(crate) fn row_offsets(&self) -> Vec<usize> {
+        self.factor.row_ptr().to_vec()
+    }
+    #[cfg(test)]
+    pub(crate) fn column_indices(&self) -> Vec<usize> {
+        self.factor.col_idx().to_vec()
+    }
+    #[cfg(test)]
+    pub(crate) fn retained_bytes(&self) -> u64 {
+        self.factor.retained_bytes()
+    }
+
     /// Computes `U⁻¹ L⁻¹ input`. For right GMRES apply `A M⁻¹ y`; recover `x = M⁻¹ y`.
     /// Original physical residual/power acceptance remains the caller's duty.
     pub(crate) fn apply(

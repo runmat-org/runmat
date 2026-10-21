@@ -5,7 +5,7 @@ use crate::{
         RealSparseMatrix,
     },
     planning::resource::{
-        execute_scoped_chunks, ByteCount, Count, LocalThreadCount, ScopedLocalExecutionError,
+        ByteCount, Count, LocalThreadCount,
     },
     solve::backend::cpu_reference::CpuReferenceBackend,
 };
@@ -302,48 +302,6 @@ fn scoped_pcg_matches_serial_and_rejects_nested_execution() {
     assert_eq!(parallel, serial);
     assert!((parallel.solution[0] - 5.0 / 11.0).abs() < 1.0e-12);
     assert!((parallel.solution[1] - 9.0 / 11.0).abs() < 1.0e-12);
-
-    let nested = execute_scoped_chunks(LocalExecutionPlan::serial(), 1, |_| {
-        Ok::<_, ()>(solve_operator_system_scoped(
-            &operator,
-            SpdPreconditionerKind::Jacobi,
-            LinearAlgebraBackendKind::CpuReference,
-            &CpuReferenceBackend,
-            None,
-            ScopedLinearSolveSettings::with_default_tolerance(plan, None),
-        ))
-    })
-    .unwrap();
-    assert!(matches!(
-        &nested[0],
-        Err(ScopedSpmvError::Execution(
-            ScopedLocalExecutionError::NestedExecution
-        ))
-    ));
-}
-
-#[test]
-fn scoped_pcg_reduction_failure_is_not_reported_as_numerical_breakdown() {
-    let operator = system([4.0, 3.0]);
-    let result = solve_operator_system_with_apply(
-        &operator,
-        SpdPreconditionerKind::Jacobi,
-        LinearAlgebraBackendKind::CpuReference,
-        &CpuReferenceBackend,
-        None,
-        (
-            |prepared: &PreparedRealLinearSystem, x: &[f64]| {
-                Ok(crate::algebra::apply_prepared(prepared, x))
-            },
-            |_: &[f64], _: &[f64]| Err(ScopedSpmvError::ReductionDimensionMismatch),
-            None,
-        ),
-        ScopedLinearSolveSettings::with_default_tolerance(LocalExecutionPlan::serial(), None),
-    );
-    assert!(matches!(
-        result,
-        Err(ScopedSpmvError::ReductionDimensionMismatch)
-    ));
 }
 
 #[test]

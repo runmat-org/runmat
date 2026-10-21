@@ -8,16 +8,13 @@ mod settings;
 use diagnostics::SuccessfulDiagnostic;
 pub(crate) use diagnostics::{successful_diagnostic_record_count, successful_diagnostics_profile};
 pub(crate) use settings::ScopedLinearSolveSettings;
-pub(crate) use settings::{
-    accelerator_iteration_limit, iteration_limit, DEFAULT_RELATIVE_TOLERANCE,
-};
+pub(crate) use settings::accelerator_iteration_limit;
 
 use admission::{incompatible_system_result, invalid_system_result, rejected_system_result};
 
 use crate::{
     algebra::{
-        validate_prepared_solver_compatibility, AssembledRealSystem, PreparedRealLinearSystem,
-        RealPreconditioner, RealSolver, ScopedSpmvError,
+        validate_prepared_solver_compatibility, AssembledRealSystem, RealPreconditioner, RealSolver, ScopedSpmvError,
     },
     assembly::AssemblySummary,
     contracts::{SolverMethod, SolverPreconditioner},

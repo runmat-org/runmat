@@ -1147,7 +1147,7 @@ fn analysis_run_modal_contract_is_v1_and_typed() {
     assert_eq!(modal_envelope.op_version, "fea.run_modal/v1");
     assert_eq!(
         modal_envelope.data.run.solver_method,
-        SolverMethod::MatrixFreeSubspaceIteration
+        SolverMethod::ShiftInvertBlockLanczos
     );
     let modal_results = modal_envelope
         .data
