@@ -152,6 +152,11 @@ fn type_assignable(expected: AuthoredInputType, actual: AuthoredInputType) -> bo
                     AuthoredInputType::Complex,
                     AuthoredInputType::Integer | AuthoredInputType::Real
                 )
+                // A bare number is a dimensionless quantity.
+                | (
+                    AuthoredInputType::Quantity(QuantityDimension::Dimensionless),
+                    AuthoredInputType::Integer | AuthoredInputType::Real
+                )
         )
 }
 
