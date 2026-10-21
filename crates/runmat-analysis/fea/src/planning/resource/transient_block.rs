@@ -178,17 +178,29 @@ pub fn build_structural_transient_block_resource_plan(
         crate::execution::ANALYSIS_MANIFEST_MAX_ENCODED_BYTES,
         "transient segment closure",
     )?;
-    let segment_construction = add(
-        runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(
-            segment_bytes,
-            2,
-        )
-        .ok_or(ResourcePlanningError::Overflow(
-            "transient segment construction",
-        ))?,
-        segment_closure,
-        "transient segment construction",
+    // The segment is encoded from typed solver vectors, never decoded from a generic value
+    // tree: its construction holds the nine f64 physical vectors per record, the encoded
+    // payload and closure, and fixed per-contract codec state.
+    let segment_records = add(time_point_count, 4, "transient segment records")?;
+    let segment_typed_values = multiply(
+        multiply(segment_records, 9, "transient segment vectors")?,
+        physical_dofs,
+        "transient segment values",
     )?;
+    let segment_construction = [
+        multiply(segment_typed_values, 8, "transient segment typed bytes")?,
+        segment_bytes,
+        segment_closure,
+        multiply(
+            runmat_canonical_codec::CANONICAL_MATERIALIZATION_FIXED_BYTES_PER_CONTRACT,
+            2,
+            "transient segment contract state",
+        )?,
+    ]
+    .into_iter()
+    .try_fold(0_u64, |sum, bytes| {
+        add(sum, bytes, "transient segment construction")
+    })?;
     let segment_output = PreparedOutputResourceFacts {
         encoded_payload_bytes_upper_bound: ByteCount(segment_bytes),
         transport_closure_bytes_upper_bound: ByteCount(segment_closure),
