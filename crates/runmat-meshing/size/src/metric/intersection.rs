@@ -46,7 +46,7 @@ pub(super) fn combine(
 
 /// All principal minors characterize a symmetric positive-semidefinite
 /// difference. Scaling keeps these fixed-size tests away from overflow.
-fn dominates(a: MetricTensor3, b: MetricTensor3) -> bool {
+pub(crate) fn dominates(a: MetricTensor3, b: MetricTensor3) -> bool {
     let [xx, yy, zz, xy, xz, yz] = [
         a.xx - b.xx,
         a.yy - b.yy,

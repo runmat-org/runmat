@@ -577,6 +577,7 @@ fn resolved_curve_metric_grades_fine_edge_constraints_across_topology_adjacency(
     let (_, base, _) = runmat_geometry_fixtures::exact_circle();
     let topology = repeated_circle_topology(&base, 2);
     let request = runmat_meshing_core::MetricFieldRequest {
+        entity_supports: Vec::new(),
         combination: runmat_meshing_core::MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: runmat_meshing_core::MetricTensor3::isotropic_length_m(1.0).unwrap(),
         maximum_grading_ratio: 2.0,
@@ -621,6 +622,7 @@ fn exact_curve_curvature_becomes_a_typed_cancellable_metric_source() {
     let evaluator =
         runmat_geometry_core::PortableExactEvaluator::new(&registry, &topology, model).unwrap();
     let request = runmat_meshing_core::MetricFieldRequest {
+        entity_supports: Vec::new(),
         combination: runmat_meshing_core::MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: runmat_meshing_core::MetricTensor3::isotropic_length_m(1.0).unwrap(),
         maximum_grading_ratio: 1.3,
@@ -876,6 +878,7 @@ fn resolved_metric_request(
 ) -> runmat_meshing_core::MetricFieldRequest {
     let unit = runmat_meshing_core::MetricTensor3::isotropic_length_m(1.0).unwrap();
     runmat_meshing_core::MetricFieldRequest {
+        entity_supports: Vec::new(),
         combination: runmat_meshing_core::MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: unit,
         maximum_grading_ratio: 1.3,

@@ -60,14 +60,50 @@ Implemented selectors include:
 | --- | --- |
 | `select id "..."` | role-scoped alias published by source inspection |
 | `select persistent_id "..."` | canonical persistent entity identity |
-| `select name "..."` | imported authored name |
-| `select tag "..."` | imported semantic tag |
+| `select name "..."` | imported authored face or solid name (see below) |
+| `select tag "..."` | imported presentation layer (STEP `PRESENTATION_LAYER_ASSIGNMENT`) on a face or solid, or on its part |
 | `select result` | final result of constructed geometry |
 | `select feature.<id>` | exact output of a feature |
 | `select boundary_introduced_by feature.<id>` | boundary introduced by one feature operation |
 | `select output.region.<id>` | region returned by generated geometry |
 
 Selectors are resolved at exact realization and then projected onto the solver mesh. Wrong topology, empty selection, cardinality mismatch, missing lineage, or changed source identity fails before assembly.
+
+### Authored names
+
+`select name` matches the names a CAD tool wrote into the file, exactly and case-sensitively:
+
+- a face name written on the STEP face (`ADVANCED_FACE('Fixed end', ...)`);
+- a solid name written on the STEP solid (`MANIFOLD_SOLID_BREP('Coil', ...)`), or else the name of the part (product) that holds the solid. A `cell` region selects by its solid's name.
+
+`runmat fea check` rejects a `select name` that the file does not carry and lists the names it does carry for that role. The `face_000001`-style aliases stay available for files without names; prefer names, because they say which face the study loads or fixes.
+
+## Multi-Body Geometry And Shared Interfaces
+
+A STEP assembly of separate parts imports as separate solids, each with its own faces. Parts that touch keep independent faces at the contact, which is what structural contact and the `interface` pairs in [constraints/interfaces.md](./constraints/interfaces.md) need.
+
+For a conformal multi-body mesh (a part inside an air region, a coil and core in air, fluid against a solid wall), join the bodies:
+
+```fea
+geometry cell {
+    file = "./geometry/induction-gear.step"
+    units = mm
+    interfaces = shared
+    region gear : solid { select name "Gear"; expect exactly_one }
+    region air : solid { select name "Air"; expect one_or_more }
+    region coil_in : face { select name "Coil terminal in"; expect exactly_one }
+}
+```
+
+With `interfaces = shared`, every solid of every placed part enters one General Fuse. Where two solids touch, their coincident faces become one face used by both solids, imprinted where a smaller face covers part of a larger one. The mesh then shares nodes across that face, which is classified as a conformal interface between the two volume regions. `interfaces = separate` is the default.
+
+- Bodies may touch but must not interpenetrate. Import fails, naming the bodies, when a solid would be split by another.
+- Each solid keeps its own name, or its part's name. A shared face carries the names authored on every face it replaced, the name from the smaller solid first, so `select name` finds it by the part's face name ("Coil terminal in") or by the surrounding body's name for that face if one was written.
+- `face_000001`-style aliases number the faces of the joined geometry.
+- A single STEP part whose solids already share faces (a General Fuse result written as one body) imports with those shared faces either way.
+- A solid with several cavities (an air box around a gear and a coil) imports as one solid with one void shell per cavity.
+
+From the command line, `runmat mesh part.step --shared-interfaces` meshes the joined geometry.
 
 ## Construct Geometry
 

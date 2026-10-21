@@ -52,6 +52,10 @@ pub(super) fn visit_from_metric_contexts(
                     context.tetrahedron_node_identities,
                     protected_facets,
                 ),
+                protected_edges: super::protected_edge_mask(
+                    context.tetrahedron_node_identities,
+                    protected_facets,
+                ),
             },
             options,
         )?;

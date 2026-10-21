@@ -6,12 +6,14 @@ use serde::{Deserialize, Serialize};
 
 mod directional;
 mod exact_faces;
-pub use exact_faces::ExactFaceMetricResolutionError;
+pub use exact_faces::{ExactFaceMetricResolutionError, ExactFaceSizing};
 mod subspace;
 pub use subspace::DirectionalMetricEnvelope;
 mod index;
 mod intersection;
 mod uniform;
+mod local;
+pub use local::{LocalMetricSource, MetricEntitySupport};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MetricContractError {
@@ -218,6 +220,10 @@ pub struct MetricFieldRequest {
     pub maximum_grading_ratio: f64,
     #[serde(default)]
     pub contributions: Vec<MetricContribution>,
+    /// World-space supports of entity-local contribution scopes, ordered by entity identity.
+    /// A supported scope is graded by distance instead of applying across incident faces.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub entity_supports: Vec<MetricEntitySupport>,
 }
 
 impl MetricFieldRequest {
@@ -238,6 +244,7 @@ impl MetricFieldRequest {
         for contribution in &self.contributions {
             contribution.validate()?;
         }
+        local::validate_supports(&self.entity_supports)?;
         if self
             .contributions
             .windows(2)

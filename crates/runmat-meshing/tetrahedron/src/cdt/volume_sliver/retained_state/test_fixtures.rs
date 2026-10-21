@@ -81,6 +81,7 @@ pub(in crate::cdt::volume_sliver) fn quality(
     topology: &DelaunayVolumeTopology,
 ) -> DelaunayVolumeQuality {
     let metric = MetricFieldRequest {
+        entity_supports: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(10.).unwrap(),
         maximum_grading_ratio: 1.5,

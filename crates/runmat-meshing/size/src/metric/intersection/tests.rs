@@ -38,6 +38,7 @@ fn thousands_of_noncommuting_sources_do_not_multiply_density_or_refine_the_commo
             });
         }
         let request = MetricFieldRequest {
+            entity_supports: Vec::new(),
             combination: MetricCombinationRule::MostRestrictiveIntersection,
             global_metric: base,
             maximum_grading_ratio: 1.3,

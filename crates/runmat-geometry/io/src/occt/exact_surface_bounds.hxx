@@ -1,6 +1,9 @@
 #pragma once
 
+#include <BRepAdaptor_Surface.hxx>
 #include <BRepTools.hxx>
+#include <BRep_Tool.hxx>
+#include <cmath>
 #include <BRepTools_ShapeSet.hxx>
 #include <TopoDS.hxx>
 #include <rust/cxx.h>
@@ -41,8 +44,25 @@ public:
       }
       auto& entry = entries_[index];
       entry.face_key = key;
-      BRepTools::UVBounds(TopoDS::Face(shape), entry.bounds[0], entry.bounds[1],
-                         entry.bounds[2], entry.bounds[3]);
+      const TopoDS_Face& face = TopoDS::Face(shape);
+      BRepTools::UVBounds(face, entry.bounds[0], entry.bounds[1], entry.bounds[2],
+                         entry.bounds[3]);
+      // A tolerant face's pcurves may run past a surface's natural domain by up to the
+      // parameter equivalent of its edge tolerance; admit that margin, nothing more.
+      const double tolerance = BRep_Tool::MaxTolerance(face, TopAbs_EDGE);
+      if (std::isfinite(tolerance) && tolerance > 0.0) {
+        const BRepAdaptor_Surface surface(face, Standard_False);
+        const double du = surface.UResolution(tolerance);
+        const double dv = surface.VResolution(tolerance);
+        if (std::isfinite(du) && du > 0.0 && !surface.IsUPeriodic()) {
+          entry.bounds[0] -= du;
+          entry.bounds[1] += du;
+        }
+        if (std::isfinite(dv) && dv > 0.0 && !surface.IsVPeriodic()) {
+          entry.bounds[2] -= dv;
+          entry.bounds[3] += dv;
+        }
+      }
     }
   }
 

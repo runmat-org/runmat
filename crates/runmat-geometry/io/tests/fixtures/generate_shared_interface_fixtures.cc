@@ -15,6 +15,8 @@
 //                                 bottom face "Cold face"); they touch over their full 20 x 20 face.
 //   overlapping_parts_assembly.step  Two 10 mm cubes ("First", "Second") that interpenetrate by
 //                                 5 mm, which shared interfaces must reject.
+//   free_wireframe_part.step      One product: a 10 mm cube plus a free construction line that
+//                                 starts at one of its corners (no face uses the line).
 //   fused_compound.step           One product whose shape is the General Fuse of a cube and its
 //                                 air box: two solids that already share the cavity faces, named by
 //                                 their solid entities ("Part", "Air").
@@ -27,6 +29,9 @@
 // Run: ./generate_shared_interface_fixtures <out-dir/>
 #include <BRepAlgoAPI_BuilderAlgo.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
+#include <BRepBuilderAPI_MakeEdge.hxx>
+#include <BRep_Builder.hxx>
+#include <TopoDS_Compound.hxx>
 #include <BRepGProp.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <DESTEP_Parameters.hxx>
@@ -173,6 +178,18 @@ int main(int argc, char** argv) {
   ok = ok && write_assembly(dir + "overlapping_parts_assembly.step", "Clash",
                             {{"First", box(0, 0, 0, 10, 10, 10), {}},
                              {"Second", box(5, 0, 0, 10, 10, 10), {}}});
+
+  {
+    BRep_Builder builder;
+    TopoDS_Compound part;
+    builder.MakeCompound(part);
+    builder.Add(part, box(0, 0, 0, 10, 10, 10));
+    builder.Add(part, BRepBuilderAPI_MakeEdge(gp_Pnt(10, 10, 10), gp_Pnt(20, 25, 30)).Edge());
+    Handle(TDocStd_Document) doc = new_document();
+    Handle(XCAFDoc_ShapeTool) shapes = XCAFDoc_DocumentTool::ShapeTool(doc->Main());
+    TDataStd_Name::Set(shapes->AddShape(part, Standard_False), "Cube");
+    ok = ok && write(doc, dir + "free_wireframe_part.step");
+  }
 
   // One product: the General Fuse of the cube and the air box shares the cube faces.
   BRepAlgoAPI_BuilderAlgo fuse;
