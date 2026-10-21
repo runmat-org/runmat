@@ -148,9 +148,15 @@ fn resolve_target(
         }
         MixedStructuralTargetOwnership::Explicit { canonical_nodes }
     };
-    let requires_mixed = !matches!(ownership, MixedStructuralTargetOwnership::Solid { .. });
     let explicit_ownership = matches!(ownership, MixedStructuralTargetOwnership::Explicit { .. });
+    let solid_ownership = matches!(ownership, MixedStructuralTargetOwnership::Solid { .. });
     let nodes = ownership.into_canonical_nodes();
+    // A mesh node that carries realized beam or shell rotations is constrained in the mixed
+    // node space, so a fixed support also fixes its rotations.
+    let requires_mixed = !solid_ownership
+        || nodes
+            .iter()
+            .any(|node| topology.nodes[*node].owns_explicit_rotation);
     let resolved = if !explicit_ownership {
         resolve_nodal_target(
             mesh.expect("solid target ownership requires a solver mesh"),

@@ -61,8 +61,13 @@ impl CompiledPropertyMap {
             &mut total,
             map_slots::<StableDigest, CompiledShellProperty>(shell_properties.len())?,
         )?;
+        // Keys (digests) are charged by the map slots above; profile only the owned values,
+        // since canonical profiles admit scalar map keys only.
         let sections = profile_serialized(
-            &(beam_properties.as_ref(), shell_properties.as_ref()),
+            &(
+                beam_properties.values().collect::<Vec<_>>(),
+                shell_properties.values().collect::<Vec<_>>(),
+            ),
             limits,
         )
         .map_err(|error| error.to_string())?
