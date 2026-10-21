@@ -297,7 +297,10 @@ mod tests {
         assert!(from_counts(u64::MAX, 1, 1, 0, 0, 0).is_err());
         assert!(from_counts(1, 1, 1, u64::MAX, 0, 0).is_err());
         assert!(from_counts(1, 1, 1, 0, 0, u64::MAX).is_err());
-        assert!(from_counts(u64::from(u32::MAX), 0, 0, 0, 0, 0).is_err());
+        // The direct factor reservation grows with the unknown count; there is no
+        // iteration-counter ceiling any more.
+        let large = from_counts(u64::from(u32::MAX), 0, 0, 0, 0, 0).unwrap();
+        assert!(large.total_bytes > 256 * (1u64 << 30));
     }
 
     #[test]

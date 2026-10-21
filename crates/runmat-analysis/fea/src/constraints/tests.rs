@@ -1051,7 +1051,7 @@ fn canonical_solid_solve_enforces_exact_multiplier_equations() {
     assert!(solve.relative_residual.is_some_and(|value| value <= 1e-8));
     assert_eq!(
         solve.solver_method,
-        crate::contracts::SolverMethod::MatrixFreeSaddlePointGmres
+        crate::contracts::SolverMethod::SparseDirectCholesky
     );
     assert!((solve.solution[3] - solve.solution[6] - 0.001).abs() <= 1.0e-9);
     let execution = crate::planning::resource::LocalExecutionPlan::fixed(
@@ -1180,7 +1180,7 @@ fn multiplier_solver_rejects_an_unremoved_mechanism_before_iteration() {
         solve
             .diagnostics
             .iter()
-            .any(|diagnostic| diagnostic.code == "FEA_INVALID_MULTIPLIER_SOLVER_ADMISSION"),
+            .any(|diagnostic| diagnostic.code == "FEA_INVALID_AFFINE_SOLVER_ADMISSION"),
         "{:?}",
         solve.diagnostics
     );

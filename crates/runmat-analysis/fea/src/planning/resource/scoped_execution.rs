@@ -56,6 +56,12 @@ thread_local! {
     static EXECUTING_LOCAL_CHUNK: Cell<bool> = const { Cell::new(false) };
 }
 
+/// True while this thread executes a chunk of an admitted local plan. Work that would open its
+/// own parallel execution must fail closed instead of oversubscribing the admitted cores.
+pub(crate) fn local_chunk_active() -> bool {
+    EXECUTING_LOCAL_CHUNK.with(Cell::get)
+}
+
 struct LocalChunkGuard;
 
 impl LocalChunkGuard {

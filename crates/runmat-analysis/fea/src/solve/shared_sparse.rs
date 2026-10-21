@@ -156,6 +156,28 @@ pub(crate) fn solve_spd(request: SpdSolveRequest<'_>) -> SpdSolveOutcome {
         let a = arrays.view();
         match strategy {
             SpdStrategy::Cholesky => {
+                // Warm starts are corrections: x = x0 + A⁻¹(b − A x0); an initial guess that
+                // already meets the tolerance is returned unchanged (zero iterations).
+                let mut x = match initial_guess {
+                    Some(guess) if guess.len() == n => guess.to_vec(),
+                    _ => vec![0.0; n],
+                };
+                let mut ax = vec![0.0; n];
+                a.spmv(&x, &mut ax);
+                let initial: Vec<f64> = rhs.iter().zip(&ax).map(|(b, v)| b - v).collect();
+                let initial_norm = runmat_sparse_solvers::par::norm2(&initial);
+                let reference = reference_norm(rhs, initial_norm);
+                if initial_norm <= relative_tolerance * reference {
+                    return SpdSolveOutcome {
+                        converged: true,
+                        solution: x,
+                        iterations: 0,
+                        residual_norm: initial_norm,
+                        reference_norm: reference,
+                        cancelled: false,
+                        failure: None,
+                    };
+                }
                 let owned;
                 let solver = match factor {
                     Some(solver) => solver,
@@ -174,17 +196,16 @@ pub(crate) fn solve_spd(request: SpdSolveRequest<'_>) -> SpdSolveOutcome {
                         &owned
                     }
                 };
-                let mut x = vec![0.0; n];
-                let report = match solver.solve_refined(a.into(), rhs, &mut x, 1) {
-                    Ok(report) => report,
-                    Err(error) => return failure(format!("sparse Cholesky solve failed: {error}")),
-                };
-                let mut ax = vec![0.0; n];
+                let mut correction = vec![0.0; n];
+                if let Err(error) = solver.solve_refined(a.into(), &initial, &mut correction, 1) {
+                    return failure(format!("sparse Cholesky solve failed: {error}"));
+                }
+                for (value, delta) in x.iter_mut().zip(&correction) {
+                    *value += delta;
+                }
                 a.spmv(&x, &mut ax);
                 let residual: Vec<f64> = rhs.iter().zip(&ax).map(|(b, v)| b - v).collect();
                 let residual_norm = runmat_sparse_solvers::par::norm2(&residual);
-                let reference = reference_norm(rhs, residual_norm);
-                let _ = report;
                 SpdSolveOutcome {
                     converged: residual_norm <= relative_tolerance.max(1e-14) * reference || residual_norm == 0.0,
                     solution: x,

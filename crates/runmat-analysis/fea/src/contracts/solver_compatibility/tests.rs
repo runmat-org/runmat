@@ -27,11 +27,11 @@ fn magnetic_saddle_method_cannot_claim_electrical_or_harmonic_algebra() {
         TemporalImplementation::MagnetostaticWeakCoulombSaddleSolve,
         SolutionSpace::Direct,
         CouplingImplementation::Uncoupled,
-        SolverMethod::AssembledSaddlePointGmres,
+        SolverMethod::SparseDirectLdlt,
     ));
     for method in [
         SolverMethod::AssembledPcg,
-        SolverMethod::MatrixFreeSaddlePointGmres,
+        SolverMethod::SparseDirectLu,
         SolverMethod::StructuralDirectHarmonicGmres,
     ] {
         assert!(!method_is_compatible(
@@ -45,16 +45,16 @@ fn magnetic_saddle_method_cannot_claim_electrical_or_harmonic_algebra() {
         TemporalImplementation::ElectrostaticPotentialLinearSolve,
         SolutionSpace::Direct,
         CouplingImplementation::Uncoupled,
-        SolverMethod::AssembledSaddlePointGmres,
+        SolverMethod::SparseDirectLdlt,
     ));
     assert!(preconditioner_is_compatible(
         TemporalImplementation::MagnetostaticWeakCoulombSaddleSolve,
-        SolverMethod::AssembledSaddlePointGmres,
+        SolverMethod::SparseDirectLdlt,
         SolverPreconditioner::None,
     ));
     assert!(!preconditioner_is_compatible(
         TemporalImplementation::MagnetostaticWeakCoulombSaddleSolve,
-        SolverMethod::AssembledSaddlePointGmres,
+        SolverMethod::SparseDirectLdlt,
         SolverPreconditioner::Jacobi,
     ));
 }
@@ -138,15 +138,15 @@ fn canonical_maxwell_reports_only_genuine_general_gmres_without_spd_or_gauge_cla
                 .unwrap();
         validate_solver_formulation_compatibility(
             &identity,
-            SolverMethod::GeneralGmres,
+            SolverMethod::SparseDirectLu,
             SolverPreconditioner::None,
         )
         .unwrap();
         for method in [
             SolverMethod::AssembledPcg,
-            SolverMethod::MatrixFreePcg,
-            SolverMethod::AssembledSaddlePointGmres,
-            SolverMethod::MatrixFreeSaddlePointGmres,
+            SolverMethod::GeneralGmres,
+            SolverMethod::SparseDirectCholesky,
+            SolverMethod::SparseDirectLdlt,
             SolverMethod::StructuralDirectHarmonicGmres,
             SolverMethod::StructuralDirectHarmonicGmres,
             SolverMethod::DenseDirect,
@@ -165,7 +165,7 @@ fn canonical_maxwell_reports_only_genuine_general_gmres_without_spd_or_gauge_cla
         ] {
             assert!(validate_solver_formulation_compatibility(
                 &identity,
-                SolverMethod::GeneralGmres,
+                SolverMethod::SparseDirectLu,
                 preconditioner
             )
             .is_err());
@@ -177,7 +177,7 @@ fn canonical_maxwell_reports_only_genuine_general_gmres_without_spd_or_gauge_cla
         .unwrap();
         assert!(validate_solver_formulation_compatibility(
             &magnetic,
-            SolverMethod::GeneralGmres,
+            SolverMethod::SparseDirectLu,
             SolverPreconditioner::None
         )
         .is_err());
@@ -197,26 +197,26 @@ fn structural_temporals_admit_only_their_solver_families() {
         (
             AnalysisProcedure::Static,
             SolutionSpace::Direct,
-            SolverMethod::MatrixFreePcg,
+            SolverMethod::AssembledPcg,
             SolverPreconditioner::Jacobi,
         ),
         (
             AnalysisProcedure::ModalExtraction,
             SolutionSpace::Direct,
             SolverMethod::ShiftInvertBlockLanczos,
-            SolverPreconditioner::Ilu0,
+            SolverPreconditioner::SparseCholesky,
         ),
         (
             AnalysisProcedure::PrestressedModalExtraction,
             SolutionSpace::Direct,
             SolverMethod::ShiftInvertBlockLanczos,
-            SolverPreconditioner::Jacobi,
+            SolverPreconditioner::SparseCholesky,
         ),
         (
             AnalysisProcedure::EigenvalueBuckling,
             SolutionSpace::Direct,
             SolverMethod::BucklingBlockLanczos,
-            SolverPreconditioner::Ilu0,
+            SolverPreconditioner::SparseCholesky,
         ),
         (
             AnalysisProcedure::HarmonicResponse,
@@ -280,19 +280,19 @@ fn nonstructural_temporals_admit_only_their_solver_families() {
         (
             PhysicsFamily::Thermal,
             AnalysisProcedure::Static,
-            SolverMethod::MatrixFreePcg,
-            SolverPreconditioner::Jacobi,
+            SolverMethod::SparseDirectCholesky,
+            SolverPreconditioner::None,
         ),
         (
             PhysicsFamily::Thermal,
             AnalysisProcedure::TransientResponse,
-            SolverMethod::MatrixFreePcg,
+            SolverMethod::AssembledPcg,
             SolverPreconditioner::Jacobi,
         ),
         (
             PhysicsFamily::Electromagnetic,
             AnalysisProcedure::HarmonicResponse,
-            SolverMethod::GeneralGmres,
+            SolverMethod::SparseDirectLu,
             SolverPreconditioner::None,
         ),
         (
@@ -343,7 +343,7 @@ fn persisted_run_rejects_solver_or_preconditioner_substitution() {
             execution_backend: ExecutionBackend::Cpu,
             solver_backend: LinearAlgebraBackendKind::CpuReference,
             solver_device_apply_k_ratio: 0.0,
-            solver_method: SolverMethod::MatrixFreePcg,
+            solver_method: SolverMethod::AssembledPcg,
             preconditioner: SolverPreconditioner::Jacobi,
             solver_host_sync_count: 0,
             accelerator_evidence: Vec::new(),
@@ -417,7 +417,7 @@ fn persisted_run_rejects_solver_or_preconditioner_substitution() {
     unexpected_static_evidence.identity =
         structural_identity(AnalysisProcedure::ModalExtraction, SolutionSpace::Direct);
     unexpected_static_evidence.solver_method = SolverMethod::ShiftInvertBlockLanczos;
-    unexpected_static_evidence.preconditioner = SolverPreconditioner::Ilu0;
+    unexpected_static_evidence.preconditioner = SolverPreconditioner::SparseCholesky;
     assert_eq!(
         unexpected_static_evidence.validate_solver_formulation(),
         Err(SolverFormulationCompatibilityError::UnexpectedStructuralStaticConvergence)

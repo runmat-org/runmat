@@ -351,12 +351,17 @@ fn pseudo_acceleration_missing_mass_recovers_the_independent_static_field() {
     )
     .unwrap();
     let first_mode = &run.basis.modes()[0];
-    let axis = first_mode
-        .directional()
-        .iter()
-        .enumerate()
-        .max_by(|(_, left), (_, right)| left.effective_mass().total_cmp(&right.effective_mass()))
-        .map(|(axis, _)| axis)
+    // The axis with the least captured effective mass has a nonzero missing-mass
+    // correction for any orthonormal basis of a repeated eigenspace.
+    let captured = |axis: usize| {
+        run.basis
+            .modes()
+            .iter()
+            .map(|mode| mode.directional()[axis].effective_mass())
+            .sum::<f64>()
+    };
+    let axis = (0..3)
+        .min_by(|left, right| captured(*left).total_cmp(&captured(*right)))
         .unwrap();
     let mut direction = [0.0; 3];
     direction[axis] = 1.0;
@@ -430,7 +435,7 @@ fn pseudo_acceleration_missing_mass_recovers_the_independent_static_field() {
             recover_modal_response_spectrum_fields(&summary, &run.basis, &result).unwrap();
         assert_eq!(
             recovery.deformation().missing_mass_static_preconditioner(),
-            Some(crate::solve::preconditioner::SpdPreconditionerKind::Ilu0)
+            Some(crate::solve::preconditioner::SpdPreconditionerKind::Direct)
         );
         let recovered = recovery
             .field(StructuralLinearFieldQuantity::Stress)
@@ -519,7 +524,7 @@ fn directional_residual_vector_is_generated_in_the_basis_and_combined_as_a_mode(
         serde_json::from_value(published).unwrap();
     assert_eq!(
         restored.residual_vectors()[0].static_correction_preconditioner(),
-        crate::solve::preconditioner::SpdPreconditionerKind::Ilu0
+        crate::solve::preconditioner::SpdPreconditionerKind::Direct
     );
     assert!(residual.frequency_hz() > basis.modes().last().unwrap().frequency_hz());
     assert!(residual.static_equilibrium_residual_ratio() <= 1.0e-8);

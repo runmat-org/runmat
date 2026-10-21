@@ -151,22 +151,37 @@ fn physical_random_response_matches_independent_dense_reference_and_round_trips(
     .to_string()
     .contains("incomplete"));
 
-    let participation = mode.directional()[0].participation_factor();
-    let dof = mode
-        .dof_shape()
-        .iter()
-        .enumerate()
-        .max_by(|left, right| left.1.abs().total_cmp(&right.1.abs()))
-        .map(|(index, _)| index)
+    // Basis-independent reference: the x-channel response of every retained mode, including
+    // the cross terms of repeated frequencies, so any orthonormal basis of a degenerate
+    // eigenspace gives the same variance.
+    let modes = basis.modes();
+    let coefficient = |dof: usize| -> Vec<f64> {
+        modes
+            .iter()
+            .map(|mode| mode.dof_shape()[dof] * mode.directional()[0].participation_factor())
+            .collect()
+    };
+    let dof = (0..mode.dof_shape().len())
+        .max_by(|left, right| {
+            let total = |dof: usize| coefficient(dof).iter().sum::<f64>().abs();
+            total(*left).total_cmp(&total(*right))
+        })
         .unwrap();
+    let weights = coefficient(dof);
     let panel_count = 400_000_usize;
     let step = (upper - lower) / panel_count as f64;
     let ordinate = |frequency_hz: f64| {
         let angular = std::f64::consts::TAU * frequency_hz;
-        let natural = std::f64::consts::TAU * mode.frequency_hz();
-        let denominator = (natural * natural - angular * angular).powi(2)
-            + (2.0 * policy().modal_damping_ratio * natural * angular).powi(2);
-        mode.dof_shape()[dof].powi(2) * participation.powi(2) * density / denominator
+        let (mut real, mut imaginary) = (0.0, 0.0);
+        for (mode, weight) in modes.iter().zip(&weights) {
+            let natural = std::f64::consts::TAU * mode.frequency_hz();
+            let a = natural * natural - angular * angular;
+            let b = 2.0 * policy().modal_damping_ratio * natural * angular;
+            let denominator = a * a + b * b;
+            real += weight * a / denominator;
+            imaginary -= weight * b / denominator;
+        }
+        (real * real + imaginary * imaginary) * density
     };
     let mut dense = 0.5 * (ordinate(lower) + ordinate(upper));
     for index in 1..panel_count {

@@ -60,6 +60,17 @@ pub(super) fn solve_structural_system_with_execution(
     plan: LocalExecutionPlan,
     admission: Option<&SolverAdmissionResourcePolicy>,
 ) -> Result<LinearSolveResult, ScopedSpmvError> {
+    if crate::planning::resource::local_chunk_active() {
+        return Err(ScopedSpmvError::Execution(
+            crate::planning::resource::ScopedLocalExecutionError::NestedExecution,
+        ));
+    }
+    if crate::is_fea_cancelled() {
+        // A cancelled solve reports the cancelled admitted work, not a numerical outcome.
+        crate::planning::resource::execute_scoped_chunks(plan, 1, |_| {
+            Err::<(), _>(crate::algebra::SpmvWorkError::Cancelled)
+        })?;
+    }
     if let Some(reduction) = summary.affine_constraint_reduction.as_ref() {
         return solve_affine_constraint_system_with_execution(
             summary,

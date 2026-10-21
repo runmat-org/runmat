@@ -232,7 +232,7 @@ fn static_pcg_preserves_a_manufactured_solution_under_operator_and_load_scaling(
 }
 
 #[test]
-fn zero_load_warm_start_uses_initial_residual_as_relative_reference() {
+fn zero_load_warm_start_returns_the_exact_zero_solution() {
     let stiffness = RealSparseMatrix::diagonal(
         vec![2.0, 4.0],
         OperatorRole::Stiffness,
@@ -265,8 +265,10 @@ fn zero_load_warm_start_uses_initial_residual_as_relative_reference() {
         Some(&[1.0, -1.0]),
     );
     assert!(solved.converged, "{:?}", solved.diagnostics);
-    assert!(solved.iterations > 0);
-    assert!(solved.solution.iter().all(|value| value.abs() <= 1.0e-12));
+    // A homogeneous nonsingular system has the exact solution zero, whatever the warm start.
+    assert_eq!(solved.iterations, 0);
+    assert!(solved.solution.iter().all(|value| *value == 0.0));
+    assert_eq!(solved.relative_residual, Some(0.0));
 }
 
 #[test]

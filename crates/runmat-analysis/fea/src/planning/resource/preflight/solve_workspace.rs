@@ -141,7 +141,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn multiplier_preflight_names_gmres_without_charging_an_unused_preconditioner() {
+    fn multiplier_preflight_plans_the_reduced_spd_solve() {
         let admission = SolverAdmissionResourcePolicy {
             dimension: Count(8),
             factor_nonzero_upper_bound: Count(36),
@@ -158,21 +158,21 @@ mod tests {
             0,
         )
         .unwrap();
-        let SolveResourcePolicy::SaddlePointGmres {
-            block_dimension,
-            restart,
-            maximum_iterations,
-            workspace_bytes_upper_bound,
+        let SolveResourcePolicy::Iterative {
+            vector_count,
+            preconditioner,
             admission: planned_admission,
+            ..
         } = policy
         else {
-            panic!("multiplier solve must have a saddle GMRES policy");
+            panic!("multiplier solve is planned as the affine-reduced SPD solve");
         };
-        assert_eq!(block_dimension, Count(19));
-        assert_eq!(restart, Count(19));
-        assert_eq!(maximum_iterations, Count(256));
         assert_eq!(planned_admission, admission);
-        assert!(workspace_bytes_upper_bound.0 >= 19 * 20 * 8);
+        assert_eq!(vector_count, Count(101));
+        assert!(matches!(
+            preconditioner,
+            PreconditionerStorage::SparseCsr { .. }
+        ));
     }
 
     #[test]

@@ -61,10 +61,12 @@ fn checked_counts_and_actual_shared_krylov_counter_fail_closed() {
         (1, 1, 1, u64::MAX, 0, 0),
         (1, 1, 1, 0, u64::MAX, 0),
         (1, 1, 1, 0, 0, u64::MAX),
-        (1, u64::from(u32::MAX) / 480 + 1, 1, 0, 0, 0),
     ] {
         assert!(from_counts(values.0, values.1, values.2, values.3, values.4, values.5).is_err());
     }
+    // The sparse LU reservation scales with the element count, with no iteration-counter cap.
+    let huge = from_counts(1, u64::from(u32::MAX) / 480 + 1, 1, 0, 0, 0).unwrap();
+    assert!(huge.assembly_and_solver_bytes > 16 * (1u64 << 30));
     let small = from_counts(10, 1, 4, 100, 100, 100).unwrap();
     let large = from_counts(27, 8, 24, 101, 101, 101).unwrap();
     assert!(large.total_bytes > small.total_bytes);
