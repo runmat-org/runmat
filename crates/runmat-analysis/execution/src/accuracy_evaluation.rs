@@ -116,7 +116,17 @@ pub fn prepare_accuracy(
         ));
     }
     let source_result = numerical_receipt.source_result();
-    if preparation.source_observations.is_some() == preparation.step.observations.is_empty() {
+    // A sampled source (one frequency of an acoustic sweep) publishes observations only at the
+    // coordinates its authored observations sample; its source context checks that exactly.
+    let sampled_source = matches!(
+        preparation.source_kind,
+        runmat_analysis_fea::execution::AccuracySourceKind::AcousticHarmonic
+    );
+    if (preparation.source_observations.is_some() && preparation.step.observations.is_empty())
+        || (!sampled_source
+            && preparation.source_observations.is_none()
+            && !preparation.step.observations.is_empty())
+    {
         return Err(AnalysisBridgeError::Invalid(
             "accuracy observation publication presence differs from authored declarations".into(),
         ));
