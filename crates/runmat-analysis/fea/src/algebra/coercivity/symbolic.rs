@@ -33,6 +33,19 @@ pub(crate) struct CoercivityWorkEnvelope {
     factor_nonzero_limit: u64,
     update_limit: u64,
     resident_bytes_limit: u64,
+    /// Graph-count budgets of the anchored local-energy proof (independent of factorization).
+    energy_operation_limit: u64,
+    energy_resident_limit: u64,
+}
+
+/// Local-energy proof budgets from the undirected graph size: work ≤ 1024 (n + |E|) + n and
+/// storage ≤ 192 B · (16 (n + |E|) + n) + 256 B · n.
+fn energy_limits(dimension: u64, edges: u64) -> Option<(u64, u64)> {
+    let input = dimension.checked_add(edges)?;
+    let operations = input.checked_mul(1024)?.checked_add(dimension)?;
+    let entries = input.checked_mul(16)?.checked_add(dimension)?;
+    let resident = entries.checked_mul(192)?.checked_add(dimension.checked_mul(256)?)?;
+    Some((operations, resident))
 }
 
 impl CoercivityWorkEnvelope {
@@ -42,16 +55,35 @@ impl CoercivityWorkEnvelope {
             return Err(CoercivityError::IncompatibleOperator);
         }
         let estimate = analyze(pattern)?;
-        Self::from_estimate(&estimate)
+        let mut edges = std::collections::BTreeSet::new();
+        for row in 0..pattern.rows() {
+            for entry in pattern.row_range(row) {
+                let column = pattern.column(entry);
+                if row != column {
+                    edges.insert((row.min(column), row.max(column)));
+                }
+            }
+        }
+        Self::from_estimate(&estimate, edges.len() as u64)
     }
 
-    pub(super) fn from_estimate(estimate: &FactorEstimate) -> Result<Self, CoercivityError> {
+    pub(super) fn from_estimate(estimate: &FactorEstimate, edges: u64) -> Result<Self, CoercivityError> {
         let dimension = u64::try_from(estimate.dimension).map_err(|_| CoercivityError::WorkOverflow)?;
+        let (energy_operation_limit, energy_resident_limit) =
+            energy_limits(dimension, edges).ok_or(CoercivityError::WorkOverflow)?;
         Ok(Self {
+            energy_operation_limit,
+            energy_resident_limit,
             dimension,
             factor_nonzero_limit: with_headroom(estimate.factor_entries).ok_or(CoercivityError::WorkOverflow)?,
-            update_limit: with_headroom(flop_count(estimate)).ok_or(CoercivityError::WorkOverflow)?,
-            resident_bytes_limit: with_headroom(estimate.peak_bytes()).ok_or(CoercivityError::WorkOverflow)?,
+            // Either proof method may run: the limits cover the Cholesky factorization and the
+            // anchored local-energy proof.
+            update_limit: with_headroom(flop_count(estimate))
+                .ok_or(CoercivityError::WorkOverflow)?
+                .max(energy_operation_limit),
+            resident_bytes_limit: with_headroom(estimate.peak_bytes())
+                .ok_or(CoercivityError::WorkOverflow)?
+                .max(energy_resident_limit),
         })
     }
 
@@ -66,6 +98,12 @@ impl CoercivityWorkEnvelope {
     }
     pub(crate) fn resident_bytes_limit(self) -> u64 {
         self.resident_bytes_limit
+    }
+    pub(crate) fn energy_operation_limit(self) -> u64 {
+        self.energy_operation_limit
+    }
+    pub(crate) fn energy_resident_limit(self) -> u64 {
+        self.energy_resident_limit
     }
 }
 

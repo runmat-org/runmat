@@ -508,12 +508,12 @@ fn directional_residual_vector_is_generated_in_the_basis_and_combined_as_a_mode(
     let residual = &basis.residual_vectors()[0];
     assert_eq!(
         residual.static_correction_preconditioner(),
-        crate::solve::preconditioner::SpdPreconditionerKind::Ilu0
+        crate::solve::preconditioner::SpdPreconditionerKind::Direct
     );
     let published = serde_json::to_value(&basis).unwrap();
     assert_eq!(
         published["residual_vectors"][0]["static_correction_preconditioner"],
-        "ilu0"
+        "direct"
     );
     let restored: crate::pipeline::modal_basis::ModalBasisArtifact =
         serde_json::from_value(published).unwrap();

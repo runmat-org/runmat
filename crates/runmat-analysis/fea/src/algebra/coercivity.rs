@@ -24,9 +24,13 @@ pub(crate) use symbolic::CoercivityWorkEnvelope;
 #[derive(Clone)]
 pub(crate) struct SharedFactor(pub std::sync::Arc<runmat_sparse_solvers::direct::DirectSolver<f64>>);
 
+/// Factors are derived data: the certificate binds the exact operator, so two factors of the
+/// same certified operator compare equal.
 impl PartialEq for SharedFactor {
     fn eq(&self, other: &Self) -> bool {
         std::sync::Arc::ptr_eq(&self.0, &other.0)
+            || (self.0.kind() == other.0.kind()
+                && self.0.symbolic().fingerprint() == other.0.symbolic().fingerprint())
     }
 }
 
