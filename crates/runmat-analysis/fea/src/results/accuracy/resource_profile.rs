@@ -91,7 +91,7 @@ struct Projection<'a> {
 
 impl Serialize for Projection<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(Some(11))?;
+        let mut map = serializer.serialize_map(Some(10))?;
         map.serialize_entry("schema_version", &2_u16)?;
         map.serialize_entry("identity", &Digest::sha256([]))?;
         map.serialize_entry("evaluation_request", &self.request.identity())?;

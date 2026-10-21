@@ -24,7 +24,7 @@ use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{
     ArtifactAccess, ExecutionBundleBuilder, ProgramExecutionDescriptor, ProgramExecutionInputs,
     ProgramExecutionObject, ProgramExecutionObjectClosure, ProgramExecutionObjectLocation,
-    ProgramExecutionOutputs, PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+    ProgramExecutionOutputs, PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
 };
 use runmat_execution_runner::WorkerSpec;
 use runmat_execution_transport_native::control::{
@@ -325,6 +325,7 @@ impl DriverControlPlane for DurableControl {
                 .map(|id| artifact_download(id, state.artifacts.get(id).unwrap())),
             cancellation_requested: false,
             driver_resources: self.resources.clone(),
+            driver_accelerator_devices: Vec::new(),
             desired_worker_count: 1,
             worker_resources: self.resources.clone(),
         })
@@ -607,6 +608,7 @@ impl DriverControlPlane for DurableControl {
         allocation_lease_id: &str,
         endpoint_fingerprint: &str,
         run_key_envelope: &[u8],
+        _ready_v1: bool,
     ) -> runmat_execution_transport_native::TransportResult<()> {
         let worker = self.workers.get(&authority.fencing_token).unwrap();
         let evidence = worker.endpoint_identity.as_ref().unwrap();
@@ -963,6 +965,7 @@ async fn actual_driver_replacement_case(
         RemoteDriverConfig {
             authority: first_authority,
             endpoint_identity_file: identity_path.clone(),
+            ready_v1: false,
         },
         control.clone(),
     );
@@ -1139,6 +1142,7 @@ async fn actual_driver_replacement_case(
         RemoteDriverConfig {
             authority: second_authority,
             endpoint_identity_file: identity_path.clone(),
+            ready_v1: false,
         },
         control.clone(),
     );
@@ -1177,6 +1181,7 @@ async fn actual_driver_replacement_case(
             RemoteDriverConfig {
                 authority: driver_authority(3, third_relay.http_base()),
                 endpoint_identity_file: identity_path,
+                ready_v1: false,
             },
             control.clone(),
         );
