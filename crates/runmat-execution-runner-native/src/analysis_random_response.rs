@@ -185,6 +185,140 @@ async fn execute_with_pool(
     coordinator
         .complete_assembly(pool, executed_assembly.response, &assembly)
         .map_err(protocol)?;
+    let mut accuracy_dependencies = vec![assembly_dependency];
+    if coordinator.requires_observations() {
+        // Authored outputs: recover the RMS fields, then fan out, reduce and assemble the
+        // observations through the shared engine before accuracy and publication.
+        let recovery = coordinator.prepare_field_recovery().map_err(protocol)?;
+        let [executed_recovery] = execute_analysis_task_batch(
+            pool,
+            vec![PreparedAnalysisTask {
+                host: &recovery.host,
+                program: &recovery.program,
+                resource_plan: Some(&recovery.resource_plan),
+                prepared_closure: None,
+                fallback_resources: policy.resources.clone(),
+                dependencies: vec![assembly_dependency],
+            }],
+            task_policy(&policy),
+        )
+        .await?
+        .try_into()
+        .map_err(|_| protocol("random-response field recovery returned an invalid inventory"))?;
+        let recovery_dependency = dependency(&executed_recovery);
+        resource_attempts.extend(
+            planned_phase_execution(&recovery.resource_plan, &executed_recovery)?
+                .resource_graph(&recovery.resource_plan)
+                .map_err(protocol)?
+                .attempts,
+        );
+        coordinator
+            .complete_field_recovery(pool, executed_recovery.response)
+            .map_err(protocol)?;
+
+        let fanout = coordinator.prepare_observation_fanout(pool).map_err(protocol)?;
+        let observation_count = fanout.source_request.plan.observations.len();
+        let executed_partitions = execute_analysis_task_batch(
+            pool,
+            fanout
+                .partitions
+                .iter()
+                .map(|task| PreparedAnalysisTask {
+                    host: &task.host,
+                    program: &task.program,
+                    resource_plan: Some(&task.resource_plan),
+                    prepared_closure: None,
+                    fallback_resources: policy.resources.clone(),
+                    dependencies: vec![recovery_dependency],
+                })
+                .collect(),
+            task_policy(&policy),
+        )
+        .await?;
+        if executed_partitions.len() != fanout.partitions.len() {
+            return Err(protocol(
+                "random-response observation partitions returned an invalid inventory",
+            ));
+        }
+        let mut partition_dependencies = Vec::with_capacity(executed_partitions.len());
+        let mut partition_responses = Vec::with_capacity(executed_partitions.len());
+        for (task, executed) in fanout.partitions.iter().zip(executed_partitions) {
+            resource_attempts.extend(
+                planned_phase_execution(&task.resource_plan, &executed)?
+                    .resource_graph(&task.resource_plan)
+                    .map_err(protocol)?
+                    .attempts,
+            );
+            partition_dependencies.push(dependency(&executed));
+            partition_responses.push(executed.response);
+        }
+        for (ordinal, response) in partition_responses.into_iter().enumerate() {
+            coordinator
+                .complete_observation_partition(pool, ordinal, response)
+                .map_err(protocol)?;
+        }
+
+        let mut reduction_dependencies = Vec::with_capacity(observation_count);
+        for _ in 0..observation_count {
+            let reduction = coordinator
+                .prepare_observation_reduction()
+                .map_err(protocol)?;
+            let [executed] = execute_analysis_task_batch(
+                pool,
+                vec![PreparedAnalysisTask {
+                    host: &reduction.host,
+                    program: &reduction.program,
+                    resource_plan: Some(&reduction.resource_plan),
+                    prepared_closure: None,
+                    fallback_resources: policy.resources.clone(),
+                    dependencies: partition_dependencies.clone(),
+                }],
+                task_policy(&policy),
+            )
+            .await?
+            .try_into()
+            .map_err(|_| protocol("random-response reduction returned an invalid inventory"))?;
+            resource_attempts.extend(
+                planned_phase_execution(&reduction.resource_plan, &executed)?
+                    .resource_graph(&reduction.resource_plan)
+                    .map_err(protocol)?
+                    .attempts,
+            );
+            reduction_dependencies.push(dependency(&executed));
+            coordinator
+                .complete_observation_reduction(pool, executed.response)
+                .map_err(protocol)?;
+        }
+
+        let observation_assembly = coordinator
+            .prepare_observation_assembly()
+            .map_err(protocol)?;
+        let [executed_observations] = execute_analysis_task_batch(
+            pool,
+            vec![PreparedAnalysisTask {
+                host: &observation_assembly.host,
+                program: &observation_assembly.program,
+                resource_plan: Some(&observation_assembly.resource_plan),
+                prepared_closure: None,
+                fallback_resources: policy.resources.clone(),
+                dependencies: reduction_dependencies,
+            }],
+            task_policy(&policy),
+        )
+        .await?
+        .try_into()
+        .map_err(|_| protocol("random-response observation assembly returned an invalid inventory"))?;
+        resource_attempts.extend(
+            planned_phase_execution(&observation_assembly.resource_plan, &executed_observations)?
+                .resource_graph(&observation_assembly.resource_plan)
+                .map_err(protocol)?
+                .attempts,
+        );
+        accuracy_dependencies = vec![dependency(&executed_observations)];
+        coordinator
+            .complete_observation_assembly(pool, executed_observations.response)
+            .map_err(protocol)?;
+    }
     let graph = PlannedResourceUsageGraph::new(
         resource_attempts,
         u64::try_from(workflow_started.elapsed().as_millis()).unwrap_or(u64::MAX),
@@ -218,7 +352,7 @@ async fn execute_with_pool(
             resource_plan: Some(&accuracy.resource_plan),
             prepared_closure: None,
             fallback_resources: policy.resources.clone(),
-            dependencies: vec![assembly_dependency],
+            dependencies: accuracy_dependencies,
         }],
         task_policy(&policy),
     )

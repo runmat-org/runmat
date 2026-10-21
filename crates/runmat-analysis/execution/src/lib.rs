@@ -181,6 +181,13 @@ pub use maxwell_study::{
     MaxwellStudyResultClosure, MaxwellStudyResultPhase, PreparedMaxwellStudyRoot,
 };
 mod magnetic_field_recovery;
+mod random_response_field_recovery;
+pub use random_response_field_recovery::{
+    build_prepared_random_response_field_recovery_resource_plan,
+    decode_random_response_recovery_source, import_random_response_recovered_fields,
+    prepare_random_response_field_recovery, random_response_recovery_request,
+    PreparedRandomResponseFieldRecovery, RandomResponseFieldRecoveryPreparation,
+};
 mod magnetic_state_profiles;
 mod maxwell_field_recovery;
 mod maxwell_harmonic_plan;

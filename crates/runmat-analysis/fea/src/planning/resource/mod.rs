@@ -19,6 +19,10 @@ pub use fluid_transient::{
     PreparedFluidTransientResources,
 };
 mod magnetic_recovery;
+mod statistical_recovery;
+pub use statistical_recovery::{
+    build_random_response_field_recovery_resource_plan, random_response_field_recovery_shape,
+};
 mod magnetic_static;
 mod maxwell_harmonic;
 mod maxwell_recovery;

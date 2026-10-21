@@ -85,6 +85,7 @@ mod observation_partition;
 mod observation_source;
 mod publication;
 mod random_response_interval;
+mod statistical_fields;
 mod random_response_result;
 mod random_response_scope;
 mod random_response_workload;
@@ -131,6 +132,11 @@ pub use buckling_workload::{
 };
 pub use error::{AnalysisExecutionError, AnalysisExecutionResult};
 pub use field::{FieldRecoveryRequest, FieldRecoverySource};
+pub use statistical_fields::{
+    random_response_field_definitions, random_response_statistical_fields,
+    statistical_field_request, statistical_recovered_fields,
+    StatisticalFieldValues,
+};
 pub use field_plan::{FieldRecoveryCost, FieldRecoveryPlan, FieldRecoveryRequirement};
 pub use field_topology::FieldTopologyIdentity;
 pub use frequency_assembly::{

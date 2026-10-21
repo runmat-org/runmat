@@ -16,7 +16,8 @@ impl FeaResourcePlanningInput {
             FeaResourceDemand::FluidFieldRecovery(demand) => demand.topology_digest,
             FeaResourceDemand::FluidSteadySolve(demand) => demand.projection.topology_digest,
             FeaResourceDemand::FluidTransientBlock(demand) => demand.projection.topology_digest,
-            FeaResourceDemand::MagneticFieldRecovery(demand) => demand.topology_digest,
+            FeaResourceDemand::MagneticFieldRecovery(demand)
+            | FeaResourceDemand::StatisticalFieldRecovery(demand) => demand.topology_digest,
             FeaResourceDemand::StructuralFieldRecovery(demand) => demand.topology_digest,
             FeaResourceDemand::NonlinearFieldRecovery(demand) => demand.topology_digest,
             FeaResourceDemand::SemanticStatePublication(demand) => demand.topology_digest,
@@ -69,7 +70,8 @@ impl FeaResourcePlanningInput {
             FeaResourceDemand::FluidSteadySolve(_) | FeaResourceDemand::FluidTransientBlock(_) => {
                 None
             }
-            FeaResourceDemand::MagneticFieldRecovery(_) => None,
+            FeaResourceDemand::MagneticFieldRecovery(_)
+            | FeaResourceDemand::StatisticalFieldRecovery(_) => None,
             FeaResourceDemand::StructuralFieldRecovery(_) => None,
             FeaResourceDemand::NonlinearFieldRecovery(_) => None,
             FeaResourceDemand::AccuracyEvaluation(_) => None,
@@ -132,7 +134,8 @@ impl FeaResourcePlanningInput {
             FeaResourceDemand::FluidSteadySolve(_) | FeaResourceDemand::FluidTransientBlock(_) => {
                 &PartitioningPolicy::Monolithic
             }
-            FeaResourceDemand::MagneticFieldRecovery(_) => &PartitioningPolicy::Monolithic,
+            FeaResourceDemand::MagneticFieldRecovery(_)
+            | FeaResourceDemand::StatisticalFieldRecovery(_) => &PartitioningPolicy::Monolithic,
             FeaResourceDemand::StructuralFieldRecovery(_) => &PartitioningPolicy::Monolithic,
             FeaResourceDemand::NonlinearFieldRecovery(_) => &PartitioningPolicy::Monolithic,
             FeaResourceDemand::AccuracyEvaluation(_) => &PartitioningPolicy::Monolithic,
@@ -194,7 +197,8 @@ impl FeaResourcePlanningInput {
             FeaResourceDemand::FluidSteadySolve(_) | FeaResourceDemand::FluidTransientBlock(_) => {
                 None
             }
-            FeaResourceDemand::MagneticFieldRecovery(_) => None,
+            FeaResourceDemand::MagneticFieldRecovery(_)
+            | FeaResourceDemand::StatisticalFieldRecovery(_) => None,
             FeaResourceDemand::StructuralFieldRecovery(_) => None,
             FeaResourceDemand::NonlinearFieldRecovery(_) => None,
             FeaResourceDemand::AccuracyEvaluation(_) => None,
@@ -241,7 +245,8 @@ impl FeaResourcePlanningInput {
             FeaResourceDemand::FluidSteadySolve(_) | FeaResourceDemand::FluidTransientBlock(_) => {
                 None
             }
-            FeaResourceDemand::MagneticFieldRecovery(_) => None,
+            FeaResourceDemand::MagneticFieldRecovery(_)
+            | FeaResourceDemand::StatisticalFieldRecovery(_) => None,
             FeaResourceDemand::StructuralFieldRecovery(_) => None,
             FeaResourceDemand::NonlinearFieldRecovery(_) => None,
             FeaResourceDemand::AccuracyEvaluation(_) => None,

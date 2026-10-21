@@ -54,7 +54,10 @@ impl FeaResourceDemand {
             (Self::NonlinearFieldRecovery(demand), AnalysisNumericalObjectKind::Field) => {
                 Some(&demand.output)
             }
-            (Self::MagneticFieldRecovery(demand), AnalysisNumericalObjectKind::Field) => {
+            (
+                Self::MagneticFieldRecovery(demand) | Self::StatisticalFieldRecovery(demand),
+                AnalysisNumericalObjectKind::Field,
+            ) => {
                 Some(&demand.output)
             }
             (Self::Magnetostatic(demand), AnalysisNumericalObjectKind::SolverResult) => {
