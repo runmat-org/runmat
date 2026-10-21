@@ -159,7 +159,7 @@ pub(super) fn solve(
     );
     let solution = crate::solve::linear::solve_operator_system_scoped(
         &system,
-        crate::solve::preconditioner::SpdPreconditionerKind::Jacobi,
+        crate::solve::preconditioner::SpdPreconditionerKind::Auto,
         crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
         &backend,
         None,

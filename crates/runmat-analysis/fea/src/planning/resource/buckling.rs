@@ -32,6 +32,7 @@ const RECEIPT_BYTES: u64 = 16 * 1024;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PreparedStructuralBucklingResourceFacts {
+    pub local_execution: super::LocalExecutionPlan,
     pub inputs: PreparedInputResourceFacts,
     pub result_output: PreparedOutputResourceFacts,
     pub receipt_output: PreparedOutputResourceFacts,
@@ -125,11 +126,15 @@ pub fn build_structural_buckling_resource_plan(
         reduced_geometric.column_indices().len(),
         "reduced geometric stiffness nonzeros",
     )?;
-    let dense_projected = checked_mul(subspace, subspace, "buckling Ritz matrix")?;
+    // Shared block Lanczos on K⁻¹(−K_G): basis max(2s + 12, s + 48) with block 6, plus
+    // restart/Ritz copies; projected matrices of the basis size.
+    let basis = checked_add(checked_mul(subspace, 2, "buckling Lanczos basis")?, 12, "buckling Lanczos basis")?
+        .max(checked_add(subspace, 48, "buckling Lanczos basis")?);
+    let dense_projected = checked_mul(checked_mul(basis, basis, "buckling projected matrix")?, 4, "buckling projected matrices")?;
     let subspace_vectors = checked_mul(
-        checked_mul(reduced_dimension, subspace, "buckling subspace vectors")?,
-        6,
-        "buckling live subspace vectors",
+        reduced_dimension,
+        checked_add(checked_mul(basis, 2, "buckling basis copies")?, subspace + 36, "buckling vectors")?,
+        "buckling live Lanczos vectors",
     )?;
     let reduced_sparse_values = checked_add(
         reduced_stiffness_nonzeros,
@@ -297,7 +302,10 @@ pub fn build_structural_buckling_resource_plan(
         }),
         output_set: Some(prepared.output_set),
         worker: WorkerResourcePolicy {
-            cpu_millicores: 1_000,
+            cpu_millicores: prepared
+                .local_execution
+                .checked_cpu_millicores()
+                .map_err(|error| invalid(error.to_string()))?,
             maximum_wall_milliseconds: step.accuracy.resources.maximum_wall_time_milliseconds,
             fixed_memory_bytes: ByteCount(FIXED_WORKER_MEMORY_BYTES),
             fixed_scratch_bytes: ByteCount(FIXED_WORKER_SCRATCH_BYTES),

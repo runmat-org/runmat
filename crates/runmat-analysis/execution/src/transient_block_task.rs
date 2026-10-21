@@ -27,6 +27,7 @@ use crate::{
 };
 
 pub struct StructuralTransientBlockPreparation {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub workload: PreparedAnalysisObjects,
     pub mesh: PreparedAnalysisObjects,
     pub request: PreparedAnalysisObjects,
@@ -135,6 +136,7 @@ pub fn prepare_structural_transient_block_task(
         predecessor.as_ref(),
         Some(prepared_input_resource_facts(&inputs)?),
         Some(projected_output_set_resource_facts()),
+        preparation.local_execution,
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let resource_objects = prepare_analysis_objects(

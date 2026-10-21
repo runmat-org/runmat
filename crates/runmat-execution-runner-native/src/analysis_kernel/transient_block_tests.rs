@@ -361,6 +361,7 @@ fn assert_scope_task_round_trip(
     let limits = ObjectInventoryLimits::default();
     let prepared =
         prepare_structural_transient_scope_task(StructuralTransientScopeTaskPreparation {
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             workload: workload.clone(),
             mesh: mesh.clone(),
             modal_state: modal_state.clone(),
@@ -457,6 +458,7 @@ fn transient_sequence_coordinator_admits_each_exact_transition_before_assembly()
     )
     .unwrap();
     let preparation = StructuralTransientSequencePreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         workload: workload_objects,
         mesh: mesh_objects,
         modal_state: None,
@@ -608,6 +610,7 @@ fn transient_sequence_preserves_typed_scope_resource_rejection() {
     };
     let error =
         match prepare_structural_transient_scope_task(StructuralTransientScopeTaskPreparation {
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             workload,
             mesh,
             modal_state: None,
@@ -639,6 +642,8 @@ fn modal_transient_sequence_transports_one_basis_and_restarts_exact_reduced_stat
         let limits = ObjectInventoryLimits::default();
         let plan =
             prepare_structural_transient_sequence(StructuralTransientSequencePreparationInput {
+                local_execution:
+                    runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
                 workload: &workload,
                 mesh: &mesh,
                 modal_state: Some(&modal_state),
@@ -652,6 +657,8 @@ fn modal_transient_sequence_transports_one_basis_and_restarts_exact_reduced_stat
             .unwrap();
         let scope_task =
             prepare_structural_transient_scope_task(StructuralTransientScopeTaskPreparation {
+                local_execution:
+                    runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
                 workload: workload.clone(),
                 mesh: mesh.clone(),
                 modal_state: Some(modal_state.clone()),
@@ -910,6 +917,7 @@ fn authored_modal_transient_study_publishes_and_binds_the_produced_basis() {
 
     let scope_task =
         prepare_structural_transient_scope_task(StructuralTransientScopeTaskPreparation {
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             workload: plan.workload.clone(),
             mesh: plan.mesh.clone(),
             modal_state: plan.modal_state.clone(),

@@ -267,6 +267,7 @@ impl StructuralRandomResponseStudyCoordinator {
             .ok_or_else(|| invalid("published modal basis is absent"))?;
         let tasks =
             prepare_structural_random_response_fanout(StructuralRandomResponseFanoutPreparation {
+                local_execution: self.preparation.local_execution,
                 authored_study_digest: self.preparation.authored_study_digest,
                 frozen_project_digest: self.preparation.frozen_project_digest,
                 program_revision: self.preparation.program_revision.clone(),
@@ -341,6 +342,7 @@ impl StructuralRandomResponseStudyCoordinator {
             .ok_or_else(|| invalid("published modal basis is absent"))?;
         let task = prepare_structural_random_response_assembly(
             StructuralRandomResponseAssemblyPreparation {
+                local_execution: self.preparation.local_execution,
                 authored_study_digest: self.preparation.authored_study_digest,
                 frozen_project_digest: self.preparation.frozen_project_digest,
                 program_revision: self.preparation.program_revision.clone(),

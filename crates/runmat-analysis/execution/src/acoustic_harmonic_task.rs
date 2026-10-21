@@ -16,6 +16,7 @@ use runmat_meshing_core::SolverMeshArtifact;
 use std::collections::BTreeSet;
 
 pub struct AcousticHarmonicTaskPreparation {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub authored_study_digest: Digest,
     pub frozen_project_digest: Option<Digest>,
     pub program_revision: ProgramRevision,
@@ -40,6 +41,7 @@ pub fn prepare_acoustic_harmonic_task(
         &preparation.workload,
         &preparation.mesh,
         preparation.output_policy,
+        preparation.local_execution,
     )?;
     let resource_plan = prepared.resource_plan;
     let mut inputs = prepared.inputs;

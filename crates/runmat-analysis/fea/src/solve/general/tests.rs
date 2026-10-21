@@ -15,16 +15,7 @@ fn matrix(values: [[f64; 3]; 3], scale: f64) -> RealSparseMatrix {
     a.finish().unwrap()
 }
 fn policy() -> GeneralSolvePolicy {
-    GeneralSolvePolicy {
-        relative_tolerance: 1e-10,
-        restart: 3,
-        maximum_iterations: 12,
-        uniqueness: SparseUniquenessPolicy {
-            candidate_relative_tolerance: 1e-6,
-            restart: 3,
-            maximum_iterations_per_column: 12,
-        },
-    }
+    GeneralSolvePolicy::bounded(1e-10)
 }
 #[test]
 fn independent_nonsymmetric_and_indefinite_references_preserve_general_operator() {
@@ -49,9 +40,10 @@ fn independent_nonsymmetric_and_indefinite_references_preserve_general_operator(
             }
             assert!(result.relative_residual < 1e-10);
             assert_eq!(
-                result.certificate.operator_identity(),
+                result.certificate.operator_identity,
                 a.numerical_identity().unwrap()
             );
+            assert!(result.certificate.contraction_bound < 0.5);
             assert_eq!(a, original);
         }
     }
@@ -66,7 +58,7 @@ fn zero_load_cannot_hide_an_unverified_nullspace() {
             policy(),
             GeneralSolveEnvelope::derive(&a, policy()).unwrap()
         ),
-        Err(GeneralSolveError::UniquenessNotEstablished(_))
+        Err(GeneralSolveError::NonsingularityNotEstablished(_))
     ));
     let a = matrix([[2., 1., 0.], [0., 3., 1.], [1., 0., 4.]], 1.);
     let result = solve_general_system(
@@ -86,7 +78,7 @@ fn actual_counts_rederive_admission_and_both_budget_axes_reject() {
     let required = GeneralSolveEnvelope::derive(&a, policy()).unwrap();
     assert_eq!(
         required,
-        GeneralSolveEnvelope::for_counts(3, 9, 3, policy()).unwrap()
+        GeneralSolveEnvelope::for_counts(3, 9, policy()).unwrap()
     );
     for admitted in [
         GeneralSolveEnvelope {
@@ -103,9 +95,9 @@ fn actual_counts_rederive_admission_and_both_budget_axes_reject() {
             GeneralSolveError::Admission
         );
     }
-    assert!(GeneralSolveEnvelope::for_counts(3, 10, 3, policy()).is_err());
+    assert!(GeneralSolveEnvelope::for_counts(3, 10, policy()).is_err());
     assert!(
-        GeneralSolveEnvelope::for_counts(usize::MAX, usize::MAX, usize::MAX, policy()).is_err()
+        GeneralSolveEnvelope::for_counts(usize::MAX, usize::MAX, policy()).is_err()
     );
 }
 #[test]
@@ -130,14 +122,16 @@ fn original_rhs_and_invalid_policies_fail_closed() {
             Err(GeneralSolveError::Invalid)
         );
     }
-    assert!(GeneralSolveEnvelope::derive(
-        &a,
-        GeneralSolvePolicy {
-            maximum_iterations: 0,
-            ..policy()
-        }
-    )
-    .is_err());
+    for limit in [0., 1., f64::NAN] {
+        assert!(GeneralSolveEnvelope::derive(
+            &a,
+            GeneralSolvePolicy {
+                contraction_limit: limit,
+                ..policy()
+            }
+        )
+        .is_err());
+    }
     let mut encoded = serde_json::to_value(policy()).unwrap();
     encoded
         .as_object_mut()
@@ -164,27 +158,10 @@ fn precancellation_is_typed_before_numerical_work() {
 }
 
 #[test]
-fn bounded_rhs_failure_never_returns_an_unaccepted_solution() {
-    // Sparse cyclic support makes ILU(0) approximate; proof columns have their
-    // own larger explicit cap, while this RHS is deliberately limited to one.
-    let a = matrix([[4., 1., 0.], [0., 3., 1.], [1., 0., 2.]], 1.);
-    let policy = GeneralSolvePolicy {
-        restart: 1,
-        maximum_iterations: 1,
-        ..policy()
-    };
-    let admitted = GeneralSolveEnvelope::derive(&a, policy).unwrap();
-    assert!(matches!(
-        solve_general_system(&a, &[1., 2., 3.], policy, admitted),
-        Err(GeneralSolveError::NotConverged { iterations: 1, .. })
-    ));
-}
-
-#[test]
-fn unavailable_candidate_is_not_a_singularity_diagnosis() {
-    let a = matrix([[0., 1., 0.], [1., 0., 0.], [0., 0., 2.]], 1.);
-    // This matrix is nonsingular, but the declared unpivoted ILU provider cannot
-    // produce its inverse candidate. No repair or false singularity verdict.
+fn ill_conditioned_operator_is_not_certified_and_returns_no_solution() {
+    // Nonsingular in exact arithmetic but with condition ~1e17: the certificate's
+    // n·ε·κ term exceeds the contraction limit, so no solution is returned.
+    let a = matrix([[1., 1., 0.], [1., 1. + 1e-16, 0.], [0., 0., 1.]], 1.);
     assert!(matches!(
         solve_general_system(
             &a,
@@ -192,8 +169,22 @@ fn unavailable_candidate_is_not_a_singularity_diagnosis() {
             policy(),
             GeneralSolveEnvelope::derive(&a, policy()).unwrap()
         ),
-        Err(GeneralSolveError::UniquenessNotEstablished(
-            SparseUniquenessUncertainty::FactorUnavailable
-        ))
+        Err(GeneralSolveError::NonsingularityNotEstablished(_))
     ));
+}
+
+#[test]
+fn pivoting_handles_a_zero_leading_diagonal() {
+    // The retired unpivoted ILU could not produce a candidate here; sparse LU pivots.
+    let a = matrix([[0., 1., 0.], [1., 0., 0.], [0., 0., 2.]], 1.);
+    let result = solve_general_system(
+        &a,
+        &[1., 2., 3.],
+        policy(),
+        GeneralSolveEnvelope::derive(&a, policy()).unwrap(),
+    )
+    .unwrap();
+    for (actual, expected) in result.solution.iter().zip([2., 1., 1.5]) {
+        assert!((actual - expected).abs() < 1e-14);
+    }
 }

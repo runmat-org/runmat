@@ -4310,9 +4310,10 @@ fn prepare_linear_static_workload_template(
     options: &AnalysisRunOptions,
 ) -> Result<StructuralLinearWorkload, OperationErrorEnvelope> {
     let requested_preconditioner = match options.preconditioner_mode {
-        PreconditionerMode::Auto | PreconditionerMode::Jacobi => SpdPreconditionerKind::Jacobi,
+        PreconditionerMode::Auto => SpdPreconditionerKind::Auto,
+        PreconditionerMode::Jacobi => SpdPreconditionerKind::Jacobi,
         PreconditionerMode::Ilu => SpdPreconditionerKind::Ilu0,
-        PreconditionerMode::Amg => SpdPreconditionerKind::Jacobi,
+        PreconditionerMode::Amg => SpdPreconditionerKind::Amg,
     };
     let accelerator_available = runmat_accelerate_api::provider().is_some();
     let requested_solver_backend = match backend {

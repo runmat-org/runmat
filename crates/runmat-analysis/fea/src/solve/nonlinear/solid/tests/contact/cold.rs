@@ -26,14 +26,14 @@ fn combined_scope_history_and_general_admission_reject_substitution() {
     encoded["contact"]["points"][0]["point"]["frictional_work_j_per_m2"] = (-1.).into();
     let corrupt: AcceptedSolidState = serde_json::from_value(encoded).unwrap();
     assert!(problem.validate_accepted(&corrupt).is_err());
-    // The Krylov correction builds no uniqueness proof, so its envelope is not a separate
-    // preparation admission: the coupling still prepares and its scope binds the envelope.
     let mut coupling = CoupledFixture::coupling(&operator);
     coupling.solve_admission.resident_bytes = 0;
-    assert!(
-        SolidNewtonProblem::prepare_with_contact(&basis, &f.summary, policy(), Some(coupling))
-            .is_ok()
-    );
+    assert!(matches!(
+        SolidNewtonProblem::prepare_with_contact(&basis, &f.summary, policy(), Some(coupling)),
+        Err(SolidNewtonError::General(
+            crate::solve::general::GeneralSolveError::Admission
+        ))
+    ));
     for budget in 0..3 {
         let mut coupling = CoupledFixture::coupling(&operator);
         if budget == 0 {
@@ -72,18 +72,11 @@ fn zero_load_open_contact_does_not_accept_unanchored_body_tangent() {
         CanonicalNonlinearSolidBasis::prepare(&f.model, &f.surface.mesh, &f.summary).unwrap();
     let mut coupling = CoupledFixture::coupling(&operator);
     let support = basis.contact_pattern().union(operator.pattern()).unwrap();
-    let width = support
-        .row_offsets()
-        .windows(2)
-        .map(|r| r[1] - r[0])
-        .max()
-        .unwrap() as usize;
     // This separate nullspace reference has many more free coordinates than
     // the affine patch. Admit its actual full source inventory explicitly.
     coupling.solve_admission = GeneralSolveEnvelope::for_counts(
         support.rows(),
         support.column_indices().len(),
-        width,
         coupling.solve_policy,
     )
     .unwrap();
@@ -92,6 +85,8 @@ fn zero_load_open_contact_does_not_accept_unanchored_body_tangent() {
             .unwrap();
     assert!(matches!(
         problem.initial_state(),
-        Err(SolidNewtonError::Evaluation(reason)) if reason.contains("singular")
+        Err(SolidNewtonError::General(
+            crate::solve::general::GeneralSolveError::NonsingularityNotEstablished(_)
+        ))
     ));
 }

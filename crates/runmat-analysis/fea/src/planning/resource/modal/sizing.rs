@@ -9,6 +9,8 @@ use crate::planning::resource::{
 };
 
 const ARTIFACT_OVERHEAD_BYTES: u64 = 64 * 1024;
+/// Block size of the shared shift-invert Lanczos (`EigenOptions::default().block_size`).
+const LANCZOS_BLOCK_SIZE: u64 = 6;
 const MODAL_RECEIPT_PAYLOAD_BYTES_UPPER_BOUND: u64 = 16 * 1024;
 
 pub(super) fn modal_workspace_bytes(
@@ -43,27 +45,32 @@ pub(super) fn modal_workspace_bytes(
         checked_bytes(reduced_entries, 16, "reduced operator entries")?,
         "reduced operators",
     )?;
+    // Shift-invert block Lanczos (shared sparse layer): basis of
+    // max(2s + 2p, s + 8p) vectors with block p, plus restart, block and Ritz-vector copies.
+    let block = LANCZOS_BLOCK_SIZE;
+    let basis = checked_add(
+        checked_mul(subspace_dimension, 2, "Lanczos basis")?,
+        2 * block,
+        "Lanczos basis",
+    )?
+    .max(checked_add(subspace_dimension, 8 * block, "Lanczos basis")?);
     let vector_values = checked_add(
         checked_mul(full_dimension, subspace_dimension, "expanded modal vectors")?,
         checked_mul(
-            checked_mul(
-                reduced_dimension,
-                subspace_dimension,
-                "reduced modal vectors",
+            reduced_dimension,
+            checked_add(
+                checked_mul(basis, 2, "Lanczos basis and restart copy")?,
+                checked_add(subspace_dimension, 6 * block, "Ritz vectors and blocks")?,
+                "reduced Lanczos vectors",
             )?,
-            3,
-            "reduced modal vector blocks",
+            "reduced Lanczos vectors",
         )?,
         "modal vector values",
     )?;
     let dense_values = checked_mul(
-        checked_mul(
-            subspace_dimension,
-            subspace_dimension,
-            "dense modal matrices",
-        )?,
-        3,
-        "dense modal matrices",
+        checked_mul(basis, basis, "dense projected matrices")?,
+        4,
+        "dense projected matrices",
     )?;
     let residual_workspace_values = if residual_vector_count == 0 {
         0
@@ -74,13 +81,6 @@ pub(super) fn modal_workspace_bytes(
             "residual-vector workspace",
         )?
     };
-    // The inverse iteration retains one Rayleigh-scaled starting vector while
-    // the shared CG provider owns its solve buffers.
-    let vector_values = checked_add(
-        vector_values,
-        reduced_dimension,
-        "modal inverse starting vector",
-    )?;
     let vector_and_dense = checked_bytes(
         checked_add(
             checked_add(vector_values, dense_values, "modal numerical workspace")?,
@@ -90,11 +90,13 @@ pub(super) fn modal_workspace_bytes(
         8,
         "modal numerical workspace",
     )?;
+    // The coercivity-proving Cholesky factor is the shift-invert operator; the Sturm check
+    // factors K − σ'M once more (Bunch–Kaufman, same symbolic size up to pivoting headroom).
     checked_add(
         checked_add(
             reduced_operator_bytes,
-            coercivity_bytes,
-            "reduced operators and ILU",
+            checked_mul(coercivity_bytes, 3, "Cholesky and Sturm factors")?,
+            "reduced operators and factors",
         )?,
         vector_and_dense,
         "modal workspace",

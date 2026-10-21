@@ -30,7 +30,21 @@ fn task(
     mesh: SolverMeshArtifact,
     chunk: usize,
 ) -> crate::PreparedFluidSteadyTask {
+    task_with_threads(
+        workload,
+        mesh,
+        chunk,
+        runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+    )
+}
+fn task_with_threads(
+    workload: FluidSteadyWorkload,
+    mesh: SolverMeshArtifact,
+    chunk: usize,
+    local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
+) -> crate::PreparedFluidSteadyTask {
     crate::prepare_fluid_steady_task(FluidSteadyTaskPreparation {
+        local_execution,
         authored_study_digest: Digest::sha256("authored-fluid"),
         frozen_project_digest: None,
         program_revision: revision(),
@@ -108,7 +122,13 @@ fn source_decode_authenticates_chunks_before_join_and_rejects_tiny_ceiling() {
         .accuracy
         .resources
         .maximum_resident_bytes = 1;
-    assert!(prepare_fluid_steady_inputs(&w, &m, task.output_policy).is_err());
+    assert!(prepare_fluid_steady_inputs(
+        &w,
+        &m,
+        task.output_policy,
+        runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial()
+    )
+    .is_err());
 }
 
 #[test]
@@ -341,4 +361,23 @@ fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
         },
     };
     (workload, mesh)
+}
+
+#[test]
+fn fluid_plan_carries_admitted_threads_and_worker_rederivation_converges() {
+    let (w, m) = authored();
+    let threads =
+        runmat_analysis_fea::planning::resource::LocalExecutionPlan::from_cpu_millicores(2_000)
+            .unwrap();
+    let task = task_with_threads(w.clone(), m.clone(), 1024, threads);
+    assert_eq!(task.resource_plan.request.cpu_millicores, 2_000);
+    assert_eq!(
+        rederive_fluid_steady_resource_plan(&w, &m, &task.inputs, task.output_policy).unwrap(),
+        task.resource_plan
+    );
+    assert_eq!(
+        w.execute_with_resource_plan(&m, &task.resource_plan)
+            .unwrap(),
+        w.execute(&m).unwrap()
+    );
 }

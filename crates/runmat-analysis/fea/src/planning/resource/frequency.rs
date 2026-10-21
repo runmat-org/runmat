@@ -23,10 +23,11 @@ use super::{
     structural_facts::derive_structural_resource_facts,
     AccuracyResourceDemand, AssemblyResourcePolicy, ByteCount, CheckpointArtifactPolicy, Count,
     FeaResourceDemand, FeaResourcePhase, FeaResourcePlan, FeaResourcePlanningInput,
-    ObservationResourceFacts, PartitioningPolicy, PhaseResourcePolicy, PreparedInputResourceFacts,
-    PreparedOutputResourceFacts, PreparedOutputSetResourceFacts, PreparedPhaseResourceFacts,
-    ResourcePlanningError, SolveResourcePolicy, StructuralFrequencyOperatorResourceDemand,
-    StructuralOperatorResourceDemand, WorkerResourcePolicy, RESOURCE_ESTIMATION_MODEL_REVISION,
+    LocalExecutionPlan, ObservationResourceFacts, PartitioningPolicy, PhaseResourcePolicy,
+    PreparedInputResourceFacts, PreparedOutputResourceFacts, PreparedOutputSetResourceFacts,
+    PreparedPhaseResourceFacts, ResourcePlanningError, SolveResourcePolicy,
+    StructuralFrequencyOperatorResourceDemand, StructuralOperatorResourceDemand,
+    WorkerResourcePolicy, RESOURCE_ESTIMATION_MODEL_REVISION,
 };
 
 mod accounting;
@@ -92,17 +93,36 @@ pub struct StructuralFrequencyEntryResourceProjection {
     modal_operator_digest: Option<Digest>,
     recovery_layout: crate::post::ComplexStructuralFieldLayout,
     constraint_group_count: usize,
-    worker: WorkerResourcePolicy,
+    maximum_wall_milliseconds: u64,
     accuracy_ceiling: AccuracyResourceCeiling,
 }
 
 impl StructuralFrequencyEntryResourceProjection {
+    /// One worker sized by the admitted local execution plan; the projection itself is
+    /// thread-independent so one fan-out projection serves every entry.
+    fn worker(
+        &self,
+        local_execution: LocalExecutionPlan,
+    ) -> Result<WorkerResourcePolicy, ResourcePlanningError> {
+        Ok(WorkerResourcePolicy {
+            cpu_millicores: local_execution
+                .checked_cpu_millicores()
+                .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
+            maximum_wall_milliseconds: self.maximum_wall_milliseconds,
+            fixed_memory_bytes: ByteCount(FIXED_WORKER_MEMORY_BYTES),
+            fixed_scratch_bytes: ByteCount(FIXED_WORKER_SCRATCH_BYTES),
+            required_capabilities: BTreeSet::new(),
+            accelerators: Vec::new(),
+        })
+    }
+
     pub fn plan_for(
         &self,
         request: &StructuralFrequencyEntryRequest,
         inputs: PreparedInputResourceFacts,
         output: PreparedOutputResourceFacts,
         output_set: PreparedOutputSetResourceFacts,
+        local_execution: LocalExecutionPlan,
     ) -> Result<FeaResourcePlan, ResourcePlanningError> {
         request
             .validate_for_workload(&self.workload)
@@ -182,7 +202,7 @@ impl StructuralFrequencyEntryResourceProjection {
                 },
             ),
             output_set: Some(output_set),
-            worker: self.worker.clone(),
+            worker: self.worker(local_execution)?,
             accuracy_ceiling: self.accuracy_ceiling,
         })
     }

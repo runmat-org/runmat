@@ -217,6 +217,7 @@ pub fn plan_transient_checkpoint_scope_task(
     modal_state: Option<&crate::execution::CanonicalSemanticState>,
     prepared_inputs: crate::planning::resource::PreparedInputResourceFacts,
     output_set: crate::planning::resource::PreparedOutputSetResourceFacts,
+    local_execution: crate::planning::resource::LocalExecutionPlan,
 ) -> Result<crate::planning::resource::FeaResourcePlan, FeaRunError> {
     workload
         .validate()
@@ -230,6 +231,7 @@ pub fn plan_transient_checkpoint_scope_task(
             &prepared,
             Some(prepared_inputs),
             Some(output_set),
+            local_execution,
         )?,
     )
 }
@@ -250,6 +252,7 @@ fn prepare_transient_scope_basis(
         &prepared,
         None,
         None,
+        crate::planning::resource::LocalExecutionPlan::serial(),
     )?;
     let options = workload.solve_options(solver_mesh.clone());
     let basis = assemble_transient_block_basis(prepared, &options)?;
@@ -274,6 +277,7 @@ pub fn run_transient_block(
         input.predecessor,
         None,
         None,
+        crate::planning::resource::LocalExecutionPlan::serial(),
     )?;
     let (basis, options) =
         prepare_transient_scope_basis(input.workload, input.solver_mesh, input.modal_state)?;

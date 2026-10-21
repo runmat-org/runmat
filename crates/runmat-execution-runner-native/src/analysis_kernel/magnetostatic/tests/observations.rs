@@ -222,6 +222,7 @@ fn magnetic_native_fields_reopen_selective_blocks_and_shared_observation_workers
             ),
         ];
         let task = prepare_magnetostatic_task(MagnetostaticTaskPreparation {
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             authored_study_digest: Digest::sha256(b"native magnetic authored observations"),
             frozen_project_digest: None,
             program_revision: original.program.request.recipe.program_revision.clone(),

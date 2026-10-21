@@ -101,6 +101,7 @@ fn execute(
     for entry in sweep.plan().entries().unwrap().into_iter().rev() {
         let workload = sweep.entry(entry).unwrap();
         let task = prepare_acoustic_harmonic_task(AcousticHarmonicTaskPreparation {
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             authored_study_digest: digest,
             frozen_project_digest: None,
             program_revision: fixture.revision.clone(),

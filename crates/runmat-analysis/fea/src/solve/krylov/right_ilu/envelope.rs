@@ -79,12 +79,7 @@ mod tests {
             SparseRightIluEnvelope::for_counts(3, 7, 3).unwrap()
         );
         let factor = SparseRightIlu::factor(&matrix, || false).unwrap();
-        let heap = (factor.row_offsets.capacity()
-            + factor.column_indices.capacity()
-            + factor.diagonal_entries.capacity())
-            * std::mem::size_of::<usize>()
-            + factor.factors.capacity() * std::mem::size_of::<f64>();
-        assert!((heap as u64) < envelope.resident_bytes_upper_bound);
+        assert!(factor.retained_bytes() < envelope.resident_bytes_upper_bound);
         assert!(SparseRightIluEnvelope::for_counts(u64::MAX, u64::MAX, u64::MAX).is_none());
         assert!(SparseRightIluEnvelope::for_counts(3, 10, 3).is_none());
     }

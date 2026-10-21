@@ -1,21 +1,13 @@
 use super::*;
 use crate::{
     algebra::SparsePatternStatistics,
-    solve::{
-        general::{GeneralSolveEnvelope, GeneralSolvePolicy},
-        uniqueness::SparseUniquenessPolicy,
-    },
+    solve::general::{GeneralSolveEnvelope, GeneralSolvePolicy},
 };
 fn policy() -> GeneralSolvePolicy {
-    GeneralSolvePolicy {
-        relative_tolerance: 1e-10,
-        restart: 3,
-        maximum_iterations: 16,
-        uniqueness: SparseUniquenessPolicy::bounded(),
-    }
+    GeneralSolvePolicy::bounded(1e-10)
 }
 fn general(policy: GeneralSolvePolicy, extra: u64) -> GeneralSparseSolveResourceDemand {
-    let mut envelope = GeneralSolveEnvelope::for_counts(3, 9, 3, policy).unwrap();
+    let mut envelope = GeneralSolveEnvelope::for_counts(3, 9, policy).unwrap();
     envelope.resident_bytes += extra;
     GeneralSparseSolveResourceDemand::derive(
         SparsePatternStatistics {

@@ -340,6 +340,30 @@ impl RealSparseMatrix {
         if size < self.rows() || self.rows() != self.columns() {
             return Err(RealSparseMatrixError::ShapeMismatch);
         }
+        if self.values.iter().all(|value| *value != 0.0) {
+            // No stored zero to compact: reuse the canonical support (shared when the size is
+            // unchanged) and append empty rows. Provenance is not carried, as before.
+            let pattern = if size == self.rows() {
+                self.pattern.clone()
+            } else {
+                let mut offsets = reserve_payload(size + 1)?;
+                offsets.extend_from_slice(self.pattern.row_offsets());
+                let last = *offsets.last().unwrap_or(&0);
+                offsets.resize(size + 1, last);
+                let mut columns = reserve_payload(self.pattern.column_indices().len())?;
+                columns.extend_from_slice(self.pattern.column_indices());
+                SparsePattern::try_new(size as u64, size as u64, offsets, columns)?
+            };
+            return Ok(Self {
+                pattern,
+                values: self.values.clone(),
+                scalar_domain: ScalarDomain::Real,
+                precision: ScalarPrecision::F64,
+                role: self.role,
+                properties: self.properties,
+                contributions: std::sync::Arc::new(Vec::new()),
+            });
+        }
         let mut assembler = RealSparseAssembler::square(size, self.role, self.properties);
         for row in 0..self.rows() {
             for entry in self.pattern.row_range(row) {

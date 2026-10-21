@@ -25,6 +25,7 @@ impl NonlinearSolidStudyCoordinator {
         }
         self.admit_retention(None, None)?;
         let task = prepare_nonlinear_solid_block_task(NonlinearSolidBlockPreparation {
+            local_execution: p.local_execution,
             authored_study_digest: self.definition,
             frozen_project_digest: p.frozen_project_digest,
             program_revision: p.program_revision.clone(),

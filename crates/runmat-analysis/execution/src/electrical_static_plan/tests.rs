@@ -78,8 +78,13 @@ fn electrical_planning_and_admitted_solve_preserve_physics_and_cold_transport() 
             for chunk in [1024, 8192] {
                 let policy =
                     AnalysisOutputPolicy::new(chunk, ObjectInventoryLimits::default()).unwrap();
-                let mut prepared =
-                    prepare_electrical_static_inputs(&source, &mesh, policy).unwrap();
+                let mut prepared = prepare_electrical_static_inputs(
+                    &source,
+                    &mesh,
+                    policy,
+                    LocalExecutionPlan::serial(),
+                )
+                .unwrap();
                 prepared
                     .inputs
                     .push(resource_input(&prepared.resource_plan, policy));
@@ -180,5 +185,29 @@ fn electrical_ceiling_rejection_precedes_numerical_matrix() {
         .resources
         .maximum_resident_bytes = 1;
     let policy = AnalysisOutputPolicy::new(1024, ObjectInventoryLimits::default()).unwrap();
-    assert!(prepare_electrical_static_inputs(&source, &mesh, policy).is_err());
+    assert!(
+        prepare_electrical_static_inputs(&source, &mesh, policy, LocalExecutionPlan::serial())
+            .is_err()
+    );
+}
+
+#[test]
+fn electrical_plan_carries_admitted_threads_and_worker_rederivation_converges() {
+    let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let source = workload(&mesh, StaticElectricalEquation::Electrostatics);
+    let policy = AnalysisOutputPolicy::new(1024, ObjectInventoryLimits::default()).unwrap();
+    let threads = LocalExecutionPlan::from_cpu_millicores(3_000).unwrap();
+    let mut prepared = prepare_electrical_static_inputs(&source, &mesh, policy, threads).unwrap();
+    assert_eq!(prepared.resource_plan.request.cpu_millicores, 3_000);
+    assert_eq!(prepared.resource_plan.input.worker.cpu_millicores, 3_000);
+    prepared
+        .inputs
+        .push(resource_input(&prepared.resource_plan, policy));
+    let plan =
+        rederive_electrical_static_resource_plan(&source, &mesh, &prepared.inputs, policy).unwrap();
+    assert_eq!(plan, prepared.resource_plan);
+    assert_eq!(
+        source.execute_with_resource_plan(&mesh, &plan).unwrap(),
+        source.execute(&mesh).unwrap()
+    );
 }

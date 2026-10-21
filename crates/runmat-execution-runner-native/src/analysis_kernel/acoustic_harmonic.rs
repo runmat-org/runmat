@@ -94,7 +94,7 @@ pub(super) fn execute(
         ));
     }
     let policy = invocation.output_policy;
-    let result = workload.execute(&mesh)?;
+    let result = super::with_admitted_cpu_pool(&resource_plan, || Ok(workload.execute(&mesh)?))?;
     let receipt = AcousticNumericalReceiptArtifact::new(&workload, &result, &mesh)?;
     let bytes = result.canonical_bytes()?;
     let bound = runmat_analysis_fea::planning::resource::acoustic_harmonic_result_payload_bytes_upper_bound(&workload, &mesh)?;

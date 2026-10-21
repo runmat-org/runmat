@@ -54,6 +54,7 @@ fn native_response_spectrum_fanout_and_fanin_are_portable_and_order_independent(
     .unwrap();
     let fanout = prepare_structural_modal_response_spectrum_fanout(
         StructuralModalResponseSpectrumFanoutPreparation {
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             authored_study_digest: digest("response-spectrum-study"),
             frozen_project_digest: None,
             program_revision: revision(),
@@ -90,6 +91,7 @@ fn native_response_spectrum_fanout_and_fanin_are_portable_and_order_independent(
     entries.reverse();
     let task = prepare_structural_modal_response_spectrum_assembly(
         StructuralModalResponseSpectrumAssemblyPreparation {
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             authored_study_digest: digest("response-spectrum-study"),
             frozen_project_digest: None,
             program_revision: revision(),

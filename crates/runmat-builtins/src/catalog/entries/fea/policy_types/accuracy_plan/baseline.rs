@@ -55,7 +55,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
             concat!(
                 "assert(strcmp(class(plan), 'fea.AccuracyPlan'));\n",
                 "assert(plan.accuracy_plan_id == \"bracket_static.accuracy\");\n",
-                "assert(plan.unavailable_evidence == \"mark_indeterminate\");\n",
+                "assert(plan.unavailable_evidence == \"fail\");\n",
                 "assert(plan.resources.maximum_refinement_cycles == 0);\n",
                 "assert(criterion.criterion_id == \"algebraic_residual\");",
             ),

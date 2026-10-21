@@ -325,6 +325,7 @@ fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutcome, FeaRunE
         initial_increment.as_deref(),
         &facts.operators,
         residual_target,
+        None,
     )?;
     // Numerical preparation is complete. Release the guess, constraint mask and
     // zero damping carrier before allocating the complete recovered fields.
@@ -367,13 +368,14 @@ fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutcome, FeaRunE
     })
 }
 
-fn solve_checked(
+pub(super) fn solve_checked(
     operator: &crate::algebra::AssembledRealSystem,
     requested_solver_backend: LinearAlgebraBackendKind,
     algebra: &dyn LinearAlgebraBackend,
     initial_guess: Option<&[f64]>,
     facts: &crate::planning::resource::ThermalOperatorResourceFacts,
     residual_target: f64,
+    preparation: Option<&mut crate::algebra::LinearPreparationReuse>,
 ) -> Result<LinearSolveResult, FeaRunError> {
     for matrix in [
         operator.operators().stiffness(),
@@ -389,9 +391,12 @@ fn solve_checked(
         Some(facts.solver_admission()),
     );
     settings.relative_tolerance = settings.relative_tolerance.min(residual_target);
+    // Reused preparation keeps the proving Cholesky factor across solves with an unchanged
+    // operator (fixed-step transients, refinement re-solves).
+    settings.preparation = preparation;
     let solve = solve_operator_system_scoped(
         operator,
-        SpdPreconditionerKind::Jacobi,
+        SpdPreconditionerKind::Auto,
         requested_solver_backend,
         algebra,
         initial_guess,

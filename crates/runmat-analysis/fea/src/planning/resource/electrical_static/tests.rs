@@ -32,6 +32,7 @@ fn facts(
         (workload.canonical_bytes().unwrap().len() + mesh.canonical_encode().unwrap().len()) as u64;
     let output = electrical_static_result_payload_bytes_upper_bound(workload, mesh).unwrap();
     PreparedElectricalStaticResourceFacts {
+        local_execution: LocalExecutionPlan::serial(),
         inputs: PreparedInputResourceFacts {
             encoded_payload_bytes: ByteCount(input),
             transport_closure_bytes: ByteCount(input + 2048),

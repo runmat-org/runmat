@@ -8,6 +8,7 @@ fn solve_facts(
 ) -> PreparedFluidSteadyResourceFacts {
     let projection = derive_fluid_steady_resource_projection(w, m).unwrap();
     PreparedFluidSteadyResourceFacts {
+        local_execution: crate::planning::resource::LocalExecutionPlan::serial(),
         inputs: PreparedInputResourceFacts {
             encoded_payload_bytes: projection.canonical_input_bytes,
             transport_closure_bytes: ByteCount(projection.canonical_input_bytes.0 + 2048),

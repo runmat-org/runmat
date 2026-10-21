@@ -46,6 +46,7 @@ pub struct CompletedAcousticStudy {
 }
 
 pub struct AcousticStudyPreparation {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub policy: AcousticStudyPlanningPolicy,
     pub product: AcousticStudyProduct,
     pub mesh: SolverMeshArtifact,
@@ -252,6 +253,7 @@ impl AcousticStudyCoordinator {
             .map_err(|_| invalid("acoustic preparation still has lifecycle owners"))?;
         Ok(CompletedAcousticStudy {
             replay: completion::AcousticStudyReplayContext {
+                local_execution: preparation.local_execution,
                 policy: preparation.policy,
                 mesh: preparation.mesh,
                 frozen_project_digest: preparation.frozen_project_digest,

@@ -5,10 +5,9 @@ impl ThermalOperatorAssembly {
         &self,
         temperature_k: &[f64],
     ) -> Result<Vec<[f64; 3]>, ThermalAssemblyError> {
-        self.projection
-            .elements
-            .iter()
-            .map(|element| {
+        let elements = &self.projection.elements;
+        crate::algebra::element_assembly::ordered_map_range(elements.len(), |index| {
+                let element = &elements[index];
                 let mut integrated = [0.0; 3];
                 let mut volume = 0.0;
                 // Partition of unity makes the reference temperature immaterial analytically.
@@ -30,8 +29,9 @@ impl ThermalOperatorAssembly {
                         volume += point.volume_weight_m3;
                     })
                     .map_err(|error| ThermalAssemblyError::InvalidProjection(error.to_string()))?;
-                Ok(integrated.map(|component| component / volume))
+                Ok::<_, ThermalAssemblyError>(integrated.map(|component| component / volume))
             })
+            .into_iter()
             .collect()
     }
 
@@ -53,11 +53,9 @@ impl ThermalOperatorAssembly {
         temperature_k: &[f64],
         time_step_s: f64,
     ) -> Result<Vec<f64>, ThermalAssemblyError> {
-        self.projection
-            .elements
-            .iter()
-            .enumerate()
-            .map(|(element_index, element)| {
+        let elements = &self.projection.elements;
+        crate::algebra::element_assembly::ordered_map_range(elements.len(), |element_index| {
+                let element = &elements[element_index];
                 let mut integrated_rate = 0.0;
                 let mut volume = 0.0;
                 self.projection
@@ -78,8 +76,9 @@ impl ThermalOperatorAssembly {
                         volume += point.volume_weight_m3;
                     })
                     .map_err(|error| ThermalAssemblyError::InvalidProjection(error.to_string()))?;
-                Ok(integrated_rate / volume)
+                Ok::<_, ThermalAssemblyError>(integrated_rate / volume)
             })
+            .into_iter()
             .collect()
     }
 }

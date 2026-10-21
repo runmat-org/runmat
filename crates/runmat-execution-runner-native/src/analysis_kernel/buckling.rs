@@ -81,6 +81,11 @@ pub(super) fn execute_structural_buckling(
         &state,
         &resource_plan.request.accelerators,
         PreparedStructuralBucklingResourceFacts {
+            local_execution:
+                runmat_analysis_fea::planning::resource::LocalExecutionPlan::from_cpu_millicores(
+                    resource_plan.request.cpu_millicores,
+                )
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
             inputs: prepared_input_resource_facts(&inputs_except_resource_plan(&invocation))?,
             result_output: projected_output_resource_facts(result_bound)?,
             receipt_output: projected_output_resource_facts(
@@ -97,9 +102,10 @@ pub(super) fn execute_structural_buckling(
             "structural buckling resource plan does not converge from authoritative inputs",
         ));
     }
-    let result =
+    let result = super::with_admitted_cpu_pool(&resource_plan, || {
         runmat_analysis_fea::execute_structural_buckling_workload(&workload, &mesh, &state)
-            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
+    })?;
     let receipt =
         StructuralBucklingNumericalReceipt::new(invocation.host.workload.identity, &result)?;
     Ok(vec![

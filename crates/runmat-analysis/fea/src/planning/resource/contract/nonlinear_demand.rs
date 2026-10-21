@@ -32,6 +32,7 @@ pub struct NonlinearSolidBlockTransportDemand {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PreparedNonlinearSolidBlockResourceFacts {
+    pub local_execution: crate::planning::resource::LocalExecutionPlan,
     pub inputs: PreparedInputResourceFacts,
     pub output: PreparedOutputResourceFacts,
     pub receipt_output: PreparedOutputResourceFacts,
