@@ -1,10 +1,10 @@
 # Retained steady Joule heating into canonical thermal assembly
 
-## Supported experimental envelope
+## Supported envelope
 
 One-way, same-canonical-mesh steady electrical conduction into steady CPU thermal
-conduction with constant coefficients. This numerical composition is experimental,
-not a production formulation or a governed whole-study execution claim.
+conduction with constant coefficients. This numerical composition is
+not a qualified formulation or a governed whole-study execution claim.
 
 The electrical result is retained and authenticated against its original workload,
 producer, exact result identity, canonical element ordering and mesh. Its element
@@ -31,7 +31,7 @@ Tests compare terminal electrical power, retained Joule power, integrated therma
 source and prescribed-boundary outflow. They check the Tet10 quadratic patch,
 Tet4 cell-interior refinement, voltage-sign and gauge invariance, and retained
 transfer canonical roundtrips after dropping the original electrical result.
-Malformed or unsupported sources and production admission fail closed.
+Malformed or unsupported sources fail closed.
 
 ## Governed native consumer and cold completion
 

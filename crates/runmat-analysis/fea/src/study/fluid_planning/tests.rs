@@ -50,7 +50,6 @@ fn study() -> (CompiledAnalysisStudy, SolverMeshArtifact) {
             assessments: Vec::new(),
             module_path: "tests/fluid.fea".into(),
             study_id: "flow".into(),
-            formulation_requirement: FormulationRequirement::Experimental,
             study_inputs: vec![],
             outputs: vec![],
             model,
@@ -63,7 +62,6 @@ fn study() -> (CompiledAnalysisStudy, SolverMeshArtifact) {
 
 fn policy() -> FluidStudyPlanningPolicy {
     FluidStudyPlanningPolicy {
-        formulation_requirement: FormulationRequirement::Experimental,
         numerical: CanonicalFluidPolicy {
             fixed_point_acceleration: None,
             maximum_outer_iterations: 200,
@@ -105,14 +103,8 @@ fn preserves_signed_authority_and_consumes_only_relative_algebraic_criterion() {
 }
 
 #[test]
-fn rejects_mismatched_requirement_missing_criterion_and_nan_controls() {
+fn rejects_missing_criterion_and_nan_controls() {
     let (mut study, _) = study();
-    let mut wrong = policy();
-    wrong.formulation_requirement = FormulationRequirement::Production;
-    assert!(matches!(
-        plan_fluid_study(&study, wrong),
-        Err(FluidStudyPlanningError::FormulationRequirementMismatch)
-    ));
     let mut invalid = policy();
     invalid.numerical.linear_relative_tolerance = f64::NAN;
     assert!(plan_fluid_study(&study, invalid).is_err());

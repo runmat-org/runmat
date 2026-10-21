@@ -1,6 +1,6 @@
 # Shared right LU and canonical Helmholtz — bounded native qualification
 
-This is an experimental numerical correction, not an acoustic production gate.
+This is a numerical correction, not an acoustic qualification gate.
 The original refined Tet10 authored duct failed under the authored 4,096-iteration
 budget; the previously tried diagonal scaling was discarded. No mesh, tolerance,
 iteration budget, physical source or material law is relaxed here.
@@ -112,6 +112,6 @@ shift temporaries before factoring; one extra restricted-vector temporary stays
 within the existing simultaneous row/correction allowance.
 
 This qualifies the bounded single-frequency matched-duct native envelope, not
-the entire acoustic production formulation. Acoustic radiation,
+the entire acoustic formulation. Acoustic radiation,
 frequency sweeps, process restart, remote/GPU/distributed operation envelopes,
 measured peak resources and release qualification remain separate open gates.

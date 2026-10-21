@@ -82,5 +82,5 @@ This case verifies a constrained discrete solid operator and an exactly complete
 one-mode basis. It does not provide a mode-truncation study, unconstrained continuum
 resonance reference, radiation or nonproportional damping validation, authored
 complex-source equivalence, spatial convergence, result-storage/restart parity,
-accelerator evidence, or a production gate decision. Those remain explicit
+accelerator evidence, or a qualification gate decision. Those remain explicit
 requirements of the formulation's qualification inventory.

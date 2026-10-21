@@ -130,7 +130,7 @@ load distributed_current {
 }
 ```
 
-Current density preserves amperes per square metre. Integrated current follows the resolved face
+Current density preserves amperes per square meter. Integrated current follows the resolved face
 area and normal direction. Check CAD units, face orientation, and the integrated resultant.
 
 ## How do I import measured or computed current-density data?
@@ -166,7 +166,7 @@ load insulated_boundary {
 }
 ```
 
-The boundary contributes no scalar value. In the experimental edge-graph realization, result
+The boundary contributes no scalar value. In the edge-graph realization, result
 evidence distinguishes canonical boundary projection from ordinal/global-count/unmapped fallback.
 Require canonical localization for geometry-sensitive conclusions.
 

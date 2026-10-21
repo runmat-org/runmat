@@ -64,11 +64,10 @@ model loaded_bracket {
     load_case service { include load.service_traction }
 }
 
-study structural_static_experimental {
+study structural_static {
     geometry = geometry.bracket
     mesh = mesh.bracket
     model = model.loaded_bracket
-    formulation = experimental
     analysis static { structural static {} }
     output displacement = analysis.static.field.node.displacement
     output von_mises = analysis.static.field.element.von_mises_stress
@@ -242,6 +241,6 @@ element projection.
 
 ## What Runs Today
 
-The typed language checks a broader family of procedure contracts, but the native whole-study executor currently admits structural procedure graphs. The checked `acoustic-production-rejected.fea` example intentionally demonstrates fail-closed production admission; it is not a runnable acoustic example. See [Current status](./status) before relying on a formulation or backend.
+The typed language checks a broader family of procedure contracts, but the native whole-study executor currently admits structural procedure graphs. The checked `acoustic-cavity-harmonic.fea` example declares a multi-frequency acoustic harmonic study of an air cavity; it checks and plans, and the native executor rejects it rather than running a substitute. See [Current status](./status) before relying on a formulation or backend.
 
 Continue with the [language reference](./language/), [meshing guide](./meshing), and [study contracts](./study-contracts).

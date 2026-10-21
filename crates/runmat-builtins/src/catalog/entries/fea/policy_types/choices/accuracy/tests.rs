@@ -27,12 +27,11 @@ const ENTRIES: &[&BuiltinCatalogEntry] = &[
     &super::evidence_references::statistical_confidence::CATALOG_ENTRY,
     &super::evidence_references::transfer_bound::CATALOG_ENTRY,
     &super::unavailable_evidence::fail::CATALOG_ENTRY,
-    &super::unavailable_evidence::mark_indeterminate_experimental::CATALOG_ENTRY,
+    &super::unavailable_evidence::mark_indeterminate::CATALOG_ENTRY,
     &super::limit_action::refine::CATALOG_ENTRY,
     &super::limit_action::tighten_solver::CATALOG_ENTRY,
     &super::limit_action::extend_sampling::CATALOG_ENTRY,
     &super::limit_action::fail::CATALOG_ENTRY,
-    &super::limit_action::warn_experimental::CATALOG_ENTRY,
 ];
 
 #[test]
@@ -139,8 +138,8 @@ fn accuracy_policy_choices_conform() {
             &super::unavailable_evidence::fail::POLICY_CALL,
         ),
         (
-            &super::unavailable_evidence::mark_indeterminate_experimental::CATALOG_ENTRY,
-            &super::unavailable_evidence::mark_indeterminate_experimental::POLICY_CALL,
+            &super::unavailable_evidence::mark_indeterminate::CATALOG_ENTRY,
+            &super::unavailable_evidence::mark_indeterminate::POLICY_CALL,
         ),
         (
             &super::limit_action::refine::CATALOG_ENTRY,
@@ -157,10 +156,6 @@ fn accuracy_policy_choices_conform() {
         (
             &super::limit_action::fail::CATALOG_ENTRY,
             &super::limit_action::fail::POLICY_CALL,
-        ),
-        (
-            &super::limit_action::warn_experimental::CATALOG_ENTRY,
-            &super::limit_action::warn_experimental::POLICY_CALL,
         ),
     ]);
 }

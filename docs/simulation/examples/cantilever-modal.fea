@@ -32,7 +32,6 @@ study cantilever_modes {
     geometry = geometry.beam
     mesh = mesh.beam
     model = model.supported_beam
-    formulation = experimental
     analysis modes { structural modal { modes = 2 } retain basis }
     output shapes = analysis.modes.field.node.displacement
 }

@@ -91,7 +91,6 @@ pub(super) fn thermal_preload(
         &model,
         ComputeBackend::Cpu,
         ThermalSolveOptions {
-            formulation_requirement: FormulationRequirement::Experimental,
             procedure: ThermalProcedureControl::Steady,
             solver_mesh: Some(mesh.clone()),
             ..ThermalSolveOptions::default()
@@ -167,7 +166,6 @@ fn thermal_prestressed_frequency(order: ElementOrder, delta: f64) -> f64 {
         model,
         step_id: modal.step_id,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         observation_execution: crate::results::observation::ObservationExecutionPolicy::scalable(),
         truncation: crate::ModalTruncationPolicy::requested(1),
         convergence: crate::ModalConvergencePolicy::exploratory(),

@@ -223,7 +223,6 @@ pub(super) fn import_response_spectrum_result<Source: CacheImport>(
         runmat_analysis_fea::execution::AccuracySourceKind::StructuralModalResponseSpectrum,
         response_numerical_receipt.source_result(),
         None,
-        response_workload.formulation_requirement(),
         response_workload
             .procedure_step()
             .map_err(protocol)?

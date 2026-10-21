@@ -34,5 +34,5 @@ and inspect the associated mesh with `mesh(field)`.
 
 For each published object, retain the study, analysis, field, sample, mesh, workload, and numerical
 receipt identities. A result is not complete merely because its data array exists. Verify terminal
-status, formulation maturity, convergence and balance, recovery method, partition completeness,
+status, formulation identity, convergence and balance, recovery method, partition completeness,
 and source attribution before downstream use.

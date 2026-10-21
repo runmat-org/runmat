@@ -123,7 +123,6 @@ pub(super) fn task(
     let workload = MagnetostaticWorkload {
         model,
         step_id: ProcedureStepId("potential".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         relative_residual_target: 1e-10,
     };
     let mesh = match order {

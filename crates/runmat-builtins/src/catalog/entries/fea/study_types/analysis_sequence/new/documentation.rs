@@ -36,7 +36,7 @@ const EXAMPLES: &[BuiltinExample] = &[
             "    fea.ReductionPolicy.none(), storage, fea.ObservationPurpose.visualization(), cost);\n",
             "staticStep = fea.ProcedureStep.configure(fea.StructuralStep.static(\"static\"), ...\n",
             "    fea.IndependentDomain.staticDomain(), {fixed}, cell(0, 0), {state}, {displacement}, ...\n",
-            "    fea.AccuracyPlan.experimentalBaseline(\"static_acceptance\"), fea.RestartPolicy.fresh());\n",
+            "    fea.AccuracyPlan.baseline(\"static_acceptance\"), fea.RestartPolicy.fresh());\n",
             "sequence = fea.AnalysisSequence.new(\"bracket_sequence\", {staticStep}, cell(0, 0), cell(0, 0), cell(0, 0));",
         ),
         display_output: None,

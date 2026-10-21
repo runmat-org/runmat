@@ -10,17 +10,16 @@ use crate::BuiltinDocumentation;
 const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(ConstructorDocumentationDefinition {
     title: "fea.ExecutionStep.new",
     summary: concat!(
-        "Bind one procedure step to a compute backend, formulation requirement, and solver ",
-        "options.",
+        "Bind one procedure step to a compute backend and solver options.",
     ),
     description: concat!(
-        "`fea.ExecutionStep.new(step, backend, requirement, solverOptions)` returns an ",
-        "`fea.ExecutionStep` with properties `step_id`, `backend`, `requirement`, and ",
+        "`fea.ExecutionStep.new(step, backend, solverOptions)` returns an ",
+        "`fea.ExecutionStep` with properties `step_id`, `backend`, and ",
         "`solver_options`. Only the step's identifier is retained; the step itself stays in ",
         "the analysis sequence.",
     ),
     keywords: &["fea", "execution", "step", "backend", "solver"],
-    related: &["fea.SolverOptions.defaults", "fea.ComputeBackend.cpu", "fea.FormulationRequirement.production", "fea.ExecutionPlan.new"],
+    related: &["fea.SolverOptions.defaults", "fea.ComputeBackend.cpu", "fea.ExecutionPlan.new"],
     sections: &[
         section(
             "Behavior",
@@ -40,7 +39,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
                 concat!(
                     "Create one execution step for each procedure step of a heterogeneous sequence, then ",
                     "pass them in a cell array to `fea.ExecutionPlan.new(sequence, steps)`. When every ",
-                    "step can use the same backend, requirement, and default options, ",
+                    "step can use the same backend and default options, ",
                     "`fea.ExecutionPlan.defaults` is shorter.",
                 ),
                 super::super::execution_plan::EXECUTION_STUDY,
@@ -54,13 +53,12 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
             concat!(
                 "step = fea.StructuralStep.static('preload');\n",
                 "execution = fea.ExecutionStep.new(step, fea.ComputeBackend.gpu(), ...\n",
-                "    fea.FormulationRequirement.experimental(), fea.SolverOptions.defaults(step));",
+                "    fea.SolverOptions.defaults(step));",
             ),
             concat!(
                 "assert(strcmp(class(execution), 'fea.ExecutionStep'));\n",
                 "assert(execution.step_id == \"preload\");\n",
-                "assert(execution.backend == \"gpu\");\n",
-                "assert(execution.requirement == \"experimental\");",
+                "assert(execution.backend == \"gpu\");",
             ),
         ),
     ],
@@ -98,7 +96,7 @@ policy_entry!(
     FEA_EXECUTION_STEP_NEW_CATALOG_ENTRY,
     name: "fea.ExecutionStep.new",
     result: classes::EXECUTION_STEP,
-    signature: "execution = fea.ExecutionStep.new(step, backend, requirement, solverOptions)",
+    signature: "execution = fea.ExecutionStep.new(step, backend, solverOptions)",
     inputs: [
         (
             "step",
@@ -111,12 +109,6 @@ policy_entry!(
             Any,
             "Typed fea.ComputeBackend.",
             PolicyArg::Typed(&[classes::COMPUTE_BACKEND]),
-        ),
-        (
-            "requirement",
-            Any,
-            "Typed fea.FormulationRequirement.",
-            PolicyArg::Typed(&[classes::FORMULATION_REQUIREMENT]),
         ),
         (
             "solverOptions",

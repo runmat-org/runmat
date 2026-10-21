@@ -1,6 +1,6 @@
 use super::{Branch, Case};
 use crate::{ExactStructuralStudyAnalysisResult, ExactStructuralStudyResult};
-use runmat_analysis_core::{FormulationRequirement, StateUse};
+use runmat_analysis_core::StateUse;
 use runmat_analysis_fea::execution::{
     CanonicalStateTransition, StructuralFrequencySolverPlan, StructuralLinearStateInput,
     StructuralLinearWorkload, StructuralLinearWorkloadResult,
@@ -79,10 +79,6 @@ pub(in super::super) fn assert_authored_result(case: Case, result: &ExactStructu
         .expect("cold typed root must retain thermal source");
     assert_eq!(result.compiled_study.as_ref(), Some(&thermal.compiled));
     assert_eq!(
-        thermal.compiled.formulation_requirement,
-        FormulationRequirement::Experimental
-    );
-    assert_eq!(
         result.mesh.artifact.resolved_request.element_order,
         case.order
     );
@@ -103,10 +99,6 @@ pub(in super::super) fn assert_authored_result(case: Case, result: &ExactStructu
         runmat_analysis_core::StateId("heated".into())
     );
     let (workload, preload) = preload(&result.analysis);
-    assert_eq!(
-        workload.formulation_requirement,
-        FormulationRequirement::Experimental
-    );
     let source = preload
         .linearization
         .as_ref()
@@ -268,10 +260,6 @@ fn assert_frequency(frequency: &crate::ExactStructuralFrequencyAnalysisResult) {
         .numerical_receipt
         .validate_for_result(&frequency.result)
         .unwrap();
-    assert_eq!(
-        frequency.resolved_workload.formulation_requirement(),
-        FormulationRequirement::Experimental
-    );
     assert_eq!(frequency.result.samples().len(), 1);
     for sample in frequency.result.samples() {
         assert!(sample

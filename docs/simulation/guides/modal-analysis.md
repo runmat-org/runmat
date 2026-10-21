@@ -31,7 +31,7 @@ Follow the connection from the clamped stem through the bridge to each tine. Onl
 
 <!-- fea:example:tuning-fork-modal:mode-1 -->
 
-The frequency shown above the figure comes from the saved modal basis, in **hertz**. The coloured shape is the original recovered eigenvector, rescaled for inspection relative to the fork’s dimensions. The grey outline shows the undeformed fork. Colour measures amplitude relative to that mode’s largest stored vector magnitude: **1** is its maximum. Rotate the view to see whether the tines move within the fork’s plane or perpendicular to it.
+The frequency shown above the figure comes from the saved modal basis, in **hertz**. The colored shape is the original recovered eigenvector, rescaled for inspection relative to the fork’s dimensions. The gray outline shows the undeformed fork. Color measures amplitude relative to that mode’s largest stored vector magnitude: **1** is its maximum. Rotate the view to see whether the tines move within the fork’s plane or perpendicular to it.
 
 Follow the motion down through the bridge and stem: fixing the bottom face still allows the rest of the stem to bend. Compare the two tine tips to distinguish motion together from motion in opposite directions.
 
@@ -41,7 +41,7 @@ Follow the motion down through the bridge and stem: fixing the bottom face still
 
 Compare the two tine tips, their relative directions, and the bridge motion. A fork has several families of natural motion; its lowest pair need not be the familiar audible in-plane tuning mode. The model’s stiffness, cross-section, mass and stem restraint determine their ordering.
 
-These are static views of modal patterns. Reversing an entire eigenvector gives the same mode. Display scale and colour do not imply a measured vibration amplitude, a forcing level or an animation time.
+These are static views of modal patterns. Reversing an entire eigenvector gives the same mode. Display scale and color do not imply a measured vibration amplitude, a forcing level or an animation time.
 
 ## Build and modify this study in RunMat
 
@@ -85,6 +85,6 @@ Stiffness $\mathbf K$ and mass $\mathbf M$ determine each mode vector $\boldsymb
 
 ## Supported scope and next steps
 
-This extraction uses the experimental modal formulation. Check material, mass and restraint assignments, then compare frequencies and mode shapes across meshes. For close or repeated modes, compare their physical motion or subspace rather than requiring identical signed vectors.
+This extraction uses RunMat's modal formulation. Check material, mass and restraint assignments, then compare frequencies and mode shapes across meshes. For close or repeated modes, compare their physical motion or subspace rather than requiring identical signed vectors.
 
 [Modal validation](/docs/simulation/validation/modal) describes the spectral, basis and workflow criteria. To predict driven motion, continue with a response study and its forcing, damping, frequency-range and modal-coverage requirements.

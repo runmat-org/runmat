@@ -44,7 +44,6 @@ fn solved_thermal_buckling_factor_is_inverse_to_heating_preload() {
                 model,
                 step_id: step.step_id,
                 backend: ComputeBackend::Cpu,
-                formulation_requirement: FormulationRequirement::Experimental,
                 observation_execution:
                     crate::results::observation::ObservationExecutionPolicy::scalable(),
                 solver: StructuralBucklingSolverPolicy::new(1, 1.0e-9, 100).unwrap(),
@@ -178,7 +177,6 @@ fn solved_thermal_harmonic_response_matches_dense_retained_tangent_system() {
             model,
             step_id: step.step_id,
             backend: ComputeBackend::Cpu,
-            formulation_requirement: FormulationRequirement::Experimental,
             observation_execution:
                 crate::results::observation::ObservationExecutionPolicy::scalable(),
             plan: crate::frequency::FrequencyResponsePlan::new(hz, &[], &[]).unwrap(),

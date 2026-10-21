@@ -24,7 +24,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
                 concat!(
                     "A global-equilibrium criterion accepts only algebraic, nonlinear, or coupling error ",
                     "contributions; other contributions fail study validation. The default ",
-                    "`fea.AccuracyPlan.experimentalBaseline` uses this target with a relative residual ",
+                    "`fea.AccuracyPlan.baseline` uses this target with a relative residual ",
                     "bound of 1e-8.",
                 ),
                 super::TARGET_ROLE,

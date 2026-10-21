@@ -61,14 +61,7 @@ pub(crate) fn prescribe(model: &mut AnalysisModel, id: String, target: RegionTar
 }
 
 fn solve(model: &AnalysisModel, mesh: &SolverMeshArtifact) -> CanonicalElectricalResponse {
-    solve_canonical_static(
-        model,
-        mesh,
-        "potential",
-        FormulationRequirement::Experimental,
-        1e-11,
-    )
-    .unwrap()
+    solve_canonical_static(model, mesh, "potential", 1e-11).unwrap()
 }
 
 fn coefficient(equation: StaticElectricalEquation) -> f64 {
@@ -368,14 +361,7 @@ fn harmonic_quadratic_potential_has_tet10_exact_field_and_tet4_convergence() {
 fn missing_anchors_conflicts_unsupported_intent_and_invalid_material_fail_closed() {
     let mesh = mesh(ElementOrder::Tet4, 2);
     let mut model = model(StaticElectricalEquation::SteadyConduction);
-    assert!(solve_canonical_static(
-        &model,
-        &mesh,
-        "potential",
-        FormulationRequirement::Experimental,
-        1e-8
-    )
-    .is_err());
+    assert!(solve_canonical_static(&model, &mesh, "potential", 1e-8).is_err());
     prescribe(
         &mut model,
         "left".into(),
@@ -388,28 +374,14 @@ fn missing_anchors_conflicts_unsupported_intent_and_invalid_material_fail_closed
         RegionTarget::boundary("slab_right"),
         1.0,
     );
-    assert!(solve_canonical_static(
-        &model,
-        &mesh,
-        "potential",
-        FormulationRequirement::Production,
-        1e-8
-    )
-    .is_err());
+    assert!(solve_canonical_static(&model, &mesh, "potential", 1e-8).is_err());
     let mut bad = model.clone();
     bad.materials[0]
         .electrical
         .as_mut()
         .unwrap()
         .conductivity_s_per_m = 0.0;
-    assert!(solve_canonical_static(
-        &bad,
-        &mesh,
-        "potential",
-        FormulationRequirement::Experimental,
-        1e-8
-    )
-    .is_err());
+    assert!(solve_canonical_static(&bad, &mesh, "potential", 1e-8).is_err());
     let mut bad = model.clone();
     prescribe(
         &mut bad,
@@ -417,26 +389,12 @@ fn missing_anchors_conflicts_unsupported_intent_and_invalid_material_fail_closed
         RegionTarget::boundary("slab_left"),
         1.0,
     );
-    assert!(solve_canonical_static(
-        &bad,
-        &mesh,
-        "potential",
-        FormulationRequirement::Experimental,
-        1e-8
-    )
-    .is_err());
+    assert!(solve_canonical_static(&bad, &mesh, "potential", 1e-8).is_err());
     let mut bad = model.clone();
     bad.electromagnetic = Some(ElectromagneticDomain::Harmonic {
         reference_frequency: Frequency::new(60.0),
     });
-    assert!(solve_canonical_static(
-        &bad,
-        &mesh,
-        "potential",
-        FormulationRequirement::Experimental,
-        1e-8
-    )
-    .is_err());
+    assert!(solve_canonical_static(&bad, &mesh, "potential", 1e-8).is_err());
     let mut bad = model.clone();
     bad.constraints
         .push(AnalysisConstraint::Electrical(ElectricalConstraint {
@@ -445,14 +403,7 @@ fn missing_anchors_conflicts_unsupported_intent_and_invalid_material_fail_closed
                 target: RegionTarget::boundary("slab_right"),
             },
         }));
-    assert!(solve_canonical_static(
-        &bad,
-        &mesh,
-        "potential",
-        FormulationRequirement::Experimental,
-        1e-8
-    )
-    .is_err());
+    assert!(solve_canonical_static(&bad, &mesh, "potential", 1e-8).is_err());
     let mut bad = model.clone();
     prescribe(
         &mut bad,
@@ -460,32 +411,11 @@ fn missing_anchors_conflicts_unsupported_intent_and_invalid_material_fail_closed
         RegionTarget::point("node:999999"),
         1.0,
     );
-    assert!(solve_canonical_static(
-        &bad,
-        &mesh,
-        "potential",
-        FormulationRequirement::Experimental,
-        1e-8
-    )
-    .is_err());
+    assert!(solve_canonical_static(&bad, &mesh, "potential", 1e-8).is_err());
     let mut bad = model.clone();
     bad.sequence.steps.push(bad.sequence.steps[0].clone());
-    assert!(solve_canonical_static(
-        &bad,
-        &mesh,
-        "potential",
-        FormulationRequirement::Experimental,
-        1e-8
-    )
-    .is_err());
+    assert!(solve_canonical_static(&bad, &mesh, "potential", 1e-8).is_err());
     let mut bad = model.clone();
     bad.material_assignments.clear();
-    assert!(solve_canonical_static(
-        &bad,
-        &mesh,
-        "potential",
-        FormulationRequirement::Experimental,
-        1e-8
-    )
-    .is_err());
+    assert!(solve_canonical_static(&bad, &mesh, "potential", 1e-8).is_err());
 }

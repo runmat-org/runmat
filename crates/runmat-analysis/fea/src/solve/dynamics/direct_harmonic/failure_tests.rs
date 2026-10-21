@@ -14,7 +14,7 @@ fn nonconvergence_retains_finite_original_equilibrium_diagnostics() {
         &model,
         &excitations,
         None,
-        crate::assembly::StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+        crate::assembly::StructuralFormulationRequirement::SyntheticOperator,
     )
     .unwrap();
     let imaginary = (0..summary.dof_count)

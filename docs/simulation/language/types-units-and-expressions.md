@@ -70,7 +70,7 @@ reference is an error; there is no string-based lookup at solver time.
 ## Expressions and operations
 
 Expressions are immutable. They support typed arithmetic, comparisons, lists, records, references,
-and calls to catalogued operations. Output operations use the same canonical operation identities
+and calls to cataloged operations. Output operations use the same canonical operation identities
 as RunMat where the meaning agrees:
 
 ```fea

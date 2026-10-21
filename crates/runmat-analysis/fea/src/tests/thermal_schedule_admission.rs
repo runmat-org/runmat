@@ -20,7 +20,6 @@ fn workload() -> ThermalWorkload {
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
         residual_target: 1e-4,
     }
@@ -237,7 +236,6 @@ fn thermal_observation_preflight_accounts_catalog_and_combined_ceiling() {
                 Some(&mesh),
                 runmat_analysis_core::SourceImplementation::CanonicalVolumeProjection,
                 runmat_analysis_core::BoundaryTransferImplementation::CanonicalBoundaryProjection,
-                workload.formulation_requirement,
             )
             .unwrap(),
         )

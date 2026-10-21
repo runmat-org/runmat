@@ -96,7 +96,6 @@ fn authored_acoustic_orders_publish_cold_native_fields_and_exact_state_catalog()
             retained.identity.family(),
             runmat_analysis_core::PhysicsFamily::Acoustic
         );
-        assert!(!retained.production_publishable);
         let runmat_runtime::analysis::AnalysisStudyStepNumericalResultData::AcousticFrequency(
             numerical,
         ) = &retained.numerical_result
@@ -350,7 +349,6 @@ study response {
     geometry = geometry.part
     mesh = mesh.volume
     model = model.cavity
-    formulation = experimental
     analysis sound { acoustic harmonic { frequencies = [0.2] Hz } }
 }
 "#;

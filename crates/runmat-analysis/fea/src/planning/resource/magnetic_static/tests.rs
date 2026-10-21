@@ -3,8 +3,7 @@ use crate::execution::{MagneticNumericalReceiptArtifact, MAGNETIC_RECEIPT_MAX_EN
 use crate::physics::magnetic::test_support::authored_model;
 use crate::topology::test_meshes::{quadratic_slab_mesh, slab_mesh};
 use runmat_analysis_core::{
-    FormulationRequirement, ProcedureStepId, StateCompleteness, StateId, StateKind, StateOutput,
-    StatePersistence,
+    ProcedureStepId, StateCompleteness, StateId, StateKind, StateOutput, StatePersistence,
 };
 use runmat_meshing_core::ElementOrder;
 fn workload(current: f64) -> MagnetostaticWorkload {
@@ -24,7 +23,6 @@ fn workload(current: f64) -> MagnetostaticWorkload {
     MagnetostaticWorkload {
         model,
         step_id: ProcedureStepId("potential".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         relative_residual_target: 1e-10,
     }
 }

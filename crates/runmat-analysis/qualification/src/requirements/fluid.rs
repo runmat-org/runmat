@@ -1,6 +1,6 @@
 //! Standing incompressible Newtonian, laminar, single-phase fluid requirements.
 //! Coupled heat/interface physics is a separate qualification responsibility.
-//! Witness links declare assertion scope; they do not declare passing maturity.
+//! Witness links declare assertion scope; they do not declare passing qualification.
 use crate::requirement::*;
 const STEADY_FORMULATION: Formulation = Formulation::IncompressibleLaminarSteady;
 const TRANSIENT_FORMULATION: Formulation = Formulation::IncompressibleLaminarTransient;

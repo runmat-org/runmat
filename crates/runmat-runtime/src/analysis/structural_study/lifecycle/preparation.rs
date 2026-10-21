@@ -100,7 +100,6 @@ pub fn analysis_prepare_structural_study_intent_op(
                     &study.model,
                     &step.procedure_step.step_id,
                     step.authored_execution.backend,
-                    step.authored_execution.requirement,
                     &options,
                 )?;
                 authored_execution.solver_options =
@@ -149,7 +148,6 @@ pub fn analysis_prepare_structural_study_intent_op(
                         model: study.model.clone(),
                         step_id: step.procedure_step.step_id.clone(),
                         backend: step.authored_execution.backend,
-                        formulation_requirement: step.authored_execution.requirement,
                         solver:
                             runmat_analysis_fea::execution::StructuralTransientSolverPlan::Direct,
                         time_step_policy:
@@ -478,7 +476,6 @@ pub(in crate::analysis) fn prepare_structural_buckling_template(
         model: study.model.clone(),
         step_id: step.procedure_step.step_id.clone(),
         backend: step.authored_execution.backend,
-        formulation_requirement: step.authored_execution.requirement,
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         solver: options.solver,
@@ -499,7 +496,6 @@ pub(in crate::analysis) fn prepare_structural_modal_workload(
             model: study.model.clone(),
             step_id: step.procedure_step.step_id.clone(),
             backend: step.authored_execution.backend,
-            formulation_requirement: step.authored_execution.requirement,
             observation_execution:
                 runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
             truncation: options.truncation,
@@ -524,7 +520,6 @@ pub(in crate::analysis) fn prepare_structural_prestressed_modal_template(
         model: study.model.clone(),
         step_id: step.procedure_step.step_id.clone(),
         backend: step.authored_execution.backend,
-        formulation_requirement: step.authored_execution.requirement,
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         truncation: options.truncation,
@@ -559,7 +554,6 @@ pub(in crate::analysis) fn prepare_structural_response_spectrum_template(
         model: study.model.clone(),
         step_id: step.procedure_step.step_id.clone(),
         backend: step.authored_execution.backend,
-        formulation_requirement: step.authored_execution.requirement,
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
     };
@@ -590,7 +584,6 @@ pub(in crate::analysis) fn prepare_structural_random_response_template(
         model: study.model.clone(),
         step_id: step.procedure_step.step_id.clone(),
         backend: step.authored_execution.backend,
-        formulation_requirement: step.authored_execution.requirement,
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         integration_policy: options.integration,
@@ -623,7 +616,6 @@ pub(in crate::analysis) fn prepare_structural_frequency_workload(
             model: study.model.clone(),
             step_id: step.procedure_step.step_id.clone(),
             backend: step.authored_execution.backend,
-            formulation_requirement: step.authored_execution.requirement,
             observation_execution:
                 runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
             plan,
@@ -675,7 +667,6 @@ pub(in crate::analysis) fn prepare_structural_prestressed_frequency_template(
         model: study.model.clone(),
         step_id: step.procedure_step.step_id.clone(),
         backend: step.authored_execution.backend,
-        formulation_requirement: step.authored_execution.requirement,
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::scalable(),
         plan: prepare_structural_frequency_plan(study, step)?,

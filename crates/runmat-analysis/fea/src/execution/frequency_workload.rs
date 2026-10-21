@@ -1,7 +1,6 @@
 use runmat_analysis_core::{
-    validate_model_sequence, AnalysisModel, AnalysisProcedure, FormulationRequirement,
-    IndependentDomain, PhysicsFamily, ProcedureStep, ProcedureStepId, SolutionSpace, StateKind,
-    StateSource, StateUse,
+    validate_model_sequence, AnalysisModel, AnalysisProcedure, IndependentDomain, PhysicsFamily,
+    ProcedureStep, ProcedureStepId, SolutionSpace, StateKind, StateSource, StateUse,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use serde::{Deserialize, Serialize};
@@ -86,7 +85,6 @@ pub struct StructuralModalFrequencyTemplate {
     pub model: AnalysisModel,
     pub step_id: ProcedureStepId,
     pub backend: ComputeBackend,
-    pub formulation_requirement: FormulationRequirement,
     pub observation_execution: ObservationExecutionPolicy,
     pub plan: FrequencyResponsePlan,
 }
@@ -116,7 +114,6 @@ impl StructuralModalFrequencyTemplate {
             model: self.model,
             step_id: self.step_id,
             backend: self.backend,
-            formulation_requirement: self.formulation_requirement,
             observation_execution: self.observation_execution,
             plan: self.plan,
             solver: StructuralFrequencySolverPlan::ModalReduced { basis_state },
@@ -134,7 +131,6 @@ pub struct StructuralPrestressedFrequencyTemplate {
     pub model: AnalysisModel,
     pub step_id: ProcedureStepId,
     pub backend: ComputeBackend,
-    pub formulation_requirement: FormulationRequirement,
     pub observation_execution: ObservationExecutionPolicy,
     pub plan: FrequencyResponsePlan,
     pub solver: StructuralPrestressedFrequencySolverTemplate,
@@ -189,7 +185,6 @@ impl StructuralPrestressedFrequencyTemplate {
             model: self.model,
             step_id: self.step_id,
             backend: self.backend,
-            formulation_requirement: self.formulation_requirement,
             observation_execution: self.observation_execution,
             plan: self.plan,
             solver,
@@ -207,7 +202,6 @@ pub struct StructuralFrequencyWorkload {
     model: AnalysisModel,
     step_id: ProcedureStepId,
     backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
     observation_execution: ObservationExecutionPolicy,
     plan: FrequencyResponsePlan,
     solver: StructuralFrequencySolverPlan,
@@ -222,7 +216,6 @@ struct StructuralFrequencyWorkloadWire {
     model: AnalysisModel,
     step_id: ProcedureStepId,
     backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
     observation_execution: ObservationExecutionPolicy,
     plan: FrequencyResponsePlan,
     solver: StructuralFrequencySolverPlan,
@@ -239,7 +232,6 @@ impl TryFrom<StructuralFrequencyWorkloadWire> for StructuralFrequencyWorkload {
             model: wire.model,
             step_id: wire.step_id,
             backend: wire.backend,
-            formulation_requirement: wire.formulation_requirement,
             observation_execution: wire.observation_execution,
             plan: wire.plan,
             solver: wire.solver,
@@ -254,7 +246,6 @@ pub struct StructuralFrequencyWorkloadInput {
     pub model: AnalysisModel,
     pub step_id: ProcedureStepId,
     pub backend: ComputeBackend,
-    pub formulation_requirement: FormulationRequirement,
     pub observation_execution: ObservationExecutionPolicy,
     pub plan: FrequencyResponsePlan,
     pub solver: StructuralFrequencySolverPlan,
@@ -272,7 +263,6 @@ impl StructuralFrequencyWorkload {
             model: input.model,
             step_id: input.step_id,
             backend: input.backend,
-            formulation_requirement: input.formulation_requirement,
             observation_execution: input.observation_execution,
             plan: input.plan,
             solver: input.solver,
@@ -297,10 +287,6 @@ impl StructuralFrequencyWorkload {
 
     pub const fn backend(&self) -> ComputeBackend {
         self.backend
-    }
-
-    pub const fn formulation_requirement(&self) -> FormulationRequirement {
-        self.formulation_requirement
     }
 
     pub const fn observation_execution(&self) -> ObservationExecutionPolicy {
@@ -412,7 +398,6 @@ impl StructuralFrequencyWorkload {
                 &self.model,
                 &self.step_id,
                 self.backend,
-                self.formulation_requirement,
                 self.observation_execution,
                 &self.plan,
                 &self.solver,

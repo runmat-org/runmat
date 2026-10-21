@@ -70,8 +70,7 @@ Issue codes describe authoring problems found during validation. Operation error
 
 Every successful run stores an `AnalysisRunResult`. A successful operation can still produce a degraded or rejected result. The result carries:
 
-- canonical physics-family, procedure, solution-space, formulation, maturity, and fallback-policy
-  identity,
+- canonical physics-family, procedure, solution-space, and exact formulation-realization identity,
 - `model_validity`,
 - `solver_convergence`,
 - `result_quality`,
@@ -83,7 +82,7 @@ Every successful run stores an `AnalysisRunResult`. A successful operation can s
   method, preconditioner, and typed fallback events,
 - domain payloads where applicable.
 
-Those fields explain what happened in the run. They do not, by themselves, prove that a physics family is validated for production use.
+Those fields explain what happened in the run. They do not, by themselves, prove that a physics family is validated for a given use.
 
 ## Artifact Roots
 

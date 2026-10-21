@@ -1,14 +1,12 @@
 use super::*;
 use crate::analysis::{analysis_run_linear_static_with_options, tests, AnalysisRunOptions};
 use crate::operations::OperationContext;
-use runmat_analysis_core::FormulationRequirement;
 use runmat_analysis_fea::ComputeBackend;
 
 fn run() -> AnalysisRunResult {
     analysis_run_linear_static_with_options(
         &tests::sample_model(),
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         AnalysisRunOptions::default(),
         OperationContext::new(None, None),
     )

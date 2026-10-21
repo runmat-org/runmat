@@ -5,12 +5,12 @@
 //! u(x)=T sin(k x)/(E k cos(k)), k=omega sqrt(rho/E).
 
 use runmat_analysis_core::{
-    AnalysisConstraint, AnalysisModel, CoordinateFrame, Displacement, FormulationRequirement,
-    IndependentDomain, MaterialElasticityModel, PhysicalSignal, PrescribedStructuralDofs,
-    PrescribedValue, ProcedureStep, PropertyRegionTarget, RegionTarget, SignalExtrapolation,
-    SignalInterpolation, SignalKnot, SignalOrdinate, SignalPrecision, SignalRepresentation,
-    SignalValue, StructuralConstraint, StructuralConstraintKind, StructuralTranslationDof,
-    TabulatedSignal, TabulatedSignalDomain, Traction, TranslationDofValue,
+    AnalysisConstraint, AnalysisModel, CoordinateFrame, Displacement, IndependentDomain,
+    MaterialElasticityModel, PhysicalSignal, PrescribedStructuralDofs, PrescribedValue,
+    ProcedureStep, PropertyRegionTarget, RegionTarget, SignalExtrapolation, SignalInterpolation,
+    SignalKnot, SignalOrdinate, SignalPrecision, SignalRepresentation, SignalValue,
+    StructuralConstraint, StructuralConstraintKind, StructuralTranslationDof, TabulatedSignal,
+    TabulatedSignalDomain, Traction, TranslationDofValue,
 };
 use runmat_meshing_core::SolverMeshArtifact;
 
@@ -327,7 +327,6 @@ fn modal_continuum(quadratic: bool) {
             ModalSolveOptions {
                 solver_mesh: Some(mesh.clone()),
                 truncation: ModalTruncationPolicy::requested(1),
-                formulation_requirement: FormulationRequirement::Experimental,
                 ..ModalSolveOptions::default()
             },
         )
@@ -362,7 +361,6 @@ fn modal_continuum(quadratic: bool) {
             ModalSolveOptions {
                 solver_mesh: Some(mesh.clone()),
                 truncation: ModalTruncationPolicy::requested(requested),
-                formulation_requirement: FormulationRequirement::Experimental,
                 ..ModalSolveOptions::default()
             },
         )

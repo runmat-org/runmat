@@ -1,4 +1,4 @@
-//! Authored CAD, actual native completed closure and cold replay. Experimental only.
+//! Authored CAD, actual native completed closure and cold replay.
 //! Independent separated Fourier reference, not another RunMat solve.
 #[path = "maxwell_authored/replay.rs"]
 mod replay;
@@ -66,7 +66,6 @@ study response {
     geometry = geometry.part
     mesh = mesh.volume
     model = model.field
-    formulation = experimental
     analysis phasor {
         electromagnetic harmonic { frequencies = [159154.94309189534 Hz] }
         accuracy { algebraic_relative_tolerance = 1e-10 }
@@ -261,9 +260,7 @@ pub(super) async fn run() {
             .unwrap(),
         )
         .unwrap();
-        let policy = runmat_analysis_fea::study::MaxwellStudyPlanningPolicy {
-            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
-        };
+        let policy = runmat_analysis_fea::study::MaxwellStudyPlanningPolicy {};
         let mut wrong = actual.compiled.clone();
         wrong.model.sequence.steps[0].restart =
             runmat_analysis_core::RestartPolicy::ResumeCheckpoint {

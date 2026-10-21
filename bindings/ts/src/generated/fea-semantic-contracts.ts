@@ -24,8 +24,7 @@ export interface AccuracyCriterion {
 export type AccuracyLimitAction = "refine"
   | "tighten_solver"
   | "extend_sampling"
-  | "fail"
-  | "warn_experimental";
+  | "fail";
 
 export type AccuracyObservationEvent = "criterion_crossing";
 
@@ -977,7 +976,6 @@ export interface AuthoredStudy {
   geometry: AuthoredGeometryInstance;
   mesh: AuthoredMeshRef;
   model: AuthoredModelInstance;
-  formulation_requirement: FormulationRequirement;
   inputs: AuthoredInputDefinition[];
   outputs: AuthoredOutput[];
   assessments?: AuthoredAssessment[];
@@ -1652,9 +1650,6 @@ export type FieldLocation = "node"
 export interface Force {
   newtons: number;
 }
-
-export type FormulationRequirement = "production"
-  | "experimental";
 
 export interface FoundationModulus {
   newtons_per_cubic_meter: number;
@@ -2468,7 +2463,9 @@ export type PartitionBalance = "nonzeros"
   | "dofs"
   | "elements";
 
-export interface PersistentEntityId {
+export type PersistentEntityId = PersistentEntityIdData;
+
+export interface PersistentEntityIdData {
   kind: PersistentEntityKind;
   source_topology_id: string;
   assembly_path: string[];
@@ -3318,7 +3315,7 @@ export interface TubularBeamSection {
 }
 
 export type UnavailableEvidencePolicy = "fail"
-  | "mark_indeterminate_experimental";
+  | "mark_indeterminate";
 
 export type UnitSystem = "unspecified"
   | "meter"

@@ -153,7 +153,6 @@ fn serialized_native_thermal_source_drives_tet4_and_tet10_static_fields_and_line
             &model,
             ComputeBackend::Cpu,
             ThermalSolveOptions {
-                formulation_requirement: FormulationRequirement::Experimental,
                 procedure: ThermalProcedureControl::Steady,
                 solver_mesh: Some(mesh.clone()),
                 ..ThermalSolveOptions::default()
@@ -177,7 +176,6 @@ fn serialized_native_thermal_source_drives_tet4_and_tet10_static_fields_and_line
                 step_id: model.sequence.steps[1].step_id.clone(),
                 model: model.clone(),
                 backend: ComputeBackend::Cpu,
-                formulation_requirement: FormulationRequirement::Experimental,
                 preconditioner: SpdPreconditionerKind::Jacobi,
                 algebra_backend: LinearAlgebraBackendKind::CpuReference,
                 observation_execution:

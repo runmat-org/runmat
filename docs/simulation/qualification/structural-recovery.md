@@ -87,7 +87,7 @@ are confined to tests; it is neither a new production solver nor a certification
 or resource-admission path.
 
 The original cantilever convergence gate remains failed. This diagnostic adds no
-production, adaptation, stage, platform or whole-resource qualification. Original
+family, adaptation, stage, platform or whole-resource qualification. Original
 independent material, curved geometry and manufactured field checks remain
 mandatory; successful equilibrium alone does not close recovery or adaptation.
 

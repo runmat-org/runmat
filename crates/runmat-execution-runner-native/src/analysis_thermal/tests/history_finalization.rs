@@ -473,7 +473,6 @@ fn check_history_chain(order: ElementOrder, partial_access: PartialAccessPolicy)
             .collect(),
         sequence,
         step: step.clone(),
-        formulation_requirement: workload.formulation_requirement,
         program_revision: revision.clone(),
         chunk_bytes,
         inventory_limits: limits,
@@ -737,7 +736,6 @@ fn assert_worker_rejects_omitted_authored_observations(
         source.source_kind,
         source.source_result,
         None,
-        source.formulation_requirement,
         source.plan.clone(),
     )
     .unwrap();

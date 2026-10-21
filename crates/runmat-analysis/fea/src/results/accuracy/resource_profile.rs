@@ -99,10 +99,6 @@ impl Serialize for Projection<'_> {
         map.serialize_entry("source_kind", &self.request.source_kind)?;
         map.serialize_entry("source_result", &self.request.source_result)?;
         map.serialize_entry("source_observations", &self.request.source_observations)?;
-        map.serialize_entry(
-            "formulation_requirement",
-            &self.request.formulation_requirement,
-        )?;
         map.serialize_entry("evidence", &self.evidence)?;
         map.serialize_entry("evaluation", &EvaluationProjection(self))?;
         map.serialize_entry("gate", &GateProjection(self.longest_id()))?;
@@ -240,8 +236,7 @@ mod tests {
             crate::execution::AccuracySourceKind::StructuralLinear,
             result,
             None,
-            FormulationRequirement::Experimental,
-            AccuracyPlan::experimental_baseline("resource accuracy"),
+            AccuracyPlan::baseline("resource accuracy"),
         )
         .unwrap();
         let evidence = AccuracyEvidence::new(
@@ -298,7 +293,6 @@ mod tests {
             request.source_kind,
             request.source_result,
             None,
-            request.formulation_requirement,
             plan,
         )
         .unwrap();
@@ -339,7 +333,6 @@ mod tests {
             request.source_kind,
             request.source_result,
             None,
-            FormulationRequirement::Production,
             plan,
         )
         .unwrap();

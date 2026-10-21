@@ -54,7 +54,6 @@ fn native_magnetic_authored_plan_accuracy_preserves_unknown_spatial_evidence() {
         let compiled = CompiledAnalysisStudy {
             module_path: "qualification/magnetic.fea".into(),
             study_id: "magnetic".into(),
-            formulation_requirement: source.formulation_requirement,
             study_inputs: Vec::new(),
             assessments: Vec::new(),
             outputs: Vec::new(),
@@ -62,14 +61,8 @@ fn native_magnetic_authored_plan_accuracy_preserves_unknown_spatial_evidence() {
             model: source.model,
             solver_mesh_digest: mesh.canonical_digest,
         };
-        let product = plan_magnetic_study_product(
-            compiled,
-            &mesh,
-            MagneticStudyPlanningPolicy {
-                formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
-            },
-        )
-        .unwrap();
+        let product =
+            plan_magnetic_study_product(compiled, &mesh, MagneticStudyPlanningPolicy {}).unwrap();
         let task = prepare_magnetostatic_task(MagnetostaticTaskPreparation {
             authored_study_digest: product.compiled.definition_digest().unwrap(),
             frozen_project_digest: None,
@@ -120,7 +113,6 @@ fn native_magnetic_authored_plan_accuracy_preserves_unknown_spatial_evidence() {
             sequence: SequenceIdentity::from_solver_contract(&product.workload.model.sequence)
                 .unwrap(),
             step: product.workload.model.sequence.steps[0].clone(),
-            formulation_requirement: product.workload.formulation_requirement,
             program_revision: task.program.request.recipe.program_revision.clone(),
             chunk_bytes: 8192,
             inventory_limits: limits,

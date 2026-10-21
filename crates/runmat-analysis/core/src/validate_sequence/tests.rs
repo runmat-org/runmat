@@ -93,7 +93,7 @@ fn initial_velocity(applies_before_step_id: &str) -> InitialCondition {
 
 #[test]
 fn rejects_family_procedure_and_domain_mismatches() {
-    let invalid_family = ProcedureStep::experimental(
+    let invalid_family = ProcedureStep::new(
         "thermal_modes",
         PhysicsFamily::Thermal,
         AnalysisProcedure::ModalExtraction,

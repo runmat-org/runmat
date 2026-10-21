@@ -13,7 +13,7 @@ pub use solver_compatibility::{
     validate_solver_formulation_compatibility, SolverFormulationCompatibilityError,
 };
 
-use runmat_analysis_core::{AnalysisField, FormulationRequirement};
+use runmat_analysis_core::AnalysisField;
 use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
 
@@ -187,7 +187,6 @@ pub struct FeaContactInterfaceContext {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LinearStaticSolveOptions {
-    pub formulation_requirement: FormulationRequirement,
     pub preconditioner_kind: SpdPreconditionerKind,
     pub algebra_backend_kind: LinearAlgebraBackendKind,
     pub solver_mesh_artifact_path: Option<String>,
@@ -202,7 +201,6 @@ pub struct LinearStaticSolveOptions {
 impl Default for LinearStaticSolveOptions {
     fn default() -> Self {
         Self {
-            formulation_requirement: FormulationRequirement::Production,
             preconditioner_kind: SpdPreconditionerKind::Jacobi,
             algebra_backend_kind: LinearAlgebraBackendKind::CpuReference,
             solver_mesh_artifact_path: None,
@@ -216,7 +214,6 @@ impl Default for LinearStaticSolveOptions {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ModalSolveOptions {
-    pub formulation_requirement: FormulationRequirement,
     pub truncation: crate::pipeline::modal_governance::ModalTruncationPolicy,
     pub convergence: crate::pipeline::modal_governance::ModalConvergencePolicy,
     /// Global base-acceleration directions whose load-dependent residual vectors are retained in
@@ -228,7 +225,6 @@ pub struct ModalSolveOptions {
 impl Default for ModalSolveOptions {
     fn default() -> Self {
         Self {
-            formulation_requirement: FormulationRequirement::Production,
             truncation: crate::pipeline::modal_governance::ModalTruncationPolicy::default(),
             convergence: crate::pipeline::modal_governance::ModalConvergencePolicy::default(),
             residual_vector_directions: Vec::new(),

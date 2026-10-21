@@ -57,11 +57,10 @@ model impulsive_bracket {
     load_case impact { include excitation.impact }
 }
 
-study structural_transient_experimental {
+study structural_transient {
     geometry = geometry.bracket
     mesh = mesh.bracket
     model = model.impulsive_bracket
-    formulation = experimental
     analysis response {
         structural transient {
             start_time = 0 s

@@ -18,7 +18,6 @@ fn workload() -> ThermalWorkload {
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: crate::ComputeBackend::Cpu,
-        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         procedure: crate::ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
         residual_target: 1e-4,
     }
@@ -494,7 +493,6 @@ fn admitted_identity(
         Some(mesh),
         runmat_analysis_core::SourceImplementation::CanonicalVolumeProjection,
         runmat_analysis_core::BoundaryTransferImplementation::CanonicalBoundaryProjection,
-        workload.formulation_requirement,
     )
     .unwrap()
 }

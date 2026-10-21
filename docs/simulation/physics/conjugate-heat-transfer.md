@@ -5,7 +5,7 @@ solid. Fluid and solid retain different materials and equations; a declared inte
 temperature and normal heat flux.
 
 The `.fea` language checks steady, transient, and nonlinear CHT contracts. The numerical library
-currently admits an experimental **partitioned reduced-flow/thermal realization** with heuristic
+currently admits a **partitioned reduced-flow/thermal realization** with heuristic
 interface transfer. The public typed `.fea` executor does not connect it end to end, and it is not a
 general 3D CHT finite-volume/finite-element solver.
 
@@ -47,9 +47,9 @@ the reduced channel realization documented in [fluid flow](./fluid).
 
 | Procedure | Contract | Registered realization |
 | --- | --- | --- |
-| `conjugate_heat_transfer steady` | Static fluid/solid temperature and flow state | Experimental single-pass partitioned projection |
-| `conjugate_heat_transfer transient` | Time samples and coupled initial state | Experimental fixed-point relaxation |
-| `conjugate_heat_transfer nonlinear` | Load-factor domain and coupled residual | Experimental scalar residual iteration |
+| `conjugate_heat_transfer steady` | Static fluid/solid temperature and flow state | Single-pass partitioned projection |
+| `conjugate_heat_transfer transient` | Time samples and coupled initial state | Fixed-point relaxation |
+| `conjugate_heat_transfer nonlinear` | Load-factor domain and coupled residual | Scalar residual iteration |
 
 Every current branch uses the reduced fluid component and heuristic interface transfer. Canonical
 Tet4/Tet10 topology can improve projection provenance, but does not turn the reduced fluid component
@@ -75,7 +75,6 @@ study cooler {
     geometry = geometry.cooler
     mesh = mesh.cooler
     model = model.cooled_part
-    formulation = experimental
     analysis operating_point { conjugate_heat_transfer steady {} }
 }
 ```

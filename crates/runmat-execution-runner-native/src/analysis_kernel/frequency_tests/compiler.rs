@@ -66,7 +66,6 @@ fn original_compiler_reservation_is_rederived_for_both_orders_and_frequency_phas
             model,
             step_id: ProcedureStepId("frequency".into()),
             backend: ComputeBackend::Cpu,
-            formulation_requirement: FormulationRequirement::Experimental,
             observation_execution: ObservationExecutionPolicy::scalable(),
             plan: FrequencyResponsePlan::new(20.0, &[40.0], &[]).unwrap(),
             solver: StructuralFrequencySolverPlan::Direct {

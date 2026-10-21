@@ -311,7 +311,7 @@ fn maximum_off_diagonal_ratio(matrix: &[f64], size: usize) -> f64 {
 mod tests {
     use super::*;
     use crate::algebra::{MatrixProperties, OperatorRole};
-    use runmat_analysis_core::{FormulationRequirement, ProcedureStep};
+    use runmat_analysis_core::ProcedureStep;
 
     #[test]
     fn exact_projection_retains_coupling_and_reconstructs_vectors() {
@@ -344,7 +344,6 @@ mod tests {
             &model,
             crate::ComputeBackend::Cpu,
             crate::ModalSolveOptions {
-                formulation_requirement: FormulationRequirement::Experimental,
                 ..crate::ModalSolveOptions::default()
             },
         )
@@ -360,7 +359,7 @@ mod tests {
             &model,
             &excitations,
             None,
-            crate::assembly::StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+            crate::assembly::StructuralFormulationRequirement::SyntheticOperator,
         )
         .unwrap();
         let reduced = ModalReducedSystem::project(&summary, &modal.basis).unwrap();

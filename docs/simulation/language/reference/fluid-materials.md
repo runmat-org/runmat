@@ -34,7 +34,7 @@ all owners to declare identical physical density and viscosity; material names
 may differ. Missing, overlapping, unused, mixed Cell/Solid, and heterogeneous
 ownership rejects. Coefficients are not averaged or selected by node order.
 
-This material prerequisite is not production CFD qualification, native execution
+This material prerequisite is not CFD validation, native execution
 admission, a turbulence closure, transient flow, or coupled CHT/FSI support.
 Material compilation represents the explicit laminar envelope with zero
 turbulence intensity in the existing coefficient carrier; it does not infer a

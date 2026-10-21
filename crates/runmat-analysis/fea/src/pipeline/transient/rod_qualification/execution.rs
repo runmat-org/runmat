@@ -25,7 +25,6 @@ fn transient_rod_cold_blocks_and_recovered_history_retain_independent_continuum_
             step_id: model.sequence.steps[0].step_id.clone(),
             model,
             backend: ComputeBackend::Cpu,
-            formulation_requirement: FormulationRequirement::Experimental,
             solver: StructuralTransientSolverPlan::Direct,
             time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 80 },
             residual_target: 1.0e-10,

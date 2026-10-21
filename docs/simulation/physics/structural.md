@@ -5,10 +5,9 @@ forced vibration, shock response, buckling, and nonlinear load paths. RunMat kee
 model independent from meshing and execution: geometry defines regions, the mesh discretizes them,
 the model assigns materials, sections, supports, and loads, and the study chooses a procedure graph.
 
-The typed `.fea` language covers the complete structural procedure set described on this page. The
-native `.fea` execution path is currently admitted as `formulation = experimental`; each result
-records the actual formulation, operator identities, backend, convergence, residual, and recovery
-evidence. Language acceptance alone is not a production qualification.
+The typed `.fea` language covers the complete structural procedure set described on this page, and
+the native `.fea` execution path runs it. Each result records the actual formulation, operator
+identities, backend, convergence, residual, and recovery evidence.
 
 ## What equations does RunMat solve for structural FEA?
 
@@ -107,7 +106,6 @@ study bracket_static {
     geometry = geometry.bracket
     mesh = mesh.bracket
     model = model.loaded_bracket
-    formulation = experimental
     analysis static { structural static {} }
     output displacement = analysis.static.field.node.displacement
     output stress = analysis.static.field.element.von_mises_stress
@@ -151,7 +149,6 @@ study bracket_modes {
     geometry = geometry.bracket
     mesh = mesh.bracket
     model = model.loaded_bracket
-    formulation = experimental
 
     analysis modes {
         structural modal { modes = 30 }
@@ -206,7 +203,6 @@ study transient_response {
     geometry = geometry.bracket
     mesh = mesh.bracket
     model = model.impacted_bracket
-    formulation = experimental
     analysis response {
         structural transient {
             start_time = 0 s
@@ -300,8 +296,8 @@ and variance follows from integration over angular frequency. Input PSD/CPSD uni
 the inverse-domain unit and cannot be substituted by an amplitude spectrum.
 
 The checked runnable examples
-[`modal-response-spectrum-experimental.fea`](../examples/modal-response-spectrum-experimental.fea)
-and [`modal-random-response-experimental.fea`](../examples/modal-random-response-experimental.fea)
+[`modal-response-spectrum.fea`](../examples/modal-response-spectrum.fea)
+and [`modal-random-response.fea`](../examples/modal-random-response.fea)
 show the complete spectrum declarations, modal state flow, and outputs.
 
 ## How do I run nonlinear structural analysis?
@@ -369,7 +365,7 @@ by different material regions do not erase a legitimate stress jump.
 
 At minimum, review geometry and units, material and section coverage, load resultants, support
 reactions, mesh quality, discretization convergence, equation residuals, energy balance, formulation
-maturity, backend identity, and recovery evidence. Dynamics additionally needs time/frequency
+identity, backend identity, and recovery evidence. Dynamics additionally needs time/frequency
 convergence, damping justification, mass participation, and basis truncation evidence. Buckling and
 nonlinear work needs imperfection and path-sensitivity studies appropriate to the engineering
 decision.

@@ -1,7 +1,7 @@
 //! Explicit, mesh-bound integration inventory for canonical solid history.
 //!
 //! A rule identifies point ownership; it does not certify integration convergence.
-//! In particular, the positive Duffy alternatives remain experimental envelopes.
+//! In particular, the positive Duffy alternatives remain unadmitted envelopes.
 
 use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::Digest;

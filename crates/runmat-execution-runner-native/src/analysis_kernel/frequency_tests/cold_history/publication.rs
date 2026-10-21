@@ -75,7 +75,6 @@ pub(super) fn publish(
     let compiled = runmat_analysis_fea::study::CompiledAnalysisStudy {
         module_path: "original-native-frequency.fea".into(),
         study_id: "original-frequency".into(),
-        formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: Vec::new(),
         outputs: Vec::new(),
         assessments: Vec::new(),
@@ -173,10 +172,6 @@ pub(super) fn publish(
     let [step] = completed.steps.as_slice() else {
         panic!("singleton frequency study")
     };
-    assert!(
-        !step.production_publishable,
-        "experimental lifecycle does not qualify physics"
-    );
     let expected = scalars
         .into_iter()
         .filter(|scalar| scalar.observation_id.0 == "displacement_peak")

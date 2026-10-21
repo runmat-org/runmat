@@ -122,7 +122,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         step_id: ProcedureStepId("insulated".into()),
         model,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         procedure: ThermalProcedureControl::BackwardEuler {
             snapshot_count: samples,
         },
@@ -141,7 +140,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             Some(&mesh),
             runmat_analysis_core::SourceImplementation::CanonicalVolumeProjection,
             runmat_analysis_core::BoundaryTransferImplementation::CanonicalBoundaryProjection,
-            workload.formulation_requirement,
         )?,
     )?;
     let expected_evidence = samples

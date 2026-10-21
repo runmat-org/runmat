@@ -7,7 +7,6 @@ fn modal_capacity_binds_workload_workspace_payload_and_original_ceiling() {
         model: base.model().clone(),
         step_id: base.step_id().clone(),
         backend: base.backend(),
-        formulation_requirement: base.formulation_requirement(),
         observation_execution: base.observation_execution(),
         truncation: base.truncation(),
         convergence: base.convergence().with_maximum_subspace_dimension(2),

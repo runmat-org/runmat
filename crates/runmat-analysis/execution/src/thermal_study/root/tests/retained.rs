@@ -32,7 +32,6 @@ fn retained_preparation() -> ThermalStudyPreparation {
         "heat",
         runmat_analysis_fea::study::ThermalStudyPlanningPolicy {
             backend: input.product.workload.backend,
-            formulation_requirement: FormulationRequirement::Experimental,
         },
     )
     .unwrap();
@@ -77,7 +76,6 @@ fn retained_preparation() -> ThermalStudyPreparation {
     let electrical = ElectricalStaticWorkload {
         model: electrical_model,
         step_id: ProcedureStepId("potential".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         relative_residual_target: 1e-10,
     };
     let result = electrical.execute(&input.mesh).unwrap();

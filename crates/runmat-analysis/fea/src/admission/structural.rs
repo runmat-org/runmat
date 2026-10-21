@@ -367,8 +367,7 @@ pub(super) fn structural_temporal(procedure: AnalysisProcedure) -> Option<Tempor
 #[cfg(test)]
 mod tests {
     use runmat_analysis_core::{
-        FormulationAdmissionRejectionReason, FormulationAxis, FormulationMaturity,
-        FormulationRequirement, PhysicsFamily, SolutionSpace,
+        FormulationAdmissionRejectionReason, FormulationAxis, PhysicsFamily, SolutionSpace,
     };
 
     use super::*;
@@ -413,15 +412,13 @@ mod tests {
             realization.temporals,
             vec![TemporalImplementation::StructuralModalResponseSpectrumCombination]
         );
-        let admitted = admit_formulation(FormulationAdmissionRequest {
+        admit_formulation(FormulationAdmissionRequest {
             family: PhysicsFamily::Structural,
             procedure: AnalysisProcedure::ModalResponseSpectrum,
             solution_space: SolutionSpace::ModalReduced,
-            requirement: FormulationRequirement::Experimental,
             realization,
         })
-        .expect("modal response-spectrum formulation should be admitted experimentally");
-        assert_eq!(admitted.qualification(), FormulationMaturity::Experimental);
+        .expect("modal response-spectrum formulation should be admitted");
     }
 
     #[test]
@@ -434,15 +431,13 @@ mod tests {
             realization.temporals,
             vec![TemporalImplementation::StructuralRandomResponseIntegration]
         );
-        let admitted = admit_formulation(FormulationAdmissionRequest {
+        admit_formulation(FormulationAdmissionRequest {
             family: PhysicsFamily::Structural,
             procedure: AnalysisProcedure::RandomResponse,
             solution_space: SolutionSpace::ModalReduced,
-            requirement: FormulationRequirement::Experimental,
             realization,
         })
-        .expect("random-response formulation should be admitted experimentally");
-        assert_eq!(admitted.qualification(), FormulationMaturity::Experimental);
+        .expect("random-response formulation should be admitted");
     }
 
     #[test]
@@ -452,18 +447,13 @@ mod tests {
             SourceImplementation::CanonicalVolumeProjection,
         ]))
         .expect("valid structural realization");
-        assert_eq!(
-            admit_formulation(FormulationAdmissionRequest {
-                family: PhysicsFamily::Structural,
-                procedure: AnalysisProcedure::Static,
-                solution_space: SolutionSpace::Direct,
-                requirement: FormulationRequirement::Experimental,
-                realization: canonical.clone(),
-            })
-            .expect("canonical exact evidence should be admitted")
-            .qualification(),
-            FormulationMaturity::Experimental
-        );
+        admit_formulation(FormulationAdmissionRequest {
+            family: PhysicsFamily::Structural,
+            procedure: AnalysisProcedure::Static,
+            solution_space: SolutionSpace::Direct,
+            realization: canonical.clone(),
+        })
+        .expect("canonical exact evidence should be admitted");
 
         let mut noncanonical = canonical.clone();
         noncanonical.components[0].sources.reverse();
@@ -471,7 +461,6 @@ mod tests {
             family: PhysicsFamily::Structural,
             procedure: AnalysisProcedure::Static,
             solution_space: SolutionSpace::Direct,
-            requirement: FormulationRequirement::Experimental,
             realization: noncanonical,
         })
         .expect_err("noncanonical source order must not produce a second identity");
@@ -488,7 +477,6 @@ mod tests {
             family: PhysicsFamily::Structural,
             procedure: AnalysisProcedure::Static,
             solution_space: SolutionSpace::Direct,
-            requirement: FormulationRequirement::Experimental,
             realization: duplicated,
         })
         .expect_err("duplicate source evidence must be rejected");
@@ -534,7 +522,6 @@ mod tests {
             family: PhysicsFamily::Structural,
             procedure: AnalysisProcedure::Static,
             solution_space: SolutionSpace::Direct,
-            requirement: FormulationRequirement::Experimental,
             realization,
         })
         .expect("the exact mixed formulation must pass admission");
@@ -578,7 +565,6 @@ mod tests {
             family: PhysicsFamily::Structural,
             procedure: AnalysisProcedure::Static,
             solution_space: SolutionSpace::Direct,
-            requirement: FormulationRequirement::Experimental,
             realization,
         })
         .expect("component-owned mixed sources must round-trip through admission");

@@ -4,7 +4,7 @@
 
 The original unit-square, fully developed Newtonian duct reference now runs through
 native process scheduling, original field recovery, semantic state, accuracy and
-publication. This is experimental CPU FP64 evidence for the frozen benchmark. It
+publication. This is CPU FP64 evidence for the frozen benchmark. It
 does not promote Stage 9 or certify spatial accuracy for arbitrary authored studies.
 Boundary authority consists of the original persistent triangle-centroid samples;
 this is not an authored CAD profile envelope.
@@ -57,8 +57,8 @@ budget policy reject. No solver is called to rebuild lost fields.
 
 A mandatory spatial convergence criterion remains **Indeterminate** in the generic
 accuracy artifact. Independent benchmark assertions do not manufacture a portable
-spatial certificate. Experimental publication is explicit; production publication
-remains blocked.
+spatial certificate. The result publishes, marked indeterminate, only under an explicit
+`markIndeterminate` unavailable-evidence policy; otherwise publication is blocked.
 
 ## Verification and remaining gates
 

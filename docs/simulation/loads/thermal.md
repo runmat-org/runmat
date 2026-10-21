@@ -27,7 +27,7 @@ canonical thermal procedure, as described below.
 | `ambient_temperature` | K | Ambient-temperature excitation for a compatible formulation |
 | `thermal.heat_flux` | `target`, `value` | Constant natural surface flux |
 | `thermal.convection` | `target`, `ambient_temperature`, `coefficient` | Robin boundary $q=h(T-T_\infty)$ |
-| `thermal.radiation` | `target`, `ambient_temperature`, `emissivity` | Experimental authored surface-to-ambient gray radiation; thermal procedure execution remains rejected |
+| `thermal.radiation` | `target`, `ambient_temperature`, `emissivity` | Authored surface-to-ambient gray radiation; thermal procedure execution remains rejected |
 
 `heat_generation` targets a solid or, in explicit excitation form, `whole_model`.
 `temperature_field` targets a solid. Heat flux, ambient temperature, and the natural boundary
@@ -61,7 +61,7 @@ load radiating_surface {
 ```
 
 The authored contract uses nonnegative Kelvin and dimensionless emissivity in `[0, 1]`.
-The experimental CPU face-form library integrates outward loss
+The CPU face-form library integrates outward loss
 `epsilon * sigma * (T^4 - T_ambient^4)` and its exact consistent tangent. This describes
 exchange with a prescribed ambient, not enclosure/view-factor or participating-medium radiation.
 The canonical thermal procedure currently **rejects** this boundary explicitly: nonlinear
@@ -454,7 +454,7 @@ loss is volumetric, `thermal.heat_flux` for a thin resolved heater, or an electr
 when current distribution must determine $q'''=\mathbf J\cdot\mathbf E$. If a component dissipates
 total power $P$ uniformly in selected volume $V$, the source density is $q'''=P/V$.
 
-Do not apply $P$ as though it were $q'''$: watts and watts per cubic metre are different typed
+Do not apply $P$ as though it were $q'''$: watts and watts per cubic meter are different typed
 quantities. After projection, verify that $\int_V q'''\,dV=P$ and that the source did not spread into
 non-dissipating encapsulant, substrate, or coolant.
 

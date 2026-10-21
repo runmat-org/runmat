@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::support::{source_module, TestHost};
-use runmat_analysis_core::{AuthoredInputValue, AuthoredStudyInputBinding, FormulationRequirement};
+use runmat_analysis_core::{AuthoredInputValue, AuthoredStudyInputBinding};
 use runmat_analysis_fea::excitation::SpatialProjectionBalance;
 use runmat_analysis_fea::{
     run_linear_static_with_options, ComputeBackend, LinearStaticSolveOptions,
@@ -67,7 +67,6 @@ study static {
     geometry = geometry.part
     mesh = mesh.part
     model = model.loaded(service_load = input.commanded_load)
-    formulation = experimental
     analysis solve { structural static {} }
 }
 "#;
@@ -173,7 +172,6 @@ fn two_authored_force_inputs_compile_to_distinct_physical_static_solutions() {
                 mesh: &mesh,
                 planning: runmat_analysis_fea::study::StructuralStudyPlanningPolicy {
                     backend: ComputeBackend::Cpu,
-                    formulation_requirement: FormulationRequirement::Experimental,
                     numerics:
                         runmat_analysis_fea::study::StructuralNumericalPlanningPolicy::production(),
                 },
@@ -188,7 +186,6 @@ fn two_authored_force_inputs_compile_to_distinct_physical_static_solutions() {
             &compiled.model,
             ComputeBackend::Cpu,
             LinearStaticSolveOptions {
-                formulation_requirement: FormulationRequirement::Experimental,
                 solver_mesh: Some(mesh.clone()),
                 ..LinearStaticSolveOptions::default()
             },

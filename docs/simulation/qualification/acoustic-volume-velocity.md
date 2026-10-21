@@ -71,7 +71,7 @@ reject. Paired boundary conflicts and reduced graph execution reject explicitly.
 
 ## Completion boundary
 
-This is a bounded CPU FP64 source/duct envelope, not a production/Stage8 decision.
+This is a bounded CPU FP64 source/duct envelope, not a Stage 8 decision.
 No interior monopole, nonuniform patch, arbitrary incident wave, multi-frequency
 authored publication, process restart, measured-memory, distributed or GPU claim.
 Shared/runtime/DSL/native and original-field cold evidence agree. Retention uses

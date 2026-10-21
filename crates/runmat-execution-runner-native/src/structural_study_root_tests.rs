@@ -87,7 +87,6 @@ fn typed_study_root_round_trips_exact_analysis_definition() {
         .unwrap();
     let planning = StructuralStudyPlanningPolicy {
         backend: runmat_analysis_fea::ComputeBackend::Cpu,
-        formulation_requirement: realized.formulation_requirement,
         numerics: StructuralNumericalPlanningPolicy::production(),
     };
     let authored_study_digest = runmat_analysis_fea::study::structural_study_source_digest(
@@ -562,7 +561,6 @@ fn prepare_source(
         &resolved.material_catalog,
     )
     .unwrap();
-    let formulation_requirement = realized.formulation_requirement;
     prepare_structural_study_root(StructuralStudyRootPreparation {
         program_revision: revision,
         artifact_access: access,
@@ -572,7 +570,6 @@ fn prepare_source(
         materials: resolved.material_catalog,
         planning: crate::StudyRootPlanning::Structural(StructuralStudyPlanningPolicy {
             backend: runmat_analysis_fea::ComputeBackend::Cpu,
-            formulation_requirement,
             numerics: StructuralNumericalPlanningPolicy::production(),
         }),
         analysis_accelerator_requests: Vec::new(),
@@ -648,7 +645,6 @@ study static {
     geometry = geometry.part
     mesh = mesh.volume
     model = model.structure
-    formulation = experimental
     analysis solve {
         structural static {}
     }

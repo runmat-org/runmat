@@ -69,7 +69,6 @@ study heating {
     geometry = geometry.part
     mesh = mesh.volume
     model = model.heated
-    formulation = experimental
     analysis heat {
         thermal transient {
             start_time = 0 s
@@ -477,7 +476,6 @@ fn workload(
         model,
         step_id: ProcedureStepId("heat".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
         residual_target: 1e-10,
     }

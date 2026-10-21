@@ -50,7 +50,6 @@ fn signed_source_reports_fit_full_original_history_profiles() {
     let workload = FluidTransientWorkload {
         model,
         step_id: ProcedureStepId("advance".into()),
-        formulation_requirement: FormulationRequirement::Experimental,
         policy: f.policy,
         geometry_policy: crate::physics::cfd::canonical::qualification::fixture::geometry_policy(),
         initial_fields: Vec::new(),

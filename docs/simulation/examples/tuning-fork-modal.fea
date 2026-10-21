@@ -31,7 +31,6 @@ study fork_modes {
     geometry = geometry.fork
     mesh = mesh.fork
     model = model.supported_fork
-    formulation = experimental
     analysis modes { structural modal { modes = 2 } retain basis }
     output shapes = analysis.modes.field.node.displacement
 }

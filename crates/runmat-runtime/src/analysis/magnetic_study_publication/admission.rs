@@ -42,16 +42,13 @@ pub(super) fn validate(
     };
     if completed.workload.model != completed.compiled.model
         || completed.workload.step_id != step.step_id
-        || completed.workload.formulation_requirement != completed.compiled.formulation_requirement
     {
         return Err("magnetic publication differs from original authored workload".into());
     }
     validate_options(options, completed.workload.relative_residual_target)?;
     let expected = runmat_analysis_fea::study::plan_magnetic_study(
         &completed.compiled,
-        runmat_analysis_fea::study::MagneticStudyPlanningPolicy {
-            formulation_requirement: completed.workload.formulation_requirement,
-        },
+        runmat_analysis_fea::study::MagneticStudyPlanningPolicy {},
     )
     .map_err(|e| e.to_string())?;
     if expected != completed.workload {
@@ -163,7 +160,6 @@ pub(super) fn validate(
             .source_result_identity()
             .map_err(|e| e.to_string())?,
         completed.observation_catalog.as_ref(),
-        completed.workload.formulation_requirement,
         step.accuracy.clone(),
     )
     .map_err(|e| e.to_string())?;

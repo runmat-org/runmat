@@ -6,12 +6,12 @@ boundaries. The retained authored/native chain is described in
 charge extension and its explicit remaining gates are described in
 [electrical-volume-charge.md](electrical-volume-charge.md). Earlier statements below
 that native dispatch/publication/resources were absent refer to those initial slices,
-not the current repository. Production and the largest Tet10 proof gate remain open.
+not the current repository. Stage 7 qualification and the largest Tet10 proof gate remain open.
 
 The CPU library entry `physics::electrical::solve_canonical_static` solves distinct
 electrostatic and steady DC conduction equations on canonical Tet4/Tet10 topology.
 This is not the legacy reduced EM edge graph, native authored dispatch, restart,
-production resource admission or a release-qualified envelope. A numerical-only portable
+whole-study resource admission or a release-qualified envelope. A numerical-only portable
 workload/result contract now binds that kernel to its explicit equation, producer,
 source and canonical topology; it does not open scheduler or authored execution.
 
@@ -28,7 +28,7 @@ proof limits, and source storage is additive in the pre-assembly task plan (revi
 Shared algebra71/71, resource170/170, bridge13/13 and native6/6 pass. Strict FEA,
 bridge and native library/test lint pass. Actual electrothermal workers and cold
 publication pass both orders; exact source and unrelated-change preservation are verified. Cold retained fields remain consistency/provenance evidence,
-not a decoded proof or independent accuracy certificate. Production remains closed.
+not a decoded proof or independent accuracy certificate.
 Statements below about the original largest-Tet10 failure describe earlier checkpoints;
 that particular failure is superseded by the current unchanged-reference pass.
 
@@ -85,7 +85,7 @@ dispersive/temperature-dependent laws, imported state and coupling fail closed.
 
 ## Verification status and remaining gates
 
-Implementation and focused evidence are in progress; no production promotion.
+Implementation and focused evidence are in progress; no stage promotion.
 Initial tests pass homogeneous, layered, gauge and invalid cases. The largest
 quadratic refinement currently hits the shared sparse coercivity work limit before
 PCG; it remains in the suite. A bounded exact minimum-degree ordering experiment
@@ -112,7 +112,7 @@ numerical entry returns physical fields but does not execute semantic publicatio
 
 Exact registry identity distinguishes both equations and both element orders. Its scalar
 Galerkin gradient, epsilon/sigma law, static temporal solve and D/energy versus J/Joule
-recovery cannot borrow the harmonic reduced edge graph. Production admission remains closed.
+recovery cannot borrow the harmonic reduced edge graph.
 
 `ElectricalStaticSolverResult` retains SI arrays behind an immutable, validated contract.
 Cold source-bound import checks workload/producer/mesh/projection/order/formulation identity,
@@ -132,7 +132,7 @@ limit43840305). Final portable contract tests pass5/5, including all four equati
 combinations, exact cold arrays/identities, malformed imports, voltage scales1e-6/1e6 and
 constant1e12 gauge substitution. Shared admission and algebra regressions each pass40/40;
 FEA library/tests strict Clippy and scoped formatting pass. Architecture still reports four
-unrelated runtime module-size debts. No resource, process/restart or production pass is inferred.
+unrelated runtime module-size debts. No resource, process/restart or qualification pass is inferred.
 
 ## Requested-heap admission and transport boundary
 
@@ -163,4 +163,4 @@ budget rejection before invalid geometry. The bridge matrix verifies two chunk p
 canonical input substitution rejection and identical cold retained fields; the full bridge
 suite passes103/103. Strict FEA/bridge all-target Clippy passes without suppression, scoped
 format and whitespace pass. Architecture still reports only the four unrelated runtime debts.
-No measured-residency, scheduler, publication, restart or production claim follows.
+No measured-residency, scheduler, publication, restart or qualification claim follows.

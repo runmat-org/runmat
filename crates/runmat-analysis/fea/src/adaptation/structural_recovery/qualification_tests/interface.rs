@@ -211,8 +211,6 @@ fn connected_tet4_and_tet10_material_interface_preserves_traction_and_energy() {
                 &missing_assignment,
                 ComputeBackend::Cpu,
                 LinearStaticSolveOptions {
-                    formulation_requirement:
-                        runmat_analysis_core::FormulationRequirement::Experimental,
                     solver_mesh: Some(mesh.clone()),
                     require_solver_mesh_for_solid: true,
                     ..LinearStaticSolveOptions::default()
@@ -226,7 +224,6 @@ fn connected_tet4_and_tet10_material_interface_preserves_traction_and_energy() {
             &model,
             ComputeBackend::Cpu,
             LinearStaticSolveOptions {
-                formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
                 solver_mesh: Some(mesh.clone()),
                 require_solver_mesh_for_solid: true,
                 ..LinearStaticSolveOptions::default()
@@ -340,7 +337,6 @@ fn connected_tet4_and_tet10_material_interface_transmits_physical_tip_traction()
             &model,
             ComputeBackend::Cpu,
             LinearStaticSolveOptions {
-                formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
                 solver_mesh: Some(mesh.clone()),
                 require_solver_mesh_for_solid: true,
                 ..LinearStaticSolveOptions::default()
@@ -413,7 +409,6 @@ fn connected_tet4_and_tet10_material_interface_transmits_physical_tip_traction()
             &reordered,
             ComputeBackend::Cpu,
             LinearStaticSolveOptions {
-                formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
                 solver_mesh: Some(mesh),
                 require_solver_mesh_for_solid: true,
                 ..LinearStaticSolveOptions::default()
