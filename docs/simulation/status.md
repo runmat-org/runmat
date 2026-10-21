@@ -40,10 +40,17 @@ execution after pre-execution driver/worker replacement and cold import from dec
 including foreign-source and missing-object rejection. Full outer-root consumer/order coverage
 and genuine mid-phase restart remain open.
 
-Acoustic, electromagnetic, fluid, electro-thermal, conjugate heat-transfer and fluid-structure
-procedure contracts are represented and checked by the language but are not yet admitted by the
-typed native whole-study executor. Runtime object-level operations and solver components are not
-a substitute for that complete path.
+Electromagnetic studies run in the typed native executor: steady current flow, electrostatics
+and magnetostatics (`electromagnetic static {}`), time-harmonic fields at one or several
+frequencies (`electromagnetic harmonic { frequencies = [...] }`, one case per frequency), a
+harmonic loss heating a thermal analysis (`heat_source = analysis.<harmonic>.state.<name>`), and
+two-way electrothermal analysis (`electrothermal steady {}` / `electrothermal transient {...}`,
+published as a heat-transfer case and a conduction case). Authored outputs and reductions over
+their native fields are published. See
+[electromagnetic validation](./validation/electromagnetic) for the analytic checks.
+
+Conjugate heat-transfer and fluid-structure procedure contracts are represented and checked by
+the language but are not yet admitted by the typed native whole-study executor.
 
 `docs/simulation/examples/acoustic-cavity-harmonic.fea` is an acoustic harmonic study of a 1 m air cavity with incident pressure on its walls at 100, 200 and 400 Hz. It checks and plans as an authored acoustic contract. The native whole-study executor does not yet run this multi-frequency acoustic study, and rejects it rather than running a substitute.
 

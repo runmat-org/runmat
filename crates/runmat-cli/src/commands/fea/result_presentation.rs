@@ -240,7 +240,10 @@ pub(crate) fn print_fea_sweep_result(
                 summary["elements"],
                 summary["procedure"].as_str().unwrap_or("unknown")
             ),
-            None => println!("  {id}: {status}"),
+            None => match case["message"].as_str() {
+                Some(message) => println!("  {id}: {status}: {message}"),
+                None => println!("  {id}: {status}"),
+            },
         }
     }
     Ok(())
