@@ -101,12 +101,7 @@ fn task_with_boundary(
         step_id: ProcedureStepId("acoustic".into()),
         frequency: Frequency::new(0.2),
         formulation_requirement: FormulationRequirement::Experimental,
-        solver: AcousticHarmonicPolicy {
-            uniqueness: Some(
-                runmat_analysis_fea::solve::uniqueness::SparseUniquenessPolicy::bounded(),
-            ),
-            ..Default::default()
-        },
+        solver: AcousticHarmonicPolicy::default(),
         power_balance_relative_tolerance: 1e-8,
     };
     let mesh = canonical_tetrahedron_solver_mesh(order);

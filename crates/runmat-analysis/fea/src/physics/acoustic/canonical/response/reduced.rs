@@ -1,10 +1,9 @@
-//! Exact affine reduction, fixed shared right LU, and physical warm corrections.
+//! Exact affine reduction, then one certified sparse LU of the reduced real block operator.
 use super::*;
 use crate::{
     algebra::{spmv, RealSparseMatrix},
     constraints::{build_phase_reduction, AffineConstraintReduction},
-    contracts::SolverPreconditioner,
-    solve::krylov::right_ilu::{SparseRightIlu, SparseRightIluError},
+    solve::certificate::{certify_nonsingular, CertificateError, CertifiedFactorization},
 };
 
 mod operator;
@@ -16,25 +15,16 @@ pub(super) struct PreparedReduced {
     operator: RealSparseMatrix,
     rhs: Vec<f64>,
     residual_reference: f64,
-    preconditioner: Option<SparseRightIlu>,
+    factorization: Option<CertifiedFactorization>,
+    certificate: AcousticSolveCertificate,
     size: usize,
-    uniqueness: Option<crate::solve::uniqueness::SparseUniquenessRecord>,
 }
 
 impl PreparedReduced {
-    /// Prepared once per unchanged numerical operator, reused by power refinement.
-    #[cfg(test)]
+    /// Certifies and factors the original reduced operator once; the solve reuses the factor.
     pub(super) fn new(
         assembly: &AcousticAssembly,
         policy: AcousticHarmonicPolicy,
-    ) -> Result<Self, AcousticHarmonicError> {
-        Self::new_admitted(assembly, policy, None)
-    }
-
-    pub(super) fn new_admitted(
-        assembly: &AcousticAssembly,
-        policy: AcousticHarmonicPolicy,
-        admitted: Option<crate::solve::uniqueness::SparseUniquenessEnvelope>,
     ) -> Result<Self, AcousticHarmonicError> {
         check_cancelled()?;
         let reduction = match &assembly.reduction {
@@ -54,9 +44,8 @@ impl PreparedReduced {
         let operator = reduction
             .reduce_sparse_operator(&full_operator)
             .map_err(|error| AcousticHarmonicError::Operator(error.to_string()))?;
-        // Source-independent, once per unchanged original reduced operator,
-        // before physical RHS acceptance or physical preconditioner construction.
-        let uniqueness = super::super::uniqueness::certify(&operator, policy.uniqueness, admitted)?;
+        // Source-independent: the factorization that solves also certifies nonsingularity.
+        let (factorization, certificate) = certify(&operator, policy.contraction_limit)?;
         let (mut lifting, lifting_imaginary) = assembly.apply(
             &reduction.offset[..assembly.projection.nodes.len()],
             &reduction.offset[assembly.projection.nodes.len()..],
@@ -97,26 +86,14 @@ impl PreparedReduced {
         drop(source);
         drop(lifting);
         drop(shifted);
-        let preconditioner = match policy.preconditioner {
-            SolverPreconditioner::None => None,
-            SolverPreconditioner::Ilu0 if reduction.reduced_dof_count == 0 => None,
-            SolverPreconditioner::Ilu0 => Some(
-                SparseRightIlu::factor(&operator, crate::is_fea_cancelled).map_err(ilu_error)?,
-            ),
-            _ => {
-                return Err(AcousticHarmonicError::Unsupported(
-                    "pressure preconditioner".into(),
-                ))
-            }
-        };
         Ok(Self {
             reduction,
             operator,
             rhs,
             residual_reference,
-            preconditioner,
+            factorization,
+            certificate,
             size: assembly.projection.nodes.len(),
-            uniqueness,
         })
     }
 
@@ -124,76 +101,30 @@ impl PreparedReduced {
         &self,
         assembly: &AcousticAssembly,
         policy: AcousticHarmonicPolicy,
-        initial: Option<&[f64]>,
     ) -> Result<ReducedSolution, AcousticHarmonicError> {
         check_cancelled()?;
-        let mut solution = initial
-            .map(<[f64]>::to_vec)
-            .unwrap_or_else(|| vec![0.0; self.rhs.len()]);
-        if solution.len() != self.rhs.len() || solution.iter().any(|value| !value.is_finite()) {
-            return Err(AcousticHarmonicError::InvalidInput(
-                "physical warm-start shape or values".into(),
-            ));
-        }
-        let mut iterations = 0;
+        let mut solution = vec![0.0; self.rhs.len()];
+        let mut refinement_steps = 0;
         let mut reference = self.residual_reference;
-        if !self.rhs.is_empty() {
-            let residual = self.residual(&solution)?;
-            let residual_norm = norm(&residual);
-            if !residual_norm.is_finite() {
-                return Err(AcousticHarmonicError::Operator(
-                    "nonfinite original residual".into(),
-                ));
-            }
-            // Truly homogeneous warm starts use the shared GMRES initial
-            // residual convention, fixed for target, acceptance and reporting.
-            if reference == 0.0 {
-                reference = residual_norm;
-            }
-            let target = policy.relative_tolerance * reference;
-            if !target.is_finite() || (reference > 0.0 && target == 0.0) {
-                return Err(AcousticHarmonicError::NotConverged);
-            }
-            if residual_norm > target {
-                // A physical warm start is never mistaken for preconditioned y.
-                // Solve A M^-1 y = b-Ax0, then recover x=x0+M^-1 y.
-                let zero = vec![0.0; residual.len()];
-                let result = restarted_gmres(
-                    &residual,
-                    &zero,
-                    GmresPolicy {
-                        relative_tolerance: target / residual_norm,
-                        restart: policy.restart,
-                        maximum_iterations: policy.maximum_iterations,
-                    },
-                    |value| {
-                        spmv(&self.operator, &self.right_apply(value)?)
-                            .map_err(|error| AcousticHarmonicError::Operator(error.to_string()))
-                    },
-                    |a, b| Ok(a.iter().zip(b).map(|(a, b)| a * b).sum()),
-                    crate::is_fea_cancelled,
-                )?
-                .ok_or(AcousticHarmonicError::Breakdown)?;
-                if result.cancelled {
-                    return Err(AcousticHarmonicError::Cancelled);
-                }
-                if result.breakdown {
-                    return Err(AcousticHarmonicError::Breakdown);
-                }
-                if !result.converged {
-                    return Err(AcousticHarmonicError::NotConverged);
-                }
-                for (value, correction) in
-                    solution.iter_mut().zip(self.right_apply(&result.solution)?)
-                {
-                    *value += correction;
-                }
-                iterations = result.iterations;
-            }
-            // Original reduced operator acceptance, never a factor/scaled residual.
-            // The separate power gate still evaluates original K/M/B.
+        if let Some(factorization) = &self.factorization {
+            let arrays = crate::solve::shared_sparse::CsrArrays::of(&self.operator);
+            let report = factorization
+                .factor
+                .solve_refined(arrays.view().into(), &self.rhs, &mut solution, 1)
+                .map_err(|error| match error {
+                    runmat_sparse_solvers::SolverError::Cancelled => {
+                        AcousticHarmonicError::Cancelled
+                    }
+                    other => AcousticHarmonicError::Operator(other.to_string()),
+                })?;
+            refinement_steps = u32::try_from(report.refinement_steps)
+                .map_err(|_| AcousticHarmonicError::NotConverged)?;
+            // Acceptance re-evaluates the original reduced operator, never the factor.
             let final_norm = norm(&self.residual(&solution)?);
-            if !final_norm.is_finite() || final_norm > target {
+            if reference == 0.0 {
+                reference = final_norm;
+            }
+            if !final_norm.is_finite() || final_norm > policy.relative_tolerance * reference {
                 return Err(AcousticHarmonicError::NotConverged);
             }
         }
@@ -234,22 +165,11 @@ impl PreparedReduced {
         Ok(ReducedSolution {
             real: full,
             imaginary,
-            coordinates: solution,
-            iterations,
+            iterations: refinement_steps,
             relative_residual,
-            uniqueness: self.uniqueness,
+            certificate: self.certificate,
         })
     }
-
-    fn right_apply(&self, value: &[f64]) -> Result<Vec<f64>, AcousticHarmonicError> {
-        match &self.preconditioner {
-            Some(preconditioner) => preconditioner
-                .apply(value, crate::is_fea_cancelled)
-                .map_err(ilu_error),
-            None => Ok(value.to_vec()),
-        }
-    }
-
     fn residual(&self, solution: &[f64]) -> Result<Vec<f64>, AcousticHarmonicError> {
         Ok(self
             .rhs
@@ -267,13 +187,6 @@ fn norm(value: &[f64]) -> f64 {
     value.iter().fold(0.0, |sum, value| sum.hypot(*value))
 }
 
-fn ilu_error(error: SparseRightIluError) -> AcousticHarmonicError {
-    match error {
-        SparseRightIluError::Cancelled => AcousticHarmonicError::Cancelled,
-        _ => AcousticHarmonicError::Operator(error.to_string()),
-    }
-}
-
 fn check_cancelled() -> Result<(), AcousticHarmonicError> {
     if crate::is_fea_cancelled() {
         Err(AcousticHarmonicError::Cancelled)
@@ -286,16 +199,37 @@ fn check_cancelled() -> Result<(), AcousticHarmonicError> {
 pub(super) fn solve(
     assembly: &AcousticAssembly,
     policy: AcousticHarmonicPolicy,
-    initial: Option<&[f64]>,
 ) -> Result<ReducedSolution, AcousticHarmonicError> {
-    PreparedReduced::new(assembly, policy)?.solve(assembly, policy, initial)
+    PreparedReduced::new(assembly, policy)?.solve(assembly, policy)
 }
 
 pub(super) struct ReducedSolution {
     pub real: Vec<f64>,
     pub imaginary: Vec<f64>,
-    pub coordinates: Vec<f64>,
+    /// Iterative refinement steps of the certified direct solve.
     pub iterations: u32,
     pub relative_residual: f64,
-    pub uniqueness: Option<crate::solve::uniqueness::SparseUniquenessRecord>,
+    pub certificate: AcousticSolveCertificate,
+}
+
+/// Certify the reduced operator, or record that no free unknown remains.
+fn certify(
+    operator: &RealSparseMatrix,
+    limit: f64,
+) -> Result<(Option<CertifiedFactorization>, AcousticSolveCertificate), AcousticHarmonicError> {
+    if operator.rows() == 0 {
+        let operator_identity = operator
+            .numerical_identity()
+            .map_err(|error| AcousticHarmonicError::Operator(error.to_string()))?;
+        return Ok((
+            None,
+            AcousticSolveCertificate::no_free_unknowns(operator_identity, limit),
+        ));
+    }
+    let certified = certify_nonsingular(operator, limit).map_err(|error| match error {
+        CertificateError::Cancelled => AcousticHarmonicError::Cancelled,
+        other => AcousticHarmonicError::Certificate(other),
+    })?;
+    let certificate = AcousticSolveCertificate::from(&certified.certificate);
+    Ok((Some(certified), certificate))
 }

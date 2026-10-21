@@ -28,34 +28,23 @@ mod tests;
 #[serde(deny_unknown_fields)]
 pub struct AcousticStudyPlanningPolicy {
     pub formulation_requirement: FormulationRequirement,
-    pub krylov_restart: usize,
-    pub maximum_iterations: usize,
     pub power_balance_relative_tolerance: f64,
-    /// Optional column-wise inverse-existence proof. Its work grows with the square of the
-    /// unknown count, so authored studies rely on residual and power closure instead.
-    pub uniqueness: Option<crate::solve::uniqueness::SparseUniquenessPolicy>,
+    /// Limit on the factorization certificate's contraction bound for every frequency.
+    pub contraction_limit: f64,
 }
 
 impl AcousticStudyPlanningPolicy {
     pub const fn experimental() -> Self {
         Self {
             formulation_requirement: FormulationRequirement::Experimental,
-            krylov_restart: 64,
-            maximum_iterations: 4096,
             power_balance_relative_tolerance: 1.0e-8,
-            uniqueness: None,
+            contraction_limit: crate::solve::certificate::DEFAULT_CONTRACTION_LIMIT,
         }
     }
 
     fn validate(self) -> Result<(), AcousticStudyPlanningError> {
-        if let Some(uniqueness) = self.uniqueness {
-            uniqueness
-                .validate()
-                .map_err(|_| AcousticStudyPlanningError::InvalidNumericalPolicy)?;
-        }
-        if self.krylov_restart == 0
-            || self.maximum_iterations == 0
-            || !open_unit_interval(self.power_balance_relative_tolerance)
+        if !open_unit_interval(self.power_balance_relative_tolerance)
+            || !open_unit_interval(self.contraction_limit)
         {
             return Err(AcousticStudyPlanningError::InvalidNumericalPolicy);
         }
@@ -160,11 +149,8 @@ pub fn plan_acoustic_study(
         .filter(|value| open_unit_interval(*value))
         .ok_or(AcousticStudyPlanningError::MissingRelativeAlgebraicTarget)?;
     let solver = AcousticHarmonicPolicy {
-        uniqueness: policy.uniqueness,
-        preconditioner: crate::contracts::SolverPreconditioner::Ilu0,
+        contraction_limit: policy.contraction_limit,
         relative_tolerance,
-        restart: policy.krylov_restart,
-        maximum_iterations: policy.maximum_iterations,
     };
     let frequencies = frequency_plan
         .entries()

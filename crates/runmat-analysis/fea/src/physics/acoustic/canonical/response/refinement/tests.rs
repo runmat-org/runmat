@@ -62,24 +62,15 @@ fn nonfinite_apparent_power_cannot_certify_zero_relative_error() {
 }
 
 #[test]
-fn loose_linear_stop_does_not_authorize_power_and_refinement_matches_complex_division() {
+fn certified_direct_solve_matches_complex_division_and_closes_power() {
     for amplitude in [1., 1e-12] {
         let assembly = assembly(amplitude);
-        let policy = AcousticHarmonicPolicy {
-            uniqueness: None,
-            preconditioner: crate::contracts::SolverPreconditioner::None,
-            relative_tolerance: 0.99,
-            restart: 8,
-            maximum_iterations: 32,
-        };
-        let coarse = reduced::solve(&assembly, policy, None).unwrap();
-        let coarse_power = power::evaluate(&assembly, &coarse.real, &coarse.imaginary).unwrap();
-        assert!(coarse.relative_residual <= policy.relative_tolerance);
-        assert!(coarse_power.power_relative_error > 1e-10);
+        let policy = AcousticHarmonicPolicy::default();
         let (actual, closure) = solve(&assembly, policy, 1e-10).unwrap();
-        assert!(actual.iterations > coarse.iterations);
-        assert!(actual.iterations as usize <= policy.maximum_iterations);
+        assert!(actual.relative_residual <= policy.relative_tolerance);
         assert!(closure.power_relative_error <= 1e-10);
+        assert!(actual.certificate.contraction_bound < actual.certificate.limit);
+        assert_eq!(actual.certificate.dimension, 8);
         // Independent diagonal complex division p_i=b_i/(K_i+iB_i).
         for (i, loss) in [0.1, 0.5, 0.8, 1.].into_iter().enumerate() {
             let k = (i + 1) as f64;
@@ -95,23 +86,25 @@ fn loose_linear_stop_does_not_authorize_power_and_refinement_matches_complex_div
 }
 
 #[test]
-fn power_refinement_cannot_reset_or_enlarge_the_authored_iteration_budget() {
-    let error = solve(
-        &assembly(1.),
-        AcousticHarmonicPolicy {
-            uniqueness: None,
-            preconditioner: crate::contracts::SolverPreconditioner::None,
-            relative_tolerance: 0.99,
-            restart: 8,
-            maximum_iterations: 1,
-        },
-        1e-10,
+fn singular_operator_fails_closed_and_invalid_power_tolerances_are_rejected() {
+    // A lossless rigid cavity at a resonance: K − ω²M singular in one mode.
+    let mut singular = assembly(1.);
+    singular.impedance = RealSparseAssembler::square(
+        4,
+        OperatorRole::Damping,
+        MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
     )
-    .err()
-    .expect("one loose iteration cannot close passive power");
+    .finish()
+    .unwrap();
+    let mut stiffness =
+        RealSparseAssembler::square(4, OperatorRole::Stiffness, MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE);
+    for (row, value) in [1., 2., 0., 4.].into_iter().enumerate() {
+        stiffness.add(row, row, value);
+    }
+    singular.stiffness = stiffness.finish().unwrap();
     assert!(matches!(
-        error,
-        AcousticHarmonicError::PowerNotConverged { iterations: 1, .. }
+        solve(&singular, AcousticHarmonicPolicy::default(), 1e-10),
+        Err(AcousticHarmonicError::Certificate(_))
     ));
     for tolerance in [0., -1., f64::NAN, f64::INFINITY, 1.] {
         assert!(solve(&assembly(1.), AcousticHarmonicPolicy::default(), tolerance).is_err());

@@ -73,10 +73,8 @@ pub(super) fn validate(
         &completed.compiled,
         runmat_analysis_fea::study::AcousticStudyPlanningPolicy {
             formulation_requirement: first.workload.formulation_requirement,
-            krylov_restart: first.workload.solver.restart,
-            maximum_iterations: first.workload.solver.maximum_iterations,
             power_balance_relative_tolerance: first.workload.power_balance_relative_tolerance,
-            uniqueness: first.workload.solver.uniqueness,
+            contraction_limit: first.workload.solver.contraction_limit,
         },
     )
     .map_err(|e| e.to_string())?;

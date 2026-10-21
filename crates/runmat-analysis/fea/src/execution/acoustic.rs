@@ -126,8 +126,8 @@ impl AcousticHarmonicWorkload {
         .map_err(invalid)?;
         validate_solver_formulation_compatibility(
             &identity,
-            SolverMethod::AcousticCanonicalHelmholtzGmres,
-            self.solver.preconditioner,
+            SolverMethod::AcousticCanonicalHelmholtzCertifiedLu,
+            crate::contracts::SolverPreconditioner::None,
         )
         .map_err(invalid)?;
         Ok(identity)

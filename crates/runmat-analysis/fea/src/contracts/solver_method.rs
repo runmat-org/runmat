@@ -20,7 +20,7 @@ pub enum SolverMethod {
     StructuralRandomResponseIntegration,
     IncrementalNewtonRaphson,
     AcousticDomainGraphHelmholtzHarmonic,
-    AcousticCanonicalHelmholtzGmres,
+    AcousticCanonicalHelmholtzCertifiedLu,
     AcousticCanonicalShiftInvertBlockKrylov,
     AcousticCanonicalNewmarkPcg,
     CfdVelocityPressureFiniteVolume,
@@ -53,7 +53,7 @@ impl SolverMethod {
             Self::AcousticDomainGraphHelmholtzHarmonic => {
                 "acoustic_domain_graph_helmholtz_harmonic"
             }
-            Self::AcousticCanonicalHelmholtzGmres => "acoustic_canonical_helmholtz_gmres",
+            Self::AcousticCanonicalHelmholtzCertifiedLu => "acoustic_canonical_helmholtz_certified_lu",
             Self::AcousticCanonicalShiftInvertBlockKrylov => {
                 "acoustic_canonical_shift_invert_block_krylov"
             }

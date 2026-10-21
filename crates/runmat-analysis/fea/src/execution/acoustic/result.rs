@@ -8,7 +8,7 @@ use crate::{
 };
 use runmat_meshing_core::StableDigest;
 
-const PREFIX: &[u8] = b"runmat-acoustic-harmonic-result/v1\0";
+const PREFIX: &[u8] = b"runmat-acoustic-harmonic-result/v2\0";
 const LIMITS: CanonicalLimits = CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64);
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -47,7 +47,7 @@ struct ResultData {
     mean_impedance_loss_w: f64,
     power_relative_error: f64,
     source_evidence: Vec<SpatialProjectionEvidence>,
-    uniqueness: Option<crate::solve::uniqueness::SparseUniquenessRecord>,
+    certificate: crate::physics::acoustic::AcousticSolveCertificate,
 }
 impl TryFrom<ResultData> for AcousticHarmonicSolverResult {
     type Error = AnalysisExecutionError;
@@ -131,7 +131,7 @@ impl AcousticHarmonicSolverResult {
             mean_impedance_loss_w: response.mean_impedance_loss_w,
             power_relative_error: response.power_relative_error,
             source_evidence: response.source_evidence,
-            uniqueness: response.uniqueness,
+            certificate: response.certificate,
         };
         let result = Self::try_from(data)?;
         result.validate_for(workload, mesh)?;
@@ -154,37 +154,24 @@ impl AcousticHarmonicSolverResult {
         d.solver.validate(d.frequency).map_err(invalid)?;
         validate_solver_formulation_compatibility(
             &d.formulation,
-            SolverMethod::AcousticCanonicalHelmholtzGmres,
-            d.solver.preconditioner,
+            SolverMethod::AcousticCanonicalHelmholtzCertifiedLu,
+            crate::contracts::SolverPreconditioner::None,
         )
         .map_err(invalid)?;
-        match (d.solver.uniqueness, d.uniqueness) {
-            (None, None) => {}
-            (Some(policy), Some(record)) => {
-                record.validate().map_err(invalid)?;
-                if record.policy() != policy
-                    || record.dimension()
-                        > d.ordered_node_ids
-                            .len()
-                            .checked_mul(2)
-                            .ok_or_else(|| invalid("acoustic diagnostic dimension overflow"))?
-                {
-                    return Err(invalid(
-                        "acoustic uniqueness diagnostic policy or dimension mismatch",
-                    ));
-                }
-            }
-            _ => {
-                return Err(invalid(
-                    "acoustic uniqueness diagnostic missing or unrequested",
-                ))
-            }
-        }
+        d.certificate
+            .validate(
+                d.solver.contraction_limit,
+                d.ordered_node_ids
+                    .len()
+                    .checked_mul(2)
+                    .ok_or_else(|| invalid("acoustic certificate dimension overflow"))?,
+            )
+            .map_err(invalid)?;
         if let Some(reason) = closure_rejection_reason(d) {
             return Err(invalid(format!(
-                "acoustic result rejected: {reason}; family={:?} procedure={:?} mesh={:?} frequency_hz={} iterations={} maximum_iterations={} relative_residual={:e} solver_relative_tolerance={:e} power_relative_error={:e} power_relative_tolerance={:e} mean_input_power_w={:e} mean_impedance_loss_w={:e}",
+                "acoustic result rejected: {reason}; family={:?} procedure={:?} mesh={:?} frequency_hz={} refinement_steps={} relative_residual={:e} solver_relative_tolerance={:e} power_relative_error={:e} power_relative_tolerance={:e} mean_input_power_w={:e} mean_impedance_loss_w={:e}",
                 d.formulation.family(), d.formulation.procedure(), d.mesh_digest,
-                d.frequency.hertz, d.iterations, d.solver.maximum_iterations,
+                d.frequency.hertz, d.iterations,
                 d.relative_residual, d.solver.relative_tolerance,
                 d.power_relative_error, d.power_tolerance,
                 d.mean_input_power_w, d.mean_impedance_loss_w,
@@ -290,8 +277,8 @@ impl AcousticHarmonicSolverResult {
         &self.data.source_evidence
     }
     /// Validated producer claim, not an independently replayed cold proof.
-    pub const fn uniqueness(&self) -> Option<crate::solve::uniqueness::SparseUniquenessRecord> {
-        self.data.uniqueness
+    pub const fn certificate(&self) -> crate::physics::acoustic::AcousticSolveCertificate {
+        self.data.certificate
     }
     pub fn intensity_w_per_m2(&self) -> &[[f64; 3]] {
         &self.data.intensity_w_per_m2
@@ -344,8 +331,6 @@ fn closure_rejection_reason(d: &ResultData) -> Option<&'static str> {
         || d.formulation.procedure() != AnalysisProcedure::HarmonicResponse
     {
         Some("incompatible family or procedure")
-    } else if d.iterations as usize > d.solver.maximum_iterations {
-        Some("iteration count exceeds solver maximum")
     } else if !d.power_tolerance.is_finite() || d.power_tolerance <= 0.0 || d.power_tolerance >= 1.0
     {
         Some("invalid power tolerance")

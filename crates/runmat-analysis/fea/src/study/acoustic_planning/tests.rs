@@ -145,7 +145,7 @@ fn plans_sweep_with_original_authored_model_and_entry_scoped_states() {
 fn rejects_invalid_policy_and_formulation_mismatch() {
     let study = compiled_duct();
     let mut policy = AcousticStudyPlanningPolicy::experimental();
-    policy.krylov_restart = 0;
+    policy.contraction_limit = 1.0;
     assert!(matches!(
         plan_acoustic_study(&study, policy),
         Err(AcousticStudyPlanningError::InvalidNumericalPolicy)
