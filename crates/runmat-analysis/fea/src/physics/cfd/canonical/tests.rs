@@ -4,6 +4,7 @@ mod acceleration;
 mod authority;
 mod boundary_balances;
 mod closed_reference;
+mod kinematic;
 use super::qualification::fixture;
 mod linear_correction;
 mod mass_flow;
@@ -476,3 +477,29 @@ fn pressure_l2(f: &fixture::Fixture, r: &CanonicalFluidResult) -> f64 {
 }
 
 mod time_block;
+
+#[test]
+fn couette_vorticity_and_wall_shear_match_the_linear_profile() {
+    // u = (y, 0, 0) on the unit slab with μ = fixture viscosity: ω = (0, 0, −1),
+    // wall shear on the stationary y = 0 wall is μ (1, 0, 0) along the flow.
+    let f = case(2, ReferenceCase::Couette, false);
+    let p = CanonicalFluidProblem::prepare(f.input()).unwrap();
+    let r = p.solve().unwrap();
+    for w in &r.residual.cell_vorticity_per_s {
+        assert!(norm(sub(*w, [0.0, 0.0, -1.0])) < 1e-6, "vorticity {w:?}");
+    }
+    let mu = f.material.dynamic_viscosity.pascal_seconds;
+    let mut walls = 0;
+    for (i, face) in p.topology.faces.iter().enumerate() {
+        if face.neighbor.is_some() || face.centroid_m[1].abs() > 1e-12 {
+            continue;
+        }
+        let n = face.owner_area_vector_m2.map(|x| x / face.area_m2);
+        let t = r.residual.face_forces.viscous_traction_n[i];
+        let tn = geometry_ops::dot(t, n);
+        let shear: [f64; 3] = std::array::from_fn(|k| -(t[k] - tn * n[k]) / face.area_m2);
+        assert!(norm(sub(shear, [mu, 0.0, 0.0])) < 1e-6 * mu.max(1.0), "{shear:?}");
+        walls += 1;
+    }
+    assert!(walls > 0);
+}

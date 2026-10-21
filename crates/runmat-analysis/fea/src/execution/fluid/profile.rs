@@ -60,6 +60,7 @@ impl<'a, I: Iterator<Item = &'a str> + Clone> Serialize for BoundaryProfiles<I> 
 struct ResidualProfile<I> {
     boundary_balances: BoundaryProfiles<I>,
     face_forces: FaceForcesProfile,
+    cell_vorticity_per_s: Repeated<[f64; 3]>,
     cell_momentum_n: Repeated<[f64; 3]>,
     cell_algebraic_momentum_n: Repeated<[f64; 3]>,
     cell_momentum_relative: Repeated<f64>,
@@ -105,6 +106,7 @@ fn original_profile<I>(cells: usize, faces: usize, authorities: I) -> OriginalPr
                 pressure_traction_n: vector(faces),
                 pressure_fluctuation_traction_n: vector(faces),
             },
+            cell_vorticity_per_s: vector(cells),
             cell_momentum_n: vector(cells),
             cell_algebraic_momentum_n: vector(cells),
             cell_momentum_relative: scalar(cells),
@@ -366,6 +368,7 @@ mod tests {
                 outer_iterations: 123,
                 linear_iterations: 1234567,
                 residual: CanonicalFluidResidual {
+                    cell_vorticity_per_s: vec![[0.0; 3]; cells],
                     boundary_balances: vec![
                             crate::physics::cfd::canonical::CanonicalFluidBoundaryBalance {
                                 authority_id: "pressure_β".into(),

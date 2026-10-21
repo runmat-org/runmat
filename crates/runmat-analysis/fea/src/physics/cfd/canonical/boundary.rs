@@ -24,6 +24,7 @@ pub(super) enum FaceBoundary<'a> {
     },
 }
 
+mod kinematic;
 mod mass_flow;
 
 pub(super) struct BoundaryInput<'a, 's> {
@@ -53,7 +54,9 @@ pub(super) fn compile<'a>(input: BoundaryInput<'a, '_>) -> Result<Vec<FaceBounda
         .map(|c| c.constraint_id.as_str())
         .chain(operators.iter().map(|b| b.boundary_id.as_str()))
         .chain(input.excitations.iter().filter_map(|a| match a {
-            ExcitationAction::MassFlow(a) => Some(a.excitation_id.0.as_str()),
+            ExcitationAction::MassFlow(a)
+            | ExcitationAction::InletVelocity(a)
+            | ExcitationAction::WallMotion(a) => Some(a.excitation_id.0.as_str()),
             _ => None,
         }))
     {
@@ -140,6 +143,7 @@ pub(super) fn compile<'a>(input: BoundaryInput<'a, '_>) -> Result<Vec<FaceBounda
         )?;
     }
     mass_flow::compile(&input, &mut out)?;
+    kinematic::compile(&input, &mut out)?;
     for (i, f) in t.faces.iter().enumerate() {
         if f.neighbor.is_none() && matches!(out[i], FaceBoundary::Interior) {
             return Err(Error::Invalid("incomplete exterior boundary coverage"));

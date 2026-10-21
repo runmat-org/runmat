@@ -17,14 +17,21 @@ pub struct CanonicalFluidFaceForces {
     pub pressure_fluctuation_traction_n: Vec<V>,
 }
 
+/// Face forces and the cell vorticity ∇×u, both from the same boundary-aware velocity
+/// gradient that defines the viscous stress.
 pub(super) fn evaluate(
     p: &CanonicalFluidProblem<'_>,
     u: &[V],
     pressure_fluctuation: &[f64],
     q: &[f64],
     mesh_flux: Option<&[f64]>,
-) -> Result<CanonicalFluidFaceForces, Error> {
+) -> Result<(CanonicalFluidFaceForces, Vec<V>), Error> {
     let gu = velocity_gradients(p, u)?;
+    // Row k of a gradient is ∇u_k: ω = (∂w/∂y − ∂v/∂z, ∂u/∂z − ∂w/∂x, ∂v/∂x − ∂u/∂y).
+    let vorticity = gu
+        .iter()
+        .map(|g| [g[2][1] - g[1][2], g[0][2] - g[2][0], g[1][0] - g[0][1]])
+        .collect::<Vec<_>>();
     let gp = pressure_gradient(p, pressure_fluctuation)?;
     let mut advective = Vec::with_capacity(q.len());
     let mut viscous = Vec::with_capacity(q.len());
@@ -69,10 +76,13 @@ pub(super) fn evaluate(
     {
         return Err(Error::Invalid("nonfinite original face force"));
     }
-    Ok(CanonicalFluidFaceForces {
-        advective_momentum_n: advective,
-        viscous_traction_n: viscous,
-        pressure_traction_n: pressure_force,
-        pressure_fluctuation_traction_n: fluctuation,
-    })
+    Ok((
+        CanonicalFluidFaceForces {
+            advective_momentum_n: advective,
+            viscous_traction_n: viscous,
+            pressure_traction_n: pressure_force,
+            pressure_fluctuation_traction_n: fluctuation,
+        },
+        vorticity,
+    ))
 }

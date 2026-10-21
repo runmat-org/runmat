@@ -24,6 +24,10 @@ pub struct AcousticFrequencyEntryEvidence {
     /// Authored outputs evaluated at this frequency (pressure, level, peaks).
     #[serde(default)]
     pub observations: Vec<runmat_analysis_fea::results::observation::ObservationResult>,
+    /// The publication catalog of those outputs, which the entry's accuracy evaluation names.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observation_catalog:
+        Option<runmat_analysis_fea::results::observation::ObservationPublicationCatalog>,
     pub accuracy: runmat_analysis_fea::results::accuracy::AccuracyArtifact,
     pub states: Vec<crate::analysis::study_result_manifest::PersistedStateEvidence>,
     pub baseline_usage: runmat_analysis_fea::planning::resource::ResourceUsageEvidence,

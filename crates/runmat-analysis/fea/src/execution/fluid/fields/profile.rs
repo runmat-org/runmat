@@ -59,10 +59,14 @@ struct Fields<'a> {
 }
 impl Serialize for Fields<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        // Derived vectors (vorticity, face shear) have the width of the retained arrays they
+        // come from; the canonical f64 encoding has a fixed width per value.
         let mut values = vec![
             Values::Velocity(&self.original.velocity_m_per_s),
             Values::Scalar(&self.original.pressure_pa),
             Values::Scalar(&self.original.face_volume_flux_m3_per_s),
+            Values::Velocity(&self.original.residual.cell_vorticity_per_s),
+            Values::Velocity(&self.original.residual.face_forces.viscous_traction_n),
         ];
         if let Some(extra) = &self.extra {
             values.push(match extra {
@@ -104,17 +108,19 @@ fn artifact_profile(
     extra: Option<Values<'_>>,
     entity_counts: RecoveredFieldEntityCounts,
 ) -> AnalysisExecutionResult<SerializedCanonicalProfile> {
-    let expected = 3 + usize::from(extra.is_some());
+    let expected = 5 + usize::from(extra.is_some());
     if definitions.len() != expected
         || counts.len() != expected
         || extra.as_ref().is_some_and(|values| match values {
-            Values::Velocity(v) => v.len() != counts[3],
-            Values::Scalar(v) => v.len() != counts[3],
+            Values::Velocity(v) => v.len() != counts[5],
+            Values::Scalar(v) => v.len() != counts[5],
         })
         || original.velocity_m_per_s.len() != counts[0]
         || original.pressure_pa.len() != counts[1]
         || original.pressure_fluctuation_pa.len() != counts[1]
         || original.face_volume_flux_m3_per_s.len() != counts[2]
+        || original.residual.cell_vorticity_per_s.len() != counts[3]
+        || original.residual.face_forces.viscous_traction_n.len() != counts[4]
     {
         return Err(invalid("fluid native profile original cardinality"));
     }
@@ -164,7 +170,7 @@ pub(super) fn requested_bytes(
         Some(Values::Scalar(_)) => 1,
         None => 0,
     };
-    let mut counts = vec![cells, cells, faces];
+    let mut counts = vec![cells, cells, faces, cells, faces];
     if extra.is_some() {
         counts.push(nodes);
     }
@@ -225,6 +231,16 @@ pub(super) fn requested_bytes(
         )?,
         vector_bytes::<f64>(cells)?,
         vector_bytes::<f64>(faces)?,
+        vector_bytes::<f64>(
+            cells
+                .checked_mul(3)
+                .ok_or_else(|| invalid("fluid vorticity count overflow"))?,
+        )?,
+        vector_bytes::<f64>(
+            faces
+                .checked_mul(3)
+                .ok_or_else(|| invalid("fluid face shear count overflow"))?,
+        )?,
         vector_bytes::<f64>(
             nodes
                 .checked_mul(extra_components)
@@ -309,10 +325,11 @@ mod tests {
             outer_iterations: 1,
             linear_iterations: 0,
             residual: CanonicalFluidResidual {
+                cell_vorticity_per_s: vec![[0.0; 3]; 2],
                 boundary_balances: vec![],
                 face_forces: CanonicalFluidFaceForces {
                     advective_momentum_n: vec![],
-                    viscous_traction_n: vec![],
+                    viscous_traction_n: vec![[0.5, -0.25, 1.0]; 7],
                     pressure_traction_n: vec![],
                     pressure_fluctuation_traction_n: vec![],
                 },
@@ -329,7 +346,7 @@ mod tests {
                 flux_constitutive_relative: 0.0,
             },
         };
-        let counts = [2, 2, 7];
+        let counts = [2, 2, 7, 2, 7];
         let entity_counts = RecoveredFieldEntityCounts {
             nodes: 5,
             volume_elements: 2,
@@ -351,6 +368,21 @@ mod tests {
                 .collect(),
             original.pressure_pa.clone(),
             original.face_volume_flux_m3_per_s.clone(),
+            original
+                .residual
+                .cell_vorticity_per_s
+                .iter()
+                .flatten()
+                .copied()
+                .collect(),
+            original
+                .residual
+                .face_forces
+                .viscous_traction_n
+                .iter()
+                .flatten()
+                .copied()
+                .collect(),
         ]
         .into_iter();
         let fields = definitions

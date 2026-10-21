@@ -10,11 +10,11 @@ selected faces, using their total area and the admitted density. It checks the r
 the source's projection tolerance. A complete velocity or pressure law on the same faces is an
 unsupported overlap; a pressure reference supplies a gauge rather than another face law.
 
-The native typed `.fea` executor supports one fresh independent direct **steady** fluid
-step on serial CPU. Transient source histories are supported by the canonical numerical and scheduled
-checkpoint/block APIs; authored transient whole-study roots remain unsupported. These routes do not
-qualify remote, GPU, turbulence, symmetry, periodic, CHT or FSI execution. See the
-[signed-source witness](../qualification/fluid-mass-flow-native.md) for the verified scope.
+`fea run` realizes every load on this page in steady and transient flow, standalone or coupled to
+heat transfer or a structure. `inlet_velocity` and `wall_motion` prescribe the face velocity from a
+vector signal, or from a scalar speed history with a unit `direction`; wall motion is tangential,
+and wall motion normal to the wall comes from a coupled structure. See the
+[signed-source witness](../qualification/fluid-mass-flow-native.md) for mass flow.
 
 | Kind | Quantity/fields | Use |
 | --- | --- | --- |

@@ -126,9 +126,17 @@ pub(super) fn admit_authority_profile(
         mul(profile.maximum_entity_units.max(1), 2)?,
         u64::from(usize::BITS),
     )?;
+    // Every face-bound action (mass flow, inlet velocity, wall motion) selects faces.
     let mass_flow_actions = actions
         .iter()
-        .filter(|a| matches!(a, ExcitationAction::MassFlow(_)))
+        .filter(|a| {
+            matches!(
+                a,
+                ExcitationAction::MassFlow(_)
+                    | ExcitationAction::InletVelocity(_)
+                    | ExcitationAction::WallMotion(_)
+            )
+        })
         .count() as u64;
     let boundary_work = mul(
         mul(
@@ -296,6 +304,8 @@ impl CanonicalFluidReservation {
                 48,
             )?,
         )?;
+        // Cell vorticity: one retained and one evaluated vector per cell, doubled payload.
+        bytes = add(bytes, add(mul(n, 2 * 2 * 24)?, 48)?)?;
         // Gauge selection/component arrays, original and reduced scalar systems,
         // compatibility traversal and mean-trace normalization coexist with GMRES.
         bytes = add(bytes, add(mul(n, 512)?, mul(f, 64)?)?)?;

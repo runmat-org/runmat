@@ -11,11 +11,11 @@ conservative face fluxes, Rhie–Chow pressure–velocity coupling with nonortho
 linear-upwind convection and the full Newtonian stress. Transient flow advances with backward
 Euler over the authored time grid, every interval converged to the same physical acceptance as a
 steady solve. Every run checks momentum and continuity cell by cell and publishes velocity,
-pressure, face flux and the mass and momentum balance of every authored boundary.
+pressure, vorticity, face flux, the shear stress on every face (the wall shear stress on walls),
+and the mass and momentum balance of every authored boundary.
 
 The same flow solver drives the coupled [conjugate heat transfer](./conjugate-heat-transfer) and
-[fluid–structure interaction](./fluid-structure-interaction) analyses. Periodic boundaries and
-turbulence models are not available.
+[fluid–structure interaction](./fluid-structure-interaction) analyses.
 
 ## What fluid equations does the contract target?
 
@@ -33,7 +33,10 @@ constitutive model applies. A full discretization must satisfy momentum and cont
 mass-balance evidence.
 
 The canonical operator uses owner-oriented face incidence, Newtonian viscous stresses and conservative
-advective fluxes. Correction solves use the shared sparse layer's restarted GMRES with strict fixed-support ILU(0); they act on current velocity and pressure fluctuations;
+advective fluxes. Correction solves use the shared sparse layer's restarted GMRES: the momentum
+solves with an ILU(0) preconditioner, the pressure correction with smoothed-aggregation algebraic
+multigrid, so the pressure solve keeps its iteration count as the mesh is refined. They act on
+current velocity and pressure fluctuations;
 the pressure reference is retained separately, avoiding an absolute-pressure round trip. Acceptance
 checks momentum, continuity, constitutive flux and local/global physical balance.
 

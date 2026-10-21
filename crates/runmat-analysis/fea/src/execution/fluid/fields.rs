@@ -45,6 +45,20 @@ pub fn fluid_native_field_definition_inventory(
             FieldLocation::Face,
             RecoveredFieldEntityDomain::OrientedFaces,
         ),
+        (
+            "cfd.vorticity",
+            ObservationQuantity::Vorticity,
+            FieldLocation::Cell,
+            RecoveredFieldEntityDomain::VolumeElements,
+        ),
+        // The tangential viscous traction the owner-side fluid exerts across each face, Pa;
+        // on a wall face it is the wall shear stress.
+        (
+            "cfd.wall_shear_stress",
+            ObservationQuantity::WallShearStress,
+            FieldLocation::Face,
+            RecoveredFieldEntityDomain::OrientedFaces,
+        ),
     ]
     .into_iter()
     .map(|(id, quantity, location, domain)| {
@@ -106,6 +120,8 @@ pub(super) struct VolumeMeshLayout {
     cells: Vec<usize>,
     /// Stored face position -> (fluid face, orientation relative to the mesh face owner).
     faces: Vec<(usize, bool)>,
+    /// Per fluid face: unit owner normal and area.
+    face_frames: Vec<([f64; 3], f64)>,
 }
 
 impl VolumeMeshLayout {
@@ -117,7 +133,7 @@ impl VolumeMeshLayout {
         let mut bytes = std::mem::size_of::<usize>()
             .checked_mul(fluid.cells.len())
             .and_then(|b| {
-                (std::mem::size_of::<(usize, bool)>())
+                (std::mem::size_of::<(usize, bool)>() + std::mem::size_of::<([f64; 3], f64)>())
                     .checked_mul(fluid.faces.len())
                     .and_then(|f| b.checked_add(f))
             })
@@ -183,6 +199,7 @@ impl VolumeMeshLayout {
                 faces_support: RecoveredFieldSupport::Complete,
                 cells,
                 faces: (0..fluid.faces.len()).map(|face| (face, false)).collect(),
+                face_frames: face_frames(fluid),
             });
         };
         let complete = FiniteVolumeTopology::derive_selected(
@@ -220,6 +237,7 @@ impl VolumeMeshLayout {
             faces_support,
             cells,
             faces,
+            face_frames: face_frames(fluid),
         })
     }
 
@@ -246,20 +264,26 @@ impl VolumeMeshLayout {
         )
     }
 
-    fn cell_values<const N: usize>(&self, values: &[[f64; N]]) -> Vec<f64> {
-        self.cells.iter().flat_map(|&cell| values[cell]).collect()
-    }
-
-    fn scalar_cell_values(&self, values: &[f64]) -> Vec<f64> {
-        self.cells.iter().map(|&cell| values[cell]).collect()
-    }
-
+    #[cfg(test)]
     fn face_values(&self, values: &[f64]) -> Vec<f64> {
         self.faces
             .iter()
             .map(|&(face, reversed)| if reversed { -values[face] } else { values[face] })
             .collect()
     }
+}
+
+fn face_frames(fluid: &FiniteVolumeTopology) -> Vec<([f64; 3], f64)> {
+    fluid
+        .faces
+        .iter()
+        .map(|face| {
+            (
+                face.owner_area_vector_m2.map(|x| x / face.area_m2),
+                face.area_m2,
+            )
+        })
+        .collect()
 }
 
 fn with_supports(
@@ -434,21 +458,49 @@ impl FluidSteadySolverResult {
     }
 
     /// Native values in stored order: cells by projection element, faces by mesh face with
-    /// the flux sign of the mesh face owner, coupled node fields as solved.
-    fn native_values(&self, layout: &VolumeMeshLayout) -> Vec<Vec<f64>> {
+    /// the orientation of the mesh face owner, coupled node fields as solved. One lazy source
+    /// serves recovery and the in-place publication check.
+    fn native_value_sources<'s>(
+        &'s self,
+        layout: &'s VolumeMeshLayout,
+    ) -> Vec<Box<dyn Iterator<Item = f64> + 's>> {
         let original = self.original();
-        let mut values = vec![
-            layout.cell_values(&original.velocity_m_per_s),
-            layout.scalar_cell_values(&original.pressure_pa),
-            layout.face_values(&original.face_volume_flux_m3_per_s),
+        let viscous = &original.residual.face_forces.viscous_traction_n;
+        let vorticity = &original.residual.cell_vorticity_per_s;
+        let mut sources: Vec<Box<dyn Iterator<Item = f64> + 's>> = vec![
+            Box::new(
+                layout
+                    .cells
+                    .iter()
+                    .flat_map(|&cell| original.velocity_m_per_s[cell]),
+            ),
+            Box::new(layout.cells.iter().map(|&cell| original.pressure_pa[cell])),
+            Box::new(layout.faces.iter().map(|&(face, reversed)| {
+                let q = original.face_volume_flux_m3_per_s[face];
+                if reversed {
+                    -q
+                } else {
+                    q
+                }
+            })),
+            Box::new(layout.cells.iter().flat_map(|&cell| vorticity[cell])),
+            Box::new(layout.faces.iter().flat_map(move |&(face, reversed)| {
+                // Shear exerted by the owner fluid across the face: the negated tangential part
+                // of the viscous force on the owner, per unit area.
+                let (normal, area) = layout.face_frames[face];
+                let t = viscous[face];
+                let tn = t[0] * normal[0] + t[1] * normal[1] + t[2] * normal[2];
+                let sign = if reversed { 1.0 } else { -1.0 };
+                std::array::from_fn::<f64, 3, _>(|k| sign * (t[k] - tn * normal[k]) / area)
+            })),
         ];
         if let Some(energy) = self.conjugate_heat() {
-            values.push(energy.temperature_k.clone());
+            sources.push(Box::new(energy.temperature_k.iter().copied()));
         }
         if let Some(displacement) = self.coupled_displacement() {
-            values.push(displacement.iter().flatten().copied().collect());
+            sources.push(Box::new(displacement.iter().flatten().copied()));
         }
-        values
+        sources
     }
 
     pub fn recover_native_fields(
@@ -465,7 +517,11 @@ impl FluidSteadySolverResult {
         }
         let definitions = layout.definitions(workload.coupling())?;
         let mut fields = Vec::with_capacity(definitions.len());
-        for (definition, values) in definitions.into_iter().zip(self.native_values(&layout)) {
+        for (definition, values) in definitions
+            .into_iter()
+            .zip(self.native_value_sources(&layout))
+        {
+            let values = values.collect::<Vec<_>>();
             let shape = definition
                 .storage_shape(definition.stored_entities(layout.counts))
                 .map_err(invalid)?;
@@ -498,30 +554,7 @@ impl FluidSteadySolverResult {
         let (layout, _) = self.volume_mesh_layout(workload, mesh)?;
         let definitions = layout.definitions(workload.coupling())?;
         // Compared in place against the original arrays: no second copy of the values.
-        let original = self.original();
-        let mut expected: Vec<Box<dyn Iterator<Item = f64> + '_>> = vec![
-            Box::new(
-                layout
-                    .cells
-                    .iter()
-                    .flat_map(|&cell| original.velocity_m_per_s[cell]),
-            ),
-            Box::new(layout.cells.iter().map(|&cell| original.pressure_pa[cell])),
-            Box::new(layout.faces.iter().map(|&(face, reversed)| {
-                let q = original.face_volume_flux_m3_per_s[face];
-                if reversed {
-                    -q
-                } else {
-                    q
-                }
-            })),
-        ];
-        if let Some(energy) = self.conjugate_heat() {
-            expected.push(Box::new(energy.temperature_k.iter().copied()));
-        }
-        if let Some(displacement) = self.coupled_displacement() {
-            expected.push(Box::new(displacement.iter().flatten().copied()));
-        }
+        let expected = self.native_value_sources(&layout);
         if fields.fields().len() != definitions.len()
             || expected.len() != definitions.len()
             || fields.entity_counts() != layout.counts

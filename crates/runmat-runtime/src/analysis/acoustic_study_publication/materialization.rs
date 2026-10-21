@@ -55,6 +55,7 @@ impl AcousticFrequencyCompletionResults {
                     result: entry.result.summary().map_err(|error| error.to_string())?,
                     numerical_receipt: entry.numerical_receipt.clone(),
                     observations: entry.observation_results.clone(),
+                    observation_catalog: entry.observation_catalog.clone(),
                     accuracy: entry.accuracy.clone(),
                     states: entry
                         .states

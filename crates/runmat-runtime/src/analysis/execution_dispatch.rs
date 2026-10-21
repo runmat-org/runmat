@@ -259,7 +259,11 @@ fn run_operation_for_procedure(
             HarmonicResponse | PrestressedHarmonicResponse,
             SolutionSpace::Direct | SolutionSpace::ModalReduced,
         ) => Some(AnalysisOperation::StructuralFrequency),
-        (Acoustic, HarmonicResponse, SolutionSpace::Direct) => Some(AnalysisOperation::Acoustic),
+        (
+            Acoustic,
+            HarmonicResponse | ModalExtraction | TransientResponse,
+            SolutionSpace::Direct,
+        ) => Some(AnalysisOperation::Acoustic),
         (Thermal, Static | TransientResponse, SolutionSpace::Direct) => {
             Some(AnalysisOperation::Thermal)
         }
