@@ -439,19 +439,13 @@ mod tests {
             Value::Int(IntValue::U64(3)),
         ))
         .unwrap();
-        let callable = Value::Closure(Closure::new(
-            "anonymous#7".into(),
-            Some(crate::user_functions::test_support::exact_portable_binding(
-                7,
-                "fea callable capture fixture",
-            )),
-            runmat_types::FunctionSourceRole::Anonymous,
-            None,
+        let (callable, _catalog) = crate::builtins::fea::test_support::portable_closure_fixture(
+            "anonymous#7",
+            7,
             vec![Value::Tensor(
                 Tensor::new_2d(vec![1.0, 2.0, 3.0], 3, 1).unwrap(),
             )],
-            None,
-        ));
+        );
         let arguments = Value::Cell(
             CellArray::new(
                 vec![

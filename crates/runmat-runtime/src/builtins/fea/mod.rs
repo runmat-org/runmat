@@ -3948,9 +3948,9 @@ mod tests {
         let Value::Object(substituted) = &mut substituted_model else {
             unreachable!()
         };
-        let Value::Cell(bindings) = substituted
-            .try_property_mut_unique(signals::bindings::FROZEN_GENERATORS_PROPERTY)
-            .unwrap()
+        let Some(Value::Cell(mut bindings)) = substituted
+            .property(signals::bindings::FROZEN_GENERATORS_PROPERTY)
+            .cloned()
         else {
             unreachable!()
         };
@@ -3974,6 +3974,10 @@ mod tests {
                         (name, value)
                     }
                 }),
+        );
+        substituted.replace_property_unbounded(
+            signals::bindings::FROZEN_GENERATORS_PROPERTY.to_string(),
+            Value::Cell(bindings),
         );
         assert!(modeling::model_from_value("test", &substituted_model).is_err());
 
