@@ -5,7 +5,7 @@ use runmat_analysis_fea::{
     results::{
         field::FiniteVolumeFieldTopology, observation::resolve_finite_volume_observation_plan,
     },
-    topology::{AnalysisProjection, FiniteVolumeTopology},
+    topology::AnalysisProjection,
 };
 
 fn fail(message: &'static str) -> AnalysisBridgeError {

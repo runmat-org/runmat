@@ -7,7 +7,6 @@ use runmat_analysis_core::{
     validate_model_against_geometry, AnalysisConstraint, AnalysisField, AnalysisInterfaceKind,
     AnalysisModel, AnalysisProcedure, BoundaryOperator, ContactFriction, CoordinateFrame,
     CoupledPhysicsFamily, ExcitationAction, PhysicsFamily, ProcedureStepId, StateKind, StateOutput,
-    ThermalInterfaceTransfer,
 };
 use runmat_analysis_fea::execution::{
     CanonicalSemanticState, CanonicalSemanticStateInput, CanonicalSemanticStatePayload,
@@ -18,11 +17,12 @@ use runmat_analysis_fea::physics::cfd::CfdDomainTopology;
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
 use runmat_analysis_fea::{
-    run_modal_with_options, run_nonlinear_with_options, run_thermal_with_options,
-    run_transient_with_options, AnalysisRunIdentity, ComputeBackend, ExecutionBackend,
-    FeaBucklingRunResult, FeaProgressHandler, FeaRunResult, ModalSolveOptions, SolverMethod,
-    SolverPreconditioner, ThermalProcedureControl, ThermalSolveOptions,
+    run_modal_with_options, run_nonlinear_with_options, run_transient_with_options,
+    AnalysisRunIdentity, ComputeBackend, ExecutionBackend, FeaBucklingRunResult,
+    FeaProgressHandler, FeaRunResult, ModalSolveOptions,
 };
+#[cfg(test)]
+use runmat_analysis_fea::{SolverMethod, SolverPreconditioner};
 use runmat_geometry_core::UnitSystem;
 use runmat_meshing_core::SolverMeshArtifact;
 
@@ -113,7 +113,7 @@ pub mod value_admission;
 use excitation_authoring::{append_constant_excitation, ConstantExcitation};
 use execution_dispatch::{execution_operation, run_operation_for_identity, AnalysisOperation};
 use execution_error::{admit_runtime_proxy_for_operation, map_fea_run_error};
-use formulation_admission::{RuntimeDomainSource, RuntimeDomainTopology, RuntimeProxyFormulation};
+use formulation_admission::RuntimeProxyFormulation;
 use linear_static_execution::analysis_run_linear_static_with_executor;
 use result_policy::{classify_run_status, evaluate_production_publication};
 pub use structural_study::{
@@ -3887,99 +3887,6 @@ fn validate_contact_interface_options(
                 options.friction_coefficient.to_string(),
             )]),
         ));
-    }
-    Ok(())
-}
-
-fn validate_coupled_flow_interfaces(
-    model: &AnalysisModel,
-    family: &str,
-) -> Result<(), (String, BTreeMap<String, String>)> {
-    for interface in &model.interfaces {
-        match &interface.kind {
-            AnalysisInterfaceKind::Contact(_) => {
-                return Err((
-                    format!(
-                        "{family} coupling does not accept structural contact interfaces as fluid/thermal interface mappings"
-                    ),
-                    BTreeMap::from([
-                        ("interface_id".to_string(), interface.interface_id.clone()),
-                        (
-                            "primary_region_id".to_string(),
-                            interface.primary.region_id.clone(),
-                        ),
-                        (
-                            "secondary_region_id".to_string(),
-                            interface.secondary.region_id.clone(),
-                        ),
-                        ("interface_kind".to_string(), "contact".to_string()),
-                    ]),
-                ));
-            }
-            AnalysisInterfaceKind::FluidStructure(_) => {
-                if family != "FSI" {
-                    return Err((
-                        format!(
-                            "{family} coupling does not accept fluid-structure interfaces as fluid/thermal interface mappings"
-                        ),
-                        BTreeMap::from([
-                            ("interface_id".to_string(), interface.interface_id.clone()),
-                            (
-                                "primary_region_id".to_string(),
-                                interface.primary.region_id.clone(),
-                            ),
-                            (
-                                "secondary_region_id".to_string(),
-                                interface.secondary.region_id.clone(),
-                            ),
-                            ("interface_kind".to_string(), "fluid_structure".to_string()),
-                        ]),
-                    ));
-                }
-            }
-            AnalysisInterfaceKind::ConjugateHeatTransfer(cht_interface) => {
-                if family != "CHT" {
-                    return Err((
-                        format!(
-                            "{family} coupling does not accept conjugate heat-transfer interfaces as fluid/structure interface mappings"
-                        ),
-                        BTreeMap::from([
-                            ("interface_id".to_string(), interface.interface_id.clone()),
-                            (
-                                "primary_region_id".to_string(),
-                                interface.primary.region_id.clone(),
-                            ),
-                            (
-                                "secondary_region_id".to_string(),
-                                interface.secondary.region_id.clone(),
-                            ),
-                            (
-                                "interface_kind".to_string(),
-                                "conjugate_heat_transfer".to_string(),
-                            ),
-                        ]),
-                    ));
-                }
-                let invalid_transfer = match cht_interface.transfer {
-                    ThermalInterfaceTransfer::Perfect => false,
-                    ThermalInterfaceTransfer::Conductance(conductance) => {
-                        !conductance.is_finite() || conductance.watts_per_square_meter_kelvin <= 0.0
-                    }
-                    ThermalInterfaceTransfer::Resistance(resistance) => {
-                        !resistance.is_finite() || resistance.square_meter_kelvin_per_watt <= 0.0
-                    }
-                };
-                if invalid_transfer {
-                    return Err((
-                        format!("{family} conjugate heat-transfer interface has an invalid transfer law"),
-                        BTreeMap::from([
-                            ("interface_id".to_string(), interface.interface_id.clone()),
-                            ("transfer_law".to_string(), format!("{:?}", cht_interface.transfer)),
-                        ]),
-                    ));
-                }
-            }
-        }
     }
     Ok(())
 }

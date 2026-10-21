@@ -85,7 +85,11 @@ fn error(f: &fixture::Fixture, r: &CanonicalFluidResult) -> (f64, f64) {
 
 #[test]
 fn symmetry_planes_reproduce_plane_poiseuille_flow_under_refinement() {
+    // Tetrahedral cells are not mirror-symmetric about the spanwise mid-plane, so the
+    // spanwise velocity is a discretization error: small against the peak 0.125 m/s and
+    // shrinking under refinement, never an exact zero.
     let mut previous = f64::INFINITY;
+    let mut spanwise_history = Vec::new();
     for n in [2, 3, 4] {
         let f = symmetry_case(n, |target| FluidConstraintKind::Symmetry { target });
         let p = CanonicalFluidProblem::prepare(f.input()).unwrap();
@@ -94,7 +98,11 @@ fn symmetry_planes_reproduce_plane_poiseuille_flow_under_refinement() {
         let (relative, spanwise) = error(&f, &r);
         assert!(relative < previous, "n={n}: {relative} !< {previous}");
         assert!(relative < 0.2, "n={n}: {relative}");
-        assert!(spanwise < 1e-6, "n={n}: spanwise velocity {spanwise}");
+        assert!(
+            spanwise < 0.05 * 0.125,
+            "n={n}: spanwise velocity {spanwise}"
+        );
+        spanwise_history.push(spanwise);
         for (i, face) in f.topology.faces.iter().enumerate() {
             if matches!(p.boundaries[i], boundary::FaceBoundary::Symmetry { .. }) {
                 assert_eq!(r.face_volume_flux_m3_per_s[i], 0.0);
@@ -116,6 +124,10 @@ fn symmetry_planes_reproduce_plane_poiseuille_flow_under_refinement() {
         assert_eq!(balance.volume_flow_rate_m3_per_s, 0.0);
         previous = relative;
     }
+    assert!(
+        spanwise_history[2] < spanwise_history[0],
+        "spanwise velocity does not shrink under refinement: {spanwise_history:?}"
+    );
 }
 
 #[test]

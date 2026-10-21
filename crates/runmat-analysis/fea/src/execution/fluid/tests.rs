@@ -457,20 +457,22 @@ fn original_velocity_pressure_flux_traction_and_resource_substitution_reject() {
     let (workload, mesh) = authored();
     let result = workload.execute(&mesh).unwrap();
     for path in [
-        vec!["original", "velocity_m_per_s", "0", "0"],
-        vec!["original", "pressure_pa", "0"],
-        vec!["original", "pressure_fluctuation_pa", "0"],
+        vec!["original", "steady", "velocity_m_per_s", "0", "0"],
+        vec!["original", "steady", "pressure_pa", "0"],
+        vec!["original", "steady", "pressure_fluctuation_pa", "0"],
         vec![
             "original",
+            "steady",
             "residual",
             "boundary_balances",
             "0",
             "volume_flow_rate_m3_per_s",
         ],
-        vec!["original", "face_volume_flux_m3_per_s", "0"],
-        vec!["original", "pressure_reference_pa", "0"],
+        vec!["original", "steady", "face_volume_flux_m3_per_s", "0"],
+        vec!["original", "steady", "pressure_reference_pa", "0"],
         vec![
             "original",
+            "steady",
             "residual",
             "face_forces",
             "viscous_traction_n",
@@ -506,9 +508,9 @@ fn original_velocity_pressure_flux_traction_and_resource_substitution_reject() {
         let mut wire = serde_json::to_value(&result).unwrap();
         if legacy_schema >= 2 {
             wire["data"]["schema_version"] =
-                serde_json::json!(if legacy_schema == 2 { 1 } else { 3 });
+                serde_json::json!(if legacy_schema == 2 { 1 } else { 4 });
         } else {
-            wire["data"]["original"]
+            wire["data"]["original"]["steady"]
                 .as_object_mut()
                 .unwrap()
                 .remove(if legacy_schema == 0 {
