@@ -89,6 +89,7 @@ fn lower_expression(
             operation @ (OutputOperation::Real
             | OutputOperation::Imaginary
             | OutputOperation::Phase
+            | OutputOperation::Level
             | OutputOperation::Magnitude
             | OutputOperation::VonMises) => {
                 let source = positional_or_named(arguments, 0, "field")?;
@@ -97,6 +98,7 @@ fn lower_expression(
                         OutputOperation::Real => AuthoredFieldProjection::Real,
                         OutputOperation::Imaginary => AuthoredFieldProjection::Imaginary,
                         OutputOperation::Phase => AuthoredFieldProjection::Phase,
+                        OutputOperation::Level => AuthoredFieldProjection::Level,
                         OutputOperation::Magnitude => AuthoredFieldProjection::Magnitude,
                         OutputOperation::VonMises => AuthoredFieldProjection::VonMises,
                         _ => unreachable!(),
