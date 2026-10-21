@@ -2,8 +2,28 @@ use clap::{CommandFactory, FromArgMatches};
 use std::io::Write;
 use std::process::ExitCode;
 
-#[tokio::main]
-async fn main() -> ExitCode {
+/// Deep async study pipelines (geometry, meshing, analysis publication) nest large futures. The
+/// main thread's default stack is too small for them in unoptimized builds, so the command runs
+/// on a thread with an explicit stack, and runtime workers get the same budget.
+const COMMAND_STACK_BYTES: usize = 64 * 1024 * 1024;
+
+fn main() -> ExitCode {
+    let command = std::thread::Builder::new()
+        .name("runmat-main".into())
+        .stack_size(COMMAND_STACK_BYTES)
+        .spawn(|| {
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .thread_stack_size(COMMAND_STACK_BYTES)
+                .build()
+                .expect("start the tokio runtime")
+                .block_on(run())
+        })
+        .expect("start the command thread");
+    command.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+}
+
+async fn run() -> ExitCode {
     let args = std::env::args_os().collect::<Vec<_>>();
     match runmat_process_host::HiddenModeRegistry::standard().detect(args.clone()) {
         Ok(Some(runmat_process_host::HiddenMode::TestWorker)) => {

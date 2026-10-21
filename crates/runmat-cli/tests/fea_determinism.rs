@@ -1,7 +1,6 @@
 //! SIM-24: the same study gives the same result on every run and for every local worker and
 //! thread count. Execution placement and timing are evidence, never result identity.
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -9,7 +8,7 @@ use tempfile::TempDir;
 
 const STUDY: &str = include_str!("fixtures/typed_box_loaded_static.fea");
 
-/// The identity of one run's results: definition, mesh, step run ids, the bytes of every
+/// The identity of one run's results: definition, mesh, step run ids, the content digest of every
 /// persisted solver state, and the assessed scalar.
 #[derive(Debug, PartialEq)]
 struct ResultIdentity {
@@ -84,7 +83,20 @@ fn collect_state_digests(directory: &Path, digests: &mut Vec<String>) {
         if path.is_dir() {
             collect_state_digests(&path, digests);
         } else if path.extension().is_some_and(|extension| extension == "state") {
-            digests.push(format!("{:x}", Sha256::digest(fs::read(&path).unwrap())));
+            // The state header records its numerical content digest; its execution identity
+            // also binds the resource plan the step ran under, which is placement evidence.
+            let bytes = fs::read(&path).unwrap();
+            let marker = b"content_digest";
+            let at = bytes
+                .windows(marker.len())
+                .position(|window| window == marker)
+                .expect("state header records its content digest");
+            let digest = &bytes[at + marker.len()..];
+            let start = digest
+                .windows(7)
+                .position(|window| window == b"sha256:")
+                .unwrap();
+            digests.push(String::from_utf8_lossy(&digest[start..start + 71]).into_owned());
         }
     }
 }
@@ -95,7 +107,7 @@ fn a_study_gives_identical_results_across_runs_workers_and_threads() {
     assert_eq!(reference.assessed.len(), 1);
     assert!(reference.assessed[0] > 0.0);
     // Repeated runs, then explicit worker and thread counts. Placement differs; results do not.
-    for policy in [None, None, Some((1, 1)), Some((4, 1)), Some((2, 4))] {
+    for policy in [None, None, None, None, Some((1, 1)), Some((4, 1)), Some((2, 4))] {
         let identity = run(policy);
         // The definition digest binds the authored execution policy, so compare it only for
         // identical sources; every result identity below must match regardless.

@@ -47,6 +47,19 @@ Read diagnostics with quality reasons:
 - diagnostics say what was observed,
 - quality reasons say why that observation affected trust.
 
+## Same Study, Same Result
+
+A study run is deterministic. For the same RunMat build on the same hardware class, the same
+checked study produces the same mesh digest, the same step run identities, saved solver states
+with identical content digests, and bit-identical assessed values on every run, whatever the local worker count or
+threads per worker. Worker placement, retries, queueing and measured stage times are recorded as
+execution evidence; they never enter the result identity. An `execution` policy changes where and
+how widely the work runs, not what it computes.
+
+The guarantee is tested: `crates/runmat-cli/tests/fea_determinism.rs` runs one static study five
+times and with 1, 2 and 4 workers and 1 or 4 threads per worker, and compares the mesh digest,
+the saved state content digests and the assessed value.
+
 ## Provenance
 
 Provenance records how the run executed:
