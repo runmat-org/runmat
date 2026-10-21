@@ -1,16 +1,100 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
+    authored_expressions::{AuthoredExpressionError, AuthoredNumericExpression},
+    authored_inputs::{AuthoredInputDefinition, AuthoredInputType, AuthoredInputValue},
     model_authoring::{AuthoredModelError, AuthoredRegionSource},
     prescribed_value::PrescribedValue,
     quantity::{
         Damping, FoundationModulus, FrictionCoefficient, HeatFlux, HeatTransferCoefficient,
-        Pressure, SpecificAcousticImpedance, Stiffness, SurfaceEmissivity, Temperature,
-        ThermalContactResistance,
+        CanonicalQuantity, Pressure, SpecificAcousticImpedance, Stiffness, SurfaceEmissivity,
+        Temperature, ThermalContactResistance,
     },
 };
 use runmat_geometry_core::GeometryRegionRole;
-use std::collections::BTreeSet;
+use runmat_types::QuantityDimension;
+use std::collections::{BTreeMap, BTreeSet};
+
+/// A boundary coefficient that is either authored as a constant or computed from
+/// reusable-model inputs. Study realization evaluates every input form to a constant before
+/// analysis lowering, so solvers only ever see the constant.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AuthoredBoundaryCoefficient<Q> {
+    Constant(Q),
+    ModelInput(AuthoredNumericExpression),
+}
+
+impl<Q: CanonicalQuantity> AuthoredBoundaryCoefficient<Q> {
+    pub fn constant(&self) -> Option<Q> {
+        match self {
+            Self::Constant(value) => Some(*value),
+            Self::ModelInput(_) => None,
+        }
+    }
+
+    fn validate_inputs(
+        &self,
+        inputs: &[AuthoredInputDefinition],
+        expected: &[AuthoredInputType],
+    ) -> Result<(), AuthoredExpressionError> {
+        let Self::ModelInput(expression) = self else {
+            return Ok(());
+        };
+        expression.validate(inputs)?;
+        expected
+            .contains(&expression.value_type)
+            .then_some(())
+            .ok_or(AuthoredExpressionError::ResultTypeMismatch)
+    }
+
+    fn realize(
+        &mut self,
+        inputs: &BTreeMap<String, AuthoredInputValue>,
+    ) -> Result<(), AuthoredExpressionError> {
+        if let Self::ModelInput(expression) = self {
+            *self = Self::Constant(Q::from_canonical_value(expression.evaluate(inputs)?));
+        }
+        Ok(())
+    }
+}
+
+impl AuthoredBoundaryKind {
+    /// Check model-input coefficient expressions against the declaring model's inputs.
+    pub fn validate_model_inputs(
+        &self,
+        inputs: &[AuthoredInputDefinition],
+    ) -> Result<(), AuthoredExpressionError> {
+        match self {
+            Self::ThermalConvection { coefficient, .. } => coefficient.validate_inputs(
+                inputs,
+                &[AuthoredInputType::Quantity(
+                    QuantityDimension::HeatTransferCoefficient,
+                )],
+            ),
+            Self::ThermalRadiation { emissivity, .. } => emissivity.validate_inputs(
+                inputs,
+                &[
+                    AuthoredInputType::Quantity(QuantityDimension::Dimensionless),
+                    AuthoredInputType::Real,
+                ],
+            ),
+            _ => Ok(()),
+        }
+    }
+
+    /// Replace every model-input coefficient with its value for one bound input set.
+    pub fn realize_model_inputs(
+        &mut self,
+        inputs: &BTreeMap<String, AuthoredInputValue>,
+    ) -> Result<(), AuthoredExpressionError> {
+        match self {
+            Self::ThermalConvection { coefficient, .. } => coefficient.realize(inputs),
+            Self::ThermalRadiation { emissivity, .. } => emissivity.realize(inputs),
+            _ => Ok(()),
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -31,11 +115,11 @@ pub enum AuthoredBoundaryKind {
     },
     ThermalConvection {
         ambient_temperature: PrescribedValue<Temperature>,
-        coefficient: HeatTransferCoefficient,
+        coefficient: AuthoredBoundaryCoefficient<HeatTransferCoefficient>,
     },
     ThermalRadiation {
         ambient_temperature: PrescribedValue<Temperature>,
-        emissivity: SurfaceEmissivity,
+        emissivity: AuthoredBoundaryCoefficient<SurfaceEmissivity>,
     },
     MagneticInsulation,
     AcousticRigidWall,
@@ -119,21 +203,25 @@ impl AuthoredBoundary {
                 value: PrescribedValue::Constant(value),
             } => value.is_finite(),
             AuthoredBoundaryKind::ThermalConvection {
-                ambient_temperature: PrescribedValue::Constant(temperature),
+                ambient_temperature,
                 coefficient,
             } => {
-                temperature.is_finite()
-                    && temperature.kelvin >= 0.0
-                    && coefficient.is_finite()
-                    && coefficient.watts_per_square_meter_kelvin >= 0.0
+                coefficient.constant().is_none_or(|coefficient| {
+                    coefficient.is_finite() && coefficient.watts_per_square_meter_kelvin >= 0.0
+                }) && match ambient_temperature {
+                    PrescribedValue::Constant(temperature) => {
+                        temperature.is_finite() && temperature.kelvin >= 0.0
+                    }
+                    PrescribedValue::Signal(_) => true,
+                }
             }
             AuthoredBoundaryKind::ThermalRadiation {
                 ambient_temperature,
                 emissivity,
             } => {
-                emissivity.is_finite()
-                    && (0.0..=1.0).contains(&emissivity.fraction)
-                    && match ambient_temperature {
+                emissivity.constant().is_none_or(|emissivity| {
+                    emissivity.is_finite() && (0.0..=1.0).contains(&emissivity.fraction)
+                }) && match ambient_temperature {
                         PrescribedValue::Constant(value) => {
                             value.is_finite() && value.kelvin >= 0.0
                         }

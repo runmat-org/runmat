@@ -11,6 +11,9 @@ pub(super) use local::{completed_summary, print_completed_fea_result};
 pub(super) struct LocalRunSummary {
     #[serde(flatten)]
     assessment_summary: AssessmentSummary,
+    /// Signed global heat balance of the final thermal solve, in watts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    thermal_energy_balance: Option<ThermalEnergyBalanceSummary>,
     root_id: String,
     procedure: &'static str,
     study_definition_digest: String,
@@ -27,6 +30,29 @@ struct AssessmentSummary {
     run_status: runmat_runtime::analysis::RunStatus,
     numerically_acceptable: bool,
     assessments: Vec<runmat_runtime::analysis::assessment::PublishedStudyAssessment>,
+}
+
+#[derive(Serialize)]
+pub(super) struct ThermalEnergyBalanceSummary {
+    applied_power_w: f64,
+    boundary_loss_w: f64,
+    storage_rate_w: f64,
+    prescribed_boundary_power_w: f64,
+    residual_w: f64,
+    relative_residual: f64,
+}
+
+impl From<&runmat_analysis_fea::contracts::ThermalEnergyBalance> for ThermalEnergyBalanceSummary {
+    fn from(balance: &runmat_analysis_fea::contracts::ThermalEnergyBalance) -> Self {
+        Self {
+            applied_power_w: balance.applied_power_w,
+            boundary_loss_w: balance.boundary_loss_w,
+            storage_rate_w: balance.storage_rate_w,
+            prescribed_boundary_power_w: balance.prescribed_boundary_power_w,
+            residual_w: balance.residual_w,
+            relative_residual: balance.relative_residual,
+        }
+    }
 }
 
 impl From<&AnalysisStudyRunData> for AssessmentSummary {
@@ -46,6 +72,7 @@ pub(super) fn local_summary(
 ) -> Result<LocalRunSummary> {
     Ok(LocalRunSummary {
         assessment_summary: publication.into(),
+        thermal_energy_balance: None,
         root_id: root_id.into(),
         procedure: numerical_kind(completed.numerical()),
         study_definition_digest: completed
@@ -115,6 +142,18 @@ fn print_summary(study_id: &str, summary: LocalRunSummary, json: bool) -> Result
         summary.elements,
         summary.boundary_faces
     );
+    if let Some(balance) = &summary.thermal_energy_balance {
+        println!(
+            "  {} applied {:.6} W, boundary loss {:.6} W, storage {:.6} W, prescribed-temperature reaction {:.6} W, residual {:.3e} W (relative {:.3e})",
+            styles.label("energy balance:"),
+            balance.applied_power_w,
+            balance.boundary_loss_w,
+            balance.storage_rate_w,
+            balance.prescribed_boundary_power_w,
+            balance.residual_w,
+            balance.relative_residual
+        );
+    }
     for assessment in &summary.assessment_summary.assessments {
         println!(
             "  {}: {:?}",

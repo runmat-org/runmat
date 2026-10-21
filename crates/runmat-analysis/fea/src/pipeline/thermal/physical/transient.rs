@@ -170,24 +170,13 @@ pub(super) fn solve_transient(
         };
         let mut balance = recover_balance(&solve.solution)?;
         if balance.relative_residual > input.residual_target {
-            // |sum r_i| <= sqrt(N) ||r||_2. Translate the measured physical power
-            // scale to the shared solver's RHS-relative criterion, reserving half
-            // the power budget for assembly/recovery roundoff. One bounded refinement;
-            // retained physical acceptance is still authoritative, never rewritten.
-            // Shared preparation owns prescribed-temperature lifting. Match PCG's
-            // normalization (initial residual when the lifted RHS is exactly zero),
-            // without preparing a second constrained matrix/coercivity certificate.
-            let lifted_rhs = operator.linear_rhs();
-            let lifted_norm = input.algebra.dot(&lifted_rhs, &lifted_rhs).sqrt();
-            drop(lifted_rhs);
-            let reference_norm = if lifted_norm > 0.0 {
-                lifted_norm
-            } else {
-                solve.residual_norm
-            };
-            let target = (0.5 * input.residual_target * balance.scale.maximum()
-                / ((operator.dof_count() as f64).sqrt() * reference_norm))
-                .min(input.residual_target);
+            let target = super::energy_refinement_target(
+                &operator,
+                input.algebra,
+                &solve,
+                &balance,
+                input.residual_target,
+            );
             let mut refined = solve_checked(
                 &operator,
                 input.requested_solver_backend,

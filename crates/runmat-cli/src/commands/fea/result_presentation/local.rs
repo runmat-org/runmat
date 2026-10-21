@@ -13,6 +13,7 @@ pub(in super::super) fn completed_summary(
         CompletedFeaStudyResult::Structural(result) => local_summary(root_id, result, publication),
         CompletedFeaStudyResult::Electrical(result) => Ok(LocalRunSummary {
             assessment_summary: publication.into(),
+            thermal_energy_balance: None,
             root_id: root_id.into(),
             procedure: match result
                 .completion
@@ -51,6 +52,7 @@ pub(in super::super) fn completed_summary(
         }),
         CompletedFeaStudyResult::Magnetic(result) => Ok(LocalRunSummary {
             assessment_summary: publication.into(),
+            thermal_energy_balance: None,
             root_id: root_id.into(),
             procedure: "magnetostatics",
             study_definition_digest: result
@@ -77,6 +79,7 @@ pub(in super::super) fn completed_summary(
         }),
         CompletedFeaStudyResult::Maxwell(result) => Ok(LocalRunSummary {
             assessment_summary: publication.into(),
+            thermal_energy_balance: None,
             root_id: root_id.into(),
             procedure: "harmonic_maxwell",
             study_definition_digest: result
@@ -103,6 +106,7 @@ pub(in super::super) fn completed_summary(
         }),
         CompletedFeaStudyResult::Nonlinear(result) => Ok(LocalRunSummary {
             assessment_summary: publication.into(),
+            thermal_energy_balance: None,
             root_id: root_id.into(),
             procedure: "quasistatic_j2_solid",
             study_definition_digest: result
@@ -129,6 +133,7 @@ pub(in super::super) fn completed_summary(
         }),
         CompletedFeaStudyResult::Fluid(result) => Ok(LocalRunSummary {
             assessment_summary: publication.into(),
+            thermal_energy_balance: None,
             root_id: root_id.into(),
             procedure: "steady_incompressible_fluid",
             study_definition_digest: result
@@ -155,6 +160,7 @@ pub(in super::super) fn completed_summary(
         }),
         CompletedFeaStudyResult::Acoustic(result) => Ok(LocalRunSummary {
             assessment_summary: publication.into(),
+            thermal_energy_balance: None,
             root_id: root_id.into(),
             procedure: "acoustic_harmonic",
             study_definition_digest: result
@@ -181,6 +187,12 @@ pub(in super::super) fn completed_summary(
         }),
         CompletedFeaStudyResult::Thermal(result) => Ok(LocalRunSummary {
             assessment_summary: publication.into(),
+            thermal_energy_balance: result
+                .completion
+                .manifest
+                .energy_balances
+                .last()
+                .map(super::ThermalEnergyBalanceSummary::from),
             root_id: root_id.into(),
             procedure: match result.completion.workload.procedure {
                 runmat_analysis_fea::ThermalProcedureControl::Steady => "thermal_steady",

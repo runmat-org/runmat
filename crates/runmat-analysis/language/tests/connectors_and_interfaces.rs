@@ -182,9 +182,11 @@ model coupled {
     let model = program.models.values().next().unwrap();
     assert_eq!(model.boundaries.len(), 8);
     assert!(model.boundaries.iter().any(|boundary| matches!(
-        boundary.kind,
-        runmat_analysis_core::AuthoredBoundaryKind::ThermalRadiation { emissivity, .. }
-        if emissivity.fraction == 0.8
+        &boundary.kind,
+        runmat_analysis_core::AuthoredBoundaryKind::ThermalRadiation {
+            emissivity: runmat_analysis_core::AuthoredBoundaryCoefficient::Constant(emissivity),
+            ..
+        } if emissivity.fraction == 0.8
     )));
     assert_eq!(model.connectors.len(), 4);
     assert!(matches!(

@@ -1,6 +1,6 @@
 use runmat_analysis_core::{
-    AnalysisProcedure, AnalysisSequence, ElectromagneticDomain, PhysicsFamily, RestartPolicy,
-    SolutionSpace,
+    AnalysisProcedure, AnalysisSequence, CoupledPhysicsFamily, ElectromagneticDomain,
+    PhysicsFamily, RestartPolicy, SolutionSpace,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -40,11 +40,7 @@ pub(super) fn select_family(
     }) {
         return Err(unsupported());
     }
-    if sequence
-        .steps
-        .iter()
-        .all(|step| step.family == PhysicsFamily::Structural)
-    {
+    if structural_root_sequence(sequence) {
         return Ok(PreparedFamily::Structural);
     }
     let [step] = sequence.steps.as_slice() else {
@@ -136,6 +132,32 @@ pub(super) fn select_family(
         return Err(unsupported());
     }
     Ok(PreparedFamily::Thermal)
+}
+
+/// The structural study root owns structural graphs, thermomechanical steps, and a thermal
+/// producer that feeds a thermomechanical step. The exact thermal-to-preload binding and the
+/// supported consumers are validated by structural workload planning, not by this family gate.
+fn structural_root_sequence(sequence: &AnalysisSequence) -> bool {
+    let mechanical = |step: &runmat_analysis_core::ProcedureStep| {
+        matches!(
+            step.family,
+            PhysicsFamily::Structural
+                | PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical)
+        )
+    };
+    let thermal = sequence
+        .steps
+        .iter()
+        .filter(|step| step.family == PhysicsFamily::Thermal)
+        .count();
+    let thermomechanical = sequence.steps.iter().any(|step| {
+        step.family == PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical)
+    });
+    sequence
+        .steps
+        .iter()
+        .all(|step| mechanical(step) || step.family == PhysicsFamily::Thermal)
+        && (thermal == 0 || (thermal == 1 && thermomechanical))
 }
 
 fn unsupported() -> String {
@@ -394,6 +416,15 @@ mod tests {
             vec![restart],
             vec![thermal.clone(), ProcedureStep::structural_static("solid")],
             vec![thermal.clone(), ProcedureStep::thermal_transient("other")],
+            vec![
+                thermal.clone(),
+                ProcedureStep::thermal_transient("other"),
+                ProcedureStep::thermomechanical_preload("preload", "heat", "heated"),
+            ],
+            vec![
+                ProcedureStep::structural_preload("preload"),
+                ProcedureStep::acoustic_harmonic("sound"),
+            ],
         ] {
             assert!(
                 select_family(&AnalysisSequence::from_steps("unsupported", steps))
@@ -404,6 +435,23 @@ mod tests {
         let mut wrong = thermal;
         wrong.family = PhysicsFamily::Acoustic;
         assert!(select_family(&AnalysisSequence::from_steps("acoustic", vec![wrong])).is_err());
+    }
+
+    #[test]
+    fn thermal_prefix_and_thermomechanical_graphs_select_the_structural_root() {
+        let chained = vec![
+            ProcedureStep::thermal_steady("heat"),
+            ProcedureStep::thermomechanical_preload("preload", "heat", "heated"),
+            ProcedureStep::structural_prestressed_modal("modes", "preload", "geometric_stiffness"),
+        ];
+        let mut prescribed = ProcedureStep::structural_static("coupled");
+        prescribed.family = PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical);
+        for steps in [chained, vec![prescribed]] {
+            assert_eq!(
+                select_family(&AnalysisSequence::from_steps("thermal_stress", steps)).unwrap(),
+                PreparedFamily::Structural
+            );
+        }
     }
 
     #[test]
