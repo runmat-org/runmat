@@ -28,18 +28,16 @@ pub fn validate_canonical_input<'a>(
             "harmonic frequencies must be finite, positive and distinct",
         ));
     }
-    // The step's frequencies are the analysis authority. An authored harmonic domain is
-    // optional; when present its reference frequency must be one of them.
+    // The step's frequencies are the analysis authority (each runs as its own case). An
+    // authored harmonic domain is optional; its reference frequency only names the domain.
     match &model.electromagnetic {
         None => {}
         Some(ElectromagneticDomain::Harmonic {
             reference_frequency,
-        }) if frequencies
-            .iter()
-            .any(|value| value.to_bits() == reference_frequency.hertz.to_bits()) => {}
+        }) if reference_frequency.hertz.is_finite() && reference_frequency.hertz > 0.0 => {}
         Some(ElectromagneticDomain::Harmonic { .. }) => {
             return Err(invalid(
-                "the model's harmonic reference frequency is not one of the step's frequencies",
+                "the model's harmonic reference frequency must be finite and positive",
             ))
         }
         Some(_) => {

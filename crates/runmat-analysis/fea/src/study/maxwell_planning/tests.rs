@@ -143,7 +143,9 @@ fn accuracy_static_sequence_frequency_and_restart_fail_closed() {
         .push(sequence.model.sequence.steps[0].clone());
     // Several authored frequencies are one case each, not an error.
     assert!(plan_maxwell_study(&sweep, policy()).is_ok());
-    for changed in [static_intent, foreign_frequency, restart, sequence] {
+    // A domain reference frequency other than the analysis frequency only names the domain.
+    assert!(plan_maxwell_study(&foreign_frequency, policy()).is_ok());
+    for changed in [static_intent, restart, sequence] {
         assert!(plan_maxwell_study(&changed, policy()).is_err());
     }
 }

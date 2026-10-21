@@ -206,7 +206,8 @@ fn native_both_orders_preserve_original_complex_fields_power_and_receipt_across_
                 .any(|v| v.real != 0.0 && v.imaginary != 0.0));
             let request = result.native_field_request(&w, &mesh).unwrap();
             let fields = result.recover_native_fields_from_result(&request).unwrap();
-            assert_eq!(fields.fields().len(), 6);
+            // Edge circulation, five integration-point fields, their loss, and four element averages.
+            assert_eq!(fields.fields().len(), 11);
             assert_eq!(
                 fields.entity_counts.volume_integration_points,
                 mesh.topology.volume_elements.len() * 15

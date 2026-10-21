@@ -117,8 +117,8 @@ study gear_hardening {
 ```
 
 No `electromagnetic { equation = ... }` block is needed for a harmonic analysis: the analysis's
-frequencies define it. A `harmonic_maxwell` model domain with a `reference_frequency` is accepted
-when that frequency is one of the analysis frequencies.
+frequencies define it. A `harmonic_maxwell` model domain with a `reference_frequency` is also
+accepted; the analysis frequencies, not the reference, set what is solved.
 
 ## How does the loss heat the part?
 

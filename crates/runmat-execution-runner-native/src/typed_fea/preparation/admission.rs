@@ -259,7 +259,11 @@ mod tests {
             super::select_family(&sequence, Some(&domain)).unwrap(),
             PreparedFamily::Maxwell
         );
-        assert!(super::select_family(&sequence, None).is_err());
+        // The analysis's own frequencies define a harmonic study; no domain block is needed.
+        assert_eq!(
+            super::select_family(&sequence, None).unwrap(),
+            PreparedFamily::Maxwell
+        );
         assert!(super::select_family(
             &sequence,
             Some(&ElectromagneticDomain::Magnetostatic {
@@ -270,7 +274,6 @@ mod tests {
         .is_err());
         for frequencies in [
             vec![],
-            vec![1.0],
             vec![2000.0, 3000.0],
             vec![f64::NAN],
             vec![0.0],
