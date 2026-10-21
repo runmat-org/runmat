@@ -2,6 +2,7 @@ use super::{
     artifact::validation_checkpoint,
     artifact_workspace::{flags, reserve},
     solver_midside_node_identity, BoundaryEdgeOrder, BoundaryTriangleOrder, ElementOrder,
+    MeshDimension,
     MeshingCancellationSignal, MeshingContractError, MeshingRequest, PersistentEntityKind,
     SolverMeshTopology, SolverNodeExactParameter, TETRAHEDRON_MIDSIDE_EDGE_CORNERS,
 };
@@ -13,13 +14,14 @@ pub(super) fn validate_order_topology(
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<(), MeshingContractError> {
     match request.element_order {
-        ElementOrder::Tet4 => validate_linear(topology, node_ids, cancellation),
+        ElementOrder::Tet4 => validate_linear(topology, request.dimension, node_ids, cancellation),
         ElementOrder::Tet10 => validate_quadratic(topology, node_ids, cancellation),
     }
 }
 
 fn validate_linear(
     topology: &SolverMeshTopology,
+    dimension: MeshDimension,
     node_ids: &[u64],
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<(), MeshingContractError> {
@@ -38,15 +40,22 @@ fn validate_linear(
         ));
     }
     let mut referenced = flags(node_ids.len(), cancellation)?;
-    for element in &topology.volume_elements {
+    // Every node belongs to an element of the requested dimension: tetrahedra for solids,
+    // triangles for sheets, and segments for curve-only beam meshes.
+    let connectivity: Box<dyn Iterator<Item = &Vec<u64>>> = match dimension {
+        MeshDimension::Solid => Box::new(topology.volume_elements.iter().map(|e| &e.node_ids)),
+        MeshDimension::Surface => Box::new(topology.boundary_faces.iter().map(|f| &f.node_ids)),
+        MeshDimension::Curve => Box::new(topology.boundary_edges.iter().map(|e| &e.node_ids)),
+    };
+    for node_ids_of_element in connectivity {
         validation_checkpoint(cancellation)?;
-        for id in &element.node_ids {
+        for id in node_ids_of_element {
             referenced[node_ids.binary_search(id).expect("validated node")] = 1;
         }
     }
     if referenced.contains(&0) {
         return Err(invalid(
-            "every Tet4 node must be referenced as a volume corner",
+            "every linear node must be referenced as an element corner",
         ));
     }
     validate_boundary_faces(topology, &[], cancellation)

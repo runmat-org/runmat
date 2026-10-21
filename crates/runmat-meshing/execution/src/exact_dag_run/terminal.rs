@@ -18,20 +18,20 @@ pub(super) async fn execute_terminal_dag<E: ExactMeshingDagExecutor>(
     mut observations: Vec<runmat_meshing_core::MeshingStageEvidence>,
     started: Instant,
 ) -> Result<ExactMeshingDagRunResult, ExactMeshingDagRunError> {
-    let volume = execute(
-        executor,
-        &planner.tetrahedralization(surface_root.clone())?,
-        run,
-        &mut observations,
-    )
-    .await?;
-    let projection = execute(
-        executor,
-        &planner.solver_projection(surface_root, volume.root)?,
-        run,
-        &mut observations,
-    )
-    .await?;
+    let projection_stage = if run.request.dimension.is_solid() {
+        let volume = execute(
+            executor,
+            &planner.tetrahedralization(surface_root.clone())?,
+            run,
+            &mut observations,
+        )
+        .await?;
+        planner.solver_projection(surface_root, volume.root)?
+    } else {
+        // Shell and beam meshes stop at the exact surface; no volume is generated.
+        planner.surface_solver_projection(surface_root)?
+    };
+    let projection = execute(executor, &projection_stage, run, &mut observations).await?;
     let projection_root = projection.root;
     let validation = execute(
         executor,

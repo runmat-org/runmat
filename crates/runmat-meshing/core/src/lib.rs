@@ -23,7 +23,7 @@ pub use contracts::canonical::{
     ClosedMeshingStage, ConformalInterface, ContactPair, CurveQualityTargets, ElementOrder,
     EncodedMeshingChunk, EncodedMeshingChunkRef, ErrorDistribution, FieldTopologyLocation,
     FieldTopologyMap, GeometricWitness, GeometryRevisionRef, GeometryTolerancePolicy,
-    InvariantEvidence, MeshDefinition, MeshNeighbor, MeshRegion, MeshingCancellationSignal,
+    InvariantEvidence, MeshDefinition, MeshDimension, MeshNeighbor, MeshRegion, MeshingCancellationSignal,
     MeshingCanonicalCodecControl, MeshingCanonicalLimits, MeshingCapabilityRequirement,
     MeshingChunkDescriptor, MeshingChunkMediaType, MeshingChunkPolicy, MeshingChunkStorageProfile,
     MeshingChunkStream, MeshingChunkedPayload, MeshingContractError, MeshingDiagnosticEntry,
