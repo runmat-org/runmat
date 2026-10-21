@@ -106,7 +106,7 @@ fn typed_study_root_round_trips_exact_analysis_definition() {
         frozen_project_digest: Some(Digest::sha256(b"frozen-project")),
         study: realized.clone(),
         materials: resolved.material_catalog.clone(),
-        planning,
+        planning: crate::StudyRootPlanning::Structural(planning),
         analysis_accelerator_requests: Vec::new(),
         local_execution,
         input_materializations: Vec::new(),
@@ -148,7 +148,7 @@ fn typed_study_root_round_trips_exact_analysis_definition() {
     let decoded = decode_structural_study_root(prepared.request(), &store).unwrap();
     assert_eq!(decoded.study, realized);
     assert_eq!(decoded.materials, resolved.material_catalog);
-    assert_eq!(decoded.planning, planning);
+    assert_eq!(decoded.planning, crate::StudyRootPlanning::Structural(planning));
     assert_eq!(decoded.local_execution, local_execution);
     assert!(decoded.analysis_accelerator_requests.is_empty());
     assert_eq!(
@@ -570,11 +570,11 @@ fn prepare_source(
         frozen_project_digest: Some(Digest::sha256(b"frozen-project")),
         study: realized,
         materials: resolved.material_catalog,
-        planning: StructuralStudyPlanningPolicy {
+        planning: crate::StudyRootPlanning::Structural(StructuralStudyPlanningPolicy {
             backend: runmat_analysis_fea::ComputeBackend::Cpu,
             formulation_requirement,
             numerics: StructuralNumericalPlanningPolicy::production(),
-        },
+        }),
         analysis_accelerator_requests: Vec::new(),
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         input_materializations: Vec::new(),

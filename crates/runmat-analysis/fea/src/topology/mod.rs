@@ -30,6 +30,20 @@ pub use finite_volume::{
     FiniteVolumeReservation, FiniteVolumeTopology,
 };
 pub use flow::FlowTopologyProjection;
+
+/// Visit the canonical volume quadrature of one isolated tetrahedron.
+///
+/// This is the rule every volume operator of the shared projection integrates with; element
+/// kernels that run without a whole projection (one subdomain of a decomposed mesh) use it so
+/// their element operators equal the assembled ones exactly. Returns `None` for a degenerate or
+/// inverted element or a node count that differs from `order`.
+pub fn visit_tetrahedron_volume_quadrature(
+    order: runmat_meshing_core::ElementOrder,
+    coordinates: &[[f64; 3]],
+    visit: impl FnMut(VolumeQuadraturePoint),
+) -> Option<()> {
+    quadrature::visit_volume_quadrature(order, coordinates, visit)
+}
 pub use solid_integration::{
     CanonicalSolidIntegrationElement, CanonicalSolidIntegrationPlan, CanonicalSolidIntegrationRule,
     SolidIntegrationPlanError,
