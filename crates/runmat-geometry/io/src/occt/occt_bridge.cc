@@ -26,6 +26,8 @@
 #include <Poly_Triangle.hxx>
 #include <Poly_Triangulation.hxx>
 #include <Quantity_Color.hxx>
+#include <ShapeAnalysis_Edge.hxx>
+#include <TopoDS_Compound.hxx>
 #include <STEPCAFControl_Reader.hxx>
 #include <StepData_StepModel.hxx>
 #include <XSControl_Reader.hxx>
@@ -1040,6 +1042,130 @@ OcctImportPayload import_cad_bytes(rust::Str path,
   return result;
 }
 
+// Exports often carry construction geometry beside a part's solids: PMI leader curves,
+// supplemental wireframe and points that bound no face. It is not part of the analysis model,
+// and its curves would be meshed and sized against the real edges, so a part that has faces
+// keeps only its solids, shells and faces. A wireframe-only part is left unchanged.
+static TopoDS_Shape without_free_wireframe(const TopoDS_Shape& shape, bool& changed) {
+  if (shape.ShapeType() != TopAbs_COMPOUND) {
+    return shape;
+  }
+  BRep_Builder builder;
+  TopoDS_Compound result;
+  builder.MakeCompound(result);
+  bool empty = true;
+  for (TopoDS_Iterator children(shape); children.More(); children.Next()) {
+    const TopoDS_Shape& child = children.Value();
+    switch (child.ShapeType()) {
+      case TopAbs_EDGE:
+      case TopAbs_WIRE:
+      case TopAbs_VERTEX:
+        changed = true;
+        continue;
+      case TopAbs_COMPOUND: {
+        const TopoDS_Shape kept = without_free_wireframe(child, changed);
+        if (!TopExp_Explorer(kept, TopAbs_FACE).More()) {
+          changed = true;
+          continue;
+        }
+        builder.Add(result, kept);
+        break;
+      }
+      default:
+        builder.Add(result, child);
+        break;
+    }
+    empty = false;
+  }
+  if (empty) {
+    return shape;
+  }
+  result.Location(TopLoc_Location());
+  return result;
+}
+
+static void strip_free_wireframe(CadDocument& document) {
+  if (!TopExp_Explorer(document.shape, TopAbs_FACE).More()) {
+    return;
+  }
+  if (!document.has_xcaf || document.shape_tool.IsNull()) {
+    bool changed = false;
+    TopoDS_Shape stripped = without_free_wireframe(document.shape, changed);
+    if (changed) {
+      document.shape = stripped;
+    }
+    return;
+  }
+  TDF_LabelSequence labels;
+  document.shape_tool->GetShapes(labels);
+  bool any = false;
+  for (Standard_Integer index = 1; index <= labels.Length(); ++index) {
+    const TDF_Label& label = labels.Value(index);
+    if (!XCAFDoc_ShapeTool::IsSimpleShape(label)) {
+      continue;
+    }
+    TopoDS_Shape shape = XCAFDoc_ShapeTool::GetShape(label);
+    bool changed = false;
+    TopoDS_Shape stripped;
+    if (!TopExp_Explorer(shape, TopAbs_FACE).More()) {
+      // A part holding only construction geometry contributes nothing to the model.
+      TopoDS_Compound empty;
+      BRep_Builder().MakeCompound(empty);
+      stripped = empty;
+      changed = !shape.IsNull();
+    } else {
+      stripped = without_free_wireframe(shape, changed);
+    }
+    if (changed) {
+      document.shape_tool->SetShape(label, stripped);
+      any = true;
+    }
+  }
+  if (any) {
+    document.shape_tool->UpdateAssemblies();
+    TDF_LabelSequence free_shapes;
+    document.shape_tool->GetFreeShapes(free_shapes);
+    document.shape = XCAFDoc_ShapeTool::GetOneShape(free_shapes);
+  }
+}
+
+// Edge tolerances written by CAD exporters bound the gap between an edge's 3D curve and its
+// pcurves only at the writer's control points (OCCT checks 23), and exports often understate it.
+// RunMat's curve, surface and validation stages rely on the edge tolerance continuously, so each
+// understated tolerance is raised to the gap measured at dense control points plus a 5% margin,
+// as OCCT's own shape healing does. Gaps above ten times the written tolerance are real defects
+// and are left for validation to report.
+static void admit_measured_edge_tolerances(const TopoDS_Shape& shape, const OcctImportOptions& options) {
+  TopTools_IndexedMapOfShape edges;
+  TopExp::MapShapes(shape, TopAbs_EDGE, edges);
+  ShapeAnalysis_Edge analysis;
+  BRep_Builder builder;
+  for (Standard_Integer index = 1; index <= edges.Extent(); ++index) {
+    if ((index & 63) == 0) {
+      check_cancelled(options);
+    }
+    const TopoDS_Edge& edge = TopoDS::Edge(edges(index));
+    if (BRep_Tool::Degenerated(edge)) {
+      continue;
+    }
+    Standard_Real deviation = 0.0;
+    analysis.CheckSameParameter(edge, deviation, 101);
+    const double written = BRep_Tool::Tolerance(edge);
+    const double required = deviation * 1.05;
+    if (!std::isfinite(required) || required <= written || deviation > 10.0 * written) {
+      continue;
+    }
+    builder.UpdateEdge(edge, required);
+    for (TopoDS_Iterator vertices(edge, Standard_False, Standard_False); vertices.More();
+         vertices.Next()) {
+      if (vertices.Value().ShapeType() == TopAbs_VERTEX &&
+          BRep_Tool::Tolerance(TopoDS::Vertex(vertices.Value())) < required) {
+        builder.UpdateVertex(TopoDS::Vertex(vertices.Value()), required);
+      }
+    }
+  }
+}
+
 OcctExactShapePayload import_exact_cad_bytes(
     rust::Str path,
     rust::Slice<const std::uint8_t> bytes,
@@ -1056,6 +1182,9 @@ OcctExactShapePayload import_exact_cad_bytes(
   // Polygonal data is a derived display cache. Removing it before serialization ensures the
   // representation consumed by exact evaluators cannot accidentally carry tessellation authority.
   BRepTools::Clean(document.shape);
+  check_cancelled(options);
+  strip_free_wireframe(document);
+  admit_measured_edge_tolerances(document.shape, options);
   check_cancelled(options);
 
   std::array<std::uint8_t, 32> original_geometry_digest{};

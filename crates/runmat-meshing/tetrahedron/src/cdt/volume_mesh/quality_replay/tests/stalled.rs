@@ -79,6 +79,7 @@ fn stalled_state_reaches_the_host_observer_without_replacing_the_verdict() {
         facets,
     };
     let request = MetricFieldRequest {
+        entity_supports: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(10.).unwrap(),
         maximum_grading_ratio: 1.5,

@@ -19,13 +19,16 @@ use crate::ExactFaceChartParameterization;
 #[derive(Clone, Debug, PartialEq)]
 pub struct ResolvedFaceMetricField {
     by_face: BTreeMap<PersistentEntityId, FaceMetricRecord>,
+    resolver: std::sync::Arc<runmat_meshing_size::metric::ResolvedMetricField>,
 }
 
 #[derive(Clone, Debug)]
 struct FaceMetricRecord {
     surface_evaluator_id: SurfaceEvaluatorId,
     world_transform: GeometryTransform,
+    /// Uniform part of the face sizing; entity-local sources are graded from it pointwise.
     resolved: ResolvedMetricEvaluation,
+    local: Vec<runmat_meshing_size::metric::LocalMetricSource>,
     boundary_metrics: Vec<boundary::EdgeMetric>,
     provenance: std::sync::Arc<super::ExactFaceMetricProvenance>,
     evaluator_parameter_domain: OnceLock<EvaluatorParameterDomain>,
@@ -36,6 +39,7 @@ impl PartialEq for FaceMetricRecord {
         self.surface_evaluator_id == other.surface_evaluator_id
             && self.world_transform == other.world_transform
             && self.resolved == other.resolved
+            && self.local == other.local
             && self.boundary_metrics == other.boundary_metrics
             && self.provenance == other.provenance
     }
@@ -122,7 +126,11 @@ impl ResolvedFaceMetricField {
             ));
         }
         let physical_metric = pullback_identity(derivative_u_m, derivative_v_m);
-        let sizing_metric = pullback_metric(record.resolved.metric, derivative_u_m, derivative_v_m);
+        let local_metric = self
+            .resolver
+            .evaluate_graded(record.resolved.metric, &record.local, point_m)
+            .map_err(|error| invalid_evaluation(source_face_id, error.to_string()))?;
+        let sizing_metric = pullback_metric(local_metric, derivative_u_m, derivative_v_m);
         physical_metric.validate().map_err(|reason| {
             ExactFaceMetricError::new(
                 ExactFaceMetricErrorKind::InvalidEvaluation,

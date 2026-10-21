@@ -177,6 +177,62 @@ fn shape_candidate_batch_respects_the_two_child_spacing_collar() {
 }
 
 #[test]
+fn near_node_sizing_candidates_are_relocated_or_dropped_not_fatal() {
+    let face = id(PersistentEntityKind::Face, "near-node-face");
+    let geometry = geometry([2.0, 2.0, 2.0], 0.5, 1.0, 0.0, 0.0);
+    let pslg = triangle_pslg(&geometry);
+
+    // A metric-edge-length candidate beside a corner moves to a separated point in its
+    // triangle, measured in the sizing at the new point.
+    let near = candidate(face.clone(), [0.01, 0.0]);
+    let selected = super::select::independent_candidate_batch(
+        vec![near.clone()],
+        &geometry,
+        &pslg,
+        0.02,
+        None,
+    )
+    .unwrap();
+    assert_eq!(selected.len(), 1);
+    assert_ne!(selected[0].uv, near.uv);
+    for vertex in &pslg.vertices {
+        let distance = (selected[0].uv[0] - vertex.uv[0]).hypot(selected[0].uv[1] - vertex.uv[1]);
+        assert!(distance >= 0.02, "relocated candidate stays separated");
+    }
+    let repeated = super::select::independent_candidate_batch(
+        vec![near.clone()],
+        &geometry,
+        &pslg,
+        0.02,
+        None,
+    )
+    .unwrap();
+    assert_eq!(repeated, selected, "relocation is deterministic");
+
+    // With no separated point in the triangle, a boundary-support candidate is dropped and the
+    // batch is empty, so refinement terminates instead of retrying the same target.
+    let mut support = candidate(face.clone(), [0.01, 0.0]);
+    support.reason = ExactFaceRefinementReason::BoundaryMetricSupport;
+    assert!(
+        super::select::independent_candidate_batch(vec![support], &geometry, &pslg, 2.0, None)
+            .unwrap()
+            .is_empty()
+    );
+
+    // Geometric fidelity targets still have no substitute point.
+    let mut chordal = candidate(face, [0.01, 0.0]);
+    chordal.reason = ExactFaceRefinementReason::ChordalDeviation;
+    assert!(super::select::independent_candidate_batch(
+        vec![chordal],
+        &geometry,
+        &pslg,
+        0.02,
+        None
+    )
+    .is_err());
+}
+
+#[test]
 fn shape_refinement_respects_the_surface_minimum_edge_collar() {
     let geometry = geometry([0.005, 0.5, 0.5], 0.001, 1_000.0, 0.0, 0.0);
     let mut pslg = triangle_pslg(&geometry);
@@ -803,6 +859,7 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
     );
 
     let coarse_request = MetricFieldRequest {
+        entity_supports: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(100.0).unwrap(),
         maximum_grading_ratio: 2.0,
@@ -1406,6 +1463,7 @@ fn quality() -> SurfaceQualityTargets {
 
 fn metric_request() -> MetricFieldRequest {
     MetricFieldRequest {
+        entity_supports: Vec::new(),
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(1.0).unwrap(),
         maximum_grading_ratio: 2.0,
