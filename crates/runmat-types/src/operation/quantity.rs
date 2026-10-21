@@ -20,6 +20,7 @@ pub enum QuantityDimension {
     Power,
     HeatFlux,
     ThermalConductivity,
+    HeatTransferCoefficient,
     ElectricPotential,
     ElectricCurrent,
     MagneticFluxDensity,

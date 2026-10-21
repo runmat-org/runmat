@@ -327,27 +327,61 @@ fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutcome, FeaRunE
         &facts.operators,
         residual_target,
     )?;
-    // Numerical preparation is complete. Release the guess, constraint mask and
-    // zero damping carrier before allocating the complete recovered fields.
     drop(initial_increment);
-    drop(operator);
-    for ((temperature, prescribed), reference) in solve
-        .solution
-        .iter_mut()
-        .zip(&assembly.prescribed_temperature_k)
-        .zip(&reference_temperature_k)
-    {
-        // Prescribed coordinates are known exactly; avoid losing them in a shift/unshift
-        // round trip when their magnitude differs greatly from the reference.
-        *temperature = prescribed.unwrap_or(*temperature + reference);
+    // Prescribed coordinates are known exactly; avoid losing them in a shift/unshift
+    // round trip when their magnitude differs greatly from the reference.
+    let absolute = |increment: &[f64]| {
+        increment
+            .iter()
+            .zip(&assembly.prescribed_temperature_k)
+            .zip(&reference_temperature_k)
+            .map(|((value, prescribed), reference)| prescribed.unwrap_or(value + reference))
+            .collect::<Vec<_>>()
+    };
+    let recover_balance = |temperature: &[f64]| {
+        assembly
+            .energy_balance(model, sample, temperature, temperature, 1.0, 0.0)
+            .map_err(|error| FeaRunError::Assembly(error.to_string()))
+    };
+    let mut temperature = absolute(&solve.solution);
+    let mut energy_balance = recover_balance(&temperature)?;
+    let mut accelerator_evidence = Vec::new();
+    if energy_balance.relative_residual > residual_target {
+        // The same single bounded refinement as each transient step: the linear stopping
+        // criterion alone does not bound the global signed power residual.
+        let target =
+            energy_refinement_target(&operator, algebra, &solve, &energy_balance, residual_target);
+        let mut refined = solve_checked(
+            &operator,
+            requested_solver_backend,
+            algebra,
+            Some(&solve.solution),
+            &facts.operators,
+            target,
+        )?;
+        backend_evidence::retain(
+            &mut accelerator_evidence,
+            &mut solve.accelerator_evidence,
+            &facts.metadata.backend_evidence,
+        )?;
+        refined.host_sync_count = refined.host_sync_count.saturating_add(solve.host_sync_count);
+        refined.device_apply_k_count = refined
+            .device_apply_k_count
+            .saturating_add(solve.device_apply_k_count);
+        refined.device_apply_k_attempt_count = refined
+            .device_apply_k_attempt_count
+            .saturating_add(solve.device_apply_k_attempt_count);
+        temperature = absolute(&refined.solution);
+        energy_balance = recover_balance(&temperature)?;
+        solve = refined;
     }
+    // Numerical preparation is complete. Release the constraint mask and zero damping
+    // carrier before allocating the complete recovered fields.
+    drop(operator);
     drop(reference_temperature_k);
+    solve.solution = temperature;
     let mut recovered = RecoveredSnapshots::with_capacity(1);
     push_recovered_snapshot(assembly, &solve.solution, None, 1.0, 0.0, &mut recovered)?;
-    let energy_balance = assembly
-        .energy_balance(model, sample, &solve.solution, &solve.solution, 1.0, 0.0)
-        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
-    let mut accelerator_evidence = Vec::new();
     backend_evidence::retain(
         &mut accelerator_evidence,
         &mut solve.accelerator_evidence,
@@ -366,6 +400,32 @@ fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutcome, FeaRunE
         accelerator_evidence,
         last_solve: solve,
     })
+}
+
+/// Solver tolerance for one bounded refinement after the recovered global balance missed the
+/// retained target. |sum r_i| <= sqrt(N) ||r||_2, so the measured physical power scale is
+/// translated to the shared solver's RHS-relative criterion, reserving half the power budget for
+/// assembly/recovery roundoff. Shared preparation owns prescribed-temperature lifting; this
+/// matches PCG's normalization (initial residual when the lifted RHS is exactly zero). Retained
+/// physical acceptance stays authoritative and is never rewritten.
+fn energy_refinement_target(
+    operator: &crate::algebra::AssembledRealSystem,
+    algebra: &dyn LinearAlgebraBackend,
+    solve: &LinearSolveResult,
+    balance: &ThermalEnergyBalance,
+    residual_target: f64,
+) -> f64 {
+    let lifted_rhs = operator.linear_rhs();
+    let lifted_norm = algebra.dot(&lifted_rhs, &lifted_rhs).sqrt();
+    drop(lifted_rhs);
+    let reference_norm = if lifted_norm > 0.0 {
+        lifted_norm
+    } else {
+        solve.residual_norm
+    };
+    (0.5 * residual_target * balance.scale.maximum()
+        / ((operator.dof_count() as f64).sqrt() * reference_norm))
+        .min(residual_target)
 }
 
 fn solve_checked(

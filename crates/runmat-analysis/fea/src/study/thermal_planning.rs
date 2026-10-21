@@ -174,10 +174,14 @@ fn authored_controls<'a>(
     for request in &step.observations {
         let spec = match request {
             ObservationRequest::History(spec) => spec,
-            ObservationRequest::Field(spec) if spec.sampling == SamplingPolicy::Final => spec,
+            ObservationRequest::Field(spec) | ObservationRequest::Reduction(spec)
+                if spec.sampling == SamplingPolicy::Final =>
+            {
+                spec
+            }
             _ => {
                 return Err(ThermalStudyPlanningError::Observation(format!(
-                    "observation {:?} is not a supported thermal history or final field",
+                    "observation {:?} is not a supported thermal history, final field or final spatial reduction",
                     request.observation_id()
                 )))
             }

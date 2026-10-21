@@ -104,7 +104,7 @@ pub use problem::authored_inputs::{
     AuthoredInputDefinition, AuthoredInputError, AuthoredInputType, AuthoredInputValue,
 };
 pub use problem::authored_model_physics::{
-    AuthoredBoundary, AuthoredBoundaryKind, AuthoredConnector, AuthoredConnectorKind,
+    AuthoredBoundary, AuthoredBoundaryCoefficient, AuthoredBoundaryKind, AuthoredConnector, AuthoredConnectorKind,
     AuthoredInterface, AuthoredInterfaceKind, AuthoredModelPhysicsError,
 };
 pub use problem::authored_parameterized_signals::{

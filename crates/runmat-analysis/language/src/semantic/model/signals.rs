@@ -277,6 +277,16 @@ pub(super) fn depends_on_model_input(value: &CheckedExpression) -> bool {
     parameterized::depends_on_model_input(value)
 }
 
+/// Lower pure arithmetic over numeric model inputs whose result has the checked value type.
+pub(super) fn model_input_expression(
+    declaration: &CheckedFeaDeclaration,
+    value: &CheckedExpression,
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<runmat_analysis_core::AuthoredNumericExpression> {
+    let expected = super::super::input::authored_type(&value.value_type)?;
+    parameterized::expression(declaration, value, expected, diagnostics)
+}
+
 fn signal_contract(
     id: &str,
     shape_source: SignalValue<f64>,
