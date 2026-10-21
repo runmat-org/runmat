@@ -245,8 +245,8 @@ fn test_builtin_lapack_functions() {
     match call_builtin("solve", &[Value::Tensor(a), Value::Cell(b_vec)]) {
         Ok(result) => match result.value() {
             Value::Cell(sol) => {
-                assert_eq!(sol.data.len(), 2);
-                if let (Value::Num(x), Value::Num(y)) = (&sol.data[0], &sol.data[1]) {
+                assert_eq!(sol.data().len(), 2);
+                if let (Value::Num(x), Value::Num(y)) = (&sol.data()[0], &sol.data()[1]) {
                     assert!((x - 1.8).abs() < 1e-10);
                     assert!((y - 1.4).abs() < 1e-10);
                 } else {
