@@ -40,6 +40,28 @@ pub fn run_nonlinear_block(
     let prepared =
         preparation::prepare_with_output_limit(model, backend, options, accepted_block_limit, 0)?;
     let admission = preflight::tangent_admission(&prepared.resource_plan)?;
+    let maximum_resident_bytes = prepared
+        .execution_step
+        .accuracy
+        .resources
+        .maximum_resident_bytes;
+    let contact_inputs = match options.solver_mesh.as_ref() {
+        Some(mesh) => super::contact::prepare_inputs(
+            model,
+            mesh,
+            &prepared.summary,
+            options.contact_enforcement.clone().unwrap_or_default(),
+            maximum_resident_bytes,
+        )?,
+        None => None,
+    };
+    let contact_operator = contact_inputs
+        .as_ref()
+        .map(|inputs| super::contact::prepare_operator(model, inputs, prepared.summary.dof_count))
+        .transpose()?;
+    let contact_execution = contact_operator
+        .as_ref()
+        .map(|operator| super::contact::execution(operator, options, maximum_resident_bytes));
     let input = match input {
         NonlinearBlockInput::Fresh => NonlinearLoadBlockStart::Fresh,
         NonlinearBlockInput::Continue {
@@ -56,7 +78,7 @@ pub fn run_nonlinear_block(
         options,
         execution: crate::solve::nonlinear::NonlinearExecution {
             backend,
-            contact: None,
+            contact: contact_execution,
             solver_admission: Some(admission),
         },
         start: prepared.load_factor_start,

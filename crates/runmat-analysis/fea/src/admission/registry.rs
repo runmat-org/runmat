@@ -229,6 +229,7 @@ fn validate_structural_identity(
     let input = StructuralRealizationInput {
         assemblies,
         procedure: request.procedure,
+        kinematics: requested_kinematics(request),
         coupling: expected_coupling,
         sources,
         boundary_transfers: structural_boundaries,
@@ -312,6 +313,27 @@ fn first_incompatible_axis(
     FormulationAdmissionRejectionReason::IncompatibleAxis(axis)
 }
 
+/// The kinematics a structural request realizes is carried by its spatial operator identity.
+fn requested_kinematics(
+    request: &FormulationAdmissionRequest,
+) -> runmat_analysis_core::StructuralKinematics {
+    let total_lagrangian = request.realization.components.iter().any(|component| {
+        matches!(
+            component.spatial_operator,
+            SpatialOperatorImplementation::Structural(
+                runmat_analysis_core::StructuralOperatorImplementation::Tet4TotalLagrangianContinuum
+                    | runmat_analysis_core::StructuralOperatorImplementation::Tet10TotalLagrangianContinuum
+            )
+        )
+    });
+    if total_lagrangian {
+        runmat_analysis_core::StructuralKinematics::LargeDeformation
+    } else {
+        runmat_analysis_core::StructuralKinematics::SmallStrain
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
     use runmat_analysis_core::{
@@ -329,6 +351,7 @@ mod tests {
                 Some(StructuralRecoveryImplementation::Tet4ConstantStrain),
             )],
             procedure: AnalysisProcedure::Static,
+            kinematics: runmat_analysis_core::StructuralKinematics::SmallStrain,
             coupling: CouplingImplementation::Uncoupled,
             sources: vec![SourceImplementation::CanonicalBoundaryProjection],
             boundary_transfers: vec![BoundaryTransferImplementation::CanonicalBoundaryProjection],

@@ -96,12 +96,14 @@ fn prepare_for<'a>(
             "nonlinear structural execution requires an authoritative canonical solid mesh".into(),
         ));
     }
-    if backend != ComputeBackend::Cpu
-        || options.contact_context.is_some()
-        || !model.interfaces.is_empty()
-    {
+    if backend != ComputeBackend::Cpu {
         return Err(FeaRunError::InvalidModel(
-            "canonical J2 solids require CPU and do not implement contact".into(),
+            "canonical nonlinear solids run on the CPU backend".into(),
+        ));
+    }
+    if options.contact_enforcement.is_some() && model.interfaces.is_empty() {
+        return Err(FeaRunError::InvalidModel(
+            "contact enforcement controls require an authored contact interface".into(),
         ));
     }
     let required_history_samples = required_load_factor_history_samples(execution_step)
@@ -168,9 +170,17 @@ fn prepare_for<'a>(
         Some(1),
         Some(5),
     );
-    let summary = assemble_structural_system_borrowed(
+    // Fixed-frame loads form the dead-load vector. Follower loads depend on the deformed
+    // boundary; the nonlinear solid integrates them at every iterate and owns their source.
+    let follower_present = excitations.iter().any(|load| {
+        load.policy.kinematics == runmat_analysis_core::ExcitationKinematics::Follower
+    });
+    let dead_loads = excitations.filtered(|load| {
+        load.policy.kinematics == runmat_analysis_core::ExcitationKinematics::FixedFrame
+    });
+    let mut summary = assemble_structural_system_borrowed(
         model,
-        &excitations,
+        &dead_loads,
         options.solver_mesh.as_ref(),
         StructuralFormulationRequirement::PhysicalDiscretization,
     )
@@ -178,6 +188,15 @@ fn prepare_for<'a>(
         LinearAssemblyError::CouplingRealization(_) => FeaRunError::InvalidModel(err.to_string()),
         _ => FeaRunError::Assembly(err.to_string()),
     })?;
+    if follower_present
+        && !summary
+            .structural_sources
+            .contains(&runmat_analysis_core::SourceImplementation::CanonicalFollowerBoundaryIntegration)
+    {
+        summary
+            .structural_sources
+            .push(runmat_analysis_core::SourceImplementation::CanonicalFollowerBoundaryIntegration);
+    }
     let identity = super::super::admission::admit_structural(
         &summary,
         execution_step,

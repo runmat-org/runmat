@@ -262,6 +262,7 @@ fn thermomechanical_realizations(procedure: AnalysisProcedure) -> Vec<ExactFormu
                     structural: StructuralRealizationInput {
                         assemblies: vec![StructuralFormulationRealization::new(operator, recovery)],
                         procedure,
+                        kinematics: runmat_analysis_core::StructuralKinematics::SmallStrain,
                         coupling,
                         sources: vec![SourceImplementation::NotApplicable],
                         boundary_transfers: vec![BoundaryTransferImplementation::NotApplicable],

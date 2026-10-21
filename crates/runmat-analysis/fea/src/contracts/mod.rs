@@ -178,11 +178,23 @@ pub struct FeaElectroThermalContext {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FeaContactInterfaceContext {
-    pub enabled: bool,
+/// Run controls of penalty contact enforcement. The interfaces, their surfaces and their
+/// friction law come from the analysis model only.
+#[serde(deny_unknown_fields)]
+pub struct FeaContactEnforcement {
+    /// Multiplier on the default normal penalty `10 E_min / h` (h: mean secondary face size).
     pub penalty_stiffness_scale: f64,
+    /// Admitted initial penetration as a fraction of h.
     pub max_penetration_ratio: f64,
-    pub friction_coefficient: f64,
+}
+
+impl Default for FeaContactEnforcement {
+    fn default() -> Self {
+        Self {
+            penalty_stiffness_scale: 1.0,
+            max_penetration_ratio: 0.05,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -46,19 +46,9 @@ impl CanonicalNonlinearSolidBasis {
         let mut ordinal = 0;
         for element in &self.elements {
             for point in &element.points {
-                let strain: [f64; 6] = std::array::from_fn(|component| {
-                    element
-                        .dofs
-                        .iter()
-                        .zip(&point.gradients)
-                        .map(|(rows, g)| {
-                            rows.iter()
-                                .zip(evaluation::columns(g))
-                                .map(|(&row, b)| b[component] * displacement[row])
-                                .sum::<f64>()
-                        })
-                        .sum()
-                });
+                let strain =
+                    evaluation::point_kinematics(self.kinematics, element, point, displacement)
+                        .strain;
                 let committed = &state.points[ordinal];
                 let response = element
                     .constitutive

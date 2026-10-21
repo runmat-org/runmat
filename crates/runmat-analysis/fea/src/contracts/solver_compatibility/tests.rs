@@ -86,6 +86,7 @@ fn structural_identity(
             Some(StructuralRecoveryImplementation::Tet4ConstantStrain),
         )],
         procedure,
+        kinematics: runmat_analysis_core::StructuralKinematics::SmallStrain,
         coupling: CouplingImplementation::Uncoupled,
         sources: vec![SourceImplementation::CanonicalBoundaryProjection],
         boundary_transfers: vec![BoundaryTransferImplementation::CanonicalBoundaryProjection],

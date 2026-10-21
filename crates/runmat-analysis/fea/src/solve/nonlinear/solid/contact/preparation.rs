@@ -53,18 +53,6 @@ impl<'a> PreparedSolidContact<'a> {
         if required > input.maximum_additional_resident_bytes {
             return Err(SolidNewtonError::Contact(ContactOperatorError::Budget));
         }
-        let solve_resources = if reduced.rows > 0 {
-            Some(
-                crate::planning::resource::GeneralSparseSolveResourceDemand::derive(
-                    reduced,
-                    input.solve_policy,
-                    crate::planning::resource::Count(1),
-                    input.solve_admission,
-                )?,
-            )
-        } else {
-            None
-        };
         // All exact support/solver counts and construction buffers are admitted
         // before either combined or reduced CSR columns are allocated.
         let pattern = basis
@@ -76,7 +64,6 @@ impl<'a> PreparedSolidContact<'a> {
             input,
             pattern,
             reduced_pattern,
-            solve_resources,
         })
     }
 }
