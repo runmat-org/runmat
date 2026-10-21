@@ -21,7 +21,6 @@ pub(super) fn linear_workload_matches_prepared_execution(
         ),
     };
     workload.backend == execution.backend
-        && workload.formulation_requirement == execution.requirement
         && workload.preconditioner == expected_preconditioner
         && backend_matches
         && workload.observation_execution == ObservationExecutionPolicy::scalable()

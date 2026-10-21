@@ -1,4 +1,4 @@
-//! Experimental continuum electric-phasor curl-curl formulation, exp(+i ω t).
+//! Continuum electric-phasor curl-curl formulation, exp(+i ω t).
 //!
 //! curl(μ⁻¹ curl E) − ω² ε E + i ω σ E = −i ω J, with full-exterior
 //! homogeneous PEC (n × E = 0). Six first-kind lowest-order Nédélec corner

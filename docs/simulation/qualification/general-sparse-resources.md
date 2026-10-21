@@ -38,5 +38,5 @@ only the negative support-bound test fixture.
 Whole contact task admission, typed public interface controls, immutable native
 producer-death continuation, independent mandatory contact accuracy and semantic
 publication remain open. Local tangent certification is not nonlinear uniqueness,
-stability or production contact qualification. All original scientific failures
+stability or contact qualification. All original scientific failures
 and release acceptance requirements remain unchanged.

@@ -10,7 +10,7 @@ The governed workflow must preserve frequencies, original mode vectors and their
 
 ## Bounded eigenspace search
 
-The convergence policy declares both an iteration limit and a maximum Ritz-subspace dimension, including boundary probes. Planning reserves vectors, projected matrices, recovered fields and durable outputs against that capacity. Native execution rederives the same controls and stops expansion at the admitted bound. Production defaults allow 256 vectors; exploratory defaults allow 64. These capacities are configurable numerical controls, not accuracy tolerances.
+The convergence policy declares both an iteration limit and a maximum Ritz-subspace dimension, including boundary probes. Planning reserves vectors, projected matrices, recovered fields and durable outputs against that capacity. Native execution rederives the same controls and stops expansion at the admitted bound. The standard defaults allow 256 vectors; the exploratory preset allows 64. These capacities are configurable numerical controls, not accuracy tolerances.
 
 A mode-count cut inside a repeated eigenspace requires the complete cluster and a separated boundary probe. Reaching capacity without that evidence produces an unqualified result. The solver does not silently split a cluster or interpret the resource bound as the full physical spectrum. Increasing capacity requires a newly admitted workload under the same resource ceilings.
 

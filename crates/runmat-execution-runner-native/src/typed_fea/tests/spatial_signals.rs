@@ -49,7 +49,6 @@ study static {
     geometry = geometry.part
     mesh = mesh.volume
     model = model.structure
-    formulation = experimental
     analysis solve { structural static {} }
 }
 "#;

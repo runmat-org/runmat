@@ -2,9 +2,9 @@
 
 ## Decision and ownership
 
-Stage 7 remains open. This is a physical **experimental magnetostatic envelope**,
+Stage 7 remains open. This is a physical **magnetostatic envelope**,
 with authored CAD/native execution, governed retained fields and observations,
-and authenticated cold completion reopening. It is not production admission,
+and authenticated cold completion reopening. It is not Stage 7 qualification,
 numerical restart, measured resource or release qualification.
 The old reduced harmonic pipeline explicitly rejects magnetic intent;
 its graph tests are not evidence for this formulation. Its eventual replacement by
@@ -59,10 +59,10 @@ import validates those retained arrays; it does not reconstruct fields after los
 
 ## Portable execution and retention contract
 
-The exact experimental realization distinguishes integrated lowest-order edge
+The exact realization distinguishes integrated lowest-order edge
 curl-curl, element-owned permeability, weak-Coulomb saddle solve, A/B/H/energy
 recovery, oriented canonical Tet4/Tet10 topology, volume projection and explicit
-full-exterior grounding. Production and spliced scalar/reduced-graph identities
+full-exterior grounding. Spliced scalar/reduced-graph identities
 remain rejected. Generic static selection does not guess an equation. The legacy
 solver compatibility table admits only assembled saddle-point GMRES with no
 preconditioner for this magnetic workload; electrical CG/PCG and harmonic
@@ -146,7 +146,7 @@ Tet4 and Tet10 runs complete with relative physical and gauge residuals at most
 1e-10 and energy/work error at most 1e-9. Against the independent series above,
 both report relative energy error approximately 0.11259 and volume-weighted B
 relative L² error approximately 0.33548. These are coarse execution witnesses,
-not a refinement study or production spatial-accuracy claim. Tet10 still uses the
+not a refinement study or qualified spatial-accuracy claim. Tet10 still uses the
 same lowest-order edge approximation.
 
 The test copies the exact completion catalog into an independent filesystem store,
@@ -172,9 +172,9 @@ The default OCCT process conformance suite includes this witness. Focused
 Complete mandatory spatial accuracy, weighted volume observations, measured resource
 qualification and real numerical restart/replacement evidence, then apply release
 gates. An algebraic accuracy report is not discretization evidence; missing mandatory
-spatial criteria remain Indeterminate and block production. Cold artifact reopening
-is not numerical restart. The standalone authored path rejects unsupported restart,
-dependent/mixed sequences and production requests.
+spatial criteria remain Indeterminate and block publication. Cold artifact reopening
+is not numerical restart. The standalone authored path rejects unsupported restart
+and dependent/mixed sequences.
 Extend boundary/topology/material/source envelopes with their own physical evidence;
 ports/periodicity, nonlinear magnetic laws, permanent magnetization and force recovery
 are not borrowed from this witness. Replace legacy Maxwell proxies at the physical

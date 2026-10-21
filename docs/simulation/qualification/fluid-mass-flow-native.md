@@ -1,6 +1,6 @@
 # Signed canonical mass-flow sources
 
-Status: experimental; native source and cold-continuation witnesses pass. This source vertical does not promote
+Status: native source and cold-continuation witnesses pass. This source vertical does not promote
 CFD, close the original structural/J2 science failures, or supply arbitrary spatial-error evidence.
 
 ## Physical contract
@@ -42,7 +42,7 @@ balance are explicit rejection cases.
 The accelerating reference has `u(t)=0.001+0.01*t` and `grad(p')=-rho*[0.01,0,0]`. Native witnesses
 exercise original fields/state, ordered receipts, cold publication and split immutable continuation
 after terminated producer sessions. They also keep mandatory missing spatial evidence indeterminate
-and assert production blocking. The original Fourier velocity/flow/shear convergence gate remains
+and assert that publication is blocked without a `markIndeterminate` policy. The original Fourier velocity/flow/shear convergence gate remains
 byte-identical after sharing lifecycle scaffolding.
 
 The exact candidate passes 48 canonical CFD tests, 7 shared ILU tests, 6 uniqueness-provider
@@ -63,7 +63,7 @@ cargo test -p runmat-execution-runner-native --test analysis_process_conformance
 cargo test -p runmat-execution-runner-native --test analysis_process_conformance -- --fluid-fourier-only
 ```
 
-The canonical serial CPU scope remains experimental Tet4 laminar flow. Authored transient
+The canonical serial CPU scope is Tet4 laminar flow. Authored transient
 whole-study roots, symmetry/periodic/slip operators, remote/distributed/GPU, CHT/FSI, measured resource
 qualification and release evidence remain open. A retained source hash is provenance, not an
 independent mathematical accuracy certificate.

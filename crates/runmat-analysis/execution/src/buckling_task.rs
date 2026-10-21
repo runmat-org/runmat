@@ -200,10 +200,7 @@ pub fn prepare_structural_buckling_task(
     let discretization = DiscretizationIdentity::new(
         problem,
         topology_digest,
-        contract_digest(
-            "buckling-formulation",
-            &preparation.workload.formulation_requirement(),
-        )?,
+        contract_digest("buckling-formulation")?,
     )?;
     let operator = OperatorIdentity::new(
         discretization,

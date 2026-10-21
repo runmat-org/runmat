@@ -158,9 +158,6 @@
           "disposition": "execution_policy",
           "default": "merged project and CLI policy"
         },
-        "requirement": {
-          "default": "production publication requires production qualification"
-        },
         "solver_options": {
           "disposition": "execution_policy",
           "default": "typed procedure preset"
@@ -509,14 +506,8 @@
         "numerically_acceptable": {
           "identity": "quality evidence"
         },
-        "production_publishable": {
-          "identity": "publication evidence"
-        },
         "quality_reasons": {
           "identity": "quality evidence"
-        },
-        "production_publication_reasons": {
-          "identity": "publication evidence"
         },
         "provenance": {
           "identity": "physical attempt evidence"

@@ -94,16 +94,11 @@
               "example_mesh": {
                 "type": "string",
                 "minLength": 1
-              },
-              "maturity": {
-                "type": "string",
-                "minLength": 1
               }
             },
             "required": [
               "procedure",
-              "example_mesh",
-              "maturity"
+              "example_mesh"
             ]
           },
           "verification_labels": {

@@ -22,7 +22,6 @@ pub(crate) fn preparation(branch: usize, order: ElementOrder) -> ThermalPrestres
         &heat.product.compiled,
         StructuralStudyPlanningPolicy {
             backend: runmat_analysis_fea::ComputeBackend::Cpu,
-            formulation_requirement: heat.product.compiled.formulation_requirement,
             numerics: StructuralNumericalPlanningPolicy::production(),
         },
     )

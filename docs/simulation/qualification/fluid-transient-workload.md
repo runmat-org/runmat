@@ -5,9 +5,9 @@
 `FluidTransientWorkload` retains the complete authored model, selected procedure,
 canonical policy, geometry policy and original closed initial-field bindings. It does
 not rewrite a transient procedure into a steady request. Canonical backward Euler has
-its own experimental temporal realization, separate from steady pressure correction.
+its own temporal realization, separate from steady pressure correction.
 Generic nonstructural admission cannot let profile code claim either canonical fluid
-operator. Production admission remains rejected.
+operator. Authored transient admission remains rejected.
 
 Steady and transient workloads now share one bounded source compiler for original
 geometry and Cell-role property/material authority. No second property map, fake
@@ -70,4 +70,4 @@ Selected object activation, inlet/wall/mass-flow and generated input realization
 full typed cell/face restart authority, mandatory spatial/time accuracy and independent
 vortex/cavity/backstep qualification are still required. Reduced CHT/FSI physics must
 be replaced with canonical original-field operators and conservative transfer. No
-production, coupled, distributed, accelerator, measured-resource or release promotion.
+qualification, coupled, distributed, accelerator, measured-resource or release promotion.

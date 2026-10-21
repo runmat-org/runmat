@@ -24,7 +24,6 @@ pub(super) fn validate(
             .map_err(|e| e.to_string())?
             != definition
         || completed.workload.model != completed.compiled.model
-        || completed.workload.formulation_requirement != completed.compiled.formulation_requirement
     {
         return Err("Fluid publication differs from its authenticated definition/root".into());
     }
@@ -36,7 +35,6 @@ pub(super) fn validate(
     let expected = runmat_analysis_fea::study::plan_fluid_study(
         &completed.compiled,
         runmat_analysis_fea::study::FluidStudyPlanningPolicy {
-            formulation_requirement: completed.workload.formulation_requirement,
             numerical: options.numerical,
             geometry: options.geometry,
         },

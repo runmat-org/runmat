@@ -39,10 +39,9 @@ pub(super) mod refine {
         "fea.AccuracyLimitAction.tightenSolver",
         "fea.AccuracyLimitAction.extendSampling",
         "fea.AccuracyLimitAction.fail",
-        "fea.AccuracyLimitAction.warnExperimental",
         "fea.AccuracyPlan.new",
         "fea.AccuracyResourceCeiling.new",
-        "fea.AccuracyPlan.experimentalBaseline",
+        "fea.AccuracyPlan.baseline",
         "fea.ProcedureStep.configure",
     ];
     const DOCUMENTATION: BuiltinDocumentation = documentation(ConstructorDocumentationDefinition {
@@ -110,10 +109,9 @@ pub(super) mod tighten_solver {
         "fea.AccuracyLimitAction.refine",
         "fea.AccuracyLimitAction.extendSampling",
         "fea.AccuracyLimitAction.fail",
-        "fea.AccuracyLimitAction.warnExperimental",
         "fea.AccuracyPlan.new",
         "fea.AccuracyResourceCeiling.new",
-        "fea.AccuracyPlan.experimentalBaseline",
+        "fea.AccuracyPlan.baseline",
         "fea.ProcedureStep.configure",
     ];
     const DOCUMENTATION: BuiltinDocumentation = documentation(ConstructorDocumentationDefinition {
@@ -181,10 +179,9 @@ pub(super) mod extend_sampling {
         "fea.AccuracyLimitAction.refine",
         "fea.AccuracyLimitAction.tightenSolver",
         "fea.AccuracyLimitAction.fail",
-        "fea.AccuracyLimitAction.warnExperimental",
         "fea.AccuracyPlan.new",
         "fea.AccuracyResourceCeiling.new",
-        "fea.AccuracyPlan.experimentalBaseline",
+        "fea.AccuracyPlan.baseline",
         "fea.ProcedureStep.configure",
     ];
     const DOCUMENTATION: BuiltinDocumentation = documentation(ConstructorDocumentationDefinition {
@@ -231,7 +228,7 @@ pub(super) mod fail {
         ),
         section(
             "When to use it",
-            &["Use it for production acceptance with a fixed discretization."],
+            &["Use it for acceptance with a fixed discretization."],
         ),
         USE_PLAN,
     ];
@@ -248,10 +245,9 @@ pub(super) mod fail {
         "fea.AccuracyLimitAction.refine",
         "fea.AccuracyLimitAction.tightenSolver",
         "fea.AccuracyLimitAction.extendSampling",
-        "fea.AccuracyLimitAction.warnExperimental",
         "fea.AccuracyPlan.new",
         "fea.AccuracyResourceCeiling.new",
-        "fea.AccuracyPlan.experimentalBaseline",
+        "fea.AccuracyPlan.baseline",
         "fea.ProcedureStep.configure",
     ];
     const DOCUMENTATION: BuiltinDocumentation = documentation(ConstructorDocumentationDefinition {
@@ -288,82 +284,9 @@ pub(super) mod fail {
     );
 }
 
-pub(super) mod warn_experimental {
-    use super::*;
-
-    const SECTIONS: &[BuiltinDocumentationSection] = &[
-        section(
-            "Behavior",
-            &[
-                "For an experimental formulation, an unsatisfied plan still publishes as degraded. Production formulations are still blocked.",
-                "Plan validation requires `fea.UnavailableEvidencePolicy.markIndeterminateExperimental` with this action.",
-            ],
-        ),
-        section(
-            "When to use it",
-            &[
-                "Use it only for explicitly experimental work where a result outside tolerance is still informative.",
-            ],
-        ),
-        USE_PLAN,
-    ];
-    const EXAMPLES: &[BuiltinExample] = &[
-        example(
-            "warn-experimental",
-            "Use warnExperimental in an accuracy plan",
-            "value = fea.AccuracyLimitAction.warnExperimental();\ncriterion = fea.AccuracyCriterion.new(\"equilibrium\", fea.AccuracyTarget.globalEquilibrium(), fea.ErrorContribution.algebraic(), ...\n    fea.AccuracyTolerance.relative(1e-8), fea.RequiredAccuracyEvidence.residualBound(), true);\nplan = fea.AccuracyPlan.new(\"acceptance\", {criterion}, fea.UnavailableEvidencePolicy.markIndeterminateExperimental(), value, ...\n    fea.NumericalEquivalencePolicy.relativeTolerance(1e-12), fea.AccuracyResourceCeiling.new(0, 0, 100, 600000, 2000000000));",
-            "assert(strcmp(class(value), 'fea.AccuracyLimitAction'));\nassert(strcmp(value.value, 'warn_experimental'));\nassert(strcmp(class(plan), 'fea.AccuracyPlan'));",
-        ),
-    ];
-    const FAQS: &[BuiltinDocumentationFaq] = &[];
-    const RELATED: &[&str] = &[
-        "fea.AccuracyLimitAction.refine",
-        "fea.AccuracyLimitAction.tightenSolver",
-        "fea.AccuracyLimitAction.extendSampling",
-        "fea.AccuracyLimitAction.fail",
-        "fea.AccuracyPlan.new",
-        "fea.AccuracyResourceCeiling.new",
-        "fea.AccuracyPlan.experimentalBaseline",
-        "fea.ProcedureStep.configure",
-    ];
-    const DOCUMENTATION: BuiltinDocumentation = documentation(ConstructorDocumentationDefinition {
-        title: "fea.AccuracyLimitAction.warnExperimental",
-        summary: "Publish an unsatisfied experimental result with a warning.",
-        description: "`fea.AccuracyLimitAction.warnExperimental()` returns the closed `fea.AccuracyLimitAction` value `warn_experimental`. It takes no arguments.",
-        keywords: &[
-            "fea",
-            "accuracy",
-            "AccuracyLimitAction",
-            "warnExperimental",
-            "evidence",
-        ],
-        related: RELATED,
-        sections: SECTIONS,
-        examples: EXAMPLES,
-        faqs: FAQS,
-        links: LINKS,
-        implementation: IMPLEMENTATION,
-        verification: VERIFICATION,
-        notes: &[],
-    });
-
-    policy_entry!(
-        CATALOG_ENTRY,
-        name: "fea.AccuracyLimitAction.warnExperimental",
-        result: crate::fea_contract::policy_types::classes::ACCURACY_LIMIT_ACTION,
-        signature: "value = fea.AccuracyLimitAction.warnExperimental()",
-        inputs: [],
-        output: ("value", "Typed fea.AccuracyLimitAction value."),
-        integer_capabilities: &[],
-        integer_audit: Some(&NO_ARGUMENT_AUDIT),
-        documentation: DOCUMENTATION,
-    );
-}
-
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[
     &refine::CATALOG_ENTRY,
     &tighten_solver::CATALOG_ENTRY,
     &extend_sampling::CATALOG_ENTRY,
     &fail::CATALOG_ENTRY,
-    &warn_experimental::CATALOG_ENTRY,
 ];

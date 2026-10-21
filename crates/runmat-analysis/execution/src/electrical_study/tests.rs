@@ -1,9 +1,8 @@
 use super::*;
 use runmat_analysis_core::{
     AnalysisConstraint, AnalysisSequence, ElectricPotential, ElectricalConstraint,
-    ElectricalConstraintKind, ElectromagneticDomain, FormulationRequirement,
-    MaterialElectricalModel, PrescribedValue, ProcedureStep, RegionTarget,
-    StaticElectricalEquation,
+    ElectricalConstraintKind, ElectromagneticDomain, MaterialElectricalModel, PrescribedValue,
+    ProcedureStep, RegionTarget, StaticElectricalEquation,
 };
 use runmat_analysis_fea::{
     fixtures::{fixture_model, FixtureId},
@@ -55,7 +54,6 @@ pub(crate) fn preparation() -> ElectricalStudyPreparation {
     let compiled = CompiledAnalysisStudy {
         module_path: "tests/electrical.fea".into(),
         study_id: "electrical".into(),
-        formulation_requirement: FormulationRequirement::Experimental,
         study_inputs: Vec::new(),
         assessments: Vec::new(),
         outputs: Vec::new(),
@@ -63,9 +61,7 @@ pub(crate) fn preparation() -> ElectricalStudyPreparation {
         model,
         solver_mesh_digest: mesh.canonical_digest,
     };
-    let policy = ElectricalStudyPlanningPolicy {
-        formulation_requirement: FormulationRequirement::Experimental,
-    };
+    let policy = ElectricalStudyPlanningPolicy {};
     let workload = plan_electrical_study(&compiled, policy).unwrap();
     ElectricalStudyPreparation {
         product: ElectricalStudyProduct { compiled, workload },
@@ -98,9 +94,6 @@ pub(crate) fn preparation() -> ElectricalStudyPreparation {
 fn electrical_standalone_coordinator_rejects_foreign_mesh_policy_and_definition() {
     let mut input = preparation();
     input.product.compiled.solver_mesh_digest = StableDigest::ZERO;
-    assert!(ElectricalStudyCoordinator::new(input).is_err());
-    let mut input = preparation();
-    input.policy.formulation_requirement = FormulationRequirement::Production;
     assert!(ElectricalStudyCoordinator::new(input).is_err());
     let mut input = preparation();
     input.product.compiled.model.geometry_revision += 1;

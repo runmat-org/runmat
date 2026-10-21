@@ -8,7 +8,6 @@ pub(super) fn solved_heterogeneous_tet4_stress_matches_an_independent_constituti
         &model,
         ComputeBackend::Cpu,
         LinearStaticSolveOptions {
-            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
             solver_mesh: Some(mesh.clone()),
             require_solver_mesh_for_solid: true,
             ..LinearStaticSolveOptions::default()
@@ -124,7 +123,6 @@ pub(super) fn solved_heterogeneous_tet10_stress_matches_independent_quadratic_co
         &model,
         ComputeBackend::Cpu,
         LinearStaticSolveOptions {
-            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
             solver_mesh: Some(mesh.clone()),
             require_solver_mesh_for_solid: true,
             ..LinearStaticSolveOptions::default()
@@ -279,7 +277,6 @@ pub(super) fn solved_heterogeneous_tet10_stress_matches_independent_quadratic_co
         &reordered,
         ComputeBackend::Cpu,
         LinearStaticSolveOptions {
-            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
             solver_mesh: Some(mesh),
             require_solver_mesh_for_solid: true,
             ..LinearStaticSolveOptions::default()

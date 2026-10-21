@@ -9,7 +9,7 @@ use runmat_analysis_core::{
     geometry_parameter_input_type, AuthoredGeometryArgument, AuthoredGeometryArgumentValue,
     AuthoredGeometryInstance, AuthoredMeshRef, AuthoredModel, AuthoredModelArgument,
     AuthoredModelArgumentValue, AuthoredModelInstance, AuthoredModelRef, AuthoredStudy,
-    AuthoredStudyInputRef, FormulationRequirement,
+    AuthoredStudyInputRef,
 };
 use runmat_geometry_core::GeometryDefinition;
 use runmat_meshing_core::MeshDefinition;
@@ -79,7 +79,7 @@ pub(super) fn lower(
     let model_closure = model_closure(context.models, model)?;
     let mut sequence = lower::lower_study(declaration, &model_closure, diagnostics)?;
     let outputs = super::output::lower_outputs(context.bound, declaration, diagnostics);
-    let formulation_requirement = formulation_requirement(declaration, diagnostics);
+    reject_formulation_setting(declaration, diagnostics);
     let assessments = super::assessment::lower_assessments(context.bound, declaration, diagnostics);
     match runmat_analysis_core::attach_authored_outputs(&outputs, &mut sequence) {
         Ok(()) => {}
@@ -114,7 +114,6 @@ pub(super) fn lower(
             },
             arguments,
         },
-        formulation_requirement,
         inputs,
         outputs,
         assessments,
@@ -132,61 +131,25 @@ pub(super) fn lower(
     Some(study)
 }
 
-fn formulation_requirement(
+/// `formulation` is not a study setting: every registered formulation runs on one path. A stale
+/// `formulation = ...` line is rejected so the authored file states only what the study does.
+fn reject_formulation_setting(
     declaration: &CheckedFeaDeclaration,
     diagnostics: &mut Vec<FeaDiagnostic>,
-) -> FormulationRequirement {
+) {
     for statement in &declaration.statements {
-        if matches!(
-            &statement.kind,
-            crate::CheckedFeaStatementKind::Requirement { target, .. }
-                if target.as_slice() == ["formulation"]
-        ) {
+        let target = match &statement.kind {
+            crate::CheckedFeaStatementKind::Assignment { target, .. }
+            | crate::CheckedFeaStatementKind::Requirement { target, .. } => target,
+            _ => continue,
+        };
+        if target.as_slice() == ["formulation"] {
             lower::error(
                 declaration,
                 statement.span,
-                "study formulation uses `formulation = production` or `formulation = experimental`",
+                "`formulation` is not a study setting; remove this line",
                 diagnostics,
             );
-        }
-    }
-    let settings = declaration
-        .statements
-        .iter()
-        .filter_map(|statement| {
-            let crate::CheckedFeaStatementKind::Assignment { target, value, .. } = &statement.kind
-            else {
-                return None;
-            };
-            (target.as_slice() == ["formulation"]).then_some(value)
-        })
-        .collect::<Vec<_>>();
-    if settings.len() > 1 {
-        lower::error(
-            declaration,
-            declaration.span,
-            "study formulation is declared more than once",
-            diagnostics,
-        );
-    }
-    let Some(value) = settings.first() else {
-        return FormulationRequirement::Production;
-    };
-    match &value.kind {
-        CheckedExpressionKind::Enum(value) if value == "production" => {
-            FormulationRequirement::Production
-        }
-        CheckedExpressionKind::Enum(value) if value == "experimental" => {
-            FormulationRequirement::Experimental
-        }
-        _ => {
-            lower::error(
-                declaration,
-                value.span,
-                "formulation must be `production` or `experimental`",
-                diagnostics,
-            );
-            FormulationRequirement::Production
         }
     }
 }

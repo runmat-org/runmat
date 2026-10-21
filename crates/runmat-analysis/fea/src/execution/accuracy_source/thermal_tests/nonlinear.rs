@@ -35,7 +35,6 @@ fn nonlinear_equilibrium_uses_original_acceptance_not_inner_linear_residual() {
             step_id: model.sequence.steps[0].step_id.clone(),
             model,
             backend: ComputeBackend::Cpu,
-            formulation_requirement: FormulationRequirement::Experimental,
             procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
             residual_target: 1e-8,
         };
@@ -82,13 +81,9 @@ fn nonlinear_equilibrium_uses_original_acceptance_not_inner_linear_residual() {
     let evaluated = evaluate_accuracy(&request.plan, &evidence).unwrap();
     assert_eq!(evaluated.report().status, AccuracyStatus::Indeterminate);
     assert_eq!(
-        publication_gate(
-            &request.plan,
-            FormulationRequirement::Production,
-            &evaluated
-        )
-        .unwrap()
-        .decision,
+        publication_gate(&request.plan, &evaluated)
+            .unwrap()
+            .decision,
         PublicationDecision::Block
     );
 }

@@ -4,7 +4,7 @@ This Stage 4 envelope exercises genuinely non-affine Tet10 volume and Tri6
 boundary geometry through physical assembly, load realization, direct harmonic
 response and recovered complex displacement. It extends the independent
 [straight rod reference](solid-rod-harmonic.md), not production CAD generation or
-general curved-solid qualification. No stage or production gate is promoted by
+general curved-solid qualification. No stage or qualification gate is promoted by
 this fixture alone.
 
 ## Geometry and independent reference
@@ -110,7 +110,7 @@ both damping settings and consistent changed-curvature rejection. The four
 existing straight Tet4/Tet10 cold execution/recovery tests also pass against the
 same compiled test binary, as does the original both-order damped continuum
 helper with its unchanged cases and bounds. These are portable-object execution checks, not actual
-process replacement or a complete production gate decision.
+process replacement or a complete qualification gate decision.
 
 This envelope does not establish curved CAD generation, arbitrary deformation
 maps, bending/shear spectra, nonzero-Poisson unrestrained rods, prestress, real

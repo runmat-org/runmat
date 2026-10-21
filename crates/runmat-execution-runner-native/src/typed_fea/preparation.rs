@@ -170,7 +170,6 @@ pub async fn prepare_study(
                 local_execution,
                 analysis_accelerator_requests: options.accelerators.clone(),
                 controls: runmat_analysis_fea::solve::nonlinear::NonlinearSolveOptions {
-                    formulation_requirement: resolved.study.formulation_requirement,
                     ..Default::default()
                 },
                 accepted_block_limit:
@@ -193,7 +192,6 @@ pub async fn prepare_study(
                 artifact_access: access,
                 input_materializations,
                 planning: runmat_analysis_fea::study::FluidStudyPlanningPolicy {
-                    formulation_requirement: resolved.study.formulation_requirement,
                     numerical: Default::default(),
                     geometry: Default::default(),
                 },
@@ -216,9 +214,7 @@ pub async fn prepare_study(
                 program_revision: revision.clone(),
                 artifact_access: access,
                 input_materializations,
-                planning: runmat_analysis_fea::study::MaxwellStudyPlanningPolicy {
-                    formulation_requirement: resolved.study.formulation_requirement,
-                },
+                planning: runmat_analysis_fea::study::MaxwellStudyPlanningPolicy {},
                 local_execution,
                 analysis_accelerator_requests: options.accelerators.clone(),
             })
@@ -238,9 +234,7 @@ pub async fn prepare_study(
                 program_revision: revision.clone(),
                 artifact_access: access,
                 input_materializations,
-                planning: runmat_analysis_fea::study::MagneticStudyPlanningPolicy {
-                    formulation_requirement: resolved.study.formulation_requirement,
-                },
+                planning: runmat_analysis_fea::study::MagneticStudyPlanningPolicy {},
                 local_execution,
                 analysis_accelerator_requests: options.accelerators.clone(),
             })
@@ -264,9 +258,7 @@ pub async fn prepare_study(
                 program_revision: revision.clone(),
                 artifact_access: access,
                 input_materializations,
-                planning: runmat_analysis_fea::study::ElectricalStudyPlanningPolicy {
-                    formulation_requirement: resolved.study.formulation_requirement,
-                },
+                planning: runmat_analysis_fea::study::ElectricalStudyPlanningPolicy {},
                 local_execution,
                 analysis_accelerator_requests: options.accelerators.clone(),
             })
@@ -292,8 +284,7 @@ pub async fn prepare_study(
                 artifact_access: access,
                 input_materializations,
                 planning: runmat_analysis_fea::study::AcousticStudyPlanningPolicy {
-                    formulation_requirement: resolved.study.formulation_requirement,
-                    ..runmat_analysis_fea::study::AcousticStudyPlanningPolicy::experimental()
+                    ..runmat_analysis_fea::study::AcousticStudyPlanningPolicy::standard()
                 },
                 local_execution,
                 analysis_accelerator_requests: options.accelerators.clone(),
@@ -325,7 +316,6 @@ pub async fn prepare_study(
                 input_materializations,
                 planning: runmat_analysis_fea::study::ThermalStudyPlanningPolicy {
                     backend: options.backend,
-                    formulation_requirement: resolved.study.formulation_requirement,
                 },
                 local_execution,
                 analysis_accelerator_requests: options.accelerators.clone(),
@@ -341,7 +331,6 @@ pub async fn prepare_study(
                 materials: resolved.material_catalog,
                 planning: runmat_analysis_fea::study::StructuralStudyPlanningPolicy {
                     backend: options.backend,
-                    formulation_requirement: resolved.study.formulation_requirement,
                     numerics:
                         runmat_analysis_fea::study::StructuralNumericalPlanningPolicy::production(),
                 },

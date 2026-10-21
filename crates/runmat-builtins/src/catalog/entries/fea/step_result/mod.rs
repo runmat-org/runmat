@@ -40,7 +40,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
     sections: &[
         BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
             "A study's procedure sequence can hold several steps, for example a modal extraction followed by a response analysis. `fea.run` returns one aggregate `fea.RunResult`; each step's outcome is stored separately with its own run id. `fea.stepResult` picks one of them by its authored step id.",
-            "The step id must match exactly (case-sensitive). The returned `fea.StepRunResult` holds the step's ordinal, procedure step, execution settings, run identity and operation, `run_id`, run status, `numerically_acceptable` and `production_publishable` flags, convergence and quality gates, quality and publication reasons, provenance, and evidence path. The study carried by the aggregate run is kept on the step result.",
+            "The step id must match exactly (case-sensitive). The returned `fea.StepRunResult` holds the step's ordinal, procedure step, execution settings, run identity and operation, `run_id`, run status, `numerically_acceptable` flag, convergence and quality gates, quality reasons, provenance, and evidence path. The study carried by the aggregate run is kept on the step result.",
             "Selection is a pure, in-memory operation on the run object; it does not read the artifact store.",
         ] },
         BuiltinDocumentationSection { heading: "Use in a study", paragraphs: &[

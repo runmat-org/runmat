@@ -9,8 +9,8 @@ RunMat records those signals in the result payload, saved artifacts, diagnostics
 Every run returns common result data:
 
 - `run_id`,
-- a required run identity separating physics family, procedure, solution space, formulations,
-  maturity, and fallback policy,
+- a required run identity separating physics family, procedure, solution space, and exact
+  formulation realization,
 - fields from the underlying FEA run payload,
 - optional domain payloads,
 - `model_validity`,
@@ -61,9 +61,8 @@ Provenance records how the run executed:
 - typed fallback stage and reason.
 
 Requested placement and actual execution are distinct. Uploading result fields to an accelerator
-does not turn a CPU solve into an accelerator solve. Experimental formulations may allow an
-explicitly recorded fallback; production identities forbid it, and artifacts that violate their
-identity are rejected.
+does not turn a CPU solve into an accelerator solve. Any fallback is recorded with its typed stage
+and reason, and artifacts that violate their identity are rejected.
 
 This matters for comparisons. Two runs can use the same model and operation but differ in backend, precision, fallback behavior, or solver policy.
 
@@ -88,7 +87,7 @@ Before treating a result as reliable, ask:
 3. Did the selected backend and solver policy match expectations?
 4. Did the result pass quality gates?
 5. Are there quality reasons or diagnostics that affect use?
-6. Is the family mature enough for this use class?
+6. Does the recorded validation evidence cover this use class?
 7. Is there V&V evidence for this model class, not just a successful run?
 8. Are artifacts available for review and reproduction?
 

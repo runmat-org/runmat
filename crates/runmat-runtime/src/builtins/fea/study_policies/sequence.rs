@@ -32,10 +32,10 @@ pub(super) const REFERENCE_STATE_CLASS: &str =
 macro_rules! choice {
     ($function:ident, $builtin:literal, $class:expr, $value:expr $(,)?) => {
         #[runtime_builtin(
-                            name = $builtin,
-                            binding_variant = "default",
-                            builtin_path = "crate::builtins::fea::study_policies::sequence"
-                        )]
+                                    name = $builtin,
+                                    binding_variant = "default",
+                                    builtin_path = "crate::builtins::fea::study_policies::sequence"
+                                )]
         pub async fn $function() -> BuiltinResult<Value> {
             to_typed_value($builtin, $class, $value)
         }

@@ -69,5 +69,5 @@ source digest and records materialization evidence. The function cannot change t
 configuration.
 
 The checked tabulated counterpart is
-[`structural-transient-experimental.fea`](../../examples/structural-transient-experimental.fea).
+[`structural-transient.fea`](../../examples/structural-transient.fea).
 Use it to compare an explicit table with a generated signal at identical samples.

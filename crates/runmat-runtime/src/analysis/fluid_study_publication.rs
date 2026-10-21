@@ -106,7 +106,6 @@ pub fn prepare_fluid_study_publication(
     let execution = super::AnalysisExecutionStep {
         step_id: completed.workload.step_id.clone(),
         backend: runmat_analysis_fea::ComputeBackend::Cpu,
-        requirement: completed.workload.formulation_requirement,
         solver_options: super::AnalysisSolverOptions::IncompressibleFlow(options.clone()),
     };
     let prepared = super::structural_study::standalone_completion(
@@ -185,7 +184,9 @@ impl FluidLayoutEvidence {
         Ok(Self {
             identity: layout.identity(),
             content_digest: runmat_execution::Digest::sha256(
-                layout.canonical_bytes().map_err(|error| error.to_string())?,
+                layout
+                    .canonical_bytes()
+                    .map_err(|error| error.to_string())?,
             ),
             entity_counts: layout.entity_counts(),
         })

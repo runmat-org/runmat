@@ -112,7 +112,7 @@ weaken physical or accuracy requirements.
 Portable accuracy tasks for linear structural, modal response-spectrum and random-response
 results carry the producing workload contract and its canonical numerical workload and mesh
 inputs. Preparation and workers bind those inputs to the numerical receipt before checking the
-authored accuracy plan, formulation requirement and observation coverage. A result catalog cannot
+authored accuracy plan, formulation identity and observation coverage. A result catalog cannot
 define a weaker acceptance plan or silently omit authored observations. Thermal tasks bind their
 original thermal workload and mesh directly to the thermal receipt.
 

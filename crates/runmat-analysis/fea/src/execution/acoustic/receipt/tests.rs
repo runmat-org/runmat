@@ -69,7 +69,7 @@ fn acoustic_accuracy_receipt_supplies_only_algebraic_closure_and_rejects_foreign
     .unwrap();
     assert_eq!(source.identity(), receipt.identity());
     assert_eq!(source.source_workload(), receipt.source_workload());
-    let mut plan = AccuracyPlan::experimental_baseline("acoustic_accuracy");
+    let mut plan = AccuracyPlan::baseline("acoustic_accuracy");
     plan.criteria = [
         RequiredAccuracyEvidence::ResidualBound,
         RequiredAccuracyEvidence::ConservationBalance,
@@ -99,7 +99,6 @@ fn acoustic_accuracy_receipt_supplies_only_algebraic_closure_and_rejects_foreign
         AccuracySourceKind::AcousticHarmonic,
         receipt.source_result(),
         None,
-        FormulationRequirement::Experimental,
         plan,
     )
     .unwrap();
@@ -130,7 +129,6 @@ fn acoustic_accuracy_receipt_supplies_only_algebraic_closure_and_rejects_foreign
         request.source_kind,
         request.source_result,
         None,
-        request.formulation_requirement,
         request.plan.clone(),
     )
     .unwrap();

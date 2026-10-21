@@ -1,7 +1,7 @@
 use runmat_analysis_core::{
-    validate_model_sequence, AnalysisModel, AnalysisProcedure, FormulationRequirement,
-    IndependentDomain, PhysicsFamily, ProcedureStep, ProcedureStepId, RandomExcitationSpectrum,
-    SolutionSpace, StateKind, StateSource, StateUse,
+    validate_model_sequence, AnalysisModel, AnalysisProcedure, IndependentDomain, PhysicsFamily,
+    ProcedureStep, ProcedureStepId, RandomExcitationSpectrum, SolutionSpace, StateKind,
+    StateSource, StateUse,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use serde::{Deserialize, Serialize};
@@ -28,7 +28,6 @@ pub struct StructuralRandomResponseWorkload {
     model: AnalysisModel,
     step_id: ProcedureStepId,
     backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
     observation_execution: ObservationExecutionPolicy,
     modal_basis_transition: CanonicalStateTransition,
     integration_policy: RandomResponseIntegrationPolicy,
@@ -43,7 +42,6 @@ struct StructuralRandomResponseWorkloadWire {
     model: AnalysisModel,
     step_id: ProcedureStepId,
     backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
     observation_execution: ObservationExecutionPolicy,
     modal_basis_transition: CanonicalStateTransition,
     integration_policy: RandomResponseIntegrationPolicy,
@@ -54,7 +52,6 @@ pub struct StructuralRandomResponseWorkloadInput {
     pub model: AnalysisModel,
     pub step_id: ProcedureStepId,
     pub backend: ComputeBackend,
-    pub formulation_requirement: FormulationRequirement,
     pub observation_execution: ObservationExecutionPolicy,
     pub modal_basis_transition: CanonicalStateTransition,
     pub integration_policy: RandomResponseIntegrationPolicy,
@@ -68,7 +65,6 @@ pub struct StructuralRandomResponseTemplate {
     pub model: AnalysisModel,
     pub step_id: ProcedureStepId,
     pub backend: ComputeBackend,
-    pub formulation_requirement: FormulationRequirement,
     pub observation_execution: ObservationExecutionPolicy,
     pub integration_policy: RandomResponseIntegrationPolicy,
     pub maximum_intervals_per_task: usize,
@@ -94,7 +90,6 @@ impl StructuralRandomResponseTemplate {
             model: self.model,
             step_id: self.step_id,
             backend: self.backend,
-            formulation_requirement: self.formulation_requirement,
             observation_execution: self.observation_execution,
             modal_basis_transition,
             integration_policy: self.integration_policy,
@@ -113,7 +108,6 @@ impl TryFrom<StructuralRandomResponseWorkloadWire> for StructuralRandomResponseW
             model: wire.model,
             step_id: wire.step_id,
             backend: wire.backend,
-            formulation_requirement: wire.formulation_requirement,
             observation_execution: wire.observation_execution,
             modal_basis_transition: wire.modal_basis_transition,
             integration_policy: wire.integration_policy,
@@ -135,7 +129,6 @@ impl StructuralRandomResponseWorkload {
             model: input.model,
             step_id: input.step_id,
             backend: input.backend,
-            formulation_requirement: input.formulation_requirement,
             observation_execution: input.observation_execution,
             modal_basis_transition: input.modal_basis_transition,
             integration_policy: input.integration_policy,
@@ -160,10 +153,6 @@ impl StructuralRandomResponseWorkload {
 
     pub const fn backend(&self) -> ComputeBackend {
         self.backend
-    }
-
-    pub const fn formulation_requirement(&self) -> FormulationRequirement {
-        self.formulation_requirement
     }
 
     pub const fn observation_execution(&self) -> ObservationExecutionPolicy {
@@ -251,7 +240,6 @@ impl StructuralRandomResponseWorkload {
                 &self.model,
                 &self.step_id,
                 self.backend,
-                self.formulation_requirement,
                 self.observation_execution,
                 &self.modal_basis_transition,
                 self.integration_policy,

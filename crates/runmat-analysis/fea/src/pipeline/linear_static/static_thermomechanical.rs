@@ -1,4 +1,4 @@
-//! Physical solid and experimental reduced static thermomechanical result dispatch.
+//! Physical solid and reduced static thermomechanical result dispatch.
 
 use runmat_analysis_core::AnalysisField;
 

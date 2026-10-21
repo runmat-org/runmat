@@ -41,7 +41,6 @@ pub(super) fn verify(
         source_context_inputs: vec![workload.clone(), mesh, original.objects.clone()],
         sequence: SequenceIdentity::from_solver_contract(&source_workload.model.sequence).unwrap(),
         step: source_workload.model.sequence.steps[0].clone(),
-        formulation_requirement: source_workload.controls.formulation_requirement,
         program_revision: task.program.request.recipe.program_revision.clone(),
         chunk_bytes: policy.chunk_bytes(),
         inventory_limits: limits,
@@ -71,13 +70,9 @@ pub(super) fn verify(
         AccuracyStatus::Indeterminate
     );
     assert_eq!(
-        publication_gate(
-            &accuracy.request.plan,
-            FormulationRequirement::Production,
-            cold.artifact.evaluation()
-        )
-        .unwrap()
-        .decision,
+        publication_gate(&accuracy.request.plan, cold.artifact.evaluation())
+            .unwrap()
+            .decision,
         PublicationDecision::Block
     );
     drop(store);

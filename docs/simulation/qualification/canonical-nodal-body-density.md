@@ -1,7 +1,7 @@
-# Canonical nodal body density — experimental, qualification incomplete
+# Canonical nodal body density — qualification incomplete
 
 This Stage 3/4 slice realizes frozen physical vector-density samples before
-assembly. It does not promote structural production or establish authored
+assembly. It does not qualify the structural family or establish authored
 mesh-dependent generators, field-artifact execution, restart or remote equivalence.
 
 ## Ownership and supported numerical envelope
@@ -71,7 +71,7 @@ integration; the corrected admission names actual physical volume projection.
 This is spatially affine temporal evidence, not general spatial convergence.
 Existing free-decay spatial and acceleration failures in solid-rod-transient.md
 remain unchanged and open. The iterator-only Clippy correction also passes the
-numerical rerun in 14.03 seconds, with unchanged errors; no production or
+numerical rerun in 14.03 seconds, with unchanged errors; no qualification or
 whole-study execution gate is promoted.
 
 ## Resource and remaining execution evidence

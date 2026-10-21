@@ -21,7 +21,6 @@ pub(in crate::analysis) fn prepare_structural_modal_transient_template(
         model: study.model.clone(),
         step_id: step.procedure_step.step_id.clone(),
         backend: step.authored_execution.backend,
-        formulation_requirement: step.authored_execution.requirement,
         time_step_policy: runmat_analysis_fea::solve::transient::StructuralTimeStepPolicy::Fixed {
             interval_count: options.time_step_policy.interval_count(),
         },

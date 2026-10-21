@@ -39,7 +39,7 @@ model cavity {
     }
 }
 
-study acoustic_production_rejected {
+study acoustic_cavity_harmonic {
     geometry = geometry.cavity
     mesh = mesh.cavity
     model = model.cavity

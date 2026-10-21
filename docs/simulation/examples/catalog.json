@@ -58,9 +58,9 @@
       "id": "two-body-static",
       "title": "Load a two-body assembly",
       "description": "Import two STEP solids, assign steel to both, fix their support faces and apply traction to one body.",
-      "entry": "structural-static-experimental.fea",
+      "entry": "structural-static.fea",
       "files": [
-        "structural-static-experimental.fea",
+        "structural-static.fea",
         "geometry/two-box-assembly.step"
       ],
       "expected_outputs": [

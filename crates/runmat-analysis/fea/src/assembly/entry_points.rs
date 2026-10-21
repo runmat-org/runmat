@@ -192,7 +192,7 @@ pub(crate) fn assemble_structural_modal_system(
         model,
         excitations,
         solver_mesh,
-        Some(StructuralFormulationRequirement::ExperimentalSyntheticOperator),
+        Some(StructuralFormulationRequirement::SyntheticOperator),
         None,
         crate::planning::resource::LocalExecutionPlan::serial(),
         StructuralCouplingInput::Authored {

@@ -82,6 +82,6 @@ RunMat integrates these solid and boundary terms, solves for nodal temperature, 
 
 ## Supported scope and next steps
 
-This example uses the experimental steady thermal formulation. Its uniform film coefficient and distributed heater deliberately keep the cooling model simple. For a specific assembly, use the actual source footprint, contact path and cooling conditions; choose a transient study when thermal timing matters.
+This example uses RunMat's steady thermal formulation. Its uniform film coefficient and distributed heater deliberately keep the cooling model simple. For a specific assembly, use the actual source footprint, contact path and cooling conditions; choose a transient study when thermal timing matters.
 
 [The thermal validation section](/docs/simulation/validation/thermal) describes the formulation, energy, field-recovery and workflow checks. Continue with [thermal loads](/docs/simulation/loads/thermal) to choose between power, temperature and convection boundaries.

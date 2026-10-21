@@ -1,7 +1,7 @@
 # Generated complex acoustic spectra
 
 This evidence contract covers shared compiled RunMat signal generation feeding
-experimental CPU FP64 canonical Tet4/Tet10 acoustic frequency tasks. It does not
+CPU FP64 canonical Tet4/Tet10 acoustic frequency tasks. It does not
 replace the independent duct/cavity/interface continuum evidence, qualify authored
 CAD studies, or claim a distributed numerical solve or whole-study restart.
 

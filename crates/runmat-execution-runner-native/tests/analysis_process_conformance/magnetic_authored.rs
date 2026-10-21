@@ -53,7 +53,6 @@ study response {
     geometry = geometry.part
     mesh = mesh.volume
     model = model.coil
-    formulation = experimental
     analysis potential {
         electromagnetic static {}
         accuracy { algebraic_relative_tolerance = 1e-10 }
@@ -183,9 +182,7 @@ pub(super) async fn run() {
                 checkpoint_id: "unqualified".into(),
                 required_state_digest: "unqualified".into(),
             };
-        let policy = runmat_analysis_fea::study::MagneticStudyPlanningPolicy {
-            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
-        };
+        let policy = runmat_analysis_fea::study::MagneticStudyPlanningPolicy {};
         assert!(runmat_analysis_fea::study::plan_magnetic_study(&wrong, policy).is_err());
         for equation in [
             runmat_analysis_core::StaticElectricalEquation::Electrostatics,
@@ -196,16 +193,6 @@ pub(super) async fn run() {
                 Some(runmat_analysis_core::ElectromagneticDomain::Static { equation });
             assert!(runmat_analysis_fea::study::plan_magnetic_study(&wrong, policy).is_err());
         }
-        let mut production = expected.compiled.clone();
-        production.formulation_requirement =
-            runmat_analysis_core::FormulationRequirement::Production;
-        assert!(runmat_analysis_fea::study::plan_magnetic_study(
-            &production,
-            runmat_analysis_fea::study::MagneticStudyPlanningPolicy {
-                formulation_requirement: runmat_analysis_core::FormulationRequirement::Production,
-            }
-        )
-        .is_err());
     }
 }
 

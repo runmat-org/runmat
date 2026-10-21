@@ -1,8 +1,7 @@
 use super::*;
 use crate::{ComputeBackend, ThermalProcedureControl};
 use runmat_analysis_core::{
-    AnalysisSequence, FormulationRequirement, ProcedureStep, ProcedureStepId, Temperature,
-    ThermalDomain,
+    AnalysisSequence, ProcedureStep, ProcedureStepId, Temperature, ThermalDomain,
 };
 use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
 
@@ -20,7 +19,6 @@ fn thermal_catalog_is_metadata_only_and_rejects_tampering_and_foreign_selection(
         model,
         step_id: ProcedureStepId("heat_a".into()),
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
         residual_target: 1e-4,
     };

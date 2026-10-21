@@ -71,7 +71,6 @@ pub(super) fn reject_substituted_structural_authority(
         prepared.request.source_kind,
         prepared.request.source_result,
         Some(catalog),
-        prepared.request.formulation_requirement,
         weakened,
     )
     .unwrap();
@@ -88,7 +87,6 @@ pub(super) fn reject_substituted_structural_authority(
         prepared.request.source_kind,
         prepared.request.source_result,
         None,
-        prepared.request.formulation_requirement,
         prepared.request.plan.clone(),
     )
     .unwrap();

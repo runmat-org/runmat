@@ -10,7 +10,7 @@ use crate::{
 };
 pub use prepared::PreparedFluidTransient;
 pub use result::FluidTransientSolverResult;
-use runmat_analysis_core::{AnalysisModel, FormulationRequirement, ProcedureStepId};
+use runmat_analysis_core::{AnalysisModel, ProcedureStepId};
 use runmat_execution::Digest;
 use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
@@ -20,7 +20,6 @@ const PREFIX: &[u8] = b"runmat-fluid-transient-workload/v1\0";
 pub struct FluidTransientWorkload {
     pub model: AnalysisModel,
     pub step_id: ProcedureStepId,
-    pub formulation_requirement: FormulationRequirement,
     pub policy: CanonicalFluidPolicy,
     pub geometry_policy: FiniteVolumeProjectionPolicy,
     pub initial_fields: Vec<InitialFieldBinding>,
@@ -62,8 +61,7 @@ impl FluidTransientWorkload {
         )?;
         self.validate()?;
         let formulation =
-            crate::admission::admit_canonical_fluid_transient(mesh, self.formulation_requirement)
-                .map_err(invalid)?;
+            crate::admission::admit_canonical_fluid_transient(mesh).map_err(invalid)?;
         let source = super::source::PreparedFluidSource::prepare(
             self,
             &self.model,

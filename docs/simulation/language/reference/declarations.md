@@ -37,9 +37,8 @@ has no template or defaults field. Its required content is determined by consumi
 ## `study <name> { ... }`
 
 Parent: module. Label: one study name. Required members are `geometry`, `mesh`, `model`, and at
-least one `analysis`. Optional members are typed inputs, `formulation`, `execution`, and outputs.
-Omitted `formulation` means production is required. Omitted `execution` uses ordinary local/project
-policy. A study produces one typed procedure graph and a runnable root.
+least one `analysis`. Optional members are typed inputs, `execution`, and outputs.
+Omitted `execution` uses ordinary local/project policy. A study produces one typed procedure graph and a runnable root.
 
 ## `sweep <name> over study.<name> { ... }`
 

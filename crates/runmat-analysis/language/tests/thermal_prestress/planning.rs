@@ -1,7 +1,5 @@
 use super::support::{source_module, TestHost};
-use runmat_analysis_core::{
-    AnalysisProcedure, FormulationRequirement, SolutionSpace, StateKind, StateSource, StateUse,
-};
+use runmat_analysis_core::{AnalysisProcedure, SolutionSpace, StateKind, StateSource, StateUse};
 use runmat_analysis_fea::{study::*, ComputeBackend};
 use runmat_analysis_language::*;
 use runmat_geometry_core::{GeometryRegionRole, ResolvedGeometryRegion};
@@ -38,9 +36,8 @@ fn check_planning(order: ElementOrder, consumer: Consumer) {
     // This language/planning test supplies the canonical STEP tetrahedron through
     // the inspection host, so only its asset reference differs from the example.
     // The native driver-replacement test uses the original box.brep and OCCT meshing.
-    let mut source =
-        include_str!("../../../../../docs/simulation/examples/thermal-prestress-experimental.fea")
-            .replace("./geometry/box.brep", "./geometry/tetrahedron.step");
+    let mut source = include_str!("../../../../../docs/simulation/examples/thermal-prestress.fea")
+        .replace("./geometry/box.brep", "./geometry/tetrahedron.step");
     if order == ElementOrder::Tet10 {
         source = source.replace("order = linear", "order = quadratic");
     }
@@ -182,7 +179,6 @@ fn check_planning(order: ElementOrder, consumer: Consumer) {
         mesh: &mesh,
         planning: StructuralStudyPlanningPolicy {
             backend: ComputeBackend::Cpu,
-            formulation_requirement: FormulationRequirement::Experimental,
             numerics: StructuralNumericalPlanningPolicy::production(),
         },
     })

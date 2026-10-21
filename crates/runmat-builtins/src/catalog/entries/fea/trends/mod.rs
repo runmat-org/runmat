@@ -36,7 +36,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
     sections: &[
         BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
             "RunMat lists the runs in the analysis artifact store and groups them by run identity, meaning physics family and procedure (for example structural static or nonlinear). Within each group it keeps the first `WindowSize` runs in descending run-id order and summarizes them.",
-            "The `fea.Trends` result holds `window_size` and one entry per group in `summaries`. Each summary reports the group identity, `sample_count`, median and 95th-percentile solve time in milliseconds when recorded, and the fractions of runs that were numerically acceptable and production publishable. Nonlinear groups add the failed-increment rate and mean iteration-spike and convergence-stall counts; thermo-mechanical diagnostics add coupling, warning, and threshold-breach rates when present.",
+            "The `fea.Trends` result holds `window_size` and one entry per group in `summaries`. Each summary reports the group identity, `sample_count`, median and 95th-percentile solve time in milliseconds when recorded, and the fraction of runs that were numerically acceptable. Nonlinear groups add the failed-increment rate and mean iteration-spike and convergence-stall counts; thermo-mechanical diagnostics add coupling, warning, and threshold-breach rates when present.",
             "`WindowSize` must be a positive integer, given as any integer class or an integral double, and may appear once. The option name is case-insensitive with punctuation ignored.",
             "Trends only read stored run metadata; nothing is solved or modified.",
         ] },

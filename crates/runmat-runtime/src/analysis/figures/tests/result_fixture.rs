@@ -14,7 +14,8 @@ pub(super) fn simple_run_result(
             identity,
             requested_backend: runmat_analysis_fea::ComputeBackend::Cpu,
             execution_backend: runmat_analysis_fea::ExecutionBackend::Cpu,
-            solver_backend: runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
+            solver_backend:
+                runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
             solver_device_apply_k_ratio: 0.0,
             solver_method: runmat_analysis_fea::SolverMethod::DenseDirect,
             preconditioner: runmat_analysis_fea::SolverPreconditioner::None,
@@ -41,18 +42,12 @@ pub(super) fn simple_run_result(
         result_quality: crate::analysis::contracts::QualityGate::Pass,
         run_status: crate::analysis::contracts::RunStatus::Completed,
         numerically_acceptable: true,
-        production_publishable: false,
         quality_reasons: Vec::new(),
-        production_publication_reasons: vec![
-            crate::analysis::contracts::ProductionPublicationReason {
-                code: crate::analysis::contracts::ProductionPublicationReasonCode::FormulationNotProductionQualified,
-                detail: "test formulation is experimental".to_string(),
-            },
-        ],
         provenance: crate::analysis::contracts::RunProvenance {
             requested_backend: runmat_analysis_fea::ComputeBackend::Cpu,
             execution_backend: runmat_analysis_fea::ExecutionBackend::Cpu,
-            solver_backend: runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
+            solver_backend:
+                runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
             solver_device_apply_k_ratio: 0.0,
             solver_host_sync_count: 0,
             precision_mode: "double".to_string(),

@@ -79,7 +79,6 @@ fn thermal_observation_fanout_uses_published_sample_and_reads_only_selected_fiel
                 model,
                 step_id: step.step_id.clone(),
                 backend: ComputeBackend::Cpu,
-                formulation_requirement: FormulationRequirement::Experimental,
                 procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
                 residual_target: 1e-4,
             };

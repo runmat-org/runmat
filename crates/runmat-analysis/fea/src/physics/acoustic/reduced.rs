@@ -11,7 +11,7 @@ use crate::{
 
 use super::{domain, linear, medium, recovery};
 
-/// Executes the explicitly experimental graph-domain acoustic proxy.
+/// Executes the graph-domain acoustic proxy.
 ///
 /// Keeping this function in the acoustic physics domain prevents runtime adapters from owning
 /// numerical assembly, solution, recovery, or physics diagnostics. Production acoustic

@@ -1,6 +1,6 @@
 # Small-strain J2 solid qualification — implementation in progress
 
-Status: **unqualified**. No Stage 6 exit, execution shape, release or production gate is
+Status: **unqualified**. No Stage 6 exit, execution shape, release or qualification gate is
 closed by this draft. The original scalar nonlinear pipeline has been replaced in source;
 public-route compilation succeeds, but independent continuum gates have failed. A new kernel
 or passing adjacent linear tests is not whole-route qualification.
@@ -61,7 +61,7 @@ plus the existing richer-rule fresh-trajectory failure.
 Native task transport, real producer termination/cold continuation, source-bound
 numerical receipts, shared accuracy and original-state publication now pass focused
 both-order witnesses. The authored study/runtime coordinator, retained-prefix admission,
-standalone retention and production qualification remain open. Driver-owned earlier
+standalone retention and whole-study qualification remain open. Driver-owned earlier
 outputs are not silently covered by one worker's resource plan.
 
 ### Original strain and all authored states (2026-10-03)
@@ -79,7 +79,7 @@ not rerun equilibrium or manufacture point history from averages. Fourteen real
 native producer exits precede cold imports across both element orders. Independent
 homogeneous references check all six total-strain components as well as stress,
 displacement, plastic strain and alpha. Missing mandatory mesh evidence remains
-Indeterminate and blocks production; no continuum promotion follows from this witness.
+Indeterminate and blocks publication; no continuum promotion follows from this witness.
 
 Authored product planning revalidates compiled mesh/material identity and preserves
 the original model, declarations, schedule and caps. Matching relative nonlinear
@@ -117,7 +117,7 @@ mechanical pressure/traction must use typed excitation actions.
 The implementation now has a mesh-bound `CanonicalSolidIntegrationPlan`: exact
 ordered element/point/node inventory and exact reference-rule identity, using the
 shared canonical codec and geometry/rule evaluators. Keast15 remains the unchanged
-public solve rule; positive Duffy5/8/12/16 are explicit internal experimental plans,
+public solve rule; positive Duffy5/8/12/16 are explicit internal diagnostic plans,
 not qualified replacements. Physical basis and original point histories bind the
 plan identity. Foreign-rule history is rejected, never interpolated or initialized
 silently. All five rules preserve independent affine stress and face-integrated
@@ -226,7 +226,7 @@ errors are below1e−10 (an exact integrated reference), with finest energy boun
 lateral moment bound.15. All cases require axial reaction balance below1e−8 relative.
 Public-route tests use both orders, cells1/2 and both schedules; Tet10 remains exact1e−7,
 while predefined Tet4 coarse/fine exported-field bounds are.35/.2 with reduction above1.5
-or the same exact-reference branch. Failed gates remain failed; none is a production gate
+or the same exact-reference branch. Failed gates remain failed; none is a qualification gate
 by itself.
 
 ## Verification record
@@ -239,7 +239,7 @@ Newton tests pass2/2, kernel11/11 and the same compiled binary's assembly tests5
 Language tests remain unverified after concurrent schema/manifest and incomplete-lock changes.
 07:11 UTC: public-pipeline/driver cutover, old scalar/global carrier deletion and dimensional
 runtime constructors are implemented. New result stress and force are material/equilibrium
-owned, and reactions use actual internal minus scaled applied force. CPU/experimental,
+owned, and reactions use actual internal minus scaled applied force. CPU,
 canonical mesh and dead-load requirements fail closed; synthetic/contact/coupled/GPU and
 nonzero initial-history routes cannot borrow this identity. A first library build rejects
 unused draft evidence under warnings denied; production recovery now validates that evidence
@@ -255,7 +255,7 @@ arbitrary-summary solve entry, adds actual nodal reactions and empty unsupported
 channels, and checks cold reporting-field identity. The new runtime fixture executes genuine
 both-order canonical solids and cold-reopens stored reporting history; it is not constitutive
 restart or worker/process qualification. Concurrent schema feature compile failures are recorded
-separately from physics; no final numerical, production or release gate is claimed.
+separately from physics; no final numerical, qualification or release gate is claimed.
 
 Primary method context: [MOOSE isotropic plasticity stress update](https://mooseframework.inl.gov/source/materials/IsotropicPlasticityStressUpdate.html)
 and [radial return stress update](https://mooseframework.inl.gov/source/materials/RadialReturnStressUpdate.html).
@@ -268,7 +268,7 @@ Clean isolated FEA build completed in39.14s, avoiding the unrelated shared build
 The first nonlinear run18261 passed27 and failed7: five invalid fixture/expected-rejection
 assumptions and two numerical cases. Vector signals now explicitly name the global frame;
 internal driver fixtures author their actual support components; coupled execution asserts
-the earlier truthful unsupported-family rejection. No production validation was weakened.
+the earlier truthful unsupported-family rejection. No existing validation was weakened.
 The corrected run70718 passes32 and fails2. Splitting order/schedule tests, without changing
 any numerical predicate, exposes the full result in43902:33pass/5fail,198.42s.
 
@@ -306,7 +306,7 @@ Finite-mesh intermediate shear/rotating plastic directions can persist in histor
 when final continuum displacement is polynomial. The current exact eight-step gates remain
 **failed**, not relaxed or silently replaced. A subsequent history qualification must use
 the actual independent moving-front trajectory and preregistered spatial/load-step evidence.
-No Stage6, production, worker/restart or release promotion; source remains an uncommitted draft.
+No Stage6, qualification, worker/restart or release promotion; source remains an uncommitted draft.
 
 ## Moving-front history discriminator (2026-09-30)
 
@@ -326,8 +326,8 @@ then advances to full load. Each accepted front is an element-layer interface: t
 piecewise-quadratic displacement is representable, and no unaligned accepted cutback is
 permitted. This exact-path test passes: final displacement/stress/alpha errors are
 2.30e-13/4.12e-13/4.82e-13; energies and lateral reaction moment are below3.31e-13.
-This supports representable-history equilibrium, not uniform-schedule exactness or a
-production envelope limited to specially selected load factors.
+This supports representable-history equilibrium, not uniform-schedule exactness or an
+envelope limited to specially selected load factors.
 
 The separate preregistered cells1/2/4, uniform-eight-increment matrix preserves the
 previous fine stepped bounds across the entire history (u .02, stress .05, alpha .08,
@@ -380,7 +380,7 @@ u/stress/alpha errors are.00322487/.02301529/.02776541; cells4→8 reductions ar
 At the previously failing factor.375, cells8 stress error is.02792124, below the unchanged.05.
 This supplies finer-mesh/asymptotic evidence without establishing any mandatory execution,
 resource or accuracy-report acceptance. This is additional
-resolution evidence, not a replacement for the failed coarse-grid cases. No production,
+resolution evidence, not a replacement for the failed coarse-grid cases. No qualification,
 release or whole nonlinear execution qualification is inferred from these diagnostics.
 
 ## Captured accepted-path discriminator
@@ -399,8 +399,8 @@ history from zero through the captured displacement trajectory. It neither
 interpolates old point history nor reruns equilibrium. Direct tensor virtual work
 compares the reduced force against original integration and between richer rules.
 Tet4 and elastic Tet10 must agree within1e-8, registered before execution; nonlinear
-deltas remain diagnostics, not assertions of converged quadrature or production
-accuracy. Full enriched matrix passes1/1 (220.56s), all6 mesh/order cases and
+deltas remain diagnostics, not assertions of converged quadrature or
+qualified accuracy. Full enriched matrix passes1/1 (220.56s), all6 mesh/order cases and
 all accepted subincrements, including the cells2 Tet10 factor.4375 cutback.
 
 The expanded125/512/1728/4096-point diagnostic matrix passes1/1 (428.52s).
@@ -455,7 +455,7 @@ producer termination and receipts now pass: four actual native producer processe
 run the original generic programs and exit before both-order cold history import.
 Accepted residual receipts bind original block controls, point inventory, work and
 lineage under additional resource admission. Shared accuracy and typed MaterialHistory
-publication now execute through portable/native tasks and cold imports. Production
+publication now execute through portable/native tasks and cold imports. Whole-study
 qualification remains open. Newton now accepts only when both relative force
 residual and the undamped pending correction meet the original tolerance. Correction
 is normalized by offset-free current/committed displacement, and uses the original
@@ -486,7 +486,7 @@ original-run histories; raw block validation requires current samples to fit the
 
 Shared accuracy uses retained original nonlinear residual and undamped pending-correction
 closure. In the both-order witness this contribution is Satisfied, but mandatory missing
-mesh convergence is Indeterminate and production is BLOCKED. No spatial/load-step/reference
+mesh convergence is Indeterminate and publication is BLOCKED. No spatial/load-step/reference
 evidence is fabricated. Cold integrity does not re-prove equilibrium, establish field
 accuracy, qualify adaptation or authorize a different load schedule. Authored study/runtime
 cutover, isolated retention and original continuum qualification remain open.
@@ -541,7 +541,7 @@ Both-order native coordinator witnesses execute the original two blocks, accurac
 three state tasks and publication in real producer processes, then replay after exit.
 The current native selection passes9/9 (12.37s), including28 child processes across
 the original continuation and coordinator witnesses. Shared bridge tests pass186/186
-(1.58s). Mandatory spatial accuracy remains Indeterminate and production is blocked.
+(1.58s). Mandatory spatial accuracy remains Indeterminate and publication is blocked.
 ## Durable whole-study closure and original prefix access
 
 The standalone immutable J2 study root now carries exact original compiled inputs,
@@ -579,8 +579,8 @@ runtime routes share one field-history transport mapping.
 Runtime publication retains the accepted output sequence with global field ordinals,
 all three original semantic states, accuracy and resource lineage, and immutable root
 catalog. DTO/source, cold replay, accumulated history and recovery demand are admitted
-against the original ceiling. The public adapter remains CPU/Experimental and truthfully
-blocks production when mandatory spatial accuracy is absent. Requested component bounds
+against the original ceiling. The public adapter remains CPU-only and truthfully
+blocks publication when mandatory spatial accuracy is absent. Requested component bounds
 do not establish allocator overhead or measured RSS.
 
 The scheduled Tet4/Tet10 witness uses the original homogeneous fixtures, two original
@@ -590,16 +590,16 @@ homogeneous hardening references; altered DTO metadata and caller-memory exhaust
 Persisted history is compared with the original block trajectories, including accepted
 cutbacks rather than assuming requested increment count equals accepted output count.
 This fixture witness does not certify authored CAD/meshing or the `.fea` entrypoint.
-Whole-study storage atomicity, scientific gates and production promotion remain open.
+Whole-study storage atomicity and scientific gates remain open.
 
 
 ## Authored dispatch and original portable final observations
 
 The draft now dispatches one fresh independent direct nonlinear step through the original
 J2 workload and shared coordinator. It preserves canonical CAD/mesh/material realization,
-CPU/Experimental admission, original defaults and authored resource limits. Unsupported
+CPU admission, original defaults and authored resource limits. Unsupported
 restart, dependent/reduced/multiple-step and remote envelopes reject explicitly. The new
-experimental example retains both displacement and stress final declarations.
+example retains both displacement and stress final declarations.
 
 Global accepted-work capacity and live output capacity are separate resource facts.
 A task with eight accepted outputs retains that inventory; the original global 4,096
@@ -626,7 +626,7 @@ case also completes cold transport but fails those same limits: maximum alpha er
 6.82237e-8 and stress-component error1.39226e-6. The whole authored witness is terminal
 FAIL; neither completed transport establishes physics qualification. Numerical defaults, meshes,
 rule, update caps and resource limits are unchanged. These transport results do not close
-the seven original scientific gates or authorize production publication.
+the seven original scientific gates or authorize publication.
 
 Original recovery now also rederives the analysis-owned physical basis and checks terminal
 scope, constraints, equilibrium, replayed constitutive state and accumulated dissipation.
@@ -664,7 +664,7 @@ Actual native-program producers terminate before each cold import. Original ordi
 cancellation rejection, cumulative work, restored initial plastic outputs and numerical receipts
 are checked. All three declared semantic-state publishers likewise terminate before cold import
 and preserve the original complete block/workload. Accuracy retains satisfied Newton evidence,
-Indeterminate mandatory mesh evidence and a blocking production decision. The expanded native
+Indeterminate mandatory mesh evidence and a blocking publication decision. The expanded native
 suite passes12/12; scoped strict lint and132-member architecture checks pass. The exact final refresh
 passes1/1 in87.94s, checking every accepted displacement/stress/alpha/plastic output at the
 original2e-9/2e-7 bounds through both layer yield transitions. Exact native lib/test strict lint,
@@ -672,7 +672,7 @@ scoped formatting/whitespace and132-member architecture/crate-boundary checks pa
 
 These fixture references do not replace the seven failed moving-front science gates, supply
 multi-mesh convergence or establish authored CAD/source compiler, whole runtime study persistence,
-measured resources or arbitrary-history qualification. J2 remains experimental and unqualified.
+measured resources or arbitrary-history qualification. J2 remains unqualified.
 
 
 ## Rehashed yielded checkpoint rejection
@@ -687,7 +687,7 @@ uniaxial alpha0.02 reference. The controller block suite passes6/6 (0.82s).
 
 This is physical-consistency rejection for those substitutions, not provenance authentication
 of arbitrary rehashed history, a native nonuniform substitution witness or scientific
-qualification. Immutable predecessor lineage remains separately mandatory. No production
+qualification. Immutable predecessor lineage remains separately mandatory. No solver
 algorithm or original numerical/acceptance limits changed.
 
 
@@ -714,7 +714,7 @@ Insufficient host preparation exposes no children; unchanged default128MiB admis
 After publisher exit, cold filesystem reads preserve all original accepted outputs and verify
 the independent uniaxial alpha law at every load factor. The original controller may retain11
 accepted outputs, including its final endpoint; publication preserves that exact original count.
-All three states remain present and production remains blocked by mandatory spatial evidence.
+All three states remain present and publication remains blocked by mandatory spatial evidence.
 Final native suite passes12/12 (107.62s), bridge186/186, runtime storage73/73; strict libraries,
 native/bridge test lint, scoped format and architecture pass.
 
@@ -776,7 +776,7 @@ observation fanout. Its refreshed native witness fails1/1 (170.75s), still at st
 required8591994994 against8589934592, about2MiB over; no layered cold-field pass. Retained typed state/transport
 remain separately charged; no original task reservation, codec factor or resource ceiling changes.
 
-No mesh, reference, tolerance, production decision or seven original scientific gates change.
+No mesh, reference, tolerance, publication decision or seven original scientific gates change.
 Whole publication/J2 remain uncommitted and unqualified. Estimates are not measured allocator,
 aggregate worker or RSS evidence; full lifecycle/candidate/scientific release gates remain open.
 
@@ -873,7 +873,7 @@ temporary decoding remain separately charged; producer wire-output allowance is 
 Both-order cold state tests pass sharing, canonical-byte preservation and changed-history
 rejection. The full original layered runtime witness remains live after the preceding Tet10
 resource rejection (12 passed/1 failed,358.89s). Original limits and scientific targets remain
-unchanged; no whole lifecycle, measured-memory or production qualification is claimed.
+unchanged; no whole lifecycle, measured-memory or whole-study qualification is claimed.
 
 
 The full shared-payload native matrix finishes12pass/1fail (362.99s): Tet10's original

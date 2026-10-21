@@ -284,7 +284,7 @@ mod tests {
             &model,
             &excitations,
             None,
-            crate::assembly::StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+            crate::assembly::StructuralFormulationRequirement::SyntheticOperator,
         )
         .unwrap();
         let response = solve_direct_harmonic(
@@ -320,7 +320,7 @@ mod tests {
             &model,
             &excitations,
             None,
-            crate::assembly::StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+            crate::assembly::StructuralFormulationRequirement::SyntheticOperator,
         )
         .unwrap();
         let policy = DirectHarmonicPolicy {

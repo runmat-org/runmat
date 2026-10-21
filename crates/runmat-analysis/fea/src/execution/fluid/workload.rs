@@ -6,9 +6,9 @@ use crate::{
 };
 use runmat_analysis_core::{
     validate_model, AnalysisConstraint, AnalysisModel, AnalysisProcedure, CoordinateFrame,
-    ExcitationCaseActivation, ExcitationCaseSelection, FormulationRequirement, IndependentDomain,
-    PhysicsFamily, ProcedureSettings, ProcedureStepId, RestartPolicy, SolutionSpace,
-    StateCompleteness, StateKind, StatePersistence,
+    ExcitationCaseActivation, ExcitationCaseSelection, IndependentDomain, PhysicsFamily,
+    ProcedureSettings, ProcedureStepId, RestartPolicy, SolutionSpace, StateCompleteness, StateKind,
+    StatePersistence,
 };
 use runmat_canonical_codec::{
     decode_contract, encode_contract, serialized_materialization_resident_bytes_estimate,
@@ -22,7 +22,6 @@ use serde::{Deserialize, Serialize};
 pub struct FluidSteadyWorkload {
     pub model: AnalysisModel,
     pub step_id: ProcedureStepId,
-    pub formulation_requirement: FormulationRequirement,
     pub policy: CanonicalFluidPolicy,
     pub geometry_policy: FiniteVolumeProjectionPolicy,
 }
@@ -35,8 +34,7 @@ impl FluidSteadyWorkload {
         mesh: &SolverMeshArtifact,
     ) -> AnalysisExecutionResult<crate::admission::AnalysisRunIdentity> {
         self.validate()?;
-        crate::admission::admit_canonical_fluid_steady(mesh, self.formulation_requirement)
-            .map_err(invalid)
+        crate::admission::admit_canonical_fluid_steady(mesh).map_err(invalid)
     }
     pub(crate) fn resident_ceiling(&self) -> AnalysisExecutionResult<u64> {
         let [step] = self.model.sequence.steps.as_slice() else {
@@ -92,8 +90,7 @@ impl FluidSteadyWorkload {
                 "steady fluid has no scheduled/alternate excitation-case authority",
             ));
         }
-        if self.formulation_requirement != FormulationRequirement::Experimental
-            || step.step_id != self.step_id
+        if step.step_id != self.step_id
             || step.family != PhysicsFamily::Fluid
             || step.procedure != AnalysisProcedure::Static
             || step.solution_space != SolutionSpace::Direct
@@ -134,9 +131,7 @@ impl FluidSteadyWorkload {
                 .iter()
                 .any(|s| !crate::physics::cfd::canonical::supports_signal(s))
         {
-            return Err(invalid(
-                "unsupported standalone experimental CPU steady fluid authority",
-            ));
+            return Err(invalid("unsupported standalone CPU steady fluid authority"));
         }
         Ok(())
     }

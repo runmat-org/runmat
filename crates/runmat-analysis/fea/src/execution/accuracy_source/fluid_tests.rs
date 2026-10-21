@@ -2,14 +2,12 @@ use super::*;
 use crate::results::accuracy::{
     evaluate_accuracy, publication_gate, AccuracyStatus, PublicationDecision,
 };
-use runmat_analysis_core::{
-    AccuracyCriterion, AccuracyPlan, AccuracyTarget, AccuracyTolerance, FormulationRequirement,
-};
+use runmat_analysis_core::{AccuracyCriterion, AccuracyPlan, AccuracyTarget, AccuracyTolerance};
 
 #[test]
 fn original_fluid_closure_cannot_manufacture_mandatory_spatial_accuracy() {
     let (mut w, m) = crate::execution::fluid::tests::authored();
-    let mut plan = AccuracyPlan::experimental_baseline("fluid_original_accuracy");
+    let mut plan = AccuracyPlan::baseline("fluid_original_accuracy");
     plan.criteria = [
         (
             "momentum",
@@ -65,7 +63,6 @@ fn original_fluid_closure_cannot_manufacture_mandatory_spatial_accuracy() {
         AccuracySourceKind::FluidSteady,
         receipt.source_result(),
         None,
-        FormulationRequirement::Experimental,
         plan,
     )
     .unwrap();
@@ -88,13 +85,9 @@ fn original_fluid_closure_cannot_manufacture_mandatory_spatial_accuracy() {
         );
     }
     assert_eq!(
-        publication_gate(
-            &request.plan,
-            FormulationRequirement::Production,
-            &evaluation
-        )
-        .unwrap()
-        .decision,
+        publication_gate(&request.plan, &evaluation)
+            .unwrap()
+            .decision,
         PublicationDecision::Block
     );
     let mut original_algebraic = request.plan.clone();
@@ -113,7 +106,6 @@ fn original_fluid_closure_cannot_manufacture_mandatory_spatial_accuracy() {
         request.source_kind,
         request.source_result,
         None,
-        request.formulation_requirement,
         request.plan.clone(),
     )
     .unwrap();

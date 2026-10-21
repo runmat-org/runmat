@@ -6,14 +6,14 @@ use crate::fea_contract::policy_types::{classes, integer};
 use crate::BuiltinDocumentation;
 
 const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(ConstructorDocumentationDefinition {
-    title: "fea.AccuracyPlan.experimentalBaseline",
-    summary: "Create the explicit, non-production baseline accuracy plan.",
+    title: "fea.AccuracyPlan.baseline",
+    summary: "Create the baseline accuracy plan that step constructors attach by default.",
     description: concat!(
-        "`fea.AccuracyPlan.experimentalBaseline(id)` returns the baseline `fea.AccuracyPlan` ",
-        "RunMat uses for formulations that have not yet earned production accuracy evidence.",
+        "`fea.AccuracyPlan.baseline(id)` returns the baseline `fea.AccuracyPlan`: a mandatory ",
+        "algebraic-residual bound that every procedure step carries until a study authors its own plan.",
     ),
-    keywords: &["fea", "accuracy", "plan", "experimental", "baseline"],
-    related: &["fea.AccuracyPlan.new", "fea.FormulationRequirement.experimental", "fea.ProcedureStep.configure"],
+    keywords: &["fea", "accuracy", "plan", "baseline", "residual"],
+    related: &["fea.AccuracyPlan.new", "fea.ProcedureStep.configure"],
     sections: &[
         section(
             "Behavior",
@@ -21,7 +21,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
                 concat!(
                     "The plan has exactly one mandatory criterion, `algebraic_residual`: target ",
                     "`globalEquilibrium`, contribution `algebraic`, relative tolerance 1e-8, evidence ",
-                    "`residualBound`. Unavailable evidence is marked indeterminate and experimental, the ",
+                    "`residualBound`. Unavailable evidence is marked indeterminate, the ",
                     "limit action is `fail`, and numerical equivalence is a relative tolerance of 1e-10.",
                 ),
                 concat!(
@@ -37,9 +37,9 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
             &[
                 super::PLAN_STUDY,
                 concat!(
-                    "The baseline is useful while building or diagnosing a formulation. It cannot make an",
-                    " experimental formulation publishable; author a plan with `fea.AccuracyPlan.new` for",
-                    " production acceptance.",
+                    "The baseline checks algebraic equilibrium only. Author a plan with ",
+                    "`fea.AccuracyPlan.new` to add discretization, sampling, or reference-comparison ",
+                    "criteria for a study's acceptance.",
                 ),
             ],
         ),
@@ -47,15 +47,15 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
     examples: &[
         example(
             "baseline",
-            "Inspect the experimental baseline plan",
+            "Inspect the baseline plan",
             concat!(
-                "plan = fea.AccuracyPlan.experimentalBaseline('bracket_static.accuracy');\n",
+                "plan = fea.AccuracyPlan.baseline('bracket_static.accuracy');\n",
                 "criterion = plan.criteria{1};",
             ),
             concat!(
                 "assert(strcmp(class(plan), 'fea.AccuracyPlan'));\n",
                 "assert(plan.accuracy_plan_id == \"bracket_static.accuracy\");\n",
-                "assert(plan.unavailable_evidence == \"mark_indeterminate_experimental\");\n",
+                "assert(plan.unavailable_evidence == \"mark_indeterminate\");\n",
                 "assert(plan.resources.maximum_refinement_cycles == 0);\n",
                 "assert(criterion.criterion_id == \"algebraic_residual\");",
             ),
@@ -77,22 +77,22 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
             "crates/runmat-builtins/src/catalog/entries/fea/policy_types/accuracy_plan/tests.rs::accuracy_plan_identities_conform",
         ),
         unit_test(
-            "Experimental baseline matches the core baseline",
-            "crates/runmat-runtime/src/builtins/fea/accuracy.rs::experimental_baseline_matches_the_core_baseline",
+            "Baseline matches the core baseline",
+            "crates/runmat-runtime/src/builtins/fea/accuracy.rs::baseline_matches_the_core_baseline",
         ),
         unit_test(
-            "Experimental baseline validates",
-            "crates/runmat-analysis/core/src/validate_accuracy.rs::experimental_baseline_is_valid",
+            "Baseline validates",
+            "crates/runmat-analysis/core/src/validate_accuracy.rs::baseline_is_valid",
         ),
     ],
     notes: &[],
 });
 
 policy_entry!(
-    FEA_ACCURACY_PLAN_EXPERIMENTAL_BASELINE_CATALOG_ENTRY,
-    name: "fea.AccuracyPlan.experimentalBaseline",
+    FEA_ACCURACY_PLAN_BASELINE_CATALOG_ENTRY,
+    name: "fea.AccuracyPlan.baseline",
     result: classes::ACCURACY_PLAN,
-    signature: "plan = fea.AccuracyPlan.experimentalBaseline(id)",
+    signature: "plan = fea.AccuracyPlan.baseline(id)",
     inputs: [
         (
             "id",
@@ -101,7 +101,7 @@ policy_entry!(
             PolicyArg::Text,
         ),
     ],
-    output: ("plan", "Typed fea.AccuracyPlan with the experimental baseline contents."),
+    output: ("plan", "Typed fea.AccuracyPlan with the baseline contents."),
     integer_capabilities: &[],
     integer_audit: Some(&integer::NO_NUMERIC_INPUT_AUDIT),
     documentation: DOCUMENTATION,

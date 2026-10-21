@@ -4,7 +4,7 @@
 //! receipt and inputs. Selecting a variant or validating a workload alone is not receipt
 //! attestation; this adapter only delegates to the existing workload owners.
 
-use runmat_analysis_core::{AnalysisModel, FormulationRequirement, ProcedureStep};
+use runmat_analysis_core::{AnalysisModel, ProcedureStep};
 
 use super::{
     AnalysisExecutionResult, NonlinearSolidWorkload, StructuralFrequencyWorkload,
@@ -53,16 +53,6 @@ impl<'a> StructuralObservationSource<'a> {
             Self::Frequency(workload) => workload.observation_execution(),
             Self::ModalResponseSpectrum(workload) => workload.observation_execution(),
             Self::RandomResponse(workload) => workload.observation_execution(),
-        }
-    }
-
-    pub const fn formulation_requirement(self) -> FormulationRequirement {
-        match self {
-            Self::Linear(workload) => workload.formulation_requirement,
-            Self::NonlinearSolid(workload) => workload.controls.formulation_requirement,
-            Self::Frequency(workload) => workload.formulation_requirement(),
-            Self::ModalResponseSpectrum(workload) => workload.formulation_requirement(),
-            Self::RandomResponse(workload) => workload.formulation_requirement(),
         }
     }
 

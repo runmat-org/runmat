@@ -1,7 +1,7 @@
 use runmat_analysis_core::{
-    validate_model_sequence, AnalysisModel, AnalysisProcedure, FormulationRequirement,
-    IndependentDomain, PhysicsFamily, ProcedureStep, ProcedureStepId, RestartPolicy, SolutionSpace,
-    StateCompleteness, StateKind, StateOutput, StatePersistence, StateSource, StateUse,
+    validate_model_sequence, AnalysisModel, AnalysisProcedure, IndependentDomain, PhysicsFamily,
+    ProcedureStep, ProcedureStepId, RestartPolicy, SolutionSpace, StateCompleteness, StateKind,
+    StateOutput, StatePersistence, StateSource, StateUse,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use serde::{Deserialize, Serialize};
@@ -29,7 +29,6 @@ pub struct StructuralPrestressedModalTemplate {
     pub model: AnalysisModel,
     pub step_id: ProcedureStepId,
     pub backend: ComputeBackend,
-    pub formulation_requirement: FormulationRequirement,
     pub observation_execution: ObservationExecutionPolicy,
     pub truncation: ModalTruncationPolicy,
     pub convergence: ModalConvergencePolicy,
@@ -66,7 +65,6 @@ impl StructuralPrestressedModalTemplate {
             model: self.model,
             step_id: self.step_id,
             backend: self.backend,
-            formulation_requirement: self.formulation_requirement,
             observation_execution: self.observation_execution,
             truncation: self.truncation,
             convergence: self.convergence,
@@ -89,7 +87,6 @@ pub struct StructuralModalWorkload {
     model: AnalysisModel,
     step_id: ProcedureStepId,
     backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
     observation_execution: ObservationExecutionPolicy,
     truncation: ModalTruncationPolicy,
     convergence: ModalConvergencePolicy,
@@ -105,7 +102,6 @@ struct StructuralModalWorkloadWire {
     model: AnalysisModel,
     step_id: ProcedureStepId,
     backend: ComputeBackend,
-    formulation_requirement: FormulationRequirement,
     observation_execution: ObservationExecutionPolicy,
     truncation: ModalTruncationPolicy,
     convergence: ModalConvergencePolicy,
@@ -123,7 +119,6 @@ impl TryFrom<StructuralModalWorkloadWire> for StructuralModalWorkload {
             model: wire.model,
             step_id: wire.step_id,
             backend: wire.backend,
-            formulation_requirement: wire.formulation_requirement,
             observation_execution: wire.observation_execution,
             truncation: wire.truncation,
             convergence: wire.convergence,
@@ -139,7 +134,6 @@ pub struct StructuralModalWorkloadInput {
     pub model: AnalysisModel,
     pub step_id: ProcedureStepId,
     pub backend: ComputeBackend,
-    pub formulation_requirement: FormulationRequirement,
     pub observation_execution: ObservationExecutionPolicy,
     pub truncation: ModalTruncationPolicy,
     pub convergence: ModalConvergencePolicy,
@@ -158,7 +152,6 @@ impl StructuralModalWorkload {
             model: input.model,
             step_id: input.step_id,
             backend: input.backend,
-            formulation_requirement: input.formulation_requirement,
             observation_execution: input.observation_execution,
             truncation: input.truncation,
             convergence: input.convergence,
@@ -184,10 +177,6 @@ impl StructuralModalWorkload {
 
     pub const fn backend(&self) -> ComputeBackend {
         self.backend
-    }
-
-    pub const fn formulation_requirement(&self) -> FormulationRequirement {
-        self.formulation_requirement
     }
 
     pub const fn observation_execution(&self) -> ObservationExecutionPolicy {
@@ -334,7 +323,6 @@ impl StructuralModalWorkload {
                 &self.model,
                 &self.step_id,
                 self.backend,
-                self.formulation_requirement,
                 self.observation_execution,
                 self.truncation,
                 self.convergence,

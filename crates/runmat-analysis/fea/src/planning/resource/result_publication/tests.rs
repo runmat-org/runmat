@@ -9,8 +9,7 @@ use crate::results::accuracy::{
 };
 use crate::results::publication::PublishedAnalysisResult;
 use runmat_analysis_core::{
-    AccuracyPlan, AccuracyTarget, ErrorContributionKind, FormulationRequirement, ProcedureStep,
-    RequiredAccuracyEvidence,
+    AccuracyPlan, AccuracyTarget, ErrorContributionKind, ProcedureStep, RequiredAccuracyEvidence,
 };
 use runmat_canonical_codec::{profile_serialized, CanonicalLimits};
 use runmat_execution::{
@@ -67,7 +66,6 @@ fn source_facts(
 fn fixture(
     attempts: usize,
     criterion: &str,
-    requirement: FormulationRequirement,
     satisfied: bool,
 ) -> (
     ResultPublicationRequest,
@@ -81,14 +79,13 @@ fn fixture(
     .unwrap();
     let result =
         SolverResultIdentity::from_step_result(producer, Digest::sha256(b"result")).unwrap();
-    let mut plan = AccuracyPlan::experimental_baseline("publication-accuracy");
+    let mut plan = AccuracyPlan::baseline("publication-accuracy");
     plan.criteria[0].criterion_id = criterion.into();
     let request = AccuracyEvaluationRequest::new(
         producer,
         AccuracySourceKind::StructuralLinear,
         result,
         None,
-        requirement,
         plan,
     )
     .unwrap();
@@ -143,8 +140,7 @@ fn fixture(
 #[test]
 fn borrowed_receipt_profile_matches_shared_actual_serializer_and_canonical_plan() {
     for criterion in ["residual".to_string(), "r".repeat(2048)] {
-        let (request, accuracy, usage) =
-            fixture(1, &criterion, FormulationRequirement::Production, true);
+        let (request, accuracy, usage) = fixture(1, &criterion, true);
         let projected = published_result_encoding_profile(&request, &accuracy, &usage).unwrap();
         let actual = PublishedAnalysisResult::new(&request, &accuracy, &usage).unwrap();
         let actual_profile = profile_serialized(
@@ -182,14 +178,12 @@ fn borrowed_receipt_profile_matches_shared_actual_serializer_and_canonical_plan(
 
 #[test]
 fn receipt_projection_and_constructor_reject_substitutions_and_blocked_gate() {
-    let (request, accuracy, usage) =
-        fixture(1, "residual", FormulationRequirement::Production, true);
-    let (_, other_accuracy, _) = fixture(1, "other", FormulationRequirement::Production, true);
+    let (request, accuracy, usage) = fixture(1, "residual", true);
+    let (_, other_accuracy, _) = fixture(1, "other", true);
     assert!(published_result_encoding_profile(&request, &other_accuracy, &usage).is_err());
-    let (_, _, other_usage) = fixture(2, "residual", FormulationRequirement::Production, true);
+    let (_, _, other_usage) = fixture(2, "residual", true);
     assert!(published_result_encoding_profile(&request, &accuracy, &other_usage).is_err());
-    let (blocked_request, blocked_accuracy, blocked_usage) =
-        fixture(1, "residual", FormulationRequirement::Production, false);
+    let (blocked_request, blocked_accuracy, blocked_usage) = fixture(1, "residual", false);
     assert!(
         published_result_encoding_profile(&blocked_request, &blocked_accuracy, &blocked_usage)
             .is_err()
@@ -201,8 +195,7 @@ fn receipt_projection_and_constructor_reject_substitutions_and_blocked_gate() {
 
 #[test]
 fn receipt_and_validation_underreservation_are_rejected() {
-    let (request, accuracy, usage) =
-        fixture(1, "residual", FormulationRequirement::Production, true);
+    let (request, accuracy, usage) = fixture(1, "residual", true);
     let profile = published_result_encoding_profile(&request, &accuracy, &usage).unwrap();
     let mut output_facts = source_facts(
         &request,
@@ -277,12 +270,7 @@ fn receipt_and_validation_underreservation_are_rejected() {
 #[test]
 fn validation_reservation_scales_with_measured_attempt_inventory_not_receipt_size() {
     let build = |attempts| {
-        let (request, accuracy, usage) = fixture(
-            attempts,
-            "residual",
-            FormulationRequirement::Production,
-            true,
-        );
+        let (request, accuracy, usage) = fixture(attempts, "residual", true);
         let profile = published_result_encoding_profile(&request, &accuracy, &usage).unwrap();
         build_result_publication_resource_plan(
             &request,

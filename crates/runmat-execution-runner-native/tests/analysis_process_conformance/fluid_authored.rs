@@ -37,7 +37,7 @@ model flow {
  load outlet { fluid.outlet_pressure { target = geometry.part.region.outlet; value = 0 Pa } }
 }
 study steady {
- geometry = geometry.part; mesh = mesh.volume; model = model.flow; formulation = experimental
+ geometry = geometry.part; mesh = mesh.volume; model = model.flow
  analysis solve { fluid static {}; accuracy { algebraic_relative_tolerance = 1e-8 } }
  output velocity = analysis.solve.field.cell.fluid_velocity
  output pressure = analysis.solve.field.cell.fluid_pressure
@@ -230,13 +230,9 @@ pub(super) async fn run() {
             runmat_analysis_fea::results::accuracy::AccuracyStatus::Indeterminate
         );
         assert_eq!(
-            runmat_analysis_fea::results::accuracy::publication_gate(
-                &spatial_plan,
-                runmat_analysis_core::FormulationRequirement::Production,
-                &spatial
-            )
-            .unwrap()
-            .decision,
+            runmat_analysis_fea::results::accuracy::publication_gate(&spatial_plan, &spatial)
+                .unwrap()
+                .decision,
             runmat_analysis_fea::results::accuracy::PublicationDecision::Block
         );
         assert!(!result.completion.states.is_empty());

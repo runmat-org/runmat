@@ -85,6 +85,6 @@ Stiffness $\mathbf K$ and mass $\mathbf M$ determine each mode vector $\boldsymb
 
 ## Supported scope and next steps
 
-This extraction uses the experimental modal formulation. Check material, mass and restraint assignments, then compare frequencies and mode shapes across meshes. For close or repeated modes, compare their physical motion or subspace rather than requiring identical signed vectors.
+This extraction uses RunMat's modal formulation. Check material, mass and restraint assignments, then compare frequencies and mode shapes across meshes. For close or repeated modes, compare their physical motion or subspace rather than requiring identical signed vectors.
 
 [Modal validation](/docs/simulation/validation/modal) describes the spectral, basis and workflow criteria. To predict driven motion, continue with a response study and its forcing, damping, frequency-range and modal-coverage requirements.

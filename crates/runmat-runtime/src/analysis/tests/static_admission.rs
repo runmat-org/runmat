@@ -6,7 +6,6 @@ fn assert_gpu_rejected_without_publication() {
     let error = analysis_run_linear_static_with_options(
         &sample_model(),
         ComputeBackend::Gpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(None, None),
     )
@@ -129,7 +128,6 @@ fn cpu_static_run_keeps_authoritative_host_fields() {
     let envelope = analysis_run_linear_static_with_options(
         &sample_model(),
         ComputeBackend::Cpu,
-        FormulationRequirement::Experimental,
         Default::default(),
         OperationContext::new(None, None),
     )
@@ -167,7 +165,6 @@ fn cpu_balanced_and_strict_quality_policies_accept_clean_and_reject_conflicted_m
             let envelope = analysis_run_linear_static_with_options(
                 &model,
                 ComputeBackend::Cpu,
-                FormulationRequirement::Experimental,
                 AnalysisRunOptions {
                     quality_policy: policy,
                     deterministic_mode: true,

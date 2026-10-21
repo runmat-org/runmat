@@ -42,8 +42,7 @@
       ],
       "scope": {
         "procedure": "Linear static",
-        "example_mesh": "Quadratic tetrahedra",
-        "maturity": "Experimental"
+        "example_mesh": "Quadratic tetrahedra"
       },
       "verification_labels": {
         "FEA-STRUCTURAL-SOLID-001": "Element formulation and integration",
@@ -74,8 +73,7 @@
       ],
       "scope": {
         "procedure": "Cross-domain",
-        "example_mesh": "Not applicable",
-        "maturity": "Assessment-specific"
+        "example_mesh": "Not applicable"
       },
       "verification_labels": {}
     },
@@ -106,8 +104,7 @@
       ],
       "scope": {
         "procedure": "Structural",
-        "example_mesh": "Not applicable",
-        "maturity": "Assessment-specific"
+        "example_mesh": "Not applicable"
       },
       "verification_labels": {
         "FEA-STRUCTURAL-SOLID-001": "Element formulation and integration",
@@ -149,8 +146,7 @@
       ],
       "scope": {
         "procedure": "Thermal steady",
-        "example_mesh": "Linear tetrahedra",
-        "maturity": "Experimental"
+        "example_mesh": "Linear tetrahedra"
       },
       "verification_labels": {}
     },
@@ -186,8 +182,7 @@
       ],
       "scope": {
         "procedure": "Structural modal",
-        "example_mesh": "Quadratic tetrahedra",
-        "maturity": "Experimental"
+        "example_mesh": "Quadratic tetrahedra"
       },
       "verification_labels": {}
     },
@@ -224,8 +219,7 @@
       ],
       "scope": {
         "procedure": "Structural static",
-        "example_mesh": "Quadratic tetrahedra",
-        "maturity": "Experimental"
+        "example_mesh": "Quadratic tetrahedra"
       },
       "verification_labels": {}
     },
@@ -256,8 +250,7 @@
       ],
       "scope": {
         "procedure": "Thermal",
-        "example_mesh": "Assessment-specific",
-        "maturity": "Assessment-specific"
+        "example_mesh": "Assessment-specific"
       },
       "verification_labels": {}
     },
@@ -286,8 +279,7 @@
       ],
       "scope": {
         "procedure": "Modal",
-        "example_mesh": "Assessment-specific",
-        "maturity": "Assessment-specific"
+        "example_mesh": "Assessment-specific"
       },
       "verification_labels": {}
     }

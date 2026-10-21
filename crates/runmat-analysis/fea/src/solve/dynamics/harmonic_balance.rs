@@ -148,7 +148,7 @@ mod tests {
             &model,
             &excitations,
             None,
-            StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+            StructuralFormulationRequirement::SyntheticOperator,
         )
         .unwrap();
         let imaginary_load = vec![0.0; summary.dof_count];

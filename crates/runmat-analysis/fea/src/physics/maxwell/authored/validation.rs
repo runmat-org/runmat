@@ -3,16 +3,10 @@ use super::*;
 pub fn validate_canonical_input<'a>(
     model: &'a AnalysisModel,
     step_id: &str,
-    requirement: FormulationRequirement,
     residual_target: f64,
 ) -> Result<&'a ProcedureStep, MaxwellError> {
     if !residual_target.is_finite() || residual_target <= 0.0 || residual_target >= 1.0 {
         return Err(invalid("relative residual target"));
-    }
-    if requirement != FormulationRequirement::Experimental {
-        return Err(MaxwellError::Unsupported(
-            "production Maxwell qualification".into(),
-        ));
     }
     validate_model(model).map_err(invalid)?;
     let Some(ElectromagneticDomain::Harmonic {

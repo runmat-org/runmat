@@ -1,5 +1,5 @@
 //! Standing physical acceptance requirements. Witness links describe assertion scope,
-//! not successful execution or production qualification.
+//! not successful execution or release qualification.
 use crate::requirement::*;
 const ELECTROSTATIC: &[Envelope] = &[
     envelope(
@@ -436,7 +436,7 @@ const FEA_EM_INPUT_001: Requirement = Requirement {
                 obligation: "scalar_constraints",
                 envelopes: CONDUCTION_TET4,
                 boundary: concat!(
-                    "Experimental Tet4 rejects missing anchor, conflicting potentials, floating ",
+                    "Tet4 rejects missing anchor, conflicting potentials, floating ",
                     "conductor, bad material, target and wrong harmonic intent; rejection is not ",
                     "implementation of floating conductors.",
                 ),
@@ -642,7 +642,7 @@ const FEA_EM_QUALIFICATION_001: Requirement = Requirement {
         "Promote each electromagnetic formulation separately only after independent ",
         "physical, constraint, convergence, recovery, source and execution evidence ",
         "passes. Capability metadata and successful linear solves alone do not ",
-        "establish production qualification.",
+        "establish release qualification.",
     ),
     owners: &[
         "crates/runmat-analysis/fea/src/execution/electrical_static.rs",

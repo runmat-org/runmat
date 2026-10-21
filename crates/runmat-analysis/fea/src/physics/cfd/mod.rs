@@ -1,4 +1,4 @@
-//! Experimental incompressible finite-volume formulation and shared fluid-domain behavior.
+//! Incompressible finite-volume formulation and shared fluid-domain behavior.
 
 pub mod canonical;
 mod diagnostics;

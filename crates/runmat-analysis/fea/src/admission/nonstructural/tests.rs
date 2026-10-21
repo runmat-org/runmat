@@ -1,5 +1,4 @@
 use super::*;
-use runmat_analysis_core::FormulationMaturity;
 use runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh;
 
 #[test]
@@ -25,13 +24,11 @@ fn thermal_mesh_and_procedure_select_the_registry_issued_identity() {
                 Some(&mesh),
                 SourceImplementation::CanonicalVolumeProjection,
                 BoundaryTransferImplementation::CanonicalBoundaryProjection,
-                FormulationRequirement::Experimental,
             )
             .unwrap();
             assert_eq!(identity.family(), PhysicsFamily::Thermal);
             assert_eq!(identity.procedure(), procedure);
             assert_eq!(identity.solution_space(), SolutionSpace::Direct);
-            assert_eq!(identity.qualification(), FormulationMaturity::Experimental);
             assert!(identity.realization().components.iter().any(|component| {
                 component.topologies.contains(&topology)
                     && component
@@ -42,7 +39,6 @@ fn thermal_mesh_and_procedure_select_the_registry_issued_identity() {
                 family: PhysicsFamily::Thermal,
                 procedure,
                 solution_space: SolutionSpace::Direct,
-                requirement: FormulationRequirement::Experimental,
                 realization: identity.realization().clone(),
             })
             .unwrap();
@@ -59,7 +55,6 @@ fn thermal_admission_preserves_missing_mesh_error() {
         None,
         SourceImplementation::CanonicalVolumeProjection,
         BoundaryTransferImplementation::CanonicalBoundaryProjection,
-        FormulationRequirement::Experimental,
     )
     .unwrap_err();
     assert!(matches!(error, FeaRunError::InvalidModel(message)
@@ -67,7 +62,7 @@ fn thermal_admission_preserves_missing_mesh_error() {
 }
 
 #[test]
-fn nonlinear_thermal_identity_is_exact_and_remains_experimental() {
+fn nonlinear_thermal_identity_is_exact() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
         let mesh = canonical_tetrahedron_solver_mesh(order);
         for (procedure, temporal) in [
@@ -80,28 +75,24 @@ fn nonlinear_thermal_identity_is_exact_and_remains_experimental() {
                 TemporalImplementation::ThermalBackwardEulerDampedNewton,
             ),
         ] {
-            let admit = |requirement| {
+            let admit = || {
                 admit_nonstructural_with_temporal(
                     PhysicsFamily::Thermal,
                     procedure,
                     Some(&mesh),
                     SourceImplementation::CanonicalVolumeProjection,
                     BoundaryTransferImplementation::CanonicalBoundaryProjection,
-                    requirement,
                     Some(temporal),
                 )
             };
-            let identity = admit(FormulationRequirement::Experimental).unwrap();
+            let identity = admit().unwrap();
             assert_eq!(identity.realization().temporals, vec![temporal]);
-            assert_eq!(identity.qualification(), FormulationMaturity::Experimental);
-            assert!(admit(FormulationRequirement::Production).is_err());
             assert!(admit_nonstructural_with_temporal(
                 PhysicsFamily::Thermal,
                 procedure,
                 Some(&mesh),
                 SourceImplementation::CanonicalVolumeProjection,
                 BoundaryTransferImplementation::CanonicalBoundaryProjection,
-                FormulationRequirement::Experimental,
                 Some(TemporalImplementation::AcousticCanonicalHarmonicSolve),
             )
             .is_err());

@@ -1,7 +1,7 @@
 use runmat_analysis_core::{
     AnalysisField, AnalysisFieldValues, AnalysisModel, AnalysisProcedure, CoupledPhysicsFamily,
-    FormulationRequirement, PhysicalSignal, PhysicsFamily, ProcedureStep, ProcedureStepId,
-    SolutionSpace, StateCompleteness, StateId, StateKind, StatePersistence,
+    PhysicalSignal, PhysicsFamily, ProcedureStep, ProcedureStepId, SolutionSpace,
+    StateCompleteness, StateId, StateKind, StatePersistence,
 };
 use runmat_analysis_fea::diagnostics::FeaDiagnostic;
 use runmat_analysis_fea::execution::{SequenceIdentity, SolverResultIdentity, StateIdentity};
@@ -134,19 +134,6 @@ pub enum QualityReasonCode {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct QualityReason {
     pub code: QualityReasonCode,
-    pub detail: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProductionPublicationReasonCode {
-    NumericalAcceptanceFailed,
-    FormulationNotProductionQualified,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProductionPublicationReason {
-    pub code: ProductionPublicationReasonCode,
     pub detail: String,
 }
 
@@ -696,9 +683,7 @@ pub struct AnalysisRunResult {
     pub result_quality: QualityGate,
     pub run_status: RunStatus,
     pub numerically_acceptable: bool,
-    pub production_publishable: bool,
     pub quality_reasons: Vec<QualityReason>,
-    pub production_publication_reasons: Vec<ProductionPublicationReason>,
     pub provenance: RunProvenance,
 }
 
@@ -1808,9 +1793,7 @@ pub struct AnalysisResultsData {
     pub diagnostics: Option<Vec<FeaDiagnostic>>,
     pub run_status: RunStatus,
     pub numerically_acceptable: bool,
-    pub production_publishable: bool,
     pub quality_reasons: Vec<QualityReason>,
-    pub production_publication_reasons: Vec<ProductionPublicationReason>,
     pub provenance: RunProvenance,
     pub summary: AnalysisResultsSummary,
 }
@@ -1826,7 +1809,6 @@ pub struct AnalysisResultsCompareData {
     pub baseline_run_id: String,
     pub candidate_run_id: String,
     pub numerically_acceptable_changed: bool,
-    pub production_publishable_changed: bool,
     pub run_status_changed: bool,
     pub quality_reason_count_delta: i64,
     pub failed_increment_delta: Option<i64>,
@@ -1876,8 +1858,6 @@ mod solver_options;
 pub struct AnalysisExecutionStep {
     pub step_id: ProcedureStepId,
     pub backend: ComputeBackend,
-    #[serde(default = "default_formulation_requirement")]
-    pub requirement: FormulationRequirement,
     pub solver_options: AnalysisSolverOptions,
 }
 
@@ -1892,14 +1872,6 @@ impl AnalysisExecutionPlan {
         sequence: &runmat_analysis_core::AnalysisSequence,
         backend: ComputeBackend,
     ) -> Result<Self, String> {
-        Self::for_sequence_with_requirement(sequence, backend, FormulationRequirement::Production)
-    }
-
-    pub fn for_sequence_with_requirement(
-        sequence: &runmat_analysis_core::AnalysisSequence,
-        backend: ComputeBackend,
-        requirement: FormulationRequirement,
-    ) -> Result<Self, String> {
         let steps = sequence
             .steps
             .iter()
@@ -1907,7 +1879,6 @@ impl AnalysisExecutionPlan {
                 Ok(AnalysisExecutionStep {
                     step_id: step.step_id.clone(),
                     backend,
-                    requirement,
                     solver_options: AnalysisSolverOptions::defaults_for(step)?,
                 })
             })
@@ -2180,12 +2151,10 @@ pub struct AnalysisStudyStepRunData {
     pub run_id: String,
     pub run_status: RunStatus,
     pub numerically_acceptable: bool,
-    pub production_publishable: bool,
     pub solver_convergence: QualityGate,
     pub result_quality: QualityGate,
     #[serde(default)]
     pub quality_reasons: Vec<QualityReason>,
-    pub production_publication_reasons: Vec<ProductionPublicationReason>,
     pub provenance: RunProvenance,
     pub numerical_result: AnalysisStudyStepNumericalResultData,
     pub evidence_artifact_path: String,
@@ -2256,7 +2225,6 @@ pub struct AnalysisStudyRunData {
     pub operation_sequence: Vec<String>,
     pub run_status: RunStatus,
     pub numerically_acceptable: bool,
-    pub production_publishable: bool,
     pub solver_convergence: QualityGate,
     pub result_quality: QualityGate,
     pub evidence_artifact_path: String,
@@ -2362,10 +2330,6 @@ fn default_study_sweep_fail_fast() -> bool {
     true
 }
 
-const fn default_formulation_requirement() -> FormulationRequirement {
-    FormulationRequirement::Production
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisTrendKindSummary {
     pub identity: AnalysisRunIdentity,
@@ -2373,7 +2337,6 @@ pub struct AnalysisTrendKindSummary {
     pub median_solve_ms: Option<f64>,
     pub p95_solve_ms: Option<f64>,
     pub numerically_acceptable_rate: f64,
-    pub production_publishable_rate: f64,
     pub failed_increment_rate: Option<f64>,
     pub mean_spike_count: Option<f64>,
     pub mean_stall_count: Option<f64>,
@@ -2802,10 +2765,6 @@ mod tests {
         let plan = AnalysisExecutionPlan::for_sequence(&sequence, ComputeBackend::Cpu)
             .expect("supported sequence should produce a typed execution plan");
         assert_eq!(plan.steps.len(), 2);
-        assert!(plan
-            .steps
-            .iter()
-            .all(|step| step.requirement == FormulationRequirement::Production));
         assert!(plan.validate_against(&sequence).is_ok());
 
         let mut duplicate = plan.clone();

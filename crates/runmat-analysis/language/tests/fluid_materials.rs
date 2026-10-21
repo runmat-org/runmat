@@ -61,7 +61,7 @@ geometry part {
 mesh part on geometry.part { tetrahedra { order = linear; target_size = 0.5 m; maximum_deviation = 0.01 m } }
 material water { mass_density = 1000 kg/m^3; fluid { law = incompressible_newtonian; dynamic_viscosity = 0.001 Pa*s } }
 model flow { assign material.water to geometry.part.region.volume }
-study steady { geometry = geometry.part; mesh = mesh.part; model = model.flow; formulation = experimental; analysis solve { fluid static {} } }
+study steady { geometry = geometry.part; mesh = mesh.part; model = model.flow; analysis solve { fluid static {} } }
 "#;
     let host = TestHost::default().with_geometry_inspection(
         "project/part.step",

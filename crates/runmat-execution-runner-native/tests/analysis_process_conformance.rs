@@ -638,10 +638,6 @@ fn assert_publication_semantics(
     assert_eq!(actual.source_observations, expected.source_observations);
     assert_eq!(actual.source_accuracy, expected.source_accuracy);
     assert_eq!(actual.source_resource_plan, expected.source_resource_plan);
-    assert_eq!(
-        actual.formulation_requirement,
-        expected.formulation_requirement
-    );
     assert_eq!(actual.accuracy_status, expected.accuracy_status);
     assert_eq!(actual.gate, expected.gate);
 }
@@ -1479,7 +1475,6 @@ fn fixture_for_study(
         model,
         step_id,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_runtime::analysis::FormulationRequirement::Experimental,
         preconditioner: SpdPreconditionerKind::Jacobi,
         algebra_backend: LinearAlgebraBackendKind::CpuReference,
         observation_execution:
@@ -1533,7 +1528,6 @@ fn explicit_fixture(
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_runtime::analysis::FormulationRequirement::Experimental,
         preconditioner: SpdPreconditionerKind::Jacobi,
         algebra_backend: LinearAlgebraBackendKind::CpuReference,
         observation_execution:
@@ -1728,7 +1722,6 @@ fn mixed_fixture(
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_runtime::analysis::FormulationRequirement::Experimental,
         preconditioner: SpdPreconditionerKind::Jacobi,
         algebra_backend: LinearAlgebraBackendKind::CpuReference,
         observation_execution:
@@ -1876,7 +1869,6 @@ fn sequence_preparation(
         model,
         step_id: root.step_id,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_runtime::analysis::FormulationRequirement::Experimental,
         preconditioner: SpdPreconditionerKind::Jacobi,
         algebra_backend: LinearAlgebraBackendKind::CpuReference,
         observation_execution:
@@ -1962,7 +1954,6 @@ fn frequency_preparation(
         model,
         step_id: step.step_id,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: runmat_runtime::analysis::FormulationRequirement::Experimental,
         observation_execution:
             runmat_analysis_fea::results::observation::ObservationExecutionPolicy::canonical(
                 std::num::NonZeroU32::new(2).unwrap(),

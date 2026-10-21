@@ -277,7 +277,6 @@ fn publishes_retained_thermal_result(solved: &SolvedPipeline) {
         &model,
         ComputeBackend::Cpu,
         ThermalSolveOptions {
-            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
             procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
             solver_mesh: Some(mesh.clone()),
             ..ThermalSolveOptions::default()

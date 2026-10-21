@@ -1,7 +1,7 @@
 # Build and run a static structural study
 
 This guide uses the checked example at
-[`docs/simulation/examples/structural-static-experimental.fea`](../../examples/structural-static-experimental.fea).
+[`docs/simulation/examples/structural-static.fea`](../../examples/structural-static.fea).
 It uses a two-part STEP assembly so the complete exact import, mesh, multi-solid material coverage,
 model, solve, and result path can run in a release check.
 
@@ -106,17 +106,14 @@ not implicitly rotate an arbitrary traction vector onto that face normal.
 
 ## 5. Define the study
 
-The study binds geometry, mesh, and model, then names one structural static analysis. The example
-sets `formulation = experimental` because the current runnable structural formulation has not been
-promoted to production. Remove that line only when the status page and admission evidence identify
-the selected formulation as production-qualified.
+The study binds geometry, mesh, and model, then names one structural static analysis and the
+result fields to publish.
 
 ```fea
-study structural_static_experimental {
+study structural_static {
     geometry = geometry.bracket
     mesh = mesh.bracket
     model = model.loaded_bracket
-    formulation = experimental
     analysis static { structural static {} }
     output displacement = analysis.static.field.node.displacement
     output von_mises = analysis.static.field.element.von_mises_stress
@@ -126,13 +123,13 @@ study structural_static_experimental {
 ## 6. Check, plan, and run
 
 ```sh
-runmat fea check docs/simulation/examples/structural-static-experimental.fea
-runmat fea plan docs/simulation/examples/structural-static-experimental.fea
-runmat fea run docs/simulation/examples/structural-static-experimental.fea
+runmat fea check docs/simulation/examples/structural-static.fea
+runmat fea plan docs/simulation/examples/structural-static.fea
+runmat fea run docs/simulation/examples/structural-static.fea
 ```
 
 Read check diagnostics before planning. In the plan, verify the selected root, geometry, mesh,
-model, formulation requirement, and logical phases. After execution, inspect mesh quality,
+model, and logical phases. After execution, inspect mesh quality,
 property coverage, constraint rank, convergence, balance, and formulation evidence before reading
 the displacement or stress field.
 

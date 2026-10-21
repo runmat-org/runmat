@@ -2,9 +2,7 @@
 #[path = "../../fea/support/peak_allocator/counting.rs"]
 mod counting;
 
-use runmat_analysis_core::{
-    AnalysisSequence, FormulationRequirement, ProcedureStep, Temperature, ThermalDomain,
-};
+use runmat_analysis_core::{AnalysisSequence, ProcedureStep, Temperature, ThermalDomain};
 use runmat_analysis_execution::{
     execute_thermal_solver_result_objects, projected_transport_output_resource_facts,
 };
@@ -30,7 +28,6 @@ fn workload(samples: usize) -> ThermalWorkload {
         step_id: model.sequence.steps[0].step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
-        formulation_requirement: FormulationRequirement::Experimental,
         procedure: ThermalProcedureControl::BackwardEuler {
             snapshot_count: samples,
         },

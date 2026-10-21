@@ -22,8 +22,6 @@ pub const UNAVAILABLE_EVIDENCE_POLICY: StaticClassIdentity =
 pub const ACCURACY_LIMIT_ACTION: StaticClassIdentity =
     StaticClassIdentity::new("fea.AccuracyLimitAction");
 pub const COMPUTE_BACKEND: StaticClassIdentity = StaticClassIdentity::new("fea.ComputeBackend");
-pub const FORMULATION_REQUIREMENT: StaticClassIdentity =
-    StaticClassIdentity::new("fea.FormulationRequirement");
 pub const SOLVER_OPTIONS: StaticClassIdentity = StaticClassIdentity::new("fea.SolverOptions");
 pub const EXECUTION_STEP: StaticClassIdentity = StaticClassIdentity::new("fea.ExecutionStep");
 pub const EXECUTION_PLAN: StaticClassIdentity = StaticClassIdentity::new("fea.ExecutionPlan");

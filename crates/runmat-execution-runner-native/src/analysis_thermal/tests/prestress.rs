@@ -75,7 +75,6 @@ macro_rules! structural_preparation {
                 &heat.product.compiled,
                 StructuralStudyPlanningPolicy {
                     backend: ComputeBackend::Cpu,
-                    formulation_requirement: FormulationRequirement::Experimental,
                     numerics: StructuralNumericalPlanningPolicy::production(),
                 },
             )

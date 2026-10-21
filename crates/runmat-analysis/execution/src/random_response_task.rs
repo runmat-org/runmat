@@ -552,10 +552,7 @@ fn execution_plan(
     let discretization = DiscretizationIdentity::new(
         problem,
         topology_digest,
-        contract_digest(
-            "random-response-formulation",
-            &workload.formulation_requirement(),
-        )?,
+        contract_digest("random-response-formulation")?,
     )?;
     let operator = OperatorIdentity::new(discretization, scope.operator_digest())?;
     let numerical = NumericalPlanIdentity::new(
