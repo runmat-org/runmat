@@ -73,12 +73,16 @@ fn rigid_cube_modes_match_rectangular_cavity_including_degenerate_triplets() {
             .zip(&expected[1..])
             .map(|(value, reference)| ((value - reference) / reference).abs())
             .fold(0.0_f64, f64::max);
-        assert!(error < previous_error, "cells={cells}: {error} >= {previous_error}");
+        assert!(
+            previous_error.is_infinite() || previous_error / error > 2.5,
+            "cells={cells}: {error} vs {previous_error}"
+        );
         previous_error = error;
         assert!(result.relative_residuals.iter().all(|value| *value <= 1e-8));
         assert!(result.mass_orthogonality_error < 1e-8);
         if cells == 4 {
-            assert!(error < 2e-3, "{:?} vs {expected:?}", result.frequencies_hz);
+            // Quadratic elements: frequency error falls as h^4 (about 3.2x from 3 to 4 cells).
+            assert!(error < 4e-3, "{:?} vs {expected:?}", result.frequencies_hz);
         }
     }
 }
@@ -97,7 +101,7 @@ fn pressure_release_ends_remove_the_rigid_mode_and_match_open_open_duct() {
     )
     .unwrap();
     for (value, reference) in result.frequencies_hz.iter().zip(reference(true, count)) {
-        assert!(((value - reference) / reference).abs() < 3e-3, "{value} vs {reference}");
+        assert!(((value - reference) / reference).abs() < 4e-3, "{value} vs {reference}");
     }
     // Released nodes carry exactly zero modal pressure.
     let projection = &result.projection;

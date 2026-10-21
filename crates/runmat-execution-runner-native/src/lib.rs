@@ -7,6 +7,7 @@ mod accelerator_placement;
 mod machine_capacity;
 pub use accelerator_placement::active_provider_resource;
 mod analysis_acoustic;
+mod analysis_acoustic_response;
 mod analysis_electrical;
 mod analysis_fluid;
 pub use analysis_fluid::{execute_fluid_study_locally, FluidStudyExecutionPolicy};
@@ -46,6 +47,7 @@ mod analysis_task;
 mod analysis_task_pool;
 mod bounded_object_read;
 pub use analysis_acoustic::source::acoustic_study_completion_from_source;
+pub use analysis_acoustic_response::source::acoustic_response_study_completion_from_source;
 mod analysis_thermal;
 mod analysis_thermal_prestress;
 mod analysis_transient;
@@ -281,7 +283,7 @@ pub use typed_fea::{
 };
 pub use typed_fea::{
     execute_checked_fea_locally, execute_prepared_fea_study_locally, imported_family_result,
-    prepare_study_publication, CompletedAuthoredAcousticStudy, CompletedAuthoredElectricalStudy, CompletedAuthoredFluidStudy,
+    prepare_study_publication, CompletedAuthoredAcousticResponseStudy, CompletedAuthoredAcousticStudy, CompletedAuthoredElectricalStudy, CompletedAuthoredFluidStudy,
     CompletedAuthoredMagneticStudy, CompletedAuthoredMaxwellStudy,
     CompletedAuthoredNonlinearSolidStudy, CompletedAuthoredThermalStudy, CompletedFeaStudyResult,
     CompletedLocalFeaCase, LocalFeaExecution, LocalFeaExecutionOptions, LocalFeaMeshObserver,

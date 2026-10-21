@@ -57,6 +57,9 @@ pub fn prepare_semantic_state_publication(
             SemanticStatePublicationSource::AcousticNativeFields,
             AnalysisWorkKind::SolveAcousticHarmonic
         ) | (
+            SemanticStatePublicationSource::AcousticResponseFields,
+            AnalysisWorkKind::SolveAcousticResponse
+        ) | (
             SemanticStatePublicationSource::StaticElectricalNativeFields,
             AnalysisWorkKind::SolveElectricalStatic
         ) | (
@@ -97,6 +100,14 @@ pub fn prepare_semantic_state_publication(
     let acoustic_source = (preparation.source
         == SemanticStatePublicationSource::AcousticNativeFields)
         .then(|| crate::acoustic_state_profiles::decode_acoustic_source(&preparation.source_result))
+        .transpose()?;
+    let response_source = (preparation.source
+        == SemanticStatePublicationSource::AcousticResponseFields)
+        .then(|| {
+            crate::acoustic_response_state_profiles::decode_acoustic_response_source(
+                &preparation.source_result,
+            )
+        })
         .transpose()?;
     let electrical_source = (preparation.source
         == SemanticStatePublicationSource::StaticElectricalNativeFields)
@@ -169,6 +180,23 @@ pub fn prepare_semantic_state_publication(
         {
             return Err(AnalysisBridgeError::Identity(
                 "magnetic state source differs from workload, mesh or sampled topology",
+            ));
+        }
+        result.source_result_identity()?
+    } else if let Some(result) = &response_source {
+        if result.producer() != preparation.source_host.workload.step
+            || Digest::from_bytes(*result.mesh_digest().bytes()) != preparation.topology_digest
+            || !preparation.source_host.workload.inputs.iter().any(|input| {
+                input.kind == AnalysisNumericalObjectKind::AcousticResponseWorkload
+                    && input.logical_identity == result.source_workload().digest()
+            })
+            || !preparation.source_host.workload.inputs.iter().any(|input| {
+                input.kind == AnalysisNumericalObjectKind::Mesh
+                    && input.logical_identity == preparation.topology_digest
+            })
+        {
+            return Err(AnalysisBridgeError::Identity(
+                "acoustic response state source differs from workload or topology",
             ));
         }
         result.source_result_identity()?
@@ -264,6 +292,22 @@ pub fn prepare_semantic_state_publication(
         {
             return Err(AnalysisBridgeError::Identity(
                 "magnetic publication profiles differ from completed source",
+            ));
+        }
+    }
+    if let Some(result) = &response_source {
+        result.validate_publication_request(&request)?;
+        let catalog =
+            StatePublicationProfiles::from_canonical_bytes(&preparation.source_profiles.payload())?;
+        if preparation.source_profiles.manifest.kind
+            != AnalysisNumericalObjectKind::StatePublicationProfiles
+            || preparation.source_profiles.manifest.logical_identity != catalog.identity()
+            || catalog
+                != result
+                    .state_publication_profiles(preparation.source_result.manifest.payload_digest)?
+        {
+            return Err(AnalysisBridgeError::Identity(
+                "acoustic response publication profiles differ from completed source",
             ));
         }
     }

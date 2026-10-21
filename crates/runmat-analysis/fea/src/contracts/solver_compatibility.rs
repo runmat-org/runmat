@@ -185,6 +185,12 @@ const fn method_is_compatible(
         TemporalImplementation::AcousticCanonicalHarmonicSolve => {
             matches!(method, SolverMethod::AcousticCanonicalHelmholtzGmres)
         }
+        TemporalImplementation::AcousticCanonicalModalSolve => {
+            matches!(method, SolverMethod::AcousticCanonicalShiftInvertBlockKrylov)
+        }
+        TemporalImplementation::AcousticCanonicalTransientSolve => {
+            matches!(method, SolverMethod::AcousticCanonicalNewmarkPcg)
+        }
         TemporalImplementation::CoupledSinglePassProfileTransfer
         | TemporalImplementation::CoupledFixedPointRelaxation
         | TemporalImplementation::CoupledScalarResidualIteration => match coupling {
@@ -257,6 +263,10 @@ const fn preconditioner_is_compatible(
             preconditioner,
             SolverPreconditioner::None | SolverPreconditioner::Ilu0
         ),
+        SolverMethod::AcousticCanonicalShiftInvertBlockKrylov
+        | SolverMethod::AcousticCanonicalNewmarkPcg => {
+            matches!(preconditioner, SolverPreconditioner::Ilu0)
+        }
         SolverMethod::StructuralDirectHarmonicGmres => {
             matches!(preconditioner, SolverPreconditioner::Jacobi)
         }

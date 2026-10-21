@@ -6,6 +6,7 @@ use runmat_analysis_core::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum PreparedFamily {
     Acoustic,
+    AcousticResponse,
     Electrical,
     Fluid,
     Nonlinear,
@@ -138,6 +139,21 @@ pub(super) fn select_family(
     {
         return Ok(PreparedFamily::Acoustic);
     }
+    if step.family == PhysicsFamily::Acoustic
+        && matches!(
+            step.procedure,
+            AnalysisProcedure::ModalExtraction | AnalysisProcedure::TransientResponse
+        )
+        && step.solution_space == SolutionSpace::Direct
+        && step.restart == RestartPolicy::Fresh
+        && step.state_inputs.is_empty()
+        && step.activations.is_empty()
+        && sequence.dependencies.is_empty()
+        && sequence.transitions.is_empty()
+        && sequence.branches.is_empty()
+    {
+        return Ok(PreparedFamily::AcousticResponse);
+    }
     if step.family != PhysicsFamily::Thermal
         || !matches!(
             step.procedure,
@@ -156,7 +172,7 @@ pub(super) fn select_family(
 }
 
 fn unsupported() -> String {
-    "RM.FEA.TYPED_EXECUTION.UNSUPPORTED_PHYSICS_FAMILY: typed native execution admits structural studies or one fresh independent direct thermal steady/transient, fluid steady/transient, steady conjugate heat transfer or fluid–structure interaction, equation-selected static electrical/magnetic, singleton Maxwell harmonic, or acoustic harmonic step".into()
+    "RM.FEA.TYPED_EXECUTION.UNSUPPORTED_PHYSICS_FAMILY: typed native execution admits structural studies or one fresh independent direct thermal steady/transient, fluid steady/transient, steady conjugate heat transfer or fluid–structure interaction, equation-selected static electrical/magnetic, singleton Maxwell harmonic, or acoustic harmonic, modal or transient step".into()
 }
 
 #[cfg(test)]

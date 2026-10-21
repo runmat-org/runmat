@@ -67,6 +67,8 @@ pub enum TemporalImplementation {
     MaxwellComplexElectricFieldGeneralSolve,
     AcousticDomainGraphHarmonicSolve,
     AcousticCanonicalHarmonicSolve,
+    AcousticCanonicalModalSolve,
+    AcousticCanonicalTransientSolve,
     FluidSteadyNonorthogonalPressureCorrection,
     FluidBackwardEulerConservativeMomentumPressure,
     /// Steady finite-volume flow, then one monolithic energy solve across fluid and solid.
@@ -137,6 +139,7 @@ pub enum RecoveryImplementation {
     ElementOwnedThermoelasticStressEnergy,
     AcousticDomainGraphComplexPressure,
     AcousticSolverMeshPressureVelocityEnergy,
+    AcousticSolverMeshNodalPressure,
     ElectricalSolverMeshFieldDisplacementEnergy,
     ElectricalSolverMeshFieldCurrentJoulePower,
     MagneticSolverMeshVectorPotentialFluxFieldEnergy,

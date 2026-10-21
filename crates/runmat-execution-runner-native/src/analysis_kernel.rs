@@ -100,6 +100,7 @@ mod acoustic_harmonic;
 mod buckling;
 #[cfg(test)]
 mod buckling_tests;
+mod acoustic_response;
 mod electrical_static;
 mod field_recovery;
 mod fluid_steady;
@@ -146,6 +147,7 @@ impl AnalysisKernel for NativeAnalysisKernel {
                 acoustic_frequency_assembly::execute(invocation)
             }
             AnalysisWorkKind::SolveElectricalStatic => electrical_static::execute(invocation),
+            AnalysisWorkKind::SolveAcousticResponse => acoustic_response::execute(invocation),
             AnalysisWorkKind::SolveMagnetostatic => magnetostatic::execute(invocation),
             AnalysisWorkKind::SolveMaxwellHarmonic => maxwell_harmonic::execute(invocation),
             AnalysisWorkKind::SolveFluidSteady => fluid_steady::execute(invocation),

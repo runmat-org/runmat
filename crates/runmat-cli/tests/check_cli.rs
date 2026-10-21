@@ -132,6 +132,8 @@ fn canonical_fea_documentation_examples_check_cleanly() {
         "modal-response-spectrum-experimental.fea",
         "modal-random-response-experimental.fea",
         "acoustic-production-rejected.fea",
+        "acoustic-duct-modes.fea",
+        "acoustic-duct-pulse.fea",
     ] {
         let path = format!("docs/simulation/examples/{name}");
         assert_fea_checks(&temp, &path);

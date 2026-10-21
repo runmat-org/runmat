@@ -43,8 +43,8 @@ diagnostics, not a production claim for arbitrary CAD acoustics.
 | Procedure | Required domain/state | Current numerical status |
 | --- | --- | --- |
 | `acoustic static` | Static pressure state | Typed contract; reduced component is harmonic, not static |
-| `acoustic modal` | Positive mode count | Typed contract only |
-| `acoustic transient` | Time samples and compatible initial pressure | Typed contract only |
+| `acoustic modal` | Positive mode count; acoustic modes state | Canonical Tet4/Tet10 pressure eigen-solve; publishes `modal.frequency_hz` and one `acoustic.pressure` field per mode |
+| `acoustic transient` | Time samples; acoustic pressure state | Canonical Tet4/Tet10 Newmark pressure history; publishes one `acoustic.pressure` field per time sample with acoustic energy |
 | `acoustic harmonic` | Frequency samples and complex pressure | Experimental reduced Helmholtz graph component |
 | `acoustic nonlinear` | Load-factor domain | Typed contract only |
 

@@ -7,6 +7,7 @@ mod magnetic_recovery;
 pub(super) mod magnetic_static;
 pub(super) mod maxwell_harmonic;
 mod maxwell_recovery;
+mod acoustic_response;
 mod acoustic_recovery;
 mod nonlinear_recovery;
 mod result_publication;
@@ -113,6 +114,10 @@ pub fn build_resource_plan(
             FeaResourcePhase::MagneticFieldRecovery(request),
             FeaResourceDemand::MagneticFieldRecovery(demand),
         ) if *request == demand.request => magnetic_recovery::build(input.clone(), demand),
+        (
+            FeaResourcePhase::AcousticResponse(workload),
+            FeaResourceDemand::AcousticResponse(demand),
+        ) if *workload == demand.workload => acoustic_response::build(input.clone(), demand),
         (
             FeaResourcePhase::MaxwellFieldRecovery(request),
             FeaResourceDemand::MaxwellFieldRecovery(demand),

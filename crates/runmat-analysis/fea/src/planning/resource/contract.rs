@@ -35,6 +35,8 @@ pub use structural_recovery_demand::StructuralFieldRecoveryResourceDemand;
 mod nonlinear_recovery_demand;
 pub use nonlinear_recovery_demand::NonlinearFieldRecoveryResourceDemand;
 mod maxwell_recovery_demand;
+mod acoustic_response_demand;
+pub use acoustic_response_demand::AcousticResponseResourceDemand;
 pub use maxwell_recovery_demand::MaxwellFieldRecoveryResourceDemand;
 mod acoustic_recovery_demand;
 pub use acoustic_recovery_demand::AcousticFieldRecoveryResourceDemand;

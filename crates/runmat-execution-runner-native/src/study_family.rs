@@ -8,8 +8,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_analysis_core::{AnalysisModel, AuthoredMaterialRef, MaterialModel, RealizedStudy};
 use runmat_analysis_execution::{
-    AcousticStudyPreparation, AnalysisCapabilityRequirement, AnalysisOutputPolicy,
-    CompletedAcousticStudy, CompletedElectricalStudy, CompletedFluidStudy, CompletedMagneticStudy,
+    AcousticResponseStudyPreparation, AcousticStudyPreparation, AnalysisCapabilityRequirement, AnalysisOutputPolicy,
+    CompletedAcousticResponseStudy, CompletedAcousticStudy, CompletedElectricalStudy, CompletedFluidStudy, CompletedMagneticStudy,
     CompletedMaxwellStudy, CompletedNonlinearSolidStudy, CompletedThermalStudy,
     ElectricalStudyPreparation, FluidStudyPreparation, MagneticStudyPreparation,
     MaxwellStudyPreparation, NonlinearSolidStudyPreparation, ThermalStudyPreparation,
@@ -20,7 +20,8 @@ use runmat_analysis_fea::planning::resource::LocalExecutionPlan;
 use runmat_analysis_fea::study::{
     build_electrical_study_product, build_fluid_study_product, build_magnetic_study_product,
     build_maxwell_study_product, build_nonlinear_solid_study_product, compile_analysis_study,
-    plan_acoustic_study_product, plan_thermal_study_product_with_fields,
+    plan_acoustic_response_study_product, plan_acoustic_study_product,
+    plan_thermal_study_product_with_fields,
     AnalysisStudyCompilationInput, ElectricalStudyProductInput, FluidStudyProductInput,
     MagneticStudyProductInput, MaxwellStudyProductInput, NonlinearSolidStudyProductInput,
 };
@@ -46,6 +47,7 @@ pub enum StudyFamilyKind {
     Magnetic,
     Maxwell,
     Acoustic,
+    AcousticResponse,
     Fluid,
     NonlinearSolid,
 }
@@ -59,6 +61,7 @@ impl StudyFamilyKind {
             StudyRootPlanning::Magnetic(_) => Self::Magnetic,
             StudyRootPlanning::Maxwell(_) => Self::Maxwell,
             StudyRootPlanning::Acoustic(_) => Self::Acoustic,
+            StudyRootPlanning::AcousticResponse(_) => Self::AcousticResponse,
             StudyRootPlanning::Fluid(_) => Self::Fluid,
             StudyRootPlanning::NonlinearSolid(_) => Self::NonlinearSolid,
         })
@@ -71,6 +74,7 @@ impl StudyFamilyKind {
             Self::Magnetic => "magnetic",
             Self::Maxwell => "Maxwell",
             Self::Acoustic => "acoustic",
+            Self::AcousticResponse => "acoustic response",
             Self::Fluid => "fluid",
             Self::NonlinearSolid => "nonlinear solid",
         }
@@ -104,6 +108,7 @@ pub(crate) enum FamilyStudyPreparation {
     Magnetic(Box<MagneticStudyPreparation>),
     Maxwell(Box<MaxwellStudyPreparation>),
     Acoustic(Box<AcousticStudyPreparation>),
+    AcousticResponse(Box<AcousticResponseStudyPreparation>),
     Fluid(Box<FluidStudyPreparation>),
     NonlinearSolid(Box<NonlinearSolidStudyPreparation>),
 }
@@ -220,6 +225,27 @@ pub(crate) fn plan_family_study(
                     output_policy,
                     required_capabilities: capabilities,
                 })),
+                step,
+            )
+        }
+        StudyRootPlanning::AcousticResponse(policy) => {
+            let product =
+                plan_acoustic_response_study_product(compile(apply_inputs)?, context.mesh, *policy)
+                    .map_err(|error| error.to_string())?;
+            let step = single_step(&product.compiled.model, kind)?;
+            (
+                FamilyStudyPreparation::AcousticResponse(Box::new(
+                    AcousticResponseStudyPreparation {
+                        policy: *policy,
+                        product,
+                        mesh,
+                        frozen_project_digest: frozen,
+                        artifact_access: access,
+                        program_revision: revision,
+                        output_policy,
+                        required_capabilities: capabilities,
+                    },
+                )),
                 step,
             )
         }
@@ -386,6 +412,7 @@ pub enum CompletedFamilyStudy {
     Magnetic(Box<CompletedMagneticStudy>),
     Maxwell(Box<CompletedMaxwellStudy>),
     Acoustic(Box<CompletedAcousticStudy>),
+    AcousticResponse(Box<CompletedAcousticResponseStudy>),
     Fluid(Box<CompletedFluidStudy>),
     NonlinearSolid(Box<CompletedNonlinearSolidStudy>),
 }
@@ -473,6 +500,21 @@ pub(crate) async fn execute_family_study(
             ))
             .await?,
         )),
+        FamilyStudyPreparation::AcousticResponse(preparation) => {
+            CompletedFamilyStudy::AcousticResponse(Box::new(
+                Box::pin(crate::analysis_acoustic_response::execute_with_pool(
+                    pool,
+                    *preparation,
+                    crate::analysis_acoustic_response::AcousticResponseStudyExecutionPolicy {
+                        resources,
+                        retry,
+                        deadline_unix_millis,
+                        priority,
+                    },
+                ))
+                .await?,
+            ))
+        }
         FamilyStudyPreparation::Fluid(preparation) => CompletedFamilyStudy::Fluid(Box::new(
             Box::pin(crate::analysis_fluid::execute_with_pool(
                 pool,
@@ -528,6 +570,7 @@ impl CompletedFamilyStudy {
             Self::Magnetic(_) => StudyFamilyKind::Magnetic,
             Self::Maxwell(_) => StudyFamilyKind::Maxwell,
             Self::Acoustic(_) => StudyFamilyKind::Acoustic,
+            Self::AcousticResponse(_) => StudyFamilyKind::AcousticResponse,
             Self::Fluid(_) => StudyFamilyKind::Fluid,
             Self::NonlinearSolid(_) => StudyFamilyKind::NonlinearSolid,
         }
@@ -569,6 +612,9 @@ impl CompletedFamilyStudy {
                     completed
                 ))
             }
+            Self::AcousticResponse(completed) => root!(
+                runmat_analysis_execution::prepare_acoustic_response_study_root(completed)
+            ),
             Self::Fluid(completed) => {
                 root!(runmat_analysis_execution::prepare_fluid_study_root(completed))
             }

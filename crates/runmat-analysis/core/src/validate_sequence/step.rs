@@ -408,7 +408,13 @@ fn family_can_publish_state(family: PhysicsFamily, kind: StateKind) -> bool {
                 | StateKind::Integrator
         ),
         PhysicsFamily::Acoustic => {
-            matches!(kind, StateKind::AcousticComplex | StateKind::Integrator)
+            matches!(
+                kind,
+                StateKind::AcousticComplex
+                    | StateKind::AcousticModes
+                    | StateKind::AcousticPressure
+                    | StateKind::Integrator
+            )
         }
         PhysicsFamily::Fluid => matches!(
             kind,

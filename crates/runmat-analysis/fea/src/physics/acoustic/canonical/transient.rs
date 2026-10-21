@@ -69,6 +69,8 @@ pub struct CanonicalAcousticTransient {
     /// Energy absorbed by impedance and radiation boundaries up to each time point (J).
     pub boundary_absorbed_energy_j: Vec<f64>,
     pub linear_iterations: usize,
+    /// Largest achieved relative residual of any step's effective-operator solve.
+    pub maximum_linear_relative_residual: f64,
 }
 
 /// Integrate an authored acoustic transient step from rest.
@@ -145,6 +147,7 @@ pub fn solve_canonical_transient(
         policy.linear_maximum_iterations,
     )?;
     let mut linear_iterations = 0usize;
+    let mut maximum_linear_relative_residual = 0.0_f64;
     let apply = |matrix: &RealSparseMatrix, values: &[f64]| {
         spmv(matrix, values).map_err(|error| AcousticHarmonicError::Operator(error.into()))
     };
@@ -179,6 +182,8 @@ pub fn solve_canonical_transient(
             )?;
             let solved = mass_operator.solve(&rhs, None)?;
             linear_iterations += solved.iterations;
+            maximum_linear_relative_residual =
+                maximum_linear_relative_residual.max(solved.relative_residual);
             for (reduced, &row) in free.iter().enumerate() {
                 acceleration[row] = solved.values[reduced];
             }
@@ -245,6 +250,8 @@ pub fn solve_canonical_transient(
         let guess = free.iter().map(|&row| pressure[row]).collect::<Vec<_>>();
         let solved = operator.solve(&rhs, Some(&guess))?;
         linear_iterations += solved.iterations;
+        maximum_linear_relative_residual =
+            maximum_linear_relative_residual.max(solved.relative_residual);
         for (reduced, &row) in free.iter().enumerate() {
             next_pressure[row] = solved.values[reduced];
         }
@@ -286,6 +293,7 @@ pub fn solve_canonical_transient(
         acoustic_energy_j: energies,
         boundary_absorbed_energy_j: absorbed,
         linear_iterations,
+        maximum_linear_relative_residual,
     })
 }
 

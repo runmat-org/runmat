@@ -299,9 +299,19 @@ impl Driver {
                     )
             }))
         {
-            return Err(RunnerError::Invalid(
-                "task resource request cannot be satisfied by the target pool".into(),
-            ));
+            let request = &submission.request.resources;
+            let limit = &pool.spec.resource_limit;
+            return Err(RunnerError::Invalid(format!(
+                "task resource request cannot be satisfied by the target pool: requested \
+                 {} millicores, {} memory bytes, {} scratch bytes; pool limit {} millicores, \
+                 {} memory bytes, {} scratch bytes",
+                request.cpu_millicores,
+                request.memory_bytes,
+                request.scratch_bytes,
+                limit.cpu_millicores,
+                limit.memory_bytes,
+                limit.scratch_bytes,
+            )));
         }
         if self.snapshot.tasks.contains_key(&submission.request.id) {
             return Err(RunnerError::Invalid(format!(
