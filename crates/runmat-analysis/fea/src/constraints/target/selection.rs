@@ -16,10 +16,13 @@ impl Selector {
         match (target.entity_dimension,target.expected_topology) {
             (EntityDimension::Face,ExpectedTopology::BoundaryFace)=>Ok(Self::Face),
             (EntityDimension::Point,ExpectedTopology::MeshNode) if !target.resolved_entities().is_empty()=>Ok(Self::ExactPoint),
+            // An exact edge (a beam member or a shell boundary) constrains every mesh node
+            // whose provenance carries that edge, like an exact vertex constrains its node.
+            (EntityDimension::Edge,_) if !target.resolved_entities().is_empty()=>Ok(Self::ExactPoint),
             (EntityDimension::Point,ExpectedTopology::MeshNode)=>target.region_id.strip_prefix("node:")
                 .and_then(|s|s.parse().ok()).map(Self::Point).ok_or_else(||ConstraintPlanError::UnsupportedTarget {
                     constraint_id:constraint_id.into(),reason:"mesh-node targets require a `node:<id>` selector or exact vertex resolution" }),
-            _=>Err(ConstraintPlanError::UnsupportedTarget { constraint_id:constraint_id.into(),reason:"solid essential constraints require a boundary-face or mesh-node target" })
+            _=>Err(ConstraintPlanError::UnsupportedTarget { constraint_id:constraint_id.into(),reason:"essential constraints require a boundary-face, exact edge or mesh-node target" })
         }
     }
 }

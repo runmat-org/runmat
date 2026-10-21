@@ -6059,10 +6059,9 @@ fn analysis_run_nonlinear_rejects_invalid_plastic_material() {
 #[test]
 fn nonlinear_solver_rejects_invalid_contact_enforcement_options() {
     let _guard = analysis_test_guard();
-    let error = validate_contact_interface_options(&ResolvedContactOptions {
+    let error = validate_contact_interface_options(&runmat_analysis_fea::FeaContactEnforcement {
         penalty_stiffness_scale: 0.0,
         max_penetration_ratio: 0.01,
-        friction_coefficient: 0.0,
     })
     .expect_err("nonlinear solver should reject an invalid contact penalty");
     assert!(error.0.contains("penalty_stiffness_scale"));

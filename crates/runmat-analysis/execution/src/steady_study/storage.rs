@@ -1,6 +1,5 @@
 //! Enumerate each owned buffer copy; shared content addresses do not imply shared heap storage.
 use super::*;
-use runmat_canonical_codec::{profile_serialized, CanonicalLimits};
 
 fn sum(bytes: &mut u64, additional: u64) -> AnalysisBridgeResult<()> {
     *bytes = bytes
@@ -14,12 +13,9 @@ fn inputs(bytes: &mut u64, objects: &[PreparedAnalysisObjects]) -> AnalysisBridg
     }
     Ok(())
 }
+/// Retained metadata is resident typed data; charge its typed size, not a JSON tree.
 fn metadata<T: serde::Serialize>(value: &T) -> AnalysisBridgeResult<u64> {
-    Ok(profile_serialized(
-        value,
-        CanonicalLimits::new(1024 * 1024 * 1024, 100_000_000, 65_536, 64),
-    )?
-    .materialization_resident_bytes_estimate)
+    Ok(runmat_canonical_codec::typed_resident_bytes_estimate(value)?)
 }
 impl SteadyStudyTail {
     pub(crate) fn retained_storage_bytes(&self) -> AnalysisBridgeResult<u64> {

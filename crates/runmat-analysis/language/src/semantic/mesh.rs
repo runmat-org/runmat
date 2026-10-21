@@ -7,7 +7,7 @@ use crate::{
     FeaSymbolKind, FeaSymbolOrigin, LogicalSourcePath,
 };
 use runmat_geometry_core::GeometryDefinitionRef;
-use runmat_meshing_core::{ElementOrder, MeshDefinition, MeshingRequestSettings};
+use runmat_meshing_core::{ElementOrder, MeshDefinition, MeshDimension, MeshingRequestSettings};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub fn lower_mesh_definitions(
@@ -49,43 +49,48 @@ fn definition(
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<MeshDefinition> {
     let geometry = geometry_reference(bound, declaration, diagnostics)?;
-    let tetrahedra = unique_block(declaration, "tetrahedra", diagnostics)?;
+    let (block, dimension) = element_block(declaration, diagnostics)?;
+    let (header, settings_block) = block;
     reject_unsupported_top_level(declaration, diagnostics);
-    reject_unsupported_settings(declaration, tetrahedra, diagnostics);
+    reject_unsupported_settings(declaration, header, settings_block, diagnostics);
 
-    let order =
-        required_enum(declaration, tetrahedra, "order", diagnostics).and_then(
-            |value| match value {
-                "linear" => Some(ElementOrder::Tet4),
-                "quadratic" => Some(ElementOrder::Tet10),
-                _ => {
-                    diagnostic(
-                        declaration,
-                        declaration.span,
-                        "mesh `order` must be `linear` or `quadratic`",
-                        diagnostics,
-                    );
-                    None
-                }
-            },
-        );
-    let target_edge_length_m = required_length(declaration, tetrahedra, "target_size", diagnostics);
+    // Shell triangles and beam segments are linear; solids choose their tetrahedral order.
+    let order = if dimension == MeshDimension::Solid {
+        required_enum(declaration, settings_block, "order", diagnostics).and_then(|value| match value
+        {
+            "linear" => Some(ElementOrder::Tet4),
+            "quadratic" => Some(ElementOrder::Tet10),
+            _ => {
+                diagnostic(
+                    declaration,
+                    declaration.span,
+                    "mesh `order` must be `linear` or `quadratic`",
+                    diagnostics,
+                );
+                None
+            }
+        })
+    } else {
+        Some(ElementOrder::Tet4)
+    };
+    let target_edge_length_m = required_length(declaration, settings_block, "target_size", diagnostics);
     let maximum_chordal_deviation_m =
-        required_length(declaration, tetrahedra, "maximum_deviation", diagnostics);
+        required_length(declaration, settings_block, "maximum_deviation", diagnostics);
 
     let defaults = MeshingRequestSettings::default();
     let maximum_grading_ratio = optional_scalar(
         declaration,
-        tetrahedra,
+        settings_block,
         "maximum_grading_ratio",
         diagnostics,
     )
     .unwrap_or(defaults.maximum_grading_ratio);
     let deterministic_seed =
-        optional_integer(declaration, tetrahedra, "deterministic_seed", diagnostics)
+        optional_integer(declaration, settings_block, "deterministic_seed", diagnostics)
             .unwrap_or(defaults.deterministic_seed);
     let settings = MeshingRequestSettings {
         element_order: order?,
+        dimension,
         deterministic_seed,
         target_edge_length_m: target_edge_length_m?,
         maximum_chordal_deviation_m: maximum_chordal_deviation_m?,
@@ -165,11 +170,20 @@ fn geometry_reference(
     }
 }
 
-fn unique_block<'a>(
+/// The element block names the solver elements: `tetrahedra` for solids, `triangles` for
+/// sheet faces meshed as shells (with their edges as segments), `lines` for edges only.
+const ELEMENT_BLOCKS: [(&str, MeshDimension); 3] = [
+    ("tetrahedra", MeshDimension::Solid),
+    ("triangles", MeshDimension::Surface),
+    ("lines", MeshDimension::Curve),
+];
+
+type ElementBlock<'a> = ((&'static str, &'a [CheckedFeaStatement]), MeshDimension);
+
+fn element_block<'a>(
     declaration: &'a CheckedFeaDeclaration,
-    name: &str,
     diagnostics: &mut Vec<FeaDiagnostic>,
-) -> Option<&'a [CheckedFeaStatement]> {
+) -> Option<ElementBlock<'a>> {
     let matching = declaration
         .statements
         .iter()
@@ -180,14 +194,17 @@ fn unique_block<'a>(
             else {
                 return None;
             };
-            (header.trim() == name).then_some(statements.as_slice())
+            ELEMENT_BLOCKS
+                .iter()
+                .find(|(name, _)| header.trim() == *name)
+                .map(|(name, dimension)| ((*name, statements.as_slice()), *dimension))
         })
         .collect::<Vec<_>>();
     if matching.len() != 1 {
         diagnostic(
             declaration,
             declaration.span,
-            format!("mesh requires exactly one `{name}` block"),
+            "mesh requires exactly one `tetrahedra`, `triangles`, or `lines` block",
             diagnostics,
         );
         None
@@ -203,14 +220,15 @@ fn reject_unsupported_top_level(
     for statement in &declaration.statements {
         if matches!(
             &statement.kind,
-            CheckedFeaStatementKind::Block { header, .. } if header.trim() == "tetrahedra"
+            CheckedFeaStatementKind::Block { header, .. }
+                if ELEMENT_BLOCKS.iter().any(|(name, _)| header.trim() == *name)
         ) {
             continue;
         }
         diagnostic(
             declaration,
             statement.span,
-            "mesh currently accepts only its `tetrahedra` request block",
+            "mesh accepts only its `tetrahedra`, `triangles`, or `lines` request block",
             diagnostics,
         );
     }
@@ -218,16 +236,19 @@ fn reject_unsupported_top_level(
 
 fn reject_unsupported_settings(
     declaration: &CheckedFeaDeclaration,
+    block: &str,
     statements: &[CheckedFeaStatement],
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) {
-    let supported = BTreeSet::from([
-        "order",
+    let mut supported = BTreeSet::from([
         "target_size",
         "maximum_deviation",
         "maximum_grading_ratio",
         "deterministic_seed",
     ]);
+    if block == "tetrahedra" {
+        supported.insert("order");
+    }
     let mut seen = BTreeSet::new();
     for statement in statements {
         let CheckedFeaStatementKind::Assignment {
@@ -237,7 +258,7 @@ fn reject_unsupported_settings(
             diagnostic(
                 declaration,
                 statement.span,
-                "tetrahedra settings must be assignments",
+                format!("{block} settings must be assignments"),
                 diagnostics,
             );
             continue;
@@ -263,14 +284,14 @@ fn reject_unsupported_settings(
             diagnostic(
                 declaration,
                 statement.span,
-                format!("unsupported tetrahedra setting `{name}`"),
+                format!("unsupported {block} setting `{name}`"),
                 diagnostics,
             );
         } else if !seen.insert(name.as_str()) {
             diagnostic(
                 declaration,
                 statement.span,
-                format!("duplicate tetrahedra setting `{name}`"),
+                format!("duplicate {block} setting `{name}`"),
                 diagnostics,
             );
         }
@@ -436,7 +457,7 @@ fn missing(declaration: &CheckedFeaDeclaration, name: &str, diagnostics: &mut Ve
     diagnostic(
         declaration,
         declaration.span,
-        format!("tetrahedra mesh requires `{name}`"),
+        format!("mesh element block requires `{name}`"),
         diagnostics,
     );
 }

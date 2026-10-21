@@ -114,6 +114,24 @@ pub struct ProcedureStep {
 pub enum ProcedureSettings {
     None,
     StructuralRandomResponse(StructuralRandomResponseSettings),
+    StructuralNonlinear(StructuralNonlinearSettings),
+}
+
+/// Kinematic description of a structural nonlinear step. Small strain keeps the reference
+/// configuration for strain and equilibrium; large deformation is the total Lagrangian form
+/// (Green-Lagrange strain, second Piola-Kirchhoff stress, consistent material plus geometric
+/// tangent) for large displacement and large rotation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StructuralKinematics {
+    SmallStrain,
+    LargeDeformation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StructuralNonlinearSettings {
+    pub kinematics: StructuralKinematics,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -124,6 +142,14 @@ pub struct StructuralRandomResponseSettings {
 }
 
 impl ProcedureStep {
+    /// Kinematics of a structural nonlinear step; every other step is small strain.
+    pub fn structural_kinematics(&self) -> StructuralKinematics {
+        match self.settings {
+            ProcedureSettings::StructuralNonlinear(settings) => settings.kinematics,
+            _ => StructuralKinematics::SmallStrain,
+        }
+    }
+
     /// Resolves whether an authored model object participates in this step.
     ///
     /// Empty activation inventories retain the concise single-step convention in which authored
@@ -598,6 +624,15 @@ impl ProcedureStep {
                 state("material_history", StateKind::MaterialHistory),
             ],
         )
+    }
+
+    pub fn structural_nonlinear_with(
+        step_id: impl Into<String>,
+        settings: StructuralNonlinearSettings,
+    ) -> Self {
+        let mut step = Self::structural_nonlinear(step_id);
+        step.settings = ProcedureSettings::StructuralNonlinear(settings);
+        step
     }
 
     pub fn fluid_static(step_id: impl Into<String>) -> Self {

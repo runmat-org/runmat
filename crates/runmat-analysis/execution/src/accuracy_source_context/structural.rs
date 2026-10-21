@@ -213,10 +213,15 @@ fn validate_authored(
             request.source_kind,
             request.source_result,
         )?;
-        catalog.validate_for(
-            step,
-            ObservationHistorySourceContext::Structural { source, mesh },
-        )?;
+        // Statistical steps publish through the family-neutral native mesh catalog.
+        let context = match (catalog.source().source(), mesh) {
+            (
+                runmat_analysis_fea::results::observation::ObservationFieldCatalogSource::VolumeMeshRecovery { .. },
+                Some(mesh),
+            ) => ObservationHistorySourceContext::VolumeMesh { mesh },
+            _ => ObservationHistorySourceContext::Structural { source, mesh },
+        };
+        catalog.validate_for(step, context)?;
     }
     Ok(())
 }

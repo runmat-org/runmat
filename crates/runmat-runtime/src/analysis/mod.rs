@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use runmat_analysis_core::{
     validate_model_against_geometry, AnalysisConstraint, AnalysisField, AnalysisInterfaceKind,
-    AnalysisModel, AnalysisProcedure, BoundaryOperator, ContactFriction, CoordinateFrame,
+    AnalysisModel, AnalysisProcedure, BoundaryOperator, CoordinateFrame,
     CoupledPhysicsFamily, ExcitationAction, PhysicsFamily, ProcedureStepId, StateKind, StateOutput,
 };
 use runmat_analysis_fea::execution::{
@@ -3142,9 +3142,11 @@ fn execute_nonlinear_with_options(
         ));
     }
 
-    let contact_options =
-        model_contact_interface_options(model, options.contact_enforcement.as_ref());
-    if options.contact_enforcement.is_some() && contact_options.is_none() {
+    let has_contact = model
+        .interfaces
+        .iter()
+        .any(|interface| matches!(interface.kind, AnalysisInterfaceKind::Contact(_)));
+    if options.contact_enforcement.is_some() && !has_contact {
         return Err(operation_error(
             AnalysisOperation::Nonlinear.name(),
             AnalysisOperation::Nonlinear.version(),
@@ -3159,6 +3161,8 @@ fn execute_nonlinear_with_options(
             BTreeMap::new(),
         ));
     }
+    let contact_options =
+        has_contact.then(|| contact_enforcement(options.contact_enforcement.as_ref()));
     if let Some(contact_options) = contact_options.as_ref() {
         if let Err((detail, metadata)) = validate_contact_interface_options(contact_options) {
             return Err(operation_error(
@@ -3200,7 +3204,7 @@ fn execute_nonlinear_with_options(
             max_line_search_backtracks: options.max_line_search_backtracks,
             line_search_reduction: options.line_search_reduction,
             solver_mesh: solver_mesh.clone(),
-            contact_context: to_fea_contact_interface_context(contact_options),
+            contact_enforcement: contact_options,
         },
     )
     .map_err(|err| map_fea_run_error(AnalysisOperation::Nonlinear, model, &context, err))?;
@@ -3718,54 +3722,22 @@ fn resolve_solver_mesh_artifact(
     Ok(Some(mesh))
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct ResolvedContactOptions {
-    penalty_stiffness_scale: f64,
-    max_penetration_ratio: f64,
-    friction_coefficient: f64,
-}
-
-fn model_contact_interface_options(
-    model: &AnalysisModel,
+/// Penalty enforcement controls applied to every authored contact interface. Interfaces and
+/// their friction law are read by the solver from the analysis model itself.
+fn contact_enforcement(
     enforcement: Option<&ContactEnforcementOptions>,
-) -> Option<ResolvedContactOptions> {
-    let penalty_stiffness_scale = enforcement
-        .map(|value| value.penalty_stiffness_scale)
-        .unwrap_or(1.0);
-    let max_penetration_ratio = enforcement
-        .map(|value| value.max_penetration_ratio)
-        .unwrap_or(0.01);
-    model
-        .interfaces
-        .iter()
-        .filter_map(|interface| match &interface.kind {
-            AnalysisInterfaceKind::Contact(contact) => Some(ResolvedContactOptions {
-                penalty_stiffness_scale,
-                max_penetration_ratio,
-                friction_coefficient: match contact.friction {
-                    ContactFriction::Frictionless => 0.0,
-                    ContactFriction::Coulomb { coefficient } => coefficient.ratio,
-                },
-            }),
-            AnalysisInterfaceKind::FluidStructure(_)
-            | AnalysisInterfaceKind::ConjugateHeatTransfer(_) => None,
-        })
-        .next()
-}
-
-fn to_fea_contact_interface_context(
-    options: Option<ResolvedContactOptions>,
-) -> Option<runmat_analysis_fea::FeaContactInterfaceContext> {
-    options.map(|contact| runmat_analysis_fea::FeaContactInterfaceContext {
-        enabled: true,
-        penalty_stiffness_scale: contact.penalty_stiffness_scale,
-        max_penetration_ratio: contact.max_penetration_ratio,
-        friction_coefficient: contact.friction_coefficient,
-    })
+) -> runmat_analysis_fea::FeaContactEnforcement {
+    let defaults = runmat_analysis_fea::FeaContactEnforcement::default();
+    runmat_analysis_fea::FeaContactEnforcement {
+        penalty_stiffness_scale: enforcement
+            .map_or(defaults.penalty_stiffness_scale, |value| value.penalty_stiffness_scale),
+        max_penetration_ratio: enforcement
+            .map_or(defaults.max_penetration_ratio, |value| value.max_penetration_ratio),
+    }
 }
 
 fn validate_contact_interface_options(
-    options: &ResolvedContactOptions,
+    options: &runmat_analysis_fea::FeaContactEnforcement,
 ) -> Result<(), (String, BTreeMap<String, String>)> {
     if !options.penalty_stiffness_scale.is_finite() || options.penalty_stiffness_scale <= 0.0 {
         return Err((
@@ -3783,15 +3755,6 @@ fn validate_contact_interface_options(
             BTreeMap::from([(
                 "max_penetration_ratio".to_string(),
                 options.max_penetration_ratio.to_string(),
-            )]),
-        ));
-    }
-    if !options.friction_coefficient.is_finite() || options.friction_coefficient < 0.0 {
-        return Err((
-            "contact interface model requires finite non-negative friction_coefficient".to_string(),
-            BTreeMap::from([(
-                "friction_coefficient".to_string(),
-                options.friction_coefficient.to_string(),
             )]),
         ));
     }

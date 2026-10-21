@@ -9,7 +9,8 @@ use crate::{
     topology::{CanonicalSolidIntegrationPlan, CanonicalSolidIntegrationRule},
 };
 pub use block::{
-    build_nonlinear_solid_block_resource_plan, nonlinear_solid_block_payload_bytes_upper_bound,
+    build_nonlinear_solid_block_resource_plan, nonlinear_solid_block_output_construction_bytes,
+    nonlinear_solid_block_payload_bytes_upper_bound,
 };
 
 pub(crate) fn build_nonlinear_resource_plan_with_output_limit(

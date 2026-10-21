@@ -2,16 +2,27 @@
 //! Inventory values are for profiling only; they never enter geometry or physics.
 use super::*;
 use crate::assembly::dofs::{StructuralDofAddress, StructuralDofLayout, StructuralNodeDofSet};
-use runmat_canonical_codec::{profile_serialized, CanonicalLimits};
+use runmat_canonical_codec::{
+    profile_canonical_encoding, CanonicalLimits, CANONICAL_MATERIALIZATION_FIXED_BYTES_PER_CONTRACT,
+};
 
-fn incremental<T: Serialize>(value: &T) -> Result<u64, NonlinearSolidError> {
-    profile_serialized(
+/// The authority is encoded directly (`encode_contract`), never projected into a value tree.
+/// Its construction workspace is the direct encoder's own profile: the reserved output, held
+/// out-of-order buffers and sorted-map metadata. Each component charges its share of that
+/// workspace; the enclosing contract charges the shared envelope once.
+fn encoding_workspace<T: Serialize>(value: &T) -> Result<u64, NonlinearSolidError> {
+    Ok(profile_canonical_encoding(
         value,
         CanonicalLimits::new(512 * 1024 * 1024, 8_000_000, 4096, 64),
     )
     .map_err(|e| invalid(&e.to_string()))?
-    .materialization_bytes_without_envelope()
-    .ok_or_else(overflow)
+    .resident_workspace_bytes_estimate)
+}
+
+fn incremental<T: Serialize>(value: &T) -> Result<u64, NonlinearSolidError> {
+    encoding_workspace(value)?
+        .checked_sub(CANONICAL_MATERIALIZATION_FIXED_BYTES_PER_CONTRACT)
+        .ok_or_else(overflow)
 }
 
 pub(super) fn construction_bytes(
@@ -27,12 +38,7 @@ pub(super) fn construction_bytes(
         layout: &empty_layout,
         elements: Vec::new(),
     };
-    let outer = profile_serialized(
-        &enclosing,
-        CanonicalLimits::new(512 * 1024 * 1024, 8_000_000, 4096, 64),
-    )
-    .map_err(|e| invalid(&e.to_string()))?
-    .materialization_resident_bytes_estimate;
+    let outer = encoding_workspace(&enclosing)?;
     // The admitted uncoupled solid basis has three translations per node.
     // Profile the actual row/node schema without allocating a layout inventory.
     let node = incremental(&StructuralNodeDofSet::translational())?;

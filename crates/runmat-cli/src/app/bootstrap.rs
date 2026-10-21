@@ -336,7 +336,8 @@ fn configure_analysis_from_config(config: &RunMatRuntimeConfig) -> Result<()> {
             .study_artifact_root
             .clone()
             .or_else(|| Some(artifact_root.join("studies"))),
-        publication_staging_bytes: analysis::FeaRuntimeConfig::default().publication_staging_bytes,
+        // Sized from this host's admitted memory (the shared machine-capacity authority).
+        publication_staging_bytes: runmat_execution_runner_native::publication_staging_bytes(),
     })
     .map_err(|err| anyhow::anyhow!("Failed to configure FEA runtime: {err}"))?;
     Ok(())

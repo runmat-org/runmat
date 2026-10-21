@@ -14,6 +14,7 @@ pub(super) fn request() -> MeshingRequest {
     MeshingRequest {
         schema_version: MESHING_REQUEST_SCHEMA_VERSION,
         element_order: ElementOrder::Tet4,
+        dimension: crate::MeshDimension::Solid,
         deterministic_seed: 17,
         algorithms: AlgorithmVersionSet {
             geometry: "geometry/v2".into(),

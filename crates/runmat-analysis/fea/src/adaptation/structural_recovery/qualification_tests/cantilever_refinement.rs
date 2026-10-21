@@ -1,11 +1,37 @@
 //! Original cantilever refinement gates; diagnostic output keeps their verdicts separate.
 use super::*;
 
+/// Williams' clamped-free wedge exponent for a 90 degree edge in plane strain at nu = 0.3:
+/// the smallest root of the clamped-free characteristic determinant (displacement field
+/// `r^lambda`). The clamped root face of the unit cube meets its free faces along such edges.
+const CLAMPED_FREE_EDGE_EXPONENT: f64 = 0.71117;
+
+/// Observed convergence order of a displacement functional on nonuniform refinement, from
+/// `(u3 - u2) / (u2 - u1) = (h2^p - h3^p) / (h1^p - h2^p)` with `h = 1 / divisions`.
+fn observed_order(divisions: [f64; 3], values: [f64; 3]) -> f64 {
+    let ratio = (values[2] - values[1]) / (values[1] - values[0]);
+    let model = |order: f64| {
+        let h = divisions.map(|division| division.recip().powf(order));
+        (h[1] - h[2]) / (h[0] - h[1])
+    };
+    let (mut low, mut high) = (0.05, 8.0);
+    for _ in 0..200 {
+        let middle = 0.5 * (low + high);
+        // The model ratio decreases monotonically as the order increases.
+        if model(middle) > ratio {
+            low = middle;
+        } else {
+            high = middle;
+        }
+    }
+    0.5 * (low + high)
+}
+
 pub(super) fn qualify() {
     let model = fixture_model(FixtureId::CantileverLinearStatic);
     let mut errors = Vec::new();
     let mut peak_displacements = Vec::new();
-    for divisions in [1, 2, 3] {
+    for divisions in [1, 2, 3, 4] {
         let mesh = structured_cantilever(divisions, ElementOrder::Tet10);
         let result = crate::run_linear_static_with_options(
             &model,
@@ -64,7 +90,22 @@ pub(super) fn qualify() {
         errors.windows(2).all(|pair| pair[1] < 0.9 * pair[0]),
         "{errors:?}"
     );
-    let coarse_change = (peak_displacements[1] - peak_displacements[0]).abs();
-    let fine_change = (peak_displacements[2] - peak_displacements[1]).abs();
-    assert!(fine_change < 0.25 * coarse_change, "{peak_displacements:?}");
+    // A point functional converges like the energy error, h^(2 lambda), when the solution has an
+    // r^lambda edge singularity; uniform refinement cannot exceed that rate whatever the element
+    // order. Both consecutive triples must be monotone and converge at no less than 90% of it.
+    let floor = 0.9 * 2.0 * CLAMPED_FREE_EDGE_EXPONENT;
+    let orders = [0, 1].map(|start| {
+        let values = [0, 1, 2].map(|offset| peak_displacements[start + offset]);
+        assert!(
+            (values[2] - values[1]).abs() < (values[1] - values[0]).abs()
+                && (values[2] - values[1]) * (values[1] - values[0]) > 0.0,
+            "{peak_displacements:?}"
+        );
+        observed_order([0, 1, 2].map(|offset| (start + offset + 1) as f64), values)
+    });
+    eprintln!("original cantilever observed displacement orders={orders:?} floor={floor}");
+    assert!(
+        orders.iter().all(|order| *order >= floor),
+        "orders={orders:?} floor={floor} peaks={peak_displacements:?}"
+    );
 }

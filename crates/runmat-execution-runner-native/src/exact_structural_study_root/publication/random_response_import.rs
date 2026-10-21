@@ -205,6 +205,16 @@ pub(super) fn import_random_response_result<Source: CacheImport>(
         response_workload.procedure_step().map_err(protocol)?,
     )
     .map_err(protocol)?;
+    if !response_workload
+        .procedure_step()
+        .map_err(protocol)?
+        .observations
+        .is_empty()
+    {
+        return Err(protocol(
+            "remote random-response publication does not yet package authored observations",
+        ));
+    }
     let accuracy_request = runmat_analysis_fea::execution::AccuracyEvaluationRequest::new(
         producer,
         runmat_analysis_fea::execution::AccuracySourceKind::StructuralRandomResponse,
@@ -316,6 +326,9 @@ pub(super) fn import_random_response_result<Source: CacheImport>(
                 response_resource_usage,
                 response_publication,
                 statistics_state,
+                // Remote packaging does not carry statistical observation catalogs; steps with
+                // authored outputs are rejected below before this result is built.
+                response_observations: None,
             },
         )),
     )

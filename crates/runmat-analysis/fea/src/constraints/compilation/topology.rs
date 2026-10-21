@@ -143,7 +143,10 @@ impl<'a> CompilationInputs<'a> {
             .as_ref()
             .filter(|value| !value.elements.is_empty());
         match (mesh, structural) {
-            (Some(mesh), Some(structural)) if !mesh.topology.volume_elements.is_empty() => {
+            (Some(mesh), Some(structural))
+                if !mesh.topology.volume_elements.is_empty()
+                    || !mesh.resolved_request.dimension.is_solid() =>
+            {
                 Ok(Self::Mixed { mesh, structural })
             }
             (Some(mesh), _) => Ok(Self::Solid(mesh)),

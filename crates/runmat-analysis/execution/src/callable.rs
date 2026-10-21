@@ -544,12 +544,17 @@ fn validate_static_contract(
             "seeded-random generators require a task-scoped deterministic RNG context".into(),
         ));
     }
-    if !function.effects.is_side_effect_free() {
+    if !function.effects.is_deterministic_value_function() {
         let forbidden = function
             .effects
             .0
             .iter()
-            .filter(|effect| !effect.is_side_effect_free())
+            .filter(|effect| {
+                !matches!(
+                    effect,
+                    runmat_types::EffectKind::MayThrow | runmat_types::EffectKind::MaySuspend
+                )
+            })
             .copied()
             .collect::<Vec<_>>();
         return Err(AnalysisBridgeError::Invalid(format!(

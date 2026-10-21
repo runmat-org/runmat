@@ -27,7 +27,10 @@ impl StructuralRecoveredFieldTopology {
         let structural = model.structural.as_ref();
         let has_explicit = structural.is_some_and(|structural| !structural.elements.is_empty());
         let (identity, nodes) = match (mesh, structural.filter(|_| has_explicit)) {
-            (Some(mesh), Some(structural)) if !mesh.topology.volume_elements.is_empty() => {
+            (Some(mesh), Some(structural))
+                if !mesh.topology.volume_elements.is_empty()
+                    || !mesh.resolved_request.dimension.is_solid() =>
+            {
                 let topology = CanonicalStructuralNodeSpace::derive(mesh, structural)
                     .map_err(|error| RecoveredFieldError::InvalidArtifact(error.to_string()))?;
                 (topology.identity, topology.nodes.len())

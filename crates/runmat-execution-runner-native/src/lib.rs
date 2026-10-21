@@ -5,6 +5,7 @@ mod test_support;
 
 mod accelerator_placement;
 mod machine_capacity;
+pub use machine_capacity::publication_staging_bytes;
 pub use accelerator_placement::active_provider_resource;
 mod analysis_acoustic;
 mod analysis_acoustic_response;
@@ -42,6 +43,7 @@ mod analysis_prestressed_modal_frequency;
 mod analysis_progress;
 mod analysis_random_response;
 mod analysis_response_spectrum;
+mod analysis_statistical_observations;
 mod analysis_sequence;
 mod analysis_task;
 mod analysis_task_pool;

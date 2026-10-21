@@ -1512,14 +1512,9 @@ fn nonlinear_accepted_states_preserve_complete_constraint_kinematics() {
             },
             ComputeBackend::Cpu,
         );
-        if lifting != 0.0 {
-            assert!(result
-                .unwrap_err()
-                .to_string()
-                .contains("nonzero initial lifting"));
-            continue;
-        }
-        let result = result.expect("homogeneous affine constraints admit actual solid equilibrium");
+        // Prescribed (affine) supports scale with the load factor like the applied loads, so a
+        // nonzero lifting is reached at load factor one through admissible increments.
+        let result = result.expect("affine constraints admit actual solid equilibrium");
         assert_eq!(result.displacement_snapshots.len(), 2);
         assert!(result
             .displacement_snapshots
@@ -1527,7 +1522,11 @@ fn nonlinear_accepted_states_preserve_complete_constraint_kinematics() {
             .unwrap()
             .iter()
             .any(|value| value.abs() > 0.0));
-        for state in &result.displacement_snapshots {
+        for (state, load_factor) in result
+            .displacement_snapshots
+            .iter()
+            .zip(&result.load_factors)
+        {
             for row in 0..constraints.row_count() {
                 let start = constraints.row_offsets[row];
                 let end = constraints.row_offsets[row + 1];
@@ -1536,10 +1535,10 @@ fn nonlinear_accepted_states_preserve_complete_constraint_kinematics() {
                     .zip(&constraints.coefficients[start..end])
                     .map(|(column, coefficient)| coefficient * state[*column])
                     .sum::<f64>();
+                let expected = load_factor * constraints.right_hand_side[row];
                 assert!(
-                    (value - constraints.right_hand_side[row]).abs() <= 1.0e-8,
-                    "row {row} expected={} actual={value}",
-                    constraints.right_hand_side[row]
+                    (value - expected).abs() <= 1.0e-8,
+                    "row {row} expected={expected} actual={value}"
                 );
             }
         }

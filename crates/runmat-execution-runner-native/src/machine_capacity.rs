@@ -25,6 +25,13 @@ pub(crate) fn memory_bytes() -> io::Result<u64> {
     }
 }
 
+/// Default host budget for staging one study publication: a quarter of the memory this host
+/// admits for work, at least 1 GiB. An explicitly configured budget takes precedence.
+pub fn publication_staging_bytes() -> u64 {
+    const MINIMUM: u64 = 1024 * 1024 * 1024;
+    memory_bytes().map_or(MINIMUM, |bytes| (bytes / 4).max(MINIMUM))
+}
+
 #[cfg(target_os = "macos")]
 fn available_memory() -> io::Result<u64> {
     macos::available_memory()

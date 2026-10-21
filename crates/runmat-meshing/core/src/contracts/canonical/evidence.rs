@@ -322,7 +322,7 @@ impl MeshingEvidence {
             ));
         }
         if self.resources.generated_nodes != artifact.topology.nodes.len() as u64
-            || self.resources.generated_elements != artifact.topology.volume_elements.len() as u64
+            || self.resources.generated_elements != artifact.generated_element_count()
             || self.resources.artifact_bytes != artifact.canonical_encode()?.len() as u64
         {
             return Err(MeshingContractError::invalid(

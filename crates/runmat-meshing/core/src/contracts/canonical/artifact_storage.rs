@@ -126,6 +126,7 @@ impl<F: FnMut() -> Result<(), MeshingContractError>> Storage<'_, F> {
         let super::MeshingRequest {
             schema_version: _,
             element_order: _,
+            dimension: _,
             deterministic_seed: _,
             algorithms,
             tolerance: _,

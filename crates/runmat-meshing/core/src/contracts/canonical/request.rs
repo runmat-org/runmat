@@ -14,6 +14,27 @@ pub enum ElementOrder {
     Tet10,
 }
 
+/// Topological dimension of the solver elements a request produces.
+///
+/// `Solid` meshes closed solids with tetrahedra (and their boundary faces and edges).
+/// `Surface` meshes sheet faces with linear triangles and their edges with linear segments,
+/// the discretization of MITC3 shells and Euler-Bernoulli beams. `Curve` discretizes only the
+/// exact edges, for beam frames. Surface and curve meshes are linear (`ElementOrder::Tet4`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MeshDimension {
+    #[default]
+    Solid,
+    Surface,
+    Curve,
+}
+
+impl MeshDimension {
+    pub const fn is_solid(&self) -> bool {
+        matches!(self, Self::Solid)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AlgorithmVersionSet {
@@ -234,6 +255,10 @@ impl MeshingResourceBudget {
 pub struct MeshingRequest {
     pub schema_version: u16,
     pub element_order: ElementOrder,
+    /// Omitted from the canonical encoding for solid meshes so solid request identities are
+    /// unchanged by the surface and curve dimensions.
+    #[serde(default, skip_serializing_if = "MeshDimension::is_solid")]
+    pub dimension: MeshDimension,
     pub deterministic_seed: u64,
     pub algorithms: AlgorithmVersionSet,
     pub tolerance: GeometryTolerancePolicy,
@@ -249,6 +274,12 @@ impl MeshingRequest {
             return Err(MeshingContractError::invalid(
                 "meshing request schema version",
                 format!("expected {MESHING_REQUEST_SCHEMA_VERSION}"),
+            ));
+        }
+        if !self.dimension.is_solid() && self.element_order != ElementOrder::Tet4 {
+            return Err(MeshingContractError::invalid(
+                "meshing request dimension",
+                "surface and curve meshes use linear elements",
             ));
         }
         self.algorithms.validate()?;

@@ -121,7 +121,7 @@ fn invalid_and_overflowing_caps_fail_before_allocation() {
 
 #[test]
 fn point_schema_composition_covers_actual_full_basis_authority_for_every_rule() {
-    use runmat_canonical_codec::{profile_serialized, CanonicalLimits};
+    use runmat_canonical_codec::CanonicalLimits;
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
         let (model, mesh, initial) = super::super::tests::fixture(order, true);
         for rule in [
@@ -147,7 +147,8 @@ fn point_schema_composition_covers_actual_full_basis_authority_for_every_rule() 
                     .map(|e| (e.identity, e.dofs.as_slice(), e.points.as_slice()))
                     .collect(),
             };
-            let actual = profile_serialized(
+            // The authority is encoded directly; its witness is the direct encoder's workspace.
+            let actual = runmat_canonical_codec::profile_canonical_encoding(
                 &authority,
                 CanonicalLimits::new(512 * 1024 * 1024, 8_000_000, 4096, 64),
             )
@@ -162,11 +163,10 @@ fn point_schema_composition_covers_actual_full_basis_authority_for_every_rule() 
             )
             .unwrap();
             assert!(
-                demand.authority_construction_bytes
-                    >= actual.materialization_resident_bytes_estimate,
+                demand.authority_construction_bytes >= actual.resident_workspace_bytes_estimate,
                 "{order:?}/{rule:?}: {} < {}",
                 demand.authority_construction_bytes,
-                actual.materialization_resident_bytes_estimate
+                actual.resident_workspace_bytes_estimate
             );
             assert!(demand.recovery_peak_bytes < demand.nonlinear_peak_bytes);
             // Extraction preserved the exact original authority encoding and identity.

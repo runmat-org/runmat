@@ -56,6 +56,7 @@ enum StudyPhase {
     AwaitingDirections(BTreeSet<Digest>),
     ReadyForAssembly,
     AwaitingAssembly(Digest),
+    Observing,
     ReadyForAccuracy,
     AwaitingAccuracy(Digest),
     ReadyForPublication,
@@ -82,6 +83,7 @@ pub struct StructuralModalResponseSpectrumStudyCoordinator {
     resource_usage: Option<PreparedResourceUsage>,
     publication: Option<ImportedPublishedResult>,
     envelope_state: Option<ImportedSemanticState>,
+    observations: Option<crate::StatisticalStudyObservations>,
     phase: StudyPhase,
 }
 
@@ -147,6 +149,7 @@ impl StructuralModalResponseSpectrumStudyCoordinator {
             resource_usage: None,
             publication: None,
             envelope_state: None,
+            observations: None,
             phase: StudyPhase::ReadyForModal,
         })
     }
@@ -400,6 +403,54 @@ impl StructuralModalResponseSpectrumStudyCoordinator {
             })
             .cloned()
             .collect();
+        // Authored outputs observe the step's combined-peak fields before accuracy.
+        let workload = self
+            .response_workload
+            .as_ref()
+            .ok_or_else(|| invalid("bound response-spectrum workload is absent"))?;
+        let step = workload.procedure_step()?.clone();
+        if step.observations.is_empty() {
+            self.phase = StudyPhase::ReadyForAccuracy;
+        } else {
+            let result = self
+                .result
+                .as_ref()
+                .ok_or_else(|| invalid("completed response-spectrum result is absent"))?;
+            self.observations = Some(crate::StatisticalStudyObservations::new(
+                crate::StatisticalObservationSource {
+                    assembly_host: task.host.clone(),
+                    assembly_inputs: self.assembly_source_context_inputs.clone(),
+                    source_result: result.result_objects.clone(),
+                    source_fields: Some(result.field_recovery_objects.clone()),
+                    sequence: SequenceIdentity::from_solver_contract(&workload.model().sequence)?,
+                    step,
+                    mesh: self.preparation.mesh.clone(),
+                    program_revision: self.preparation.program_revision.clone(),
+                    chunk_bytes: self.preparation.chunk_bytes,
+                    inventory_limits: self.preparation.inventory_limits,
+                },
+            )?);
+            self.phase = StudyPhase::Observing;
+        }
+        Ok(())
+    }
+
+    /// The authored observations awaiting execution after assembly, if the step has any.
+    pub fn observations_mut(&mut self) -> Option<&mut crate::StatisticalStudyObservations> {
+        if self.phase == StudyPhase::Observing {
+            self.observations.as_mut()
+        } else {
+            None
+        }
+    }
+
+    /// Accept completed observations; accuracy and publication then bind their catalog.
+    pub fn finish_observations(&mut self) -> AnalysisBridgeResult<()> {
+        if self.phase != StudyPhase::Observing
+            || !self.observations.as_ref().is_some_and(|o| o.is_complete())
+        {
+            return Err(invalid("response-spectrum observations are not complete"));
+        }
         self.phase = StudyPhase::ReadyForAccuracy;
         Ok(())
     }
@@ -427,7 +478,7 @@ impl StructuralModalResponseSpectrumStudyCoordinator {
                 .clone(),
             source_kind: AccuracySourceKind::StructuralModalResponseSpectrum,
             source_numerical_receipt: result.receipt_objects.clone(),
-            source_observations: None,
+            source_observations: self.observations.as_ref().and_then(|o| o.catalog()),
             sequence: SequenceIdentity::from_solver_contract(&workload.model().sequence)?,
             step: workload.procedure_step()?.clone(),
             program_revision: self.preparation.program_revision.clone(),
@@ -478,7 +529,7 @@ impl StructuralModalResponseSpectrumStudyCoordinator {
                 .objects
                 .clone(),
             source_resource_usage: resource_usage.objects.clone(),
-            source_observations: None,
+            source_observations: self.observations.as_ref().and_then(|o| o.catalog()),
             program_revision: self.preparation.program_revision.clone(),
             chunk_bytes: self.preparation.chunk_bytes,
             inventory_limits: self.preparation.inventory_limits,
@@ -594,6 +645,13 @@ impl StructuralModalResponseSpectrumStudyCoordinator {
 
     pub fn envelope_state(&self) -> Option<&ImportedSemanticState> {
         self.envelope_state.as_ref()
+    }
+
+    /// The authored-observation catalog accuracy and publication bound, if the step has outputs.
+    pub fn observation_catalog(
+        &self,
+    ) -> Option<runmat_analysis_fea::results::observation::ObservationPublicationCatalog> {
+        self.observations.as_ref().and_then(|o| o.catalog())
     }
 
     pub fn accuracy(&self) -> Option<&ImportedAccuracy> {

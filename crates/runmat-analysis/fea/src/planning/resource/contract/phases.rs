@@ -18,6 +18,8 @@ pub enum FeaResourcePhase {
     Magnetostatic(AnalysisWorkloadIdentity),
     MaxwellHarmonic(AnalysisWorkloadIdentity),
     MagneticFieldRecovery(FieldRecoveryRequestIdentity),
+    /// Random-response or response-spectrum fields recovered for authored observations.
+    StatisticalFieldRecovery(FieldRecoveryRequestIdentity),
     StructuralFieldRecovery(FieldRecoveryRequestIdentity),
     NonlinearFieldRecovery(FieldRecoveryRequestIdentity),
     MaxwellFieldRecovery(FieldRecoveryRequestIdentity),
@@ -64,6 +66,8 @@ pub enum FeaResourceDemand {
     Magnetostatic(MagnetostaticResourceDemand),
     MaxwellHarmonic(MaxwellHarmonicResourceDemand),
     MagneticFieldRecovery(MagneticFieldRecoveryResourceDemand),
+    /// Host-only native-copy recovery with the same accounting as magnetic native fields.
+    StatisticalFieldRecovery(MagneticFieldRecoveryResourceDemand),
     StructuralFieldRecovery(StructuralFieldRecoveryResourceDemand),
     NonlinearFieldRecovery(NonlinearFieldRecoveryResourceDemand),
     MaxwellFieldRecovery(MaxwellFieldRecoveryResourceDemand),

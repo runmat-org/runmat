@@ -309,10 +309,13 @@ FeatureExecution execute_instances(rust::Slice<const double> matrices,
       throw std::runtime_error("OCCT instance transform did not complete");
     }
     compound_builder.Add(compound, builder.Shape());
+    // Each placed copy is a new entity generated from the template: it keeps lineage to the
+    // template and is introduced by this feature, so `boundary_introduced_by` an instance
+    // selects the copies (and their images through later Booleans).
     for (FeatureHistorySource& source : execution.history) {
       append_relations(source,
                        builder.Modified(source.source),
-                       OcctFeatureRelationKind::Modified);
+                       OcctFeatureRelationKind::Generated);
     }
   }
   execution.shape = compound;

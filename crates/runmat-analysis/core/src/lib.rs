@@ -246,7 +246,8 @@ pub use study::sequence::{
     ReferenceStatePolicy, RestartPolicy, SequenceBranch, SequenceBranchId, SequenceDependency,
     SequenceDependencyReason, StateCompleteness, StateId, StateInput, StateKind, StateOutput,
     StatePersistence, StateSource, StateTransition, StateTransitionMethod, StateUse,
-    StepObjectActivation, StepObjectRef, StructuralRandomResponseSettings,
+    StepObjectActivation, StepObjectRef, StructuralKinematics, StructuralNonlinearSettings,
+    StructuralRandomResponseSettings,
     TopologyTransitionPolicy, TransitionId, ValidatedAnalysisSequence,
 };
 pub use study::{

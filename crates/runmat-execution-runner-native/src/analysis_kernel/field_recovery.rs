@@ -4,6 +4,7 @@ mod fluid;
 mod magnetic;
 mod maxwell;
 mod nonlinear;
+mod statistical;
 mod structural;
 
 pub(super) fn execute_field_recovery(
@@ -43,6 +44,9 @@ pub(super) fn execute_field_recovery(
         .any(|input| input.manifest.kind == AnalysisNumericalObjectKind::MagnetostaticWorkload)
     {
         return magnetic::execute(invocation);
+    }
+    if statistical::is_statistical(&invocation) {
+        return statistical::execute(invocation);
     }
     if invocation.inputs.iter().any(|input| {
         input.manifest.kind == AnalysisNumericalObjectKind::StructuralFrequencyWorkload

@@ -39,7 +39,7 @@ fn coupled_trial_requested_payload_covers_observed_heap_with_borrowed_sources_ex
             .unwrap();
         let (trial, retained, peak) = crate::topology::measure_test_allocations(|| {
             problem
-                .evaluate_trial(&u, &initial.constitutive, initial.contact.as_ref())
+                .evaluate_trial(&u, &initial.constitutive, initial.contact.as_ref(), 1.0)
                 .unwrap()
         });
         let bound = material.evaluation_bytes + material.tangent_contribution_bytes + contact_bytes;

@@ -17,6 +17,7 @@ fn request(order: ElementOrder) -> MeshingRequest {
     MeshingRequest {
         schema_version: MESHING_REQUEST_SCHEMA_VERSION,
         element_order: order,
+        dimension: runmat_meshing_core::MeshDimension::Solid,
         deterministic_seed: 17,
         algorithms: AlgorithmVersionSet {
             geometry: "geometry/current".into(),
