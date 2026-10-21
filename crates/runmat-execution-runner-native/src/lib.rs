@@ -5,6 +5,7 @@ mod test_support;
 
 mod accelerator_placement;
 mod machine_capacity;
+pub use machine_capacity::publication_staging_bytes;
 pub use accelerator_placement::active_provider_resource;
 mod analysis_acoustic;
 mod analysis_electrical;
