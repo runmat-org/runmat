@@ -16,7 +16,10 @@ pub(super) fn compile(
     // Reject external/generated/time-domain input before shared realization.
     // Accepted complex tables are evaluated once at the exact authored Hz value.
     for action in &model.excitations {
-        if matches!(action, ExcitationAction::ElectricCurrent(_)) {
+        if matches!(
+            action,
+            ExcitationAction::ElectricCurrent(_) | ExcitationAction::TerminalVoltage(_)
+        ) {
             // Terminal currents drive solid conductors; see `drive`.
             continue;
         }
@@ -51,7 +54,10 @@ pub(super) fn compile(
         realize_step_excitations(model, step, ExcitationSamplePoint::frequency(frequency_hz))
             .map_err(invalid)?;
     for load in loads.iter() {
-        if matches!(load.kind, RealizedExcitationKind::ElectricCurrent(_)) {
+        if matches!(
+            load.kind,
+            RealizedExcitationKind::ElectricCurrent(_) | RealizedExcitationKind::TerminalVoltage(_)
+        ) {
             continue;
         }
         let RealizedExcitationKind::MagneticVolumeCurrentDensity(value) = load.kind else {

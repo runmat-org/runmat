@@ -201,6 +201,7 @@ pub(crate) fn validate_canonical_input<'a>(
                 action,
                 runmat_analysis_core::ExcitationAction::ElectricChargeDensity(_)
                     | runmat_analysis_core::ExcitationAction::ElectricCurrent(_)
+                    | runmat_analysis_core::ExcitationAction::TerminalVoltage(_)
             )
         })
     {

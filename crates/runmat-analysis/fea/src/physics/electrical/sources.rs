@@ -84,6 +84,10 @@ pub(crate) fn assemble(
     };
     let source_kind = kind(model);
     for load in loads.iter() {
+        // Terminal voltages are essential conditions, applied with the constraints.
+        if matches!(load.kind, RealizedExcitationKind::TerminalVoltage(_)) {
+            continue;
+        }
         if source_kind == CanonicalElectricalSource::BoundaryCurrent {
             let RealizedExcitationKind::ElectricCurrent(value) = load.kind else {
                 return Err(ElectricalStaticError::Unsupported(

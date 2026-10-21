@@ -418,3 +418,62 @@ fn missing_anchors_conflicts_unsupported_intent_and_invalid_material_fail_closed
     bad.material_assignments.clear();
     assert!(solve_canonical_static(&bad, &mesh, "potential", 1e-8).is_err());
 }
+
+#[test]
+fn terminal_voltage_load_holds_its_terminal_like_a_prescribed_potential() {
+    for equation in [
+        StaticElectricalEquation::Electrostatics,
+        StaticElectricalEquation::SteadyConduction,
+    ] {
+        let mesh = mesh(ElementOrder::Tet4, 2);
+        let mut constrained = model(equation);
+        prescribe(&mut constrained, "left".into(), RegionTarget::boundary("slab_left"), 0.0);
+        let mut driven = constrained.clone();
+        prescribe(&mut constrained, "right".into(), RegionTarget::boundary("slab_right"), 2.5);
+        driven.signals.push(PhysicalSignal::ElectricPotential(Signal {
+            signal_id: SignalId("supply".into()),
+            shape: SignalShape::Scalar,
+            frame: None,
+            representation: SignalRepresentation::Constant(SignalValue::Scalar(
+                ElectricPotential::new(2.5),
+            )),
+            precision: SignalPrecision::Real64,
+            provenance: SignalProvenance::Authored,
+            evidence: SignalApproximationEvidence {
+                max_absolute_error: Some(0.0),
+                max_relative_error: Some(0.0),
+                derivative_max_absolute_error: None,
+                sample_count: 1,
+            },
+        }));
+        driven
+            .excitations
+            .push(ExcitationAction::TerminalVoltage(AnalysisExcitation {
+                excitation_id: ExcitationId("supply".into()),
+                target: ExcitationTarget::Region(RegionTarget::boundary("slab_right")),
+                frame: CoordinateFrame::Global,
+                direction: None,
+                distribution: ExcitationDistribution::PreserveResultant,
+                kinematics: ExcitationKinematics::FixedFrame,
+                signal_id: SignalId("supply".into()),
+                active_step_ids: vec!["potential".into()],
+                combination_group: None,
+                projection: ProjectionRequirement {
+                    preserve_resultant: true,
+                    preserve_moment: false,
+                    relative_tolerance: 1e-12,
+                },
+            }));
+        driven.excitation_cases.push(ExcitationCase {
+            case_id: ExcitationCaseId("supply".into()),
+            action_ids: vec![ExcitationId("supply".into())],
+            activation: ExcitationCaseActivation::Always,
+        });
+        let expected = solve(&constrained, &mesh);
+        let actual = solve(&driven, &mesh);
+        for (a, b) in actual.potential_v.iter().zip(&expected.potential_v) {
+            assert!((a - b).abs() <= 1e-12 * 2.5, "{a} vs {b}");
+        }
+        assert_relative(actual.terminal_work, expected.terminal_work, 1e-10);
+    }
+}

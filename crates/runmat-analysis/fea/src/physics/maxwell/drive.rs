@@ -274,16 +274,22 @@ fn terminals(context: &DriveContext<'_>) -> Result<Vec<Terminal>, MaxwellError> 
     )
     .map_err(invalid)?;
     for load in loads.iter() {
-        let RealizedExcitationKind::ElectricCurrent(value) = load.kind else {
-            continue;
+        let kind = match load.kind {
+            RealizedExcitationKind::ElectricCurrent(value) => {
+                TerminalKind::Current(ComplexPhasor::new(value.real, value.imaginary))
+            }
+            RealizedExcitationKind::TerminalVoltage(value) => {
+                TerminalKind::Potential(ComplexPhasor::new(value.real, value.imaginary))
+            }
+            _ => continue,
         };
         let RealizedExcitationTarget::Region(target) = &load.target else {
-            return Err(invalid("terminal current requires a face region"));
+            return Err(invalid("a terminal current or voltage requires a face region"));
         };
         terminals.push(Terminal {
             label: load.excitation_id.0.clone(),
             faces: faces_for(context.projection, target, &load.excitation_id.0)?,
-            kind: TerminalKind::Current(ComplexPhasor::new(value.real, value.imaginary)),
+            kind,
         });
     }
     Ok(terminals)

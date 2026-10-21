@@ -85,7 +85,9 @@ pub fn validate_canonical_input<'a>(
     if model.excitations.iter().any(|action| {
         !matches!(
             action,
-            ExcitationAction::MagneticVolumeCurrentDensity(_) | ExcitationAction::ElectricCurrent(_)
+            ExcitationAction::MagneticVolumeCurrentDensity(_)
+                | ExcitationAction::ElectricCurrent(_)
+                | ExcitationAction::TerminalVoltage(_)
         )
     }) {
         return Err(MaxwellError::Unsupported(
