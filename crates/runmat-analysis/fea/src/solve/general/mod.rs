@@ -1,13 +1,11 @@
 //! Admitted real GENERAL solve. Local operator nonsingularity is neither
 //! coercivity nor uniqueness/stability of the surrounding nonlinear problem.
-use super::{
-    krylov::{restarted_gmres, right_ilu::SparseRightIluError, GmresPolicy},
-    uniqueness::{
-        prepare_sparse_uniqueness, SparseUniquenessError, SparseUniquenessPolicy,
-        SparseUniquenessUncertainty, SparseUniquenessVerdict,
-    },
-};
-use crate::algebra::{spmv, RealSparseMatrix, RightInverseCertificate};
+//!
+//! One sparse LU factorization (shared sparse layer) is both the nonsingularity certificate
+//! (`solve::certificate`) and the direct solver; the solution is accepted only after the
+//! residual of the original operator meets the tolerance.
+use super::certificate::{certify_nonsingular, CertificateError, NonsingularityCertificate};
+use crate::algebra::{spmv, RealSparseMatrix};
 use thiserror::Error;
 mod envelope;
 pub use envelope::GeneralSolveEnvelope;
@@ -17,31 +15,24 @@ mod tests;
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GeneralSolvePolicy {
+    /// Accepted `‖A x − b‖₂ / ‖b‖₂` of the refined direct solution.
     pub relative_tolerance: f64,
-    pub restart: usize,
-    pub maximum_iterations: usize,
-    pub uniqueness: SparseUniquenessPolicy,
+    /// Upper limit (exclusive) of the certified contraction bound `‖I − A F⁻¹‖`.
+    pub contraction_limit: f64,
 }
 impl GeneralSolvePolicy {
-    fn krylov(self) -> GmresPolicy {
-        GmresPolicy {
-            relative_tolerance: self.relative_tolerance,
-            restart: self.restart,
-            maximum_iterations: self.maximum_iterations,
+    pub const fn bounded(relative_tolerance: f64) -> Self {
+        Self {
+            relative_tolerance,
+            contraction_limit: super::certificate::DEFAULT_CONTRACTION_LIMIT,
         }
     }
     pub(crate) fn validate(self) -> Result<(), GeneralSolveError> {
-        if self.restart == 0
-            || self.maximum_iterations == 0
-            || !self.relative_tolerance.is_finite()
-            || self.relative_tolerance <= 0.0
-            || self.relative_tolerance >= 1.0
-        {
+        let open_unit = |value: f64| value.is_finite() && value > 0.0 && value < 1.0;
+        if !open_unit(self.relative_tolerance) || !open_unit(self.contraction_limit) {
             return Err(GeneralSolveError::Invalid);
         }
-        self.uniqueness
-            .validate()
-            .map_err(GeneralSolveError::Uniqueness)
+        Ok(())
     }
 }
 #[derive(Debug, Error, PartialEq)]
@@ -56,11 +47,9 @@ pub enum GeneralSolveError {
     Cancelled,
     #[error("general operator action or nonfinite arithmetic")]
     Operator,
-    #[error("general operator uniqueness not established: {0:?}")]
-    UniquenessNotEstablished(SparseUniquenessUncertainty),
-    #[error("general uniqueness check: {0}")]
-    Uniqueness(SparseUniquenessError),
-    #[error("general correction did not converge after {iterations} iterations")]
+    #[error("general operator nonsingularity not established: {0}")]
+    NonsingularityNotEstablished(String),
+    #[error("general direct solve residual {relative_residual:e} above tolerance")]
     NotConverged {
         iterations: u32,
         relative_residual: f64,
@@ -70,14 +59,15 @@ pub enum GeneralSolveError {
 #[derive(Debug)]
 pub struct GeneralSolveResult {
     pub solution: Vec<f64>,
+    /// Refinement steps after the factor solve (zero for a zero right-hand side).
     pub iterations: u32,
     pub relative_residual: f64,
-    pub certificate: RightInverseCertificate,
+    pub certificate: NonsingularityCertificate,
 }
 
-/// Admission precedes all numerical allocation. The matrix/RHS are borrowed and
-/// additional to this component envelope. Proof construction is source-independent
-/// and precedes even a zero-RHS return. No SPD label, pivot repair or fallback.
+/// Admission precedes all numerical allocation. The matrix/RHS are borrowed and additional to
+/// this component envelope. The certificate is source-independent and precedes even a zero-RHS
+/// return. No SPD label, pivot repair or fallback.
 pub fn solve_general_system(
     matrix: &RealSparseMatrix,
     rhs: &[f64],
@@ -94,70 +84,39 @@ pub fn solve_general_system(
     {
         return Err(GeneralSolveError::Admission);
     }
-    let proof_budget =
-        super::uniqueness::SparseUniquenessEnvelope::derive(matrix, policy.uniqueness)
-            .map_err(GeneralSolveError::Uniqueness)?;
-    let (verdict, factor) = prepare_sparse_uniqueness(matrix, policy.uniqueness, proof_budget)
-        .map_err(|e| {
-            if e == SparseUniquenessError::Cancelled {
-                GeneralSolveError::Cancelled
-            } else {
-                GeneralSolveError::Uniqueness(e)
-            }
-        })?;
-    let certificate = match verdict {
-        SparseUniquenessVerdict::Verified { certificate, .. } => certificate,
-        SparseUniquenessVerdict::Indeterminate { reason, .. } => {
-            return Err(GeneralSolveError::UniquenessNotEstablished(reason))
-        }
-    };
+    let certified = certify_nonsingular(matrix, policy.contraction_limit).map_err(certificate_error)?;
     cancelled()?;
-    let ilu = factor.ok_or(GeneralSolveError::Operator)?;
-    let result = restarted_gmres(
-        rhs,
-        &vec![0.0; rhs.len()],
-        policy.krylov(),
-        |y| {
-            cancelled()?;
-            let x = ilu.apply(y, crate::is_fea_cancelled).map_err(ilu_error)?;
-            spmv(matrix, &x).map_err(|_| GeneralSolveError::Operator)
-        },
-        crate::is_fea_cancelled,
-    )?
-    .ok_or(GeneralSolveError::Operator)?;
-    cancelled()?;
-    if result.cancelled {
-        return Err(GeneralSolveError::Cancelled);
+    let load = rhs.iter().fold(0.0_f64, |norm, b| norm.hypot(*b));
+    if load == 0.0 {
+        return Ok(GeneralSolveResult {
+            solution: vec![0.0; rhs.len()],
+            iterations: 0,
+            relative_residual: 0.0,
+            certificate: certified.certificate,
+        });
     }
-    let solution = ilu
-        .apply(&result.solution, crate::is_fea_cancelled)
-        .map_err(ilu_error)?;
+    let solution = certified.solve(matrix, rhs).map_err(certificate_error)?;
+    cancelled()?;
     let action = spmv(matrix, &solution).map_err(|_| GeneralSolveError::Operator)?;
     let residual = action
         .iter()
         .zip(rhs)
         .fold(0.0_f64, |norm, (a, b)| norm.hypot(a - b));
-    let load = rhs.iter().fold(0.0_f64, |norm, b| norm.hypot(*b));
-    let relative_residual = if load == 0.0 {
-        residual
-    } else {
-        residual / load
-    };
+    let relative_residual = residual / load;
     if !relative_residual.is_finite() {
         return Err(GeneralSolveError::Operator);
     }
-    if !result.converged || result.breakdown || relative_residual > policy.relative_tolerance {
+    if relative_residual > policy.relative_tolerance {
         return Err(GeneralSolveError::NotConverged {
-            iterations: result.iterations,
+            iterations: 1,
             relative_residual,
         });
     }
-    cancelled()?;
     Ok(GeneralSolveResult {
         solution,
-        iterations: result.iterations,
+        iterations: 1,
         relative_residual,
-        certificate,
+        certificate: certified.certificate,
     })
 }
 fn cancelled() -> Result<(), GeneralSolveError> {
@@ -167,9 +126,10 @@ fn cancelled() -> Result<(), GeneralSolveError> {
         Ok(())
     }
 }
-fn ilu_error(e: SparseRightIluError) -> GeneralSolveError {
-    match e {
-        SparseRightIluError::Cancelled => GeneralSolveError::Cancelled,
-        _ => GeneralSolveError::Operator,
+fn certificate_error(error: CertificateError) -> GeneralSolveError {
+    match error {
+        CertificateError::Cancelled => GeneralSolveError::Cancelled,
+        CertificateError::Shape => GeneralSolveError::Invalid,
+        other => GeneralSolveError::NonsingularityNotEstablished(other.to_string()),
     }
 }
