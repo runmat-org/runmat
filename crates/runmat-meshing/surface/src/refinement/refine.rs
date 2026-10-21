@@ -330,11 +330,11 @@ pub(crate) fn refine_exact_face_domain_until_blocked(
                 ));
             }
             let remaining = policy.refinement.maximum_interior_insertions - insertion_count;
-            let metric_at = |candidate: &ExactFaceRefinementCandidate| {
+            let metric_at = |candidate: &ExactFaceRefinementCandidate, uv: [f64; 2]| {
                 field
                     .evaluate_parameterized(
                         &candidate.source_face_id,
-                        candidate.uv,
+                        uv,
                         domain.parameterization(),
                         context.evaluator,
                         context.geometry_control,
