@@ -10,6 +10,7 @@ repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
 runmat-cpu-execution = { workspace = true }
+runmat-sparse-solvers = { workspace = true }
 runmat-analysis-core = { workspace = true }
 runmat-canonical-codec = { workspace = true }
 runmat-execution = { workspace = true }
