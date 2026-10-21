@@ -34,6 +34,7 @@ pub(super) struct ShellElementContribution {
 
 pub(super) fn compute(
     structural: &StructuralModel,
+    nodes: &super::ExplicitNodeIndex,
     element: &StructuralElement,
     shell: &ShellElementModel,
     properties: &CompiledPropertyMap,
@@ -43,7 +44,7 @@ pub(super) fn compute(
 ) -> Result<ShellElementContribution, StructuralAssemblyError> {
     let mut explicit_nodes = [0_usize; 3];
     for (local, node_id) in shell.node_ids.iter().copied().enumerate() {
-        explicit_nodes[local] = structural_node_index(structural, node_id, element)?;
+        explicit_nodes[local] = structural_node_index(nodes, node_id, element)?;
     }
     let node_indices = explicit_nodes.map(|node| canonical_node_indices[node]);
     let element_identity = explicit_element_identity(

@@ -43,10 +43,10 @@ pub(crate) fn build(
         .map(|(index, node)| (node.node_id, index))
         .collect::<BTreeMap<_, _>>();
 
-    mesh.topology
-        .volume_elements
-        .iter()
-        .map(|element| {
+    let elements = &mesh.topology.volume_elements;
+    // Independent per-element summaries on the admitted pool, collected in element order.
+    crate::algebra::element_assembly::ordered_map_range(elements.len(), |index| {
+            let element = &elements[index];
             let material = resolve_element_material(element, properties)?;
             let prescribed_temperature_k = thermal_context
                 .map(|context| {
@@ -110,7 +110,7 @@ pub(crate) fn build(
                     solved_thermal_quadrature(element, &node_indices, properties, temperatures)
                 })
                 .transpose()?;
-            Ok(SolidRecoveryElementSummary {
+            Ok::<_, SolverSolidAssemblyError>(SolidRecoveryElementSummary {
                 element_id: element.element_id.to_string(),
                 region_id: element.region_id.source_topology_id.clone(),
                 material: SolidMaterial {
@@ -124,6 +124,7 @@ pub(crate) fn build(
                 geometry,
             })
         })
+        .into_iter()
         .collect()
 }
 

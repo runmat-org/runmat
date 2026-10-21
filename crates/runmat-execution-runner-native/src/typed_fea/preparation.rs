@@ -131,7 +131,7 @@ pub async fn prepare_study(
         resolved
             .execution_policy
             .as_ref()
-            .map(|policy| policy.resources.cpu_threads_per_worker),
+            .and_then(|policy| policy.resources.cpu_threads_per_worker),
     )?;
     let local_thread_count = u16::try_from(cpu_threads_per_worker)
         .map_err(|_| "CPU threads per worker exceed the FEA contract maximum".to_string())?;

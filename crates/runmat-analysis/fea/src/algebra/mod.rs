@@ -3,6 +3,7 @@ pub(crate) use compensated::CompensatedSum;
 pub(crate) mod anchored_energy;
 pub use anchored_energy::EnergyError;
 mod coercivity;
+pub mod element_assembly;
 mod compatibility;
 mod matrix;
 mod nullspace;

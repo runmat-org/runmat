@@ -279,9 +279,8 @@ fn sweep_concurrency(
         .study
         .execution_policy
         .as_ref()
-        .map_or(available, |policy| {
-            policy.resources.cpu_threads_per_worker as usize
-        });
+        .and_then(|policy| policy.resources.cpu_threads_per_worker)
+        .map_or(available, |threads| threads as usize);
     requested
         .min(available / workers_per_case.saturating_mul(threads_per_worker))
         .max(1)
