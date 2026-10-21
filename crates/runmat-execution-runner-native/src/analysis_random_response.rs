@@ -31,6 +31,8 @@ pub struct CompletedStructuralRandomResponseStudy {
     pub resource_usage: PreparedResourceUsage,
     pub publication: ImportedPublishedResult,
     pub statistics_state: ImportedSemanticState,
+    /// Authored-output observations of the response step, bound by accuracy and publication.
+    pub observations: Option<runmat_analysis_fea::results::observation::ObservationPublicationCatalog>,
 }
 
 pub async fn execute_structural_random_response_locally(
@@ -360,6 +362,7 @@ async fn execute_with_pool(
             .statistics_state()
             .cloned()
             .ok_or_else(|| protocol("published random-statistics state is absent"))?,
+        observations: coordinator.observation_catalog(),
     })
 }
 

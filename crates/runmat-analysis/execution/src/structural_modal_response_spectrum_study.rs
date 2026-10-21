@@ -647,6 +647,13 @@ impl StructuralModalResponseSpectrumStudyCoordinator {
         self.envelope_state.as_ref()
     }
 
+    /// The authored-observation catalog accuracy and publication bound, if the step has outputs.
+    pub fn observation_catalog(
+        &self,
+    ) -> Option<runmat_analysis_fea::results::observation::ObservationPublicationCatalog> {
+        self.observations.as_ref().and_then(|o| o.catalog())
+    }
+
     pub fn accuracy(&self) -> Option<&ImportedAccuracy> {
         self.accuracy.as_ref()
     }
