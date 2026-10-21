@@ -185,6 +185,8 @@ pub(crate) fn import_exact_cad_shape(
         model: projection.model,
         healing_report: None,
         source_face_ids: projection.source_face_ids,
+        entity_names: projection.entity_names,
+        entity_tags: projection.entity_tags,
         analysis: options.analysis.clone(),
         kernel_body_shapes: projection.kernel_body_shapes,
         kernel_entity_ids: projection.kernel_entity_ids,
@@ -567,6 +569,7 @@ fn ffi_import_options(
         heal_duplicates: false,
         heal_gaps: false,
         heal_short_edges_and_sliver_faces: false,
+        share_interfaces: false,
         maximum_healing_displacement: 0.0,
         cancel_token_id,
     })
@@ -595,6 +598,7 @@ pub(super) fn ffi_exact_import_options(
             .analysis
             .healing
             .simplify_short_edges_and_sliver_faces,
+        share_interfaces: options.analysis.healing.shared_interfaces,
         maximum_healing_displacement: options.analysis.maximum_healing_displacement_m
             / meters_per_source_unit,
         cancel_token_id,
