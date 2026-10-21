@@ -24,6 +24,10 @@ pub use electrical_recovery::{
     build_electrical_field_recovery_resource_plan, electrical_field_recovery_partition_count,
     electrical_field_recovery_shape, electrical_recovery_source_validation_workspace,
 };
+mod statistical_recovery;
+pub use statistical_recovery::{
+    build_statistical_field_recovery_resource_plan, statistical_field_recovery_shape,
+};
 mod magnetic_static;
 mod maxwell_harmonic;
 mod maxwell_recovery;
@@ -74,7 +78,8 @@ pub(crate) use nonlinear::{
     build_nonlinear_recovery_resource_plan, build_nonlinear_resource_plan_with_output_limit,
 };
 pub use nonlinear::{
-    build_nonlinear_solid_block_resource_plan, nonlinear_solid_block_payload_bytes_upper_bound,
+    build_nonlinear_solid_block_resource_plan, nonlinear_solid_block_output_construction_bytes,
+    nonlinear_solid_block_payload_bytes_upper_bound,
 };
 pub use state_publication::build_fluid_state_publication_resource_plan;
 pub use state_publication::build_state_publication_resource_plan;

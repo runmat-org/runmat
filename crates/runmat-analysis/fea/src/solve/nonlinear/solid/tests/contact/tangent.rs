@@ -16,7 +16,7 @@ fn coupled_slip_tangent_retains_independent_nonsymmetric_reduced_action() {
         let initial = problem.initial_state().unwrap();
         let u = problem.reduction.expand(&[0.00035, 0.00015]).unwrap();
         let trial = problem
-            .evaluate_trial(&u, &initial.constitutive, initial.contact.as_ref())
+            .evaluate_trial(&u, &initial.constitutive, initial.contact.as_ref(), 1.0)
             .unwrap();
         let reduced = problem
             .reduction
@@ -46,7 +46,7 @@ fn coupled_slip_tangent_retains_independent_nonsymmetric_reduced_action() {
                     .map(|(u, v)| u + sign * step * v)
                     .collect::<Vec<_>>();
                 let trial = problem
-                    .evaluate_trial(&u, &initial.constitutive, initial.contact.as_ref())
+                    .evaluate_trial(&u, &initial.constitutive, initial.contact.as_ref(), 1.0)
                     .unwrap();
                 problem.residual(&trial.evaluation, 1.).unwrap()
             };

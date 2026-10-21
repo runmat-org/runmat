@@ -1,7 +1,7 @@
 use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
 
-use crate::FeaContactInterfaceContext;
+use crate::FeaContactEnforcement;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -18,7 +18,7 @@ pub struct NonlinearSolveOptions {
     pub line_search_reduction: f64,
     #[serde(default)]
     pub solver_mesh: Option<SolverMeshArtifact>,
-    pub contact_context: Option<FeaContactInterfaceContext>,
+    pub contact_enforcement: Option<FeaContactEnforcement>,
 }
 
 impl Default for NonlinearSolveOptions {
@@ -35,7 +35,7 @@ impl Default for NonlinearSolveOptions {
             max_line_search_backtracks: 6,
             line_search_reduction: 0.5,
             solver_mesh: None,
-            contact_context: None,
+            contact_enforcement: None,
         }
     }
 }

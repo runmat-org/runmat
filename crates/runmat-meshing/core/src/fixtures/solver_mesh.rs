@@ -386,7 +386,7 @@ pub fn canonical_tetrahedron_meshing_evidence(artifact: &SolverMeshArtifact) -> 
         sizing: Vec::new(),
         resources: MeshingResourceUsage {
             generated_nodes: artifact.topology.nodes.len() as u64,
-            generated_elements: artifact.topology.volume_elements.len() as u64,
+            generated_elements: artifact.generated_element_count(),
             peak_memory_bytes: 1_024,
             peak_scratch_bytes: 256,
             wall_time_ms: 1,
@@ -410,6 +410,7 @@ fn request() -> MeshingRequest {
     MeshingRequest {
         schema_version: MESHING_REQUEST_SCHEMA_VERSION,
         element_order: ElementOrder::Tet4,
+        dimension: crate::MeshDimension::Solid,
         deterministic_seed: 1,
         algorithms: AlgorithmVersionSet {
             geometry: "geometry/1".into(),

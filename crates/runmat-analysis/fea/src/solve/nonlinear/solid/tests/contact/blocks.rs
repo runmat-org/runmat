@@ -47,7 +47,7 @@ fn full_authored_contact_cold_blocks_preserve_schedule_original_points_and_work(
             line_search: p.line_search,
             max_line_search_backtracks: p.max_backtracks,
             line_search_reduction: p.backtrack_reduction,
-            contact_context: None,
+            contact_enforcement: None,
         };
         let schedule = LoadIncrementSchedule::canonical(&[], &[0.1, 0.5], 0., 1.).unwrap();
         assert!(run(

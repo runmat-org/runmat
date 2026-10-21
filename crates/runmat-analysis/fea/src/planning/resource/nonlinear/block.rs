@@ -113,6 +113,24 @@ fn payload_bound(
         .ok_or(ResourcePlanningError::Overflow("nonlinear block payload"))
 }
 
+/// Construction residency of an encoded block artifact beyond its typed contents. The typed
+/// history is already charged to the nonlinear pipeline's persistent storage. The direct
+/// encoder reserves the output once and holds out-of-order fields in separate buffers, never a
+/// value tree: at most the reserved output plus held copies of the same bytes, plus sorted-map
+/// metadata and fixed codec state.
+pub fn nonlinear_solid_block_output_construction_bytes(
+    encoded_bytes: u64,
+) -> Result<u64, ResourcePlanningError> {
+    encoded_bytes
+        .checked_mul(2)
+        .and_then(|bytes| {
+            bytes.checked_add(
+                2 * runmat_canonical_codec::CANONICAL_MATERIALIZATION_FIXED_BYTES_PER_CONTRACT,
+            )
+        })
+        .ok_or(ResourcePlanningError::Overflow("nonlinear block encoding"))
+}
+
 pub fn nonlinear_solid_block_payload_bytes_upper_bound(
     workload: &NonlinearSolidWorkload,
     mesh: &SolverMeshArtifact,
@@ -150,11 +168,7 @@ pub fn build_nonlinear_solid_block_resource_plan(
         prepared.local_execution,
     )?;
     let bytes = payload_bound(&input, request)?;
-    let materialization =
-        runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(
-            bytes, 1,
-        )
-        .ok_or(ResourcePlanningError::Overflow("nonlinear block encoding"))?;
+    let materialization = nonlinear_solid_block_output_construction_bytes(bytes)?;
     let receipt_bytes = crate::execution::NONLINEAR_SOLID_RECEIPT_MAX_ENCODED_BYTES;
     let receipt_materialization =
         runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(

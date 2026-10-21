@@ -24,6 +24,7 @@ pub struct StructuralStudyModalResponseSpectrumNumericalResult {
     pub response_publication: runmat_analysis_fea::results::publication::PublishedAnalysisResult,
     pub field_recovery: runmat_analysis_fea::solve::dynamics::ResponseSpectrumFieldRecovery,
     pub envelope_state: runmat_analysis_fea::execution::CanonicalSemanticState,
+    pub response_observations: Option<runmat_analysis_fea::results::observation::ObservationPublicationCatalog>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -47,4 +48,5 @@ pub struct StructuralStudyRandomResponseNumericalResult {
     pub response_resource_usage: runmat_analysis_fea::planning::resource::ResourceUsageEvidence,
     pub response_publication: runmat_analysis_fea::results::publication::PublishedAnalysisResult,
     pub statistics_state: runmat_analysis_fea::execution::CanonicalSemanticState,
+    pub response_observations: Option<runmat_analysis_fea::results::observation::ObservationPublicationCatalog>,
 }

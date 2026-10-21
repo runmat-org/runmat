@@ -20,9 +20,13 @@ use crate::{
 pub const ANALYSIS_OUTPUT_SET_MEDIA_TYPE: &str = "application/vnd.runmat.analysis-output-set+cbor";
 pub const ANALYSIS_OUTPUT_SET_VALUE_SCHEMA: &str = "runmat.analysis.output-set.v1";
 const OUTPUT_SET_PREFIX: &[u8] = b"runmat-analysis-output-set/v1\0";
-const OUTPUT_SET_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(8 * 1024 * 1024, 1_000_000, 65_536, 32);
-pub(crate) const ANALYSIS_OUTPUT_SET_MAX_ENCODED_BYTES: u64 = 8 * 1024 * 1024;
+pub(crate) use runmat_analysis_fea::execution::ANALYSIS_OUTPUT_SET_MAX_ENCODED_BYTES;
+const OUTPUT_SET_LIMITS: CanonicalLimits = CanonicalLimits::new(
+    ANALYSIS_OUTPUT_SET_MAX_ENCODED_BYTES as usize,
+    1_000_000,
+    65_536,
+    32,
+);
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

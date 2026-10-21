@@ -44,6 +44,15 @@ fn validate_settings(step: &ProcedureStep) -> Result<(), AnalysisValidationError
             step,
             "structural random-response settings require the random-response procedure",
         )),
+        (ProcedureSettings::StructuralNonlinear(_), AnalysisProcedure::Nonlinear)
+            if step.family == PhysicsFamily::Structural =>
+        {
+            Ok(())
+        }
+        (ProcedureSettings::StructuralNonlinear(_), _) => Err(step_error(
+            step,
+            "structural nonlinear kinematics require a structural nonlinear step",
+        )),
     }
 }
 

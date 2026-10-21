@@ -31,6 +31,8 @@ pub struct CompletedStructuralRandomResponseStudy {
     pub resource_usage: PreparedResourceUsage,
     pub publication: ImportedPublishedResult,
     pub statistics_state: ImportedSemanticState,
+    /// Authored-output observations of the response step, bound by accuracy and publication.
+    pub observations: Option<runmat_analysis_fea::results::observation::ObservationPublicationCatalog>,
 }
 
 pub async fn execute_structural_random_response_locally(
@@ -185,6 +187,21 @@ async fn execute_with_pool(
     coordinator
         .complete_assembly(pool, executed_assembly.response, &assembly)
         .map_err(protocol)?;
+    let mut accuracy_dependencies = vec![assembly_dependency];
+    if let Some(observations) = coordinator.observations_mut() {
+        // Authored outputs observe the recovered RMS fields before accuracy and publication.
+        accuracy_dependencies = vec![
+            crate::analysis_statistical_observations::execute_statistical_observations(
+                pool,
+                observations,
+                &policy,
+                assembly_dependency,
+                &mut resource_attempts,
+            )
+            .await?,
+        ];
+        coordinator.finish_observations().map_err(protocol)?;
+    }
     let graph = PlannedResourceUsageGraph::new(
         resource_attempts,
         u64::try_from(workflow_started.elapsed().as_millis()).unwrap_or(u64::MAX),
@@ -218,7 +235,7 @@ async fn execute_with_pool(
             resource_plan: Some(&accuracy.resource_plan),
             prepared_closure: None,
             fallback_resources: policy.resources.clone(),
-            dependencies: vec![assembly_dependency],
+            dependencies: accuracy_dependencies,
         }],
         task_policy(&policy),
     )
@@ -345,6 +362,7 @@ async fn execute_with_pool(
             .statistics_state()
             .cloned()
             .ok_or_else(|| protocol("published random-statistics state is absent"))?,
+        observations: coordinator.observation_catalog(),
     })
 }
 

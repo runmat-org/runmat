@@ -550,6 +550,7 @@ pub async fn execute_structural_workloads_locally(
                             response_publication: completed.publication.result,
                             field_recovery: completed.response.field_recovery,
                             envelope_state: completed.envelope_state.state,
+                            response_observations: completed.observations,
                         },
                     )),
                 );
@@ -591,6 +592,7 @@ pub async fn execute_structural_workloads_locally(
                         response_resource_usage: completed.resource_usage.evidence,
                         response_publication: completed.publication.result,
                         statistics_state: completed.statistics_state.state,
+                        response_observations: completed.observations,
                     }),
                 ));
             }

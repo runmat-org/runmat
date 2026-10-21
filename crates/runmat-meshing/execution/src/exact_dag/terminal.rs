@@ -29,6 +29,21 @@ impl ExactMeshingDagPlanner {
         )
     }
 
+    /// Projects a shell or beam request straight from its final exact surface.
+    pub fn surface_solver_projection(
+        &self,
+        surface_root: ValueRef,
+    ) -> MeshingExecutionResult<PlannedMeshingStage> {
+        self.build_stage_with_dependencies(
+            MeshingStageKind::OrderElevation,
+            whole_partition(MeshingPartitionKind::WholeStage),
+            vec![
+                (MeshingInputKind::ExactGeometry, self.geometry_root.clone()),
+                (MeshingInputKind::StageArtifact, surface_root),
+            ],
+        )
+    }
+
     pub fn solver_validation(
         &self,
         projection_root: ValueRef,

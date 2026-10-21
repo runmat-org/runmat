@@ -208,7 +208,7 @@ const TETRAHEDRON_DERIVATIVES: [[f64; 3]; 4] = [
     [0.0, 0.0, 1.0],
 ];
 
-const DUNAVANT_SEVEN: [([f64; 3], f64); 7] = [
+pub(crate) const DUNAVANT_SEVEN: [([f64; 3], f64); 7] = [
     ([1.0 / 3.0; 3], 0.225),
     (
         [0.059715871789770, 0.470142064105115, 0.470142064105115],
@@ -447,7 +447,7 @@ fn quadratic_edge_minimum(start: f64, end: f64, midpoint: f64) -> f64 {
     (curvature * position + slope) * position + start
 }
 
-pub(super) fn boundary_shape(
+pub(crate) fn boundary_shape(
     order: BoundaryTriangleOrder,
     [l1, l2, l3]: [f64; 3],
 ) -> ([f64; 6], [[f64; 2]; 6]) {

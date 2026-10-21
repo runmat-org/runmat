@@ -149,7 +149,7 @@ pub fn admit_named_geometry_generator(
         .zip(&function.callable.parameters)
         .map(|(argument, parameter)| encode_argument(&argument.value, parameter))
         .collect::<AnalysisBridgeResult<Vec<_>>>()?;
-    if !function.effects.is_side_effect_free()
+    if !function.effects.is_deterministic_value_function()
         || !function.capabilities.0.is_subset(available_capabilities)
     {
         return Err(AnalysisBridgeError::Invalid(

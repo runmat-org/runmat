@@ -34,11 +34,37 @@ impl EffectSet {
     pub fn is_side_effect_free(&self) -> bool {
         self.0.iter().all(|effect| effect.is_side_effect_free())
     }
+
+    /// A deterministic function of its inputs: it may reject them or suspend while awaiting
+    /// its own computation (for example an accelerator readback), but it neither observes nor
+    /// changes external state. Analysis generators (signals, spectra, geometry) require this.
+    pub fn is_deterministic_value_function(&self) -> bool {
+        self.0
+            .iter()
+            .all(|effect| matches!(effect, EffectKind::MayThrow | EffectKind::MaySuspend))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deterministic_value_functions_may_suspend_but_not_observe_external_state() {
+        assert!(EffectSet(BTreeSet::from([EffectKind::MaySuspend, EffectKind::MayThrow]))
+            .is_deterministic_value_function());
+        for forbidden in [
+            EffectKind::WorkspaceRead,
+            EffectKind::FilesystemRead,
+            EffectKind::Randomness,
+            EffectKind::Clock,
+            EffectKind::HostCallback,
+            EffectKind::Unknown,
+        ] {
+            assert!(!EffectSet(BTreeSet::from([EffectKind::MaySuspend, forbidden]))
+                .is_deterministic_value_function());
+        }
+    }
 
     #[test]
     fn pure_evaluation_may_throw_but_cannot_observe_or_change_external_state() {

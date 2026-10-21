@@ -79,8 +79,15 @@ pub(crate) struct SolidAttemptWork {
 
 pub(crate) struct SolidNewtonProblem<'a> {
     basis: &'a CanonicalNonlinearSolidBasis,
+    /// Homogeneous equality reduction; its offset is zero.
     reduction: AffineConstraintReduction,
+    /// Prescribed displacement at unit load factor. Supports move with the load factor like
+    /// every applied action: the accepted state at factor λ carries `λ * prescribed`.
+    prescribed: Vec<f64>,
     physical_force: &'a [f64],
+    /// Dead plus reference-configuration follower force: the scale of a relative residual.
+    scale_force: Vec<f64>,
+    follower: Option<&'a crate::assembly::nonlinear_solid::FollowerLoadOperator>,
     scope_identity: Digest,
     policy: SolidNewtonPolicy,
     contact: Option<contact::PreparedSolidContact<'a>>,

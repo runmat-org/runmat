@@ -26,11 +26,10 @@ impl NonlinearSolidWorkload {
             .map_err(invalid)?;
         self.controls.validate_controls().map_err(invalid)?;
         if self.controls.solver_mesh.is_some()
-            || self.controls.contact_context.is_some()
-            || !self.model.interfaces.is_empty()
+            || (self.controls.contact_enforcement.is_some() && self.model.interfaces.is_empty())
         {
             return Err(invalid(
-                "portable J2 requires a separate mesh and no contact",
+                "portable J2 requires a separate mesh; contact enforcement needs an authored contact interface",
             ));
         }
         Ok(())

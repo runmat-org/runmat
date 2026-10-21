@@ -119,6 +119,10 @@ pub fn build_resource_plan(
             FeaResourceDemand::ElectricalFieldRecovery(demand),
         ) if *request == demand.request => electrical_recovery::build(input.clone(), demand),
         (
+            FeaResourcePhase::StatisticalFieldRecovery(request),
+            FeaResourceDemand::StatisticalFieldRecovery(demand),
+        ) if *request == demand.request => magnetic_recovery::build(input.clone(), demand),
+        (
             FeaResourcePhase::MaxwellFieldRecovery(request),
             FeaResourceDemand::MaxwellFieldRecovery(demand),
         ) if *request == demand.request => maxwell_recovery::build(input.clone(), demand),

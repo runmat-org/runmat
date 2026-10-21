@@ -84,7 +84,8 @@ pub use metric::{
     MetricSourceKind, MetricTensor3,
 };
 pub use request::{
-    AlgorithmVersionSet, CurveQualityTargets, ElementOrder, MeshingQualityTargets, MeshingRequest,
+    AlgorithmVersionSet, CurveQualityTargets, ElementOrder, MeshDimension, MeshingQualityTargets,
+    MeshingRequest,
     MeshingResourceBudget, SurfaceQualityTargets, VolumeQualityTargets,
     MESHING_REQUEST_SCHEMA_VERSION,
 };

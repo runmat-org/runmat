@@ -5,11 +5,13 @@ use runmat_analysis_core::{PhysicsFamily, SolutionSpace};
 fn input(operator: StructuralOperatorImplementation) -> StructuralRealizationInput {
     let recovery = match operator {
         StructuralOperatorImplementation::Tet4LinearElasticity
-        | StructuralOperatorImplementation::Tet4SmallStrainContinuum => {
+        | StructuralOperatorImplementation::Tet4SmallStrainContinuum
+        | StructuralOperatorImplementation::Tet4TotalLagrangianContinuum => {
             Some(StructuralRecoveryImplementation::Tet4ConstantStrain)
         }
         StructuralOperatorImplementation::Tet10LinearElasticity
-        | StructuralOperatorImplementation::Tet10SmallStrainContinuum => {
+        | StructuralOperatorImplementation::Tet10SmallStrainContinuum
+        | StructuralOperatorImplementation::Tet10TotalLagrangianContinuum => {
             Some(StructuralRecoveryImplementation::Tet10IntegrationPointProjection)
         }
         StructuralOperatorImplementation::EulerBernoulliBeam3d => {
@@ -23,6 +25,7 @@ fn input(operator: StructuralOperatorImplementation) -> StructuralRealizationInp
     StructuralRealizationInput {
         assemblies: vec![StructuralFormulationRealization::new(operator, recovery)],
         procedure: AnalysisProcedure::Nonlinear,
+        kinematics: runmat_analysis_core::StructuralKinematics::SmallStrain,
         coupling: CouplingImplementation::Uncoupled,
         sources: vec![SourceImplementation::CanonicalBoundaryPressureIntegration],
         boundary_transfers: vec![BoundaryTransferImplementation::CanonicalBoundaryProjection],

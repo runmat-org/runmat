@@ -453,6 +453,7 @@ fn structural_result(
                 response_publication: response.response_publication.result.clone(),
                 field_recovery: response.field_recovery.clone(),
                 envelope_state: response.envelope_state.clone(),
+                response_observations: response.response_observations.clone(),
             },
         )),
         runmat_execution_runner_native::ExactStructuralStudyAnalysisResult::StructuralRandomResponse(
@@ -473,6 +474,7 @@ fn structural_result(
                 response_resource_usage: response.response_resource_usage.evidence.clone(),
                 response_publication: response.response_publication.result.clone(),
                 statistics_state: response.statistics_state.clone(),
+                response_observations: response.response_observations.clone(),
             },
         )),
         runmat_execution_runner_native::ExactStructuralStudyAnalysisResult::StructuralBuckling(

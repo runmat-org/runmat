@@ -254,6 +254,7 @@ fn request(tolerance: runmat_geometry_core::GeometryTolerancePolicy) -> MeshingR
     MeshingRequest {
         schema_version: MESHING_REQUEST_SCHEMA_VERSION,
         element_order: ElementOrder::Tet4,
+        dimension: runmat_meshing_core::MeshDimension::Solid,
         deterministic_seed: 7,
         algorithms: AlgorithmVersionSet {
             geometry: "geometry/v2".into(),
@@ -270,6 +271,7 @@ fn request(tolerance: runmat_geometry_core::GeometryTolerancePolicy) -> MeshingR
             global_metric: MetricTensor3::isotropic_length_m(10.0).unwrap(),
             maximum_grading_ratio: 1.3,
             contributions: Vec::new(),
+            entity_supports: Vec::new(),
         },
         quality: MeshingQualityTargets {
             curve: CurveQualityTargets {

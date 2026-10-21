@@ -75,6 +75,25 @@ pub(super) fn apply_solver_mesh_structural_loads(
         let region_id = &target.region_id;
         let (target_nodes, target_face_count) = projection_region_nodes(&projection, target);
         match load.kind {
+            RealizedExcitationKind::Force(value) if target_nodes.is_empty() => {
+                // A force on an exact vertex or edge (beam joints and members, shell edges)
+                // acts on the mesh nodes carrying that entity: one node per vertex, or a
+                // segment-length-consistent line distribution along an edge.
+                if let Some(nodal) = entity_nodal_weights(mesh, target) {
+                    record_spatial_evidence(
+                        &mut evidence,
+                        apply_entity_force(&projection, layout, rhs, load, &nodal, value.real)?,
+                    )?;
+                    continue;
+                }
+                if strict_region_mapping {
+                    return Err(SolverMeshRegionMappingError::UnmappedLoadRegion {
+                        load_id: load.excitation_id.0.clone(),
+                        region_id: region_id.to_string(),
+                        load_kind: StructuralLoadKind::Force,
+                    });
+                }
+            }
             RealizedExcitationKind::Force(value) => {
                 if target_nodes.is_empty() {
                     if strict_region_mapping {
@@ -288,6 +307,82 @@ fn add_reference_vector(
             rhs[dof] += value;
         }
     }
+}
+
+/// Nodal weights (summing to one) of a target that selects exact vertices or edges, or `None`
+/// when no mesh node carries the target's entities.
+fn entity_nodal_weights(
+    mesh: &SolverMeshArtifact,
+    target: &runmat_analysis_core::RegionTarget,
+) -> Option<Vec<(usize, f64)>> {
+    let index_of = |node_id: u64| {
+        mesh.topology
+            .nodes
+            .binary_search_by_key(&node_id, |node| node.node_id)
+            .ok()
+    };
+    let mut weights = std::collections::BTreeMap::<usize, f64>::new();
+    for edge in &mesh.topology.boundary_edges {
+        if !edge
+            .provenance
+            .iter()
+            .any(|entity| target.matches_persistent_entity(entity))
+        {
+            continue;
+        }
+        let (Some(first), Some(last)) = (index_of(edge.node_ids[0]), index_of(edge.node_ids[1]))
+        else {
+            continue;
+        };
+        let a = mesh.topology.nodes[first].coordinates_m;
+        let b = mesh.topology.nodes[last].coordinates_m;
+        let length = (0..3).map(|k| (b[k] - a[k]).powi(2)).sum::<f64>().sqrt();
+        *weights.entry(first).or_default() += 0.5 * length;
+        *weights.entry(last).or_default() += 0.5 * length;
+    }
+    if weights.is_empty() {
+        for (index, node) in mesh.topology.nodes.iter().enumerate() {
+            if node
+                .provenance
+                .iter()
+                .any(|entity| target.matches_persistent_entity(entity))
+            {
+                weights.insert(index, 1.0);
+            }
+        }
+    }
+    let total = weights.values().sum::<f64>();
+    (!weights.is_empty() && total.is_finite() && total > 0.0)
+        .then(|| weights.into_iter().map(|(node, w)| (node, w / total)).collect())
+}
+
+fn apply_entity_force(
+    projection: &AnalysisProjection,
+    layout: &StructuralDofLayout,
+    rhs: &mut [f64],
+    load: &RealizedExcitation,
+    nodal: &[(usize, f64)],
+    components: [f64; 3],
+) -> Result<SpatialProjectionEvidence, SolverMeshRegionMappingError> {
+    let point = nodal.iter().fold([0.0; 3], |mut total, (node, weight)| {
+        add_scaled(&mut total, projection.nodes[*node].coordinates_m, *weight);
+        total
+    });
+    let force = resolve_vector(load, components, point, None)?;
+    let mut evidence = SpatialProjectionAccumulator::new(
+        load,
+        projection,
+        SpatialIntegrationRule::UniformResultant,
+        nodal.len(),
+        point,
+    );
+    evidence.add_requested_force(point, force);
+    for (node, weight) in nodal {
+        let nodal_force = scale_vector(force, *weight);
+        add_translational_rhs(layout, rhs, *node, nodal_force);
+        evidence.add_projected_force(*node, nodal_force);
+    }
+    Ok(evidence.finish())
 }
 
 fn projection_region_nodes(

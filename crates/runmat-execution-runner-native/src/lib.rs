@@ -42,6 +42,7 @@ mod analysis_prestressed_modal_frequency;
 mod analysis_progress;
 mod analysis_random_response;
 mod analysis_response_spectrum;
+mod analysis_statistical_observations;
 mod analysis_sequence;
 mod analysis_task;
 mod analysis_task_pool;

@@ -13,6 +13,7 @@ mod face_geometry;
 mod face_mesh;
 mod face_pipeline;
 mod refinement;
+mod solver_topology;
 mod surface_mesh;
 
 #[cfg(test)]
@@ -66,6 +67,7 @@ pub use face_geometry::{
     ExactFaceGeometryError, ExactFaceGeometryErrorKind, ExactFaceGeometryVertex,
     ExactFaceTriangleGeometry,
 };
+pub use solver_topology::build_surface_solver_topology;
 pub use face_mesh::{
     join_exact_face_charts, validate_exact_face_mesh, ExactFaceJoinContext, ExactFaceJoinError,
     ExactFaceJoinErrorKind, ExactFaceJoinOptions, ExactFaceMesh, ExactFaceMeshBoundarySegment,
