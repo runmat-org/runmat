@@ -8,7 +8,7 @@ mod tests;
 pub(super) fn execute(
     invocation: AnalysisKernelInvocation<'_>,
 ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
-    let mut phase = runmat_analysis_fea::progress::phase_timer("structural_kernel.decode_inputs");
+    let phase = runmat_analysis_fea::progress::phase_timer("structural_kernel.decode_inputs");
     let solve_invocation =
         unique_input(&invocation, AnalysisNumericalObjectKind::SolverInvocation)?;
     let mesh_input = optional_unique_input(&invocation, AnalysisNumericalObjectKind::Mesh)?;
@@ -83,7 +83,8 @@ pub(super) fn execute(
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     // Validate from the unchanged authored constraints; solver_model only rewrites sequence
     // execution controls. Release the fresh validation result before copying that model.
-    phase = runmat_analysis_fea::progress::phase_timer("structural_kernel.constraint_compilation");
+    drop(phase);
+    let phase = runmat_analysis_fea::progress::phase_timer("structural_kernel.constraint_compilation");
     let compiled = CanonicalStructuralConstraintPlan::compile_for_model_with_workspace_limit(
         &solve.model,
         mesh.as_ref(),
@@ -95,7 +96,8 @@ pub(super) fn execute(
             "constraint plan differs from original bounded compilation",
         ));
     }
-    phase = runmat_analysis_fea::progress::phase_timer("structural_kernel.resource_plan_rederivation");
+    drop(phase);
+    let phase = runmat_analysis_fea::progress::phase_timer("structural_kernel.resource_plan_rederivation");
     let field_definitions = structural_static_observable_field_definitions()
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let observations =
@@ -216,7 +218,8 @@ pub(super) fn execute(
             })
         })
         .transpose()?;
-    phase = runmat_analysis_fea::progress::phase_timer("structural_kernel.run");
+    drop(phase);
+    let phase = runmat_analysis_fea::progress::phase_timer("structural_kernel.run");
     let solve_options = LinearStaticSolveOptions {
         formulation_requirement: solve.formulation_requirement,
         preconditioner_kind: solve.preconditioner,
@@ -317,7 +320,8 @@ pub(super) fn execute(
         )?,
         None => StructuralLinearWorkloadResult::new(run, constraint_result)?,
     };
-    phase = runmat_analysis_fea::progress::phase_timer("structural_kernel.result_encoding");
+    drop(phase);
+    let phase = runmat_analysis_fea::progress::phase_timer("structural_kernel.result_encoding");
     let payload = result.canonical_bytes()?;
     let numerical_receipt =
         StructuralLinearNumericalReceiptArtifact::new(invocation.host.workload.identity, &result)?;
