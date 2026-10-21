@@ -1,7 +1,7 @@
 //! Geometry-derived face constraints retain the principal physical directions.
 //! The original samples and constructive geometry acceptance remain unchanged.
 use super::{
-    cross, curvature_target_size, geometry_error, normalize, relations::TopologyRelations,
+    cross, curvature_target_size, geometry_error, norm, normalize, relations::TopologyRelations,
 };
 use super::{SharedCurveError, SharedCurveErrorKind};
 use runmat_geometry_core::{
@@ -105,7 +105,8 @@ impl<'a> FaceMetricSamples<'a> {
                 )
                 .for_edge(&edge.id)
             };
-            normals.push(normalize(cross(derivatives.du_m, derivatives.dv_m)).ok_or_else(failure)?);
+            let normal = normalize(cross(derivatives.du_m, derivatives.dv_m)).ok_or_else(failure)?;
+            normals.push(normal);
             if curvature.minimum_1_per_m == 0.0 && curvature.maximum_1_per_m == 0.0 {
                 continue;
             }
@@ -114,14 +115,12 @@ impl<'a> FaceMetricSamples<'a> {
                     derivatives.du_m[axis] * uv[0] + derivatives.dv_m[axis] * uv[1]
                 })
             };
-            let first = normalize(physical(curvature.minimum_direction_uv)).ok_or_else(failure)?;
-            let second = physical(curvature.maximum_direction_uv);
-            let projection: f64 = first.iter().zip(second).map(|(a, b)| a * b).sum();
-            // At an umbilic the geometry API may return a nonorthogonal UV
-            // basis. Orthonormalize in physical space, where curvature acts.
-            let second = normalize(std::array::from_fn(|axis| {
-                second[axis] - projection * first[axis]
-            }))
+            let (first, second) = principal_frame(
+                physical(curvature.minimum_direction_uv),
+                physical(curvature.maximum_direction_uv),
+                derivatives.du_m,
+                normal,
+            )
             .ok_or_else(failure)?;
             let index = self
                 .faces
@@ -171,5 +170,58 @@ impl<'a> FaceMetricSamples<'a> {
                 })
             })
             .collect()
+    }
+}
+
+/// Orthonormal physical principal directions from the curvature solver's UV directions mapped to
+/// physical space. At an umbilic the solver may return a nonorthogonal basis, so the second
+/// direction is orthogonalized against the first. Near an umbilic (a spherical blend corner)
+/// both directions come back nearly parallel and their difference is roundoff; every tangent
+/// direction is then principal and the two curvatures agree, so the tangent direction orthogonal
+/// to the first is exact.
+pub(super) fn principal_frame(
+    minimum: [f64; 3],
+    maximum: [f64; 3],
+    du: [f64; 3],
+    normal: [f64; 3],
+) -> Option<([f64; 3], [f64; 3])> {
+    let first = normalize(minimum).or_else(|| normalize(du))?;
+    let projection: f64 = first.iter().zip(maximum).map(|(a, b)| a * b).sum();
+    let remainder: [f64; 3] = std::array::from_fn(|axis| maximum[axis] - projection * first[axis]);
+    let scale = norm(maximum);
+    let second = if norm(remainder) > 1.0e-8 * scale {
+        normalize(remainder)?
+    } else {
+        normalize(cross(normal, first))?
+    };
+    Some((first, second))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::principal_frame;
+
+    fn dot(left: [f64; 3], right: [f64; 3]) -> f64 {
+        left.iter().zip(right).map(|(a, b)| a * b).sum()
+    }
+
+    #[test]
+    fn umbilic_points_with_parallel_principal_directions_get_an_orthonormal_tangent_frame() {
+        // A spherical fillet corner: the solver returned the same direction twice.
+        let normal = [0.0, 0.0, 1.0];
+        let direction = [0.6, 0.8, 0.0];
+        for maximum in [direction, [0.6 + 1.0e-14, 0.8, 0.0], [0.0; 3]] {
+            let (first, second) = principal_frame(direction, maximum, [1.0, 0.0, 0.0], normal)
+                .expect("an umbilic still has a tangent frame");
+            assert!((dot(first, first) - 1.0).abs() < 1e-12);
+            assert!((dot(second, second) - 1.0).abs() < 1e-12);
+            assert!(dot(first, second).abs() < 1e-12);
+            assert!(dot(second, normal).abs() < 1e-12);
+        }
+        // Distinct directions are only orthogonalized.
+        let (first, second) =
+            principal_frame([1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [1.0, 0.0, 0.0], normal).unwrap();
+        assert_eq!(first, [1.0, 0.0, 0.0]);
+        assert!((second[1] - 1.0).abs() < 1e-12);
     }
 }
