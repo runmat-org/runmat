@@ -91,12 +91,38 @@ pub(in crate::cdt) fn build_delaunay_volume_point_set_with_order(
     )
     .map_err(topology_error)?;
     let mut hull = UnconstrainedHull::new(topology).map_err(insertion_error)?;
-    for (index, node) in geometric_nodes.iter().copied().enumerate() {
-        if initial.contains(&index) {
-            continue;
+    // A point whose hull cavity is degenerate against the current partial hull (a surface point
+    // just inside a cylinder cap whose cocircular neighbours were inserted first) is retried
+    // after the remaining points, when it usually lies inside the hull. A failed insertion leaves
+    // the hull unchanged, and the final complex is independently checked to be Delaunay.
+    let mut pending = geometric_nodes
+        .iter()
+        .copied()
+        .enumerate()
+        .filter(|(index, _)| !initial.contains(index))
+        .collect::<Vec<_>>();
+    loop {
+        let mut deferred = Vec::new();
+        let mut first_failure = None;
+        let attempted = pending.len();
+        for (index, node) in pending {
+            match hull.insert(node, options.insertion, cancellation) {
+                Ok(()) => {}
+                Err(failure) if failure.kind == DelaunayInsertionErrorKind::InvalidTopology => {
+                    first_failure.get_or_insert((failure, index, node));
+                    deferred.push((index, node));
+                }
+                Err(failure) => return Err(insertion_error_at_node(failure, index, node)),
+            }
         }
-        hull.insert(node, options.insertion, cancellation)
-            .map_err(|failure| insertion_error_at_node(failure, index, node))?;
+        if deferred.is_empty() {
+            break;
+        }
+        if deferred.len() == attempted {
+            let (failure, index, node) = first_failure.expect("a deferred insertion failed");
+            return Err(insertion_error_at_node(failure, index, node));
+        }
+        pending = deferred;
     }
 
     let topology = hull

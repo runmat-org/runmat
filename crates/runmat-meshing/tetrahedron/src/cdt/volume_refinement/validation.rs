@@ -118,6 +118,21 @@ pub(super) fn validate_delaunay_volume_refinement_candidate_from_admitted_input(
             }
             let center = metric_circumcenter(points, source_quality.resolved_metric)
                 .ok_or_else(|| invalid("metric circumcenter is not representable"))?;
+            let index = observed.construction_point_index as usize;
+            if let Some(picking) = index.checked_sub(super::candidate::PICKING_INDEX_OFFSET) {
+                let point = super::candidate::picking_point(construction_points, center, picking)
+                    .ok_or_else(|| invalid("picking point index exceeds its construction family"))?;
+                if !strictly_inside_region_from(
+                    input.topology,
+                    construction_index,
+                    &source_quality.region_id,
+                    point,
+                    cancellation,
+                )? {
+                    return Err(invalid("picking point is outside its admitted domain"));
+                }
+                point
+            } else {
             metric_offcenter_points(
                 input.topology,
                 topology_index,
@@ -131,6 +146,7 @@ pub(super) fn validate_delaunay_volume_refinement_candidate_from_admitted_input(
             .ok_or_else(|| {
                 invalid("metric off-center point index exceeds its construction family")
             })?
+            }
         }
         DelaunayRefinementCandidateKind::InteriorPoint => {
             canonical_interior_points(construction_points)?

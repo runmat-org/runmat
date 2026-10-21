@@ -271,6 +271,7 @@ fn request(tolerance: runmat_geometry_core::GeometryTolerancePolicy) -> MeshingR
             global_metric: MetricTensor3::isotropic_length_m(10.0).unwrap(),
             maximum_grading_ratio: 1.3,
             contributions: Vec::new(),
+            entity_supports: Vec::new(),
         },
         quality: MeshingQualityTargets {
             curve: CurveQualityTargets {
