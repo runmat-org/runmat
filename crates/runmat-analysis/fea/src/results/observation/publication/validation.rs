@@ -40,6 +40,13 @@ impl ObservationPublicationCatalog {
                             .source
                             .validate_sampled_selection(&value.request.selection)?,
                         (
+                            ObservationFieldCatalogSource::VolumeMeshRecovery { .. },
+                            ObservationFieldSource::VolumeMeshRecovery { .. },
+                        ) => self.source.validate_volume_mesh_selection_metadata(
+                            &value.request.selection,
+                            value.request.plan.topology_digest,
+                        )?,
+                        (
                             ObservationFieldCatalogSource::Structural { .. },
                             ObservationFieldSource::StructuralRecovery { .. },
                         ) => {
