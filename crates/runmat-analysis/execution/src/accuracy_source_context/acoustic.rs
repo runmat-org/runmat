@@ -71,9 +71,21 @@ pub(super) fn validate(
         SequenceIdentity::from_solver_contract(&workload.model.sequence)?,
         step,
     )?;
+    // An entry carries an observation manifest exactly when an authored observation samples its
+    // frequency: final-only outputs sample the terminal frequency of the sweep alone.
+    let terminal = match &step.independent_domain {
+        runmat_analysis_core::IndependentDomain::FrequencyHertz(values) => values.last().copied(),
+        _ => None,
+    };
+    let sampled = step.observations.iter().any(|observation| {
+        observation.spec().is_none_or(|spec| {
+            spec.sampling != runmat_analysis_core::SamplingPolicy::Final
+                || terminal == Some(workload.frequency.hertz)
+        })
+    });
     if producer != request.producer
         || request.plan != step.accuracy
-        || observations.is_some() == step.observations.is_empty()
+        || observations.is_some() != sampled
     {
         return Err(AnalysisBridgeError::Identity(
             "acoustic accuracy differs from authored requirements",

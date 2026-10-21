@@ -108,7 +108,7 @@ impl AcousticStudyEntryCoordinator {
         let fields = self.fields.as_ref().expect("completed fields");
         let policy = self.preparation.output_policy;
         let workload = self.workload();
-        let fanout = AcousticObservations::prepare_fanout_at(
+        let fanout = AcousticObservations::prepare_fanout_if_sampled(
             source,
             ObservationPreparation {
                 source_host: recovery.host.clone(),
@@ -130,8 +130,15 @@ impl AcousticStudyEntryCoordinator {
             },
             RecoveredFieldSample::FrequencyHertz(workload.frequency.hertz),
         )?;
-        self.observation_state.fanout = Some(fanout);
-        self.phase = AcousticStudyPhase::ReadyForObservationPartition { ordinal: 0 };
+        match fanout {
+            Some(fanout) => {
+                self.observation_state.fanout = Some(fanout);
+                self.phase = AcousticStudyPhase::ReadyForObservationPartition { ordinal: 0 };
+            }
+            // No authored observation samples this frequency: the entry publishes its
+            // fields and accuracy without an observation manifest.
+            None => self.phase = AcousticStudyPhase::ReadyForAccuracy,
+        }
         Ok(())
     }
 
