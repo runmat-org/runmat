@@ -147,9 +147,8 @@ async fn authored_named_spatial_input_retains_deferred_authority_until_actual_me
     #[cfg(feature = "occt-native")]
     {
         let prepared = prepared.unwrap();
-        let crate::PreparedFeaStudyRoot::Structural(root) = prepared.root else {
-            panic!("expected a source structural root")
-        };
+        assert!(prepared.root.planning.structural().is_some());
+        let root = crate::prepare_structural_study_root(prepared.root).unwrap();
         assert_eq!(root.result_expectation().study, realized);
         assert_eq!(
             root.result_expectation().input_materializations,

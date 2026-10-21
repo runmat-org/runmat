@@ -315,7 +315,7 @@ struct Composition<'a, 'recovery> {
     recovery: StructuralTransientRecoveryAdmission<'recovery>,
 }
 
-fn admit_analysis_task_resources(
+pub(super) fn admit_analysis_task_resources(
     resources: &AllocationResources,
     expected_accelerators: &[runmat_execution::resource::AcceleratorRequest],
     local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
@@ -403,7 +403,7 @@ mod allocation_tests {
     }
 }
 
-fn sequence_error_composition(
+pub(super) fn sequence_error_composition(
     pool: &RemotePoolDriver,
     message: String,
 ) -> RemoteExactStructuralStudyComposition {
@@ -425,7 +425,7 @@ fn sequence_error_composition(
     }
 }
 
-fn signal_composition(
+pub(super) fn signal_composition(
     outcome: super::input_materialization::RemoteInputMaterializationOutcome,
 ) -> RemoteExactStructuralStudyComposition {
     match outcome {

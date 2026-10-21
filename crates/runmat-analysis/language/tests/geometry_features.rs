@@ -136,6 +136,7 @@ geometry bracket {
         ],
         exchange: None,
         resolved_units: Some(runmat_geometry_core::UnitSystem::Millimeter),
+        authored_names: Default::default(),
     };
     let program = FeaCompiler::new(
         &TestHost::default().with_geometry_inspection("project/part.step", inspection),

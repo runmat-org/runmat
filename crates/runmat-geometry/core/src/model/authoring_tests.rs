@@ -21,6 +21,7 @@ fn imported_geometry_requires_exact_identity_and_persistent_topology() {
                 ..GeometryAuthoringCapabilities::default()
             },
             exchange: None,
+            shared_interfaces: false,
         }),
         regions: vec![GeometryRegionDefinition {
             region_id: "body".into(),

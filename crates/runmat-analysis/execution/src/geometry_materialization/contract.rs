@@ -343,6 +343,8 @@ fn validate_source(request: &GeometryMaterializationRequest) -> AnalysisBridgeRe
                 && *encoded_length > 0
                 && valid_chunks(chunks, *encoded_length, *source_digest)
                 && request.import_options.source_units == imported.units
+                && request.import_options.analysis.healing.shared_interfaces
+                    == imported.shared_interfaces
         }
         (
             Definition::Derived(derived),

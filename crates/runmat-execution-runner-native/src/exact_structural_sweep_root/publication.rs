@@ -304,12 +304,13 @@ pub fn import_exact_structural_sweep_result(
     })
 }
 
-pub fn import_structural_sweep_result(
+/// Admit a sweep closure and return every entry, in authored order, with its terminal status.
+/// Successful entries keep their raw response for the family importer of their study.
+pub fn import_study_sweep_entries(
     source: &impl CacheImport,
     response: ProgramExecutionResponse,
     expected: &crate::StructuralSweepResultExpectation,
-    limits: ObjectInventoryLimits,
-) -> NativeExecutionResult<ExactStructuralSweepResult> {
+) -> NativeExecutionResult<(SweepIdentity, Vec<StudySweepEntry>)> {
     expected.validate()?;
     let ProgramExecutionResponse::ExternalizedSuccess {
         outputs,
@@ -357,33 +358,66 @@ pub fn import_structural_sweep_result(
     let entries = publication
         .entries
         .into_iter()
-        .zip(&expected.studies)
         .enumerate()
-        .map(|(study_index, (entry, study))| {
-            let terminal = match entry {
-                PublishedSweepEntry::Succeeded { response } => {
-                    ExactStructuralSweepTerminal::Succeeded(Box::new(
-                        import_structural_study_result(source, response, study, limits)?,
-                    ))
-                }
-                PublishedSweepEntry::Failed { message } => {
-                    ExactStructuralSweepTerminal::Failed(message)
-                }
-                PublishedSweepEntry::Cancelled => ExactStructuralSweepTerminal::Cancelled,
+        .map(|(study_index, entry)| StudySweepEntry {
+            study_index,
+            terminal: match entry {
+                PublishedSweepEntry::Succeeded { response } => StudySweepTerminal::Succeeded(response),
+                PublishedSweepEntry::Failed { message } => StudySweepTerminal::Failed(message),
+                PublishedSweepEntry::Cancelled => StudySweepTerminal::Cancelled,
                 PublishedSweepEntry::Indeterminate { message } => {
+                    StudySweepTerminal::Indeterminate(message)
+                }
+            },
+        })
+        .collect();
+    Ok((publication.identity, entries))
+}
+
+/// Structural-only view of a sweep whose every study has structural planning.
+pub fn import_structural_sweep_result(
+    source: &impl CacheImport,
+    response: ProgramExecutionResponse,
+    expected: &crate::StructuralSweepResultExpectation,
+    limits: ObjectInventoryLimits,
+) -> NativeExecutionResult<ExactStructuralSweepResult> {
+    let (identity, entries) = import_study_sweep_entries(source, response, expected)?;
+    let entries = entries
+        .into_iter()
+        .zip(&expected.studies)
+        .map(|(entry, study)| {
+            let terminal = match entry.terminal {
+                StudySweepTerminal::Succeeded(response) => ExactStructuralSweepTerminal::Succeeded(
+                    Box::new(import_structural_study_result(source, response, study, limits)?),
+                ),
+                StudySweepTerminal::Failed(message) => ExactStructuralSweepTerminal::Failed(message),
+                StudySweepTerminal::Cancelled => ExactStructuralSweepTerminal::Cancelled,
+                StudySweepTerminal::Indeterminate(message) => {
                     ExactStructuralSweepTerminal::Indeterminate(message)
                 }
             };
             Ok(ExactStructuralSweepEntryResult {
-                study_index,
+                study_index: entry.study_index,
                 terminal,
             })
         })
         .collect::<NativeExecutionResult<Vec<_>>>()?;
-    Ok(ExactStructuralSweepResult {
-        identity: publication.identity,
-        entries,
-    })
+    Ok(ExactStructuralSweepResult { identity, entries })
+}
+
+/// Terminal of one sweep study before its family importer admits the result closure.
+#[derive(Clone, Debug, PartialEq)]
+pub enum StudySweepTerminal {
+    Succeeded(ProgramExecutionResponse),
+    Failed(String),
+    Cancelled,
+    Indeterminate(String),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct StudySweepEntry {
+    pub study_index: usize,
+    pub terminal: StudySweepTerminal,
 }
 
 pub fn import_exact_structural_sweep_result_catalog(

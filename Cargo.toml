@@ -69,6 +69,7 @@ members = [
     "crates/runmat-analysis/fea",
     "crates/runmat-analysis/qualification",
     "crates/runmat-analysis/execution",
+    "crates/runmat-analysis/distributed",
     "crates/runmat-meshing",
     "crates/runmat-meshing/core",
     "crates/runmat-meshing/execution",
@@ -186,6 +187,7 @@ runmat-analysis-core = { version = "=0.6.2", path = "crates/runmat-analysis/core
 runmat-analysis-language = { version = "=0.6.2", path = "crates/runmat-analysis/language" }
 runmat-analysis-fea = { version = "=0.6.2", path = "crates/runmat-analysis/fea" }
 runmat-analysis-execution = { version = "=0.6.2", path = "crates/runmat-analysis/execution" }
+runmat-analysis-distributed = { version = "=0.6.2", path = "crates/runmat-analysis/distributed" }
 runmat-meshing-core = { version = "=0.6.2", path = "crates/runmat-meshing/core" }
 runmat-meshing-execution = { version = "=0.6.2", path = "crates/runmat-meshing/execution" }
 runmat-meshing-size = { version = "=0.6.2", path = "crates/runmat-meshing/size" }

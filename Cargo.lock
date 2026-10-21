@@ -6929,6 +6929,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-analysis-distributed"
+version = "0.6.2"
+dependencies = [
+ "faer",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "runmat-analysis-execution"
 version = "0.6.2"
 dependencies = [
@@ -7250,6 +7258,7 @@ dependencies = [
  "runmat-accelerate",
  "runmat-accelerate-api",
  "runmat-analysis-core",
+ "runmat-analysis-distributed",
  "runmat-analysis-execution",
  "runmat-analysis-fea",
  "runmat-analysis-language",
