@@ -368,12 +368,15 @@ fn supported_edge_sizing_is_fine_at_the_edge_and_coarsens_with_distance() {
     let near = length_at(&resolver, &scope, [0.5, 1.0, 0.0]);
     let far = length_at(&resolver, &scope, [0.5, 100.0, 0.0]);
     assert!((at_edge - 0.1).abs() < 1e-12);
-    assert!((near - (0.1 + 0.3 * 1.0)).abs() < 1e-9);
+    assert!((near - (0.1 + 0.3 * (1.0 - 0.1))).abs() < 1e-9);
+    // Full strength across the element layer touching the edge.
+    let layer = length_at(&resolver, &scope, [0.5, 0.1, 0.0]);
+    assert!((layer - 0.1).abs() < 1e-12);
     // Capped by the uniform part: never coarser than the global size.
     assert!((far - 10.0).abs() < 1e-9);
     // Distance to the support segment, including past its end.
     let past_end = length_at(&resolver, &scope, [3.0, 0.0, 0.0]);
-    assert!((past_end - (0.1 + 0.3 * 2.0)).abs() < 1e-9);
+    assert!((past_end - (0.1 + 0.3 * (2.0 - 0.1))).abs() < 1e-9);
 }
 
 #[test]

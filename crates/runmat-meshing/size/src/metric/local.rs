@@ -3,8 +3,9 @@
 //! An edge-scoped contribution (curvature, feature, proximity, contact) constrains the mesh near
 //! that edge, not across every face the edge bounds. When the request carries the edge's sampled
 //! world-space support, consumers evaluate it at a point `x` as the original tensor relaxed to
-//! the characteristic size `h + (r - 1) * d(x, support)`, where `r` is the request's maximum
-//! grading ratio. Scaling preserves anisotropy and the result is intersected with the constant
+//! the characteristic size `h + (r - 1) * max(0, d(x, support) - h)`, where `r` is the request's
+//! maximum grading ratio: full strength across the element layer touching the support, then
+//! graded. Scaling preserves anisotropy and the result is intersected with the constant
 //! part of the field, so it is never coarser than the entity-free sizing. An entity without a
 //! support keeps the constant semantics: its contribution applies across every incident face.
 use super::*;
@@ -211,7 +212,8 @@ impl ResolvedMetricField {
         let mut metric = constant;
         let mut reach_length = coarsest_length_bound(metric)?;
         for (lower_bound, source) in order {
-            let reach = (reach_length - source.characteristic_length_m) / slope;
+            let reach = source.characteristic_length_m
+                + (reach_length - source.characteristic_length_m) / slope;
             if lower_bound > reach {
                 continue;
             }
@@ -222,7 +224,11 @@ impl ResolvedMetricField {
             if distance > reach {
                 continue;
             }
-            let scale = 1.0 + slope * distance / source.characteristic_length_m;
+            // Full strength across the element layer touching the support: the volume applies
+            // an entity's sizing to every cell with a corner on it, so boundary facets touching
+            // the entity must already satisfy it. Grading starts one characteristic length out.
+            let graded_distance = (distance - source.characteristic_length_m).max(0.0);
+            let scale = 1.0 + slope * graded_distance / source.characteristic_length_m;
             let graded = scaled(source.metric, scale)?;
             let tightened = intersection::intersect(metric, graded)?;
             if tightened != metric {
