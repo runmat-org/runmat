@@ -131,10 +131,7 @@ fn validate_entry(
             .result
             .source_result_identity()
             .map_err(|e| e.to_string())?,
-        completed
-            .observation_catalog
-            .as_ref()
-            .map(|catalog| catalog.identity()),
+        completed.observation_catalog.as_ref(),
         completed.workload.formulation_requirement,
         step.accuracy.clone(),
     )

@@ -55,6 +55,8 @@ struct ResultData {
     mesh_digest: runmat_meshing_core::StableDigest,
     projection_digest: Digest,
     ordered_node_ids: Vec<u64>,
+    /// Volume elements of the projection the nodal pressure is interpolated over.
+    ordered_element_ids: Vec<u64>,
     /// Mode (1-based) or time coordinates, in ascending order.
     samples: Vec<RecoveredFieldSample>,
     /// Real nodal pressure (Pa, or mass-normalized mode amplitude) per sample.
@@ -122,6 +124,11 @@ impl AcousticResponseSolverResult {
                 mesh_digest: mesh.canonical_digest,
                 projection_digest: projection.projection_digest,
                 ordered_node_ids: projection.nodes.iter().map(|node| node.node_id).collect(),
+                ordered_element_ids: projection
+                    .elements
+                    .iter()
+                    .map(|element| element.element_id)
+                    .collect(),
                 samples,
                 pressure_pa,
                 diagnostics,
@@ -149,6 +156,7 @@ impl AcousticResponseSolverResult {
             || d.publication_declaration.kind != d.solver.state_kind()
             || d.publication_declaration.completeness != StateCompleteness::Complete
             || !unique_ids
+            || d.ordered_element_ids.is_empty()
             || d.samples.is_empty()
             || d.samples.len() != d.pressure_pa.len()
             || d.pressure_pa
@@ -249,6 +257,11 @@ impl AcousticResponseSolverResult {
                 .iter()
                 .copied()
                 .eq(projection.nodes.iter().map(|node| node.node_id))
+            || !d
+                .ordered_element_ids
+                .iter()
+                .copied()
+                .eq(projection.elements.iter().map(|element| element.element_id))
         {
             return Err(invalid(
                 "acoustic response result does not belong to the workload and mesh",
@@ -331,6 +344,9 @@ impl AcousticResponseSolverResult {
     }
     pub fn ordered_node_ids(&self) -> &[u64] {
         &self.data.ordered_node_ids
+    }
+    pub fn ordered_element_ids(&self) -> &[u64] {
+        &self.data.ordered_element_ids
     }
     pub fn samples(&self) -> &[RecoveredFieldSample] {
         &self.data.samples

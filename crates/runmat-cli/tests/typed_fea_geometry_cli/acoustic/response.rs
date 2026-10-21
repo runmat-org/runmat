@@ -47,7 +47,7 @@ fn rigid_cube_cavity_modes_match_rectangular_room_frequencies() {
         "analysis sound { acoustic modal { modes = 5 } }",
     ).replace(
         "    constraint drive {\n        acoustic.pressure { target = geometry.part.region.surface; value = signal.pulse }\n    }\n",
-        "",
+        "    load walls {\n        acoustic.rigid_wall { target = geometry.part.region.surface }\n    }\n",
     ));
     let (summary, run) = run(&project, "response");
     assert_eq!(summary["procedure"], "acoustic_modal");

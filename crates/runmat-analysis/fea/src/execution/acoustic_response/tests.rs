@@ -7,7 +7,11 @@ fn model(step: ProcedureStep) -> AnalysisModel {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     replace_fixture_excitations(&mut model, Vec::new());
     model.constraints.clear();
-    model.boundaries.clear();
+    model.boundaries = vec![runmat_analysis_core::AnalysisBoundary {
+        boundary_id: "closed_end".into(),
+        target: runmat_analysis_core::RegionTarget::boundary("slab_left"),
+        operator: runmat_analysis_core::BoundaryOperator::AcousticRigidWall,
+    }];
     model.materials[0].acoustic = Some(MaterialAcousticModel {
         speed_of_sound_m_per_s: 2.0,
         damping_ratio: 0.0,

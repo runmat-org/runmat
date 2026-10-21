@@ -2,6 +2,8 @@ geometry duct {
     file = "./geometry/cantilever.step"
     units = mm
     region air : solid { select id "solid_000001"; expect exactly_one }
+    region near_end : face { select id "face_000001"; expect exactly_one }
+    region far_end : face { select id "face_000002"; expect exactly_one }
 }
 
 mesh duct on geometry.duct {
@@ -22,6 +24,12 @@ material air {
 
 model closed_duct {
     assign material.air to geometry.duct.region.air
+    load near_wall {
+        acoustic.rigid_wall { target = geometry.duct.region.near_end }
+    }
+    load far_wall {
+        acoustic.rigid_wall { target = geometry.duct.region.far_end }
+    }
 }
 
 study acoustic_duct_modes {

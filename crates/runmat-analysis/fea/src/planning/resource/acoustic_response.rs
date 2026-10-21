@@ -75,7 +75,8 @@ pub fn acoustic_response_result_payload_bytes_upper_bound(
         .map_err(invalid)?
         .encoded_bytes_upper_bound;
     // Canonical f64 and u64 encodings are at most nine bytes; reserve sixteen.
-    let values = mul(add(mul(samples, nodes)?, nodes)?, 16)?;
+    let elements = count(mesh.topology.volume_elements.len())?;
+    let values = mul(add(add(mul(samples, nodes)?, nodes)?, elements)?, 16)?;
     let per_sample = mul(samples, 96)?;
     add(
         add(RESULT_SCHEMA_BYTES, formulation_bytes)?,

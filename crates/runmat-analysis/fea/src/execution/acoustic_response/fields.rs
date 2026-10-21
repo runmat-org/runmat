@@ -106,7 +106,7 @@ impl AcousticResponseSolverResult {
             RecoveredFieldEntityCounts {
                 oriented_faces: 0,
                 nodes,
-                volume_elements: 0,
+                volume_elements: self.ordered_element_ids().len(),
                 volume_integration_points: 0,
                 oriented_edges: 0,
                 beam_elements: 0,
