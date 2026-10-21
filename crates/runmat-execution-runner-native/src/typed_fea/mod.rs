@@ -246,6 +246,7 @@ pub async fn execute_checked_fea_locally(
             // independent solve (and drives its own downstream heating analysis); run them
             // as cases in parallel, each keyed by its frequency.
             let sweep_id = format!("{}.cases", study.study.study_id);
+            let study_id = study.study.study_id.clone();
             let frequencies = if frequencies.is_empty() {
                 vec![f64::NAN]
             } else {
@@ -266,6 +267,7 @@ pub async fn execute_checked_fea_locally(
                         frequency_case_id(frequency)
                     };
                     let options = &options;
+                    let study_id = study_id.clone();
                     async move {
                         // A failed frequency keeps its place in the sweep and never hides
                         // the results of its siblings.
@@ -279,7 +281,11 @@ pub async fn execute_checked_fea_locally(
                                 })
                                 .collect(),
                             Err(error) => vec![LocalSweepCase {
-                                case_id: prefix.clone(),
+                                case_id: if prefix.is_empty() {
+                                    study_id.clone()
+                                } else {
+                                    prefix.clone()
+                                },
                                 outcome: Err(error),
                             }],
                         };
