@@ -24,6 +24,10 @@ pub enum ObservationWorkloadSource {
     Magnetostatic(PreparedAnalysisObjects),
     MaxwellHarmonic(PreparedAnalysisObjects),
     FluidSteady(PreparedAnalysisObjects),
+    /// The producing workload of native node/element fields on the canonical solver mesh,
+    /// of any family. It authenticates provenance only; plans re-resolve from the authored
+    /// step and mesh carried by the volume-mesh catalog, never from a decoded workload.
+    VolumeMesh(PreparedAnalysisObjects),
 }
 
 impl ObservationWorkloadSource {
@@ -36,6 +40,7 @@ impl ObservationWorkloadSource {
             Self::Magnetostatic(_) => AnalysisNumericalObjectKind::MagnetostaticWorkload,
             Self::MaxwellHarmonic(_) => AnalysisNumericalObjectKind::MaxwellHarmonicWorkload,
             Self::FluidSteady(_) => AnalysisNumericalObjectKind::FluidSteadyWorkload,
+            Self::VolumeMesh(objects) => objects.manifest.kind,
         }
     }
 
@@ -47,6 +52,7 @@ impl ObservationWorkloadSource {
             | Self::Thermal(objects)
             | Self::Magnetostatic(objects)
             | Self::MaxwellHarmonic(objects)
+            | Self::VolumeMesh(objects)
             | Self::FluidSteady(objects) => objects,
         }
     }
@@ -92,6 +98,7 @@ impl ObservationWorkloadSource {
             Self::MaxwellHarmonic(_) => Ok(AdmittedObservationWorkload::MaxwellHarmonic(
                 MaxwellHarmonicWorkload::from_canonical_bytes(&objects.payload())?,
             )),
+            Self::VolumeMesh(_) => Ok(AdmittedObservationWorkload::VolumeMesh),
         }
     }
 }
@@ -104,11 +111,12 @@ pub(crate) enum AdmittedObservationWorkload {
     Magnetostatic(MagnetostaticWorkload),
     MaxwellHarmonic(MaxwellHarmonicWorkload),
     FluidSteady(FluidSteadyWorkload),
+    VolumeMesh,
 }
 
 impl AdmittedObservationWorkload {
-    pub(crate) fn model(&self) -> &AnalysisModel {
-        match self {
+    pub(crate) fn model(&self) -> AnalysisBridgeResult<&AnalysisModel> {
+        Ok(match self {
             Self::Linear(workload) => &workload.model,
             Self::NonlinearSolid(workload) => &workload.model,
             Self::Frequency(workload) => workload.model(),
@@ -116,7 +124,12 @@ impl AdmittedObservationWorkload {
             Self::Magnetostatic(workload) => &workload.model,
             Self::MaxwellHarmonic(workload) => &workload.model,
             Self::FluidSteady(workload) => &workload.model,
-        }
+            Self::VolumeMesh => {
+                return Err(AnalysisBridgeError::Identity(
+                    "volume-mesh observations resolve from their catalog step, not a model",
+                ))
+            }
+        })
     }
 
     pub(crate) const fn backend(&self) -> ComputeBackend {
@@ -127,6 +140,7 @@ impl AdmittedObservationWorkload {
             Self::NonlinearSolid(_)
             | Self::Magnetostatic(_)
             | Self::MaxwellHarmonic(_)
+            | Self::VolumeMesh
             | Self::FluidSteady(_) => ComputeBackend::Cpu,
         }
     }
@@ -141,6 +155,7 @@ impl AdmittedObservationWorkload {
             | Self::Thermal(_)
             | Self::Magnetostatic(_)
             | Self::MaxwellHarmonic(_)
+            | Self::VolumeMesh
             | Self::FluidSteady(_) => ObservationExecutionPolicy::serial(),
         }
     }
