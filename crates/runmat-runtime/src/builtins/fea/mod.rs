@@ -221,6 +221,32 @@ pub async fn fea_plan_builtin(input: Value) -> BuiltinResult<Value> {
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_run_builtin(input: Value) -> BuiltinResult<Value> {
+    if matches!(
+        input,
+        Value::String(_) | Value::CharArray(_) | Value::StringArray(_)
+    ) {
+        // A `.fea` path runs through the host's public study runner, as `runmat fea run`.
+        let path = scalar_string(&input, RUN_NAME, &ERROR_INPUT)?;
+        let service = crate::context::legacy::active()
+            .and_then(|runtime| runtime.service_ports().analysis().cloned())
+            .ok_or_else(|| {
+                builtin_error(
+                    RUN_NAME,
+                    &ERROR_OPERATION,
+                    "running a .fea document requires a host study runner",
+                )
+            })?;
+        let publication = service
+            .execute_document(std::path::PathBuf::from(path))
+            .await?;
+        let object = serializable_to_object_value(
+            RUN_NAME,
+            &ERROR_INTERNAL,
+            FEA_RUN_RESULT_CLASS,
+            &publication,
+        )?;
+        return Ok(Value::Object(object));
+    }
     match resolve_document_input(input, RUN_NAME).await? {
         RuntimeResolvedDocument::Study(mut composed) => {
             signals::materialize::materialize_study(

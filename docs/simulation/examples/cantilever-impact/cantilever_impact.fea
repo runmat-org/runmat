@@ -1,7 +1,7 @@
 import function impactPulse from "./impactPulse.m"
 
 geometry beam {
-    file = "../geometry/cantilever.step"
+    file = "./geometry/cantilever.step"
     units = mm
     region body : solid { select id "solid_000001"; expect exactly_one }
     region fixed_end : face { select id "face_000001"; expect exactly_one }

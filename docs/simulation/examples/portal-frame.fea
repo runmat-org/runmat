@@ -26,7 +26,10 @@ material steel {
 }
 
 model sway_frame {
-    section member { rectangular_beam { width = 100 mm  height = 100 mm } }
+    section member { rectangular_beam {
+        width = 100 mm
+        height = 100 mm
+    } }
     orientation frame_axes { global_cartesian {} }
 
     assign material.steel to geometry.frame.region.left_column
