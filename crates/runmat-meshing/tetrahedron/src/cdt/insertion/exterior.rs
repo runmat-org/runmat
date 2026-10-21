@@ -122,14 +122,18 @@ impl UnconstrainedHull {
                         &mut work,
                     )?;
                     if let Some(neighbor) = neighbor {
-                        if side == FaceSide::Coplanar && cospherical(&self.topology, neighbor, node)? {
-                            grow = Some(neighbor);
-                            break 'cells;
-                        }
                         if side != FaceSide::Interior {
+                            let tied = cospherical(&self.topology, neighbor, node)?;
+                            if side == FaceSide::Coplanar && tied {
+                                grow = Some(neighbor);
+                                break 'cells;
+                            }
                             return Err(error(
                                 DelaunayInsertionErrorKind::InvalidTopology,
-                                "finite hull conflict boundary is not visible from the cavity side",
+                                format!(
+                                    "finite hull conflict boundary is not visible from the cavity side ({side:?} face, neighbor in-sphere tie {tied}, cavity of {} cells)",
+                                    removed.len()
+                                ),
                             ));
                         }
                     }
@@ -210,7 +214,7 @@ impl UnconstrainedHull {
     }
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 enum FaceSide {
     Interior,
     Coplanar,
