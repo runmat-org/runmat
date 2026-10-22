@@ -69,8 +69,13 @@ pub fn build_result_publication_resource_plan(
             source_accuracy: accuracy.identity(),
             source_usage: usage.identity(),
             receipt_encoded_bytes_upper_bound: ByteCount(profile.encoded_bytes_upper_bound),
+            // The receipt is encoded directly, as every published output.
             receipt_materialization_bytes: ByteCount(
-                profile.materialization_resident_bytes_estimate,
+                runmat_canonical_codec::projected_canonical_encoding_resident_bytes_estimate(
+                    profile.encoded_bytes_upper_bound,
+                    1,
+                )
+                .ok_or(ResourcePlanningError::Overflow("result publication receipt"))?,
             ),
             accounting_interval_workspace_bytes: ByteCount(interval_workspace),
             nested_plan_workspace_bytes: ByteCount(nested_plan_workspace),

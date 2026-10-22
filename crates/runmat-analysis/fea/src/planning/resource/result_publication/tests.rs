@@ -221,7 +221,11 @@ fn receipt_and_validation_underreservation_are_rejected() {
     output_facts
         .output
         .construction_resident_bytes_admission_budget
-        .0 = profile.materialization_resident_bytes_estimate
+        .0 = runmat_canonical_codec::projected_canonical_encoding_resident_bytes_estimate(
+        profile.encoded_bytes_upper_bound,
+        1,
+    )
+    .unwrap()
         + output_facts.output.transport_closure_bytes_upper_bound.0
         - 1;
     assert!(build_result_publication_resource_plan(

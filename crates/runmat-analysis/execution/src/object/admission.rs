@@ -71,7 +71,7 @@ impl AnalysisInputAdmission {
     }
     /// Profile without constructing a value tree, then admit canonical verification/typed decode.
     pub(crate) fn admit_canonical_decode(&self, bytes: &[u8]) -> AnalysisBridgeResult<()> {
-        let bytes = runmat_canonical_codec::canonical_chunked_payload_materialization_resident_bytes_estimate(
+        let bytes = runmat_canonical_codec::canonical_chunked_payload_typed_resident_bytes_estimate(
             std::iter::once(bytes), &ResourceProfileControl,
         )?;
         self.charge(bytes)

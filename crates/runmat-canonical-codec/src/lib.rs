@@ -15,9 +15,12 @@ mod materialization;
 use materialization::materialization_resident_bytes_estimate;
 pub use materialization::{
     canonical_chunked_payload_materialization_resident_bytes_estimate,
+    canonical_chunked_payload_typed_resident_bytes_estimate,
     canonical_payload_materialization_resident_bytes_estimate,
     canonical_value_materialization_resident_bytes_estimate,
-    canonical_value_typed_resident_bytes_estimate, projected_canonical_materialization_resident_bytes_estimate,
+    canonical_value_typed_resident_bytes_estimate, projected_canonical_encoding_resident_bytes_estimate,
+    projected_canonical_materialization_resident_bytes_estimate,
+    projected_canonical_typed_decode_resident_bytes_estimate,
     CANONICAL_MATERIALIZATION_FIXED_BYTES_PER_CONTRACT,
 };
 
@@ -32,7 +35,7 @@ mod value;
 
 pub use serialized_profile::{
     profile_canonical_encoding, profile_canonical_encoding_with_control, profile_serialized,
-    profile_serialized_shape, profile_serialized_with_control,
+    profile_serialized_shape, profile_serialized_with_control, profile_typed_resident_bytes,
     serialized_materialization_resident_bytes_estimate, CanonicalEncodingProfile,
     SerializedCanonicalProfile,
 };

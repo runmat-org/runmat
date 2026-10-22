@@ -95,7 +95,9 @@ fn authored_memory_ceiling_rejects_before_physical_assembly_and_solve() {
 #[test]
 fn retained_context_capacity_and_overflow_remain_typed_before_physical_preparation() {
     use crate::planning::resource::ResourcePlanningError;
-    let (model, mesh, _) = fixture::prepare(1, false);
+    let (mut model, mesh, _) = fixture::prepare(1, false);
+    // An authored ceiling: the default is unbounded and placement applies machine capacity.
+    model.sequence.steps[0].accuracy.resources.maximum_resident_bytes = 8 << 30;
     let options = NonlinearSolveOptions {
         solver_mesh: Some(mesh),
         max_accepted_increments: 8,
@@ -135,7 +137,9 @@ fn retained_context_capacity_and_overflow_remain_typed_before_physical_preparati
 fn readonly_recovery_has_distinct_identity_and_rejects_forged_solve_or_work() {
     use crate::planning::resource::{build_resource_plan, FeaResourcePlan, SolveResourcePolicy};
     for quadratic in [false, true] {
-        let (model, mesh, _) = fixture::prepare(1, quadratic);
+        let (mut model, mesh, _) = fixture::prepare(1, quadratic);
+        // An authored ceiling: the default is unbounded and placement applies machine capacity.
+        model.sequence.steps[0].accuracy.resources.maximum_resident_bytes = 8 << 30;
         let mut options = NonlinearSolveOptions {
             solver_mesh: Some(mesh),
             max_accepted_increments: 8,
