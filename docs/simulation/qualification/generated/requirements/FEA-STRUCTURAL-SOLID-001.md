@@ -1,6 +1,6 @@
 # FEA-STRUCTURAL-SOLID-001: Physical linear solid operators, loads and assigned-material recovery
 
-0 PASS, 1 FAIL, 55 OPEN, 0 TAGGED. Generated; do not edit.
+1 PASS, 0 FAIL, 55 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## quadrature_mass
 
@@ -9,7 +9,7 @@ Evidence kind: IndependentReference. Criterion: Complete Tet4 verification and r
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
 | linear_structural | tet4 | numerical_kernel | OPEN |  |
-| linear_structural | tet10 | numerical_kernel | FAIL | `runmat-analysis-fea[lib]::assembly::elements::solid::tetrahedron10_mass::tests::affine_mass_preserves_all_quadratic_kinetic_cross_moments_at_scale_and_translation` (crates/runmat-analysis/fea/src/assembly/elements/solid/tetrahedron10_mass/tests.rs:59) - Affine Tet10 consistent mass preserves independent quadratic kinetic cross moments across scale/translation. No lumped mass, body-load, damping or mesh-converge... |
+| linear_structural | tet10 | numerical_kernel | PASS | `runmat-analysis-fea[lib]::assembly::elements::solid::tetrahedron10_mass::tests::affine_mass_preserves_all_quadratic_kinetic_cross_moments_at_scale_and_translation` (crates/runmat-analysis/fea/src/assembly/elements/solid/tetrahedron10_mass/tests.rs:59) - Affine Tet10 consistent mass preserves independent quadratic kinetic cross moments across scale/translation. No lumped mass, body-load, damping or mesh-converge... |
 | linear_structural | beam | numerical_kernel | OPEN |  |
 | linear_structural | shell | numerical_kernel | OPEN |  |
 | linear_structural | tet4 | public_study | OPEN |  |

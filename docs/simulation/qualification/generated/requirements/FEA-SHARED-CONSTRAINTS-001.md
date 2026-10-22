@@ -1,6 +1,6 @@
 # FEA-SHARED-CONSTRAINTS-001: Typed constraint compilation, enforcement and reactions
 
-0 PASS, 1 FAIL, 167 OPEN, 0 TAGGED. Generated; do not edit.
+1 PASS, 0 FAIL, 167 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## constraint_system_scope
 
@@ -173,7 +173,7 @@ Evidence kind: SemanticRealization. Criterion: Authored equality constraints com
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | FAIL | `runmat-analysis-fea[lib]::constraints::compilation::admission::tests::exact_caller_boundary_preserves_original_plan_across_all_compiler_routes` (crates/runmat-analysis/fea/src/constraints/compilation/admission/tests.rs:10) - Prepared structural constraint fixtures compare original canonical plans and bytes at the exact requested workspace boundary and reject one byte below; no cross... |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PASS | `runmat-analysis-fea[lib]::constraints::compilation::admission::tests::exact_caller_boundary_preserves_original_plan_across_all_compiler_routes` (crates/runmat-analysis/fea/src/constraints/compilation/admission/tests.rs:10) - Prepared structural constraint fixtures compare original canonical plans and bytes at the exact requested workspace boundary and reject one byte below; no cross... |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |

@@ -1,6 +1,6 @@
 # FEA-SHARED-EXCITATION-001: Typed signals, frozen generators and conservative actions
 
-0 PASS, 1 FAIL, 103 OPEN, 0 TAGGED. Generated; do not edit.
+1 PASS, 0 FAIL, 103 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## one_cross_family_authority
 
@@ -38,7 +38,7 @@ Evidence kind: SemanticRealization. Criterion: A signal declares: stable signal 
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | FAIL | `runmat-analysis-fea[lib]::excitation::tests::step_interpolation_selects_the_documented_side_of_an_interval` (crates/runmat-analysis/fea/src/excitation/tests.rs:314) - Typed tabulated force signal at time 0.5 selects distinct left and right endpoint vectors; no generator freezing, spatial integration or placement equivalence. |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PASS | `runmat-analysis-fea[lib]::excitation::tests::step_interpolation_selects_the_documented_side_of_an_interval` (crates/runmat-analysis/fea/src/excitation/tests.rs:314) - Typed tabulated force signal at time 0.5 selects distinct left and right endpoint vectors; no generator freezing, spatial integration or placement equivalence. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |

@@ -1,6 +1,6 @@
 # FEA-STRUCTURAL-SHELL-001: Physical membrane and bending shells
 
-0 PASS, 1 FAIL, 27 OPEN, 0 TAGGED. Generated; do not edit.
+1 PASS, 0 FAIL, 27 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## physical_shell_operator
 
@@ -11,7 +11,7 @@ Evidence kind: IndependentReference. Criterion: Select and document the supporte
 | linear_structural | tet4 | numerical_kernel | OPEN |  |
 | linear_structural | tet10 | numerical_kernel | OPEN |  |
 | linear_structural | beam | numerical_kernel | OPEN |  |
-| linear_structural | shell | numerical_kernel | FAIL | `runmat-analysis-fea[lib]::assembly::elements::shell::qualification_tests::simply_supported_sinusoidal_plate_converges_to_the_navier_solution` (crates/runmat-analysis/fea/src/assembly/elements/shell/qualification_tests.rs:12) - Dense test assembly of transverse simply-supported triangular plate; center displacement decreases toward independent Navier value and fine error below8%. No me... |
+| linear_structural | shell | numerical_kernel | PASS | `runmat-analysis-fea[lib]::assembly::elements::shell::qualification_tests::simply_supported_sinusoidal_plate_converges_to_the_navier_solution` (crates/runmat-analysis/fea/src/assembly/elements/shell/qualification_tests.rs:12) - Dense test assembly of transverse simply-supported triangular plate; center displacement decreases toward independent Navier value and fine error below8%. No me... |
 | linear_structural | tet4 | public_study | OPEN |  |
 | linear_structural | tet10 | public_study | OPEN |  |
 | linear_structural | beam | public_study | OPEN |  |

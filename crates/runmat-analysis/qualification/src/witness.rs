@@ -283,6 +283,7 @@ fn scan_file(
         });
         return;
     };
+    let base_modules = path_attribute_modules(file, &package_dir).unwrap_or(base_modules);
     let lines: Vec<&str> = text.lines().collect();
     // Inline module stack: (name, brace depth at which it opened).
     let mut stack: Vec<(String, i64)> = Vec::new();
@@ -501,4 +502,60 @@ pub fn validate_tags(tags: &[Tag], registry: &[&Requirement]) -> Vec<Problem> {
         }
     }
     problems
+}
+
+/// A file declared with `#[path = "..."] mod name;` lives at the declaring module's path plus
+/// `name`, not at its file path. Looks only at `.rs` files beside the file and in its parent
+/// directory, one at a time, and handles a top-level declaration in the declaring file.
+fn path_attribute_modules(file: &Path, package_dir: &Path) -> Option<Vec<String>> {
+    let dir = file.parent()?;
+    for search in [Some(dir), dir.parent()].into_iter().flatten() {
+        let Ok(entries) = fs::read_dir(search) else {
+            continue;
+        };
+        let mut candidates: Vec<PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "rs") && p.is_file() && p != file)
+            .collect();
+        candidates.sort();
+        for candidate in candidates {
+            let Ok(text) = fs::read_to_string(&candidate) else {
+                continue;
+            };
+            if !text.contains("#[path") {
+                continue;
+            }
+            let lines: Vec<&str> = text.lines().collect();
+            for (index, line) in lines.iter().enumerate() {
+                let Some(rest) = line.trim().strip_prefix("#[path") else {
+                    continue;
+                };
+                let Some(target) = rest.split('"').nth(1) else {
+                    continue;
+                };
+                let declared = candidate.parent()?.join(target);
+                if declared.canonicalize().ok() != file.canonicalize().ok() {
+                    continue;
+                }
+                let name = lines[index + 1..]
+                    .iter()
+                    .map(|l| l.trim())
+                    .find(|l| !l.starts_with("#["))
+                    .and_then(|l| {
+                        l.trim_start_matches("pub(crate) ")
+                            .trim_start_matches("pub(super) ")
+                            .trim_start_matches("pub ")
+                            .strip_prefix("mod ")
+                    })?
+                    .trim_end_matches(';')
+                    .trim()
+                    .to_string();
+                let (_, mut modules) = module_prefix(candidate.strip_prefix(package_dir).ok()?)?;
+                modules.push(name);
+                return Some(modules);
+            }
+        }
+    }
+    None
 }

@@ -84,3 +84,20 @@ fn verdicts_follow_test_results_and_never_exceed_tags() {
         .iter()
         .any(|c| c.verdict == Verdict::Fail));
 }
+
+#[test]
+fn path_attribute_modules_resolve_to_the_declared_module_name() {
+    let (tags, _) = scan(&repository_root());
+    let tag = tags
+        .iter()
+        .find(|t| {
+            t.test
+                .name
+                .ends_with("acoustic_accuracy_admission_binds_retained_result_and_original_intent")
+        })
+        .expect("acoustic accuracy witness");
+    assert_eq!(
+        tag.test.name,
+        "tests::acoustic_accuracy_tests::acoustic_accuracy_admission_binds_retained_result_and_original_intent"
+    );
+}

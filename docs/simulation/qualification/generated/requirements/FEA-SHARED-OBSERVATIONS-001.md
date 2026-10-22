@@ -1,6 +1,6 @@
 # FEA-SHARED-OBSERVATIONS-001: Typed field recovery, bounded observations and monitors
 
-0 PASS, 2 FAIL, 46 OPEN, 0 TAGGED. Generated; do not edit.
+2 PASS, 0 FAIL, 46 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## typed_output_request_kinds
 
@@ -23,7 +23,7 @@ Evidence kind: SemanticRealization. Criterion: precision, compression, retention
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | FAIL | `runmat-analysis-fea[lib]::results::observation::topology::tests::sampled_observation_topology_retains_each_original_rule_order_and_identity` (crates/runmat-analysis/fea/src/results/observation/topology/tests.rs:12) - Tet4/Tet10 sampled topology retains original four/fifteen-point rule identities, positions, edge IDs and integration indices and rejects mismatched topology/cou... |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PASS | `runmat-analysis-fea[lib]::results::observation::topology::tests::sampled_observation_topology_retains_each_original_rule_order_and_identity` (crates/runmat-analysis/fea/src/results/observation/topology/tests.rs:12) - Tet4/Tet10 sampled topology retains original four/fifteen-point rule identities, positions, edge IDs and integration indices and rejects mismatched topology/cou... |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
@@ -83,7 +83,7 @@ Evidence kind: SemanticRealization. Criterion: Required governed cases include: 
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | FAIL | `runmat-runtime[lib]::analysis::field_scene::deformation::scene_tests::original_modal_vectors_keep_their_values_while_display_shape_is_normalization_invariant` (crates/runmat-runtime/src/analysis/field_scene/deformation.rs:53) - A modal scene's displayed positions are invariant under eigenvector rescaling while its original field values and scalar range remain intact. Synthetic scene on... |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PASS | `runmat-runtime[lib]::analysis::field_scene::deformation::scene_tests::original_modal_vectors_keep_their_values_while_display_shape_is_normalization_invariant` (crates/runmat-runtime/src/analysis/field_scene/deformation.rs:53) - A modal scene's displayed positions are invariant under eigenvector rescaling while its original field values and scalar range remain intact. Synthetic scene on... |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |

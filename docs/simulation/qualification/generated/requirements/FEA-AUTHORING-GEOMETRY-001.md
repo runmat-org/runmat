@@ -1,6 +1,6 @@
 # FEA-AUTHORING-GEOMETRY-001: Immutable exact geometry and truthful engineering exchange
 
-0 PASS, 1 FAIL, 35 OPEN, 0 TAGGED. Generated; do not edit.
+1 PASS, 0 FAIL, 35 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## immutable_sources
 
@@ -24,7 +24,7 @@ Evidence kind: SemanticRealization. Criterion: The bounded native provider must 
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-language[test:geometry_features]::imported_source_aliases_and_persistent_ids_remain_distinct` (crates/runmat-analysis/language/tests/geometry_features.rs:11) - Compiler checks source alias versus persistent-id selectors remain distinct typed values; no native CAD feature history, regeneration or AP242 export evidence. |
+| shared_infrastructure | mesh_independent | source_check | PASS | `runmat-analysis-language[test:geometry_features]::imported_source_aliases_and_persistent_ids_remain_distinct` (crates/runmat-analysis/language/tests/geometry_features.rs:11) - Compiler checks source alias versus persistent-id selectors remain distinct typed values; no native CAD feature history, regeneration or AP242 export evidence. |
 | shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |

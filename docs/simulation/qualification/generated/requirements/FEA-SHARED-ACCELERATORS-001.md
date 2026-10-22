@@ -1,6 +1,6 @@
 # FEA-SHARED-ACCELERATORS-001: Operation-level accelerator qualification and honest fallback
 
-0 PASS, 1 FAIL, 23 OPEN, 0 TAGGED. Generated; do not edit.
+1 PASS, 0 FAIL, 23 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## provider_owned_native_sparse_work
 
@@ -8,7 +8,7 @@ Evidence kind: ExecutionEquivalence. Criterion: Extend `runmat-accelerate-api` w
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | FAIL | `runmat-analysis-fea[lib]::planning::resource::tests::general::general_host_solver_demand_does_not_authorize_accelerator_execution` (crates/runmat-analysis/fea/src/planning/resource/tests/general.rs:101) - Host general-solver demand plus a synthetic GPU requirement rejects planning; no actual accelerator kernel capability or performance proof. |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PASS | `runmat-analysis-fea[lib]::planning::resource::tests::general::general_host_solver_demand_does_not_authorize_accelerator_execution` (crates/runmat-analysis/fea/src/planning/resource/tests/general.rs:101) - Host general-solver demand plus a synthetic GPU requirement rejects planning; no actual accelerator kernel capability or performance proof. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |

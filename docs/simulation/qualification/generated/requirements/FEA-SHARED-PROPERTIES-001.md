@@ -1,6 +1,6 @@
 # FEA-SHARED-PROPERTIES-001: Element-complete typed constitutive ownership
 
-0 PASS, 1 FAIL, 79 OPEN, 0 TAGGED. Generated; do not edit.
+1 PASS, 0 FAIL, 79 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## distinct_property_roles
 
@@ -113,7 +113,7 @@ Evidence kind: SemanticRealization. Criterion: Explicit beam and shell elements 
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | FAIL | `runmat-analysis-fea[lib]::properties::preparation::tests::explicit_cache_exact_ceiling_preserves_identity_shape_and_bytes` (crates/runmat-analysis/fea/src/properties/preparation/tests.rs:344) - Explicit beam and shell fixture topology cache preserves identities, borrowed source and exact resource ceiling; no material coverage, laminate physics or distr... |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PASS | `runmat-analysis-fea[lib]::properties::preparation::tests::explicit_cache_exact_ceiling_preserves_identity_shape_and_bytes` (crates/runmat-analysis/fea/src/properties/preparation/tests.rs:344) - Explicit beam and shell fixture topology cache preserves identities, borrowed source and exact resource ceiling; no material coverage, laminate physics or distr... |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |

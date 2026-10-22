@@ -1,6 +1,6 @@
 # FEA-DYNAMICS-RESPONSE-001: Distinct second-order direct and modal dynamic procedures
 
-0 PASS, 2 FAIL, 73 OPEN, 0 TAGGED. Generated; do not edit.
+2 PASS, 0 FAIL, 73 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## second_order_equilibrium_excitation
 
@@ -31,7 +31,7 @@ Evidence kind: IndependentReference. Criterion: Implement modal transient respon
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
 | linear_structural_dynamics | mesh_independent | numerical_kernel | OPEN |  |
-| linear_structural_dynamics | tet4 | numerical_kernel | FAIL | `runmat-analysis-fea[lib]::pipeline::modal::rod_qualification::solid_rod_harmonic_face_traction_converges_to_independent_continuum` (crates/runmat-analysis/fea/src/pipeline/modal/rod_qualification.rs:187) - Original axial Tet4 rod harmonic traction matrix at three frequencies on both sides of resonance; independent complex displacement/reaction refinement and phase... |
+| linear_structural_dynamics | tet4 | numerical_kernel | PASS | `runmat-analysis-fea[lib]::pipeline::modal::rod_qualification::solid_rod_harmonic_face_traction_converges_to_independent_continuum` (crates/runmat-analysis/fea/src/pipeline/modal/rod_qualification.rs:187) - Original axial Tet4 rod harmonic traction matrix at three frequencies on both sides of resonance; independent complex displacement/reaction refinement and phase... |
 | linear_structural_dynamics | tet10 | numerical_kernel | OPEN |  |
 | linear_structural_dynamics | beam | numerical_kernel | OPEN |  |
 | linear_structural_dynamics | shell | numerical_kernel | OPEN |  |
@@ -52,7 +52,7 @@ Evidence kind: IndependentReference. Criterion: Implement typed response spectra
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| linear_structural_dynamics | mesh_independent | numerical_kernel | FAIL | `runmat-analysis-fea[lib]::solve::dynamics::response_spectrum::qualification::modal_combination_matches_independent_quadratic_form_references` (crates/runmat-analysis/fea/src/solve/dynamics/response_spectrum/qualification.rs:13) - Scalar signed synthetic modal vectors verify SRSS, absolute sum and CQC against independent formulas. Mesh-independent arithmetic only; no missing-mass, directi... |
+| linear_structural_dynamics | mesh_independent | numerical_kernel | PASS | `runmat-analysis-fea[lib]::solve::dynamics::response_spectrum::qualification::modal_combination_matches_independent_quadratic_form_references` (crates/runmat-analysis/fea/src/solve/dynamics/response_spectrum/qualification.rs:13) - Scalar signed synthetic modal vectors verify SRSS, absolute sum and CQC against independent formulas. Mesh-independent arithmetic only; no missing-mass, directi... |
 | linear_structural_dynamics | tet4 | numerical_kernel | OPEN |  |
 | linear_structural_dynamics | tet10 | numerical_kernel | OPEN |  |
 | linear_structural_dynamics | beam | numerical_kernel | OPEN |  |

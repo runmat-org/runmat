@@ -1,6 +1,6 @@
 # FEA-AUTHORING-LANGUAGE-002: Declarative source semantics and product tooling
 
-0 PASS, 2 FAIL, 30 OPEN, 0 TAGGED. Generated; do not edit.
+2 PASS, 0 FAIL, 30 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## language_scope
 
@@ -64,7 +64,7 @@ Evidence kind: SemanticRealization. Criterion: Inputs are immutable, strongly ty
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-language[test:programs]::compiler_checks_inputs_defaults_locals_and_outputs_as_one_program` (crates/runmat-analysis/language/tests/programs.rs:11) - Constructed geometry source with local/default quantity typing and one node-displacement output; source checking only.<br>`runmat-analysis-language[test:programs]::compiler_rejects_wrong_input_defaults_and_duplicate_outputs` (crates/runmat-analysis/language/tests/programs.rs:93) - Wrong dimension and duplicate-output diagnostic fixtures, not all invalid contracts. |
+| shared_infrastructure | mesh_independent | source_check | PASS | `runmat-analysis-language[test:programs]::compiler_checks_inputs_defaults_locals_and_outputs_as_one_program` (crates/runmat-analysis/language/tests/programs.rs:11) - Constructed geometry source with local/default quantity typing and one node-displacement output; source checking only.<br>`runmat-analysis-language[test:programs]::compiler_rejects_wrong_input_defaults_and_duplicate_outputs` (crates/runmat-analysis/language/tests/programs.rs:93) - Wrong dimension and duplicate-output diagnostic fixtures, not all invalid contracts. |
 
 ## semantic_state_flow
 
@@ -120,7 +120,7 @@ Evidence kind: SemanticRealization. Criterion: The concrete grammar will be froz
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-parser[lib]::fea::tests::parses_representative_language_surface` (crates/runmat-parser/src/fea/tests.rs:66) - Representative declarations, spans and imports only; no complete grammar or semantics proof.<br>`runmat-parser[lib]::fea::tests::formatter_is_canonical_and_idempotent` (crates/runmat-parser/src/fea/tests.rs:272) - One formatter fixture and second formatting equality; no complete recovery or adversarial grammar credit. |
+| shared_infrastructure | mesh_independent | source_check | PASS | `runmat-parser[lib]::fea::tests::parses_representative_language_surface` (crates/runmat-parser/src/fea/tests.rs:66) - Representative declarations, spans and imports only; no complete grammar or semantics proof.<br>`runmat-parser[lib]::fea::tests::formatter_is_canonical_and_idempotent` (crates/runmat-parser/src/fea/tests.rs:272) - One formatter fixture and second formatting equality; no complete recovery or adversarial grammar credit. |
 
 ## compiler_and_editor_ownership
 

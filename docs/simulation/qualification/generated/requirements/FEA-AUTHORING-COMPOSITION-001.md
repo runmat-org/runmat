@@ -1,6 +1,6 @@
 # FEA-AUTHORING-COMPOSITION-001: Typed declarative authoring and explicit composition
 
-0 PASS, 1 FAIL, 26 OPEN, 0 TAGGED. Generated; do not edit.
+1 PASS, 0 FAIL, 26 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## declaration_ownership
 
@@ -24,7 +24,7 @@ Evidence kind: SemanticRealization. Criterion: Composition uses explicit source-
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-language[test:modules]::compiler_loads_transitive_modules_and_binds_explicit_symbols` (crates/runmat-analysis/language/tests/modules.rs:11) - Mock host checks three-module transitive imports, explicit model/function binding and symbol-use provenance; no geometry execution, numerical result or remote e...<br>`runmat-analysis-language[test:modules]::compiler_reports_cycles_duplicates_and_missing_exports` (crates/runmat-analysis/language/tests/modules.rs:66) - Mock-host binding diagnostics identify cyclic imports, duplicate symbols and missing exports; no complete semantic or numerical qualification. |
+| shared_infrastructure | mesh_independent | source_check | PASS | `runmat-analysis-language[test:modules]::compiler_loads_transitive_modules_and_binds_explicit_symbols` (crates/runmat-analysis/language/tests/modules.rs:11) - Mock host checks three-module transitive imports, explicit model/function binding and symbol-use provenance; no geometry execution, numerical result or remote e...<br>`runmat-analysis-language[test:modules]::compiler_reports_cycles_duplicates_and_missing_exports` (crates/runmat-analysis/language/tests/modules.rs:66) - Mock-host binding diagnostics identify cyclic imports, duplicate symbols and missing exports; no complete semantic or numerical qualification. |
 | shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |

@@ -1,6 +1,6 @@
 # FEA-EM-INPUT-001: Typed electrical and magnetic sources and rank-correct constraints
 
-0 PASS, 5 FAIL, 9 OPEN, 0 TAGGED. Generated; do not edit.
+2 PASS, 3 FAIL, 9 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## scalar_constraints
 
@@ -30,8 +30,8 @@ Evidence kind: ExecutionEquivalence. Criterion: Shared signals and realized arti
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
 | harmonic_maxwell | edge_elements | numerical_kernel | OPEN |  |
-| electrostatic | tet4 | numerical_kernel | FAIL | `runmat-analysis-fea[lib]::physics::electrical::tests::charge_density::exact_volume_region_and_signed_superposition_preserve_charge_and_fields` (crates/runmat-analysis/fea/src/physics/electrical/tests/charge_density.rs:178) - Both orders, constant real volume-charge exact target and signed superposition preserve potential, net/absolute charge and two projection records; no generated ... |
-| electrostatic | tet10 | numerical_kernel | FAIL | `runmat-analysis-fea[lib]::physics::electrical::tests::charge_density::exact_volume_region_and_signed_superposition_preserve_charge_and_fields` (crates/runmat-analysis/fea/src/physics/electrical/tests/charge_density.rs:178) - Both orders, constant real volume-charge exact target and signed superposition preserve potential, net/absolute charge and two projection records; no generated ... |
+| electrostatic | tet4 | numerical_kernel | PASS | `runmat-analysis-fea[lib]::physics::electrical::tests::charge_density::exact_volume_region_and_signed_superposition_preserve_charge_and_fields` (crates/runmat-analysis/fea/src/physics/electrical/tests/charge_density.rs:178) - Both orders, constant real volume-charge exact target and signed superposition preserve potential, net/absolute charge and two projection records; no generated ... |
+| electrostatic | tet10 | numerical_kernel | PASS | `runmat-analysis-fea[lib]::physics::electrical::tests::charge_density::exact_volume_region_and_signed_superposition_preserve_charge_and_fields` (crates/runmat-analysis/fea/src/physics/electrical/tests/charge_density.rs:178) - Both orders, constant real volume-charge exact target and signed superposition preserve potential, net/absolute charge and two projection records; no generated ... |
 | electrical_conduction | tet4 | numerical_kernel | OPEN |  |
 | electrical_conduction | tet10 | numerical_kernel | OPEN |  |
 | magnetostatic | tet4 | numerical_kernel | OPEN |  |

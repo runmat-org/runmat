@@ -1,6 +1,6 @@
 # FEA-SHARED-BASELINE-001: Exact pre-solve admission and truthful realization identity
 
-0 PASS, 1 FAIL, 23 OPEN, 0 TAGGED. Generated; do not edit.
+1 PASS, 0 FAIL, 23 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## pre_solve_formulation_receipts
 
@@ -38,7 +38,7 @@ Evidence kind: SemanticRealization. Criterion: Admission either returns a regist
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | FAIL | `runmat-analysis-fea[lib]::admission::tests::persisted_identity_is_revalidated_and_cannot_forge_production` (crates/runmat-analysis/fea/src/admission/tests.rs:377) - Thermal-transient identity cold decode revalidates and rejects fields outside the registry identity; no end-to-end publication proof. |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PASS | `runmat-analysis-fea[lib]::admission::tests::persisted_identity_is_revalidated_and_cannot_forge_production` (crates/runmat-analysis/fea/src/admission/tests.rs:377) - Thermal-transient identity cold decode revalidates and rejects fields outside the registry identity; no end-to-end publication proof. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |

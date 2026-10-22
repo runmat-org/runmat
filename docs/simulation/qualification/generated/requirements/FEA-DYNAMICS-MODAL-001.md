@@ -1,6 +1,6 @@
 # FEA-DYNAMICS-MODAL-001: Physical modal extraction, eigenspaces and reusable participation state
 
-0 PASS, 1 FAIL, 55 OPEN, 0 TAGGED. Generated; do not edit.
+1 PASS, 0 FAIL, 55 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## physical_mass_base_state
 
@@ -12,7 +12,7 @@ Evidence kind: IndependentReference. Criterion: Use the physical structural stif
 | modal_structural | tet10 | numerical_kernel | OPEN |  |
 | modal_structural | beam | numerical_kernel | OPEN |  |
 | modal_structural | shell | numerical_kernel | OPEN |  |
-| modal_structural | tet4 | public_study | FAIL | `runmat-analysis-fea[lib]::pipeline::modal::rod_qualification::solid_rod_modal_frequency_and_retained_response_have_independent_evidence` (crates/runmat-analysis/fea/src/pipeline/modal/rod_qualification.rs:310) - Axial affine Tet4 slab rod frequency refinement and modal truncation against direct harmonic response. Does not cover beam/shell modes, repeated eigenspaces, ev... |
+| modal_structural | tet4 | public_study | PASS | `runmat-analysis-fea[lib]::pipeline::modal::rod_qualification::solid_rod_modal_frequency_and_retained_response_have_independent_evidence` (crates/runmat-analysis/fea/src/pipeline/modal/rod_qualification.rs:310) - Axial affine Tet4 slab rod frequency refinement and modal truncation against direct harmonic response. Does not cover beam/shell modes, repeated eigenspaces, ev... |
 | modal_structural | tet10 | public_study | OPEN |  |
 | modal_structural | beam | public_study | OPEN |  |
 | modal_structural | shell | public_study | OPEN |  |

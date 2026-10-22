@@ -1,6 +1,6 @@
 # FEA-STRUCTURAL-BEAM-001: Physical three-dimensional beams and explicit mixed-model coupling
 
-0 PASS, 1 FAIL, 27 OPEN, 0 TAGGED. Generated; do not edit.
+1 PASS, 0 FAIL, 27 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## physical_beam_mixed_dofs
 
@@ -10,7 +10,7 @@ Evidence kind: IndependentReference. Criterion: Retain the real three-dimensiona
 |---|---|---|---|---|
 | linear_structural | tet4 | numerical_kernel | OPEN |  |
 | linear_structural | tet10 | numerical_kernel | OPEN |  |
-| linear_structural | beam | numerical_kernel | FAIL | `runmat-analysis-fea[lib]::assembly::elements::beam::tests::beam_transformation_is_block_orthonormal` (crates/runmat-analysis/fea/src/assembly/elements/beam.rs:331) - One oblique beam frame transformation orthonormality only; no mixed-model or global beam benchmark claim. |
+| linear_structural | beam | numerical_kernel | PASS | `runmat-analysis-fea[lib]::assembly::elements::beam::tests::beam_transformation_is_block_orthonormal` (crates/runmat-analysis/fea/src/assembly/elements/beam.rs:331) - One oblique beam frame transformation orthonormality only; no mixed-model or global beam benchmark claim. |
 | linear_structural | shell | numerical_kernel | OPEN |  |
 | linear_structural | tet4 | public_study | OPEN |  |
 | linear_structural | tet10 | public_study | OPEN |  |

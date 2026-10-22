@@ -1,6 +1,6 @@
 # FEA-RELEASE-REGISTER-001: The register defines done and maintains itself
 
-0 PASS, 4 FAIL, 0 OPEN, 0 TAGGED. Generated; do not edit.
+4 PASS, 0 FAIL, 0 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## witness_tags_valid
 
@@ -8,7 +8,7 @@ Evidence kind: PublicationIntegrity. Criterion: Every witness tag in the reposit
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-qualification[test:witness_tags]::all_witness_tags_are_valid_against_the_register` (crates/runmat-analysis/qualification/tests/witness_tags.rs:12) - Scans every crate for witness tags and checks obligation, required envelopes, boundary and test-function placement; does not execute the tests. |
+| shared_infrastructure | mesh_independent | source_check | PASS | `runmat-analysis-qualification[test:witness_tags]::all_witness_tags_are_valid_against_the_register` (crates/runmat-analysis/qualification/tests/witness_tags.rs:12) - Scans every crate for witness tags and checks obligation, required envelopes, boundary and test-function placement; does not execute the tests. |
 
 ## evidence_catalog_generated
 
@@ -16,7 +16,7 @@ Evidence kind: PublicationIntegrity. Criterion: The evidence catalog (markdown a
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-qualification[test:witness_tags]::verdicts_follow_test_results_and_never_exceed_tags` (crates/runmat-analysis/qualification/tests/witness_tags.rs:55) - Unit-level check of the verdict derivation (PASS only when every tagged test passed, FAIL on failure or missing test, OPEN without tags); the generated files co... |
+| shared_infrastructure | mesh_independent | source_check | PASS | `runmat-analysis-qualification[test:witness_tags]::verdicts_follow_test_results_and_never_exceed_tags` (crates/runmat-analysis/qualification/tests/witness_tags.rs:55) - Unit-level check of the verdict derivation (PASS only when every tagged test passed, FAIL on failure or missing test, OPEN without tags); the generated files co... |
 
 ## scope_inventory_complete
 
@@ -24,7 +24,7 @@ Evidence kind: PublicationIntegrity. Criterion: Every capability the website pla
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-qualification[test:scope_inventory]::every_scope_row_maps_to_existing_obligations_or_an_explicit_exclusion` (crates/runmat-analysis/qualification/tests/scope_inventory.rs:8) - Parses the checked-in inventory, rejects unmapped rows, duplicate ids and mappings to absent requirements or obligations; does not judge whether a mapping is su... |
+| shared_infrastructure | mesh_independent | source_check | PASS | `runmat-analysis-qualification[test:scope_inventory]::every_scope_row_maps_to_existing_obligations_or_an_explicit_exclusion` (crates/runmat-analysis/qualification/tests/scope_inventory.rs:8) - Parses the checked-in inventory, rejects unmapped rows, duplicate ids and mappings to absent requirements or obligations; does not judge whether a mapping is su... |
 
 ## register_integrity
 
@@ -32,5 +32,5 @@ Evidence kind: PublicationIntegrity. Criterion: Requirement and obligation decla
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-qualification[test:registry_integrity]::owning_sources_exist` (crates/runmat-analysis/qualification/tests/registry_integrity.rs:149) - Every requirement's owning source files exist in the repository; duplicate, empty and unknown-name checks are in the sibling tests.<br>`runmat-analysis-qualification[test:registry_integrity]::every_declared_envelope_name_round_trips` (crates/runmat-analysis/qualification/tests/registry_integrity.rs:160) - Every formulation, mesh order and execution name round-trips through its wire name and every required envelope is drawn from the declared vocabulary. |
+| shared_infrastructure | mesh_independent | source_check | PASS | `runmat-analysis-qualification[test:registry_integrity]::owning_sources_exist` (crates/runmat-analysis/qualification/tests/registry_integrity.rs:149) - Every requirement's owning source files exist in the repository; duplicate, empty and unknown-name checks are in the sibling tests.<br>`runmat-analysis-qualification[test:registry_integrity]::every_declared_envelope_name_round_trips` (crates/runmat-analysis/qualification/tests/registry_integrity.rs:160) - Every formulation, mesh order and execution name round-trips through its wire name and every required envelope is drawn from the declared vocabulary. |
 

@@ -1,6 +1,6 @@
 # FEA-CONTACT-OPERATOR-001: Authored surface contact, search, friction and coupled inequality equilibrium
 
-0 PASS, 1 FAIL, 79 OPEN, 0 TAGGED. Generated; do not edit.
+1 PASS, 0 FAIL, 79 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## surface_search_gap
 
@@ -110,7 +110,7 @@ Evidence kind: IndependentReference. Criterion: Evidence includes gap closure, p
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| penalty_coulomb_contact | tet4 | numerical_kernel | FAIL | `runmat-analysis-fea[lib]::physics::structural::contact::penalty::tests::objectivity::material_attached_frame_and_point_traction_are_objective_under_proper_rotation` (crates/runmat-analysis/fea/src/physics/structural/contact/penalty/tests/objectivity.rs:8) - Tri3 contact frame and penalty friction point-law proper-rotation objectivity; no global Hertz, sliding body, action-reaction or mesh/penalty convergence credit... |
+| penalty_coulomb_contact | tet4 | numerical_kernel | PASS | `runmat-analysis-fea[lib]::physics::structural::contact::penalty::tests::objectivity::material_attached_frame_and_point_traction_are_objective_under_proper_rotation` (crates/runmat-analysis/fea/src/physics/structural/contact/penalty/tests/objectivity.rs:8) - Tri3 contact frame and penalty friction point-law proper-rotation objectivity; no global Hertz, sliding body, action-reaction or mesh/penalty convergence credit... |
 | penalty_coulomb_contact | tet10 | numerical_kernel | OPEN |  |
 | penalty_coulomb_contact | tet4 | public_study | OPEN |  |
 | penalty_coulomb_contact | tet10 | public_study | OPEN |  |

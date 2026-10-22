@@ -1,6 +1,6 @@
 # FEA-THERMAL-INPUT-001: Exact thermal boundaries and shared excitation realization
 
-0 PASS, 2 FAIL, 10 OPEN, 0 TAGGED. Generated; do not edit.
+2 PASS, 0 FAIL, 10 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## boundaries
 
@@ -8,9 +8,9 @@ Evidence kind: IndependentReference. Criterion: Resolve exact face targets and i
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| thermal_steady | tet4 | numerical_kernel | FAIL | `runmat-analysis-fea[lib]::physics::thermal::assembly::tests::radiation::exact_steady_slab_radiation_residual_tangent_and_prescribed_power_match_continuum` (crates/runmat-analysis/fea/src/physics/thermal/assembly/tests/radiation.rs:32) - Tet4 slab exact gray-surface law, finite-difference tangent and physical power; does not cover arbitrary enclosure radiation. |
+| thermal_steady | tet4 | numerical_kernel | PASS | `runmat-analysis-fea[lib]::physics::thermal::assembly::tests::radiation::exact_steady_slab_radiation_residual_tangent_and_prescribed_power_match_continuum` (crates/runmat-analysis/fea/src/physics/thermal/assembly/tests/radiation.rs:32) - Tet4 slab exact gray-surface law, finite-difference tangent and physical power; does not cover arbitrary enclosure radiation. |
 | thermal_steady | tet10 | numerical_kernel | OPEN |  |
-| thermal_transient | tet4 | numerical_kernel | FAIL | `runmat-analysis-fea[lib]::physics::thermal::assembly::tests::signals::time_signals_drive_prescribed_temperature_flux_and_ambient_temperature` (crates/runmat-analysis/fea/src/physics/thermal/assembly/tests/signals.rs:69) - Tet4 assembly samples prescribed temperature, flux and ambient-time signals; no generated/field-artifact equivalence credit. |
+| thermal_transient | tet4 | numerical_kernel | PASS | `runmat-analysis-fea[lib]::physics::thermal::assembly::tests::signals::time_signals_drive_prescribed_temperature_flux_and_ambient_temperature` (crates/runmat-analysis/fea/src/physics/thermal/assembly/tests/signals.rs:69) - Tet4 assembly samples prescribed temperature, flux and ambient-time signals; no generated/field-artifact equivalence credit. |
 | thermal_transient | tet10 | numerical_kernel | OPEN |  |
 
 ## histories

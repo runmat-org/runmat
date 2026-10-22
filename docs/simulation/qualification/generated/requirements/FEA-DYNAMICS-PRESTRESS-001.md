@@ -1,6 +1,6 @@
 # FEA-DYNAMICS-PRESTRESS-001: Validated prestressed base states and stability perturbation
 
-0 PASS, 1 FAIL, 111 OPEN, 0 TAGGED. Generated; do not edit.
+1 PASS, 0 FAIL, 111 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## complete_base_operator
 
@@ -8,7 +8,7 @@ Evidence kind: IndependentReference. Criterion: Consume only a complete, converg
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| prestressed_structural | tet4 | numerical_kernel | FAIL | `runmat-analysis-fea[lib]::tests::prestressed_frequency::prestressed_direct_harmonic_uses_the_exact_tangent_and_rejects_state_substitution` (crates/runmat-analysis/fea/src/tests/prestressed_frequency.rs:175) - Fixed direct entry fixture compares preload response ordering and residual, canonical result roundtrip, and substituted topology rejection. No independent buckl... |
+| prestressed_structural | tet4 | numerical_kernel | PASS | `runmat-analysis-fea[lib]::tests::prestressed_frequency::prestressed_direct_harmonic_uses_the_exact_tangent_and_rejects_state_substitution` (crates/runmat-analysis/fea/src/tests/prestressed_frequency.rs:175) - Fixed direct entry fixture compares preload response ordering and residual, canonical result roundtrip, and substituted topology rejection. No independent buckl... |
 | prestressed_structural | tet10 | numerical_kernel | OPEN |  |
 | prestressed_structural | beam | numerical_kernel | OPEN |  |
 | prestressed_structural | shell | numerical_kernel | OPEN |  |

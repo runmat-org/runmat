@@ -1,6 +1,6 @@
 # FEA-RELEASE-COMPLETION-001: Per-formulation complete acceptance
 
-0 PASS, 1 FAIL, 23 OPEN, 0 TAGGED. Generated; do not edit.
+1 PASS, 0 FAIL, 23 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## exact_admitted_physics_and_upstream_state
 
@@ -23,7 +23,7 @@ Evidence kind: PublicationIntegrity. Criterion: Its discrete formulation is impl
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | FAIL | `runmat-analysis-fea[lib]::results::accuracy::tests::production_accuracy_failure_produces_a_blocking_gate` (crates/runmat-analysis/fea/src/results/accuracy/tests.rs:32) - Scalar residual criterion failure remains blocking through a typed accuracy artifact; no complete governed family corpus, release attestation or public receipt ... |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PASS | `runmat-analysis-fea[lib]::results::accuracy::tests::production_accuracy_failure_produces_a_blocking_gate` (crates/runmat-analysis/fea/src/results/accuracy/tests.rs:32) - Scalar residual criterion failure remains blocking through a typed accuracy artifact; no complete governed family corpus, release attestation or public receipt ... |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |

@@ -1,6 +1,6 @@
 # FEA-ACOUSTIC-BOUNDARY-001: Exact typed acoustic boundaries and complex constraints
 
-0 PASS, 7 FAIL, 1 OPEN, 0 TAGGED. Generated; do not edit.
+5 PASS, 2 FAIL, 1 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## lifting
 
@@ -9,7 +9,7 @@ Evidence kind: IndependentReference. Criterion: Complex prescribed pressure lift
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
 | acoustic_harmonic | tet4 | numerical_kernel | OPEN |  |
-| acoustic_harmonic | tet10 | numerical_kernel | FAIL | `runmat-analysis-fea[lib]::physics::acoustic::canonical::tests::radiation::exact_operators::complex_prescribed_pressure_lifting_matches_independent_reduced_block_system` (crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/radiation/exact_operators.rs:313) - Tet10 lifted complex system checked against independent dense oracle; no generic solve or conditioning claim. |
+| acoustic_harmonic | tet10 | numerical_kernel | PASS | `runmat-analysis-fea[lib]::physics::acoustic::canonical::tests::radiation::exact_operators::complex_prescribed_pressure_lifting_matches_independent_reduced_block_system` (crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/radiation/exact_operators.rs:313) - Tet10 lifted complex system checked against independent dense oracle; no generic solve or conditioning claim. |
 
 ## phase
 
@@ -17,8 +17,8 @@ Evidence kind: SpatialConvergence. Criterion: Periodic and Bloch/Floquet constra
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| acoustic_harmonic | tet4 | numerical_kernel | FAIL | `runmat-analysis-fea[lib]::physics::acoustic::canonical::tests::periodic::anchored_bloch_plane_wave_pressure_mean_velocity_and_signed_intensity_refine` (crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/periodic.rs:80) - Anchored slab plane wave and declared paired planes; no unanchored pole/global conditioning credit. |
-| acoustic_harmonic | tet10 | numerical_kernel | FAIL | `runmat-analysis-fea[lib]::physics::acoustic::canonical::tests::periodic::anchored_bloch_plane_wave_pressure_mean_velocity_and_signed_intensity_refine` (crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/periodic.rs:80) - Anchored slab plane wave and declared paired planes; no unanchored pole/global conditioning credit. |
+| acoustic_harmonic | tet4 | numerical_kernel | PASS | `runmat-analysis-fea[lib]::physics::acoustic::canonical::tests::periodic::anchored_bloch_plane_wave_pressure_mean_velocity_and_signed_intensity_refine` (crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/periodic.rs:80) - Anchored slab plane wave and declared paired planes; no unanchored pole/global conditioning credit. |
+| acoustic_harmonic | tet10 | numerical_kernel | PASS | `runmat-analysis-fea[lib]::physics::acoustic::canonical::tests::periodic::anchored_bloch_plane_wave_pressure_mean_velocity_and_signed_intensity_refine` (crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/periodic.rs:80) - Anchored slab plane wave and declared paired planes; no unanchored pole/global conditioning credit. |
 
 ## radiation
 
@@ -35,6 +35,6 @@ Evidence kind: RejectionInvariant. Criterion: Reject unmatched periodic pairs, u
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| acoustic_harmonic | tet4 | numerical_kernel | FAIL | `runmat-analysis-fea[lib]::physics::acoustic::canonical::tests::periodic::periodic_rejects_unmatched_natural_overlap_and_conflicting_pressure` (crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/periodic.rs:128) - Periodic pairing, overlap and conflicting pressure rejection only. |
-| acoustic_harmonic | tet10 | numerical_kernel | FAIL | `runmat-analysis-fea[lib]::physics::acoustic::canonical::tests::periodic::periodic_rejects_unmatched_natural_overlap_and_conflicting_pressure` (crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/periodic.rs:128) - Periodic pairing, overlap and conflicting pressure rejection only. |
+| acoustic_harmonic | tet4 | numerical_kernel | PASS | `runmat-analysis-fea[lib]::physics::acoustic::canonical::tests::periodic::periodic_rejects_unmatched_natural_overlap_and_conflicting_pressure` (crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/periodic.rs:128) - Periodic pairing, overlap and conflicting pressure rejection only. |
+| acoustic_harmonic | tet10 | numerical_kernel | PASS | `runmat-analysis-fea[lib]::physics::acoustic::canonical::tests::periodic::periodic_rejects_unmatched_natural_overlap_and_conflicting_pressure` (crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/periodic.rs:128) - Periodic pairing, overlap and conflicting pressure rejection only. |
 

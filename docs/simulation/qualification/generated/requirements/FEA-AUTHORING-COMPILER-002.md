@@ -1,6 +1,6 @@
 # FEA-AUTHORING-COMPILER-002: Compiler passes and host ownership
 
-0 PASS, 1 FAIL, 57 OPEN, 0 TAGGED. Generated; do not edit.
+1 PASS, 0 FAIL, 57 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## crate_boundary
 
@@ -160,7 +160,7 @@ Evidence kind: SemanticRealization. Criterion: Input is one source file and a so
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-parser[lib]::fea::tests::recovers_at_the_next_top_level_declaration` (crates/runmat-parser/src/fea/tests.rs:145) - Malformed top-level token then valid material declaration; syntax recovery only, not complete editor services. |
+| shared_infrastructure | mesh_independent | source_check | PASS | `runmat-parser[lib]::fea::tests::recovers_at_the_next_top_level_declaration` (crates/runmat-parser/src/fea/tests.rs:145) - Malformed top-level token then valid material declaration; syntax recovery only, not complete editor services. |
 
 ## module_graph_pass
 

@@ -1,6 +1,6 @@
 # FEA-MESH-DISCRETIZATION-001: Valid tetrahedral meshes on exact geometry
 
-0 PASS, 0 FAIL, 27 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 FAIL, 30 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## curve_discretization
 
@@ -35,6 +35,16 @@ Evidence kind: IndependentReference. Criterion: Three-dimensional constrained De
 ## volume_quality_convergence
 
 Evidence kind: ResourceAdmission. Criterion: Volume quality refinement terminates within the authored work and time budget on the bracket, heat sink and tuning fork, ending with every element at or above the declared quality floor, and refinement yields to coupled repair fairly with stale rejections invalidated and true global exhaustion detected.
+
+| Formulation | Mesh | Execution | Status | Tests (boundary) |
+|---|---|---|---|---|
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
+
+## analytic_surface_coverage
+
+Evidence kind: IndependentReference. Criterion: Surface meshing handles every analytic surface kind including spheres, tori, cones and cylinders with poles, seams and umbilic points: a plain sphere, a hemisphere, spherical fillets and domes, and a carotid bulb and sinus mesh with the directional curvature metric defined at umbilic points.
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|

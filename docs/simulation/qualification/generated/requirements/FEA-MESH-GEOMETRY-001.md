@@ -1,6 +1,6 @@
 # FEA-MESH-GEOMETRY-001: Exact CAD import of real parts and assemblies
 
-0 PASS, 0 FAIL, 15 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 FAIL, 18 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## exact_formats
 
@@ -35,6 +35,16 @@ Evidence kind: SemanticRealization. Criterion: Face, edge, solid and assembly na
 ## selectors_on_constructed_and_cell_regions
 
 Evidence kind: SemanticRealization. Criterion: `select id` on constructed geometry, `select result` and `select name` for fluid `cell` regions on CAD, and every other selector form the language admits resolve identically at check and at run; a selector that check accepts cannot fail at run for lack of an entity.
+
+| Formulation | Mesh | Execution | Status | Tests (boundary) |
+|---|---|---|---|---|
+| shared_infrastructure | mesh_independent | source_check | OPEN |  |
+| shared_infrastructure | mesh_independent | native_process | OPEN |  |
+| shared_infrastructure | mesh_independent | public_study | OPEN |  |
+
+## curved_import_validation_budget
+
+Evidence kind: ResourceAdmission. Criterion: Exact import validation of curved parts (coaxial pipes with chamber and baffle, a 1.5 m hemisphere, spherical sinuses) completes within a stated allocation and time budget and either passes or fails with a typed diagnostic naming the entity; `EXACT_VALIDATION_BUDGET_EXCEEDED` on a valid part is a defect, and the budget accounts allocation consumption in every validation stage.
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|

@@ -1,6 +1,6 @@
 # FEA-FLUID-INPUTS-001: Exact typed fluid boundaries, sources and initial conditions
 
-0 PASS, 3 FAIL, 25 OPEN, 0 TAGGED. Generated; do not edit.
+3 PASS, 0 FAIL, 25 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## boundaries
 
@@ -23,8 +23,8 @@ Evidence kind: SemanticRealization. Criterion: Use shared typed signals for inle
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| incompressible_laminar_steady | canonical_tetrahedra | numerical_kernel | FAIL | `runmat-analysis-fea[lib]::physics::cfd::canonical::tests::mass_flow::signed_mass_sources_preserve_exact_faces_partitions_and_cold_original_fields` (crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/mass_flow.rs:12) - Signed rates across rotated exact faces; three modulo-index pieces demonstrate additive realization only, not distributed cell assembly. |
-| incompressible_laminar_transient | canonical_tetrahedra | numerical_kernel | FAIL | `runmat-analysis-fea[lib]::physics::cfd::canonical::tests::time_signals::body_force_time_sampling_preserves_independent_volume_resultant` (crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/time_signals.rs:135) - Independent volume-integrated time sampling; no partitioned algebra credit. |
+| incompressible_laminar_steady | canonical_tetrahedra | numerical_kernel | PASS | `runmat-analysis-fea[lib]::physics::cfd::canonical::tests::mass_flow::signed_mass_sources_preserve_exact_faces_partitions_and_cold_original_fields` (crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/mass_flow.rs:12) - Signed rates across rotated exact faces; three modulo-index pieces demonstrate additive realization only, not distributed cell assembly. |
+| incompressible_laminar_transient | canonical_tetrahedra | numerical_kernel | PASS | `runmat-analysis-fea[lib]::physics::cfd::canonical::tests::time_signals::body_force_time_sampling_preserves_independent_volume_resultant` (crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/time_signals.rs:135) - Independent volume-integrated time sampling; no partitioned algebra credit. |
 | incompressible_laminar_steady | canonical_tetrahedra | native_process | OPEN |  |
 | incompressible_laminar_transient | canonical_tetrahedra | native_process | OPEN |  |
 | incompressible_laminar_steady | canonical_tetrahedra | public_study | OPEN |  |
@@ -49,7 +49,7 @@ Evidence kind: RejectionInvariant. Criterion: Reject missing/multiply matched/wr
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| incompressible_laminar_steady | canonical_tetrahedra | numerical_kernel | FAIL | `runmat-analysis-fea[lib]::physics::cfd::canonical::tests::mass_flow::source_authority_conflicts_quantity_and_budget_reject_before_solve` (crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/mass_flow.rs:78) - Selected duplicate/wrong-quantity/source authority and budget rejection only. |
+| incompressible_laminar_steady | canonical_tetrahedra | numerical_kernel | PASS | `runmat-analysis-fea[lib]::physics::cfd::canonical::tests::mass_flow::source_authority_conflicts_quantity_and_budget_reject_before_solve` (crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/mass_flow.rs:78) - Selected duplicate/wrong-quantity/source authority and budget rejection only. |
 | incompressible_laminar_transient | canonical_tetrahedra | numerical_kernel | OPEN |  |
 | incompressible_laminar_steady | canonical_tetrahedra | native_process | OPEN |  |
 | incompressible_laminar_transient | canonical_tetrahedra | native_process | OPEN |  |

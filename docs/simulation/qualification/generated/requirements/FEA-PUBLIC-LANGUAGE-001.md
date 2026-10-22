@@ -1,6 +1,6 @@
 # FEA-PUBLIC-LANGUAGE-001: Authored language surface the published studies rely on
 
-0 PASS, 0 FAIL, 13 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 FAIL, 15 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## located_diagnostics
 
@@ -46,9 +46,18 @@ Evidence kind: SemanticRealization. Criterion: Output forms the pages show check
 |---|---|---|---|---|
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 
+## unit_and_source_forms
+
+Evidence kind: SemanticRealization. Criterion: `rpm` is a unit, units with fractional powers (such as Pa*s^0.45 for a power-law consistency) parse with exact dimensions, and total power on a body (`heat_generation on <body> = 2 W`) is accepted alongside W/m^3 and converts to the correct volumetric source.
+
+| Formulation | Mesh | Execution | Status | Tests (boundary) |
+|---|---|---|---|---|
+| shared_infrastructure | mesh_independent | source_check | OPEN |  |
+| shared_infrastructure | mesh_independent | public_study | OPEN |  |
+
 ## input_forms
 
-Evidence kind: SemanticRealization. Criterion: Typed input forms the pages show are admitted: `input film : heat_transfer_coefficient`, frequency tables and generated one-third-octave center sets, `samples = file "...csv"` with `interpolation = periodic_spline`, impedance tables over frequency with a `delany_bazley` model, and `normal_velocity` read from a retained state of another analysis.
+Evidence kind: SemanticRealization. Criterion: Typed input forms the pages show are admitted: `input film : heat_transfer_coefficient`, frequency tables and generated one-third-octave center sets, `samples = file "...csv"` with `interpolation = periodic_spline`, impedance tables over frequency with a `delany_bazley` model, `normal_velocity` read from a retained state of another analysis, `species <name> { diffusivity }` with `fluid steady { tr...
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|

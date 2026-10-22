@@ -1,6 +1,6 @@
 # FEA-AUTHORING-GEOMETRY-002: Exact geometry, persistent topology and engineering exchange
 
-0 PASS, 1 FAIL, 46 OPEN, 0 TAGGED. Generated; do not edit.
+1 PASS, 0 FAIL, 46 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## geometry_source_forms
 
@@ -140,7 +140,7 @@ Evidence kind: SemanticRealization. Criterion: Imported parameters have stable s
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-language[test:ap242_exchange]::imported_cad_parameters_reject_wrong_dimensions_and_unqualified_writes` (crates/runmat-analysis/language/tests/ap242_exchange.rs:74) - Fixture host parameter metadata: wrong dimensions/unqualified write rejection only; no CAD kernel regeneration. |
+| shared_infrastructure | mesh_independent | source_check | PASS | `runmat-analysis-language[test:ap242_exchange]::imported_cad_parameters_reject_wrong_dimensions_and_unqualified_writes` (crates/runmat-analysis/language/tests/ap242_exchange.rs:74) - Fixture host parameter metadata: wrong dimensions/unqualified write rejection only; no CAD kernel regeneration. |
 
 ## qualified_parameter_regeneration
 
