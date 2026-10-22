@@ -2,6 +2,15 @@ use super::super::test_fixtures::{assigned, pair, quality};
 use super::*;
 use crate::cdt::volume_sliver::admission::{quality_spectrum, QualityObjective};
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Independent full physical quality evaluations of a three-to-two bipyramid and zero or
+//   64 unrelated cells reconstruct exactly from three removed and two changed quality records.
+//   Every per-cell metric, provenance field, violation ratio and aggregate extreme is preserved;
+//   both priority spectra match the original full inventories. Changed metadata on unchanged
+//   connectivity is retained, unchanged seeds contain no changed records, and noncanonical cell
+//   order rejects. This storage witness does not establish sublinear encoding work, arbitrary-mesh
+//   mutation locality, native memory or quality convergence.
 #[test]
 fn compact_quality_seed_preserves_every_metric_and_rank_without_unrelated_copies() {
     for unrelated in [0, 64] {

@@ -37,11 +37,17 @@ impl AcousticAssembly {
             OperatorRole::Damping,
             "boundary_admittance",
         );
-        let mut boundary_stiffness = assembler(
+        // Spherical-radiation curvature is positive semidefinite; a reactive impedance law can
+        // make the boundary stiffness indefinite (mass-like walls).
+        let mut boundary_stiffness = crate::algebra::RealSparseAssembler::square(
             self.projection.nodes.len(),
             OperatorRole::Stiffness,
-            "spherical_radiation_curvature",
+            crate::algebra::MatrixProperties::SYMMETRIC_INDEFINITE,
         );
+        boundary_stiffness.add_contribution(crate::algebra::ContributionProvenance {
+            domain: crate::algebra::ContributionDomain::Acoustic,
+            contribution_id: crate::algebra::ContributionId("boundary_reactance".into()),
+        });
         let mut owned = BTreeSet::new();
         let mut pressure_faces = BTreeSet::new();
         let mut velocity_faces = BTreeSet::new();
@@ -65,7 +71,8 @@ impl AcousticAssembly {
                 // Radiation is face-local: its medium is resolved below from the unique
                 // exterior owner, not from the first material in the model.
                 BoundaryOperator::AcousticRadiation
-                | BoundaryOperator::AcousticSphericalRadiation { .. } => 0.0,
+                | BoundaryOperator::AcousticSphericalRadiation { .. }
+                | BoundaryOperator::AcousticImpedanceLaw { .. } => 0.0,
                 _ => {
                     return Err(AcousticHarmonicError::Unsupported(
                         "non-acoustic boundary in acoustic model".into(),
@@ -74,7 +81,31 @@ impl AcousticAssembly {
             };
             let faces = self.faces(&boundary.target)?;
             for face in faces {
-                let admittance = if matches!(
+                // A complex law Z = R + iX gives the admittance Y = G + iS = 1/Z in the facing
+                // medium; G enters the loss term iωB, and iω(iS) = −ωS a boundary stiffness.
+                let mut susceptance = 0.0;
+                let admittance = if let BoundaryOperator::AcousticImpedanceLaw { law } =
+                    &boundary.operator
+                {
+                    let [owner] = face.adjacent_element_indices.as_slice() else {
+                        return Err(AcousticHarmonicError::Boundary(
+                            "impedance law requires exactly one exterior owning element".into(),
+                        ));
+                    };
+                    let rho = self.density[*owner];
+                    let c = (1.0 / (rho * self.compressibility[*owner])).sqrt();
+                    let (r, x) = law
+                        .evaluate(self.omega / std::f64::consts::TAU, rho, c)
+                        .ok_or_else(|| {
+                            AcousticHarmonicError::Boundary(
+                                "impedance law has no finite passive value at this frequency"
+                                    .into(),
+                            )
+                        })?;
+                    let magnitude = r * r + x * x;
+                    susceptance = -x / magnitude;
+                    r / magnitude
+                } else if matches!(
                     boundary.operator,
                     BoundaryOperator::AcousticRadiation
                         | BoundaryOperator::AcousticSphericalRadiation { .. }
@@ -136,18 +167,18 @@ impl AcousticAssembly {
                         "overlapping acoustic boundaries".into(),
                     ));
                 }
+                let reactive = -self.omega * susceptance;
                 self.projection
                     .visit_boundary_quadrature(&face, |point| {
                         for (i, &row) in face.node_indices.iter().enumerate() {
                             for (j, &column) in face.node_indices.iter().enumerate() {
-                                impedance.add(
-                                    row,
-                                    column,
-                                    admittance
-                                        * point.shape_values()[i]
-                                        * point.shape_values()[j]
-                                        * point.area_weight_m2,
-                                );
+                                let mass = point.shape_values()[i]
+                                    * point.shape_values()[j]
+                                    * point.area_weight_m2;
+                                impedance.add(row, column, admittance * mass);
+                                if reactive != 0.0 {
+                                    boundary_stiffness.add(row, column, reactive * mass);
+                                }
                             }
                         }
                     })
@@ -311,12 +342,17 @@ impl AcousticAssembly {
                 }
             }
         }
-        self.impedance = finish(impedance)?;
+        self.impedance = crate::algebra::RealSparseMatrix::scaled_sum(
+            &[(1.0, &self.volume_admittance), (1.0, &finish(impedance)?)],
+            OperatorRole::Damping,
+            crate::algebra::MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+        )
+        .map_err(|e| AcousticHarmonicError::Operator(e.to_string()))?;
         let boundary_stiffness = finish(boundary_stiffness)?;
         self.stiffness = crate::algebra::RealSparseMatrix::scaled_sum(
             &[(1.0, &self.volume_stiffness), (1.0, &boundary_stiffness)],
             OperatorRole::Stiffness,
-            crate::algebra::MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+            crate::algebra::MatrixProperties::SYMMETRIC_INDEFINITE,
         )
         .map_err(|e| AcousticHarmonicError::Operator(e.to_string()))?;
         if self

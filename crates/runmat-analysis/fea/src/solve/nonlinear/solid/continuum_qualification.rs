@@ -105,6 +105,10 @@ fn relative_difference(a: &[f64], b: &[f64]) -> f64 {
     (error / norm).sqrt()
 }
 
+// witness: FEA-NONLINEAR-OPERATOR-001/references @ small_strain_j2/tet4/numerical_kernel;
+//   boundary: Original uniform Tet4 continuum gate asserts
+//   displacement/stress/point-history/energy/reaction refinement and load schedule sensitivity;
+//   linked executable is unassessed here and recorded scientific failures remain failures.
 #[test]
 fn manufactured_fully_yielded_cube_refines_and_checks_load_step_sensitivity() {
     check_manufactured_cube(false);

@@ -2,6 +2,12 @@ use super::*;
 use crate::cdt::{build_delaunay_volume_topology, DelaunayTopologyOptions, DelaunayVolumeNode};
 use runmat_meshing_core::NeverCancelled;
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: An independent radius-five construction straddles physical in-sphere equality and
+//   permits adjacent reduction only for strict improvement. Separate cospherical providers retain
+//   their own coverage/admission duties; this component is not proof of complete legalization
+//   termination, native heat recovery, arbitrary feature bounds or measured whole-task performance.
 #[test]
 fn adjacent_reduction_requires_strict_physical_improvement() {
     for (height, accepted) in [(4., false), (5., false), (6., true)] {

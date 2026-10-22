@@ -301,6 +301,9 @@ mod tests {
         assert!(incorrect.evidence.equilibrium_relative_error > 0.1);
     }
 
+    // witness: FEA-SHARED-CONSTRAINTS-001/original_reaction_and_work @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+    //   boundary: A prescribed beam extension closes reaction and work against the closed form.
     #[test]
     fn prescribed_beam_extension_closes_reaction_and_work_against_closed_form() {
         let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);

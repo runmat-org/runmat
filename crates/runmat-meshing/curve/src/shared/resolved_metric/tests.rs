@@ -21,6 +21,11 @@ impl GeometryEvaluationControl for Control {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Every boundary edge satisfies the shared incident face metric trace under three
+//   occurrence transforms, with stable repeated queries and source provenance. This component
+//   fixture does not establish complete native surface recovery or original study acceptance.
 #[test]
 fn curve_boundary_trace_satisfies_every_adjacent_fine_face_before_surface_execution() {
     for transform in [

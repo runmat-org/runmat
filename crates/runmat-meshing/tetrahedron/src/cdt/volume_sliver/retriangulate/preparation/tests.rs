@@ -38,6 +38,12 @@ fn topology() -> DelaunayVolumeTopology {
         .unwrap()
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A vertex-star neighborhood retains five cells against a 29-cell canonical mesh and
+//   reproduces the complete cavity, original outside-face owners, regions and exact target volume.
+//   This excludes full canonical reconstruction, legalization, allocator measurements and
+//   whole-study throughput.
 #[test]
 fn vertex_star_inventory_preserves_complete_cavity_and_outside_owners() {
     let topology = topology();
@@ -120,6 +126,11 @@ fn prepared_vertex_removal_reuses_the_same_refill_and_rejects_collisions() {
     assert!(relocated.nodes.contains(&replacement));
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Every removal position in a canonical node inventory matches identity-map remapping
+//   for all unchanged cells, and cells referencing the removed node reject. This verifies remapping
+//   semantics without establishing independent candidate admissibility or native runtime.
 #[test]
 fn removal_index_shift_matches_canonical_identity_remapping() {
     let topology = topology();

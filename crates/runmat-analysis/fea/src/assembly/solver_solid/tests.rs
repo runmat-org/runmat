@@ -56,6 +56,9 @@ fn scoped_solid_assembly_matches_serial_operators_exactly() {
     }
 }
 
+// witness: FEA-STRUCTURAL-REFERENCE-001/balance_independent_reference @
+//   linear_structural/tet4/numerical_kernel; coverage: partial;
+//   boundary: A connected affine patch balances independent boundary tractions.
 #[test]
 fn connected_tet4_affine_patch_balances_independent_boundary_tractions() {
     // u = (0.1 x, 0.2 y, 0.3 z), E = 100 Pa, nu = 0.25 gives the constant
@@ -224,6 +227,10 @@ fn multi_material_assembly_rejects_an_unassigned_mesh_region() {
     ));
 }
 
+// witness: FEA-SHARED-PROPERTIES-001/unique_constitutive_coverage @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Solid material coverage rejects overlap, stale revision and wrong role at assembly;
+//   beam, shell and composite coverage are separate.
 #[test]
 fn solid_material_coverage_rejects_overlap_stale_and_wrong_role() {
     let artifact = artifact(ElementOrder::Tet4);

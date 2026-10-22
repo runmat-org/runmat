@@ -1,10 +1,22 @@
 use super::*;
 use runmat_meshing_core::NeverCancelled;
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A local cone refill reinserts enclosed original points through the constrained
+//   insertion kernel, retains their coordinates and identities, leaves no orphaned vertex, and
+//   preserves the exact cavity boundary. Only cavity data is materialized. This fixture is not a
+//   whole-task memory measurement or convergence guarantee.
 #[test]
 fn local_refill_preserves_enclosed_points_and_the_original_cavity_boundary() {
     check_refill(false);
 }
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Local refill moves only explicitly named original enclosed points, preserves the
+//   other points and exact cavity boundary, and passes independent canonical construction with
+//   every point incident. Duplicate names and protected boundary point names reject. This checks
+//   refill authority, not convergence of an original CAD model.
 #[test]
 fn local_refill_moves_only_explicitly_named_enclosed_points_and_preserves_the_boundary() {
     check_refill(true);

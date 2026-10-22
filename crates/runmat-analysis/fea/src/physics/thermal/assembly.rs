@@ -19,7 +19,10 @@ use crate::{
         RealizedExcitationKind, RealizedExcitationTarget, RealizedExcitations,
         ScalarProjectionAccumulator, SpatialIntegrationRule, SpatialProjectionEvidence,
     },
-    physics::scalar_constraints::{self, ScalarNodeRelation, ScalarPairing},
+    physics::{
+        scalar_constraints::{self, ScalarNodeRelation, ScalarPairing},
+        thermal_interface::{self, InterfaceDofs},
+    },
     topology::{AnalysisProjection, ProjectedElement},
 };
 
@@ -52,6 +55,8 @@ pub(crate) struct ThermalOperatorAssembly {
     pub prescribed_temperature_k: Vec<Option<f64>>,
     /// Tie, periodic and affine-jump relations: each secondary node follows its primaries.
     pub relations: Vec<ScalarNodeRelation>,
+    /// Projection nodes: the mesh nodes, then one side-owned node per conductance-interface node.
+    pub dofs: InterfaceDofs,
     pub positive_robin_weight: Vec<f64>,
     pub element_conductivity_w_per_mk: Vec<f64>,
     pub element_volumetric_capacity_j_per_m3k: Vec<f64>,
@@ -136,6 +141,11 @@ pub(crate) fn assemble(
 ) -> Result<ThermalOperatorAssembly, ThermalAssemblyError> {
     let projection = AnalysisProjection::derive(mesh)
         .map_err(|error| ThermalAssemblyError::InvalidProjection(error.to_string()))?;
+    // A finite-conductance interface splits its nodes: the second side's elements and faces use
+    // their own side-owned nodes, joined to the first side by the interface conductance.
+    let (interfaces, dofs) = thermal_interface::solid_conduction(&projection, &model.interfaces)
+        .map_err(ThermalAssemblyError::InvalidProjection)?;
+    let projection = dofs.split_projection(&projection, &interfaces);
     if properties.identity.mesh_digest != Some(mesh.canonical_digest)
         || properties.identity.geometry_id != model.geometry_id
         || properties.identity.geometry_revision != model.geometry_revision
@@ -245,6 +255,10 @@ pub(crate) fn assemble(
         domain: ContributionDomain::Thermal,
         contribution_id: ContributionId("conductive_element_and_boundary_terms".to_string()),
     });
+    thermal_interface::add_conductance(&projection, &interfaces, &dofs, |row, column, value| {
+        conductivity.add(row, column, value)
+    })
+    .map_err(ThermalAssemblyError::InvalidProjection)?;
     capacity.add_contribution(ContributionProvenance {
         domain: ContributionDomain::Thermal,
         contribution_id: ContributionId("consistent_heat_capacity".to_string()),
@@ -435,6 +449,21 @@ pub(crate) fn assemble(
 
     let relations = scalar_constraints::relations(mesh, &projection, &pairings)
         .map_err(ThermalAssemblyError::InvalidProjection)?;
+    // Ties and periodic pairs resolve mesh nodes; a node split by a conductance interface has
+    // two temperatures, and the pairing does not say which side it means.
+    if relations.iter().any(|relation| {
+        std::iter::once(relation.secondary)
+            .chain(relation.primaries.iter().map(|&(node, _)| node))
+            .any(|node| {
+                dofs.second()
+                    .binary_search_by_key(&node, |&(split, _)| split)
+                    .is_ok()
+            })
+    }) {
+        return Err(ThermalAssemblyError::InvalidProjection(
+            "a tie, periodic or jump relation reaches a node split by a conductance interface; pair faces away from the interface".into(),
+        ));
+    }
     if let Some(relation) = relations.iter().find(|relation| {
         prescribed_temperature_k[relation.secondary].is_some()
     }) {
@@ -572,6 +601,7 @@ pub(crate) fn assemble(
         source_evidence,
         prescribed_temperature_k,
         relations,
+        dofs,
         positive_robin_weight,
         element_conductivity_w_per_mk,
         element_volumetric_capacity_j_per_m3k,

@@ -969,21 +969,4 @@ pub(super) const REQUIREMENT: Requirement = Requirement {
             LANGUAGE_SOURCE_SCOPE,
         ),
     ],
-    witnesses: &[Witness {
-        id: "FEA-WITNESS-LANGUAGE-RECOVERY",
-        locator: WitnessLocator::CargoTest {
-            package: "runmat-parser",
-            target: CargoTarget::Library,
-            name: "recovers_at_the_next_top_level_declaration",
-            source: "crates/runmat-parser/src/fea/tests.rs",
-        },
-        claims: &[CoverageClaim {
-            obligation: "syntax_pass",
-            envelopes: LANGUAGE_SOURCE_SCOPE,
-            boundary: concat!(
-                "Malformed top-level token then valid material declaration; syntax recovery ",
-                "only, not complete editor services.",
-            ),
-        }],
-    }],
 };

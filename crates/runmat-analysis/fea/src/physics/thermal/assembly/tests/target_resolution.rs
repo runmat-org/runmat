@@ -1,5 +1,10 @@
 use super::*;
 
+// witness: FEA-THERMAL-INPUT-001/boundaries @ thermal_steady/tet4|tet10/numerical_kernel; coverage:
+//   partial;
+//   boundary: Prescribed temperature and heat flux apply to the bound resolved boundary entity, not
+//   to the entity named by a deliberately wrong alias, for both element orders; convection and
+//   radiation targets are separate cases.
 #[test]
 fn thermal_boundaries_use_resolved_entities_instead_of_authored_aliases() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
@@ -29,7 +34,7 @@ fn thermal_boundaries_use_resolved_entities_instead_of_authored_aliases() {
                 value: PrescribedValue::Constant(HeatFlux::new(240.0)),
             },
         }];
-        let facts = crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh).unwrap();
+        let facts = crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[]).unwrap();
         let assemble_model = |model: &AnalysisModel| {
             assemble(
                 model,

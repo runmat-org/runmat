@@ -51,6 +51,15 @@ fn options() -> DelaunayInsertionOptions {
     options
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Physical restoration seeds its complete connectivity hint once. Across four and
+//   sixty-four disconnected neighborhoods, prospective two-to-three cavity updates visit only two
+//   removed and three created cells, match independently rebuilt complete connectivity, preserve
+//   retained state and recognize the return cycle. Local and global repair use the same adapter.
+//   Cycle hints are not geometry identities or admission proof; this component evidence does not
+//   qualify all provider search costs, arbitrary connected-mesh scaling or native whole-task
+//   memory.
 #[test]
 fn physical_repair_cycle_deltas_match_complete_connectivity_with_cavity_bounded_work() {
     for count in [4, 64] {
@@ -110,6 +119,12 @@ fn physical_repair_cycle_deltas_match_complete_connectivity_with_cavity_bounded_
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Cancellation rejects the complete seed and each removed/created-cell checkpoint
+//   without exposing a partial cycle hint or changing the retained state. This insertion-owner
+//   component check does not establish native worker cancellation, geometry admission or complete
+//   resource accounting.
 #[test]
 fn physical_repair_cycle_seed_and_each_delta_checkpoint_reject_without_partial_state() {
     let original = neighborhoods(4);

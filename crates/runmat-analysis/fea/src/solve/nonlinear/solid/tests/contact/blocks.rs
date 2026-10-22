@@ -9,6 +9,18 @@ use crate::ComputeBackend;
 use runmat_analysis_core::ProcedureStep;
 mod constraints;
 
+// witness: FEA-NONLINEAR-STATE-001/points @
+//   small_strain_j2_penalty_coulomb_contact/tet4|tet10/prepared_controller;
+//   boundary: Prepared constrained affine-body fixture; trusted test loads. No public/native
+//   contact or generic contact convergence credit.
+// witness: FEA-NONLINEAR-STATE-001/initial_outputs @
+//   small_strain_j2_penalty_coulomb_contact/tet4|tet10/prepared_controller;
+//   boundary: Prepared constrained affine-body fixture; trusted test loads. No public/native
+//   contact or generic contact convergence credit.
+// witness: FEA-NONLINEAR-STATE-001/chronology @
+//   small_strain_j2_penalty_coulomb_contact/tet4|tet10/prepared_controller;
+//   boundary: Prepared constrained affine-body fixture; trusted test loads. No public/native
+//   contact or generic contact convergence credit.
 #[test]
 fn full_authored_contact_cold_blocks_preserve_schedule_original_points_and_work() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {

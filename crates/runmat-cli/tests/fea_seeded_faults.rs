@@ -34,6 +34,10 @@ const FAULTS: &[Fault] = &[
     Fault { name: "missing material", from: "assign material.steel", to: "assign material.aluminum", expected: "unresolved reference `material.aluminum`" },
 ];
 
+// witness: FEA-AUTHORING-COMPILER-002/check_plan_run @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Seeded setup faults in the cantilever example are rejected by the run command with
+//   the expected diagnostic before any mesh artifact is produced.
 #[test]
 fn seeded_setup_faults_are_rejected_before_meshing() {
     let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");

@@ -74,6 +74,12 @@ fn missing_or_rejected_reads_release_their_entire_reservation() {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Cold stage identity, manifest and chunks retain original values with actual
+//   provider-buffer admission rather than reserving the complete artifact quota. Exact requested
+//   peak accepts, one byte less rejects and scope exit releases all storage. The fixture does not
+//   qualify original CAD, PDE accuracy or whole-task residency.
 #[test]
 fn cold_stage_identity_read_admits_actual_storage_instead_of_artifact_quota() {
     use runmat_geometry_core::GeometryEvaluationControl;

@@ -17,6 +17,9 @@ use crate::{
 
 use super::*;
 
+// witness: FEA-SHARED-EXCITATION-001/distinct_modal_response_procedures @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Modal and directional combination policies have independent semantics.
 #[test]
 fn modal_and_directional_combination_policies_have_independent_semantics() {
     assert_eq!(

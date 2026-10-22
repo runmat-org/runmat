@@ -211,6 +211,9 @@ fn governed_extrema_preserve_observation_identity_and_publish_execution_evidence
     assert!(tampered.validate().is_err());
 }
 
+// witness: FEA-SHARED-OBSERVATIONS-001/governed_observation_corpus @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Governed extrema reject unsupported work before provider allocation.
 #[test]
 fn governed_extrema_reject_unsupported_work_before_provider_allocation() {
     for (ties, reject_provider) in [

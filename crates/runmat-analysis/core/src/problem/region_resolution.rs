@@ -477,6 +477,9 @@ mod tests {
         ));
     }
 
+    // witness: FEA-SHARED-PROPERTIES-001/exact_assignment_targets @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+    //   boundary: Material targets resolve only against compatible topology aliases.
     #[test]
     fn material_targets_resolve_only_against_their_compatible_topology_aliases() {
         let mut model = model_with_all_boundary_targets();

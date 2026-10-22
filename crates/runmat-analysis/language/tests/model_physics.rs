@@ -3,6 +3,10 @@ pub mod support;
 use runmat_analysis_language::*;
 use support::{source_module, TestHost};
 
+// witness: FEA-AUTHORING-COMPILER-002/binding_pass @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Wrong region roles, wrong values and composition conflicts between included models
+//   are rejected at binding; namespace and shadowing rules are not enumerated.
 #[test]
 fn model_physics_rejects_wrong_roles_values_and_composition_conflicts() {
     let source = r#"

@@ -7,6 +7,10 @@ use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOr
 mod fixture;
 use fixture::*;
 
+// witness: FEA-SHARED-ACCURACY-001/dimensioned_targets_and_contributions @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Original static results retain typed convergence and scalar observations for both
+//   element orders.
 #[test]
 fn original_both_order_static_results_retain_typed_convergence_and_scalar_observations() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {

@@ -103,7 +103,11 @@ pub(super) fn resolve_reduction_target(
                     volume_target(selected_indices(indices, maximum)?, projection)
                 }
                 (EntityDimension::Face, ExpectedTopology::BoundaryFace)
-                    if materialized_field_location(spec) == FieldLocation::Node =>
+                    if materialized_field_location(spec) == FieldLocation::Node
+                        || (materialized_field_location(spec) == FieldLocation::Element
+                            && spec.reduction.as_ref().is_some_and(|reduction| {
+                                reduction.spatial == SpatialReduction::NormalFlux
+                            })) =>
                 {
                     let indices = matching_faces(region, projection);
                     enforce_cardinality(region.cardinality, indices.clone().count(), spec)?;

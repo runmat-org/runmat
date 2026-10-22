@@ -26,6 +26,10 @@ model structure {
 }
 "#;
 
+// witness: FEA-AUTHORING-LANGUAGE-002/execution_precedence @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: A typed execution policy is inherited by a sweep; CLI and project default precedence
+//   is not covered.
 #[test]
 fn execution_policy_is_typed_and_inherited_by_a_sweep() {
     let source = format!(
@@ -133,6 +137,9 @@ sweep loads over study.response {
     );
 }
 
+// witness: FEA-AUTHORING-LANGUAGE-002/execution_precedence @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Contradictory or out-of-range policy members are rejected.
 #[test]
 fn execution_policy_rejects_contradictions_and_invalid_limits() {
     for policy in [

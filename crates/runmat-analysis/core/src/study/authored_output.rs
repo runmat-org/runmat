@@ -281,6 +281,19 @@ impl AuthoredOutputExpression {
                         value,
                         shape: ObservationValueShape::Scalar,
                     }),
+                    AuthoredSpatialReduction::NormalFlux => {
+                        if shape != ObservationValueShape::Vector3 {
+                            return Err(AuthoredOutputError::ResultantRequiresVectorOrTraction);
+                        }
+                        Ok(AuthoredOutputType::Reduced {
+                            value: AuthoredOutputValue::Derived(
+                                output_dimension(value)
+                                    .multiply(region_measure(target)?)
+                                    .ok_or(AuthoredOutputError::DimensionOverflow)?,
+                            ),
+                            shape: ObservationValueShape::Scalar,
+                        })
+                    }
                     AuthoredSpatialReduction::Integral => Ok(AuthoredOutputType::Reduced {
                         value: AuthoredOutputValue::Derived(
                             output_dimension(value)
@@ -501,10 +514,15 @@ pub(super) fn field_domain(
     quantity: crate::ObservationQuantity,
 ) -> AuthoredFieldDomain {
     match procedure {
-        // A cycle-averaged loss density is a real quantity of a harmonic analysis.
+        // Cycle averages (loss density, active intensity) are real quantities of a harmonic
+        // analysis.
         crate::AnalysisProcedure::HarmonicResponse
         | crate::AnalysisProcedure::PrestressedHarmonicResponse
-            if quantity == crate::ObservationQuantity::JoulePowerDensity =>
+            if matches!(
+                quantity,
+                crate::ObservationQuantity::JoulePowerDensity
+                    | crate::ObservationQuantity::AcousticIntensity
+            ) =>
         {
             AuthoredFieldDomain::Real
         }

@@ -23,6 +23,9 @@ fn workload() -> ThermalWorkload {
     }
 }
 
+// witness: FEA-THERMAL-EXECUTION-001/admission @ thermal_transient/tet4|tet10/public_study;
+//   boundary: Both-order initial-field construction scratch contributes to the preassembly ceiling;
+//   no measured RSS or whole native pipeline evidence.
 #[test]
 fn field_construction_scratch_is_composed_before_assembly() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
@@ -381,7 +384,7 @@ fn planning_ceiling_precedes_geometric_projection_at_exact_boundary() {
         mesh.validate_canonical().unwrap();
         let mut workload = workload();
         let schedule = workload.solve_schedule().unwrap();
-        let history = ThermalHistoryResourceFacts::derive(&mesh, &schedule).unwrap();
+        let history = ThermalHistoryResourceFacts::derive(&mesh, &schedule, &[]).unwrap();
         let model_bytes = runmat_canonical_codec::profile_serialized_shape(
             &workload.model,
             crate::execution::THERMAL_WORKLOAD_LIMITS,

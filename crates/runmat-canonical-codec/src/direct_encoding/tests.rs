@@ -109,6 +109,11 @@ fn cancellation_interrupts_original_nested_inventory_and_overflow_rejects() {
     assert!(encode(b"test\0", "direct", &u128::MAX, LIMITS, &NeverCancelled).is_err());
 }
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Numeric array fixtures bound original encoded bytes and distinguish direct
+//   byte-buffer workspace from JSON materialization. This is a requested component estimate, not
+//   measured allocator usage, RSS, whole-task peak or complete-study scalability qualification.
 #[test]
 fn direct_encoding_profile_bounds_original_wire_and_numeric_workspace_scales_with_bytes() {
     let original = vec![1.25_f64; 65536];
@@ -147,6 +152,11 @@ fn trusted_encoding_preserves_original_projection_while_decode_and_profiles_boun
     assert_eq!(value[0][0].len(), 71);
 }
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Sibling, wide and nested maps exercise live sorted-map metadata and preserve original
+//   canonical bytes. Component demand only; no measured allocator, whole-task peak or
+//   complete-study claim.
 #[test]
 fn encoding_workspace_retains_ancestor_maps_and_releases_sibling_metadata() {
     let children = vec![std::collections::BTreeMap::from([("key", "borrowed".repeat(128))]); 1024];

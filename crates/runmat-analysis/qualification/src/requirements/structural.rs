@@ -4,47 +4,47 @@ const DOMAIN: &[Envelope] = &[
     envelope(
         Formulation::LinearStructural,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::LinearStructural,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::LinearStructural,
         MeshOrder::Beam,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::LinearStructural,
         MeshOrder::Shell,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::LinearStructural,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::LinearStructural,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::LinearStructural,
         MeshOrder::Beam,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::LinearStructural,
         MeshOrder::Shell,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::LinearStructural,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::SerialCpuNativeProcess,
+        ExecutionEnvelope::NativeProcess,
     ),
     envelope(
         Formulation::LinearStructural,
@@ -54,12 +54,17 @@ const DOMAIN: &[Envelope] = &[
     envelope(
         Formulation::LinearStructural,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::EncryptedRemote,
+        ExecutionEnvelope::RemoteExecution,
     ),
     envelope(
         Formulation::LinearStructural,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::PartitionedCpu,
+        ExecutionEnvelope::ParallelCpu,
+    ),
+    envelope(
+        Formulation::LinearStructural,
+        MeshOrder::CanonicalMixedTopology,
+        ExecutionEnvelope::DomainDecomposed,
     ),
     envelope(
         Formulation::LinearStructural,
@@ -75,7 +80,7 @@ const FEA_STRUCTURAL_SOLID_001: Requirement = Requirement {
         "Physical linear solid operators, loads and assigned-material recovery must ",
         "satisfy all applicable supported-envelope criteria. Independent physical, ",
         "semantic, accuracy, resource and publication evidence are separate; ",
-        "missing, failed or indeterminate mandatory evidence prevents production ",
+        "missing, failed or indeterminate mandatory evidence prevents ",
         "acceptance.",
     ),
     owners: &["crates/runmat-analysis/fea/src/assembly/solver_solid.rs"],
@@ -126,28 +131,6 @@ const FEA_STRUCTURAL_SOLID_001: Requirement = Requirement {
             DOMAIN,
         ),
     ],
-    witnesses: &[Witness {
-        id: "FEA-WITNESS-STRUCTURAL-MASS-MOMENTS",
-        locator: WitnessLocator::CargoTest {
-            package: "runmat-analysis-fea",
-            target: CargoTarget::Library,
-            name: concat!(
-                "assembly::elements::solid::tetrahedron10_mass::tests::affine_mass_preserves_",
-                "all_quadratic_kinetic_cross_moments_at_scale_and_translation",
-            ),
-            source:
-                "crates/runmat-analysis/fea/src/assembly/elements/solid/tetrahedron10_mass/tests.rs",
-        },
-        claims: &[CoverageClaim {
-            obligation: "quadrature_mass",
-            envelopes: &[DOMAIN[1]],
-            boundary: concat!(
-                "Affine Tet10 consistent mass preserves independent quadratic kinetic cross ",
-                "moments across scale/translation. No lumped mass, body-load, damping or ",
-                "mesh-convergence claim.",
-            ),
-        }],
-    }],
     dependencies: &[concat!(
         "Shared typed authoring, canonical topology/material/constraint/excitation ",
         "authorities; governed resources and execution; independently qualified ",
@@ -162,7 +145,7 @@ const FEA_STRUCTURAL_BEAM_001: Requirement = Requirement {
         "Physical three-dimensional beams and explicit mixed-model coupling must ",
         "satisfy all applicable supported-envelope criteria. Independent physical, ",
         "semantic, accuracy, resource and publication evidence are separate; ",
-        "missing, failed or indeterminate mandatory evidence prevents production ",
+        "missing, failed or indeterminate mandatory evidence prevents ",
         "acceptance.",
     ),
     owners: &["crates/runmat-analysis/fea/src/assembly/elements/beam.rs"],
@@ -188,23 +171,6 @@ const FEA_STRUCTURAL_BEAM_001: Requirement = Requirement {
             DOMAIN,
         ),
     ],
-    witnesses: &[Witness {
-        id: "FEA-WITNESS-BEAM-FRAME",
-        locator: WitnessLocator::CargoTest {
-            package: "runmat-analysis-fea",
-            target: CargoTarget::Library,
-            name: "assembly::elements::beam::tests::beam_transformation_is_block_orthonormal",
-            source: "crates/runmat-analysis/fea/src/assembly/elements/beam.rs",
-        },
-        claims: &[CoverageClaim {
-            obligation: "physical_beam_mixed_dofs",
-            envelopes: &[DOMAIN[2]],
-            boundary: concat!(
-                "One oblique beam frame transformation orthonormality only; no mixed-model ",
-                "or global beam benchmark claim.",
-            ),
-        }],
-    }],
     dependencies: &[concat!(
         "Shared typed authoring, canonical topology/material/constraint/excitation ",
         "authorities; governed resources and execution; independently qualified ",
@@ -219,7 +185,7 @@ const FEA_STRUCTURAL_SHELL_001: Requirement = Requirement {
         "Physical membrane and bending shells must satisfy all applicable ",
         "supported-envelope criteria. Independent physical, semantic, accuracy, ",
         "resource and publication evidence are separate; missing, failed or ",
-        "indeterminate mandatory evidence prevents production acceptance.",
+        "indeterminate mandatory evidence prevents acceptance.",
     ),
     owners: &["crates/runmat-analysis/fea/src/assembly/elements/shell.rs"],
     obligations: &[
@@ -237,32 +203,11 @@ const FEA_STRUCTURAL_SHELL_001: Requirement = Requirement {
         ),
         obligation(
             "proxy_removal",
-            "Remove the pair-spring proxy when the production formulation lands.",
+            "Remove the pair-spring proxy when the formulation lands.",
             EvidenceKind::IndependentReference,
             DOMAIN,
         ),
     ],
-    witnesses: &[Witness {
-        id: "FEA-WITNESS-SHELL-NAVIER",
-        locator: WitnessLocator::CargoTest {
-            package: "runmat-analysis-fea",
-            target: CargoTarget::Library,
-            name: concat!(
-                "assembly::elements::shell::qualification_tests::simply_supported_sinusoidal_",
-                "plate_converges_to_the_navier_solution",
-            ),
-            source: "crates/runmat-analysis/fea/src/assembly/elements/shell/qualification_tests.rs",
-        },
-        claims: &[CoverageClaim {
-            obligation: "physical_shell_operator",
-            envelopes: &[DOMAIN[3]],
-            boundary: concat!(
-                "Dense test assembly of transverse simply-supported triangular plate; center ",
-                "displacement decreases toward independent Navier value and fine error ",
-                "below8%. No membrane, mixed-shell, native or complete locking qualification.",
-            ),
-        }],
-    }],
     dependencies: &[concat!(
         "Shared typed authoring, canonical topology/material/constraint/excitation ",
         "authorities; governed resources and execution; independently qualified ",
@@ -277,7 +222,7 @@ const FEA_STRUCTURAL_REFERENCE_001: Requirement = Requirement {
         "Linear structural independent references and physical balances must satisfy ",
         "all applicable supported-envelope criteria. Independent physical, semantic, ",
         "accuracy, resource and publication evidence are separate; missing, failed ",
-        "or indeterminate mandatory evidence prevents production acceptance.",
+        "or indeterminate mandatory evidence prevents acceptance.",
     ),
     owners: &["crates/runmat-analysis/fea/src/pipeline/linear_static.rs"],
     obligations: &[
@@ -301,7 +246,6 @@ const FEA_STRUCTURAL_REFERENCE_001: Requirement = Requirement {
             DOMAIN,
         ),
     ],
-    witnesses: &[],
     dependencies: &[concat!(
         "Shared typed authoring, canonical topology/material/constraint/excitation ",
         "authorities; governed resources and execution; independently qualified ",
@@ -316,7 +260,7 @@ const FEA_STRUCTURAL_CONSTRAINT_001: Requirement = Requirement {
         "Complete typed structural constraints and constitutive connectors must ",
         "satisfy all applicable supported-envelope criteria. Independent physical, ",
         "semantic, accuracy, resource and publication evidence are separate; ",
-        "missing, failed or indeterminate mandatory evidence prevents production ",
+        "missing, failed or indeterminate mandatory evidence prevents ",
         "acceptance.",
     ),
     owners: &["crates/runmat-analysis/fea/src/constraints/mod.rs"],
@@ -379,7 +323,6 @@ const FEA_STRUCTURAL_CONSTRAINT_001: Requirement = Requirement {
             DOMAIN,
         ),
     ],
-    witnesses: &[],
     dependencies: &[concat!(
         "Shared typed authoring, canonical topology/material/constraint/excitation ",
         "authorities; governed resources and execution; independently qualified ",
@@ -388,13 +331,13 @@ const FEA_STRUCTURAL_CONSTRAINT_001: Requirement = Requirement {
 };
 const FEA_STRUCTURAL_EXECUTION_001: Requirement = Requirement {
     id: "FEA-STRUCTURAL-EXECUTION-001",
-    title: "Governed production linear structures and execution equivalence",
+    title: "Governed linear structures and execution equivalence",
     stages: &[Stage::LinearStructures],
     acceptance: concat!(
-        "Governed production linear structures and execution equivalence must ",
+        "Governed linear structures and execution equivalence must ",
         "satisfy all applicable supported-envelope criteria. Independent physical, ",
         "semantic, accuracy, resource and publication evidence are separate; ",
-        "missing, failed or indeterminate mandatory evidence prevents production ",
+        "missing, failed or indeterminate mandatory evidence prevents ",
         "acceptance.",
     ),
     owners: &["crates/runmat-analysis/fea/src/pipeline/linear_static.rs"],
@@ -448,7 +391,7 @@ const FEA_STRUCTURAL_EXECUTION_001: Requirement = Requirement {
             "release_supported_formulations",
             concat!(
                 "Add family release evidence and documentation. Each promoted structural ",
-                "formulation satisfies its evidence inventory and production definition. ",
+                "formulation satisfies its evidence inventory and acceptance definition. ",
                 "Unsupported mixed combinations fail explicitly.",
             ),
             EvidenceKind::ExecutionEquivalence,
@@ -476,7 +419,6 @@ const FEA_STRUCTURAL_EXECUTION_001: Requirement = Requirement {
             DOMAIN,
         ),
     ],
-    witnesses: &[],
     dependencies: &[concat!(
         "Shared typed authoring, canonical topology/material/constraint/excitation ",
         "authorities; governed resources and execution; independently qualified ",

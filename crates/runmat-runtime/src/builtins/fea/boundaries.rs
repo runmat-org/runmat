@@ -42,7 +42,8 @@ impl GeometryBoundBoundary {
             BoundaryOperator::AcousticRigidWall
             | BoundaryOperator::AcousticRadiation
             | BoundaryOperator::AcousticSphericalRadiation { .. }
-            | BoundaryOperator::AcousticImpedance { .. } => FEA_ACOUSTIC_BOUNDARY_CLASS,
+            | BoundaryOperator::AcousticImpedance { .. }
+            | BoundaryOperator::AcousticImpedanceLaw { .. } => FEA_ACOUSTIC_BOUNDARY_CLASS,
             BoundaryOperator::FluidOutletPressure { .. } => FEA_FLUID_BOUNDARY_CLASS,
         };
         if class_name != expected {

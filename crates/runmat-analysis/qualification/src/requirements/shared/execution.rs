@@ -1,5 +1,5 @@
 //! Standing shared execution acceptance.
-use super::{ALL, KERNEL};
+use super::ALL;
 use crate::requirement::*;
 pub(super) const FEA_SHARED_EXECUTION_001: Requirement = Requirement {
     id: "FEA-SHARED-EXECUTION-001",
@@ -343,7 +343,6 @@ pub(super) const FEA_SHARED_EXECUTION_001: Requirement = Requirement {
             ALL,
         ),
     ],
-    witnesses: &[],
 };
 pub(super) const FEA_SHARED_OPERATORS_001: Requirement = Requirement {
     id: "FEA-SHARED-OPERATORS-001",
@@ -461,7 +460,6 @@ pub(super) const FEA_SHARED_OPERATORS_001: Requirement = Requirement {
             ALL,
         ),
     ],
-    witnesses: &[],
 };
 pub(super) const FEA_SHARED_ACCELERATORS_001: Requirement = Requirement {
     id: "FEA-SHARED-ACCELERATORS-001",
@@ -539,26 +537,6 @@ pub(super) const FEA_SHARED_ACCELERATORS_001: Requirement = Requirement {
             ALL,
         ),
     ],
-    witnesses: &[Witness {
-        id: "FEA-WITNESS-SHARED-HOST-NOT-DEVICE",
-        locator: WitnessLocator::CargoTest {
-            package: "runmat-analysis-fea",
-            target: CargoTarget::Library,
-            name: concat!(
-                "planning::resource::tests::general::general_host_solver_demand_does_not_auth",
-                "orize_accelerator_execution",
-            ),
-            source: "crates/runmat-analysis/fea/src/planning/resource/tests/general.rs",
-        },
-        claims: &[CoverageClaim {
-            obligation: "provider_owned_native_sparse_work",
-            envelopes: KERNEL,
-            boundary: concat!(
-                "Host general-solver demand plus a synthetic GPU requirement rejects ",
-                "planning; no actual accelerator kernel capability or performance proof.",
-            ),
-        }],
-    }],
 };
 pub(super) const FEA_SHARED_IDENTITY_001: Requirement = Requirement {
     id: "FEA-SHARED-IDENTITY-001",
@@ -615,5 +593,4 @@ pub(super) const FEA_SHARED_IDENTITY_001: Requirement = Requirement {
             ALL,
         ),
     ],
-    witnesses: &[],
 };

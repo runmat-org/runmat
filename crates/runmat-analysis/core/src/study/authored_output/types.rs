@@ -124,6 +124,8 @@ pub enum AuthoredSpatialReduction {
     Maximum,
     Resultant,
     Moment { about: Position },
+    /// ∫ v·n dA of a vector field through a face region.
+    NormalFlux,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

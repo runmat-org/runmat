@@ -279,6 +279,10 @@ fn unit(symbol: &str) -> Option<ParsedUnit> {
 mod tests {
     use super::*;
 
+    // witness: FEA-PUBLIC-LANGUAGE-001/unit_prefixes @
+    //   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+    //   boundary: kV/mm, kA, mT and MHz parse with the correct scale and dimension; kW, MW, mA, MN and
+    //   mN are not asserted here.
     #[test]
     fn electrical_prefixes_scale_to_si() {
         let field = parse_unit_expression("kV/mm").unwrap();

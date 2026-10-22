@@ -99,6 +99,9 @@ mod tests {
         }
     }
 
+    // witness: FEA-AUTHORING-OUTPUT-002/shared_catalog_lowering @
+    //   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+    //   boundary: The read-only catalog resolves without runtime bindings.
     #[test]
     fn read_only_catalog_resolves_without_runtime_bindings() {
         let operations = [operation()];

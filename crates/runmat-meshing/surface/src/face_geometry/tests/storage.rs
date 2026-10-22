@@ -32,6 +32,12 @@ impl GeometryEvaluationControl for Budget {
         assert!(self.held.fetch_sub(bytes, Ordering::Relaxed) >= bytes);
     }
 }
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Complete vertex and triangle geometry buffers are admitted before allocation. Exact
+//   requested contiguous capacity accepts, one byte less rejects, and scope exit releases those
+//   buffers. Shared provenance is separately field-owned; allocator headers and process RSS are
+//   excluded.
 #[test]
 fn complete_geometry_buffers_admit_exact_requested_storage_and_reject_one_byte_less() {
     let fixture = fixture(None);

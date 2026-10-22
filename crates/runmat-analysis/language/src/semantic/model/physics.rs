@@ -21,6 +21,7 @@ pub(super) struct LoweredModelPhysics {
 pub(super) fn lower(
     declaration: &CheckedFeaDeclaration,
     bound: &BoundFeaProgram,
+    tables: &super::tables::ImpedanceTables,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> LoweredModelPhysics {
     let mut boundaries = Vec::new();
@@ -38,7 +39,8 @@ pub(super) fn lower(
         match kind {
             FeaModelDefinitionKind::Load => {
                 if !is_applied_excitation(statements) {
-                    if let Some(value) = boundary(declaration, bound, name, statements, diagnostics)
+                    if let Some(value) =
+                        boundary(declaration, bound, tables, name, statements, diagnostics)
                     {
                         boundaries.push(value);
                     }
@@ -77,6 +79,7 @@ fn is_applied_excitation(statements: &[CheckedFeaStatement]) -> bool {
 fn boundary(
     declaration: &CheckedFeaDeclaration,
     bound: &BoundFeaProgram,
+    tables: &super::tables::ImpedanceTables,
     id: &str,
     statements: &[CheckedFeaStatement],
     diagnostics: &mut Vec<FeaDiagnostic>,
@@ -190,6 +193,32 @@ fn boundary(
             }
         }
         "acoustic.radiation" => AuthoredBoundaryKind::AcousticRadiation,
+        // `impedance = table.<name>` takes a complex, frequency-dependent law; a quantity is
+        // a constant real impedance.
+        "acoustic.impedance"
+            if optional_property_assignment(body, "impedance").is_some_and(|value| {
+                matches!(&value.kind, crate::semantic::expression::CheckedExpressionKind::Reference(path) if path.first().map(String::as_str) == Some("table"))
+            }) =>
+        {
+            let value = optional_property_assignment(body, "impedance")?;
+            let crate::semantic::expression::CheckedExpressionKind::Reference(path) = &value.kind
+            else {
+                return None;
+            };
+            let Some(law) = path
+                .get(1)
+                .and_then(|name| tables.get(&(declaration.module.clone(), name.clone())))
+            else {
+                diagnostic(
+                    declaration,
+                    value.span,
+                    "impedance table is unknown or invalid",
+                    diagnostics,
+                );
+                return None;
+            };
+            AuthoredBoundaryKind::AcousticImpedanceLaw { law: law.clone() }
+        }
         "acoustic.impedance" => AuthoredBoundaryKind::AcousticImpedance {
             impedance: SpecificAcousticImpedance::new(required_quantity(
                 declaration,

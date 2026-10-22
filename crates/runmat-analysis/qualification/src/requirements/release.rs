@@ -1,46 +1,18 @@
 //! Standing cross-family acceptance with explicit domain boundaries. Required envelopes
 //! without a discovered witness remain open; declarations never imply a test verdict.
 use crate::requirement::*;
-const KERNEL: &[Envelope] = &[envelope(
-    Formulation::SharedInfrastructure,
-    MeshOrder::CanonicalMixedTopology,
-    ExecutionEnvelope::SerialCpuNumericalKernel,
-)];
+/// Release obligations are properties of the release lane and its evidence, checked by the
+/// release pipeline; numerical placements do not apply to them.
 const ALL: &[Envelope] = &[
     envelope(
         Formulation::SharedInfrastructure,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::ReleasePipeline,
     ),
     envelope(
         Formulation::SharedInfrastructure,
-        MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::SerialCpuPublicStudy,
-    ),
-    envelope(
-        Formulation::SharedInfrastructure,
-        MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::SerialCpuNativeProcess,
-    ),
-    envelope(
-        Formulation::SharedInfrastructure,
-        MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::Durable,
-    ),
-    envelope(
-        Formulation::SharedInfrastructure,
-        MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::EncryptedRemote,
-    ),
-    envelope(
-        Formulation::SharedInfrastructure,
-        MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::PartitionedCpu,
-    ),
-    envelope(
-        Formulation::SharedInfrastructure,
-        MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::ClaimedAccelerator,
+        MeshOrder::MeshIndependent,
+        ExecutionEnvelope::SourceCheck,
     ),
 ];
 const FEA_RELEASE_PLATFORM_001: Requirement = Requirement {
@@ -64,7 +36,7 @@ const FEA_RELEASE_PLATFORM_001: Requirement = Requirement {
                 "branch. Resolve overlaps by composing both products: retain the complete ",
                 "`origin/dev` CI/release job set, including its job IDs, display names, ",
                 "matrices, dependencies, action versions, and existing steps; preserve all ",
-                "production-meshing test and release gates; and preserve the strongest ",
+                "meshing test and release gates; and preserve the strongest ",
                 "native framed-read, cancellation, and request-lifetime semantics. Do not ",
                 "rename jobs or introduce branch-specific job variants. Add or extend only ",
                 "the lanes required by FEA and meshing, and keep them integrated with the ",
@@ -94,7 +66,7 @@ const FEA_RELEASE_PLATFORM_001: Requirement = Requirement {
                 "before each platform-facing Stage 1 or Stage 2 slice, and perform the ",
                 "mandatory final `dev` convergence before distributed or GPU promotion. the ",
                 "FEA implementation branch contains the current public `dev` lineage in a ",
-                "dedicated merge commit. Production-meshing behavior and release coverage ",
+                "dedicated merge commit. Meshing behavior and release coverage ",
                 "remain intact on the merged platform. CI/release retains the complete ",
                 "`origin/dev` job topology and coverage, with only reviewed, ",
                 "purpose-specific FEA or meshing additions; a workflow diff audit proves no ",
@@ -112,7 +84,6 @@ const FEA_RELEASE_PLATFORM_001: Requirement = Requirement {
             ALL,
         ),
     ],
-    witnesses: &[],
 };
 const FEA_RELEASE_EVIDENCE_001: Requirement = Requirement {
     id: "FEA-RELEASE-EVIDENCE-001",
@@ -171,7 +142,6 @@ const FEA_RELEASE_EVIDENCE_001: Requirement = Requirement {
             ALL,
         ),
     ],
-    witnesses: &[],
 };
 const FEA_RELEASE_CI_001: Requirement = Requirement {
     id: "FEA-RELEASE-CI-001",
@@ -201,13 +171,13 @@ const FEA_RELEASE_CI_001: Requirement = Requirement {
                 "checks in normal CI. Keep governed integration cases in the existing FEA ",
                 "conformance job, but make its reports family- and formulation-specific. Add ",
                 "a blocking FEA release-evidence job incrementally as formulations reach ",
-                "production. Make release promotion depend on that job just as it depends on ",
+                "completion. Make release promotion depend on that job just as it depends on ",
                 "meshing release evidence. Generate, validate, upload, and attest family ",
                 "evidence. Include sequence/state-transition, observation, and accuracy ",
                 "reports in the blocking evidence for every formulation that uses them. Do ",
                 "not add a nightly lane. Avoid a single opaque readiness score. A failed ",
                 "mandatory case blocks only the relevant formulation and any coupled ",
-                "formulation that depends on it, but it blocks their production claim ",
+                "formulation that depends on it, but it blocks their claim ",
                 "completely.",
             ),
             EvidenceKind::PublicationIntegrity,
@@ -232,8 +202,8 @@ const FEA_RELEASE_CI_001: Requirement = Requirement {
                 "and resource gates. Audit public documentation and capability claims against ",
                 "evidence. Make FEA release evidence a mandatory release dependency. Remove ",
                 "temporary migration tooling, obsolete fixtures, proxy code, and stale ",
-                "documentation. Every planned production formulation meets the complete ",
-                "production acceptance criteria. The full release lane is green and produces ",
+                "documentation. Every planned formulation meets the complete ",
+                "acceptance criteria. The full release lane is green and produces ",
                 "attested evidence. No string-dispatched constraint behavior or ",
                 "boolean-mask-only constraint authority remains. No live solver callback, ",
                 "family-private time-profile authority, or ambiguous modal/SRS procedure ",
@@ -245,7 +215,7 @@ const FEA_RELEASE_CI_001: Requirement = Requirement {
             ALL,
         ),
         obligation(
-            "attested_release_and_production_rejection",
+            "attested_release_and_publication_rejection",
             concat!(
                 "No full field is gathered merely to answer a distributable observation, and ",
                 "no visualization operation chooses result recovery semantics. No result is ",
@@ -259,7 +229,6 @@ const FEA_RELEASE_CI_001: Requirement = Requirement {
             ALL,
         ),
     ],
-    witnesses: &[],
 };
 const FEA_RELEASE_DOCUMENTATION_001: Requirement = Requirement {
     id: "FEA-RELEASE-DOCUMENTATION-001",
@@ -276,7 +245,7 @@ const FEA_RELEASE_DOCUMENTATION_001: Requirement = Requirement {
         obligation(
             "exact_physical_and_typed_contract_docs",
             concat!(
-                "Each production formulation must document: supported equations and ",
+                "Each formulation must document: supported equations and ",
                 "assumptions; supported element/cell types and order; material models and ",
                 "units; boundary conditions, loads, and sources; available typed ",
                 "constraints, relations, connectors, frames, schedules, enforcement ",
@@ -352,14 +321,13 @@ const FEA_RELEASE_DOCUMENTATION_001: Requirement = Requirement {
             ALL,
         ),
     ],
-    witnesses: &[],
 };
 const FEA_RELEASE_COMPLETION_001: Requirement = Requirement {
     id: "FEA-RELEASE-COMPLETION-001",
-    title: "Per-formulation complete production acceptance",
+    title: "Per-formulation complete acceptance",
     stages: &[Stage::Release],
     acceptance: concat!(
-        "Per-formulation complete production acceptance requires every listed ",
+        "Per-formulation complete acceptance requires every listed ",
         "criterion in its declared supported scope. A passing component witness does ",
         "not discharge unrelated criteria or broader execution envelopes.",
     ),
@@ -371,7 +339,7 @@ const FEA_RELEASE_COMPLETION_001: Requirement = Requirement {
             concat!(
                 "A formulation is complete only when all of the following are true: Its ",
                 "public contract names the actual equations, procedure, assumptions, and ",
-                "supported envelope. Its production identity is constructed only from a ",
+                "supported envelope. Its identity is constructed only from a ",
                 "qualified pre-solve admission receipt and records exact spatial, temporal, ",
                 "constitutive, coupling, recovery, topology, source, and boundary ",
                 "realizations; identity validity is rechecked at persistence and decode ",
@@ -415,9 +383,9 @@ const FEA_RELEASE_COMPLETION_001: Requirement = Requirement {
                 "identities and invalidation rules. Analytic/manufactured, patch, ",
                 "convergence, conservation, invalid-case, and independent-reference evidence ",
                 "passes governed tolerances. Coupled or adaptive variants demonstrate ",
-                "closure or target-quantity convergence. Every production result has a ",
+                "closure or target-quantity convergence. Every result has a ",
                 "satisfied typed accuracy report; failed or indeterminate mandatory evidence ",
-                "blocks production publication. Progress, cancellation, retry, restart, ",
+                "blocks publication. Progress, cancellation, retry, restart, ",
                 "replay, persistence, and result queries work. Inline, isolated-process, ",
                 "durable, and claimed remote execution meet the declared equivalence policy. ",
                 "Independent task distribution and cooperative distributed algebra have ",
@@ -455,24 +423,6 @@ const FEA_RELEASE_COMPLETION_001: Requirement = Requirement {
             ALL,
         ),
     ],
-    witnesses: &[Witness {
-        id: "FEA-WITNESS-RELEASE-ACCURACY-BLOCK",
-        locator: WitnessLocator::CargoTest {
-            package: "runmat-analysis-fea",
-            target: CargoTarget::Library,
-            name: "results::accuracy::tests::production_accuracy_failure_produces_a_blocking_gate",
-            source: "crates/runmat-analysis/fea/src/results/accuracy/tests.rs",
-        },
-        claims: &[CoverageClaim {
-            obligation: "truthful_fields_operators_and_accuracy",
-            envelopes: KERNEL,
-            boundary: concat!(
-                "Scalar residual criterion failure remains blocking through a typed accuracy ",
-                "artifact; no complete governed family corpus, release attestation or public ",
-                "receipt qualification.",
-            ),
-        }],
-    }],
 };
 const FEA_RELEASE_ENGINEERING_001: Requirement = Requirement {
     id: "FEA-RELEASE-ENGINEERING-001",
@@ -509,14 +459,13 @@ const FEA_RELEASE_ENGINEERING_001: Requirement = Requirement {
         EvidenceKind::PublicationIntegrity,
         ALL,
     )],
-    witnesses: &[],
 };
 const FEA_RELEASE_SCOPE_001: Requirement = Requirement {
     id: "FEA-RELEASE-SCOPE-001",
-    title: "Complete production surface and dependency promotion",
+    title: "Complete supported surface and dependency promotion",
     stages: &[Stage::Prerequisite, Stage::Release],
     acceptance: concat!(
-        "All named production formulations complete their full acceptance gates ",
+        "All named formulations complete their full acceptance gates ",
         "within documented supported envelopes, using the required dependency and ",
         "promotion order.",
     ),
@@ -527,9 +476,9 @@ const FEA_RELEASE_SCOPE_001: Requirement = Requirement {
     )],
     obligations: &[
         obligation(
-            "supported_production_surface",
+            "supported_surface",
             concat!(
-                "The required production surface comprises Tet4/Tet10 linear solids, ",
+                "The supported surface comprises Tet4/Tet10 linear solids, ",
                 "three-dimensional beams, membrane/bending shells and deliberate mixed ",
                 "assembly; eigenmodes and prestressed modes; modal transient/harmonic, ",
                 "response-spectrum correlation/missing-mass and random PSD/cross-PSD ",
@@ -537,13 +486,18 @@ const FEA_RELEASE_SCOPE_001: Requirement = Requirement {
                 "response from compatible converged state; direct transient/harmonic ",
                 "dynamics; geometric nonlinearity, supported plastic laws and ",
                 "frictionless/frictional contact; steady/transient conduction with supported ",
-                "sources and radiation; electrostatics, conduction, magnetostatics and ",
-                "harmonic Maxwell; harmonic acoustics; steady/transient incompressible ",
-                "Newtonian laminar flow; thermoelastic, electrothermal, conjugate heat ",
-                "transfer and bounded partitioned FSI; and adaptation only with validated ",
-                "family estimators and transfer. Every formulation independently satisfies ",
-                "all shared and family acceptance. No unsupported combination silently ",
-                "selects a reduced model.",
+                "sources and radiation; electrostatics, conduction, magnetostatics, harmonic ",
+                "multi-frequency and transient Maxwell and saturating magnetics; harmonic, ",
+                "modal and transient acoustics with impedance, radiation, transmission loss, ",
+                "intensity and structure-borne sound; steady/transient incompressible ",
+                "laminar flow with generalized-Newtonian, viscoelastic, porous, species, ",
+                "free-surface, rotating-frame, lubrication, electrokinetic, particle, ",
+                "low-Mach, compressible laminar and network physics; thermoelastic, ",
+                "electrothermal, conjugate heat transfer and two-way FSI; adaptation with ",
+                "validated family estimators and transfer. Every formulation runs through ",
+                "one thread plan, remotely and with domain decomposition, and independently ",
+                "satisfies all shared and family acceptance. No unsupported combination ",
+                "silently selects a reduced model.",
             ),
             EvidenceKind::AccuracyAcceptance,
             &[envelope(
@@ -555,12 +509,14 @@ const FEA_RELEASE_SCOPE_001: Requirement = Requirement {
         obligation(
             "excluded_family_admission",
             concat!(
-                "Induction transients, turbulence, compressible/reacting flow, ",
-                "piezoelectricity, electromagnetic structural coupling, nonlinear acoustics, ",
-                "fracture and arbitrary material models are excluded from implied production ",
-                "support. Advertising any of them requires a separately bounded production ",
-                "envelope and independent qualification; a future extension seam grants no ",
-                "implemented capability.",
+                "Turbulence (RANS, LES, DES), perfectly matched layers, boundary elements, ",
+                "acoustic mean flow, antennas, waveguide ports, motors, piezoelectricity, ",
+                "fracture, fatigue, hexahedral, wedge and pyramid elements, view-factor ",
+                "radiation and arbitrary material models are outside the supported ",
+                "surface. They are rejected with typed diagnostics and the site makes no ",
+                "claim about them. Advertising any of them requires a new requirement ",
+                "with its own envelope and independent qualification; a future extension ",
+                "seam grants no implemented capability.",
             ),
             EvidenceKind::AccuracyAcceptance,
             &[envelope(
@@ -646,7 +602,6 @@ const FEA_RELEASE_SCOPE_001: Requirement = Requirement {
             )],
         ),
     ],
-    witnesses: &[],
 };
 pub(crate) const REQUIREMENTS: &[Requirement] = &[
     FEA_RELEASE_SCOPE_001,

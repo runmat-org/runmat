@@ -344,6 +344,12 @@ mod tests {
         assert!(contributions.is_empty());
     }
 
+    // witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+    //   boundary: Three translated/rotated long-edge pairs retain half-separation resolution across a
+    //   thin gap while preserving the long direction at the global baseline. Original contact and
+    //   search-control cases remain separate. Sampled witnesses are not a closest-distance certificate
+    //   or general local spatial-support qualification.
     #[test]
     fn thin_extrusion_gap_resolution_preserves_long_direction_under_rotation_and_translation() {
         for (long, gap) in [

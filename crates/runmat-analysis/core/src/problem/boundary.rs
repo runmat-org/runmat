@@ -47,6 +47,10 @@ pub enum BoundaryOperator {
     AcousticImpedance {
         impedance: SpecificAcousticImpedance,
     },
+    /// Complex, frequency-dependent specific impedance (a table or a porous-layer model).
+    AcousticImpedanceLaw {
+        law: super::acoustic_impedance::AcousticImpedanceLaw,
+    },
     FluidOutletPressure {
         value: PrescribedValue<Pressure>,
     },

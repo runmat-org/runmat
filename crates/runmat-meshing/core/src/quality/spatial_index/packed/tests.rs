@@ -100,6 +100,10 @@ fn packed_build_and_query_preserve_control_failures_and_reject_nonfinite_bounds(
     assert_eq!(result, Err(91));
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Streaming packed queries stop at the first caller predicate failure without a second
+//   candidate buffer; original errors remain observable.
 #[test]
 fn fallible_packed_visitor_preserves_first_predicate_failure_without_buffering() {
     let bounds = Aabb3 {

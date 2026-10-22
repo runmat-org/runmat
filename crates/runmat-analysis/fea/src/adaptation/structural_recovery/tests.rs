@@ -238,6 +238,10 @@ fn tetrahedron10_volume_uses_curved_midside_geometry() {
     assert!((volume - 1.0 / 6.0).abs() > 1.0e-3);
 }
 
+// witness: FEA-ADAPTATION-LOOP-001/family_estimator_canonical_order @
+//   adaptive_analysis/tet10/numerical_kernel; coverage: partial;
+//   boundary: The Tet10 integration-point structural recovery estimator preserves a linear
+//   recovery; stress-jump and marking behavior are other tests.
 #[test]
 fn tetrahedron10_integration_point_estimator_preserves_linear_recovery() {
     let artifact = artifact(ElementOrder::Tet10);

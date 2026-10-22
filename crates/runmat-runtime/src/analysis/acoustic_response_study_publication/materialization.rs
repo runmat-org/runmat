@@ -28,19 +28,10 @@ pub(super) fn admit(
         &completed.publication,
     )?;
     let accuracy = accuracy_owner(&completed.accuracy);
-    let request = completed
+    let fields = completed
         .result
-        .native_field_request_from_result()
+        .published_fields()
         .map_err(|e| e.to_string())?;
-    let mut fields: Vec<runmat_analysis_core::AnalysisField> = completed
-        .result
-        .recover_native_fields_from_result(&request)
-        .map_err(|e| e.to_string())?
-        .into_fields()
-        .into_iter()
-        .map(|f| f.into_storage())
-        .collect();
-    fields.extend(completed.result.summary_fields());
     let run = FeaRunResult {
         identity: completed.result.formulation().clone(),
         requested_backend: ComputeBackend::Cpu,

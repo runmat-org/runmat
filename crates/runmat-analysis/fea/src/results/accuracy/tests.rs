@@ -24,6 +24,10 @@ fn evidence(value: f64) -> AccuracyEvidence {
     .unwrap()
 }
 
+// witness: FEA-SHARED-ACCURACY-001/mandatory_acceptance_states @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Scalar residual criterion failure remains blocking through a typed accuracy artifact;
+//   no complete governed family corpus, release attestation or public receipt qualification.
 #[test]
 fn production_accuracy_failure_produces_a_blocking_gate() {
     let plan = AccuracyPlan::baseline("accuracy");
@@ -55,6 +59,9 @@ fn production_accuracy_failure_produces_a_blocking_gate() {
     assert_eq!(artifact.gate().decision, PublicationDecision::Block);
 }
 
+// witness: FEA-SHARED-ACCURACY-001/mandatory_acceptance_states @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Mandatory evidence governs status and publication.
 #[test]
 fn mandatory_evidence_governs_status_and_production_publication() {
     let plan = AccuracyPlan::baseline("accuracy");
@@ -73,6 +80,9 @@ fn mandatory_evidence_governs_status_and_production_publication() {
     );
 }
 
+// witness: FEA-SHARED-ACCURACY-001/mandatory_acceptance_states @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Missing mandatory evidence is indeterminate and blocks publication by default.
 #[test]
 fn missing_mandatory_evidence_is_indeterminate_and_blocks_by_default() {
     let plan = AccuracyPlan::baseline("accuracy");

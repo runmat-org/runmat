@@ -17,6 +17,11 @@ impl GeometryEvaluationControl for Control {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: The 257-owner, 32768-use incidence fixture performs exactly two owner resolutions per
+//   use, and borrowed row queries preserve original use order without further owner resolution.
+//   This is component work-count evidence, not arbitrary native geometry throughput.
 #[test]
 fn incidence_construction_is_linear_and_queries_preserve_original_use_order() {
     let (owners, uses) = (257, 32768);

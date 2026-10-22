@@ -80,6 +80,11 @@ study heating {
 }
 "#;
 
+// witness: FEA-THERMAL-INPUT-001/equivalence @ thermal_transient/tet4/public_study; coverage:
+//   partial;
+//   boundary: A linear-order transient with function-generated heating and initial temperature checks
+//   and runs through the typed study path and matches tables and an independent
+//   source/boundary energy; explicit and field-artifact variants are not compared here.
 #[tokio::test]
 async fn checked_named_thermal_inputs_match_tables_and_independent_source_boundary_energy() {
     let directory = tempfile::tempdir().unwrap();

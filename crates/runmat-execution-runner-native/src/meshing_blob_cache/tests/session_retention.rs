@@ -1,6 +1,12 @@
 //! Numerical caches have a host lifetime; result objects keep their session lifetime.
 use super::*;
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A host-lifetime bounded numerical record survives native session cleanup while
+//   temporary session objects are removed; reopened reads preserve bytes and release storage. This
+//   fixture does not promise indefinite cache retention, prevent quota eviction, authorize an
+//   accepted mesh or establish whole-study performance.
 #[test]
 fn meshing_subtask_cache_survives_session_cleanup_without_retaining_session_objects() {
     let fixture = Fixture::new();

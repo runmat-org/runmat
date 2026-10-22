@@ -2325,6 +2325,10 @@ mod tests {
         assert!(solve.converged, "{:?}", solve.diagnostics);
     }
 
+    // witness: FEA-SHARED-PROPERTIES-001/material_bearing_roles @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+    //   boundary: Solver-mesh material regions select the assigned solid materials; beam, shell and
+    //   cell roles are not covered by this test.
     #[test]
     fn solver_mesh_material_regions_select_assigned_solid_materials() {
         let mut soft_model = fixture_model(FixtureId::CantileverLinearStatic);
@@ -2558,6 +2562,10 @@ mod tests {
         );
     }
 
+    // witness: FEA-STRUCTURAL-CONSTRAINT-001/typed_connector_inventory @
+    //   linear_structural/beam/numerical_kernel; coverage: partial;
+    //   boundary: Explicit connectors assemble physical stiffness and damping operators on a beam
+    //   fixture; only the connector kinds in that fixture are exercised.
     #[test]
     fn explicit_connectors_assemble_physical_stiffness_and_damping_operators() {
         let base = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
@@ -2655,6 +2663,9 @@ mod tests {
         );
     }
 
+    // witness: FEA-STRUCTURAL-CONSTRAINT-001/typed_connector_inventory @
+    //   linear_structural/beam/numerical_kernel; coverage: partial;
+    //   boundary: Connector targets and foundation semantics fail closed.
     #[test]
     fn explicit_connector_targets_and_foundation_semantics_fail_closed() {
         let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
@@ -2726,6 +2737,9 @@ mod tests {
         assert_eq!(summary.structural_connector_damping_count, 0);
     }
 
+    // witness: FEA-STRUCTURAL-SOLID-001/damping_body_loads @ linear_structural/shell/numerical_kernel;
+    //   coverage: partial;
+    //   boundary: A shell assembles authored Rayleigh damping; solid damping is not asserted here.
     #[test]
     fn shell_assembles_authored_rayleigh_damping() {
         let mut model = fixture_model(FixtureId::StructuralShellPlateMomentReference);
@@ -3250,6 +3264,9 @@ mod tests {
         assert!(summary.structural_load_plan_identity.is_some());
     }
 
+    // witness: FEA-STRUCTURAL-SOLID-001/damping_body_loads @ linear_structural/tet10/numerical_kernel;
+    //   coverage: partial;
+    //   boundary: Tet10 body-force quadrature preserves the integrated volume resultant.
     #[test]
     fn tet10_body_force_quadrature_preserves_integrated_volume_resultant() {
         let mut model = fixture_model(FixtureId::CantileverLinearStatic);
@@ -3519,6 +3536,9 @@ mod tests {
         }
     }
 
+    // witness: FEA-STRUCTURAL-BEAM-001/physical_beam_mixed_dofs @
+    //   linear_structural/beam|shell/numerical_kernel; coverage: partial;
+    //   boundary: Mixed beam and shell connectivity assembles one shared DOF system.
     #[test]
     fn mixed_beam_shell_connectivity_assembles_one_shared_dof_system() {
         let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
@@ -3709,6 +3729,9 @@ mod tests {
         }
     }
 
+    // witness: FEA-STRUCTURAL-SOLID-001/damping_body_loads @
+    //   linear_structural/beam|shell/numerical_kernel; coverage: partial;
+    //   boundary: An explicit body-force density integrates over beam and shell volumes.
     #[test]
     fn explicit_body_force_density_integrates_beam_and_shell_volume() {
         let cases = [
@@ -4297,6 +4320,9 @@ mod tests {
         );
     }
 
+    // witness: FEA-STRUCTURAL-SHELL-001/physical_shell_operator @
+    //   linear_structural/shell/numerical_kernel; coverage: partial;
+    //   boundary: An unconstrained shell retains its physical rigid-body null space.
     #[test]
     fn unconstrained_shell_retains_its_physical_rigid_body_nullspace() {
         let mut model = fixture_model(FixtureId::StructuralShellPlateMomentReference);

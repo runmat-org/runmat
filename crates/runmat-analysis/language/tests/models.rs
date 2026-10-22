@@ -3,6 +3,10 @@ pub mod support;
 use runmat_analysis_language::*;
 use support::{source_module, TestHost};
 
+// witness: FEA-AUTHORING-LANGUAGE-002/model_composition @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Included models and material assignments retain their qualified source modules across
+//   imports; the full list of model members is not exercised.
 #[test]
 fn model_composition_and_material_assignments_retain_qualified_sources() {
     let geometry_module = r#"
@@ -72,6 +76,10 @@ model bracket {
     assert_eq!(region.role, runmat_geometry_core::GeometryRegionRole::Solid);
 }
 
+// witness: FEA-AUTHORING-GEOMETRY-002/typed_property_assignments @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Parameterized model assignments remain strongly typed; section, layup and orientation
+//   forms are not covered.
 #[test]
 fn parameterized_model_assignments_remain_strongly_typed() {
     let source = r#"
@@ -102,6 +110,9 @@ model reusable(region body : region<solid>) {
     ));
 }
 
+// witness: FEA-AUTHORING-LANGUAGE-002/model_composition @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Composition cycles and conflicting assignments are rejected.
 #[test]
 fn model_composition_rejects_cycles_and_conflicting_assignments() {
     let source = r#"
@@ -248,6 +259,10 @@ model airframe {
     );
 }
 
+// witness: FEA-AUTHORING-GEOMETRY-002/complete_property_coverage @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Property roles and composite ownership fail closed; gaps, overlaps and stale
+//   revisions across a whole mesh are checked in the properties requirement.
 #[test]
 fn property_roles_and_composite_ownership_fail_closed() {
     let source = r#"

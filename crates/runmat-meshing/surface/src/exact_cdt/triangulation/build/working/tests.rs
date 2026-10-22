@@ -45,6 +45,11 @@ fn run(coordinates: Vec<[f64; 2]>, ceiling: u64) -> (Vec<[u32; 3]>, Vec<[u32; 3]
     (local, exhaustive)
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Connected cavity traversal preserves the exhaustive builder’s canonical topology on
+//   grids, reversed insertion order, transformed coordinates and cocircular inputs. This finite
+//   component comparison does not establish arbitrary CAD coverage or native throughput.
 #[test]
 fn connected_cavities_match_exhaustive_predicates_including_degeneracies() {
     for side in [3, 7, 17] {
@@ -83,6 +88,12 @@ fn connected_cavities_match_exhaustive_predicates_including_degeneracies() {
     assert_eq!(local, oracle);
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A 2025-point planar inventory compares exact canonical output against the exhaustive
+//   builder while applying a predicate ceiling that the exhaustive scan exceeds. This component
+//   work bound does not establish whole-task memory, constrained refinement convergence or native
+//   study performance.
 #[test]
 fn bounded_local_work_handles_a_large_planar_inventory() {
     let coordinates = (0..45)

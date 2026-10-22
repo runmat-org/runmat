@@ -249,6 +249,10 @@ mod tests {
         );
     }
 
+    // witness: FEA-DYNAMICS-RESPONSE-001/second_order_equilibrium_excitation @
+    //   linear_structural_dynamics/mesh_independent/numerical_kernel; coverage: partial;
+    //   boundary: Undamped free vibration under Newmark converges at second order; damped and forced
+    //   cases are other tests.
     #[test]
     fn undamped_free_vibration_converges_at_second_order() {
         let omega = 2.0_f64;

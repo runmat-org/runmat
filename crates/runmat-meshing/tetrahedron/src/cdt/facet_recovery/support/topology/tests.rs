@@ -71,6 +71,13 @@ fn fan(divisions: usize, unrelated: usize) -> (DelaunaySegmentRecovery, Vec<Stab
     )
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Boundary supports with 32/128 subdivisions recover the independently specified
+//   triangle inventory under a work ceiling proportional to boundary length. Adding 64 disconnected
+//   cells leaves deterministic support unchanged. This local edge-graph family excludes a dense
+//   cubic interval inventory; it does not establish arbitrary vertex valence, connected-feature
+//   scaling, full native facet recovery, whole-task admission or measured study performance.
 #[test]
 fn subdivided_support_uses_local_edges_under_a_linear_work_ceiling() {
     for divisions in [32, 128] {

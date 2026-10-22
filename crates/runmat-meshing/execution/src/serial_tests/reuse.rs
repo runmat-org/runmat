@@ -1,6 +1,11 @@
 use super::*;
 use crate::AcceptedMeshingStageReceipt;
 
+// witness: FEA-SHARED-RESOURCES-001/governed_path_equivalence @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: An accepted surface-stage receipt rebinds session access, preserves original
+//   observations and rejects changed implementation, changed input, understated limits and corrupt
+//   storage. Reuse is not fresh numerical execution or a native scaling measurement.
 #[test]
 fn accepted_stage_reuse_rebinds_authority_and_preserves_original_observations() {
     let mut fixture = Fixture::new();

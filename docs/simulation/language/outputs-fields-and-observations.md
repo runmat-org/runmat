@@ -29,6 +29,16 @@ preserves the field domain and changes the component shape. A regional `max` ret
 extremum: the value remains linked to the entity, position, sample, analysis, and source field that
 produced it.
 
+`flux(field, through = region)` integrates the outward normal component of a vector field over a
+face region, $\int\mathbf v\cdot\mathbf n\,dA$. For a harmonic acoustic analysis,
+`sound_power(analysis.sound, through = region)` is the flux of its active intensity
+$\tfrac12\mathrm{Re}(p\,\mathbf v^*)$, the mean acoustic power leaving through the faces:
+
+```fea
+output radiated_power = sound_power(analysis.sound, through = geometry.speaker.region.hemisphere)
+output intensity = analysis.sound.field.element.acoustic_intensity
+```
+
 This is intentionally separate from rendering. After a run, ordinary RunMat code selects the
 field and plots it:
 

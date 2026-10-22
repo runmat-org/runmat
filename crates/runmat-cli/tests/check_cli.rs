@@ -298,6 +298,10 @@ fn representative_documentation_plans_expose_the_complete_resolved_contract() {
     }
 }
 
+// witness: FEA-PUBLIC-STUDIES-001/docs_examples_run @
+//   shared_infrastructure/canonical_mixed_topology/public_study; coverage: partial;
+//   boundary: The structural static STEP documentation example runs from the CLI and publishes
+//   fields; the other examples are separate cases.
 #[test]
 fn structural_static_step_documentation_example_runs_and_publishes_fields() {
     let temp = TempDir::new().unwrap();
@@ -444,6 +448,9 @@ fn structural_static_step_documentation_example_runs_and_publishes_fields() {
     assert!(stdout.contains("von_mises"));
 }
 
+// witness: FEA-PUBLIC-STUDIES-001/docs_examples_run @
+//   shared_infrastructure/canonical_mixed_topology/public_study; coverage: partial;
+//   boundary: The response-spectrum documentation example runs its two-step study.
 #[test]
 fn response_spectrum_documentation_example_runs_its_two_step_study() {
     let temp = TempDir::new().unwrap();
@@ -545,6 +552,9 @@ fn named_response_spectrum_generator_materializes_before_the_solve() {
     );
 }
 
+// witness: FEA-PUBLIC-STUDIES-001/docs_examples_run @
+//   shared_infrastructure/canonical_mixed_topology/public_study; coverage: partial;
+//   boundary: The random-response documentation example runs and exposes paged statistical fields.
 #[test]
 fn random_response_documentation_example_exposes_paged_statistical_fields() {
     let temp = TempDir::new().unwrap();
@@ -644,6 +654,10 @@ fn fea_check_and_run_materialize_a_named_project_signal_generator() {
     assert!(payload["study_definition_digest"].as_str().is_some());
 }
 
+// witness: FEA-PUBLIC-STUDIES-001/docs_examples_run @
+//   shared_infrastructure/canonical_mixed_topology/public_study; coverage: partial;
+//   boundary: The acoustic cavity harmonic example runs its frequency sweep to a completed,
+//   numerically acceptable run.
 #[test]
 fn acoustic_cavity_example_runs_its_certified_frequency_sweep() {
     let temp = TempDir::new().unwrap();
@@ -920,6 +934,16 @@ fn strip_ansi(bytes: &[u8]) -> Vec<u8> {
 
 /// The homepage "Physics simulation as code" figure: `runmat check cantilever.fea` on the
 /// cantilever-static study with the traction authored in N and no `load_case` line.
+// witness: FEA-PUBLIC-LANGUAGE-001/located_diagnostics @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Checking a study with a force given as a traction prints error[fea.semantic.model],
+//   the file:line:col arrow, the source line, a caret underline labeled with the expected unit (Pa)
+//   and the checked summary, with no cascade error; leading-indent trimming and the JSON form are
+//   not asserted here.
+// witness: FEA-PUBLIC-LANGUAGE-001/default_load_case @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: The same file with the unit corrected and no load_case checks cleanly, so the load
+//   joins the default case; multiple loads with an explicit case set are not compared.
 #[test]
 fn fea_check_prints_located_diagnostics_like_m_files() {
     let temp = TempDir::new().unwrap();

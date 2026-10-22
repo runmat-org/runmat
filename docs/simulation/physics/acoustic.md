@@ -31,6 +31,11 @@ $$
 \hat p=Z\hat v_n.
 $$
 
+Air with loss is described per material by `damping_ratio` $\zeta$ in the `acoustic` block: the
+bulk modulus becomes complex, $K(1+i\eta)$ with loss factor $\eta=2\zeta$, so the sound speed is
+$c\sqrt{1+i\eta}$ and a resonance's half-power bandwidth is $\eta$ times its frequency. Harmonic
+studies apply it region by region.
+
 The implemented reduced component constructs a bounded structured graph from the analysis model,
 uses nearest-neighbor Laplacian weights $1/h_d^2$, adds $k^2$ and damping/boundary diagonal terms,
 maps pressure sources onto graph nodes, and solves the complex Helmholtz system. Its admitted

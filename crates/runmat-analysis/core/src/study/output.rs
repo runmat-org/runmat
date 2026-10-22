@@ -110,7 +110,8 @@ impl ObservationSpec {
             Some(
                 SpatialReduction::EuclideanNorm
                 | SpatialReduction::Minimum
-                | SpatialReduction::Maximum,
+                | SpatialReduction::Maximum
+                | SpatialReduction::NormalFlux,
             ) => ObservationValueShape::Scalar,
             Some(SpatialReduction::Resultant | SpatialReduction::Moment { .. }) => {
                 ObservationValueShape::Vector3
@@ -134,7 +135,7 @@ impl ObservationSpec {
             .map_or(SpatialReduction::None, |reduction| reduction.spatial);
         let measure = self.target.measure_dimension();
         let spatial_dimension = match spatial {
-            SpatialReduction::Integral => source.multiply(measure?),
+            SpatialReduction::Integral | SpatialReduction::NormalFlux => source.multiply(measure?),
             SpatialReduction::Resultant => {
                 if matches!(
                     self.quantity,
@@ -392,6 +393,8 @@ pub enum SpatialReduction {
     Maximum,
     Resultant,
     Moment { about: Position },
+    /// Flux of a vector field through a face region along its outward normal, ∫ v·n dA.
+    NormalFlux,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

@@ -141,6 +141,12 @@ fn run(
     let count = control.allocations.lock().unwrap().len();
     (count, control.checkpoints.load(Ordering::Relaxed))
 }
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: All exact/faceted/evidence import allocation boundaries reject injected denial before
+//   storage allocation and retain original cancellation/deadline classes. Successful reads preserve
+//   every original provider buffer; scope completion releases declared input storage. Synthetic
+//   metadata is not original CAD, physics, whole-process RSS or native throughput evidence.
 #[test]
 fn all_cold_input_classes_admit_each_storage_boundary_and_preserve_original_failures() {
     for kind in [Kind::Exact, Kind::Faceted, Kind::Evidence] {
