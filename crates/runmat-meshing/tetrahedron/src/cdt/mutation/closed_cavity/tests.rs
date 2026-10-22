@@ -2,6 +2,11 @@ use super::*;
 use crate::cdt::insertion::topology_access::TetrahedralTopology;
 use runmat_meshing_core::NeverCancelled;
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A closed replacement that preserves exterior facets but removes an enclosed vertex is
+//   rejected before commit. The original point star remains unchanged. Vertex deletion requires
+//   separate explicit authority; exterior-boundary equality alone is insufficient.
 #[test]
 fn closed_replacement_preserves_enclosed_vertices_before_commit() {
     let nodes = [

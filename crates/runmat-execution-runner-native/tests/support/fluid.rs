@@ -35,6 +35,7 @@ pub fn workload(nonzero: bool, reference_pa: f64) -> (FluidSteadyWorkload, Solve
         density: MassDensity::new(1.0),
         dynamic_viscosity: DynamicViscosity::new(1.0),
         turbulence_intensity: TurbulenceIntensity::new(0.0),
+        rheology: None,
     });
     model.sequence =
         AnalysisSequence::from_steps("native-fluid", vec![ProcedureStep::fluid_static("steady")]);

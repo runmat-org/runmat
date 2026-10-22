@@ -50,6 +50,13 @@ fn exercise(
     let allocations = control.allocations.lock().unwrap().len();
     (allocations, control.checkpoints.load(Ordering::Relaxed))
 }
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Complete immutable stage closures preserve their original objects and reference
+//   authority while verification scratch releases before the next input. Every tested allocation
+//   denial and sampled time/cancellation boundaries preserve their original cause and release owned
+//   charges. This finite fixture does not establish arbitrary closure capacity or whole-study
+//   performance.
 #[test]
 fn immutable_stage_import_transfers_only_original_retention_and_preserves_denials() {
     use runmat_geometry_core::GeometryEvaluationErrorKind::*;

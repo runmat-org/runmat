@@ -73,6 +73,9 @@ pub(super) fn run_terminated(
     serde_json::from_slice(&std::fs::read(response_path).unwrap()).unwrap()
 }
 
+// witness: FEA-NONLINEAR-STATE-001/producer_exit @ small_strain_j2/tet4|tet10/native_process;
+//   boundary: Native producer actually exits before cold consumers resume; homogeneous uncoupled J2
+//   only.
 #[test]
 fn terminated_producers_resume_original_history() {
     for quadratic in [false, true] {

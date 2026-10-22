@@ -53,6 +53,11 @@ pub(super) fn bounds(
 #[cfg(test)]
 mod tests {
     use super::*;
+    // witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+    //   boundary: Conservative segment-influence boxes retain direct rounded encroachment decisions
+    //   across the tested anisotropy and translations. This enclosure witness does not replace complete
+    //   surface quality acceptance.
     #[test]
     fn influence_enclosure_never_discards_direct_encroachment() {
         for metric in [

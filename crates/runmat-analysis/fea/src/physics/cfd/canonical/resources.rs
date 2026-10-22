@@ -279,9 +279,12 @@ impl CanonicalFluidReservation {
         // Three coexisting CSR operators/pattern clones plus assembly/output temporaries,
         // immutable boundary/bodyforce, all cell vectors/gradients/3x3 LS stencils, and
         // shared GMRES peak. Includes doubled Vec payload/header growth allowances.
+        // Per cell: velocity, pressure triple, two gradient fields (96 B), retained residual
+        // and vorticity (≈100 B), momentum right-hand sides and diagonal, one evaluation's
+        // coexisting copy of each, doubled for growth: well under 4 KiB.
         let baseline_bytes = add(
             add(
-                add(mul(nnz, 192)?, mul(n, 65536)?)?,
+                add(mul(nnz, 192)?, mul(n, 4096)?)?,
                 add(mul(f, 1024)?, gmres.resident_bytes_upper_bound)?,
             )?,
             add(geometry.scratch_bytes as u64, 128 * 1024 * 1024)?,

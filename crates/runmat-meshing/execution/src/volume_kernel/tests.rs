@@ -86,6 +86,12 @@ fn native_volume_checkpoint_batches_preserve_tighter_kernel_cadences() {
     assert_eq!(options.sliver.cancellation_check_interval, 32);
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: The governed request projects its exact declared search envelope at small,
+//   standalone-default and million-operation sizes. Shared cumulative stage accounting still bounds
+//   every strategy. This contract check establishes neither quality convergence nor original mesh
+//   acceptance.
 #[test]
 fn volume_algorithm_bounds_do_not_depend_on_execution_ceilings() {
     // `volume_options` sees only the request: its size limits and the algorithms' own bounds.

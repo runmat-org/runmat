@@ -206,5 +206,4 @@ pub(super) const REQUIREMENT: Requirement = Requirement {
             LANGUAGE_REALIZATION_SCOPE,
         ),
     ],
-    witnesses: &[],
 };

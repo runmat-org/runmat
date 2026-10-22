@@ -262,6 +262,10 @@ fn fixed_constraint_projects_a_logical_region_bound_to_multiple_faces() {
     assert_eq!(plan.rows.len(), selected_nodes.len() * 3);
 }
 
+// witness: FEA-STRUCTURAL-CONSTRAINT-001/normal_symmetry_rigid_coupling @
+//   linear_structural/tet4/numerical_kernel; coverage: partial;
+//   boundary: Normal displacement and antisymmetry compile distinct normal and tangent spaces on a
+//   fixture mesh (Tet4).
 #[test]
 fn normal_displacement_and_antisymmetry_compile_distinct_normal_tangent_spaces() {
     let (mut model, mesh) = model_and_mesh();
@@ -637,6 +641,9 @@ fn prescribed_constraint(
     })
 }
 
+// witness: FEA-SHARED-CONSTRAINTS-001/canonical_plan_and_affine_reduction @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: A general equation compiles to one canonical sparse row.
 #[test]
 fn general_equation_compiles_to_one_canonical_sparse_row() {
     let (mut model, mesh) = model_and_mesh();
@@ -682,6 +689,10 @@ fn general_equation_compiles_to_one_canonical_sparse_row() {
     assert_eq!(matrix.right_hand_side, vec![0.01]);
 }
 
+// witness: FEA-SHARED-CONSTRAINTS-001/compatible_enforcement @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: A dense global equation selects multiplier enforcement before any affine fill; direct
+//   elimination and penalty selection are separate cases.
 #[test]
 fn dense_global_equation_selects_multiplier_enforcement_before_affine_fill() {
     let constraint = equation_constraint("global", 1, 2, 0.0);
@@ -780,6 +791,9 @@ mod curved_normals;
 #[path = "tests/normal_solve.rs"]
 mod normal_solve;
 
+// witness: FEA-SHARED-CONSTRAINTS-001/canonical_plan_and_affine_reduction @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: A canonical solid solve enforces an affine equation and recovers reactions.
 #[test]
 fn canonical_solid_solve_enforces_affine_equation_and_recovers_reactions() {
     let (mut model, mesh) = model_and_mesh();
@@ -1457,6 +1471,9 @@ fn transient_direct_prescription_refinement_is_scale_consistent() {
     }
 }
 
+// witness: FEA-SHARED-CONSTRAINTS-001/nonlinear_inequality_state @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Nonlinear accepted states preserve complete constraint kinematics.
 #[test]
 fn nonlinear_accepted_states_preserve_complete_constraint_kinematics() {
     for lifting in [0.0, 0.001] {
@@ -1545,6 +1562,75 @@ fn nonlinear_accepted_states_preserve_complete_constraint_kinematics() {
     }
 }
 
+// witness: FEA-STRUCTURAL-CONSTRAINT-001/distributing_ties_equations @
+//   linear_structural/tet4/public_study; coverage: partial;
+//   boundary: The linear static pipeline admits and solves a reference-point wrench through a
+//   distributing coupling under its preflight solver admission. Resultant accuracy is covered by
+//   the kernel test below; rigid couplings and other procedures are not exercised.
+#[test]
+fn preflight_admits_a_reference_point_wrench_through_distributing_coupling() {
+    let (mut model, mesh) = model_and_mesh();
+    let boundary_ids = mesh
+        .topology
+        .boundary_faces
+        .iter()
+        .map(|face| {
+            face.provenance
+                .iter()
+                .find(|entity| entity.source_topology_id != "root")
+                .unwrap()
+                .source_topology_id
+                .clone()
+        })
+        .collect::<Vec<_>>();
+    model.constraints = vec![
+        AnalysisConstraint::Structural(StructuralConstraint {
+            constraint_id: "anchor".into(),
+            frame: CoordinateFrame::Global,
+            kind: StructuralConstraintKind::Fixed {
+                target: RegionTarget::boundary(&boundary_ids[0]),
+            },
+        }),
+        AnalysisConstraint::Structural(StructuralConstraint {
+            constraint_id: "remote_load".into(),
+            frame: CoordinateFrame::Global,
+            kind: StructuralConstraintKind::DistributingCoupling(ReferencePointCoupling {
+                target: RegionTarget::boundary(&boundary_ids[3]),
+                reference_point: ReferencePoint {
+                    reference_point_id: "control".into(),
+                    position: Position::new([1.0 / 3.0; 3]),
+                },
+            }),
+        }),
+    ];
+    replace_fixture_excitations(
+        &mut model,
+        vec![FixtureExcitation {
+            id: "remote_wrench".into(),
+            region_id: "control".into(),
+            kind: FixtureExcitationKind::Wrench {
+                force: [10.0, 0.0, 0.0],
+                moment: [0.0, 1.0, 0.0],
+                point_m: [1.0 / 3.0; 3],
+            },
+        }],
+    );
+
+    let result = crate::run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        crate::LinearStaticSolveOptions {
+            solver_mesh: Some(mesh),
+            ..crate::LinearStaticSolveOptions::default()
+        },
+    );
+    assert!(result.is_ok(), "{:?}", result.err());
+}
+
+
+// witness: FEA-STRUCTURAL-CONSTRAINT-001/distributing_ties_equations @
+//   linear_structural/tet4/numerical_kernel; coverage: partial;
+//   boundary: A reference-point wrench solves through distributing coupling on a fixture solid.
 #[test]
 fn reference_point_wrench_solves_through_distributing_coupling() {
     let (mut model, mesh) = model_and_mesh();

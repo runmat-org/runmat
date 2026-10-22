@@ -67,6 +67,10 @@ fn reference_energy(mu_j2: f64, maximum: usize) -> f64 {
     32.0 * mu_j2 / pi.powi(6) * sum
 }
 
+// witness: FEA-EM-MAGNETOSTATIC-001/formulation @ magnetostatic/tet4/numerical_kernel;
+//   boundary: Affine Tet4 extruded unit square, uniform axial current and grounded boundary;
+//   independent Fourier-series potential, curl field and energy with tail bounds and three meshes.
+//   No Tet10 convergence or force evidence.
 #[test]
 fn square_uniform_current_has_independent_potential_field_and_energy_convergence() {
     let mut errors = Vec::new();
@@ -115,6 +119,9 @@ fn square_uniform_current_has_independent_potential_field_and_energy_convergence
     assert!(errors[2].2 < 0.25);
 }
 
+// witness: FEA-EM-MAGNETOSTATIC-001/fields @ magnetostatic/tet4|tet10/numerical_kernel;
+//   boundary: Affine Tet4 and Tet10 geometry with lowest-order edge basis: sign/permeability
+//   scaling against a Tet4 solve; Tet10 geometry is not higher-order magnetic approximation.
 #[test]
 fn sign_permeability_and_affine_geometry_order_preserve_physical_scaling() {
     let (projection, data) = problem(ElementOrder::Tet4, 2, 1.0, 1.0);
@@ -185,6 +192,10 @@ fn invalid_material_identity_current_and_gauge_source_compatibility_fail_closed(
     assert!(zero.edge_circulations_wb.iter().all(|&value| value == 0.0));
 }
 
+// witness: FEA-EM-INPUT-001/magnetic_constraints @ magnetostatic/tet4|tet10/numerical_kernel;
+//   boundary: Affine Tet4/Tet10 volume-current, full grounded-boundary and gauge plan compared with
+//   same kernel; rejects missing gauge, surface-current substitution and wrong domain. No
+//   independent physical-reference or periodic claim.
 #[test]
 fn authored_material_current_ground_and_gauge_compile_into_physical_solve() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
@@ -282,6 +293,9 @@ fn exact_volume_superposition_zero_conductivity_and_missing_boundary_fail_closed
     ));
 }
 
+// witness: FEA-EM-MAGNETOSTATIC-001/fields @ magnetostatic/tet4/numerical_kernel;
+//   boundary: Affine Tet4 shared-face normal curl continuity and global boundary flux closure; no
+//   general magnetic force recovery.
 #[test]
 fn recovered_curl_has_shared_face_normal_flux_continuity_and_global_flux_closure() {
     let (projection, data) = problem(ElementOrder::Tet4, 3, 1.0, 1.0);
@@ -333,6 +347,9 @@ fn recovered_curl_has_shared_face_normal_flux_continuity_and_global_flux_closure
     assert!(net.abs() <= 1e-12 * absolute);
 }
 
+// witness: FEA-EM-INPUT-001/magnetic_constraints @ magnetostatic/tet4/numerical_kernel; coverage: partial;
+//   boundary: A partially grounded boundary with insulated faces and one gauge is admitted and its
+//   energy rises against the fully grounded case; a boundary without ground is rejected; Tet4 only.
 #[test]
 fn insulated_faces_and_one_gauge_admit_a_partially_grounded_field() {
     // The fixture current runs parallel to the slab's left face. Insulating that face
@@ -361,6 +378,11 @@ fn insulated_faces_and_one_gauge_admit_a_partially_grounded_field() {
     assert!(solve_canonical_static(&ungrounded, &mesh, "potential", 1e-10).is_err());
 }
 
+// witness: FEA-EM-INPUT-001/magnetic_constraints @ magnetostatic/tet4/numerical_kernel; coverage:
+//   partial;
+//   boundary: A prescribed tangential vector potential on one face with grounds and insulated sides
+//   drives the exact uniform flux density A = (0, a x/L, 0); gauge, periodic and phase-shifted
+//   relations are not covered.
 #[test]
 fn prescribed_tangential_potential_drives_the_exact_uniform_field() {
     // Box [0,L]^3 with A = (0, a x / L, 0): B = (0, 0, a / L). A = 0 on x = 0 and on the

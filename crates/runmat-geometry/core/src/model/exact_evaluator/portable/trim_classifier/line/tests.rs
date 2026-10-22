@@ -43,6 +43,12 @@ fn classify_polygon(
     (turns.round().abs() == 1.0, false)
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Straight portable trims use analytic projection and winding, matching the explicit
+//   concave-polygon inside/outside/boundary references across the tested scales and orientations
+//   with zero allocation budget. Curved trims keep the general method; this is finite
+//   portable-kernel evidence, not native CAD or whole-study qualification.
 #[test]
 fn analytic_lines_classify_concave_boundaries_across_scale_and_orientation_without_allocation() {
     let original = [
@@ -85,6 +91,11 @@ fn analytic_lines_classify_concave_boundaries_across_scale_and_orientation_witho
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Near-tolerance straight-edge decisions fall back to the existing general method.
+//   Search denial and cancellation remain typed failures; the fast path does not enlarge the
+//   boundary tolerance or suppress resource checks.
 #[test]
 fn analytic_line_decisions_fall_back_near_the_tolerance_and_preserve_resource_failures() {
     let definition = line([0.0, 0.0], [1.0, 0.0]);

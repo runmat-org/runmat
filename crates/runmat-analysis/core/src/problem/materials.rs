@@ -13,6 +13,10 @@ pub enum MaterialFluidModel {
     IncompressibleNewtonian {
         dynamic_viscosity: crate::DynamicViscosity,
     },
+    /// Inelastic non-Newtonian fluid: viscosity a function of the local shear rate.
+    GeneralizedNewtonian {
+        law: super::rheology::GeneralizedNewtonianLaw,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -20,6 +24,16 @@ pub enum MaterialFluidModel {
 pub struct IncompressibleNewtonianMaterial {
     pub density: crate::MassDensity,
     pub dynamic_viscosity: crate::DynamicViscosity,
+}
+
+/// An incompressible fluid's coefficients: density, reference (low-shear) viscosity and, for a
+/// generalized-Newtonian fluid, its viscosity law.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IncompressibleFluidMaterial {
+    pub density: crate::MassDensity,
+    pub dynamic_viscosity: crate::DynamicViscosity,
+    pub rheology: Option<super::rheology::GeneralizedNewtonianLaw>,
 }
 
 #[derive(Debug, Clone, PartialEq, Error)]
@@ -297,8 +311,9 @@ impl MaterialModel {
             MaterialCapability::MechanicalDamping => self.damping.is_some(),
             MaterialCapability::Thermal => self.thermal.is_some(),
             MaterialCapability::Acoustic => self.acoustic.is_some(),
+            // The incompressible-fluid capability: Newtonian or generalized-Newtonian.
             MaterialCapability::IncompressibleNewtonianFluid => {
-                self.require_incompressible_newtonian().is_ok()
+                self.require_incompressible_fluid().is_ok()
             }
             MaterialCapability::Electrical => self.electrical.is_some(),
             MaterialCapability::Plasticity => self.plastic.is_some(),
@@ -360,12 +375,51 @@ impl MaterialModel {
 
     /// Typed physical coefficients from their sole shared material authorities.
     /// This checks positivity even when called before whole-model validation.
+    /// Any incompressible fluid law: Newtonian, or generalized-Newtonian with its law and
+    /// low-shear reference viscosity.
+    pub fn require_incompressible_fluid(
+        &self,
+    ) -> Result<IncompressibleFluidMaterial, FluidMaterialError> {
+        let fluid = self
+            .fluid
+            .ok_or_else(|| self.missing(MaterialCapability::IncompressibleNewtonianFluid))?;
+        if let MaterialFluidModel::GeneralizedNewtonian { law } = fluid {
+            let density = self.require_mass_density()?;
+            let reference = law.low_shear_viscosity();
+            if !law.is_valid()
+                || !density.is_finite()
+                || density <= 0.0
+                || !reference.is_finite()
+                || reference <= 0.0
+            {
+                return Err(FluidMaterialError::Invalid {
+                    material_id: self.material_id.clone(),
+                    property: "viscosity law",
+                });
+            }
+            return Ok(IncompressibleFluidMaterial {
+                density: crate::MassDensity::new(density),
+                dynamic_viscosity: crate::DynamicViscosity::new(reference),
+                rheology: Some(law),
+            });
+        }
+        let newtonian = self.require_incompressible_newtonian()?;
+        Ok(IncompressibleFluidMaterial {
+            density: newtonian.density,
+            dynamic_viscosity: newtonian.dynamic_viscosity,
+            rheology: None,
+        })
+    }
+
     pub fn require_incompressible_newtonian(
         &self,
     ) -> Result<IncompressibleNewtonianMaterial, FluidMaterialError> {
-        let MaterialFluidModel::IncompressibleNewtonian { dynamic_viscosity } = self
-            .fluid
-            .ok_or_else(|| self.missing(MaterialCapability::IncompressibleNewtonianFluid))?;
+        let Some(MaterialFluidModel::IncompressibleNewtonian { dynamic_viscosity }) = self.fluid
+        else {
+            return Err(self
+                .missing(MaterialCapability::IncompressibleNewtonianFluid)
+                .into());
+        };
         let density = self.require_mass_density()?;
         for (property, value) in [
             ("density", density),

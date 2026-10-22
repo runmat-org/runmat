@@ -78,6 +78,14 @@ fn assert_relative(actual: f64, expected: f64, tolerance: f64) {
     );
 }
 
+// witness: FEA-EM-SCALAR-001/operator @ electrostatic/tet4|tet10/numerical_kernel,
+//   electrical_conduction/tet4|tet10/numerical_kernel;
+//   boundary: Tet4/Tet10 homogeneous slab capacitor and conductor potentials, fields, terminal
+//   flux, energy and Joule power; not arbitrary geometry or nonlinear material.
+// witness: FEA-EM-SCALAR-001/recovery @ electrostatic/tet4|tet10/numerical_kernel,
+//   electrical_conduction/tet4|tet10/numerical_kernel;
+//   boundary: Same slab constitutive vectors and global terminal/energy identities; no general
+//   charge-density reconstruction claim.
 #[test]
 fn homogeneous_capacitor_and_conductor_match_independent_slab_field_terminals_and_energy() {
     for equation in [
@@ -144,6 +152,10 @@ fn homogeneous_capacitor_and_conductor_match_independent_slab_field_terminals_an
     }
 }
 
+// witness: FEA-EM-SCALAR-001/operator @ electrostatic/tet4|tet10/numerical_kernel,
+//   electrical_conduction/tet4|tet10/numerical_kernel;
+//   boundary: Both orders, aligned two-material slab series capacitance/resistance and interface
+//   flux; no curved interface claim.
 #[test]
 fn layered_materials_match_series_capacitance_and_resistance_with_interface_flux_continuity() {
     for equation in [
@@ -274,6 +286,11 @@ fn constant_gauge_potential_produces_exactly_zero_field_and_power() {
     }
 }
 
+// witness: FEA-EM-QUALIFICATION-001/references @ electrostatic/tet4|tet10/numerical_kernel,
+//   electrical_conduction/tet4|tet10/numerical_kernel;
+//   boundary: Static harmonic polynomial potential x²-y² for both scalar equations: Tet10 exact
+//   field/energy and Tet4 refinement across three meshes; harmonic polynomial is not harmonic
+//   Maxwell.
 #[test]
 fn harmonic_quadratic_potential_has_tet10_exact_field_and_tet4_convergence() {
     // phi=x^2-y^2 is harmonic: no fabricated volume charge/current is needed.
@@ -357,6 +374,10 @@ fn harmonic_quadratic_potential_has_tet10_exact_field_and_tet4_convergence() {
     }
 }
 
+// witness: FEA-EM-INPUT-001/scalar_constraints @ electrical_conduction/tet4/numerical_kernel;
+//   boundary: Tet4 rejects missing anchor, conflicting potentials, floating conductor, bad
+//   material, target and wrong harmonic intent; rejection is not implementation of floating
+//   conductors.
 #[test]
 fn missing_anchors_conflicts_unsupported_intent_and_invalid_material_fail_closed() {
     let mesh = mesh(ElementOrder::Tet4, 2);
@@ -419,6 +440,14 @@ fn missing_anchors_conflicts_unsupported_intent_and_invalid_material_fail_closed
     assert!(solve_canonical_static(&bad, &mesh, "potential", 1e-8).is_err());
 }
 
+// witness: FEA-EM-INPUTS-002/scalar_potential_inputs @
+//   electrostatic|electrical_conduction/tet4/numerical_kernel; coverage: partial;
+//   boundary: A terminal_voltage load holds its terminal like a prescribed potential for
+//   electrostatics and steady conduction on a two-cell Tet4 slab; terminal current, charge,
+//   equipotential and floating inputs are not covered.
+// witness: FEA-EM-INPUT-001/excitation @ electrostatic/tet4/numerical_kernel, electrical_conduction/tet4/numerical_kernel; coverage: partial;
+//   boundary: A constant terminal-voltage signal on a face reproduces the prescribed-potential
+//   field exactly on a Tet4 slab; no time history, phasor or Tet10 case.
 #[test]
 fn terminal_voltage_load_holds_its_terminal_like_a_prescribed_potential() {
     for equation in [
@@ -478,6 +507,9 @@ fn terminal_voltage_load_holds_its_terminal_like_a_prescribed_potential() {
     }
 }
 
+// witness: FEA-EM-INPUT-001/scalar_constraints @ electrical_conduction/tet4/numerical_kernel; coverage: partial;
+//   boundary: Integral-current and floating terminals solved by superposition reach the common
+//   potential and current balance of a Tet4 conduction slab; no electrostatic charge case.
 #[test]
 fn integral_current_and_floating_terminals_find_their_common_potential() {
     let mesh = mesh(ElementOrder::Tet4, 2);
@@ -546,6 +578,9 @@ fn integral_current_and_floating_terminals_find_their_common_potential() {
     assert!(response.potential_v.iter().all(|v| (v - 3.0).abs() < 1e-8));
 }
 
+// witness: FEA-EM-INPUT-001/excitation @ electrical_conduction/tet4/numerical_kernel; coverage: partial;
+//   boundary: A face current density realizes its integrated normal current as the grounded
+//   terminal's outward flux on a Tet4 slab; no time history or Tet10 case.
 #[test]
 fn face_current_density_injects_its_normal_flux() {
     let mesh = mesh(ElementOrder::Tet4, 2);
@@ -607,6 +642,11 @@ fn face_current_density_injects_its_normal_flux() {
     assert_relative(left.outward_flux, 4.0 * area, 1e-8);
 }
 
+// witness: FEA-EM-INPUT-001/scalar_constraints @ electrostatic/tet4/numerical_kernel; coverage:
+//   partial;
+//   boundary: A charged slab with a translation-periodic right face matches the same slab grounded
+//   on both faces to 1e-8, and the grounded face carries the full flux; terminal voltage, floating
+//   and integral-current constraints are separate tests.
 #[test]
 fn periodic_faces_share_their_potential() {
     // A charged slab grounded on both faces, against the same slab grounded on the left and

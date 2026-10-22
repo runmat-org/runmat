@@ -50,6 +50,11 @@ impl GeometryEvaluationControl for Count {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Indexed batching matches direct canonical decisions under the tested anisotropic
+//   metrics and bounds checkpoint work on 1,024 independent regions. This finite spatial-search
+//   witness does not establish original CAD convergence or whole-study performance.
 #[test]
 fn indexed_batches_preserve_direct_anisotropic_decisions_and_local_work() {
     for metric in [
@@ -209,6 +214,11 @@ impl GeometryEvaluationControl for Budget {
         assert!(self.held.fetch_sub(bytes, Ordering::Relaxed) >= bytes);
     }
 }
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Query construction admits input, sorting scratch and retained index storage before
+//   use; denial preserves its typed cause and success releases temporary storage. Declared storage
+//   excludes allocator overhead and measured RSS.
 #[test]
 fn query_scratch_is_admitted_before_allocation_and_released_after_use() {
     let geometry = geometry([2.0, 1.0, 1.0], 0.5, 1.0, 0.0, 0.0);
@@ -263,6 +273,11 @@ fn metric_query_retains_overflow_and_underflow_sensitive_direct_cases() {
     assert!(metric_bounds([0.0, 0.0], metric, 1e-320, 1.0).contains_point([1e-162, 0.0, 0.0]));
 }
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Interruptions throughout query construction and use release previously admitted
+//   indexes and preserve cancellation. This finite ownership witness does not certify whole-task
+//   residency.
 #[test]
 fn interrupted_query_preparation_releases_completed_indexes() {
     let geometry = geometry([2.0, 1.0, 1.0], 0.5, 1.0, 0.0, 0.0);

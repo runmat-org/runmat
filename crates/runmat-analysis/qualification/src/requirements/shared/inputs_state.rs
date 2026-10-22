@@ -1,5 +1,5 @@
 //! Standing shared inputs state acceptance.
-use super::{ALL, KERNEL};
+use super::ALL;
 use crate::requirement::*;
 pub(super) const FEA_SHARED_EXCITATION_001: Requirement = Requirement {
     id: "FEA-SHARED-EXCITATION-001",
@@ -329,25 +329,6 @@ pub(super) const FEA_SHARED_EXCITATION_001: Requirement = Requirement {
             ALL,
         ),
     ],
-    witnesses: &[Witness {
-        id: "FEA-WITNESS-SHARED-SIGNAL-STEP-SIDE",
-        locator: WitnessLocator::CargoTest {
-            package: "runmat-analysis-fea",
-            target: CargoTarget::Library,
-            name:
-                "excitation::tests::step_interpolation_selects_the_documented_side_of_an_interval",
-            source: "crates/runmat-analysis/fea/src/excitation/tests.rs",
-        },
-        claims: &[CoverageClaim {
-            obligation: "dimensioned_signal_contract",
-            envelopes: KERNEL,
-            boundary: concat!(
-                "Typed tabulated force signal at time 0.5 selects distinct left and right ",
-                "endpoint vectors; no generator freezing, spatial integration or placement ",
-                "equivalence.",
-            ),
-        }],
-    }],
 };
 pub(super) const FEA_SHARED_SEQUENCES_001: Requirement = Requirement {
     id: "FEA-SHARED-SEQUENCES-001",
@@ -502,7 +483,6 @@ pub(super) const FEA_SHARED_SEQUENCES_001: Requirement = Requirement {
             ALL,
         ),
     ],
-    witnesses: &[],
 };
 pub(super) const FEA_SHARED_OBSERVATIONS_001: Requirement = Requirement {
     id: "FEA-SHARED-OBSERVATIONS-001",
@@ -665,47 +645,4 @@ pub(super) const FEA_SHARED_OBSERVATIONS_001: Requirement = Requirement {
             ALL,
         ),
     ],
-    witnesses: &[Witness {
-        id: "FEA-WITNESS-SHARED-OBSERVATION-INVENTORY",
-        locator: WitnessLocator::CargoTest {
-            package: "runmat-analysis-fea",
-            target: CargoTarget::Library,
-            name: concat!(
-                "results::observation::topology::tests::sampled_observation_topology_retains_",
-                "each_original_rule_order_and_identity",
-            ),
-            source: "crates/runmat-analysis/fea/src/results/observation/topology/tests.rs",
-        },
-        claims: &[CoverageClaim {
-            obligation: "quantity_location_and_cost_contract",
-            envelopes: KERNEL,
-            boundary: concat!(
-                "Tet4/Tet10 sampled topology retains original four/fifteen-point rule ",
-                "identities, positions, edge IDs and integration indices and rejects ",
-                "mismatched topology/count; no recovered-value convergence or global ",
-                "distributed reduction.",
-            ),
-        }],
-    }, Witness {
-        id: "FEA-WITNESS-SHARED-MODAL-DISPLAY-PRESERVATION",
-        locator: WitnessLocator::CargoTest {
-            package: "runmat-runtime",
-            target: CargoTarget::Library,
-            name: concat!(
-                "analysis::field_scene::deformation::scene_tests::",
-                "original_modal_vectors_keep_their_values_while_display_shape_is_normalization_invariant",
-            ),
-            source: "crates/runmat-runtime/src/analysis/field_scene/deformation.rs",
-        },
-        claims: &[CoverageClaim {
-            obligation: "governed_observation_corpus",
-            envelopes: KERNEL,
-            boundary: concat!(
-                "A modal scene's displayed positions are invariant under eigenvector ",
-                "rescaling while its original field values and scalar range remain intact. ",
-                "Synthetic scene only; no modal accuracy, mesh convergence, publication ",
-                "closure, distributed evaluation or whole-task resource claim.",
-            ),
-        }],
-    }],
 };

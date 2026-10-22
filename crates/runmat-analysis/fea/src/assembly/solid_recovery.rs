@@ -17,7 +17,7 @@ pub(crate) fn build(
     mesh: &SolverMeshArtifact,
     properties: &CompiledPropertyMap,
     thermal_context: Option<&FeaThermoMechanicalContext>,
-    solved_nodal_temperature_k: Option<&[f64]>,
+    solved_nodal_temperature_k: Option<&crate::execution::SolvedTemperatureField>,
 ) -> Result<Vec<SolidRecoveryElementSummary>, SolverSolidAssemblyError> {
     if thermal_context.is_some() && solved_nodal_temperature_k.is_some() {
         return Err(SolverSolidAssemblyError::InvalidMaterialCoverage(
@@ -25,10 +25,8 @@ pub(crate) fn build(
         ));
     }
     if let Some(temperature) = solved_nodal_temperature_k {
-        if temperature.len() != mesh.topology.nodes.len()
-            || temperature
-                .iter()
-                .any(|value| !value.is_finite() || *value <= 0.0)
+        if temperature.node_count() != mesh.topology.nodes.len()
+            || !temperature.all_positive_finite()
         {
             return Err(SolverSolidAssemblyError::InvalidMaterialCoverage(
                 "solved thermal field does not cover every solver node".into(),
@@ -109,7 +107,13 @@ pub(crate) fn build(
             };
             let solved_thermal_quadrature = solved_nodal_temperature_k
                 .map(|temperatures| {
-                    solved_thermal_quadrature(element, &node_indices, properties, temperatures)
+                    solved_thermal_quadrature(
+                        index,
+                        element,
+                        &node_indices,
+                        properties,
+                        temperatures,
+                    )
                 })
                 .transpose()?;
             Ok::<_, SolverSolidAssemblyError>(SolidRecoveryElementSummary {
@@ -131,10 +135,11 @@ pub(crate) fn build(
 }
 
 fn solved_thermal_quadrature(
+    element_index: usize,
     element: &runmat_meshing_core::SolverVolumeElement,
     node_indices: &BTreeMap<u64, usize>,
     properties: &CompiledPropertyMap,
-    nodal_temperature_k: &[f64],
+    temperature: &crate::execution::SolvedTemperatureField,
 ) -> Result<SolvedThermalRecoveryQuadrature, SolverSolidAssemblyError> {
     let owner = properties
         .solid_material(element.stable_identity)
@@ -161,7 +166,7 @@ fn solved_thermal_quadrature(
                         element_id: element.element_id,
                         node_id,
                     })?;
-            value += shape[local] * nodal_temperature_k[*index];
+            value += shape[local] * temperature.at(element_index, *index);
         }
         let strain =
             thermal.expansion_coefficient_per_k * (value - thermal.reference_temperature_k);
@@ -178,7 +183,7 @@ fn solved_thermal_quadrature(
         nodal_temperature_k: element
             .node_ids
             .iter()
-            .map(|node_id| nodal_temperature_k[node_indices[node_id]])
+            .map(|node_id| temperature.at(element_index, node_indices[node_id]))
             .collect(),
         expansion_coefficient_per_k: thermal.expansion_coefficient_per_k,
         reference_temperature_k: thermal.reference_temperature_k,

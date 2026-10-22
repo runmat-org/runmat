@@ -45,7 +45,7 @@ fn energy_assembly(
     assemble(
         model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &heat_generation(source_density),
@@ -54,6 +54,10 @@ fn energy_assembly(
     .unwrap()
 }
 
+// witness: FEA-THERMAL-FIELDS-001/global_energy @ thermal_steady/tet4|tet10/numerical_kernel,
+//   thermal_transient/tet4|tet10/numerical_kernel;
+//   boundary: Both-order physical heat-recovery identities and uniform zero flux; no arbitrary
+//   regional partition balance.
 #[test]
 fn internal_conduction_is_not_external_power_and_uniform_flux_is_exactly_zero() {
     let model = fixture_model(FixtureId::CantileverLinearStatic);
@@ -102,6 +106,10 @@ fn internal_conduction_is_not_external_power_and_uniform_flux_is_exactly_zero() 
     }
 }
 
+// witness: FEA-THERMAL-FIELDS-001/global_energy @ thermal_steady/tet4|tet10/numerical_kernel,
+//   thermal_transient/tet4|tet10/numerical_kernel;
+//   boundary: Both-order conductive prescribed reaction signs and internal-pair cancellation; no
+//   transient continuum convergence credit.
 #[test]
 fn conductive_prescribed_reactions_have_analytical_sign_and_cancel_internal_pairs() {
     let model = fixture_model(FixtureId::CantileverLinearStatic);

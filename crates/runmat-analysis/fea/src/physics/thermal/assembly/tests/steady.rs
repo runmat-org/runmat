@@ -1,5 +1,8 @@
 use super::*;
 
+// witness: FEA-THERMAL-DOMAIN-001/constraints @ thermal_steady/tet4|tet10/numerical_kernel;
+//   boundary: Three components with prescribed/convection anchoring; removal of an anchor rejects
+//   coercivity. Does not exercise tied, periodic or affine jumps.
 #[test]
 fn disconnected_bodies_have_independent_exact_steady_equilibria_and_require_each_anchor() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
@@ -56,7 +59,7 @@ fn disconnected_bodies_have_independent_exact_steady_equilibria_and_require_each
                 assemble(
                     model,
                     &mesh,
-                    crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+                    crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
                         .unwrap()
                         .support(),
                     &RealizedExcitations::default(),
@@ -137,7 +140,7 @@ fn component_reference_preserves_dirichlet_contrasts_within_a_connected_body() {
         let mut assembly = assemble(
             &model,
             &mesh,
-            crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+            crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
                 .unwrap()
                 .support(),
             &RealizedExcitations::default(),

@@ -4,6 +4,13 @@ use crate::cdt::test_fixtures::coupled_quality::{fixture, metric};
 use crate::cdt::volume_quality::working::PreparedLocalQuality;
 use runmat_meshing_core::NeverCancelled;
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: The actual production refinement step admits identical coordinates and evaluates
+//   exactly eight cells with 0/64/4096 unrelated cells under uniform/scoped metrics. Its last
+//   scoped grading update remains 16 invalidated cells and 152 edge reads. Complete preparation and
+//   terminal independent admission are outside the local measurement; this does not bound all
+//   search operations, total memory, complete-relocation work or original-model runtime.
 #[test]
 fn production_local_refinement_work_is_independent_of_unrelated_mesh_inventory() {
     for scoped in [false, true] {

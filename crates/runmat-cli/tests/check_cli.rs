@@ -99,6 +99,9 @@ fn fea_plan(temp: &TempDir, path: &str) -> Value {
     serde_json::from_slice(&output.stdout).unwrap()
 }
 
+/// A rerun is a new attempt of the same definition: identical definition, mesh and inventory,
+/// distinct attempt run ids, the same definition run ids, and the definition run id resolves to
+/// the latest attempt.
 fn assert_repeated_result_identity(temp: &TempDir, path: &str, first: &Value) {
     let repeated = runmat_from_repository(temp, &["run", path, "--json"]);
     assert!(
@@ -114,13 +117,41 @@ fn assert_repeated_result_identity(temp: &TempDir, path: &str, first: &Value) {
         "nodes",
         "elements",
         "boundary_faces",
-        "step_run_ids",
+        "definition_run_ids",
     ] {
         assert_eq!(
             repeated[field], first[field],
             "{path} changed verified result field `{field}` on repeat"
         );
     }
+    assert_ne!(
+        repeated["step_run_ids"], first["step_run_ids"],
+        "{path} reused an earlier attempt instead of publishing a fresh one"
+    );
+    let latest = repeated["step_run_ids"][0].as_str().expect("latest attempt id");
+    let definition = repeated["definition_run_ids"][0]
+        .as_str()
+        .expect("definition run id");
+    let script_path = temp.path().join("latest-attempt.m");
+    fs::write(
+        &script_path,
+        format!("r = fea.results(\"{definition}\");\ndisp(r.run_id);\n"),
+    )
+    .unwrap();
+    let output = runmat_from_repository(
+        temp,
+        &["run", script_path.to_str().expect("UTF-8 script path")],
+    );
+    assert!(
+        output.status.success(),
+        "latest-attempt query failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains(latest),
+        "definition run id did not resolve to the latest attempt `{latest}`"
+    );
 }
 
 #[test]
@@ -267,6 +298,10 @@ fn representative_documentation_plans_expose_the_complete_resolved_contract() {
     }
 }
 
+// witness: FEA-PUBLIC-STUDIES-001/docs_examples_run @
+//   shared_infrastructure/canonical_mixed_topology/public_study; coverage: partial;
+//   boundary: The structural static STEP documentation example runs from the CLI and publishes
+//   fields; the other examples are separate cases.
 #[test]
 fn structural_static_step_documentation_example_runs_and_publishes_fields() {
     let temp = TempDir::new().unwrap();
@@ -413,6 +448,9 @@ fn structural_static_step_documentation_example_runs_and_publishes_fields() {
     assert!(stdout.contains("von_mises"));
 }
 
+// witness: FEA-PUBLIC-STUDIES-001/docs_examples_run @
+//   shared_infrastructure/canonical_mixed_topology/public_study; coverage: partial;
+//   boundary: The response-spectrum documentation example runs its two-step study.
 #[test]
 fn response_spectrum_documentation_example_runs_its_two_step_study() {
     let temp = TempDir::new().unwrap();
@@ -514,6 +552,9 @@ fn named_response_spectrum_generator_materializes_before_the_solve() {
     );
 }
 
+// witness: FEA-PUBLIC-STUDIES-001/docs_examples_run @
+//   shared_infrastructure/canonical_mixed_topology/public_study; coverage: partial;
+//   boundary: The random-response documentation example runs and exposes paged statistical fields.
 #[test]
 fn random_response_documentation_example_exposes_paged_statistical_fields() {
     let temp = TempDir::new().unwrap();
@@ -613,6 +654,10 @@ fn fea_check_and_run_materialize_a_named_project_signal_generator() {
     assert!(payload["study_definition_digest"].as_str().is_some());
 }
 
+// witness: FEA-PUBLIC-STUDIES-001/docs_examples_run @
+//   shared_infrastructure/canonical_mixed_topology/public_study; coverage: partial;
+//   boundary: The acoustic cavity harmonic example runs its frequency sweep to a completed,
+//   numerically acceptable run.
 #[test]
 fn acoustic_cavity_example_runs_its_certified_frequency_sweep() {
     let temp = TempDir::new().unwrap();
@@ -889,6 +934,16 @@ fn strip_ansi(bytes: &[u8]) -> Vec<u8> {
 
 /// The homepage "Physics simulation as code" figure: `runmat check cantilever.fea` on the
 /// cantilever-static study with the traction authored in N and no `load_case` line.
+// witness: FEA-PUBLIC-LANGUAGE-001/located_diagnostics @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Checking a study with a force given as a traction prints error[fea.semantic.model],
+//   the file:line:col arrow, the source line, a caret underline labeled with the expected unit (Pa)
+//   and the checked summary, with no cascade error; leading-indent trimming and the JSON form are
+//   not asserted here.
+// witness: FEA-PUBLIC-LANGUAGE-001/default_load_case @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: The same file with the unit corrected and no load_case checks cleanly, so the load
+//   joins the default case; multiple loads with an explicit case set are not compared.
 #[test]
 fn fea_check_prints_located_diagnostics_like_m_files() {
     let temp = TempDir::new().unwrap();
@@ -948,4 +1003,63 @@ fn fea_check_prints_located_diagnostics_like_m_files() {
         String::from_utf8_lossy(&strip_ansi(&output.stdout)),
         "checked cantilever.fea: 0 error(s), 0 warning(s)\n"
     );
+}
+
+// witness: FEA-SHARED-EXECUTION-001/logical_study_identity @
+//   shared_infrastructure/canonical_mixed_topology/native_process; coverage: partial;
+//   boundary: Two executions of one random-response study from a script keep one definition run
+//   id, publish distinct attempts, and the definition id resolves to the latest attempt. Remote
+//   placement and retry attempts inside one execution are not exercised.
+#[test]
+fn a_script_running_the_same_study_twice_publishes_two_attempts() {
+    let temp = TempDir::new().unwrap();
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let study = repository.join("docs/simulation/examples/modal-random-response.fea");
+    let script_path = temp.path().join("twice.m");
+    fs::write(
+        &script_path,
+        format!(
+            "first = fea.stepResult(fea.run(\"{0}\"), \"random_response\");\nsecond = fea.stepResult(fea.run(\"{0}\"), \"random_response\");\ndisp(first.run_id);\ndisp(second.run_id);\n",
+            study.display()
+        ),
+    )
+    .unwrap();
+    let output = runmat_from_repository(
+        &temp,
+        &["run", script_path.to_str().expect("UTF-8 script path")],
+    );
+    assert!(
+        output.status.success(),
+        "running a study twice failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let ids = stdout
+        .split_whitespace()
+        .filter(|token| token.starts_with("run_remote_"))
+        .collect::<Vec<_>>();
+    let [first, second] = ids.as_slice() else {
+        panic!("expected two attempt run ids, got {stdout}");
+    };
+    assert_ne!(first, second, "the second run reused the first attempt");
+    let (definition, _) = second.rsplit_once('_').expect("attempt run id");
+    assert_eq!(
+        first.rsplit_once('_').map(|(definition, _)| definition),
+        Some(definition)
+    );
+    let query = temp.path().join("latest.m");
+    fs::write(
+        &query,
+        format!("r = fea.results(\"{definition}\");\ndisp(r.run_id);\n"),
+    )
+    .unwrap();
+    let output = runmat_from_repository(&temp, &["run", query.to_str().unwrap()]);
+    assert!(
+        output.status.success(),
+        "latest-attempt query failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains(second));
 }

@@ -3,6 +3,12 @@ use std::{collections::BTreeSet, sync::Mutex};
 
 static TEST_OWNER: Mutex<()> = Mutex::new(());
 
+// witness: FEA-SHARED-RESOURCES-001/machine_cpu_execution @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Four persistent worker identities survive repeated operations, indexed outputs match
+//   serial computation, and invalid or nested pool budgets reject. This component check does not
+//   establish native machine discovery, task admission, mesh/solve equivalence, cancellation,
+//   measured throughput or whole-study scaling.
 #[test]
 fn persistent_workers_ordered_results_and_explicit_budgets() {
     let _owner = TEST_OWNER.lock().unwrap();
@@ -67,6 +73,11 @@ fn borrowed_disjoint_outputs_and_panics_release_owner() {
     assert_eq!(with_cpu_pool(3, current_threads).unwrap(), 3);
 }
 
+// witness: FEA-SHARED-RESOURCES-001/machine_cpu_execution @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Two concurrent owners enter before either is released at admitted capacities one and
+//   two, and ordered kernels retain the declared capacity. This checks lease concurrency and pool
+//   ownership, not whole-machine saturation, native throughput, or measured stack residency.
 #[test]
 fn same_capacity_owners_overlap_without_allocating_competing_pools() {
     use std::sync::mpsc;
@@ -106,6 +117,11 @@ fn same_capacity_owners_overlap_without_allocating_competing_pools() {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/machine_cpu_execution @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: An incompatible one-thread request cancels while a two-thread owner remains active;
+//   its body never executes, and the existing pool remains usable. This is controlled acquisition
+//   evidence, not cancellation latency for arbitrary native kernels.
 #[test]
 fn incompatible_capacity_wait_observes_cancellation_before_the_owner_finishes() {
     use std::sync::{

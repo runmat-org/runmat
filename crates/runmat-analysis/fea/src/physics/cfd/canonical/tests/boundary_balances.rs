@@ -5,6 +5,10 @@ use runmat_analysis_core::{
     Pressure, RegionTarget, Velocity,
 };
 
+// witness: FEA-FLUID-RECOVERY-001/balance @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel;
+//   boundary: Independent constant translation exact group signs/pressure forces; no general
+//   wall-shear convergence.
 #[test]
 fn grouped_original_translation_reports_signed_mass_and_pressure_forces() {
     for reference in [0.0, 101325.0] {
@@ -96,6 +100,10 @@ fn grouped_original_translation_reports_signed_mass_and_pressure_forces() {
     }
 }
 
+// witness: FEA-FLUID-RECOVERY-001/fields @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel;
+//   boundary: Couette boundary shear/source attribution preserved under cold recovery; one fixture
+//   only.
 #[test]
 fn original_couette_boundary_shear_and_cold_attribution_are_preserved() {
     let f = case(2, ReferenceCase::Couette, false);

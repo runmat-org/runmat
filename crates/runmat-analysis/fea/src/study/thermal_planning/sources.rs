@@ -42,7 +42,12 @@ pub(super) fn validate(
         || model.electro_thermal.is_some()
         || model.electromagnetic.is_some()
         || model.cfd.is_some()
-        || !model.interfaces.is_empty()
+        || model.interfaces.iter().any(|interface| {
+            !matches!(
+                interface.kind,
+                runmat_analysis_core::AnalysisInterfaceKind::ConjugateHeatTransfer(_)
+            )
+        })
         || !model.connectors.is_empty()
         || !model.response_spectra.is_empty()
         || !model.random_excitations.is_empty()

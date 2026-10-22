@@ -144,6 +144,10 @@ impl Fixture {
         force
     }
 }
+// witness: FEA-CONTACT-OPERATOR-001/history_search_diagnostics @
+//   penalty_coulomb_contact/tet4|tet10/numerical_kernel; coverage: partial;
+//   boundary: Original point, frame and ordinal cold revalidation reject tampering for both orders;
+//   search diagnostics for initial penetration are in the operator resource tests.
 #[test]
 fn original_point_frame_and_ordinal_cold_revalidation_reject_tampering() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {

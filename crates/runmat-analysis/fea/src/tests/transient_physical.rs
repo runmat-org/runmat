@@ -479,6 +479,10 @@ fn execute_transient_workload(
     .unwrap()
 }
 
+// witness: FEA-DYNAMICS-GOVERNANCE-001/motion_restart_branches @
+//   linear_structural_dynamics/tet4/numerical_kernel; coverage: partial;
+//   boundary: Modal support motion matches direct physics and restarts exactly; durable and remote
+//   restart are not covered.
 #[test]
 fn modal_support_motion_matches_direct_physics_and_restarts_exactly() {
     let interval_count = 40;
@@ -586,6 +590,9 @@ fn modal_support_motion_matches_direct_physics_and_restarts_exactly() {
     }
 }
 
+// witness: FEA-STRUCTURAL-CONSTRAINT-001/fixed_component_motion @
+//   linear_structural/tet4/numerical_kernel; coverage: partial;
+//   boundary: Tet4 prescribed motion keeps absolute constraint kinematics.
 #[test]
 fn physical_tet4_prescribed_motion_keeps_absolute_constraint_kinematics() {
     let model = support_motion_model();
@@ -1010,6 +1017,9 @@ fn governed_support_motion_fixture_uses_the_physical_constraint_row_space() {
     .expect("the governed support-motion fixture should execute on its physical constraint rows");
 }
 
+// witness: FEA-STRUCTURAL-CONSTRAINT-001/fixed_component_motion @
+//   linear_structural/tet4/numerical_kernel; coverage: partial;
+//   boundary: A fully prescribed Tet4 advances the complete motion schedule.
 #[test]
 fn fully_prescribed_tet4_advances_the_complete_motion_schedule() {
     use runmat_analysis_core::*;

@@ -82,8 +82,10 @@ impl Default for CanonicalFluidPolicy {
             pressure_relaxation: 0.25,
             linear_relative_tolerance: 1e-8,
             physical_relative_tolerance: 1e-8,
-            maximum_resident_bytes: 1024 * 1024 * 1024,
-            maximum_operator_work: 1_000_000_000_000,
+            // No fixed size caps: the step's authored resource budget (accuracy resources)
+            // bounds resident memory, and the execution envelope bounds time.
+            maximum_resident_bytes: u64::MAX,
+            maximum_operator_work: u64::MAX,
             maximum_authority_items: 1_000_000,
         }
     }
@@ -156,6 +158,8 @@ pub struct CanonicalFluidProblem<'a> {
     topology: &'a FiniteVolumeTopology,
     density: f64,
     viscosity: f64,
+    /// Shear-rate dependent viscosity law; `viscosity` is then its low-shear reference.
+    rheology: Option<runmat_analysis_core::GeneralizedNewtonianLaw>,
     boundaries: Vec<boundary::FaceBoundary<'a>>,
     boundary_balance_plan: boundary_balances::BoundaryBalancePlan,
     body_force_n_per_m3: Vec<[f64; 3]>,
@@ -307,6 +311,9 @@ impl<'a> CanonicalFluidProblem<'a> {
                 "positive finite density and dynamic viscosity required",
             ));
         }
+        if material.rheology.is_some_and(|law| !law.is_valid()) {
+            return Err(CanonicalFluidError::Invalid("generalized-Newtonian viscosity law"));
+        }
         if material.turbulence_intensity.ratio != 0.0 {
             return Err(CanonicalFluidError::Unsupported("turbulence closure"));
         }
@@ -335,13 +342,13 @@ impl<'a> CanonicalFluidProblem<'a> {
         let pressure_stencils = pressure_gradient::derive(topology, &boundaries)?;
         let velocity_stencils = velocity_gradient::derive(topology, &boundaries)?;
         let numerical_input_identity = identity(
-            "fea-fluid-numerical-input/v7",
+            "fea-fluid-numerical-input/v8",
             &(
                 topology.mesh_digest,
                 topology.projection_digest,
                 topology.geometry_digest,
                 density,
-                viscosity,
+                (viscosity, material.rheology),
                 &boundaries,
                 &body_force_n_per_m3,
                 &pressure_reference_pa,
@@ -355,6 +362,7 @@ impl<'a> CanonicalFluidProblem<'a> {
             topology,
             density,
             viscosity,
+            rheology: material.rheology,
             boundaries,
             boundary_balance_plan,
             body_force_n_per_m3,

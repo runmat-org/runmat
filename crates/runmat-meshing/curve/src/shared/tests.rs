@@ -140,6 +140,10 @@ fn exact_circle_is_constructively_discretized_once_with_pcurve_images() {
     assert_eq!(report.metric_evaluation_count, evaluation_count);
 }
 
+// witness: FEA-MESH-DISCRETIZATION-001/curve_discretization @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: A nonperiodic closed face with distinct pcurve endpoints is rejected; tiny edges and
+//   periodic curves are separate cases.
 #[test]
 fn nonperiodic_closed_face_rejects_distinct_pcurve_endpoints() {
     let (document, topology, mut registry) = runmat_geometry_fixtures::exact_circle();
@@ -279,6 +283,9 @@ fn independent_curve_validation_rejects_geometry_uv_arc_and_evidence_tampering()
     );
 }
 
+// witness: FEA-MESH-DISCRETIZATION-001/curve_discretization @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Constructive curve discretization fails at its hard node limit.
 #[test]
 fn constructive_curve_discretization_fails_at_its_hard_node_limit() {
     let (document, topology, registry) = runmat_geometry_fixtures::exact_circle();

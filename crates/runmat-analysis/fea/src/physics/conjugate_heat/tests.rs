@@ -109,6 +109,7 @@ fn case(cells: [usize; 3], transfer: ThermalInterfaceTransfer) -> Case {
         density: MassDensity::new(1000.0),
         dynamic_viscosity: DynamicViscosity::new(1e-3),
         turbulence_intensity: TurbulenceIntensity::new(0.0),
+        rheology: None,
     });
     model.sequence = AnalysisSequence::from_steps(
         "conjugate",

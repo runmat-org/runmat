@@ -139,6 +139,11 @@ fn corridor_preserves_endpoint_indices_when_new_nodes_sort_before_original_nodes
         .unwrap();
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: An interior endpoint rejects a hull-only transaction using its four-cell local star
+//   under a five-step search budget, preserving original topology. Necessary-condition pruning
+//   only; not full recovery, asymptotic scaling or whole-task memory evidence.
 #[test]
 fn interior_endpoint_rejects_hull_corridor_before_transaction_search() {
     let original = build_delaunay_volume_topology(

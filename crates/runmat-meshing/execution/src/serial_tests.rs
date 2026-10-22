@@ -803,6 +803,9 @@ fn ordinary_serial_backend_carries_the_complete_fenced_stage_publication() {
     ));
 }
 
+// witness: FEA-MESH-EXECUTION-001/budgets_and_cancellation @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: A serial stage reports typed cancellation and search-budget failures.
 #[test]
 fn serial_stage_reports_typed_cancellation_and_search_budget_failures() {
     let mut cancelled = Fixture::new();

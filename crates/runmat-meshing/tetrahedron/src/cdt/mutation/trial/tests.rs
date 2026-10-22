@@ -77,6 +77,13 @@ fn assert_storage(left: &TopologyMutation, right: &TopologyMutation) {
             .unwrap()
     );
 }
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Committed inner changes remain reversible by their parent; rejected inner changes
+//   permit a complete outer retry and commit. Flushed spatial roots, connectivity hints, dirty-face
+//   inventory, cells and maintained incidence agree with original storage and independent canonical
+//   reconstruction. This rollback mechanism does not independently confer physical admission or
+//   complete-study qualification.
 #[test]
 fn nested_cavity_trials_restore_incidence_caches_and_physical_authority() {
     let mut topology = neighborhoods(4);
@@ -128,6 +135,13 @@ fn nested_cavity_trials_restore_incidence_caches_and_physical_authority() {
     }
     assert_storage(&topology, &expected);
 }
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: The same checked two-to-three cavity has identical cell, corner-key, incident-star,
+//   face, boundary and free-slot undo inventories across four and sixty-four disconnected
+//   neighborhoods. Rejection restores original storage and independently reconstructed canonical
+//   topology. This component count excludes arbitrary vertex valence, cached pending-delta length,
+//   recursion depth, whole-task memory and complete native study performance.
 #[test]
 fn cavity_trial_undo_inventory_is_local_across_disconnected_growth() {
     let mut costs = Vec::new();
@@ -152,6 +166,12 @@ fn cavity_trial_undo_inventory_is_local_across_disconnected_growth() {
     assert_eq!(costs[0], costs[1]);
     assert_eq!(costs[0].0, 3);
 }
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Unwinding after a checked cavity and point append restores the original node
+//   inventory, identity/position indexes, coordinate scale, cells, incidence and physical-state
+//   metadata; a subsequent checked edit succeeds. This component witness does not claim arbitrary
+//   whole-owner adoption inside a trial or native process cancellation.
 #[test]
 fn cavity_trial_rolls_back_appended_points_and_unwinding() {
     let mut topology = neighborhoods(4);

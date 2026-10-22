@@ -21,7 +21,7 @@ fn quadratic_tet10_temperature_energy_matches_exact_simplex_moment() {
         .collect::<Vec<_>>();
     let properties = compile_structural_property_map(&model, Some(&mesh)).unwrap();
     let mut elements =
-        solid_recovery::build(&mesh, &properties, None, Some(&temperatures)).unwrap();
+        solid_recovery::build(&mesh, &properties, None, Some(&crate::execution::SolvedTemperatureField::nodal(temperatures.clone()))).unwrap();
     let fixed =
         recover_solid_fields_with_plan(&elements, &[0.0; 30], LocalExecutionPlan::serial(), true)
             .unwrap();
@@ -69,7 +69,7 @@ fn curved_tet10_thermal_integrals_match_weighted_simplex_moments() {
         .collect::<Vec<_>>();
     let properties = compile_structural_property_map(&model, Some(&mesh)).unwrap();
     let mut elements =
-        solid_recovery::build(&mesh, &properties, None, Some(&temperatures)).unwrap();
+        solid_recovery::build(&mesh, &properties, None, Some(&crate::execution::SolvedTemperatureField::nodal(temperatures.clone()))).unwrap();
     // Isoparametric map x = ξ + c ξη, y = η, z = ζ; det(J) = 1 + cη.
     let c = 0.4;
     let SolidRecoveryGeometry::Tetrahedron10 { coordinates_m, .. } = &mut elements[0].geometry
@@ -142,6 +142,10 @@ fn curved_tet10_thermal_integrals_match_weighted_simplex_moments() {
     ));
 }
 
+// witness: FEA-COUPLING-THERMOELASTIC-001/strain @ thermoelastic/tet4|tet10/numerical_kernel;
+//   boundary: Both-order single-tetrahedron recovery from an supplied linear temperature array:
+//   fixed point stresses/integrated energy and Tet10 compatible free displacement. Despite test
+//   name, no upstream thermal solve or sequence transition asserted.
 #[test]
 fn solved_linear_temperature_recovers_pointwise_stress_and_integrated_energy() {
     use crate::{
@@ -167,7 +171,7 @@ fn solved_linear_temperature_recovers_pointwise_stress_and_integrated_energy() {
             .collect::<Vec<_>>();
         let retained = temperatures.clone();
         let elements =
-            solid_recovery::build(&mesh, &properties, None, Some(&temperatures)).unwrap();
+            solid_recovery::build(&mesh, &properties, None, Some(&crate::execution::SolvedTemperatureField::nodal(temperatures.clone()))).unwrap();
         assert_eq!(temperatures, retained);
         let fixed = recover_solid_fields_with_plan(
             &elements,
@@ -219,13 +223,16 @@ fn solved_linear_temperature_recovers_pointwise_stress_and_integrated_energy() {
                 .all(|value| value.abs() < 1.0e-5));
             assert!(free.strain_energy_density[0].abs() < 1.0e-16);
         }
-        assert!(solid_recovery::build(&mesh, &properties, None, Some(&temperatures[..1])).is_err());
+        assert!(solid_recovery::build(&mesh, &properties, None, Some(&crate::execution::SolvedTemperatureField::nodal(temperatures[..1].to_vec()))).is_err());
         let mut invalid = temperatures.clone();
         invalid[0] = f64::NAN;
-        assert!(solid_recovery::build(&mesh, &properties, None, Some(&invalid)).is_err());
+        assert!(solid_recovery::build(&mesh, &properties, None, Some(&crate::execution::SolvedTemperatureField::nodal(invalid.clone()))).is_err());
     }
 }
 
+// witness: FEA-COUPLING-THERMOELASTIC-001/strain @ thermoelastic/tet4|tet10/numerical_kernel;
+//   boundary: Both-order single-element uniform eigenstrain free/fixed recovery; not coupled
+//   equilibrium, temperature-dependent property iteration or mapped transition.
 #[test]
 fn thermal_eigenstrain_recovery_is_stress_free_for_free_expansion_and_compressive_when_fixed() {
     let eigenstrain = 1.0e-4;

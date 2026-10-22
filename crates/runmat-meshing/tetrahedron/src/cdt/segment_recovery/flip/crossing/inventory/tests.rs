@@ -2,6 +2,12 @@ use super::*;
 use crate::cdt::{build_delaunay_volume_topology, DelaunayTopologyOptions, DelaunayVolumeNode};
 use runmat_meshing_core::NeverCancelled;
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Analytic convex-bipyramid crossing, obstruction and edge-contact assessments reuse
+//   one conservative inventory without additional spatial search. Checked mutation rederives
+//   candidates; rollback restores the original assessment. No cache is retained across an accepted
+//   edit, and no full recovery or native resource claim follows.
 #[test]
 fn read_only_crossing_assessments_share_candidates_and_mutations_rederive_them() {
     let points = [

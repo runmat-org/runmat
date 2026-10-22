@@ -23,6 +23,7 @@ mod physics;
 mod properties;
 mod signals;
 mod spectral_inputs;
+mod tables;
 
 pub fn lower_models(
     bound: &BoundFeaProgram,
@@ -30,12 +31,13 @@ pub fn lower_models(
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> BTreeMap<(LogicalSourcePath, FeaSymbolKey), AuthoredModel> {
     let mut result = BTreeMap::new();
+    let tables = tables::lower_impedance_tables(bound, declarations, diagnostics);
     for (identity, declaration) in declarations {
         if identity.1.kind != FeaSymbolKind::Model {
             continue;
         }
         let initial_errors = diagnostics.len();
-        let model = model(bound, declaration, diagnostics);
+        let model = model(bound, declaration, &tables, diagnostics);
         if diagnostics.len() != initial_errors {
             continue;
         }
@@ -74,6 +76,7 @@ fn has_reported_error(declaration: &CheckedFeaDeclaration, diagnostics: &[FeaDia
 fn model(
     bound: &BoundFeaProgram,
     declaration: &CheckedFeaDeclaration,
+    tables: &tables::ImpedanceTables,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> AuthoredModel {
     let inputs = super::input::lower_definitions(bound, declaration, diagnostics);
@@ -104,7 +107,7 @@ fn model(
         })
         .collect();
     let lowered_properties = properties::lower(declaration, bound, diagnostics);
-    let lowered_physics = physics::lower(declaration, bound, diagnostics);
+    let lowered_physics = physics::lower(declaration, bound, tables, diagnostics);
     let (thermal, thermo_mechanical, electromagnetic) = domains::lower(declaration, diagnostics);
     let mut signals = signals::lower(declaration, bound, diagnostics);
     let constraints = constraints::lower(declaration, bound, &signals, diagnostics);

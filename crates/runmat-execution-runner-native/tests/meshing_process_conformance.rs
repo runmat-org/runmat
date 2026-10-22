@@ -243,6 +243,11 @@ impl MeshingStageKernel for AdmissionThenCooperativeSlowKernel {
     }
 }
 
+// witness: FEA-MESH-EXECUTION-001/worker_loss_and_transfer @
+//   shared_infrastructure/canonical_mixed_topology/native_process; coverage: partial;
+//   boundary: The whole harness-less meshing process-conformance target (worker child processes,
+//   progress, cancellation, remote conformance and remote recovery) exits successfully; it is one
+//   witness, so the individual claims are not separated.
 fn main() {
     let arguments = std::env::args_os().collect::<Vec<_>>();
     if let Some(mode) = arguments.get(1).and_then(|mode| mode.to_str()) {

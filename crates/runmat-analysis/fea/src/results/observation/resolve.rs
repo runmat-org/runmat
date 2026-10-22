@@ -472,7 +472,11 @@ fn operation_multiplier(request: &ObservationRequest, spec: &ObservationSpec) ->
             reduction: Some(_), ..
         }) => match spec.reduction.as_ref().map(|reduction| reduction.spatial) {
             Some(SpatialReduction::RootMeanSquare) => 12,
-            Some(SpatialReduction::Integral | SpatialReduction::Average) => 8,
+            Some(
+                SpatialReduction::Integral
+                | SpatialReduction::Average
+                | SpatialReduction::NormalFlux,
+            ) => 8,
             _ => 3,
         },
         _ => 2,

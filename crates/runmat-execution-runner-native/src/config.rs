@@ -192,6 +192,12 @@ mod tests {
 
     use super::{fresh_scope_id, session_store_root, NativeExecutionConfig};
 
+    // witness: FEA-SHARED-RESOURCES-001/shared_immutable_inventories @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+    //   boundary: Default numerical-cache placement is resolved before adding a transient scope,
+    //   explicit host roots are preserved, and relative roots reject. Both native session constructors
+    //   use this shared configuration operation. It does not independently establish payload
+    //   admissibility, cross-process throughput or diagnostic replay success.
     #[test]
     fn meshing_cache_grant_is_resolved_before_transient_scope_and_preserves_explicit_root() {
         let directory = tempfile::tempdir().unwrap();

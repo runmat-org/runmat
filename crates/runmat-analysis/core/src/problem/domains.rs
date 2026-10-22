@@ -106,6 +106,10 @@ mod tests {
 #[serde(deny_unknown_fields)]
 pub struct CfdDomain {
     pub density: MassDensity,
+    /// Newtonian viscosity, or the low-shear reference viscosity of a generalized law.
     pub dynamic_viscosity: DynamicViscosity,
     pub turbulence_intensity: TurbulenceIntensity,
+    /// Shear-rate dependent viscosity; absent for a Newtonian fluid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rheology: Option<super::rheology::GeneralizedNewtonianLaw>,
 }

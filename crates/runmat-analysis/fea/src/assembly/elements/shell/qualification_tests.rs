@@ -3,6 +3,11 @@ use super::{global_stiffness_matrix, ShellElementGeometry, ShellMaterial, ShellS
 const BENDING_DOF_PER_NODE: usize = 3;
 const SHELL_BENDING_LOCAL_DOF: [usize; BENDING_DOF_PER_NODE] = [2, 3, 4];
 
+// witness: FEA-STRUCTURAL-SHELL-001/physical_shell_operator @
+//   linear_structural/shell/numerical_kernel;
+//   boundary: Dense test assembly of transverse simply-supported triangular plate; center
+//   displacement decreases toward independent Navier value and fine error below8%. No membrane,
+//   mixed-shell, native or complete locking qualification.
 #[test]
 fn simply_supported_sinusoidal_plate_converges_to_the_navier_solution() {
     let reference = navier_center_deflection();

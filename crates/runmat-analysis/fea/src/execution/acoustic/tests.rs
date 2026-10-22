@@ -156,3 +156,84 @@ fn acoustic_portable_admission_and_result_import_fail_closed() {
         .push(workload.model.sequence.steps[0].clone());
     assert!(workload.canonical_bytes().is_err());
 }
+
+// witness: FEA-ACOUSTIC-OUTPUTS-001/intensity_and_sound_power @ acoustic_harmonic/tet10/numerical_kernel;
+//   coverage: partial; boundary: plane-wave power through a matched duct end equals |p|²A/(2ρc) and
+//   the accounted input power to 0.1 %; the monopole sphere reference is not run.
+#[test]
+fn sound_power_through_the_matched_end_is_the_plane_wave_intensity_times_area() {
+    use crate::results::{
+        field::RecoveredFieldCatalog,
+        observation::{evaluate_observations, resolve_observation_plan, ObservationLimits},
+    };
+    use runmat_analysis_core::*;
+    // p = e^{-ikx} of 1 Pa into ρc = 6 Pa·s/m: I = |p|²/(2ρc) = 1/12 W/m² over the unit end.
+    let mut authored = workload();
+    authored.model.sequence.steps[0]
+        .observations
+        .push(ObservationRequest::Reduction(ObservationSpec {
+            observation_id: ObservationId("power".into()),
+            quantity: ObservationQuantity::AcousticIntensity,
+            value_shape: ObservationValueShape::Vector3,
+            target: ObservationTarget::Spatial(ExcitationTarget::Region(RegionTarget::boundary(
+                "slab_right",
+            ))),
+            source_location: FieldLocation::Element,
+            output_location: FieldLocation::Global,
+            recovery: RecoveryPolicy::Native,
+            component: ObservationComponent::All,
+            frame: CoordinateFrame::Global,
+            sign_convention: SignConvention::Native,
+            complex_representation: ComplexRepresentation::Real,
+            sampling: SamplingPolicy::Final,
+            reduction: Some(ReductionPolicy {
+                spatial: SpatialReduction::NormalFlux,
+                series: SeriesReduction::None,
+                extrema_ties: ExtremaTiePolicy::FirstCanonical,
+            }),
+            storage: ObservationStoragePolicy {
+                precision: SignalPrecision::Real64,
+                compression: CompressionPolicy::Lossless,
+                retention: RetentionPolicy::Canonical,
+                partial_access: PartialAccessPolicy::ManifestAndChunks,
+            },
+            purpose: ObservationPurpose::Publication,
+            cost: ObservationCostPolicy::UpperBound(ObservationCostEstimate {
+                operation_count: 1_000_000,
+                peak_resident_bytes: 10_000_000,
+                stored_bytes: 1_000_000,
+                transfer_bytes: 1_000_000,
+                collective_count: 0,
+            }),
+        }));
+    let mesh = quadratic_slab_mesh(2);
+    let result = authored.execute(&mesh).unwrap();
+    let request = result.native_field_request(&authored, &mesh).unwrap();
+    let artifact = result
+        .recover_native_fields(&authored, &mesh, &request)
+        .unwrap();
+    let definitions = artifact
+        .fields()
+        .iter()
+        .map(|field| field.definition().clone())
+        .collect::<Vec<_>>();
+    let projection = crate::topology::AnalysisProjection::derive(&mesh).unwrap();
+    let catalog = RecoveredFieldCatalog::new_for_topology(
+        projection.projection_digest,
+        artifact.entity_counts(),
+        artifact.into_fields(),
+    )
+    .unwrap();
+    let plan = resolve_observation_plan(
+        &authored.model.sequence.steps[0],
+        &projection,
+        &definitions,
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let observed = evaluate_observations(&plan, &projection, &catalog).unwrap();
+    let power = observed[0].field.as_host_f64().unwrap()[0];
+    assert!((power - 1.0 / 12.0).abs() < 1e-3 / 12.0, "{power}");
+    // The input power the solver accounts for leaves through the matched end.
+    assert!((power - result.mean_input_power_w()).abs() < 1e-3 * power);
+}

@@ -254,6 +254,20 @@ impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
         self.access(false)
             .and_then(|scope| scope.load_run(run_id).map_err(|error| error.to_string()))
     }
+    fn resolve_run_attempt(&self, run_id: &str) -> Result<String, String> {
+        self.access(false).and_then(|scope| {
+            scope
+                .resolve_run_attempt(run_id)
+                .map_err(|error| error.to_string())
+        })
+    }
+    fn run_attempts(&self, definition_run_id: &str) -> Result<Vec<String>, String> {
+        self.access(false).and_then(|scope| {
+            scope
+                .run_attempts(definition_run_id)
+                .map_err(|error| error.to_string())
+        })
+    }
     fn load_run_metadata(&self, run_id: &str) -> Result<Option<AnalysisRunResult>, String> {
         self.access(false).and_then(|scope| {
             scope

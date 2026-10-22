@@ -6,7 +6,7 @@ mod construction_storage;
 
 enum StructuralCouplingInput<'a> {
     Authored {
-        solved_nodal_temperature_k: Option<&'a [f64]>,
+        solved_nodal_temperature_k: Option<&'a crate::execution::SolvedTemperatureField>,
         solid_energy: Option<&'a mut solver_solid::SolidEnergyPreparation>,
     },
     ElasticPerturbation,
@@ -87,7 +87,7 @@ pub(crate) fn assemble_structural_system_with_execution(
     requirement: StructuralFormulationRequirement,
     constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
     local_execution: crate::planning::resource::LocalExecutionPlan,
-    solved_nodal_temperature_k: Option<&[f64]>,
+    solved_nodal_temperature_k: Option<&crate::execution::SolvedTemperatureField>,
 ) -> Result<AssemblySummary, LinearAssemblyError> {
     assemble_with_mesh(
         model,
@@ -206,7 +206,7 @@ pub(crate) struct AssemblyExecution<'a> {
     pub(super) structural_requirement: Option<StructuralFormulationRequirement>,
     pub(super) supplied_constraint_plan: Option<&'a CanonicalStructuralConstraintPlan>,
     pub(super) local_execution: crate::planning::resource::LocalExecutionPlan,
-    pub(super) solved_nodal_temperature_k: Option<&'a [f64]>,
+    pub(super) solved_nodal_temperature_k: Option<&'a crate::execution::SolvedTemperatureField>,
     pub(super) solid_energy: Option<&'a mut solver_solid::SolidEnergyPreparation>,
 }
 

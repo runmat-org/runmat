@@ -174,6 +174,12 @@ pub(crate) fn surface_failure(
 #[cfg(test)]
 mod planarity_control_tests {
     use super::*;
+    // witness: FEA-SHARED-RESOURCES-001/governed_path_equivalence @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+    //   boundary: Joined acceptance preserves cancellation, time, memory, search, iteration and
+    //   numerical-result categories through both nested metric paths, retaining the original diagnostic
+    //   detail. This category transport fixture does not establish successful convergence, budget
+    //   sufficiency or whole-study execution.
     #[test]
     fn joined_acceptance_preserves_nested_geometry_control_causes() {
         use runmat_geometry_core::GeometryEvaluationErrorKind as Kind;
@@ -204,6 +210,10 @@ mod planarity_control_tests {
             }
         }
     }
+    // witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+    //   boundary: Surface-stage failure construction preserves memory denial and cancellation
+    //   categories, operation and original diagnostic detail from controlled planarity validation.
     #[test]
     fn surface_planarity_failures_preserve_resource_category_and_detail() {
         use runmat_geometry_core::GeometryEvaluationErrorKind;

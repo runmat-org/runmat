@@ -206,6 +206,10 @@ fn physical_random_response_matches_independent_dense_reference_and_round_trips(
         .contains("does not name"));
 }
 
+// witness: FEA-DYNAMICS-RESPONSE-001/spectrum_random_recovery @
+//   linear_structural_dynamics/mesh_independent/numerical_kernel; coverage: partial;
+//   boundary: A full cross-spectrum can cancel identical base-motion channels; PSD integration and
+//   residual-mode terms are other tests.
 #[test]
 fn full_cross_spectrum_can_cancel_identical_base_motion_channels() {
     let (summary, basis) = physical_basis();

@@ -133,6 +133,12 @@ fn positive_compositions(total: u16) -> Vec<[u16; 4]> {
 mod tests {
     use super::{canonical_interior_points, positive_compositions};
 
+    // witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+    //   boundary: Lazy selection evaluates one initial lattice point while its full sequence matches
+    //   complete reconstruction exactly across three scales, six coordinate orders and reflection.
+    //   Point ordering and indices are checked; original-model quality and performance remain separate
+    //   gates.
     #[test]
     fn lazy_interior_family_matches_complete_reconstruction_across_orientation_and_scale() {
         for exponent in [-80, 0, 80] {

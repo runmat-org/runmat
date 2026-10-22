@@ -71,7 +71,7 @@ fn solve_affine_constraint_system_with_settings(
             "affine reduction differs from the canonical resolved constraint matrix",
         );
     }
-    let (reduced_operator, reduced_rhs) = match reduction.reduce_sparse_system(
+    let (reduced_operator, reduced_rhs) = match reduction.reduce_sparse_system_on_support(
         summary.operator.operators().stiffness(),
         summary.operator.load(),
     ) {
@@ -144,9 +144,14 @@ fn solve_affine_constraint_system_with_settings(
             .admissibility()
             .is_some_and(|evidence| admission.admits_certificate(evidence.coercivity()));
         if !accepted {
+            let exact = prepared
+                .admissibility()
+                .map(|evidence| evidence.coercivity().work_counts());
             return rejected_affine_system(
                 summary,
-                "exact reduced-solver work exceeds the admitted resource envelope",
+                &format!(
+                    "exact reduced-solver work (dimension, factor nonzeros, updates, bytes) {exact:?} exceeds the admitted resource envelope {admission:?}"
+                ),
             );
         }
     }

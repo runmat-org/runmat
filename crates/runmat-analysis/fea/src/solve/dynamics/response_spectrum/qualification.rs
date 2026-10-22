@@ -4,6 +4,11 @@ use super::combine::{combine_directional_responses, combine_modal_responses};
 
 const RELATIVE_TOLERANCE: f64 = 2.0e-13;
 
+// witness: FEA-DYNAMICS-RESPONSE-001/spectrum_random_recovery @
+//   linear_structural_dynamics/mesh_independent/numerical_kernel;
+//   boundary: Scalar signed synthetic modal vectors verify SRSS, absolute sum and CQC against
+//   independent formulas. Mesh-independent arithmetic only; no missing-mass, directional or
+//   random-vibration claim.
 #[test]
 fn modal_combination_matches_independent_quadratic_form_references() {
     let frequencies = [10.0, 11.0];

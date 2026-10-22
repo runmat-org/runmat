@@ -56,6 +56,87 @@ pub fn solve_electrothermal_heat_study(
     Ok((thermal, point))
 }
 
+/// The conduction side's operating temperatures, taken from the heat-transfer case's published
+/// thermal state (its last time point), so the conduction case reports the same operating point
+/// the heat case publishes instead of solving the coupled loop again.
+pub fn conduction_operating_temperatures(
+    state: &crate::execution::CanonicalThermalStatePayload,
+    mesh: &SolverMeshArtifact,
+    interfaces: &[runmat_analysis_core::AnalysisInterface],
+    transient: bool,
+) -> AnalysisExecutionResult<(Vec<f64>, Option<f64>)> {
+    let projection = AnalysisProjection::derive(mesh)
+        .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+    let values = state.temperature.as_host_f64().ok_or_else(|| {
+        AnalysisExecutionError::Invalid("the heat case's temperature must be host-backed".into())
+    })?;
+    if values.len() != state.ordered_node_ids.len() {
+        return Err(AnalysisExecutionError::Invalid(
+            "the heat case's temperature does not match its node order".into(),
+        ));
+    }
+    let by_id: std::collections::BTreeMap<u64, f64> = state
+        .ordered_node_ids
+        .iter()
+        .copied()
+        .zip(values.iter().copied())
+        .collect();
+    let nodal = projection
+        .nodes
+        .iter()
+        .map(|node| {
+            by_id.get(&node.node_id).copied().ok_or_else(|| {
+                AnalysisExecutionError::Invalid(
+                    "the heat case's temperature misses a conduction mesh node".into(),
+                )
+            })
+        })
+        .collect::<AnalysisExecutionResult<Vec<_>>>()?;
+    let second = state.interface_temperature_by_node()?;
+    let element_temperature_k = if second.is_empty() {
+        element_temperatures(&projection, &nodal)?
+    } else {
+        side_element_temperatures(&projection, interfaces, &nodal, &second)?
+    };
+    Ok((element_temperature_k, transient.then_some(state.sample_time_s)))
+}
+
+/// Element means where second-side elements of conductance interfaces read that side's
+/// temperature at the interface nodes.
+pub(crate) fn side_element_temperatures(
+    projection: &AnalysisProjection,
+    interfaces: &[runmat_analysis_core::AnalysisInterface],
+    nodal: &[f64],
+    second: &[(u64, f64)],
+) -> AnalysisExecutionResult<Vec<f64>> {
+    let invalid = |error: String| AnalysisExecutionError::Invalid(error);
+    let (plans, dofs) =
+        crate::physics::thermal_interface::solid_conduction(projection, interfaces).map_err(invalid)?;
+    if dofs.second().len() != second.len()
+        || dofs
+            .second()
+            .iter()
+            .zip(second)
+            .any(|(&(node, _), &(id, _))| projection.nodes[node].node_id != id)
+    {
+        return Err(invalid(
+            "thermal interface nodes differ from the declared interfaces".into(),
+        ));
+    }
+    let values = dofs
+        .join(
+            nodal,
+            &dofs
+                .second()
+                .iter()
+                .zip(second)
+                .map(|(&(node, _), &(_, value))| (node, value))
+                .collect::<Vec<_>>(),
+        )
+        .map_err(invalid)?;
+    element_temperatures(&dofs.split_projection(projection, &plans), &values)
+}
+
 /// The conduction side of an electrothermal study, with only its electrical outputs.
 pub fn electrothermal_conduction_study(
     compiled: &CompiledAnalysisStudy,
@@ -99,10 +180,15 @@ fn operating_point(
     let last = completion
         .thermal
         .temperature_snapshots
-        .last()
-        .and_then(|snapshot| snapshot.as_host_f64())
+        .len()
+        .checked_sub(1)
         .ok_or_else(|| AnalysisExecutionError::Invalid("electrothermal thermal history is empty".into()))?;
-    let element_temperature_k = element_temperatures(&projection, last)?;
+    let element_temperature_k = super::coupled::element_temperatures_of_snapshot(
+        &projection,
+        &completion.thermal_workload.model.interfaces,
+        &completion.thermal,
+        last,
+    )?;
     let sample = completion.electrical.last().ok_or_else(|| {
         AnalysisExecutionError::Invalid("electrothermal conduction history is empty".into())
     })?;

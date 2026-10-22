@@ -35,6 +35,12 @@ fn neighborhoods(count: usize) -> TopologyMutation {
     )
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Prepared segment bounds retain every independently enumerated exact crossing edge and
+//   both hull face owners across four and sixty-four disconnected neighborhoods, with bounded query
+//   checkpoint growth. This broad-phase component series does not establish general connected-mesh
+//   asymptotics, complete native heat recovery or whole-task memory.
 #[test]
 fn corridor_candidates_retain_every_exhaustive_crossing_and_prune_distant_hulls() {
     use std::sync::atomic::{AtomicUsize, Ordering};

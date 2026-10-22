@@ -30,7 +30,10 @@ use crate::{
 };
 
 const TASK_PREFIX: &[u8] = b"runmat-analysis-transient-scope-task/v1\0";
-const TASK_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024, 8_192, 65_536, 64);
+/// Identity digests hash the authored model and constraint plan, which grow with generated
+/// signals and the mesh; only the digest is retained, never the encoded bytes.
+const IDENTITY_LIMITS: CanonicalLimits =
+    CanonicalLimits::new(1024 * 1024 * 1024, 100_000_000, 65_536, 64);
 
 pub struct StructuralTransientScopeTaskPreparation {
     pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
@@ -323,7 +326,7 @@ fn digest<T: Serialize>(domain: &'static str, input: &T) -> AnalysisBridgeResult
         TASK_PREFIX,
         domain,
         input,
-        TASK_LIMITS,
+        IDENTITY_LIMITS,
     )?))
 }
 

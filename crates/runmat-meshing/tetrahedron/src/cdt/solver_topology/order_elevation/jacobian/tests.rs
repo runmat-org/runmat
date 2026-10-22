@@ -82,6 +82,10 @@ fn exact_jacobian(coordinates: [[f64; 3]; 10], barycentric: [f64; 4]) -> [[Exact
     exact_jacobian_at(coordinates, barycentric, 10_000, &NeverCancelled, &mut work).unwrap()
 }
 
+// witness: FEA-MESH-DISCRETIZATION-001/tet10_elevation @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: The Jacobian interval certificate accepts a linear mapping and rejects a curved
+//   inversion.
 #[test]
 fn interval_certificate_accepts_linear_mapping_and_rejects_curved_inversion() {
     let mut work = 0;

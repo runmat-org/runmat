@@ -8,6 +8,9 @@ mod publication;
 pub(super) mod reference;
 mod runtime;
 
+// witness: FEA-NONLINEAR-STATE-001/producer_exit @ small_strain_j2/tet4|tet10/native_process;
+//   boundary: Native exited-producer aligned nonuniform J2 reference; no uniform moving-front
+//   accuracy or contact credit.
 #[test]
 fn terminated_native_blocks_preserve_nonuniform_material_history() {
     for quadratic in [false, true] {

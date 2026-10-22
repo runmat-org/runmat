@@ -126,6 +126,12 @@ impl MeshingSubtaskCacheStore for Store {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Manifest-last chunk transport reassembles exact bytes, rejects corruption and
+//   understated storage, treats missing chunks as a miss, and releases admitted storage after
+//   failure or record drop. This fixture does not certify every native store eviction schedule or
+//   whole-process memory.
 #[test]
 fn multi_chunk_diagnostic_round_trip_corruption_miss_and_ceiling_release_storage() {
     let store = Store::default();

@@ -197,6 +197,21 @@ pub fn solve_canonical_transient(
         .map_err(|error| AcousticHarmonicError::Material(error.to_string()))?;
     // Unit angular frequency: every assembled source is then i g(t) with real g.
     let mut assembly = AcousticAssembly::assemble(projection, &properties, 1.0)?;
+    if assembly.lossy {
+        return Err(AcousticHarmonicError::Unsupported(
+            "frequency-domain loss factor in a time-domain acoustic solve".into(),
+        ));
+    }
+    if model.boundaries.iter().any(|boundary| {
+        matches!(
+            boundary.operator,
+            runmat_analysis_core::BoundaryOperator::AcousticImpedanceLaw { .. }
+        )
+    }) {
+        return Err(AcousticHarmonicError::Unsupported(
+            "frequency-dependent impedance law in a time-domain acoustic solve".into(),
+        ));
+    }
     let n = assembly.projection.nodes.len();
     let sample =
         |assembly: AcousticAssembly, time: f64| sample_sources(assembly, model, step, time);

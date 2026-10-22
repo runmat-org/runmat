@@ -111,6 +111,8 @@ fn bound_transition(
                 reference_temperature_k: 293.15,
                 sample_time_s: 0.0,
                 maximum_relative_linear_residual: 0.0,
+                interface_node_ids: Vec::new(),
+                interface_temperature: None,
             }),
         }
     } else {

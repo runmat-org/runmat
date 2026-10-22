@@ -40,6 +40,16 @@ impl AnalysisRunResultView {
     }
 }
 
+// witness: FEA-ACOUSTIC-MODAL-001/rigid_box_modes @ acoustic_modal/tet10/public_study; coverage:
+//   partial;
+//   boundary: A rigid unit cube on a quadratic mesh run through the CLI returns a zero-frequency
+//   uniform mode and three axial modes within 2 percent of c/2L = 171.5 Hz; the first ten modes
+//   within 0.5 percent are not asserted.
+// witness: FEA-ACOUSTIC-MODAL-001/modal_publication @ acoustic_modal/tet10/public_study; coverage:
+//   partial;
+//   boundary: The modal run publishes modal.frequency_hz and five acoustic.pressure mode fields and
+//   is numerically acceptable; residuals and normalization are not asserted; a cabin-sized model is
+//   not run.
 #[test]
 fn rigid_cube_cavity_modes_match_rectangular_room_frequencies() {
     let project = project(&STUDY.replace(
@@ -62,6 +72,11 @@ fn rigid_cube_cavity_modes_match_rectangular_room_frequencies() {
     assert!(run.0.numerically_acceptable);
 }
 
+// witness: FEA-ACOUSTIC-TRANSIENT-001/pressure_time_history_publication @
+//   acoustic_transient/tet10/public_study; coverage: partial;
+//   boundary: A quadratic-mesh pulse study run through the CLI publishes 21 pressure snapshots on a
+//   21-point time axis ending at 2 ms, all finite, with the prescribed surface carrying the pulse
+//   peak at 0.5 ms; cold reopening is covered by other tests.
 #[test]
 fn pressure_transient_publishes_its_complete_time_history() {
     let project = project(STUDY);

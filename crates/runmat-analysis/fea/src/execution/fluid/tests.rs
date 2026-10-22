@@ -37,6 +37,7 @@ pub(crate) fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
         density: MassDensity::new(1.0),
         dynamic_viscosity: DynamicViscosity::new(1.0),
         turbulence_intensity: TurbulenceIntensity::new(0.0),
+        rheology: None,
     });
     model.sequence = AnalysisSequence::from_steps(
         "retained-fluid",
@@ -423,6 +424,10 @@ fn native_cells_and_internal_faces_preserve_original_fields_and_authored_observa
         .is_err());
 }
 
+// witness: FEA-FLUID-EXECUTION-001/resources @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel;
+//   boundary: Original payload and authored requested ceilings before expansion; no measured
+//   RSS/GPU/distributed bound.
 #[test]
 fn authored_resource_ceiling_and_original_wire_profile_are_enforced_before_expansion() {
     let (mut workload, mesh) = authored();
@@ -457,6 +462,10 @@ fn authored_resource_ceiling_and_original_wire_profile_are_enforced_before_expan
     );
 }
 
+// witness: FEA-FLUID-RECOVERY-001/fields @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel;
+//   boundary: Portable original field/traction/resource substitution rejection; no process
+//   termination.
 #[test]
 fn original_velocity_pressure_flux_traction_and_resource_substitution_reject() {
     let (workload, mesh) = authored();

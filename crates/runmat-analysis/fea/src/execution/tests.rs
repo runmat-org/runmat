@@ -75,6 +75,9 @@ fn layered_identities_are_deterministic_and_preserve_argument_order() {
     assert_ne!(workload_a, workload_b);
 }
 
+// witness: FEA-SHARED-EXCITATION-001/layered_generator_realization_identity @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Generator capture and realized content invalidate the realization.
 #[test]
 fn generator_capture_and_realized_content_invalidate_the_realization() {
     let (_, _, baseline) = identity_graph();
@@ -198,6 +201,9 @@ fn sweep_results_compose_in_authored_order_not_completion_order() {
     assert!(ComposedSweepResult::new(sweep, &expected_studies, wrong).is_err());
 }
 
+// witness: FEA-SHARED-IDENTITY-001/closed_chunked_numerical_objects @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Numerical objects are deterministically chunked and self-validating.
 #[test]
 fn numerical_objects_are_deterministically_chunked_and_self_validating() {
     let payload = (0_u8..=31).collect::<Vec<_>>();
@@ -290,6 +296,9 @@ fn semantic_payloads_have_independent_chunk_intervals_and_identity() {
     assert!(malformed.validate().is_err());
 }
 
+// witness: FEA-SHARED-SEQUENCES-001/typed_semantic_graph @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Semantic state and reuse transitions bind exact content and topology.
 #[test]
 fn semantic_state_and_reuse_transition_bind_exact_content_and_topology() {
     use runmat_analysis_core::{
@@ -470,6 +479,9 @@ fn semantic_state_round_trips_a_typed_modal_basis_and_rejects_field_substitution
     assert!(substituted.validate().is_err());
 }
 
+// witness: FEA-SHARED-SEQUENCES-001/typed_semantic_graph @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Semantic state rejects unimplemented projection transitions.
 #[test]
 fn semantic_state_rejects_unimplemented_projection_transitions() {
     use runmat_analysis_core::{
@@ -639,6 +651,9 @@ fn signal_realization_with_precision(
     .unwrap()
 }
 
+// witness: FEA-SHARED-EXCITATION-001/layered_generator_realization_identity @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Canonical signal realization round-trips and layers content identity.
 #[test]
 fn canonical_signal_realization_round_trips_and_layers_content_identity() {
     let first = signal_realization(vec![0.0, 4.0, 0.0]);

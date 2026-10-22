@@ -10,6 +10,7 @@ mod linear_correction;
 mod mass_flow;
 mod moving;
 mod pressure_reference;
+mod rheology;
 mod reconstruction;
 mod symmetry;
 use super::qualification::reference;
@@ -82,6 +83,10 @@ fn provisional_outlet_backflow_is_solver_only_not_original_physics() {
     // converged path without any additional authored inflow boundary authority.
 }
 
+// witness: FEA-FLUID-EQUATIONS-001/flux @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel;
+//   boundary: Independent affine skew-face flux and integrated nonzero advection; no general
+//   nonlinear field-convergence credit.
 #[test]
 fn affine_skew_face_velocity_and_nonzero_convection_are_consistent() {
     let f = case(2, ReferenceCase::Convective, false);
@@ -141,6 +146,10 @@ fn unknown_pressure_trace_reconstructs_affine_inlet_gradient_without_fake_neuman
     }
 }
 
+// witness: FEA-FLUID-ACCURACY-001/steady_references @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel;
+//   boundary: Independent affine Couette velocity, wall shear and original balance; not
+//   cavity/backward-facing step.
 #[test]
 fn affine_couette_uses_original_geometry_and_balanced_physical_fields() {
     let fixture = case(2, ReferenceCase::Couette, false);
@@ -246,6 +255,10 @@ fn affine_nonzero_convection_reproduces_independent_velocity_and_pressure() {
     );
 }
 
+// witness: FEA-FLUID-ACCURACY-001/spatial @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel;
+//   boundary: Controlled-tail non-affine Fourier duct: velocity, flow and wall shear refinement;
+//   not pressure/cavity/backward-facing-step envelope.
 #[test]
 fn rectangular_duct_compares_fourier_reference_with_controlled_tail() {
     assert!(reference::duct_tail(255) < 1e-5);
@@ -327,6 +340,11 @@ fn rectangular_duct_compares_fourier_reference_with_controlled_tail() {
     );
 }
 
+// witness: FEA-FLUID-INPUTS-001/boundaries @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel; coverage: partial;
+//   boundary: A tangential moving wall is supported and normal wall motion is rejected unless an
+//   ALE formulation governs it; velocity components, symmetry, periodic and pressure-reference
+//   boundaries are other cases.
 #[test]
 fn tangential_moving_wall_supported_but_normal_motion_requires_ale() {
     let mut f = case(1, ReferenceCase::Couette, false);
@@ -478,6 +496,9 @@ fn pressure_l2(f: &fixture::Fixture, r: &CanonicalFluidResult) -> f64 {
 
 mod time_block;
 
+// witness: FEA-FLUID-OUTPUTS-001/wall_shear_stress_fields @ incompressible_laminar_steady/tet4/numerical_kernel;
+//   coverage: partial; boundary: Couette vorticity and wall shear stress equal the linear profile's;
+//   time-averaged WSS and the oscillatory shear index are not covered.
 #[test]
 fn couette_vorticity_and_wall_shear_match_the_linear_profile() {
     // u = (y, 0, 0) on the unit slab with μ = fixture viscosity: ω = (0, 0, −1),

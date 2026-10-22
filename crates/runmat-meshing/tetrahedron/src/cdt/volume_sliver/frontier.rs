@@ -121,6 +121,14 @@ mod tests {
         }
     }
 
+    // witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+    //   boundary: For 4096 ranked synthetic payloads, widths zero, one, two and eight exactly match
+    //   independent stable full-sort/truncate selection including ties. Retained payload counts never
+    //   exceed width; construction adds at most one compact trial. Eviction/destruction release
+    //   entries, and constructor failure preserves the previous beam. This carrier witness does not
+    //   measure native mesh payload bytes, search cost, whole-task peak or physical quality
+    //   convergence.
     #[test]
     fn streamed_retention_matches_stable_full_sort_and_bounds_live_payloads() {
         for width in [0, 1, 2, 8] {

@@ -200,6 +200,9 @@ fn shell_energy_is_invariant_to_cyclic_and_reversed_node_order() {
     }
 }
 
+// witness: FEA-STRUCTURAL-SHELL-001/physical_shell_operator @
+//   linear_structural/shell/numerical_kernel; coverage: partial;
+//   boundary: Shell resultant thickness scaling separates membrane, bending and shear.
 #[test]
 fn shell_resultant_thickness_scaling_separates_membrane_bending_and_shear() {
     let mut displacement = [0.0; SHELL_ELEMENT_DOF_COUNT];

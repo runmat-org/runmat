@@ -16,6 +16,9 @@ use crate::{
     },
 };
 
+// witness: FEA-THERMAL-DOMAIN-001/assembly @ thermal_steady/tet4/numerical_kernel;
+//   boundary: Aligned Tet4 two-material series resistance, temperature and flux plus property-order
+//   invariance; no arbitrary nonuniform interface claim.
 #[test]
 fn two_material_slab_matches_series_resistance_and_authored_order_is_invariant() {
     // Independent steady 1-D reference: two half-meter layers in series, k=1 and k=4 W/(m K).
@@ -94,7 +97,7 @@ fn two_material_slab_matches_series_resistance_and_authored_order_is_invariant()
         let assembly = assemble(
             model,
             &mesh,
-            crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+            crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
                 .unwrap()
                 .support(),
             &RealizedExcitations::default(),
@@ -200,7 +203,7 @@ fn transient_slab_has_second_order_spatial_convergence() {
         let assembly = assemble(
             &model,
             &mesh,
-            crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+            crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
                 .unwrap()
                 .support(),
             &RealizedExcitations::default(),

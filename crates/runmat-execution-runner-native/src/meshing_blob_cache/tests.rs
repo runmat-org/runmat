@@ -66,6 +66,11 @@ impl GeometryEvaluationControl for Control {
         self.checkpoint()
     }
 }
+// witness: FEA-SHARED-RESOURCES-001/shared_immutable_inventories @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A reopened native store preserves exact retained bytes and decoded-storage inventory,
+//   and rejects conflicting bytes under one key. It does not independently establish numerical
+//   provenance or acceptance.
 #[test]
 fn reopened_store_preserves_original_bytes_and_rejects_identity_collision() {
     let fixture = Fixture::new();
@@ -152,6 +157,11 @@ fn quota_eviction_is_bounded_and_transactional() {
         .unwrap();
     assert_eq!(state, (8, 2));
 }
+// witness: FEA-SHARED-RESOURCES-001/governed_path_equivalence @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Cancellation during incremental storage rolls back partial payload and quota updates
+//   while preserving previously retained bytes. This bounds one storage transaction, not all native
+//   task cancellation latency.
 #[test]
 fn cancellation_rolls_back_partial_blob_and_quota_changes() {
     let fixture = Fixture::new();
@@ -235,6 +245,11 @@ fn ancestor_alias_resolves_while_private_directory_and_database_leaves_reject_sy
     ));
 }
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Repeated native cache reads release encoded buffers and unused decode workspace. A
+//   simultaneously live entry or conservatively retained decoded result cannot escape admission.
+//   This is requested storage accounting, not measured RSS.
 #[test]
 fn repeated_reads_release_encoded_storage_but_retained_materialization_stays_charged() {
     let fixture = Fixture::new();
@@ -260,6 +275,10 @@ fn repeated_reads_release_encoded_storage_but_retained_materialization_stays_cha
     assert!(cache.read(&[9; 32], &control).unwrap().is_none());
 }
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Corrupt and cancelled reads release unpublished storage while preserving typed
+//   errors. No invalid cache payload becomes numerical authority.
 #[test]
 fn corrupt_reads_and_cancelled_reads_release_the_whole_unpublished_inventory() {
     let fixture = Fixture::new();

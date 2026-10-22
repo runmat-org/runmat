@@ -49,7 +49,6 @@ pub use observations::{
 };
 
 use frequency::PersistedStructuralFrequencyArtifact;
-pub(in crate::analysis) use frequency_sample::native_values_match;
 use frequency_sample::PersistedAcousticFrequencyArtifact;
 
 pub(super) const ARTIFACT_SCHEMA_VERSION: &str = "analysis_run_artifact/2026-09-002";
@@ -688,7 +687,7 @@ pub(in crate::analysis) fn capture_artifact_store() -> Result<Arc<dyn AnalysisAr
 mod source_access;
 pub use source_access::{
     load_acoustic_frequency_result, load_assessment_metadata, load_run_metadata, load_run_result,
-    load_structural_frequency_result,
+    load_structural_frequency_result, resolve_run_attempt, run_attempts,
 };
 
 pub fn load_render_tile_index(run_id: &str) -> Result<Option<RenderTileIndex>, String> {

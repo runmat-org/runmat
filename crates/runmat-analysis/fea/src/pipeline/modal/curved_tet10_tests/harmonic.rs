@@ -68,6 +68,13 @@ impl SolidCase {
     }
 }
 
+// witness: FEA-DYNAMICS-RESPONSE-001/references @
+//   linear_structural_dynamics/tet4|tet10/numerical_kernel; coverage: partial;
+//   boundary: Direct and modal harmonic match independent phase and power references on a curved
+//   solid; oscillators, impulse and base-motion references are not covered.
+// witness: FEA-DYNAMICS-RESPONSE-001/direct_modal_procedures @
+//   linear_structural_dynamics/tet4|tet10/numerical_kernel; coverage: partial;
+//   boundary: Direct and modal harmonic procedures agree on a curved solid.
 #[test]
 fn physical_solid_direct_and_modal_harmonic_match_independent_phase_and_power_references() {
     for case in [

@@ -34,7 +34,7 @@ fn workload() -> ThermalWorkload {
 fn thermal_support_covers_actual_operators_and_exact_proof_work() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
         let mesh = canonical_tetrahedron_solver_mesh(order);
-        let facts = ThermalOperatorResourceFacts::derive(&mesh).unwrap();
+        let facts = ThermalOperatorResourceFacts::derive(&mesh, &[]).unwrap();
         let projection = AnalysisProjection::derive(&mesh).unwrap();
         let mut workload = workload();
         workload.model.boundaries.push(AnalysisBoundary {
@@ -143,7 +143,7 @@ fn thermal_support_covers_actual_operators_and_exact_proof_work() {
 #[test]
 fn disconnected_thermal_support_rejects_unplanned_cross_body_coupling() {
     let mesh = three_region_tetrahedron_solver_mesh();
-    let facts = ThermalOperatorResourceFacts::derive(&mesh).unwrap();
+    let facts = ThermalOperatorResourceFacts::derive(&mesh, &[]).unwrap();
     let dimension = facts.support().rows();
     let unconnected = (1..dimension)
         .find(|column| {
@@ -172,9 +172,9 @@ fn disconnected_thermal_support_rejects_unplanned_cross_body_coupling() {
 fn thermal_numerical_reservation_is_enforced_before_solve() {
     let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
     let mut workload = workload();
-    let facts = ThermalOperatorResourceFacts::derive(&mesh).unwrap();
+    let facts = ThermalOperatorResourceFacts::derive(&mesh, &[]).unwrap();
     let history =
-        ThermalHistoryResourceFacts::derive(&mesh, &workload.solve_schedule().unwrap()).unwrap();
+        ThermalHistoryResourceFacts::derive(&mesh, &workload.solve_schedule().unwrap(), &[]).unwrap();
     let required = facts.numerical_reservation_bytes(&history).unwrap().0;
     let rows = facts.support().rows() as u64;
     let entries = facts.support().column_indices().len() as u64;

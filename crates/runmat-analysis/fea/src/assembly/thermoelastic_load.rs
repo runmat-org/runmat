@@ -171,25 +171,23 @@ pub(super) fn assemble_prescribed_temperature_load(
 pub(crate) fn assemble_solved_temperature_load(
     mesh: &SolverMeshArtifact,
     properties: &CompiledPropertyMap,
-    nodal_temperature_k: &[f64],
+    temperature: &crate::execution::SolvedTemperatureField,
 ) -> Result<Vec<f64>, ThermoelasticLoadError> {
     let projection = AnalysisProjection::derive(mesh)
         .map_err(|error| ThermoelasticLoadError::Projection(error.to_string()))?;
-    if projection.nodes.len() != nodal_temperature_k.len()
+    if projection.nodes.len() != temperature.node_count()
         || projection.nodes.len() != mesh.topology.nodes.len()
         || projection
             .nodes
             .iter()
             .zip(&mesh.topology.nodes)
             .any(|(projected, canonical)| projected.node_id != canonical.node_id)
-        || nodal_temperature_k
-            .iter()
-            .any(|value| !value.is_finite() || *value <= 0.0)
+        || !temperature.all_positive_finite()
     {
         return Err(ThermoelasticLoadError::InvalidNodalField);
     }
     let mut load = vec![0.0; projection.nodes.len() * 3];
-    for element in &projection.elements {
+    for (element_index, element) in projection.elements.iter().enumerate() {
         let owner = properties
             .solid_material(element.stable_identity)
             .ok_or(ThermoelasticLoadError::MissingOwner(element.element_id))?;
@@ -214,7 +212,7 @@ pub(crate) fn assemble_solved_temperature_load(
                     .node_indices
                     .iter()
                     .zip(point.shape_values())
-                    .map(|(&node_index, &shape)| shape * nodal_temperature_k[node_index])
+                    .map(|(&node_index, &shape)| shape * temperature.at(element_index, node_index))
                     .sum::<f64>();
                 let stress_pa = coefficient * (temperature_k - thermal.reference_temperature_k);
                 for (&node_index, gradient) in element
@@ -317,7 +315,12 @@ mod tests {
                     - 5.0 * node.coordinates_m[2]
             })
             .collect::<Vec<_>>();
-        let force = assemble_solved_temperature_load(&mesh, &properties, &temperature).unwrap();
+        let force = assemble_solved_temperature_load(
+            &mesh,
+            &properties,
+            &crate::execution::SolvedTemperatureField::nodal(temperature.clone()),
+        )
+        .unwrap();
         let mechanical = model.materials[0].require_mechanical().unwrap();
         let average_delta = 0.25 * (10.0 + 20.0 - 5.0);
         let hydrostatic_stress = mechanical.youngs_modulus_pa * 1.0e-5 * average_delta
@@ -342,7 +345,11 @@ mod tests {
         let mut invalid = temperature;
         invalid[0] = -1.0;
         assert!(matches!(
-            assemble_solved_temperature_load(&mesh, &properties, &invalid),
+            assemble_solved_temperature_load(
+                &mesh,
+                &properties,
+                &crate::execution::SolvedTemperatureField::nodal(invalid),
+            ),
             Err(ThermoelasticLoadError::InvalidNodalField)
         ));
     }
@@ -461,7 +468,7 @@ mod tests {
             &mesh,
             &properties,
             Some(&prescribed),
-            Some(&vec![300.0; mesh.topology.nodes.len()]),
+            Some(&crate::execution::SolvedTemperatureField::nodal(vec![300.0; mesh.topology.nodes.len()])),
         )
         .is_err());
         for element in &recovery {

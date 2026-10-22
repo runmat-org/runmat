@@ -57,7 +57,12 @@ impl FeaThermalRunResult {
     pub fn source_result_identity(&self) -> AnalysisExecutionResult<SolverResultIdentity> {
         self.validate_complete()?;
         let fields = fields::retained_field_identities(self)?;
-        self.metadata().identity(&fields)
+        self.metadata()
+            .identity(super::thermal_result::identity::FieldIdentities {
+                samples: &fields,
+                interface_node_ids: &self.interface_node_ids,
+                identities: super::thermal_result::identity::retained_identities,
+            })
     }
     /// Checks structural consistency and accepted solver evidence, not independent accuracy.
     pub fn validate_complete(&self) -> AnalysisExecutionResult<()> {
@@ -71,6 +76,18 @@ impl FeaThermalRunResult {
             &[self.ordered_node_ids.len()],
             fea_thermal_temperature_field_id,
         )?;
+        if self.interface_node_ids.is_empty() {
+            if !self.interface_temperature_snapshots.is_empty() {
+                return Err(invalid());
+            }
+        } else {
+            validate_history(
+                &self.interface_temperature_snapshots,
+                samples,
+                &[self.interface_node_ids.len()],
+                crate::contracts::fea_thermal_interface_temperature_field_id,
+            )?;
+        }
         validate_history(
             &self.temperature_gradient_snapshots,
             samples,
@@ -92,6 +109,7 @@ impl FeaThermalRunResult {
         if self
             .temperature_snapshots
             .iter()
+            .chain(&self.interface_temperature_snapshots)
             .any(|field| field.as_host_f64().unwrap().iter().any(|x| *x <= 0.0))
         {
             return Err(invalid());

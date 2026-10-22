@@ -14,6 +14,7 @@ pub enum FeaSymbolKind {
     Study,
     Sweep,
     Execution,
+    Table,
     Function,
 }
 
@@ -27,6 +28,7 @@ impl FeaSymbolKind {
             Self::Study => "study",
             Self::Sweep => "sweep",
             Self::Execution => "execution",
+            Self::Table => "table",
             Self::Function => "function",
         }
     }

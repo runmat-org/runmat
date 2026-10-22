@@ -95,6 +95,10 @@ fn compiled_map_decode_rejects_semantic_audit_and_entry_substitution() {
     assert!(serde_json::from_value::<CompiledPropertyMap>(material_evidence).is_err());
 }
 
+// witness: FEA-SHARED-PROPERTIES-001/distinct_property_roles @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: A compiled property map rejects gaps, overlaps, wrong roles and stale scopes; the
+//   full distinct-role list (orientation, section, layup) is not asserted.
 #[test]
 fn compiled_map_rejects_gaps_overlaps_wrong_roles_and_stale_scopes() {
     let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
@@ -255,6 +259,10 @@ fn compiled_map_uses_bound_entity_sets_instead_of_logical_region_names() {
         .is_err());
 }
 
+// witness: FEA-SHARED-PROPERTIES-001/assignment_qualification_corpus @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Explicit beam and shell domains project without cross-role fallback; a multi-solid
+//   exact-CAD corpus is not covered.
 #[test]
 fn compiled_map_projects_explicit_beam_and_shell_domains_without_cross_role_fallback() {
     let beam_model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
@@ -282,6 +290,9 @@ fn compiled_map_projects_explicit_beam_and_shell_domains_without_cross_role_fall
     ));
 }
 
+// witness: FEA-SHARED-PROPERTIES-001/required_sections_and_layups @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Explicit properties reject duplicate and missing sections.
 #[test]
 fn explicit_properties_reject_duplicate_and_missing_sections() {
     for fixture in [
@@ -315,6 +326,9 @@ fn explicit_properties_reject_duplicate_and_missing_sections() {
     }
 }
 
+// witness: FEA-SHARED-PROPERTIES-001/independent_section_coverage @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Laminate property identity round-trips and rejects competing homogeneous ownership.
 #[test]
 fn laminate_property_identity_round_trips_and_rejects_competing_homogeneous_ownership() {
     use runmat_analysis_core::{
@@ -388,6 +402,9 @@ fn laminate_property_identity_round_trips_and_rejects_competing_homogeneous_owne
     ));
 }
 
+// witness: FEA-SHARED-PROPERTIES-001/compiled_assignment_identity @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Semantic identity is independent of assignment order while the audit trail is not.
 #[test]
 fn semantic_identity_is_independent_of_assignment_order_but_audit_is_not() {
     let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
@@ -460,6 +477,12 @@ fn matching_model(
     model
 }
 
+// witness: FEA-SHARED-RESOURCES-001/shared_immutable_inventories @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Tet4/Tet10 fixtures verify that compiled property clones share original element and
+//   audit inventory storage, preserve wire bytes, survive original owner drop, and independently
+//   validate cold reconstruction. No whole publication admission, allocator peak or study scaling
+//   claim.
 #[test]
 fn clones_share_original_validated_properties_without_changing_cold_wire_authority() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
@@ -485,6 +508,11 @@ fn clones_share_original_validated_properties_without_changing_cold_wire_authori
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Original material/audit ownership is separate from shared clones, varies with
+//   retained display buffers and survives independent cold validation. Conservative typed component
+//   inventory, not RSS or whole-study scalability qualification.
 #[test]
 fn original_property_storage_charges_retained_materials_and_audit_once_per_owner() {
     let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);

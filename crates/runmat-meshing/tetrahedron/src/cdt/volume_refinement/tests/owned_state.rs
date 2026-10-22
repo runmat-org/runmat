@@ -1,5 +1,11 @@
 use super::*;
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: An independently evaluated admitted tetrahedron retains the same node, cell and
+//   quality allocations through owned refinement and optimization handoffs, with no mutations and
+//   independently recomputed terminal quality. This narrow ownership witness does not measure
+//   whole-task memory or establish general quality convergence.
 #[test]
 fn admitted_state_moves_through_refinement_and_optimization_without_mesh_copies() {
     let topology = topology([

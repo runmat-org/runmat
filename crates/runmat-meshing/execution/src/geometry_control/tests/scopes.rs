@@ -1,6 +1,11 @@
 use super::*;
 use runmat_geometry_core::{GeometryAllocationReservation, GeometryAllocationScope};
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Nested iteration scopes release temporary allocations, transfer only retained storage
+//   and preserve global work counts and the original shared ceiling. This is declared storage
+//   accounting, not allocator RSS or whole-model acceptance.
 #[test]
 fn nested_scopes_release_scratch_and_transfer_only_live_results() {
     let control = bounded_control(100);

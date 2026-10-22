@@ -12,7 +12,25 @@ impl ThermalOperatorResourceFacts {
     ) -> Result<ByteCount, ResourcePlanningError> {
         let projection = AnalysisProjection::derivation_resident_bytes_estimate(mesh)
             .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
-        let nodes = count(mesh.topology.nodes.len())?;
+        // A finite-conductance interface adds a second-side dof at each conformal interface
+        // node, couples the two sides' face dofs, and works on a split copy of the projection.
+        let interface_widths = mesh
+            .topology
+            .boundary_faces
+            .iter()
+            .filter(|f| f.role == runmat_meshing_core::BoundaryFaceRole::ConformalInterface)
+            .map(|f| f.node_ids.len());
+        let interface_nodes = interface_widths.clone().try_fold(0, |total, width| add(total, count(width)?))?;
+        let interface_entries = interface_widths.clone().try_fold(0, |total, width| {
+            let width = count(width)?;
+            add(total, mul(mul(2, width)?, mul(2, width)?)?)
+        })?;
+        let projection = if interface_nodes > 0 {
+            mul(projection, 2)?
+        } else {
+            projection
+        };
+        let nodes = add(count(mesh.topology.nodes.len())?, interface_nodes)?;
         // Every row has a diagonal. Shared couplings may be counted repeatedly; do not allocate
         // a deduplication graph just to estimate the cost of constructing that graph.
         let entries = mesh
@@ -26,7 +44,7 @@ impl ThermalOperatorResourceFacts {
                     .iter()
                     .map(|f| f.node_ids.len()),
             )
-            .try_fold(nodes, |total, width| {
+            .try_fold(add(nodes, interface_entries)?, |total, width| {
                 let width = count(width)?;
                 add(total, mul(width, width)?)
             })?;

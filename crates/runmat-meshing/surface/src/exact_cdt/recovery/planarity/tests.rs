@@ -93,6 +93,12 @@ fn exhaustive(
     }
     Ok(predicates)
 }
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Indexed edge-planarity decisions and successful predicate counts match exhaustive
+//   closed-bounds pair checks across the tested scales, translations, crossings, endpoint contacts
+//   and collinear overlaps. This finite witness does not establish every CAD topology or PDE
+//   qualification.
 #[test]
 fn indexed_planarity_matches_exhaustive_crossings_contacts_and_collinear_overlap() {
     for scale in [1e-9, 1.0, 1e9] {
@@ -131,6 +137,12 @@ fn indexed_planarity_matches_exhaustive_crossings_contacts_and_collinear_overlap
         }
     }
 }
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: For 8,192 disjoint long edges sharing the same x interval, spatial traversal has
+//   bounded local work and preserves zero intersection predicates. Exact requested packed-index
+//   construction storage accepts, one byte less rejects, and temporary storage releases completely.
+//   The requested-buffer inventory excludes allocator overhead and process RSS.
 #[test]
 fn long_parallel_edges_have_local_work_and_exact_scratch_admission() {
     let count = 8192;
@@ -179,6 +191,11 @@ fn long_parallel_edges_have_local_work_and_exact_scratch_admission() {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: An interruption during planarity index construction preserves cancellation and
+//   releases previously admitted scratch. This finite component fixture is not whole-task memory
+//   qualification.
 #[test]
 fn interrupted_planarity_index_releases_admitted_storage() {
     let (pslg, edges) = fixture(

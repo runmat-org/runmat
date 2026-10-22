@@ -30,6 +30,10 @@ pub(crate) fn field_reference_type(name: &str) -> Option<(ObservationQuantity, F
         Q::Velocity | Q::AcousticParticleVelocity | Q::FluidVelocity => {
             (PhysicalDimension::VELOCITY, 3)
         }
+        Q::AcousticIntensity => (
+            PhysicalDimension::POWER.divide(PhysicalDimension::AREA)?,
+            3,
+        ),
         Q::Acceleration => (PhysicalDimension::ACCELERATION, 3),
         Q::Strain => (PhysicalDimension::DIMENSIONLESS, 6),
         Q::Stress => (PhysicalDimension::PRESSURE, 6),

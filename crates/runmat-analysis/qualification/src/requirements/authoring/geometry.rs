@@ -444,21 +444,4 @@ pub(super) const REQUIREMENT: Requirement = Requirement {
             LANGUAGE_SOURCE_SCOPE,
         ),
     ],
-    witnesses: &[Witness {
-        id: "FEA-WITNESS-LANGUAGE-CAD-WRITE-REJECT",
-        locator: WitnessLocator::CargoTest {
-            package: "runmat-analysis-language",
-            target: CargoTarget::Integration("ap242_exchange"),
-            name: "imported_cad_parameters_reject_wrong_dimensions_and_unqualified_writes",
-            source: "crates/runmat-analysis/language/tests/ap242_exchange.rs",
-        },
-        claims: &[CoverageClaim {
-            obligation: "cad_parameter_admission",
-            envelopes: LANGUAGE_SOURCE_SCOPE,
-            boundary: concat!(
-                "Fixture host parameter metadata: wrong dimensions/unqualified write ",
-                "rejection only; no CAD kernel regeneration.",
-            ),
-        }],
-    }],
 };

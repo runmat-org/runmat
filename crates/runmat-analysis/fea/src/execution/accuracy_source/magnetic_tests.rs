@@ -47,6 +47,10 @@ fn plan() -> AccuracyPlan {
     plan
 }
 
+// witness: FEA-EM-QUALIFICATION-001/accuracy @ magnetostatic/tet4|tet10/public_study;
+//   boundary: Both affine geometry orders/signs receipts preserve original algebraic
+//   residual/gauge/energy claims and block production when independent convergence evidence is
+//   missing; no process or distributed proof.
 #[test]
 fn magnetic_receipts_supply_only_original_algebraic_equilibrium_evidence() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {

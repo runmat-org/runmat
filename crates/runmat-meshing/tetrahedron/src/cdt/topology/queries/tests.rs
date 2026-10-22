@@ -41,6 +41,12 @@ pub(in crate::cdt) fn topology(unrelated_cells: usize) -> DelaunayVolumeTopology
     .unwrap()
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Canonical source lookup matches exhaustive oriented-cell search with zero,16 and4096
+//   unrelated cells, under128 inventory comparisons per query. Local-star boundary roles match the
+//   complete boundary, including an interior vertex. This is a query bound, not complete refinement
+//   or native throughput qualification.
 #[test]
 fn canonical_source_and_local_boundary_queries_match_exhaustive_inventories() {
     for count in [0, 16, 4096] {

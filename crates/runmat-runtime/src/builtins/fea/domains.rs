@@ -145,6 +145,7 @@ pub async fn fluid_domain_builtin(
                 TURBULENCE_INTENSITY_CLASS,
                 "ratio",
             )?),
+            rheology: None,
         },
     )
 }

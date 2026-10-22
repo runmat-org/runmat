@@ -2,6 +2,13 @@ use super::*;
 use runmat_meshing_core::NeverCancelled;
 use runmat_meshing_size::metric::MetricTensor3;
 mod reference;
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Incremental visibility and quality growth retain the independent scan reference's
+//   exact cavity under isotropic and off-diagonal metrics. Each fixed-point face metric is resolved
+//   once; the scan reference performs repeated queries. Canonical decision order, protected
+//   boundary and shared smoothing checks remain separate. This is an algorithmic work witness, not
+//   whole-model throughput or study acceptance.
 #[test]
 fn incremental_visibility_matches_scan_reference_and_resolves_each_face_metric_once() {
     let (topology, provenance) = crate::cdt::test_fixtures::coupled_quality::fixture(false, 0);

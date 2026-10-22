@@ -70,6 +70,9 @@ fn solve(
     )
 }
 
+// witness: FEA-ACOUSTIC-BOUNDARY-001/phase @ acoustic_harmonic/tet4|tet10/numerical_kernel;
+//   boundary: Anchored slab plane wave and declared paired planes; no unanchored pole/global
+//   conditioning credit.
 #[test]
 fn anchored_bloch_plane_wave_pressure_mean_velocity_and_signed_intensity_refine() {
     // Anchoring all primary-plane DOFs propagates their phase; interior DOFs still solve.
@@ -116,6 +119,8 @@ fn anchored_bloch_plane_wave_pressure_mean_velocity_and_signed_intensity_refine(
     assert_eq!(executed, 12);
 }
 
+// witness: FEA-ACOUSTIC-BOUNDARY-001/reject @ acoustic_harmonic/tet4|tet10/numerical_kernel;
+//   boundary: Periodic pairing, overlap and conflicting pressure rejection only.
 #[test]
 fn periodic_rejects_unmatched_natural_overlap_and_conflicting_pressure() {
     for quadratic in [false, true] {

@@ -15,6 +15,9 @@ fn workload(current: f64) -> MagnetostaticWorkload {
     }
 }
 
+// witness: FEA-EM-QUALIFICATION-001/accuracy @ magnetostatic/tet4|tet10/public_study;
+//   boundary: In-process affine both-order magnetic source-bound cold bytes and sign/zero-current
+//   inventory/work; no native process, restart, partition or measured RSS evidence.
 #[test]
 fn magnetic_portable_source_bound_cold_result_preserves_both_orders_and_signs() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {

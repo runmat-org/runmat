@@ -15,6 +15,11 @@ name = "export_docs"
 path = "src/bin/export_docs.rs"
 required-features = ["docs-export"]
 
+[[bin]]
+name = "evidence_report"
+path = "src/bin/evidence_report.rs"
+required-features = ["docs-export"]
+
 [dependencies]
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }

@@ -1,6 +1,12 @@
 //! Undo storage follows live differences, including nested committed branches.
 use super::*;
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Two hundred fifty-six temporary quality entries leave only one live parent
+//   difference. Undo and comparison originals share the same immutable evidence allocation; nested
+//   commit and rollback restore the exact complete quality report. This private journal fixture
+//   does not validate physical candidate geometry, whole-task memory or throughput.
 #[test]
 fn nested_quality_undo_shares_original_evidence_and_discards_transient_history() {
     let base = topology();

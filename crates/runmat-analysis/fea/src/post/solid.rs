@@ -324,6 +324,11 @@ mod tests {
         }
     }
 
+    // witness: FEA-STRUCTURAL-SOLID-001/material_recovery @ linear_structural/tet4/numerical_kernel;
+    //   coverage: partial;
+    //   boundary: Two Tet4 elements with different Young's moduli recover different stresses from the
+    //   same strain, in serial and with two threads; Tet10 recovery is covered by the recovery field
+    //   tests.
     #[test]
     fn recovery_uses_each_elements_assigned_material() {
         let geometry = SolidRecoveryGeometry::Tetrahedron4 {
@@ -412,6 +417,9 @@ mod tests {
         );
     }
 
+    // witness: FEA-STRUCTURAL-REFERENCE-001/patch_reference_convergence @
+    //   linear_structural/tet4/numerical_kernel; coverage: partial;
+    //   boundary: A connected Tet4 affine patch recovers analytic strain, stress and energy.
     #[test]
     fn connected_tet4_affine_patch_recovers_analytic_strain_stress_and_energy() {
         // Four conforming cells share the centroid of the unit tetrahedron. The imposed affine

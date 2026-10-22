@@ -1,6 +1,12 @@
 //! Production surface controls come from the admitted workload, not standalone caps.
 use super::*;
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Production acceptance sample capacity follows the explicit stage search-work budget
+//   for small and dense meshes, preserving adaptive depths and quality margins, and rejecting
+//   recursion grants below the required depth. Actual exact evaluations remain charged to shared
+//   stage work. This finite policy witness does not establish whole-task timing or RSS.
 #[test]
 fn surface_sampling_depth_and_bounds_do_not_depend_on_execution_ceilings() {
     let fixture = crate::task_tests::Fixture::new(MeshingStageKind::SurfaceMesh);
@@ -56,6 +62,11 @@ fn surface_sampling_depth_and_bounds_do_not_depend_on_execution_ceilings() {
     assert_eq!(admitted.acceptance.maximum_subdivision_depth, 4);
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Curve preparation honors the shared unit metric target and stricter authored upper
+//   bounds without mutating the request. Actual surface quality and recovery remain independently
+//   checked.
 #[test]
 fn boundary_curve_target_honors_the_shared_surface_normalization_and_stricter_user_bounds() {
     let fixture = crate::task_tests::Fixture::new(MeshingStageKind::SurfaceMesh);

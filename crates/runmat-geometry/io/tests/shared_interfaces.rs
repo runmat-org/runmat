@@ -46,6 +46,12 @@ fn interface_faces(imported: &ImportedExactCad) -> Vec<&PersistentEntityId> {
     imported.topology.interfaces.iter().map(|interface| &interface.face_id).collect()
 }
 
+// witness: FEA-MESH-GEOMETRY-001/authored_names_survive_to_run @
+//   shared_infrastructure/mesh_independent/source_check; features: occt-native; coverage:
+//   partial;
+//   boundary: Authored face names (Fixed end, Loaded end) and a solid name (Bar) reach the exact
+//   model and are stable under file rename and reimport; resolution at check and at run through the
+//   CLI is not asserted.
 #[test]
 fn authored_face_and_body_names_reach_the_exact_model() {
     let imported = import("named-faces.step", NAMED_FACES, false).unwrap();
@@ -58,6 +64,12 @@ fn authored_face_and_body_names_reach_the_exact_model() {
     assert_eq!(imported.entity_names, again.entity_names);
 }
 
+// witness: FEA-MESH-GEOMETRY-001/multibody_assembly_import @
+//   shared_infrastructure/mesh_independent/source_check; features: occt-native; coverage:
+//   partial;
+//   boundary: A part-in-air assembly imports as two named solids; with shared interfaces it yields
+//   six interface faces, keeps the names Part, Air, Outer boundary and the part's face name on the
+//   shared face, and builds its closure.
 #[test]
 fn separate_parts_stay_independent_unless_interfaces_are_shared() {
     let independent = import("part_in_air_assembly.step", PART_IN_AIR, false).unwrap();
@@ -118,6 +130,10 @@ fn interpenetrating_parts_are_rejected_by_name() {
     assert!(message.contains("'First'") || message.contains("'Second'"), "{message}");
 }
 
+// witness: FEA-MESH-GEOMETRY-001/multibody_assembly_import @
+//   shared_infrastructure/mesh_independent/source_check; features: occt-native; coverage:
+//   partial;
+//   boundary: A General Fuse compound imports with its shared faces and solid names.
 #[test]
 fn a_general_fuse_compound_imports_with_its_shared_faces_and_solid_names() {
     // A STEP writer keeps each solid self-contained, so the fused cube and the cavity of its air
@@ -157,6 +173,11 @@ fn face_names_on_a_cavity_shell_are_read() {
     assert_eq!(named(&imported, PersistentEntityKind::Solid, "Insulator").len(), 1);
 }
 
+// witness: FEA-MESH-GEOMETRY-001/multibody_assembly_import @
+//   shared_infrastructure/mesh_independent/source_check; features: occt-native; coverage:
+//   partial;
+//   boundary: Imprinted coincident faces of an assembly become one shared face with one source
+//   ordinal.
 #[test]
 fn imprinted_coincident_faces_become_one_shared_face_with_one_source_ordinal() {
     for shared in [false, true] {

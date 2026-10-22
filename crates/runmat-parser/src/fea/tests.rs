@@ -58,6 +58,10 @@ execution scalable {
 }
 "#;
 
+// witness: FEA-AUTHORING-LANGUAGE-002/grammar_and_recovery @
+//   shared_infrastructure/mesh_independent/source_check;
+//   boundary: Representative declarations, spans and imports only; no complete grammar or semantics
+//   proof.
 #[test]
 fn parses_representative_language_surface() {
     let module = parse_fea(STUDY);
@@ -133,6 +137,10 @@ fn parses_output_policy_block_without_reclassifying_its_value() {
     ));
 }
 
+// witness: FEA-AUTHORING-COMPILER-002/syntax_pass @
+//   shared_infrastructure/mesh_independent/source_check;
+//   boundary: Malformed top-level token then valid material declaration; syntax recovery only, not
+//   complete editor services.
 #[test]
 fn recovers_at_the_next_top_level_declaration() {
     let module = parse_fea("not_a_declaration\nmaterial steel {\nname = \"steel\"\n}\n");
@@ -256,6 +264,10 @@ fn signed_unit_exponents_preserve_quantity_arithmetic() {
     }
 }
 
+// witness: FEA-AUTHORING-LANGUAGE-002/grammar_and_recovery @
+//   shared_infrastructure/mesh_independent/source_check;
+//   boundary: One formatter fixture and second formatting equality; no complete recovery or
+//   adversarial grammar credit.
 #[test]
 fn formatter_is_canonical_and_idempotent() {
     let source = "study   bracket{\ngeometry=geometry.g\noutput peak=max(output.stress,over=geometry.g.region.body)\n}\n";

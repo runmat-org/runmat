@@ -137,7 +137,7 @@ fn radiation_is_never_silently_dropped_by_linear_thermal_assembly() {
     let assembly = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::default(),
@@ -177,7 +177,7 @@ fn unused_material_declarations_do_not_change_thermal_operators_or_diagnostics()
     let baseline = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::default(),
@@ -187,7 +187,7 @@ fn unused_material_declarations_do_not_change_thermal_operators_or_diagnostics()
     let changed = assemble(
         &with_unused_material,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::default(),
@@ -205,7 +205,7 @@ fn unused_material_declarations_do_not_change_thermal_operators_or_diagnostics()
 fn prepared_properties_are_reused_across_load_samples_and_reject_topology_substitution() {
     let (model, mesh, _, _) = thermal_reference_model();
     let properties = crate::properties::compile_thermal_property_map(&model, Some(&mesh)).unwrap();
-    let operators = crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh).unwrap();
+    let operators = crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[]).unwrap();
     let first = super::assemble(
         &model,
         &mesh,
@@ -295,7 +295,7 @@ fn steady_nullspace_proof_requires_an_anchor_in_every_component() {
     let assembly = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::default(),
@@ -335,7 +335,7 @@ fn steady_nullspace_proof_requires_an_anchor_in_every_component() {
     let unanchored = assemble(
         &unanchored_model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::default(),
@@ -358,7 +358,7 @@ fn thermal_nullspace_proof_rejects_metadata_only_semidefinite_claims() {
     let assembly = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::default(),
@@ -406,7 +406,7 @@ fn positive_convection_anchors_a_steady_thermal_component() {
     let system = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::default(),
@@ -436,7 +436,7 @@ fn deserialization_discards_process_local_nullspace_proof() {
     let system = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::default(),
@@ -462,7 +462,7 @@ fn deserialization_rejects_caller_asserted_nullspace_proof() {
     let system = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::default(),
@@ -492,7 +492,7 @@ mod target_resolution;
 fn thermal_operators_are_bitwise_independent_of_the_admitted_thread_count() {
     let (model, _, _, _) = thermal_reference_model();
     let mesh = runmat_meshing_core::fixtures::connected_quadratic_tetrahedron_solver_mesh();
-    let facts = crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh).unwrap();
+    let facts = crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[]).unwrap();
     let run = || {
         assemble(
             &model,

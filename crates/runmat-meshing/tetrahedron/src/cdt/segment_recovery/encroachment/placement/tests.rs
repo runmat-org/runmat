@@ -1,6 +1,13 @@
 use super::*;
 use runmat_meshing_core::NeverCancelled;
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Rejected radial placement uses inherited acute-corner spacing in both endpoint
+//   orientations at physical scales 0.001/1/1000, followed by separate exact child-sphere
+//   admission. The analytic discriminator distinguishes this rule from whole-fragment bisection and
+//   orthogonal projection. Does not prove global corner protection, arbitrary feature-size bounds
+//   or complete native recovery termination.
 #[test]
 fn rejected_corner_radius_uses_inherited_spacing_in_both_orientations() {
     for scale in [0.001, 1.0, 1000.0] {

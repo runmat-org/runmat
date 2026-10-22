@@ -44,7 +44,7 @@ pub use acoustic::{AcousticPhasorConvention, CanonicalAcousticStatePayload};
 use field_validation::{select_structural_state_fields, validate_portable_fields};
 pub use payload::CanonicalSemanticStatePayload;
 pub use thermal::CanonicalThermalStatePayload;
-pub use thermal_transfer::BoundThermalStateTransfer;
+pub use thermal_transfer::{BoundThermalStateTransfer, SolvedTemperatureField};
 
 mod publication_request;
 pub use publication_request::{SemanticStatePublicationRequest, SemanticStatePublicationSource};

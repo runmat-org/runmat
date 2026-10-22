@@ -145,6 +145,12 @@ fn local_diagonal_barriers_and_resource_rejection_preserve_the_transaction() {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A four-cell planar cavity reconnects through exact local replacement admission,
+//   retains original physical points and passes independent exhaustive empty-sphere validation.
+//   This component fixture does not establish arbitrary recovery, native heat acceptance,
+//   whole-task memory or asymptotic scaling.
 #[test]
 fn admitted_planar_reconnection_preserves_all_original_points_and_empty_spheres() {
     let mut topology = patch(true);
@@ -194,6 +200,12 @@ fn planar_reconnection_preserves_protected_internal_faces_beyond_the_planar_patc
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Exact opposite-edge face lookup preserves every candidate and its original Cartesian
+//   order across endpoint orderings and missing partners. Existing geometric admission, barrier and
+//   atomic rejection tests remain required. This candidate-equivalence witness does not establish
+//   arbitrary valence bounds, complete recovery termination, native timing or whole-task admission.
 #[test]
 fn indexed_planar_partners_match_every_exhaustive_pair_in_original_order() {
     for (left, right) in [(0, 1), (7, 2), (12, 11)] {

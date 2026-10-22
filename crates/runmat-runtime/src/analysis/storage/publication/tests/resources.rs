@@ -115,6 +115,11 @@ fn manifest_preparation_freezes_original_inventory_before_projecting_copies() {
     assert!(builder.store.load_run(&late.run_id).unwrap().is_none());
 }
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A 4096-byte preparation fixture accumulates two reservations and rejects a third
+//   without changing the retained allowance or staging a run. It does not establish typed-input
+//   accounting correctness, measured phase peak, scalable growth or complete-study admission.
 #[test]
 fn preparation_reservations_accumulate_and_failed_growth_preserves_the_allowance() {
     let input = vec![17u8; 4096];

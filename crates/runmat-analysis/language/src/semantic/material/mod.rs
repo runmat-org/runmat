@@ -53,19 +53,8 @@ fn lower_material(
     validate_authored_shape(declaration, diagnostics);
     let name = values::string_assignment(&declaration.statements, "name")
         .unwrap_or_else(|| declaration.key.name.clone());
-    let fluid = values::block(&declaration.statements, "fluid").and_then(|statements| {
-        let law = values::assignment(statements, "law");
-        if !matches!(law.map(|value| &value.kind), Some(crate::CheckedExpressionKind::Enum(name)) if name == "incompressible_newtonian") {
-            error(declaration, "fluid law must be explicitly `incompressible_newtonian`", diagnostics);
-            return None;
-        }
-        Some(MaterialFluidModel::IncompressibleNewtonian {
-            dynamic_viscosity: runmat_analysis_core::DynamicViscosity::new(values::required_quantity(
-                declaration, statements, "dynamic_viscosity",
-                PhysicalDimension::new([-1, 1, -1, 0, 0, 0, 0, 0]), diagnostics,
-            )?),
-        })
-    });
+    let fluid = values::block(&declaration.statements, "fluid")
+        .and_then(|statements| fluid_law(declaration, statements, diagnostics));
     let mass_density_kg_per_m3 = values::optional_quantity(
         declaration,
         &declaration.statements,
@@ -336,7 +325,25 @@ fn validate_authored_shape(
             ],
         ),
         ("acoustic", &["speed_of_sound", "damping_ratio"]),
-        ("fluid", &["law", "dynamic_viscosity"]),
+        (
+            "fluid",
+            &[
+                "law",
+                "dynamic_viscosity",
+                "consistency",
+                "power_index",
+                "minimum_shear_rate",
+                "zero_shear_viscosity",
+                "infinite_shear_viscosity",
+                "relaxation_time",
+                "transition_exponent",
+                "time_constant",
+                "rate_index",
+                "yield_stress",
+                "plastic_viscosity",
+                "regularization",
+            ],
+        ),
         (
             "electrical",
             &[
@@ -468,3 +475,165 @@ fn error(
         }),
     ));
 }
+
+/// The fluid law: `incompressible_newtonian`, or a generalized-Newtonian (shear-rate dependent)
+/// viscosity law. Consistency is in SI (Pa·s^n), written as a plain number or, for n = 1, in Pa·s.
+fn fluid_law(
+    declaration: &CheckedFeaDeclaration,
+    statements: &[crate::CheckedFeaStatement],
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<MaterialFluidModel> {
+    use runmat_analysis_core::GeneralizedNewtonianLaw as Law;
+    let viscosity_dimension = PhysicalDimension::new([-1, 1, -1, 0, 0, 0, 0, 0]);
+    let rate_dimension = PhysicalDimension::FREQUENCY;
+    let law = match values::assignment(statements, "law").map(|value| &value.kind) {
+        Some(crate::CheckedExpressionKind::Enum(name)) => name.clone(),
+        _ => {
+            error(
+                declaration,
+                "fluid law must be explicit: incompressible_newtonian, power_law, carreau, \
+                 carreau_yasuda, cross, bingham, herschel_bulkley or casson",
+                diagnostics,
+            );
+            return None;
+        }
+    };
+    let quantity = |name: &str, dimension: PhysicalDimension, diagnostics: &mut Vec<FeaDiagnostic>| {
+        values::required_quantity(declaration, statements, name, dimension, diagnostics)
+    };
+    let ratio = |name: &str, diagnostics: &mut Vec<FeaDiagnostic>| {
+        values::required_ratio(declaration, statements, name, diagnostics)
+    };
+    let optional_rate = |name: &str, default: f64, diagnostics: &mut Vec<FeaDiagnostic>| {
+        values::optional_quantity(declaration, statements, name, rate_dimension, diagnostics)
+            .unwrap_or(default)
+    };
+    let regularization = |diagnostics: &mut Vec<FeaDiagnostic>| {
+        values::optional_quantity(
+            declaration,
+            statements,
+            "regularization",
+            PhysicalDimension::TIME,
+            diagnostics,
+        )
+        .unwrap_or(DEFAULT_YIELD_REGULARIZATION_S)
+    };
+    let consistency = |index: f64, diagnostics: &mut Vec<FeaDiagnostic>| {
+        let value = values::assignment(statements, "consistency");
+        match value.map(|value| (&value.value_type, value)) {
+            Some((crate::FeaType::Integer | crate::FeaType::Real, _)) => {
+                values::required_ratio(declaration, statements, "consistency", diagnostics)
+            }
+            Some((_, value)) if index == 1.0 => values::typed_quantity(value, viscosity_dimension)
+                .or_else(|| {
+                    error(declaration, "consistency must be in Pa*s^n (SI)", diagnostics);
+                    None
+                }),
+            _ => {
+                error(
+                    declaration,
+                    "power-law consistency is required in SI units (Pa*s^n) as a number",
+                    diagnostics,
+                );
+                None
+            }
+        }
+    };
+    let law = match law.as_str() {
+        "incompressible_newtonian" => {
+            return Some(MaterialFluidModel::IncompressibleNewtonian {
+                dynamic_viscosity: runmat_analysis_core::DynamicViscosity::new(quantity(
+                    "dynamic_viscosity",
+                    viscosity_dimension,
+                    diagnostics,
+                )?),
+            })
+        }
+        "power_law" => {
+            let power_index = ratio("power_index", diagnostics)?;
+            Law::PowerLaw {
+                consistency_pa_s_n: consistency(power_index, diagnostics)?,
+                power_index,
+                minimum_shear_rate_per_s: optional_rate(
+                    "minimum_shear_rate",
+                    DEFAULT_MINIMUM_SHEAR_RATE_PER_S,
+                    diagnostics,
+                ),
+            }
+        }
+        "carreau" | "carreau_yasuda" => Law::CarreauYasuda {
+            zero_shear_viscosity_pa_s: quantity("zero_shear_viscosity", viscosity_dimension, diagnostics)?,
+            infinite_shear_viscosity_pa_s: quantity(
+                "infinite_shear_viscosity",
+                viscosity_dimension,
+                diagnostics,
+            )?,
+            relaxation_time_s: quantity("relaxation_time", PhysicalDimension::TIME, diagnostics)?,
+            power_index: ratio("power_index", diagnostics)?,
+            transition_exponent: if law == "carreau" {
+                2.0
+            } else {
+                ratio("transition_exponent", diagnostics)?
+            },
+        },
+        "cross" => Law::Cross {
+            zero_shear_viscosity_pa_s: quantity("zero_shear_viscosity", viscosity_dimension, diagnostics)?,
+            infinite_shear_viscosity_pa_s: quantity(
+                "infinite_shear_viscosity",
+                viscosity_dimension,
+                diagnostics,
+            )?,
+            time_constant_s: quantity("time_constant", PhysicalDimension::TIME, diagnostics)?,
+            rate_index: ratio("rate_index", diagnostics)?,
+        },
+        "bingham" => Law::HerschelBulkley {
+            yield_stress_pa: quantity("yield_stress", PhysicalDimension::PRESSURE, diagnostics)?,
+            consistency_pa_s_n: quantity("plastic_viscosity", viscosity_dimension, diagnostics)?,
+            power_index: 1.0,
+            regularization_s: regularization(diagnostics),
+            minimum_shear_rate_per_s: optional_rate(
+                "minimum_shear_rate",
+                DEFAULT_MINIMUM_SHEAR_RATE_PER_S,
+                diagnostics,
+            ),
+        },
+        "herschel_bulkley" => {
+            let power_index = ratio("power_index", diagnostics)?;
+            Law::HerschelBulkley {
+                yield_stress_pa: quantity("yield_stress", PhysicalDimension::PRESSURE, diagnostics)?,
+                consistency_pa_s_n: consistency(power_index, diagnostics)?,
+                power_index,
+                regularization_s: regularization(diagnostics),
+                minimum_shear_rate_per_s: optional_rate(
+                    "minimum_shear_rate",
+                    DEFAULT_MINIMUM_SHEAR_RATE_PER_S,
+                    diagnostics,
+                ),
+            }
+        }
+        "casson" => Law::Casson {
+            yield_stress_pa: quantity("yield_stress", PhysicalDimension::PRESSURE, diagnostics)?,
+            plastic_viscosity_pa_s: quantity("plastic_viscosity", viscosity_dimension, diagnostics)?,
+            regularization_s: regularization(diagnostics),
+            minimum_shear_rate_per_s: optional_rate(
+                "minimum_shear_rate",
+                DEFAULT_MINIMUM_SHEAR_RATE_PER_S,
+                diagnostics,
+            ),
+        },
+        other => {
+            error(declaration, format!("unknown fluid law `{other}`"), diagnostics);
+            return None;
+        }
+    };
+    if !law.is_valid() {
+        error(declaration, "fluid viscosity law parameters are out of range", diagnostics);
+        return None;
+    }
+    Some(MaterialFluidModel::GeneralizedNewtonian { law })
+}
+
+/// Shear rate below which a shear-thinning or yield-stress law holds its viscosity constant.
+const DEFAULT_MINIMUM_SHEAR_RATE_PER_S: f64 = 1e-3;
+/// Papanastasiou regularization time of a yield-stress law.
+const DEFAULT_YIELD_REGULARIZATION_S: f64 = 1000.0;

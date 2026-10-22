@@ -45,11 +45,22 @@ impl MeshingCancellationSignal for Probe {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Four and sixty-four independent cavities retain original points and pass exhaustive
+//   physical validation. Measured checkpoint growth bounds this disconnected repair fixture; it
+//   does not establish native heat recovery, whole-task memory or arbitrary connected-mesh scaling.
 #[test]
 fn dirty_face_work_scales_with_independent_cavities_and_preserves_points() {
     check_repair_growth(false);
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: The fallback recovery repair entry retains original points and independently
+//   validates four and sixty-four disconnected cavities, with bounded checkpoint growth. This
+//   entry-point size series does not establish arbitrary connected-mesh scaling, original heat
+//   recovery or whole-task native memory.
 #[test]
 fn local_recovery_entry_scales_with_independent_cavities_and_preserves_points() {
     check_repair_growth(true);

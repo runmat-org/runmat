@@ -281,6 +281,10 @@ fn artifact_identity_excludes_the_physical_validation_manifest_layout() {
     second.validate().unwrap();
 }
 
+// witness: FEA-MESH-DISCRETIZATION-001/mesh_evidence_artifact @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: A mesh artifact and its evidence round-trip with complete canonical topology;
+//   per-stage counters and quality distributions are asserted in sibling tests.
 #[test]
 fn artifact_and_evidence_round_trip_with_complete_canonical_topology() {
     let artifact = artifact();
