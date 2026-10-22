@@ -25,9 +25,11 @@ fn profiling_does_not_validate_or_trust_claimed_topology_sizes() {
     let scratch =
         validation_scratch_bytes(&mesh.topology, mesh.resolved_request.element_order).unwrap();
     mesh.canonical_digest = StableDigest::ZERO;
-    // Digest byte values affect compact wire widths, but confer no validation
-    // authority and cannot change the topology's requested validation scratch.
+    mesh.root_stage_manifest_digest = StableDigest::ZERO;
+    // Digest byte values confer no validation authority: a zeroed seal neither fails the
+    // resource estimate nor changes it, so admission is decided before validation rejects it.
     let invalid_profile = mesh.validation_resident_bytes_estimate().unwrap();
+    assert_eq!(invalid_profile, base);
     assert!(invalid_profile >= scratch);
     assert_eq!(
         scratch,
