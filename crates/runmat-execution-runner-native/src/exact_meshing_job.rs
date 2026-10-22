@@ -111,7 +111,10 @@ pub fn mesh_exact_geometry(
     let source_region_ids = prepared_geometry.source_region_ids().clone();
     // The run's execution ceilings come from this host's capacity; the local workers must be
     // able to admit tasks of that size.
-    let ceilings = crate::machine_capacity::meshing_execution_ceilings(&job.request.limits);
+    let ceilings = match config.local_memory_capacity_bytes {
+        Some(capacity) => crate::machine_capacity::meshing_execution_ceilings_for(capacity, &job.request.limits),
+        None => crate::machine_capacity::meshing_execution_ceilings(&job.request.limits),
+    };
     config.worker_memory_bytes = config.worker_memory_bytes.max(ceilings.maximum_memory_bytes);
     config.worker_scratch_bytes = config.worker_scratch_bytes.max(ceilings.maximum_scratch_bytes);
     let (session, access, geometry) = {
