@@ -49,6 +49,11 @@ impl PreparedMeshingResultPublication {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+    //   boundary: Retained publication storage includes spare reference, object-payload, manifest and
+    //   descriptor capacities without changing canonical content. Buffer capacities, encoded lengths
+    //   and measured RSS remain separate quantities.
     #[test]
     fn retained_publication_counts_spare_capacities_without_changing_canonical_content() {
         let stage = crate::tests::fixture(vec![vec![5; 2048]], 1024);

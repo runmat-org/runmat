@@ -49,6 +49,12 @@ fn sift_down<T, E>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    // witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+    //   boundary: In-place ordering matches standard ascending and descending order across block
+    //   boundaries, and cancellation preserves the input inventory. The implementation uses no
+    //   full-size scratch buffer; this finite primitive test is not an end-to-end resource or speed
+    //   qualification.
     #[test]
     fn orders_both_directions_and_preserves_inventory_on_cancellation() {
         for length in [0, 1, 2, 127, 128, 129, 1025, 8193] {

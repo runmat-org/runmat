@@ -11,6 +11,11 @@ struct Fixture {
     parameter_exponent: u8,
     source_edge_membership: [Vec<usize>; 4],
 }
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A captured four-node facet with a rounded exact midpoint recovers both support
+//   triangles, each original boundary edge once and the interior diagonal twice. This local fixture
+//   does not discharge original-model meshing, physical quality, resource or scientific gates.
 #[test]
 fn captured_rounded_facet_recovers_every_original_edge_without_a_degenerate_ear() {
     let fixture: Fixture = serde_json::from_str(include_str!(concat!(

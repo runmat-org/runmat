@@ -1,6 +1,12 @@
 //! A diametral witness does not preclude a checked Delaunay reconnection.
 use super::*;
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: An exact five-point encroached segment reconnects using its original points and
+//   independently passes physical Delaunay validation. This bounded-cavity degeneracy fixture does
+//   not establish large-input recovery, asymptotic scaling, whole-task memory or original heat-sink
+//   acceptance.
 #[test]
 fn encroached_cospherical_edge_recovers_without_subdivision() {
     // All five points lie exactly on the sphere centered at (0, 2, 0),

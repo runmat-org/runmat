@@ -195,6 +195,11 @@ fn fluid_provenance_roundtrips_without_changing_numerical_identity() {
         fluid.numerical_identity().unwrap()
     );
 }
+// witness: FEA-SHARED-RESOURCES-001/shared_immutable_inventories @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Immutable sparse clones share support and numeric values; cold decoding preserves
+//   exact wire identity and rejects malformed shape. Transformed operators, solver workspaces and
+//   native heap measurements remain separate obligations.
 #[test]
 fn immutable_clones_share_numeric_storage_and_cold_decode_revalidates() {
     let original = RealSparseMatrix::diagonal(

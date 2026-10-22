@@ -109,7 +109,7 @@ pub(super) fn active_parameter(source: &str, span: Span, offset: usize) -> usize
 pub(super) fn symbol_kind(kind: FeaSymbolKind) -> SymbolKind {
     match kind {
         FeaSymbolKind::Function => SymbolKind::FUNCTION,
-        FeaSymbolKind::Material => SymbolKind::STRUCT,
+        FeaSymbolKind::Material | FeaSymbolKind::Table => SymbolKind::STRUCT,
         FeaSymbolKind::Study | FeaSymbolKind::Sweep | FeaSymbolKind::Execution => {
             SymbolKind::OBJECT
         }
@@ -120,7 +120,7 @@ pub(super) fn symbol_kind(kind: FeaSymbolKind) -> SymbolKind {
 pub(super) fn completion_kind(kind: FeaSymbolKind) -> CompletionItemKind {
     match kind {
         FeaSymbolKind::Function => CompletionItemKind::FUNCTION,
-        FeaSymbolKind::Material => CompletionItemKind::STRUCT,
+        FeaSymbolKind::Material | FeaSymbolKind::Table => CompletionItemKind::STRUCT,
         FeaSymbolKind::Geometry | FeaSymbolKind::Mesh | FeaSymbolKind::Model => {
             CompletionItemKind::CLASS
         }
@@ -143,6 +143,7 @@ pub(super) const fn declaration_kind_symbol(kind: FeaDeclarationKind) -> FeaSymb
         FeaDeclarationKind::Study => FeaSymbolKind::Study,
         FeaDeclarationKind::Sweep => FeaSymbolKind::Sweep,
         FeaDeclarationKind::Execution => FeaSymbolKind::Execution,
+        FeaDeclarationKind::Table => FeaSymbolKind::Table,
     }
 }
 
@@ -216,9 +217,10 @@ pub(super) const KEYWORDS: &[&str] = &[
     "layup",
     "orientation",
     "signal",
+    "table",
     "excitation",
     "response_spectrum",
     "random_excitation",
 ];
 
-const _: [(); KEYWORDS.len()] = [(); 51];
+const _: [(); KEYWORDS.len()] = [(); 52];

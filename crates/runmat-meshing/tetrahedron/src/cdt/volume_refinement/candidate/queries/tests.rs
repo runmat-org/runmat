@@ -10,6 +10,11 @@ impl MeshingCancellationSignal for Probe {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Prepared point lookup matches exhaustive coordinate equality, including signed zero
+//   and adjacent floating-point coordinates, through4096 unrelated cells with fewer than128 query
+//   probes. Preparation and complete native refinement need separate evidence.
 #[test]
 fn prepared_candidate_locations_match_exhaustive_ieee_equality_with_bounded_queries() {
     for cells in [0, 64, 4096] {
@@ -63,6 +68,12 @@ fn candidate_index_construction_and_queries_preserve_cancellation_and_original_n
     assert_eq!(topology, original);
 }
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: An interrupted multi-point index update preserves the entire original lookup;
+//   successful append matches the complete old-plus-new coordinate inventory. This checks
+//   transactional point-state reuse, not measured allocator demand or physical insertion
+//   acceptance.
 #[test]
 fn accepted_point_append_is_transactional_and_preserves_original_coordinate_lookup() {
     let topology = crate::cdt::topology::queries::tests::topology(64);

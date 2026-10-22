@@ -161,6 +161,9 @@ fn identity_profile_counts_large_selected_topology_metadata() {
     }
 }
 
+// witness: FEA-SHARED-CONSTRAINTS-001/attributable_validation @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Counted validation reports the first authored failure before later duplicates.
 #[test]
 fn counted_validation_reports_first_authored_failure_before_later_duplicates() {
     let mut structural = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference)

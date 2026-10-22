@@ -4,6 +4,12 @@ use crate::model::{
     exact_evaluator::tests::registry,
     exact_topology_tests::{model, topology},
 };
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Exact topology and evaluator validators admit typed borrowed-index and claim scratch,
+//   accept their exact observed requested peak, reject a one-byte-short ceiling and release all
+//   temporary storage across repeated queries and interruption. This measures declared component
+//   storage, not allocator overhead or whole-study residency.
 #[test]
 fn exact_validation_releases_all_scratch_between_queries_and_rejects_short_admission() {
     let topology = topology();

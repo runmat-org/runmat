@@ -3,6 +3,9 @@
 use super::*;
 use crate::physics::acoustic::canonical::tests as acoustic_tests;
 
+// witness: FEA-ACOUSTIC-NUMERICS-001/uniqueness @ acoustic_harmonic/tet4/numerical_kernel;
+//   boundary: Independent Tet4 antisymmetric discrete pole fails the factorization certificate
+//   despite a zero right-hand side; the same operator off the pole is certified.
 #[test]
 fn original_canonical_lossless_discrete_pole_fails_closed_despite_zero_rhs() {
     let model = acoustic_tests::model();

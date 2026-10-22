@@ -137,7 +137,9 @@ pub(crate) fn combine_observation_partitions(
                 ));
             }
             let values = match operation {
-                SpatialReduction::Integral => linear.into_iter().map(|sum| sum.total()).collect(),
+                SpatialReduction::Integral | SpatialReduction::NormalFlux => {
+                    linear.into_iter().map(|sum| sum.total()).collect()
+                }
                 SpatialReduction::Average => linear
                     .into_iter()
                     .map(|sum| sum.total() / measure)

@@ -197,6 +197,7 @@ fn is_acoustic(quantity: ObservationQuantity) -> bool {
         quantity,
         ObservationQuantity::AcousticPressure
             | ObservationQuantity::AcousticParticleVelocity
+            | ObservationQuantity::AcousticIntensity
             | ObservationQuantity::SoundPressureLevel
     )
 }

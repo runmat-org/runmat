@@ -473,6 +473,9 @@ fn path_extrema_return_physical_sample_locations() {
     super::publish_observation(&plan, &result, 1024).unwrap();
 }
 
+// witness: FEA-SHARED-OBSERVATIONS-001/bounded_partitioned_evaluation @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Partitioned boundary reduction matches single-partition evaluation.
 #[test]
 fn partitioned_boundary_reduction_matches_single_partition_evaluation() {
     let mut mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);

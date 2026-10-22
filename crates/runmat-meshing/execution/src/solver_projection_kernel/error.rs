@@ -134,6 +134,12 @@ mod tests {
             self.checkpoint()
         }
     }
+    // witness: FEA-SHARED-RESOURCES-001/governed_path_equivalence @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+    //   boundary: Projection retains originating deadline, allocation and cancellation failure
+    //   categories through its volume decode adapter, distinguishes malformed artifacts and preserves
+    //   the order-elevation stage. This finite control fixture does not establish full native admission
+    //   or study acceptance.
     #[test]
     fn volume_decode_preserves_original_budget_and_failure_categories() {
         for (kind, expected) in [

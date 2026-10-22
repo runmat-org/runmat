@@ -197,6 +197,7 @@ fn lower_expression(
                     AuthoredSpatialReduction::Moment { about } => {
                         SpatialReduction::Moment { about: *about }
                     }
+                    AuthoredSpatialReduction::NormalFlux => SpatialReduction::NormalFlux,
                 },
                 series: SeriesReduction::None,
                 extrema_ties: match ties {

@@ -62,6 +62,12 @@ pub(super) fn fixture() -> Fixture {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A controlled selection fixture admits one valid ready cavity at its original
+//   evaluation ceiling while leaving unresolved quality visible. A maximum batch size is not a
+//   minimum publication size; full physical convergence and original-model performance remain
+//   separate gates.
 #[test]
 fn valid_partial_batch_is_admitted_at_the_original_evaluation_ceiling() {
     let fixture = fixture();
@@ -103,6 +109,11 @@ fn valid_partial_batch_is_admitted_at_the_original_evaluation_ceiling() {
     );
 }
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A cooperative handoff retains the accepted insertion and unresolved quality without
+//   labeling the intermediate checkpoint converged. This verifies owner handoff, not a completed
+//   original-model mesh.
 #[test]
 fn cooperative_checkpoint_retains_progress_and_unresolved_quality() {
     let fixture = fixture();
@@ -131,6 +142,12 @@ fn cooperative_checkpoint_retains_progress_and_unresolved_quality() {
         .is_some());
 }
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: When shape blocks floor-preserving insertion, the checkpoint moves the unchanged
+//   original topology to the shape owner and matches independently recomputed quality. Unchanged
+//   allocation pointers are bookkeeping evidence; complete shape repair and resource qualification
+//   remain separate.
 #[test]
 fn shape_blocked_checkpoint_preserves_original_state_for_the_shape_owner() {
     let topology = topology([[0., 0., 0.], [1., 0., 0.], [0., 1., 0.], [0.2, 0.2, 1e-9]]);

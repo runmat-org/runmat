@@ -88,6 +88,10 @@ impl<F> CoupledSchedule<F> {
 mod tests {
     use super::{RefinementStep::*, RepairStep::*, *};
 
+    // witness: FEA-MESH-DISCRETIZATION-001/volume_quality_convergence @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+    //   boundary: A failed source window yields to repair and a rejected repair resumes refinement;
+    //   fairness on real parts is not asserted.
     #[test]
     fn failed_source_window_yields_and_rejected_repair_resumes_refinement() {
         let mut schedule = CoupledSchedule::default();

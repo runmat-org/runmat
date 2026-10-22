@@ -57,13 +57,14 @@ impl CanonicalAcousticStatePayload {
         self.fields
             .validate()
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
-        let [pressure, velocity] = self.fields.fields() else {
+        let [pressure, velocity, intensity] = self.fields.fields() else {
             return Err(invalid(
-                "acoustic state requires exactly pressure and particle-velocity fields",
+                "acoustic state requires exactly pressure, particle-velocity and intensity fields",
             ));
         };
         validate_portable_field(pressure.storage())?;
         validate_portable_field(velocity.storage())?;
+        validate_portable_field(intensity.storage())?;
         let expected_plan = crate::execution::acoustic::native_acoustic_field_plan(
             self.ordered_node_ids.len(),
             self.ordered_element_ids.len(),

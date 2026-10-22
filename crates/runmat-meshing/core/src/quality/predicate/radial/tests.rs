@@ -10,6 +10,11 @@ fn point(id: u8, coordinates: [f64; 3]) -> SpatialPredicatePoint {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Exact radial ordering distinguishes equal and adjacent binary64 radii against an
+//   independent 3-4-5 radius at scales 2^-600, 1 and 2^600. This component arithmetic witness
+//   establishes neither recovery termination nor native task work, memory or timing.
 #[test]
 fn radial_ordering_resolves_equal_and_adjacent_radii_without_overflow() {
     for scale in [2.0_f64.powi(-600), 1., 2.0_f64.powi(600)] {

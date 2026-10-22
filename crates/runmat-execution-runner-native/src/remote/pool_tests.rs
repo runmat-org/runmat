@@ -2004,6 +2004,11 @@ end
     }
 }
 
+// witness: FEA-SHARED-EXECUTION-001/collective_failure_and_epoch_fencing @
+//   shared_infrastructure/canonical_mixed_topology/remote_execution; coverage: partial;
+//   boundary: A remote rank failure releases a peer blocked in a collective within five seconds and
+//   surfaces the primary structured error with its source ordinal; SPMD runtime program, not a
+//   numerical solve.
 #[tokio::test]
 async fn remote_rank_failure_releases_a_peer_blocked_in_a_collective() {
     let program = compile_spmd_region_bundle(

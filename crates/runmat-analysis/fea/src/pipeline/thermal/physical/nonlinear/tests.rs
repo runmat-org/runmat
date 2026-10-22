@@ -32,6 +32,9 @@ fn assert_acceptance(result: &FeaThermalRunResult, solved: usize) {
     result.validate_complete().unwrap();
 }
 
+// witness: FEA-THERMAL-SOLVE-001/steady @ thermal_steady/tet4|tet10/public_study;
+//   boundary: Tet4/Tet10 fixed-hot slab against independent scalar bisection; original fields,
+//   power and retained nonlinear evidence checked.
 #[test]
 fn fixed_hot_slab_matches_independent_gray_surface_scalar_equilibrium() {
     // Exact continuum T is linear. Independent monotone bisection solves the surface law,

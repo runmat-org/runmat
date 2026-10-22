@@ -1,6 +1,13 @@
 //! Complete independent checks after every insertion in an admitted prefix.
 use super::*;
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Six successive insertions into a construction-verified physical prefix discharge each
+//   exactly checked neighborhood before the next point. Every prefix passes independent exhaustive
+//   empty-sphere and complete topology validation. This bounded component case does not establish
+//   arbitrary feature recovery, connected-mesh scaling, whole native admission, measured resource
+//   use or durable study results.
 #[test]
 fn admitted_insertions_discharge_each_changed_neighborhood_before_the_next_point() {
     let options = DelaunayInsertionOptions::default();

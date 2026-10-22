@@ -88,6 +88,11 @@ impl Cache {
             .unwrap();
     }
 }
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A feasible 1,024-receipt working set survives publication with one inventory
+//   discovery, and a cold owner preserves the set. This finite metadata fixture does not certify
+//   arbitrary model throughput, cache hit rate or whole-study memory.
 #[test]
 fn cache_lifecycle_retains_feasible_working_set_beyond_256_without_per_stage_discovery() {
     let cache = Cache::new();
@@ -103,6 +108,11 @@ fn cache_lifecycle_retains_feasible_working_set_beyond_256_without_per_stage_dis
     assert_eq!(cold.discoveries, 1);
     assert_eq!(std::fs::read_dir(&cache.index).unwrap().count(), 1025);
 }
+// witness: FEA-SHARED-RESOURCES-001/shared_immutable_inventories @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Serialized writers invalidate stale inventories, interrupted publication reconciles
+//   durable receipts, and unreferenced objects are reclaimed. This fixture does not independently
+//   qualify the numerical contents, transport or complete native study.
 #[test]
 fn cache_lifecycle_reconciles_other_writers_and_interrupted_publications() {
     let cache = Cache::new();

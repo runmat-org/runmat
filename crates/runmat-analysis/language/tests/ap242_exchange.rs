@@ -9,6 +9,10 @@ use runmat_geometry_core::{
 };
 use support::{source_module, TestHost};
 
+// witness: FEA-AUTHORING-GEOMETRY-002/ap242_exchange @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Imported CAD parameters resolve to exact typed source facts; other AP242 content
+//   (constraints, associations) is covered by the profile tests.
 #[test]
 fn imported_cad_parameters_resolve_exact_typed_source_facts() {
     let source = r#"
@@ -66,6 +70,10 @@ geometry copy {
     );
 }
 
+// witness: FEA-AUTHORING-GEOMETRY-002/cad_parameter_admission @
+//   shared_infrastructure/mesh_independent/source_check;
+//   boundary: Fixture host parameter metadata: wrong dimensions/unqualified write rejection only;
+//   no CAD kernel regeneration.
 #[test]
 fn imported_cad_parameters_reject_wrong_dimensions_and_unqualified_writes() {
     for (physical_type, access, expected) in [
@@ -98,6 +106,10 @@ geometry part {{
     }
 }
 
+// witness: FEA-AUTHORING-GEOMETRY-002/qualified_parameter_regeneration @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Source regeneration fails at check without a qualified write capability; the
+//   qualified success path is not exercised.
 #[test]
 fn source_regeneration_fails_during_checking_without_qualified_write_capability() {
     let source = r#"
@@ -174,6 +186,14 @@ geometry changed from geometry.part {
     assert_eq!(program.geometries.len(), 1);
 }
 
+// witness: FEA-AUTHORING-GEOMETRY-002/explicit_material_adoption @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: CAD material adoption is explicit, typed and provenance-bearing; mapping to every
+//   constitutive law is not covered.
+// witness: FEA-AUTHORING-GEOMETRY-002/adopted_property_provenance @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Adopted properties retain provenance; entity ids, document references and uncertainty
+//   are not all asserted.
 #[test]
 fn cad_material_adoption_is_explicit_typed_and_provenance_bearing() {
     let source = r#"

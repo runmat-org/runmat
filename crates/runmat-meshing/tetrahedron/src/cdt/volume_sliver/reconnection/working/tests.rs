@@ -4,6 +4,12 @@ use crate::cdt::volume_sliver::{admission, working::WorkingState};
 use crate::cdt::{test_fixtures::coupled_quality, volume_quality::working::PreparedLocalQuality};
 use runmat_meshing_core::NeverCancelled;
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Coupled direct reconnection is compared with complete-topology quality arithmetic
+//   across scoped-metric candidate cells and identity permutations. Actual changed-cell spectra
+//   decide selection; source-tensor proposal order supplies no final ranking authority. Standalone
+//   first-admissible behavior remains a separate contract.
 #[test]
 fn coupled_direct_reconnection_selects_the_best_actual_cell_spectrum() {
     let mut checked = 0;

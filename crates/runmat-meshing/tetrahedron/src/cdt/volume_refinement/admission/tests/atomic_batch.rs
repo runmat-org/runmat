@@ -29,6 +29,11 @@ impl tracing::Subscriber for StopAfterPoint {
     fn exit(&self, _: &tracing::span::Id) {}
 }
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Cancellation after a real provisional point restores the complete original topology
+//   and quality under uniform and scoped metrics. It does not certify every cancellation boundary,
+//   CAD publication or whole-task quiescence.
 #[test]
 fn cancellation_after_provisional_point_restores_complete_topology_and_quality() {
     for scoped in [false, true] {

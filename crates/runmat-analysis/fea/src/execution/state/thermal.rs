@@ -296,6 +296,9 @@ mod tests {
         assert_eq!(identity, portable.source_result_identity().unwrap());
     }
 
+    // witness: FEA-SHARED-SEQUENCES-001/complete_immutable_state_publication @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+    //   boundary: A completed thermal result publishes an immutable topology-bound terminal state.
     #[test]
     fn completed_thermal_result_publishes_immutable_topology_bound_terminal_state() {
         let (model, mesh, result) = solved_thermal();
@@ -475,6 +478,10 @@ mod tests {
         assert_eq!(state.payload.thermal().unwrap().temperature.shape, vec![4]);
     }
 
+    // witness: FEA-SHARED-SEQUENCES-001/distinct_completed_state_kinds @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+    //   boundary: A completed thermal state binds authored static thermoelastic reuse; structural and
+    //   fluid state kinds are separate.
     #[test]
     fn completed_thermal_state_binds_authored_static_thermoelastic_reuse() {
         let mut model = fixture_model(FixtureId::CantileverLinearStatic);

@@ -434,6 +434,7 @@ fn declaration_kind(kind: runmat_parser::fea::FeaDeclarationKind) -> FeaSymbolKi
         runmat_parser::fea::FeaDeclarationKind::Study => FeaSymbolKind::Study,
         runmat_parser::fea::FeaDeclarationKind::Sweep => FeaSymbolKind::Sweep,
         runmat_parser::fea::FeaDeclarationKind::Execution => FeaSymbolKind::Execution,
+        runmat_parser::fea::FeaDeclarationKind::Table => FeaSymbolKind::Table,
     }
 }
 

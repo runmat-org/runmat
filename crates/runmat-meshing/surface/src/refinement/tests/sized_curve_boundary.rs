@@ -1,5 +1,11 @@
 use super::*;
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Off-edge size-only refinement preserves a sizing-valid exact curve, including
+//   reversed uses. Geometric-error candidates, on-edge points and oversized protected edges still
+//   require shared splits. Final face quality and complete CAD conformity require independent
+//   checks.
 #[test]
 fn sized_curve_allows_off_edge_size_refinement_but_retains_required_shared_splits() {
     let (document, topology, registry) = runmat_geometry_fixtures::exact_circle();

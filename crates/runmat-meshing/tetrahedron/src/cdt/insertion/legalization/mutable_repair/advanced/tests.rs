@@ -102,6 +102,13 @@ impl MeshingCancellationSignal for Checkpoints {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Captured four-to-four geometry repairs one dirty physical neighborhood with equal
+//   checkpoint work across 4/64 disconnected neighborhoods, after explicit index startup. Preserves
+//   point constructions and passes independent whole-result empty-sphere validation. Does not
+//   establish arbitrary neighborhood/valence/depth bounds, cold-index locality, full native timing
+//   or whole-task admission.
 #[test]
 fn advanced_physical_repair_is_local_and_independently_admitted() {
     let mut counts = Vec::new();
@@ -130,6 +137,12 @@ fn advanced_physical_repair_is_local_and_independently_admitted() {
     );
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Cancellation at every exercised checkpoint of a captured advanced physical-repair
+//   trial restores the original canonical topology and dirty inventory; a complete retry succeeds.
+//   Does not establish remote cancellation, fenced publication, arbitrary repair paths or
+//   whole-task resource/performance acceptance.
 #[test]
 fn advanced_physical_repair_cancellation_preserves_the_original_trial() {
     let original = changed(1);

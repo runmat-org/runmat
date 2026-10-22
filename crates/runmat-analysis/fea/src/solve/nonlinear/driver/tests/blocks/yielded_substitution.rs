@@ -1,6 +1,10 @@
 //! Rehashing checks byte integrity, not original provenance or physical history.
 use super::*;
 
+// witness: FEA-NONLINEAR-STATE-001/cold_validation @
+//   small_strain_j2/tet4|tet10/prepared_controller;
+//   boundary: Rehashed yielded history substitution requires physical validation, beyond content
+//   hashes.
 #[test]
 fn rehashed_cold_yielded_history_requires_physical_validation() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {

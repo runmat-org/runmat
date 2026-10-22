@@ -2,6 +2,11 @@ use super::*;
 use runmat_meshing_size::metric::MetricTensor3;
 use std::cell::Cell;
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Prepared edge-star children match separately evaluated child geometry and resolve
+//   each child scope once across 128 repeated probes. The complete trial still rederives graded
+//   size and quality; this local-work check is not a whole-task memory or speedup claim.
 #[test]
 fn split_probes_resolve_each_child_scope_once() {
     let (topology, _) = crate::cdt::volume_sliver::tests::interior_sliver_fixture();

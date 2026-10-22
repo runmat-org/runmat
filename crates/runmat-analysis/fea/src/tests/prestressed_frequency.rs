@@ -166,6 +166,11 @@ fn direct_case(
     (workload, mesh, state, request)
 }
 
+// witness: FEA-DYNAMICS-PRESTRESS-001/complete_base_operator @
+//   prestressed_structural/tet4/numerical_kernel;
+//   boundary: Fixed direct entry fixture compares preload response ordering and residual, canonical
+//   result roundtrip, and substituted topology rejection. No independent buckling reference,
+//   nonlinear producer or generic stability qualification.
 #[test]
 fn prestressed_direct_harmonic_uses_the_exact_tangent_and_rejects_state_substitution() {
     let solve = |force| {

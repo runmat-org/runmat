@@ -48,6 +48,11 @@ impl MeshingSubtaskCacheStore for Store {
         Ok(true)
     }
 }
+// witness: FEA-SHARED-RESOURCES-001/shared_immutable_inventories @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Fresh provider instances reuse original sizing without rederivation; changed curve
+//   quality forces fresh preparation. The shared in-memory store exercises process-independent
+//   interfaces, not filesystem persistence or complete native execution.
 #[test]
 fn fresh_workers_reuse_original_metric_and_changed_quality_invalidates_it() {
     let geometry = geometry();
@@ -74,6 +79,10 @@ fn fresh_workers_reuse_original_metric_and_changed_quality_invalidates_it() {
     load(&request);
     assert_eq!(count.load(Ordering::Relaxed), 2);
 }
+// witness: FEA-SHARED-RESOURCES-001/governed_path_equivalence @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Cold sizing rejects understated decoded inventory and a foreign embedded identity.
+//   Numerical accuracy and whole-task storage require their own evidence.
 #[test]
 fn stored_metric_must_fit_its_admitted_inventory_and_embedded_identity() {
     let geometry = geometry();
@@ -113,6 +122,11 @@ fn stored_metric_must_fit_its_admitted_inventory_and_embedded_identity() {
     );
 }
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: The production metric cache encoder releases its temporary workspace across repeated
+//   writes of the same original metric. This does not independently establish native cache
+//   throughput.
 #[test]
 fn repeated_metric_encoding_releases_temporary_storage() {
     use crate::MeshingGeometryEvaluationControl;
@@ -146,6 +160,12 @@ fn repeated_metric_encoding_releases_temporary_storage() {
     assert!(control.usage().allocation_bytes > 0);
 }
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Fresh and cold prepared metrics retain only their reported carrier inventory without
+//   retaining construction scratch or hostile-decoder workspace. Their vector capacities can
+//   legitimately differ. This finite component witness does not establish whole-study memory or
+//   arbitrary CAD throughput.
 #[test]
 fn fresh_and_cold_metric_retention_excludes_preparation_scratch() {
     use crate::MeshingGeometryEvaluationControl;

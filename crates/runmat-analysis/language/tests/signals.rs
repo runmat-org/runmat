@@ -75,6 +75,11 @@ model invalid {
     }));
 }
 
+// witness: FEA-AUTHORING-LANGUAGE-002/frozen_function_inputs @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: An imported .m generator binds source and typed sampling (range, rate, interpolation,
+//   extrapolation, tolerance) with typed arguments; capture provenance and effect policy are not
+//   asserted here.
 #[test]
 fn generated_signal_binds_imported_source_and_typed_sampling() {
     let source = r#"

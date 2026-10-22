@@ -63,6 +63,11 @@ fn compact_metrics_match_complete_indexed_resolution_and_grading_exactly() {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/shared_immutable_inventories @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Uniform metric contexts stream one cell at a time and match every original context
+//   and complete quality report. This does not measure allocator footprint, scoped graph demand or
+//   native study acceptance.
 #[test]
 fn streamed_uniform_contexts_preserve_every_original_cell_and_complete_quality() {
     let topology = topology();

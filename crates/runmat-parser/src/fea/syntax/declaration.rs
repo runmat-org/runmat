@@ -31,6 +31,8 @@ pub enum FeaDeclarationKind {
     Study,
     Sweep,
     Execution,
+    /// A named quantity over a domain, e.g. `table z : impedance over frequency { ... }`.
+    Table,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

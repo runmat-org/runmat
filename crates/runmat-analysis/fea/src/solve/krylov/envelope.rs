@@ -175,6 +175,9 @@ mod tests {
             Err(GmresEnvelopeError::ArithmeticOverflow)
         );
     }
+    // witness: FEA-SHARED-OPERATORS-001/compatible_solver_and_preconditioner_selection @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+    //   boundary: An invalid policy is rejected before any operator or reduction.
     #[test]
     fn invalid_policy_is_rejected_by_solver_before_any_operator_or_reduction() {
         let calls = Cell::new(0);

@@ -1,4 +1,8 @@
 use super::*;
+// witness: FEA-CONTACT-OPERATOR-001/friction_tangent_history @
+//   penalty_coulomb_contact/tet4|tet10/numerical_kernel; coverage: partial;
+//   boundary: Complete stick and slip tangents include frame terms and match residual changes for
+//   both element orders.
 #[test]
 fn complete_stick_and_slip_tangents_include_frame_terms_and_match_residual_changes() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {

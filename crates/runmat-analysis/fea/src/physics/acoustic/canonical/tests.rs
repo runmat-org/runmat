@@ -301,7 +301,7 @@ fn canonical_acoustics_rejects_invalid_frequency_and_material_attenuation() {
         ),
         Err(AcousticHarmonicError::InvalidInput(_))
     ));
-    model.materials[0].acoustic.as_mut().unwrap().damping_ratio = 0.01;
+    model.materials[0].acoustic.as_mut().unwrap().damping_ratio = 1.5;
     assert!(matches!(
         solve_canonical_harmonic(
             &model,
@@ -311,8 +311,89 @@ fn canonical_acoustics_rejects_invalid_frequency_and_material_attenuation() {
             AcousticHarmonicPolicy::default(),
             1e-8,
         ),
-        Err(AcousticHarmonicError::Unsupported(_))
+        Err(AcousticHarmonicError::Material(_))
     ));
+}
+
+/// Complex arithmetic for the closed-form damped standing wave.
+#[derive(Clone, Copy)]
+struct C(f64, f64);
+impl C {
+    fn mul(self, o: C) -> C {
+        C(self.0 * o.0 - self.1 * o.1, self.0 * o.1 + self.1 * o.0)
+    }
+    fn div(self, o: C) -> C {
+        let d = o.0 * o.0 + o.1 * o.1;
+        C((self.0 * o.0 + self.1 * o.1) / d, (self.1 * o.0 - self.0 * o.1) / d)
+    }
+    fn sqrt(self) -> C {
+        let r = self.0.hypot(self.1).sqrt();
+        let t = self.1.atan2(self.0) / 2.0;
+        C(r * t.cos(), r * t.sin())
+    }
+    fn cos(self) -> C {
+        C(self.0.cos() * self.1.cosh(), -self.0.sin() * self.1.sinh())
+    }
+}
+
+// witness: FEA-ACOUSTIC-BOUNDARY-002/region_damping @ acoustic_harmonic/tet4/numerical_kernel;
+//   coverage: partial;
+//   boundary: A linear-mesh duct with damping ratio 0.05 converges (error ratio above 3 per refinement, below
+//   0.004 at 8 cells) to the complex-wavenumber standing wave and the driven end supplies exactly the
+//   dissipated power; Tet10, the transient formulation and damping in the CLI are not covered.
+#[test]
+fn damped_duct_converges_to_the_complex_wavenumber_standing_wave_and_dissipates_its_input() {
+    // Loss factor η = 2ζ: c̃ = c√(1 + iη), k̃ = ω/c̃, p = cos(k̃(1 − x))/cos(k̃).
+    let (zeta, c, f) = (0.05, 2.0, 0.2);
+    let omega = std::f64::consts::TAU * f;
+    let k = C(omega, 0.0).div(C(c, 0.0).mul(C(1.0, 2.0 * zeta).sqrt()));
+    let mut errors = Vec::new();
+    for cells in [2, 4, 8] {
+        let mesh = slab_mesh(cells);
+        let mut model = model();
+        model.materials[0].acoustic.as_mut().unwrap().damping_ratio = zeta;
+        model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+        prescribe(&mut model, RegionTarget::boundary("slab_left"), 1.0);
+        model.boundaries.push(AnalysisBoundary {
+            boundary_id: "rigid".into(),
+            target: RegionTarget::boundary("slab_right"),
+            operator: BoundaryOperator::AcousticRigidWall,
+        });
+        let result = solve_canonical_harmonic(
+            &model,
+            &mesh,
+            "acoustic",
+            Frequency::new(f),
+            AcousticHarmonicPolicy {
+                relative_tolerance: 1e-11,
+                ..Default::default()
+            },
+            1e-8,
+        )
+        .unwrap();
+        let denominator = k.cos();
+        let error = (result
+            .projection
+            .nodes
+            .iter()
+            .zip(&result.pressure_pa)
+            .map(|(node, p)| {
+                let exact = k.mul(C(1.0 - node.coordinates_m[0], 0.0)).cos().div(denominator);
+                (p.real - exact.0).powi(2) + (p.imaginary - exact.1).powi(2)
+            })
+            .sum::<f64>()
+            / result.pressure_pa.len() as f64)
+            .sqrt();
+        errors.push(error);
+        // The driven end supplies exactly the power the lossy air dissipates.
+        assert!(result.mean_impedance_loss_w > 0.0);
+        assert!(result.power_relative_error < 1e-9);
+    }
+    assert!(
+        errors.windows(2).all(|pair| pair[0] / pair[1] > 3.0),
+        "{errors:?}"
+    );
+    assert!(errors[2] < 0.004, "{errors:?}");
 }
 
 #[test]
@@ -521,3 +602,83 @@ fn pressure_velocity_overlap_is_rejected_in_both_authored_orders() {
     }
 }
 mod periodic;
+
+// witness: FEA-ACOUSTIC-BOUNDARY-002/complex_frequency_dependent_impedance @
+//   acoustic_harmonic/tet4/numerical_kernel; coverage: partial;
+//   boundary: A complex impedance termination on a linear-mesh duct converges to the two-wave duct solution
+//   with power closure; frequency tables and the Delany-Bazley porous layer are not covered by this test.
+#[test]
+fn complex_impedance_termination_converges_to_the_two_wave_duct_solution() {
+    // p(0) = 1, p(L) = Z v_n(L), iωρ v = −∂p/∂x: p = A e^{−ikx} + B e^{ikx}.
+    let (rho, c, f) = (3.0, 2.0, 0.2);
+    let omega = std::f64::consts::TAU * f;
+    let k = omega / c;
+    let (r, x) = (rho * c * 0.6, -rho * c * 0.8);
+    let z = C(r, x);
+    let e = |phase: f64| C(phase.cos(), phase.sin());
+    // At x = 1: p = A e⁻ + B e⁺, p' = −ik A e⁻ + ik B e⁺, and p + Z p'/(iωρ) = 0.
+    // With A + B = 1: A (e⁻ − (Z k/(ωρ)) e⁻) + B (e⁺ + (Z k/(ωρ)) e⁺) = 0.
+    let zk = z.mul(C(k / (omega * rho), 0.0));
+    let (em, ep) = (e(-k), e(k));
+    let a_coefficient = em.mul(C(1.0 - zk.0, -zk.1));
+    let b_coefficient = ep.mul(C(1.0 + zk.0, zk.1));
+    // A = b/(b − a), B = −a/(b − a)
+    let denominator = C(b_coefficient.0 - a_coefficient.0, b_coefficient.1 - a_coefficient.1);
+    let a = b_coefficient.div(denominator);
+    let b = C(-a_coefficient.0, -a_coefficient.1).div(denominator);
+    let exact = |position: f64| {
+        let left = a.mul(e(-k * position));
+        let right = b.mul(e(k * position));
+        C(left.0 + right.0, left.1 + right.1)
+    };
+    let mut errors = Vec::new();
+    for cells in [2, 4, 8] {
+        let mesh = slab_mesh(cells);
+        let mut model = model();
+        model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+        prescribe(&mut model, RegionTarget::boundary("slab_left"), 1.0);
+        model.boundaries.push(AnalysisBoundary {
+            boundary_id: "lined_end".into(),
+            target: RegionTarget::boundary("slab_right"),
+            operator: BoundaryOperator::AcousticImpedanceLaw {
+                law: runmat_analysis_core::AcousticImpedanceLaw::Table {
+                    frequencies_hz: vec![0.1, 0.3],
+                    resistance_pa_s_per_m: vec![r, r],
+                    reactance_pa_s_per_m: vec![x, x],
+                },
+            },
+        });
+        let result = solve_canonical_harmonic(
+            &model,
+            &mesh,
+            "acoustic",
+            Frequency::new(f),
+            AcousticHarmonicPolicy {
+                relative_tolerance: 1e-11,
+                ..Default::default()
+            },
+            1e-8,
+        )
+        .unwrap();
+        let error = (result
+            .projection
+            .nodes
+            .iter()
+            .zip(&result.pressure_pa)
+            .map(|(node, p)| {
+                let exact = exact(node.coordinates_m[0]);
+                (p.real - exact.0).powi(2) + (p.imaginary - exact.1).powi(2)
+            })
+            .sum::<f64>()
+            / result.pressure_pa.len() as f64)
+            .sqrt();
+        errors.push(error);
+        assert!(result.mean_impedance_loss_w > 0.0);
+        assert!(result.power_relative_error < 1e-9);
+    }
+    assert!(
+        errors.windows(2).all(|pair| pair[0] / pair[1] > 3.0),
+        "{errors:?}"
+    );
+    assert!(errors[2] < 0.004, "{errors:?}");
+}

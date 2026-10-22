@@ -26,6 +26,13 @@ impl GeometryEvaluationControl for Control {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Portable exact cylindrical derivatives pass through occurrence transforms, principal
+//   physical directions and the production source derivation. Three translated/rotated placements
+//   preserve the flat extrusion direction, refine curved directions, and retain deterministic cold
+//   request identity. No complete CAD surface, volume, PDE or native study acceptance is
+//   established.
 #[test]
 fn cylindrical_curvature_refines_the_cross_section_without_refining_the_extrusion_axis() {
     for (transform, axis, radial) in [

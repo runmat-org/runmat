@@ -76,6 +76,12 @@ mod tests {
             Ok(())
         }
     }
+    // witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+    //   boundary: Actual vector capacity fits the admitted boundary-segment count for first and
+    //   repeated insertions. A one-byte shortage rejects before allocation; exceeding the count cannot
+    //   grow storage. This establishes typed scratch capacity admission, excluding allocator headers
+    //   and whole-process RSS, not whole-model throughput or scientific acceptance.
     #[test]
     fn boundary_capacity_is_reserved_before_allocation_and_cannot_grow_past_the_boundary() {
         let (_, topology, _) = runmat_geometry_fixtures::exact_tetrahedron();

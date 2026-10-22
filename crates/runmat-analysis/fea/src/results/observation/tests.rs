@@ -2381,6 +2381,9 @@ fn history_bounds_and_coordinates_fail_closed_before_publication() {
     );
 }
 
+// witness: FEA-SHARED-OBSERVATIONS-001/bounded_partitioned_evaluation @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Invalid and unbounded requests fail before field evaluation.
 #[test]
 fn invalid_and_unbounded_requests_fail_before_field_evaluation() {
     let projection = projection(ElementOrder::Tet4);
@@ -2670,6 +2673,9 @@ fn result_identity(
     AnalysisResultIdentity::new(workload, vec![Digest::sha256("output")]).unwrap()
 }
 
+// witness: FEA-SHARED-IDENTITY-001/distinct_identity_layers @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Output and accuracy changes do not invalidate solver identity layers.
 #[test]
 fn output_and_accuracy_changes_do_not_invalidate_solver_layers() {
     let mut baseline = fixture_model(FixtureId::CantileverLinearStatic);

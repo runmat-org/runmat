@@ -1,26 +1,21 @@
 //! Standing cross-family acceptance with explicit domain boundaries. Required envelopes
 //! without a discovered witness remain open; declarations never imply a test verdict.
 use crate::requirement::*;
-const KERNEL: &[Envelope] = &[envelope(
-    Formulation::SharedInfrastructure,
-    MeshOrder::CanonicalMixedTopology,
-    ExecutionEnvelope::SerialCpuNumericalKernel,
-)];
 const ALL: &[Envelope] = &[
     envelope(
         Formulation::SharedInfrastructure,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::SharedInfrastructure,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::SharedInfrastructure,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::SerialCpuNativeProcess,
+        ExecutionEnvelope::NativeProcess,
     ),
     envelope(
         Formulation::SharedInfrastructure,
@@ -30,12 +25,17 @@ const ALL: &[Envelope] = &[
     envelope(
         Formulation::SharedInfrastructure,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::EncryptedRemote,
+        ExecutionEnvelope::RemoteExecution,
     ),
     envelope(
         Formulation::SharedInfrastructure,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::PartitionedCpu,
+        ExecutionEnvelope::ParallelCpu,
+    ),
+    envelope(
+        Formulation::SharedInfrastructure,
+        MeshOrder::CanonicalMixedTopology,
+        ExecutionEnvelope::DomainDecomposed,
     ),
     envelope(
         Formulation::SharedInfrastructure,

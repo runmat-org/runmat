@@ -129,6 +129,11 @@ mod tests {
             Ok(())
         }
     }
+    // witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+    //   boundary: Indexed membership matches the direct robust orientation walk on interior, boundary
+    //   and exterior points over 1,024 disconnected regions with bounded local work. This is finite
+    //   domain-search evidence, not independent CAD or PDE qualification.
     #[test]
     fn domain_index_preserves_direct_membership_and_local_search_work() {
         let mut geometry = crate::refinement::tests::geometry([2.0, 1.0, 1.0], 0.5, 1.0, 0.0, 0.0);

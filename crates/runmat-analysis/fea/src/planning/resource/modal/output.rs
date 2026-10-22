@@ -49,6 +49,12 @@ pub(in crate::planning::resource) fn result_output(
 #[cfg(test)]
 mod tests {
     use super::*;
+    // witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+    //   boundary: A60000DOF/256vector/3residual numeric output shape retains the complete
+    //   search-capacity bound and conservative metadata while avoiding the unknown-shape byte
+    //   multiplier. This count-only planning witness does not establish an eigensolve, physical
+    //   convergence or whole-task capacity.
     #[test]
     fn full_search_capacity_does_not_treat_every_numeric_byte_as_a_map_node() {
         let values = super::super::modal_output_value_count(60_000, 256, 3).unwrap();

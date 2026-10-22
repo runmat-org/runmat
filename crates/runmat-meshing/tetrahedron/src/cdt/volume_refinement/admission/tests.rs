@@ -16,6 +16,11 @@ mod atomic_batch;
 mod source_metric_reference;
 use source_metric_reference::legacy_source_metric_floor;
 
+// witness: FEA-SHARED-RESOURCES-001/governed_path_equivalence @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: An actual cavity trial rejected by the source-metric proxy improves complete
+//   resolved-field quality and matches independent recomputation. This finite counterexample
+//   establishes neither arbitrary geometry convergence nor complete study acceptance.
 #[test]
 fn complete_metric_trial_retains_independent_improvement_rejected_by_source_metric_proxy() {
     let mut witnessed = 0;

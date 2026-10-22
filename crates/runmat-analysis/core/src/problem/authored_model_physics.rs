@@ -130,6 +130,9 @@ pub enum AuthoredBoundaryKind {
     AcousticImpedance {
         impedance: SpecificAcousticImpedance,
     },
+    AcousticImpedanceLaw {
+        law: super::acoustic_impedance::AcousticImpedanceLaw,
+    },
     FluidOutletPressure {
         value: PrescribedValue<Pressure>,
     },
@@ -234,6 +237,7 @@ impl AuthoredBoundary {
             AuthoredBoundaryKind::AcousticImpedance { impedance } => {
                 impedance.is_finite() && impedance.pascal_seconds_per_meter > 0.0
             }
+            AuthoredBoundaryKind::AcousticImpedanceLaw { law } => law.is_valid(),
             _ => true,
         };
         valid

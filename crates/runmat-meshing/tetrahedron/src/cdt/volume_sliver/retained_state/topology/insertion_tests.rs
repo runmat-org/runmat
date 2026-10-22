@@ -57,6 +57,15 @@ fn split(topology: &DelaunayVolumeTopology, identity: StableDigest) -> DelaunayV
     .unwrap()
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Physical one-cell insertion and compound insertion with zero or 64 unrelated cells
+//   retain only added nodes and exact changed cell records. Inserted identities precede, interleave
+//   or follow the baseline node order; materialization restores complete coordinates, orientation,
+//   neighbors, assigned regions and incidence. Independently evaluated quality and both priority
+//   spectra reconstruct exactly. Changed or removed baseline nodes, cancellation and the unchanged
+//   node ceiling reject. This component witness does not establish arbitrary mutation locality,
+//   sublinear work, whole-task native memory or quality convergence.
 #[test]
 fn inserted_node_patches_restore_physical_topology_quality_and_rank_across_index_shifts() {
     for unrelated in [0, 64] {

@@ -120,6 +120,38 @@ impl AcousticResponseSolverResult {
         .map_err(invalid)
     }
 
+    /// The run's public fields: one pressure field per retained sample, named by its sample
+    /// (`acoustic.mode_shape.<mode>` for cavity modes, `acoustic.pressure.time.<n>` for the
+    /// n-th retained transient time), then the run-level series. Field IDs are unique per run.
+    pub fn published_fields(&self) -> AnalysisExecutionResult<Vec<AnalysisField>> {
+        let request = self.native_field_request_from_result()?;
+        let mut fields = Vec::with_capacity(self.samples().len() + 4);
+        for (ordinal, field) in self
+            .recover_native_fields_from_result(&request)?
+            .into_fields()
+            .into_iter()
+            .enumerate()
+        {
+            let field_id = match field.sample() {
+                crate::results::field::RecoveredFieldSample::ModeIndex(mode) => {
+                    format!("acoustic.mode_shape.{mode}")
+                }
+                crate::results::field::RecoveredFieldSample::TimeSeconds(_) => {
+                    format!("{ACOUSTIC_PRESSURE_FIELD_ID}.time.{}", ordinal + 1)
+                }
+                _ => return Err(invalid("acoustic response sample is a mode or a time")),
+            };
+            let storage = field.into_storage();
+            fields.push(AnalysisField {
+                field_id,
+                shape: storage.shape,
+                values: storage.values,
+            });
+        }
+        fields.extend(self.summary_fields());
+        Ok(fields)
+    }
+
     /// Run-level scalar series published beside the pressure samples: natural frequencies for
     /// cavity modes (`modal.frequency_hz`, the structural modal public shape), or time points and
     /// acoustic energy for a transient.

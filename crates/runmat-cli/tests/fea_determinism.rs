@@ -101,6 +101,15 @@ fn collect_state_digests(directory: &Path, digests: &mut Vec<String>) {
     }
 }
 
+// witness: FEA-PUBLIC-RESULTS-001/result_digest_determinism @
+//   shared_infrastructure/canonical_mixed_topology/public_study; coverage: partial;
+//   boundary: A loaded structural static study run through the CLI repeatedly and with explicit
+//   worker and thread counts (1x1, 4x1, 2x4) gives identical mesh identity, solver-state content
+//   digests and assessed scalar bits; one study, one platform.
+// witness: FEA-SCALE-PARALLEL-001/thread_count_determinism @
+//   linear_structural/canonical_tetrahedra/parallel_cpu; coverage: partial;
+//   boundary: The loaded static box study gives bit-identical state digests and assessed values at
+//   1, 4 and 8 total threads through the public command; other families are not run.
 #[test]
 fn a_study_gives_identical_results_across_runs_workers_and_threads() {
     let reference = run(None);

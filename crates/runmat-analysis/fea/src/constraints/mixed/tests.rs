@@ -168,6 +168,9 @@ fn geometric_tie_couples_a_nonconformal_beam_node_to_a_solid_face() {
         .is_some());
 }
 
+// witness: FEA-STRUCTURAL-CONSTRAINT-001/normal_symmetry_rigid_coupling @
+//   linear_structural/shell/numerical_kernel; coverage: partial;
+//   boundary: Shell symmetry uses the authored surface normal.
 #[test]
 fn explicit_shell_symmetry_uses_the_authored_surface_normal() {
     let (mut model, mesh) = shell_model_and_mesh();
@@ -195,6 +198,12 @@ fn explicit_shell_symmetry_uses_the_authored_surface_normal() {
     }));
 }
 
+// witness: FEA-STRUCTURAL-CONSTRAINT-001/distributing_ties_equations @
+//   linear_structural/shell/numerical_kernel; coverage: partial;
+//   boundary: Shell distributing coupling retains reference-point evidence.
+// witness: FEA-STRUCTURAL-EXECUTION-001/constraints_reactions_shell @
+//   linear_structural/shell/numerical_kernel; coverage: partial;
+//   boundary: Shell distributing coupling with reference-point evidence.
 #[test]
 fn explicit_shell_distributing_coupling_retains_reference_point_evidence() {
     let (mut model, mesh) = shell_model_and_mesh();
@@ -293,6 +302,9 @@ fn explicit_shell_distributing_coupling_retains_reference_point_evidence() {
         .unwrap();
 }
 
+// witness: FEA-STRUCTURAL-EXECUTION-001/constraints_reactions_shell @
+//   linear_structural/shell/numerical_kernel; coverage: partial;
+//   boundary: A mesh-free shell reference coupling uses the same generalized DOF path.
 #[test]
 fn mesh_free_shell_reference_coupling_uses_the_same_generalized_dof_path() {
     let mut model = crate::fixtures::fixture_model(

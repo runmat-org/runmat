@@ -119,6 +119,9 @@ fn rejects_family_procedure_and_domain_mismatches() {
     ));
 }
 
+// witness: FEA-SHARED-EXCITATION-001/distinct_modal_response_procedures @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Modal response requires typed existing spectrum ids.
 #[test]
 fn modal_response_requires_typed_existing_spectrum_ids() {
     let mut step = ProcedureStep::structural_modal_response_spectrum(
@@ -304,6 +307,10 @@ fn rejects_incompatible_upstream_state_kind() {
     ));
 }
 
+// witness: FEA-SHARED-SEQUENCES-001/governed_transition_corpus @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Upstream input without a governed transition is rejected; the
+//   preload-to-prestressed-modal case is covered by study planning tests.
 #[test]
 fn rejects_upstream_input_without_governed_transition() {
     let producer = ProcedureStep::structural_static("base");

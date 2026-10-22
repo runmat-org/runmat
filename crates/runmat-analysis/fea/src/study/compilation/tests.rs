@@ -13,6 +13,10 @@ use super::{
     AnalysisStudyCompilationError, AnalysisStudyCompilationInput, CompiledAnalysisStudy,
 };
 
+// witness: FEA-SHARED-PROPERTIES-001/optional_law_capabilities @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Structural study compilation requires a capable solid material before planning;
+//   acoustic, electrical and fluid capability checks are sibling cases.
 #[test]
 fn structural_study_compilation_requires_capable_solid_material_before_planning() {
     let model = crate::fixtures::fixture_model(crate::fixtures::FixtureId::CantileverLinearStatic);
@@ -134,6 +138,9 @@ fn thermal_study_compilation_rejects_uncapable_and_substituted_properties() {
     ));
 }
 
+// witness: FEA-SHARED-PROPERTIES-001/optional_law_capabilities @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: A thermomechanical study requires the union of solid capabilities.
 #[test]
 fn thermomechanical_study_requires_the_union_of_solid_capabilities() {
     let mut model =

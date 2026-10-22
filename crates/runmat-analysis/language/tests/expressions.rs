@@ -33,6 +33,10 @@ impl AnalysisOperationCatalog for Catalog {
     }
 }
 
+// witness: FEA-AUTHORING-OUTPUT-002/overload_contract @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Expression checking preserves dimensions and resolves catalog overloads; availability
+//   and documentation fields of the overload contract are not asserted.
 #[test]
 fn expression_checking_preserves_dimensions_and_resolves_catalog_overloads() {
     let source =

@@ -34,6 +34,11 @@ fn query(index: &PointSpatialIndex<usize>, bounds: Aabb3) -> Vec<usize> {
     ordered
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Twelve clustered thin-fin point inventories compare adaptive candidates with
+//   exhaustive closed-boundary queries in original inventory order. Exact meshing predicates remain
+//   outside this component; no original heat acceptance or whole-task scalability claim.
 #[test]
 fn clustered_fins_match_exhaustive_closed_boundary_queries() {
     let entries = points();
@@ -70,6 +75,12 @@ fn sparse_cluster_queries_do_not_scan_the_point_inventory() {
         .unwrap();
     assert!(work < index.len() / 8, "query work={work}");
 }
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: In-bounds append cancellation exercises every checkpoint; out-of-bounds rebuilding
+//   samples the complete checkpoint range including final commit. Failed candidates preserve
+//   original point inventory and query answers and resume to the completed answer. No
+//   complete-study or measured-memory claim.
 #[test]
 fn append_and_growth_cancel_at_every_checkpoint_without_partial_inventory() {
     for position in [[0.4, 0.0025, 0.004], [0.44, 0.005, 0.004], [3.0; 3]] {
@@ -223,6 +234,11 @@ fn distant_outliers_do_not_force_a_dense_cluster_into_a_coarse_leaf() {
     assert!(work < 128, "cluster query work={work}");
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Disjoint spatial regions preserve exhaustive original point answers, prune occupied
+//   branches and honor cancellation at every visited checkpoint. Traversal component only; no
+//   original heat-sink acceptance or whole-task memory claim.
 #[test]
 fn nonrectangular_region_prunes_branches_preserves_points_and_cancellation() {
     let entries = (0..8000)
@@ -290,6 +306,12 @@ fn nonrectangular_region_prunes_branches_preserves_points_and_cancellation() {
     assert_eq!(query(&index, bounds).len(), entries.len());
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Conservative point enclosures remain queryable across spatial partitions and after
+//   append, rebuild or rejected append. This synthetic index regression preserves broad-phase
+//   candidates; it does not independently establish exact physical predicate admission or native
+//   study acceptance.
 #[test]
 fn constructed_enclosures_cross_partition_regions_and_survive_append_rejection() {
     let mut entries = (0..64)

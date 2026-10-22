@@ -77,6 +77,11 @@ fn representative_face(cells: usize) -> ExactFaceMesh {
     }
 }
 
+// witness: FEA-MESH-DISCRETIZATION-001/surface_discretization @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: A dense face of 90,601 nodes and 180,000 triangles has a bounded publication
+//   representation inside the 512 MiB default component memory and round-trips through the record
+//   and global codecs; seams, poles and many trims are not asserted here.
 #[test]
 #[ignore = "representative dense surface publication/resource gate"]
 fn representative_dense_face_publication_fits_default_component_memory() {
@@ -266,6 +271,12 @@ fn dense_round_trip(face: &ExactFaceMesh, typed: u64) {
     assert_eq!(memory.live.load(std::sync::atomic::Ordering::Relaxed), 0);
 }
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Lossless indexed surface transport preserves original identities, quality and
+//   signed-zero values, inventories typed reconstruction before decoding, and rejects denied
+//   admission. This finite representation fixture does not establish CAD or PDE acceptance,
+//   whole-task RSS, or arbitrary model capacity.
 #[test]
 fn indexed_surface_preserves_original_values_and_admits_before_decode() {
     use crate::surface_mesh::indexed_face::partition;

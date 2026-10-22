@@ -64,6 +64,10 @@ fn transient_departures_retain_heating_below_absolute_temperature_resolution() {
     }
 }
 
+// witness: FEA-THERMAL-DOMAIN-001/assembly @ thermal_steady/tet10/numerical_kernel,
+//   thermal_transient/tet10/numerical_kernel;
+//   boundary: Single Tet10 conductivity constant patch, integrated capacity, linear gradient and
+//   flux; no general curved-mesh convergence.
 #[test]
 fn canonical_tet10_thermal_matrices_pass_constant_patch_and_capacity_integral() {
     let model = fixture_model(FixtureId::CantileverLinearStatic);
@@ -209,6 +213,10 @@ fn uniform_heat_generation_is_conserved_and_uniform_temperature_is_preserved() {
     }
 }
 
+// witness: FEA-THERMAL-INPUT-001/boundaries @ thermal_steady/tet4/numerical_kernel; coverage:
+//   partial;
+//   boundary: Exact face flux and convection preserve integrated power and the ambient state on a
+//   Tet4 fixture.
 #[test]
 fn exact_face_flux_and_convection_preserve_integrated_power_and_ambient_state() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);

@@ -227,8 +227,17 @@ pub(super) fn validate_resolved_observation(
             face_indices,
             face_identities,
         } => {
-            if materialized_field_location(&observation.spec) != FieldLocation::Node
-                || observation.source_entity_domain != RecoveredFieldEntityDomain::Nodes
+            // Nodal fields reduce over boundary faces; element fields only as a normal flux,
+            // read in each face's owner element.
+            let nodal = materialized_field_location(&observation.spec) == FieldLocation::Node
+                && observation.source_entity_domain == RecoveredFieldEntityDomain::Nodes;
+            let element_flux = materialized_field_location(&observation.spec)
+                == FieldLocation::Element
+                && observation.source_entity_domain == RecoveredFieldEntityDomain::VolumeElements
+                && observation.spec.reduction.as_ref().is_some_and(|reduction| {
+                    reduction.spatial == runmat_analysis_core::SpatialReduction::NormalFlux
+                });
+            if !(nodal || element_flux)
                 || observation.spec.reduction.is_none()
                 || face_indices.is_empty()
                 || !strictly_increasing(face_indices)

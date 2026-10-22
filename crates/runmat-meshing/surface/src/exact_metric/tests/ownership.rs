@@ -1,4 +1,10 @@
 use super::*;
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Thousands of point evaluations share one immutable face identity and
+//   source-provenance allocation while retaining the same numerical values. Copy-on-write tampering
+//   rejects independently and leaves other evaluations intact. Sharing is not serialized proof
+//   authority.
 #[test]
 fn face_provenance_is_shared_without_weakening_independent_tamper_rejection() {
     let (document, topology, registry) = runmat_geometry_fixtures::exact_circle();

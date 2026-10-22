@@ -24,6 +24,31 @@ impl OutputOperation {
                 | Self::Principal),
                 Some(value),
             ) => project_type(operation, value),
+            (Self::SoundPower, _) => {
+                let measure = region_measure(argument_type(arguments, 1, "through"))
+                    .ok_or("sound_power requires a face region")?;
+                if measure != crate::PhysicalDimension::AREA {
+                    return Err("sound_power requires a face region");
+                }
+                Ok(FeaType::Quantity(crate::PhysicalDimension::POWER))
+            }
+            (Self::NormalFlux, Some(FeaType::Field(field))) => {
+                let measure = region_measure(argument_type(arguments, 1, "through"))
+                    .ok_or("flux requires a face region")?;
+                if measure != crate::PhysicalDimension::AREA {
+                    return Err("flux requires a face region");
+                }
+let FeaType::Vector { element, length: Some(3) } = field.value.as_ref() else {
+                    return Err("flux requires a three-component vector field");
+                };
+                let FeaType::Quantity(dimension) = element.as_ref() else {
+                    return Err("flux requires a physical vector field");
+                };
+                dimension
+                    .multiply(measure)
+                    .map(FeaType::Quantity)
+                    .ok_or("flux dimension overflows")
+            }
             (Self::Integral, Some(FeaType::Field(field))) => {
                 let measure = region_measure(argument_type(arguments, 1, "over"))
                     .ok_or("integral requires an edge, face, solid, or cell region")?;

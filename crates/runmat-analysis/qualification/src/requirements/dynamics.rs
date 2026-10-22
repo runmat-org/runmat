@@ -4,52 +4,52 @@ const DOMAIN: &[Envelope] = &[
     envelope(
         Formulation::LinearStructuralDynamics,
         MeshOrder::MeshIndependent,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::LinearStructuralDynamics,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::LinearStructuralDynamics,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::LinearStructuralDynamics,
         MeshOrder::Beam,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::LinearStructuralDynamics,
         MeshOrder::Shell,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::LinearStructuralDynamics,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::LinearStructuralDynamics,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::LinearStructuralDynamics,
         MeshOrder::Beam,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::LinearStructuralDynamics,
         MeshOrder::Shell,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::LinearStructuralDynamics,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::SerialCpuNativeProcess,
+        ExecutionEnvelope::NativeProcess,
     ),
     envelope(
         Formulation::LinearStructuralDynamics,
@@ -59,12 +59,17 @@ const DOMAIN: &[Envelope] = &[
     envelope(
         Formulation::LinearStructuralDynamics,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::EncryptedRemote,
+        ExecutionEnvelope::RemoteExecution,
     ),
     envelope(
         Formulation::LinearStructuralDynamics,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::PartitionedCpu,
+        ExecutionEnvelope::ParallelCpu,
+    ),
+    envelope(
+        Formulation::LinearStructuralDynamics,
+        MeshOrder::CanonicalMixedTopology,
+        ExecutionEnvelope::DomainDecomposed,
     ),
     envelope(
         Formulation::LinearStructuralDynamics,
@@ -76,47 +81,47 @@ const MODAL_DOMAIN: &[Envelope] = &[
     envelope(
         Formulation::ModalStructural,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::ModalStructural,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::ModalStructural,
         MeshOrder::Beam,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::ModalStructural,
         MeshOrder::Shell,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::ModalStructural,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::ModalStructural,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::ModalStructural,
         MeshOrder::Beam,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::ModalStructural,
         MeshOrder::Shell,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::ModalStructural,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::SerialCpuNativeProcess,
+        ExecutionEnvelope::NativeProcess,
     ),
     envelope(
         Formulation::ModalStructural,
@@ -126,12 +131,17 @@ const MODAL_DOMAIN: &[Envelope] = &[
     envelope(
         Formulation::ModalStructural,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::EncryptedRemote,
+        ExecutionEnvelope::RemoteExecution,
     ),
     envelope(
         Formulation::ModalStructural,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::PartitionedCpu,
+        ExecutionEnvelope::ParallelCpu,
+    ),
+    envelope(
+        Formulation::ModalStructural,
+        MeshOrder::CanonicalMixedTopology,
+        ExecutionEnvelope::DomainDecomposed,
     ),
     envelope(
         Formulation::ModalStructural,
@@ -143,47 +153,47 @@ const PRESTRESS_DOMAIN: &[Envelope] = &[
     envelope(
         Formulation::PrestressedStructural,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::PrestressedStructural,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::PrestressedStructural,
         MeshOrder::Beam,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::PrestressedStructural,
         MeshOrder::Shell,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::PrestressedStructural,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::PrestressedStructural,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::PrestressedStructural,
         MeshOrder::Beam,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::PrestressedStructural,
         MeshOrder::Shell,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::PrestressedStructural,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::SerialCpuNativeProcess,
+        ExecutionEnvelope::NativeProcess,
     ),
     envelope(
         Formulation::PrestressedStructural,
@@ -193,12 +203,17 @@ const PRESTRESS_DOMAIN: &[Envelope] = &[
     envelope(
         Formulation::PrestressedStructural,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::EncryptedRemote,
+        ExecutionEnvelope::RemoteExecution,
     ),
     envelope(
         Formulation::PrestressedStructural,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::PartitionedCpu,
+        ExecutionEnvelope::ParallelCpu,
+    ),
+    envelope(
+        Formulation::PrestressedStructural,
+        MeshOrder::CanonicalMixedTopology,
+        ExecutionEnvelope::DomainDecomposed,
     ),
     envelope(
         Formulation::PrestressedStructural,
@@ -208,47 +223,47 @@ const PRESTRESS_DOMAIN: &[Envelope] = &[
     envelope(
         Formulation::StructuralStability,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::StructuralStability,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::StructuralStability,
         MeshOrder::Beam,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::StructuralStability,
         MeshOrder::Shell,
-        ExecutionEnvelope::SerialCpuNumericalKernel,
+        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::StructuralStability,
         MeshOrder::Tet4,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::StructuralStability,
         MeshOrder::Tet10,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::StructuralStability,
         MeshOrder::Beam,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::StructuralStability,
         MeshOrder::Shell,
-        ExecutionEnvelope::SerialCpuPublicStudy,
+        ExecutionEnvelope::PublicStudy,
     ),
     envelope(
         Formulation::StructuralStability,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::SerialCpuNativeProcess,
+        ExecutionEnvelope::NativeProcess,
     ),
     envelope(
         Formulation::StructuralStability,
@@ -258,12 +273,17 @@ const PRESTRESS_DOMAIN: &[Envelope] = &[
     envelope(
         Formulation::StructuralStability,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::EncryptedRemote,
+        ExecutionEnvelope::RemoteExecution,
     ),
     envelope(
         Formulation::StructuralStability,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::PartitionedCpu,
+        ExecutionEnvelope::ParallelCpu,
+    ),
+    envelope(
+        Formulation::StructuralStability,
+        MeshOrder::CanonicalMixedTopology,
+        ExecutionEnvelope::DomainDecomposed,
     ),
     envelope(
         Formulation::StructuralStability,
@@ -280,7 +300,7 @@ const FEA_DYNAMICS_MODAL_001: Requirement = Requirement {
         "must satisfy all applicable supported-envelope criteria. Independent ",
         "physical, semantic, accuracy, resource and publication evidence are ",
         "separate; missing, failed or indeterminate mandatory evidence prevents ",
-        "production acceptance.",
+        "acceptance.",
     ),
     owners: &["crates/runmat-analysis/fea/src/pipeline/modal.rs"],
     obligations: &[
@@ -326,27 +346,6 @@ const FEA_DYNAMICS_MODAL_001: Requirement = Requirement {
             MODAL_DOMAIN,
         ),
     ],
-    witnesses: &[Witness {
-        id: "FEA-WITNESS-MODAL-ROD-TET4",
-        locator: WitnessLocator::CargoTest {
-            package: "runmat-analysis-fea",
-            target: CargoTarget::Library,
-            name: concat!(
-                "pipeline::modal::rod_qualification::solid_rod_modal_frequency_and_retained_r",
-                "esponse_have_independent_evidence",
-            ),
-            source: "crates/runmat-analysis/fea/src/pipeline/modal/rod_qualification.rs",
-        },
-        claims: &[CoverageClaim {
-            obligation: "physical_mass_base_state",
-            envelopes: &[MODAL_DOMAIN[4]],
-            boundary: concat!(
-                "Axial affine Tet4 slab rod frequency refinement and modal truncation ",
-                "against direct harmonic response. Does not cover beam/shell modes, repeated ",
-                "eigenspaces, every participation or remote envelope.",
-            ),
-        }],
-    }],
     dependencies: &[concat!(
         "Shared typed authoring, canonical topology/material/constraint/excitation ",
         "authorities; governed resources and execution; independently qualified ",
@@ -361,7 +360,7 @@ const FEA_DYNAMICS_PRESTRESS_001: Requirement = Requirement {
         "Validated prestressed base states and stability perturbation must satisfy ",
         "all applicable supported-envelope criteria. Independent physical, semantic, ",
         "accuracy, resource and publication evidence are separate; missing, failed ",
-        "or indeterminate mandatory evidence prevents production acceptance.",
+        "or indeterminate mandatory evidence prevents acceptance.",
     ),
     owners: &["crates/runmat-analysis/fea/src/tests/prestressed_frequency.rs"],
     obligations: &[
@@ -402,7 +401,7 @@ const FEA_DYNAMICS_PRESTRESS_001: Requirement = Requirement {
                 "contact status, follower-load linearization, topology change, loss of ",
                 "tangent symmetry, or unstable base states rather than silently reverting to ",
                 "an unstressed operator. Keep geometric imperfection analysis, nonlinear ",
-                "buckling, collapse, and post-buckling outside the production envelope until ",
+                "buckling, collapse, and post-buckling outside the supported envelope until ",
                 "separately designed and validated.",
             ),
             EvidenceKind::IndependentReference,
@@ -420,28 +419,6 @@ const FEA_DYNAMICS_PRESTRESS_001: Requirement = Requirement {
             PRESTRESS_DOMAIN,
         ),
     ],
-    witnesses: &[Witness {
-        id: "FEA-WITNESS-PRESTRESS-HARMONIC",
-        locator: WitnessLocator::CargoTest {
-            package: "runmat-analysis-fea",
-            target: CargoTarget::Library,
-            name: concat!(
-                "tests::prestressed_frequency::prestressed_direct_harmonic_uses_the_exact_tan",
-                "gent_and_rejects_state_substitution",
-            ),
-            source: "crates/runmat-analysis/fea/src/tests/prestressed_frequency.rs",
-        },
-        claims: &[CoverageClaim {
-            obligation: "complete_base_operator",
-            envelopes: &[PRESTRESS_DOMAIN[0]],
-            boundary: concat!(
-                "Fixed direct entry fixture compares preload response ordering and residual, ",
-                "canonical result roundtrip, and substituted topology rejection. No ",
-                "independent buckling reference, nonlinear producer or generic stability ",
-                "qualification.",
-            ),
-        }],
-    }],
     dependencies: &[concat!(
         "Shared typed authoring, canonical topology/material/constraint/excitation ",
         "authorities; governed resources and execution; independently qualified ",
@@ -451,148 +428,85 @@ const FEA_DYNAMICS_PRESTRESS_001: Requirement = Requirement {
 const FEA_DYNAMICS_RESPONSE_001: Requirement = Requirement {
     id: "FEA-DYNAMICS-RESPONSE-001",
     title: "Distinct second-order direct and modal dynamic procedures",
-    stages: &[
-        Stage::Dynamics
-    ],
+    stages: &[Stage::Dynamics],
     acceptance: concat!(
-"Distinct second-order direct and modal dynamic procedures must satisfy all ",
-"applicable supported-envelope criteria. Independent physical, semantic, ",
-"accuracy, resource and publication evidence are separate; missing, failed ",
-"or indeterminate mandatory evidence prevents production acceptance.",
-),
-    owners: &[
-        "crates/runmat-analysis/fea/src/solve/dynamics/mod.rs"
-    ],
+        "Distinct second-order direct and modal dynamic procedures must satisfy all ",
+        "applicable supported-envelope criteria. Independent physical, semantic, ",
+        "accuracy, resource and publication evidence are separate; missing, failed ",
+        "or indeterminate mandatory evidence prevents acceptance.",
+    ),
+    owners: &["crates/runmat-analysis/fea/src/solve/dynamics/mod.rs"],
     obligations: &[
         obligation(
             "second_order_equilibrium_excitation",
             concat!(
-"Replace first-order relaxation with a documented second-order integrator, ",
-"initially generalized-alpha or Newmark with explicit parameter policy. ",
-"Solve M a + C v + K u = f(t) with physical mass, damping, initial ",
-"displacement, initial velocity, and load history. Support force, moment, ",
-"traction, pressure, body/base displacement, velocity, and acceleration ",
-"histories through the shared typed excitation system.",
-),
+                "Replace first-order relaxation with a documented second-order integrator, ",
+                "initially generalized-alpha or Newmark with explicit parameter policy. ",
+                "Solve M a + C v + K u = f(t) with physical mass, damping, initial ",
+                "displacement, initial velocity, and load history. Support force, moment, ",
+                "traction, pressure, body/base displacement, velocity, and acceleration ",
+                "histories through the shared typed excitation system.",
+            ),
             EvidenceKind::IndependentReference,
-            DOMAIN
+            DOMAIN,
         ),
         obligation(
             "direct_modal_procedures",
             concat!(
-"Implement modal transient response, modal harmonic response, and modal ",
-"response-spectrum analysis as procedures distinct from eigenmode ",
-"extraction. Implement direct harmonic response from the documented complex ",
-"dynamic-stiffness operator, physical damping model, frequency-dependent ",
-"excitation, and reusable pattern/value identities; do not route it through ",
-"modal reduction implicitly. Support direct transient response independently ",
-"of modal transient response and compare both inside their shared validity ",
-"envelope.",
-),
+                "Implement modal transient response, modal harmonic response, and modal ",
+                "response-spectrum analysis as procedures distinct from eigenmode ",
+                "extraction. Implement direct harmonic response from the documented complex ",
+                "dynamic-stiffness operator, physical damping model, frequency-dependent ",
+                "excitation, and reusable pattern/value identities; do not route it through ",
+                "modal reduction implicitly. Support direct transient response independently ",
+                "of modal transient response and compare both inside their shared validity ",
+                "envelope.",
+            ),
             EvidenceKind::IndependentReference,
-            DOMAIN
+            DOMAIN,
         ),
         obligation(
             "spectrum_random_recovery",
             concat!(
-"Implement typed response spectra, modal and directional combination, ",
-"participation/mass capture, residual-mode and missing-mass policy, and ",
-"attributable combination evidence. Support random vibration only from ",
-"governed PSD/cross-PSD inputs with documented correlation and output ",
-"statistics. Recover velocity and acceleration from the integration state, ",
-"not post-hoc finite differences alone.",
-),
+                "Implement typed response spectra, modal and directional combination, ",
+                "participation/mass capture, residual-mode and missing-mass policy, and ",
+                "attributable combination evidence. Support random vibration only from ",
+                "governed PSD/cross-PSD inputs with documented correlation and output ",
+                "statistics. Recover velocity and acceleration from the integration state, ",
+                "not post-hoc finite differences alone.",
+            ),
             EvidenceKind::IndependentReference,
-            DOMAIN
+            DOMAIN,
         ),
         obligation(
             "time_policy_energy_checkpoints",
             concat!(
-"Support adaptive time stepping only through documented local error or ",
-"convergence criteria. Report energy behavior, numerical dissipation, ",
-"stability parameters, rejected steps, and solver convergence. Use ",
-"checkpointed temporal blocks for long durable/remote runs.",
-),
+                "Support adaptive time stepping only through documented local error or ",
+                "convergence criteria. Report energy behavior, numerical dissipation, ",
+                "stability parameters, rejected steps, and solver convergence. Use ",
+                "checkpointed temporal blocks for long durable/remote runs.",
+            ),
             EvidenceKind::IndependentReference,
-            DOMAIN
-        ) ,
+            DOMAIN,
+        ),
         obligation(
             "references",
             concat!(
-"Evidence includes undamped and damped oscillators, impulse and base-motion ",
-"response, callable/table equivalence, modal superposition comparisons, SRS ",
-"construction references, SRSS/CQC and directional-combination references, ",
-"missing-mass cases, random-response references where supported, energy ",
-"behavior, and time-step convergence.",
-),
+                "Evidence includes undamped and damped oscillators, impulse and base-motion ",
+                "response, callable/table equivalence, modal superposition comparisons, SRS ",
+                "construction references, SRSS/CQC and directional-combination references, ",
+                "missing-mass cases, random-response references where supported, energy ",
+                "behavior, and time-step convergence.",
+            ),
             EvidenceKind::IndependentReference,
-            DOMAIN
-        )
+            DOMAIN,
+        ),
     ],
-    witnesses: &[
-        Witness {
-            id: "FEA-WITNESS-HARMONIC-ROD-TET4",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-"pipeline::modal::rod_qualification::solid_rod_harmonic_face_traction_converg",
-"es_to_independent_continuum",
-),
-                source: "crates/runmat-analysis/fea/src/pipeline/modal/rod_qualification.rs"
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "direct_modal_procedures",
-                    envelopes: &[
-                        DOMAIN[
-                            1
-                        ]
-                    ],
-                    boundary: concat!(
-"Original axial Tet4 rod harmonic traction matrix at three frequencies on ",
-"both sides of resonance; independent complex displacement/reaction ",
-"refinement and phase resultant checks. Not transient, spectrum or ",
-"random-response evidence.",
-)
-                }
-            ]
-        },
-        Witness {
-            id: "FEA-WITNESS-SPECTRUM-COMBINATION",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-"solve::dynamics::response_spectrum::qualification::modal_combination_matches",
-"_independent_quadratic_form_references",
-),
-                source: "crates/runmat-analysis/fea/src/solve/dynamics/response_spectrum/qualification.rs"
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "spectrum_random_recovery",
-                    envelopes: &[
-                        DOMAIN[
-                            0
-                        ]
-                    ],
-                    boundary: concat!(
-"Scalar signed synthetic modal vectors verify SRSS, absolute sum and CQC ",
-"against independent formulas. Mesh-independent arithmetic only; no ",
-"missing-mass, directional or random-vibration claim.",
-)
-                }
-            ]
-        }
-    ],
-    dependencies: &[
-        concat!(
-"Shared typed authoring, canonical topology/material/constraint/excitation ",
-"authorities; governed resources and execution; independently qualified ",
-"accuracy and semantic publication.",
-)
-    ]
+    dependencies: &[concat!(
+        "Shared typed authoring, canonical topology/material/constraint/excitation ",
+        "authorities; governed resources and execution; independently qualified ",
+        "accuracy and semantic publication.",
+    )],
 };
 const FEA_DYNAMICS_GOVERNANCE_001: Requirement = Requirement {
     id: "FEA-DYNAMICS-GOVERNANCE-001",
@@ -602,7 +516,7 @@ const FEA_DYNAMICS_GOVERNANCE_001: Requirement = Requirement {
         "Governed dynamic procedures, checkpoints and distributed evidence must ",
         "satisfy all applicable supported-envelope criteria. Independent physical, ",
         "semantic, accuracy, resource and publication evidence are separate; ",
-        "missing, failed or indeterminate mandatory evidence prevents production ",
+        "missing, failed or indeterminate mandatory evidence prevents ",
         "acceptance.",
     ),
     owners: &["crates/runmat-analysis/fea/src/pipeline/modal.rs"],
@@ -722,7 +636,6 @@ const FEA_DYNAMICS_GOVERNANCE_001: Requirement = Requirement {
             DOMAIN,
         ),
     ],
-    witnesses: &[],
     dependencies: &[concat!(
         "Shared typed authoring, canonical topology/material/constraint/excitation ",
         "authorities; governed resources and execution; independently qualified ",
