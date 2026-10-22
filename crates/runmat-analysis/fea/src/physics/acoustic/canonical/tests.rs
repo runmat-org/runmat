@@ -336,7 +336,11 @@ impl C {
     }
 }
 
-// witness: REG-ACOUS-009 (region damping as a complex bulk modulus)
+// witness: FEA-ACOUSTIC-BOUNDARY-002/region_damping @ acoustic_harmonic/tet4/numerical_kernel;
+//   coverage: partial;
+//   boundary: A linear-mesh duct with damping ratio 0.05 converges (error ratio above 3 per refinement, below
+//   0.004 at 8 cells) to the complex-wavenumber standing wave and the driven end supplies exactly the
+//   dissipated power; Tet10, the transient formulation and damping in the CLI are not covered.
 #[test]
 fn damped_duct_converges_to_the_complex_wavenumber_standing_wave_and_dissipates_its_input() {
     // Loss factor η = 2ζ: c̃ = c√(1 + iη), k̃ = ω/c̃, p = cos(k̃(1 − x))/cos(k̃).
@@ -599,7 +603,10 @@ fn pressure_velocity_overlap_is_rejected_in_both_authored_orders() {
 }
 mod periodic;
 
-// witness: REG-ACOUS-005 (complex, frequency-dependent impedance)
+// witness: FEA-ACOUSTIC-BOUNDARY-002/complex_frequency_dependent_impedance @
+//   acoustic_harmonic/tet4/numerical_kernel; coverage: partial;
+//   boundary: A complex impedance termination on a linear-mesh duct converges to the two-wave duct solution
+//   with power closure; frequency tables and the Delany-Bazley porous layer are not covered by this test.
 #[test]
 fn complex_impedance_termination_converges_to_the_two_wave_duct_solution() {
     // p(0) = 1, p(L) = Z v_n(L), iωρ v = −∂p/∂x: p = A e^{−ikx} + B e^{ikx}.

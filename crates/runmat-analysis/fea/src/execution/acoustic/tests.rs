@@ -157,7 +157,11 @@ fn acoustic_portable_admission_and_result_import_fail_closed() {
     assert!(workload.canonical_bytes().is_err());
 }
 
-// witness: REG-ACOUS-007 (intensity field and sound power through a named surface)
+// witness: FEA-ACOUSTIC-OUTPUTS-001/intensity_and_sound_power @ acoustic_harmonic/tet10/numerical_kernel;
+//   coverage: partial;
+//   boundary: On a quadratic duct the NormalFlux reduction of the acoustic intensity through the matched
+//   end equals the plane-wave value |p|^2/(2 rho c) times area (1/12 W) within 0.1 percent and equals the
+//   solver's mean input power; a monopole sphere and a named-surface CLI run are not covered.
 #[test]
 fn sound_power_through_the_matched_end_is_the_plane_wave_intensity_times_area() {
     use crate::results::{
