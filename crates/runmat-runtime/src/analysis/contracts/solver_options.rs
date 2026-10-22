@@ -15,7 +15,7 @@ impl AnalysisSolverOptions {
                 options.solver_mesh_artifact_path = None;
             }
             Self::StructuralBuckling(options) => options.solver_mesh_artifact_path = None,
-            Self::AcousticHelmholtz(_) => {}
+            Self::AcousticHelmholtz(_) | Self::AcousticResponse(_) => {}
             Self::ThermalDiffusion(options) => options.solver_mesh_artifact_path = None,
             Self::StructuralTransient(options) => options.solver_mesh_artifact_path = None,
             Self::IncompressibleFlow(_) => {}
@@ -87,6 +87,9 @@ impl AnalysisSolverOptions {
             (Structural, HarmonicResponse, SolutionSpace::Direct) => Ok(
                 Self::StructuralFrequency(AnalysisStructuralFrequencyRunOptions::default()),
             ),
+            (Acoustic, ModalExtraction | TransientResponse, SolutionSpace::Direct) => Ok(
+                Self::AcousticResponse(super::super::AnalysisAcousticResponseRunOptions::default()),
+            ),
             (Acoustic, HarmonicResponse, SolutionSpace::Direct) => Ok(Self::AcousticHelmholtz(
                 AnalysisAcousticRunOptions::default(),
             )),
@@ -98,23 +101,17 @@ impl AnalysisSolverOptions {
                 TransientResponse,
                 SolutionSpace::Direct | SolutionSpace::ModalReduced,
             ) => Ok(Self::StructuralTransient(AnalysisTransientRunOptions::default())),
-            (Fluid, Static, SolutionSpace::Direct) => Ok(Self::IncompressibleFlow(
-                AnalysisCfdRunOptions::default(),
-            )),
-            (
-                Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer),
+            // Flow studies, standalone or coupled to heat transfer or a structure, run the one
+            // canonical finite-volume flow lifecycle and share its solver options.
+            (Fluid, Static | TransientResponse, SolutionSpace::Direct)
+            | (
+                Coupled(
+                    CoupledPhysicsFamily::ConjugateHeatTransfer
+                    | CoupledPhysicsFamily::FluidStructureInteraction,
+                ),
                 Static | TransientResponse,
                 SolutionSpace::Direct,
-            ) => Ok(Self::ConjugateHeatTransfer(
-                AnalysisChtRunOptions::default(),
-            )),
-            (
-                Coupled(CoupledPhysicsFamily::FluidStructureInteraction),
-                TransientResponse,
-                SolutionSpace::Direct,
-            ) => Ok(Self::FluidStructureInteraction(
-                AnalysisFsiRunOptions::default(),
-            )),
+            ) => Ok(Self::IncompressibleFlow(AnalysisCfdRunOptions::default())),
             (Structural, Nonlinear, SolutionSpace::Direct)
             | (
                 Coupled(CoupledPhysicsFamily::Thermomechanical),

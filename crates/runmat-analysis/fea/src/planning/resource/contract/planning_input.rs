@@ -12,7 +12,9 @@ impl FeaResourcePlanningInput {
             FeaResourceDemand::ElectricalStatic(demand) => demand.topology_digest,
             FeaResourceDemand::Magnetostatic(demand) => demand.topology_digest,
             FeaResourceDemand::MaxwellHarmonic(demand) => demand.topology_digest,
+            FeaResourceDemand::AcousticResponse(demand) => demand.topology_digest,
             FeaResourceDemand::MaxwellFieldRecovery(demand) => demand.topology_digest,
+            FeaResourceDemand::AcousticFieldRecovery(demand) => demand.topology_digest,
             FeaResourceDemand::FluidFieldRecovery(demand) => demand.topology_digest,
             FeaResourceDemand::FluidSteadySolve(demand) => demand.projection.topology_digest,
             FeaResourceDemand::FluidTransientBlock(demand) => demand.projection.topology_digest,
@@ -67,6 +69,7 @@ impl FeaResourcePlanningInput {
     pub const fn observations(&self) -> Option<&ObservationResourceFacts> {
         match &self.demand {
             FeaResourceDemand::MaxwellFieldRecovery(_) => None,
+            FeaResourceDemand::AcousticFieldRecovery(_) => None,
             FeaResourceDemand::FluidFieldRecovery(_) => None,
             FeaResourceDemand::FluidSteadySolve(_) | FeaResourceDemand::FluidTransientBlock(_) => {
                 None
@@ -83,6 +86,7 @@ impl FeaResourcePlanningInput {
             FeaResourceDemand::ElectricalStatic(_) => None,
             FeaResourceDemand::Magnetostatic(_) => None,
             FeaResourceDemand::MaxwellHarmonic(_) => None,
+            FeaResourceDemand::AcousticResponse(_) => None,
             FeaResourceDemand::SemanticStatePublication(_) => None,
             FeaResourceDemand::StructuralLinearPipeline(demand) => {
                 Some(&demand.operator.observations)
@@ -132,6 +136,7 @@ impl FeaResourcePlanningInput {
     pub const fn partitioning(&self) -> &PartitioningPolicy {
         match &self.demand {
             FeaResourceDemand::MaxwellFieldRecovery(_) => &PartitioningPolicy::Monolithic,
+            FeaResourceDemand::AcousticFieldRecovery(_) => &PartitioningPolicy::Monolithic,
             FeaResourceDemand::FluidFieldRecovery(_) => &PartitioningPolicy::Monolithic,
             FeaResourceDemand::FluidSteadySolve(_) | FeaResourceDemand::FluidTransientBlock(_) => {
                 &PartitioningPolicy::Monolithic
@@ -148,6 +153,7 @@ impl FeaResourcePlanningInput {
             FeaResourceDemand::ElectricalStatic(_) => &PartitioningPolicy::Monolithic,
             FeaResourceDemand::Magnetostatic(_) => &PartitioningPolicy::Monolithic,
             FeaResourceDemand::MaxwellHarmonic(_) => &PartitioningPolicy::Monolithic,
+            FeaResourceDemand::AcousticResponse(_) => &PartitioningPolicy::Monolithic,
             FeaResourceDemand::SemanticStatePublication(_) => &PartitioningPolicy::Monolithic,
             FeaResourceDemand::StructuralLinearPipeline(demand) => &demand.operator.partitioning,
             FeaResourceDemand::StructuralNonlinearRecovery(demand) => &demand.operator.partitioning,
@@ -196,6 +202,7 @@ impl FeaResourcePlanningInput {
     pub const fn structural_operator(&self) -> Option<&StructuralOperatorResourceDemand> {
         match &self.demand {
             FeaResourceDemand::MaxwellFieldRecovery(_) => None,
+            FeaResourceDemand::AcousticFieldRecovery(_) => None,
             FeaResourceDemand::FluidFieldRecovery(_) => None,
             FeaResourceDemand::FluidSteadySolve(_) | FeaResourceDemand::FluidTransientBlock(_) => {
                 None
@@ -212,6 +219,7 @@ impl FeaResourcePlanningInput {
             FeaResourceDemand::ElectricalStatic(_) => None,
             FeaResourceDemand::Magnetostatic(_) => None,
             FeaResourceDemand::MaxwellHarmonic(_) => None,
+            FeaResourceDemand::AcousticResponse(_) => None,
             FeaResourceDemand::SemanticStatePublication(_) => None,
             FeaResourceDemand::StructuralLinearPipeline(demand) => Some(&demand.operator),
             FeaResourceDemand::StructuralNonlinearRecovery(demand) => Some(&demand.operator),
@@ -245,6 +253,7 @@ impl FeaResourcePlanningInput {
     pub fn structural_operator_mut(&mut self) -> Option<&mut StructuralOperatorResourceDemand> {
         match &mut self.demand {
             FeaResourceDemand::MaxwellFieldRecovery(_) => None,
+            FeaResourceDemand::AcousticFieldRecovery(_) => None,
             FeaResourceDemand::FluidFieldRecovery(_) => None,
             FeaResourceDemand::FluidSteadySolve(_) | FeaResourceDemand::FluidTransientBlock(_) => {
                 None
@@ -261,6 +270,7 @@ impl FeaResourcePlanningInput {
             FeaResourceDemand::ElectricalStatic(_) => None,
             FeaResourceDemand::Magnetostatic(_) => None,
             FeaResourceDemand::MaxwellHarmonic(_) => None,
+            FeaResourceDemand::AcousticResponse(_) => None,
             FeaResourceDemand::SemanticStatePublication(_) => None,
             FeaResourceDemand::StructuralLinearPipeline(demand) => Some(&mut demand.operator),
             FeaResourceDemand::StructuralNonlinearRecovery(demand) => Some(&mut demand.operator),

@@ -152,7 +152,10 @@ impl CanonicalSemanticState {
                 state.validate()?;
             }
             CanonicalSemanticStatePayload::Fluid { state } => {
-                if self.kind != StateKind::Fluid || self.completeness != StateCompleteness::Complete
+                // A coupled flow study (conjugate heat transfer) declares its complete state as
+                // the coupled interface state; its payload is the same retained flow result.
+                if !matches!(self.kind, StateKind::Fluid | StateKind::CoupledInterface)
+                    || self.completeness != StateCompleteness::Complete
                 {
                     return Err(AnalysisExecutionError::Invalid(
                         "fluid semantic payload requires complete fluid state".into(),

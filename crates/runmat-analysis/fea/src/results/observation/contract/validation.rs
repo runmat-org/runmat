@@ -281,6 +281,20 @@ pub(in crate::results::observation) fn validate_output_numeric_contract(
                 .into(),
         ));
     }
+    if spec.complex_representation == ComplexRepresentation::SoundPressureLevel
+        && (spec.quantity != runmat_analysis_core::ObservationQuantity::AcousticPressure
+            || spec.value_shape != runmat_analysis_core::ObservationValueShape::Scalar
+            || spec.reduction.as_ref().is_some_and(|reduction| {
+                !matches!(
+                    reduction.spatial,
+                    SpatialReduction::Minimum | SpatialReduction::Maximum
+                )
+            }))
+    {
+        return Err(ObservationError::Unsupported(
+            "sound pressure level applies to scalar acoustic pressure, unreduced or as a spatial extremum",
+        ));
+    }
     if spec.complex_representation == ComplexRepresentation::PhaseRadians
         && spec.reduction.is_some()
     {

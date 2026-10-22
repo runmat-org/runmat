@@ -83,11 +83,17 @@ pub fn prepare_fluid_study_publication(
         )
         .map_err(invalid)?
     };
-    let run_id = publication_identity.local_run_id(
-        runmat_analysis_core::PhysicsFamily::Fluid,
-        definition,
-        &completed.workload.step_id,
-    );
+    // The admitted step family names the run: standalone flow or a coupled flow study.
+    let family = completed
+        .workload
+        .model
+        .sequence
+        .steps
+        .first()
+        .map_or(runmat_analysis_core::PhysicsFamily::Fluid, |step| {
+            step.family
+        });
+    let run_id = publication_identity.local_run_id(family, definition, &completed.workload.step_id);
     let run = materialization::admit(completed, mesh, options, fields, &run_id, &context)
         .map_err(invalid)?;
     let object_artifact_paths = source
@@ -145,7 +151,6 @@ pub fn prepare_fluid_study_publication(
         FluidNumericalEvidence {
             root: completed.root.clone(),
             catalog: completed.catalog.clone(),
-            layout: FluidLayoutEvidence::of(&completed.layout).map_err(invalid)?,
             object_artifact_paths,
         },
         &mut published,
@@ -163,34 +168,7 @@ pub fn prepare_fluid_study_publication(
 struct FluidNumericalEvidence {
     root: runmat_execution::value::ValueRef,
     catalog: runmat_execution::value::PublishedObjectCatalog,
-    layout: FluidLayoutEvidence,
     object_artifact_paths: Vec<String>,
-}
-
-/// The finite-volume cell/face layout is derived from the solver mesh the manifest already
-/// names, so the manifest records its identity and content digest rather than a second copy.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct FluidLayoutEvidence {
-    identity: runmat_analysis_fea::execution::FieldTopologyIdentity,
-    content_digest: runmat_execution::Digest,
-    entity_counts: runmat_analysis_fea::results::field::RecoveredFieldEntityCounts,
-}
-
-impl FluidLayoutEvidence {
-    fn of(
-        layout: &runmat_analysis_fea::results::field::FiniteVolumeFieldTopology,
-    ) -> Result<Self, String> {
-        Ok(Self {
-            identity: layout.identity(),
-            content_digest: runmat_execution::Digest::sha256(
-                layout
-                    .canonical_bytes()
-                    .map_err(|error| error.to_string())?,
-            ),
-            entity_counts: layout.entity_counts(),
-        })
-    }
 }
 
 fn publication_error(
@@ -211,19 +189,4 @@ fn publication_error(
         message,
         std::collections::BTreeMap::from([("study_id".into(), study_id.into())]),
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The manifest names the derived layout; it never repeats node, cell or face identities.
-    #[allow(dead_code)]
-    fn layout_evidence_is_size_independent(evidence: FluidLayoutEvidence) {
-        let FluidLayoutEvidence {
-            identity: _,
-            content_digest: _,
-            entity_counts: _,
-        } = evidence;
-    }
 }

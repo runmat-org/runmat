@@ -24,6 +24,19 @@ pub(super) fn execute_study_step(
 ) -> Result<(OperationEnvelope<AnalysisRunResult>, AnalysisSolverOptions), OperationErrorEnvelope> {
     let model = solver_model(model, procedure_step);
     match &execution.solver_options {
+        AnalysisSolverOptions::AcousticResponse(_) => Err(operation_error(
+            ANALYSIS_RUN_STUDY_OPERATION,
+            ANALYSIS_RUN_STUDY_OP_VERSION,
+            context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RUN_STUDY.ACOUSTIC_TYPED_EXECUTION_REQUIRED",
+                error_type: OperationErrorType::Contract,
+                retryable: false,
+                severity: OperationErrorSeverity::Fatal,
+            },
+            "acoustic cavity-mode and transient studies run through their governed typed execution path",
+            std::collections::BTreeMap::new(),
+        )),
         AnalysisSolverOptions::ElectricalStatic(_) | AnalysisSolverOptions::Magnetostatic(_) | AnalysisSolverOptions::MaxwellHarmonic(_) => Err(operation_error(
             ANALYSIS_RUN_STUDY_OPERATION,
             ANALYSIS_RUN_STUDY_OP_VERSION,

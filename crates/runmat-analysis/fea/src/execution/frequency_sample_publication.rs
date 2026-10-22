@@ -374,13 +374,7 @@ fn validate_observations(
     topology: FieldTopologyIdentity,
 ) -> AnalysisExecutionResult<()> {
     let source_matches = match observations.source {
-        ObservationFieldSource::FiniteVolumeRecovery {
-            recovery_request,
-            artifact,
-            numerical_source,
-            topology: source_topology,
-        }
-        | ObservationFieldSource::SampledRecovery {
+        ObservationFieldSource::SampledRecovery {
             recovery_request,
             artifact,
             numerical_source,

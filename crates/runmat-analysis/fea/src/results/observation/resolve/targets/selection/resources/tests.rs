@@ -1,8 +1,4 @@
 use super::*;
-use crate::{
-    results::field::FiniteVolumeFieldTopology,
-    topology::{FiniteVolumeProjectionPolicy, FiniteVolumeTopology},
-};
 use runmat_analysis_core::{RecoveryPolicy, RegionTarget};
 use runmat_meshing_core::{fixtures, ElementOrder};
 
@@ -14,12 +10,16 @@ fn original_native_cell_and_face_selection_fit_counted_scratch_and_reject_short_
             _ => fixtures::quadratic_slab_mesh(2),
         };
         let projection = AnalysisProjection::derive(&mesh).unwrap();
-        let geometry =
-            FiniteVolumeTopology::derive(&projection, FiniteVolumeProjectionPolicy::default())
-                .unwrap();
-        let layout = FiniteVolumeFieldTopology::derive(&projection, &geometry).unwrap();
-        let topology =
-            ObservationTopology::from_finite_volume(&layout, &projection, &geometry).unwrap();
+        let topology = ObservationTopology::from_projection(&projection)
+            .unwrap()
+            .with_projection_faces()
+            .unwrap();
+        let layout = topology.finite_volume.clone().unwrap();
+        let geometry = crate::topology::FiniteVolumeTopology::derive(
+            &projection,
+            crate::topology::FiniteVolumeProjectionPolicy::covering(&projection),
+        )
+        .unwrap();
         let mut target = RegionTarget::new(
             "original-volume",
             EntityDimension::Volume,
@@ -60,12 +60,12 @@ fn original_native_cell_and_face_selection_fit_counted_scratch_and_reject_short_
         else {
             panic!("original cell target");
         };
-        let expected = geometry
-            .cells
+        let expected = projection
+            .elements
             .iter()
             .enumerate()
-            .filter(|(_, c)| c.region == projection.elements[0].region_id)
-            .map(|(i, c)| (i, c.element_identity))
+            .filter(|(_, e)| e.region_id == projection.elements[0].region_id)
+            .map(|(i, e)| (i, e.stable_identity))
             .collect::<Vec<_>>();
         assert_eq!(indices, expected.iter().map(|p| p.0).collect::<Vec<_>>());
         assert_eq!(identities, expected.iter().map(|p| p.1).collect::<Vec<_>>());

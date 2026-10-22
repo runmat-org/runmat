@@ -9,7 +9,9 @@ pub use receipt::{
 };
 mod profile;
 mod result;
-pub use fields::fluid_native_field_definition_inventory;
+pub use fields::{
+    fluid_native_field_definition_inventory, fluid_native_field_definitions,
+};
 mod checkpoint;
 mod source;
 pub use checkpoint::{
@@ -29,8 +31,8 @@ pub use transient_workload::{
     FluidTransientSolverResult, FluidTransientWorkload, PreparedFluidTransient,
 };
 
-pub use result::FluidSteadySolverResult;
-pub use workload::FluidSteadyWorkload;
+pub use result::{FluidRetainedOriginal, FluidSteadySolverResult};
+pub use workload::{FluidCoupling, FluidSteadyWorkload};
 
 use super::{AnalysisExecutionError, AnalysisExecutionResult};
 use runmat_canonical_codec::CanonicalLimits;

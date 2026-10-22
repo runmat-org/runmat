@@ -181,7 +181,13 @@ const fn method_is_compatible(
             matches!(method, SolverMethod::AcousticDomainGraphHelmholtzHarmonic)
         }
         TemporalImplementation::AcousticCanonicalHarmonicSolve => {
-            matches!(method, SolverMethod::AcousticCanonicalHelmholtzGmres)
+            matches!(method, SolverMethod::AcousticCanonicalHelmholtzCertifiedLu)
+        }
+        TemporalImplementation::AcousticCanonicalModalSolve => {
+            matches!(method, SolverMethod::AcousticCanonicalShiftInvertBlockKrylov)
+        }
+        TemporalImplementation::AcousticCanonicalTransientSolve => {
+            matches!(method, SolverMethod::AcousticCanonicalNewmarkPcg)
         }
         TemporalImplementation::CoupledSinglePassProfileTransfer
         | TemporalImplementation::CoupledFixedPointRelaxation
@@ -203,7 +209,11 @@ const fn method_is_compatible(
             matches!(method, SolverMethod::SparseDirectLu)
         }
         TemporalImplementation::FluidSteadyNonorthogonalPressureCorrection
-        | TemporalImplementation::FluidBackwardEulerConservativeMomentumPressure => {
+        | TemporalImplementation::FluidBackwardEulerConservativeMomentumPressure
+        | TemporalImplementation::ConjugateSteadyFlowMonolithicEnergy
+        | TemporalImplementation::ConjugateSteadyFlowBackwardEulerEnergy
+        | TemporalImplementation::FluidStructureSteadyAitkenPartitioned
+        | TemporalImplementation::FluidStructureTransientAitkenPartitioned => {
             matches!(method, SolverMethod::GeneralGmres)
         }
     }
@@ -253,13 +263,14 @@ const fn preconditioner_is_compatible(
         | SolverMethod::StructuralModalHarmonicDenseDirect
         | SolverMethod::StructuralModalResponseSpectrumCombination
         | SolverMethod::StructuralRandomResponseIntegration
-        | SolverMethod::AcousticDomainGraphHelmholtzHarmonic => {
+        | SolverMethod::AcousticDomainGraphHelmholtzHarmonic
+        | SolverMethod::AcousticCanonicalHelmholtzCertifiedLu => {
             matches!(preconditioner, SolverPreconditioner::None)
         }
-        SolverMethod::AcousticCanonicalHelmholtzGmres => matches!(
-            preconditioner,
-            SolverPreconditioner::None | SolverPreconditioner::Ilu0
-        ),
+        SolverMethod::AcousticCanonicalShiftInvertBlockKrylov
+        | SolverMethod::AcousticCanonicalNewmarkPcg => {
+            matches!(preconditioner, SolverPreconditioner::Ilu0)
+        }
         SolverMethod::StructuralDirectHarmonicGmres => {
             matches!(preconditioner, SolverPreconditioner::Jacobi)
         }

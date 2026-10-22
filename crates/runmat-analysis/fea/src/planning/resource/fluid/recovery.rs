@@ -14,20 +14,8 @@ pub fn fluid_field_recovery_shape(
     request: &FieldRecoveryRequest,
 ) -> Result<(Vec<u64>, ByteCount), ResourcePlanningError> {
     request.validate().map_err(invalid)?;
-    let definitions =
-        crate::execution::fluid_native_field_definition_inventory().map_err(invalid)?;
-    request
-        .plan
-        .validate_definitions(definitions.iter().cloned())
-        .map_err(invalid)?;
-    if !matches!(
-        request.topology,
-        crate::execution::FieldTopologyIdentity::FiniteVolumeMesh { .. }
-    ) {
-        return Err(invalid(
-            "fluid native recovery requires original all-face finite-volume layout",
-        ));
-    }
+    // The request's requirements name the coupled fields and the fluid support.
+    let definitions = crate::execution::fluid_native_field_definitions(request).map_err(invalid)?;
     let counts = definitions.iter().map(|definition| {
         let requirement = request.plan.requirements.iter().find(|r| r.quantity == definition.quantity()
             && r.entity_domain == definition.entity_domain()).ok_or_else(|| invalid("fluid native quantity absent"))?;
@@ -90,9 +78,6 @@ pub fn build_fluid_field_recovery_resource_plan(
     facts: PreparedPhaseResourceFacts,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     result.validate_for(workload, mesh).map_err(invalid)?;
-    let topology = result
-        .native_field_topology(workload, mesh)
-        .map_err(invalid)?;
     let expected = result
         .native_field_request(workload, mesh)
         .map_err(invalid)?;
@@ -112,7 +97,6 @@ pub fn build_fluid_field_recovery_resource_plan(
         profile_serialized(mesh, LIMITS).map_err(invalid)?,
         profile_serialized(result, LIMITS).map_err(invalid)?,
         profile_serialized(request, LIMITS).map_err(invalid)?,
-        profile_serialized(&topology, LIMITS).map_err(invalid)?,
     ];
     let wire_workspace = profiles.into_iter().try_fold(0, |sum, p| {
         admission::add(
@@ -132,13 +116,12 @@ pub fn build_fluid_field_recovery_resource_plan(
         admission::add(construction, validation)?,
         workload.resident_ceiling().map_err(invalid)?,
     )?;
-    // Complete input wire profiles precede materialization of these five canonical buffers.
+    // Complete input wire profiles precede materialization of these four canonical buffers.
     let bytes = [
         workload.canonical_bytes().map_err(invalid)?,
         mesh.canonical_encode().map_err(invalid)?,
         result.canonical_bytes().map_err(invalid)?,
         request.canonical_bytes().map_err(invalid)?,
-        topology.canonical_bytes().map_err(invalid)?,
     ];
     let (encoded, decoded) = bytes.iter().try_fold((0, 0), |(e, d), b| {
         Ok::<_, ResourcePlanningError>((

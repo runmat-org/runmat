@@ -19,6 +19,7 @@ impl OutputOperation {
                 | Self::Real
                 | Self::Imaginary
                 | Self::Phase
+                | Self::Level
                 | Self::VonMises
                 | Self::Principal),
                 Some(value),
@@ -155,6 +156,15 @@ fn project_type(operation: OutputOperation, value: &FeaType) -> Result<FeaType, 
             _ => Err("component requires a three-component numeric field"),
         },
         OutputOperation::Real | OutputOperation::Imaginary => Ok(FeaType::Field(field.clone())),
+        // Sound pressure level of a complex scalar pressure, dB re 20 uPa (RMS).
+        OutputOperation::Level => match field.value.as_ref() {
+            value if value.is_numeric() => Ok(projected_field(
+                field,
+                Box::new(FeaType::Quantity(crate::PhysicalDimension::DIMENSIONLESS)),
+                Some(runmat_analysis_core::ObservationQuantity::SoundPressureLevel),
+            )),
+            _ => Err("level requires a complex scalar acoustic pressure field"),
+        },
         OutputOperation::Phase => Ok(projected_field(
             field,
             Box::new(dimensionless_shape(&field.value)),

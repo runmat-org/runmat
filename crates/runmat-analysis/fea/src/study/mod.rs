@@ -2,6 +2,8 @@
 
 mod acoustic_planning;
 mod acoustic_product;
+mod acoustic_response_planning;
+mod acoustic_response_product;
 mod compilation;
 mod electrical_planning;
 mod electrical_product;
@@ -23,6 +25,15 @@ pub use acoustic_planning::{
     plan_acoustic_study, AcousticStudyPlan, AcousticStudyPlanningError,
     AcousticStudyPlanningPolicy, PlannedAcousticFrequency,
 };
+pub use acoustic_response_planning::{
+    is_acoustic_response_study, plan_acoustic_response_study,
+    AcousticResponseStudyPlanningError, AcousticResponseStudyPlanningPolicy,
+};
+pub use acoustic_response_product::{
+    build_acoustic_response_study_product, plan_acoustic_response_study_product,
+    AcousticResponseStudyProduct, AcousticResponseStudyProductError,
+    AcousticResponseStudyProductInput,
+};
 pub use acoustic_product::{
     build_acoustic_study_product, plan_acoustic_study_product, AcousticStudyProduct,
     AcousticStudyProductError, AcousticStudyProductInput,
@@ -39,7 +50,10 @@ pub use electrical_product::{
     ElectricalStudyProductError,
     ElectricalStudyProductInput,
 };
-pub use fluid_material::{derive_canonical_fluid_material, FluidMaterialCompilationError};
+pub use fluid_material::{
+    derive_canonical_fluid_material, derive_fluid_cells, is_flow_step, FluidCells,
+    FluidMaterialCompilationError,
+};
 pub use fluid_planning::{plan_fluid_study, FluidStudyPlanningError, FluidStudyPlanningPolicy};
 pub use fluid_product::{
     build_fluid_study_product, plan_fluid_study_product, FluidStudyProduct, FluidStudyProductError,

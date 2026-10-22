@@ -78,7 +78,7 @@ impl RecoveredFieldCatalog {
             if by_sample.insert(sample_key, index).is_some() {
                 return Err(RecoveredFieldError::CatalogDuplicateSample);
             }
-            let entity_count = entity_counts.entity_count(definition.entity_domain());
+            let entity_count = definition.stored_entities(entity_counts);
             if entity_count == 0 {
                 return Err(RecoveredFieldError::ArtifactTopologyMismatch);
             }

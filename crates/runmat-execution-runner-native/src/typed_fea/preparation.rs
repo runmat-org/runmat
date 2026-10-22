@@ -180,6 +180,9 @@ pub async fn prepare_study_with_role(
                 runmat_analysis_fea::study::AcousticStudyPlanningPolicy::standard(),
             )
         }
+        admission::PreparedFamily::AcousticResponse => crate::StudyRootPlanning::AcousticResponse(
+            runmat_analysis_fea::study::AcousticResponseStudyPlanningPolicy::default(),
+        ),
         admission::PreparedFamily::Electrical => {
             crate::StudyRootPlanning::Electrical(runmat_analysis_fea::study::ElectricalStudyPlanningPolicy {
                 element_temperature_k: None,

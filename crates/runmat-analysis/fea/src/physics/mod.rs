@@ -1,8 +1,10 @@
 pub mod acoustic;
 pub mod cfd;
 pub mod cht;
+pub mod conjugate_heat;
 pub mod coupling;
 pub mod electrical;
+pub mod fluid_structure;
 pub mod fsi;
 pub mod magnetic;
 pub mod maxwell;

@@ -346,6 +346,16 @@ fn apply_projection(
         AuthoredFieldProjection::Phase => {
             spec.complex_representation = ComplexRepresentation::PhaseRadians;
         }
+        AuthoredFieldProjection::Level => {
+            if spec.quantity != ObservationQuantity::AcousticPressure
+                || spec.complex_representation != ComplexRepresentation::Complex
+            {
+                return Err(AuthoredObservationError::InvalidProjection(
+                    "level requires complex acoustic pressure".into(),
+                ));
+            }
+            spec.complex_representation = ComplexRepresentation::SoundPressureLevel;
+        }
         AuthoredFieldProjection::Principal(which) => {
             if !matches!(
                 spec.quantity,

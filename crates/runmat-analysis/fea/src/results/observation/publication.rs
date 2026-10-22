@@ -181,34 +181,6 @@ impl ObservationPublicationCatalog {
         self.validate_authored_step(step)?;
         match (self.source.source(), context) {
             (
-                ObservationFieldCatalogSource::FiniteVolumeRecovery {
-                    recovery_request, ..
-                },
-                ObservationHistorySourceContext::FluidSteady { workload, mesh },
-            ) => {
-                if recovery_request.producer != self.producer
-                    || workload.producer_identity()? != self.producer
-                    || !workload
-                        .model
-                        .sequence
-                        .steps
-                        .iter()
-                        .any(|authored| authored == step)
-                {
-                    return Err(invalid(
-                        "finite-volume publication original producer or authored step differs",
-                    ));
-                }
-                self.source
-                    .validate_finite_volume_plan(&self.plan, workload, mesh)?;
-                for entry in &self.entries {
-                    if let ObservationPublicationEntry::Sample(value) = entry {
-                        self.source
-                            .validate_finite_volume_selection(&value.request.selection)?;
-                    }
-                }
-            }
-            (
                 ObservationFieldCatalogSource::SampledRecovery {
                     recovery_request,
                     manifest,

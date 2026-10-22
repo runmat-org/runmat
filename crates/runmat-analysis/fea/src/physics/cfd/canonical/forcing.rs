@@ -17,7 +17,10 @@ pub(super) fn compile(
     for action in actions {
         let a = match action {
             ExcitationAction::BodyForce(a) => a,
-            ExcitationAction::MassFlow(_) => continue, // Validated and bound by the physical boundary owner.
+            // Validated and bound by the physical boundary owner.
+            ExcitationAction::MassFlow(_)
+            | ExcitationAction::InletVelocity(_)
+            | ExcitationAction::WallMotion(_) => continue,
             _ => return Err(Error::Unsupported("unsupported fluid excitation")),
         };
         if a.frame != CoordinateFrame::Global

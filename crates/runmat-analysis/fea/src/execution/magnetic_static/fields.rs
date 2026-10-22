@@ -232,6 +232,7 @@ fn native_magnetic_field_plan(
                 3
             };
             Ok(FieldRecoveryRequirement {
+                support: Default::default(),
                 quantity,
                 source_location: location,
                 output_location: location,

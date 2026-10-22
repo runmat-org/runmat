@@ -5,7 +5,10 @@ use runmat_analysis_core::{ExcitationAction, PhysicalSignal};
 pub(crate) fn supports_action(action: &ExcitationAction) -> bool {
     matches!(
         action,
-        ExcitationAction::BodyForce(_) | ExcitationAction::MassFlow(_)
+        ExcitationAction::BodyForce(_)
+            | ExcitationAction::MassFlow(_)
+            | ExcitationAction::InletVelocity(_)
+            | ExcitationAction::WallMotion(_)
     )
 }
 
@@ -31,7 +34,9 @@ pub(crate) fn potential_boundary_authorities<'a>(
         .map(|c| c.constraint_id.as_str())
         .chain(operators.iter().map(|b| b.boundary_id.as_str()))
         .chain(actions.iter().filter_map(|a| match a {
-            ExcitationAction::MassFlow(a) => Some(a.excitation_id.0.as_str()),
+            ExcitationAction::MassFlow(a)
+            | ExcitationAction::InletVelocity(a)
+            | ExcitationAction::WallMotion(a) => Some(a.excitation_id.0.as_str()),
             _ => None,
         }))
 }

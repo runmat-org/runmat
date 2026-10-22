@@ -5,11 +5,15 @@ use runmat_meshing_core::{MeshingEvidence, SolverMeshArtifact};
 use super::StructuralStudyNumericalResult;
 
 mod acoustic;
+mod acoustic_response;
 mod electrical;
 mod fluid;
 mod magnetic;
 mod maxwell;
 mod nonlinear;
+pub use acoustic_response::{
+    AcousticResponseStudyCompletion, AcousticResponseStudyObjectSource, AcousticResponseStudySource,
+};
 pub use electrical::{
     ElectricalStudyCompletion, ElectricalStudyObjectSource, ElectricalStudySource,
 };

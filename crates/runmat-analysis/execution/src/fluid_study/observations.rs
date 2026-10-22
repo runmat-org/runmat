@@ -1,4 +1,5 @@
-//! Native finite-volume source adapter; shared engine owns task/import/catalog mechanics.
+//! Native fluid fields on the canonical solver mesh; the shared engine owns task, import and
+//! catalog mechanics.
 use super::*;
 pub(super) use crate::sampled_study_observations::SampledStudyObservations as FluidObservations;
 use crate::{
@@ -23,26 +24,11 @@ impl FluidStudyCoordinator {
             source,
             ObservationPreparation {
                 source_host: recovery.host.clone(),
-                source: ObservationPublishedSource::FiniteVolumeRecovery {
+                source: ObservationPublishedSource::VolumeMeshRecovery {
                     recovery_request: recovery.request.clone(),
                     fields: fields.clone(),
-                    layout: self
-                        .result
-                        .as_ref()
-                        .expect("completed solve")
-                        .result
-                        .native_field_topology(
-                            self.preparation.workload(),
-                            &self.preparation.mesh,
-                        )?,
-                    resource_plan: recovery
-                        .inputs
-                        .iter()
-                        .find(|input| input.manifest.kind == Kind::ResourcePlan)
-                        .cloned()
-                        .ok_or_else(|| invalid("fluid recovery plan absent"))?,
                 },
-                source_workload: ObservationWorkloadSource::FluidSteady(
+                source_workload: ObservationWorkloadSource::VolumeMesh(
                     self.input(Kind::FluidSteadyWorkload)?,
                 ),
                 mesh: Some(self.input(Kind::Mesh)?),
@@ -235,18 +221,16 @@ impl FluidStudyCoordinator {
                 .host
                 .workload
                 .step,
-            ObservationFieldCatalog::finite_volume_recovery(
+            ObservationFieldCatalog::volume_mesh_recovery(
                 recovery.request.clone(),
                 fields.manifest.clone(),
-                self.result
-                    .as_ref()
-                    .expect("completed solve")
-                    .result
-                    .native_field_topology(self.preparation.workload(), &self.preparation.mesh)?,
+                SequenceIdentity::from_solver_contract(
+                    &self.preparation.workload().model.sequence,
+                )?,
+                self.selected_step().clone(),
             )?,
             self.selected_step(),
-            ObservationHistorySourceContext::FluidSteady {
-                workload: self.preparation.workload(),
+            ObservationHistorySourceContext::VolumeMesh {
                 mesh: &self.preparation.mesh,
             },
         )?;

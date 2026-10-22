@@ -48,7 +48,8 @@ pub(super) fn solve_with_time(
         for k in 0..3 {
             let b = m.rhs.iter().map(|v| v[k]).collect::<Vec<_>>();
             let current = u.iter().map(|v| v[k]).collect::<Vec<_>>();
-            let (x, count) = linear::solve(p, &m.matrix, &b, &current)?;
+            let (x, count) =
+                linear::solve(p, &m.matrix, &b, &current, linear::LinearSystem::Momentum)?;
             linear_iterations += count;
             for c in 0..n {
                 predicted[c][k] = x[c];

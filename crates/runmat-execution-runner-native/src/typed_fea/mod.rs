@@ -17,7 +17,8 @@ pub use execution::{execute_prepared_fea_study_locally, prepare_study_publicatio
 use execution::execute_prepared_with_source;
 pub(crate) use family_execution::local_result as local_family_result;
 pub use family_execution::{
-    imported_family_result, CompletedAuthoredAcousticStudy, CompletedAuthoredElectricalStudy,
+    imported_family_result, CompletedAuthoredAcousticResponseStudy, CompletedAuthoredAcousticStudy,
+    CompletedAuthoredElectricalStudy,
     CompletedAuthoredFluidStudy, CompletedAuthoredMagneticStudy, CompletedAuthoredMaxwellStudy,
     CompletedAuthoredNonlinearSolidStudy, CompletedAuthoredThermalStudy,
 };
@@ -143,6 +144,7 @@ pub enum CompletedFeaStudyResult {
     Fluid(Box<CompletedAuthoredFluidStudy>),
     Nonlinear(Box<CompletedAuthoredNonlinearSolidStudy>),
     Acoustic(Box<CompletedAuthoredAcousticStudy>),
+    AcousticResponse(Box<CompletedAuthoredAcousticResponseStudy>),
     Electrical(Box<CompletedAuthoredElectricalStudy>),
     Magnetic(Box<CompletedAuthoredMagneticStudy>),
     Maxwell(Box<CompletedAuthoredMaxwellStudy>),
@@ -159,6 +161,7 @@ impl CompletedFeaStudyResult {
             Self::Fluid(result) => Some(&result.completion.compiled),
             Self::Nonlinear(result) => Some(&result.completion.compiled),
             Self::Acoustic(result) => Some(&result.completion.compiled),
+            Self::AcousticResponse(result) => Some(&result.completion.compiled),
             Self::Electrical(result) => Some(&result.completion.compiled),
             Self::Magnetic(result) => Some(&result.completion.compiled),
             Self::Maxwell(result) => Some(&result.completion.compiled),
@@ -181,6 +184,7 @@ impl CompletedFeaStudyResult {
             Self::Magnetic(result) => serde_json::to_vec(&result.completion.result),
             Self::Maxwell(result) => serde_json::to_vec(&result.completion.result),
             Self::Acoustic(result) => serde_json::to_vec(&result.completion.result),
+            Self::AcousticResponse(result) => serde_json::to_vec(&result.completion.result),
             Self::Fluid(result) => serde_json::to_vec(&result.completion.result),
             Self::Nonlinear(result) => serde_json::to_vec(&(
                 &result.completion.terminal_block,
@@ -197,6 +201,7 @@ impl CompletedFeaStudyResult {
             Self::Fluid(result) => &result.mesh,
             Self::Nonlinear(result) => &result.mesh,
             Self::Acoustic(result) => &result.mesh,
+            Self::AcousticResponse(result) => &result.mesh,
             Self::Electrical(result) => &result.mesh,
             Self::Magnetic(result) => &result.mesh,
             Self::Maxwell(result) => &result.mesh,

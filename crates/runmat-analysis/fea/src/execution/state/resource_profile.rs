@@ -46,6 +46,8 @@ pub enum SemanticStatePublicationProfileSource<'a> {
     StructuralRandomStatistics(&'a StructuralRandomResponseSolverResult),
     Thermal(&'a ThermalSolverResultManifest),
     AcousticNativeFields(&'a crate::execution::AcousticHarmonicSolverResult),
+    /// Exact portable fields of an acoustic cavity-mode or pressure-transient state.
+    AcousticResponseFields(&'a [AnalysisField]),
     StaticElectricalNativeFields(&'a crate::execution::ElectricalStaticSolverResult),
     MagnetostaticNativeFields(&'a crate::execution::MagnetostaticSolverResult),
     MaxwellNativeFields(&'a crate::execution::MaxwellHarmonicSolverResult),
@@ -110,6 +112,17 @@ impl SemanticStatePublicationRequest {
                 SemanticStatePublicationSource::ThermalPrimaryField,
                 SemanticStatePublicationProfileSource::Thermal(manifest),
             ) => thermal::profile(self, manifest),
+            (
+                SemanticStatePublicationSource::AcousticResponseFields,
+                SemanticStatePublicationProfileSource::AcousticResponseFields(fields),
+            ) => profile_state_payload(
+                self,
+                &Tagged {
+                    kind: "fields",
+                    key: "fields",
+                    value: fields,
+                },
+            ),
             (
                 SemanticStatePublicationSource::StructuralPrimaryFields,
                 SemanticStatePublicationProfileSource::StructuralPrimaryFields(fields),

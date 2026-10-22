@@ -6,6 +6,7 @@ use runmat_analysis_core::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum PreparedFamily {
     Acoustic,
+    AcousticResponse,
     Electrical,
     Fluid,
     Nonlinear,
@@ -46,9 +47,26 @@ pub(super) fn select_family(
     let [step] = sequence.steps.as_slice() else {
         return Err(unsupported());
     };
-    if step.family == PhysicsFamily::Fluid
-        && step.procedure == AnalysisProcedure::Static
-        && step.independent_domain == runmat_analysis_core::IndependentDomain::Static
+    // Flow coupled to heat transfer or a structure runs the same flow study lifecycle.
+    let conjugate_heat = step.family
+        == PhysicsFamily::Coupled(
+            runmat_analysis_core::CoupledPhysicsFamily::ConjugateHeatTransfer,
+        )
+        || step.family
+            == PhysicsFamily::Coupled(
+                runmat_analysis_core::CoupledPhysicsFamily::FluidStructureInteraction,
+            );
+    if (step.family == PhysicsFamily::Fluid || conjugate_heat)
+        && matches!(
+            (step.procedure, &step.independent_domain),
+            (
+                AnalysisProcedure::Static,
+                runmat_analysis_core::IndependentDomain::Static
+            ) | (
+                AnalysisProcedure::TransientResponse,
+                runmat_analysis_core::IndependentDomain::TimeSeconds { .. }
+            )
+        )
         && step.solution_space == SolutionSpace::Direct
         && step.restart == RestartPolicy::Fresh
         && step.state_inputs.is_empty()
@@ -118,6 +136,21 @@ pub(super) fn select_family(
     if is_electrothermal(sequence) {
         return Ok(PreparedFamily::Thermal);
     }
+    if step.family == PhysicsFamily::Acoustic
+        && matches!(
+            step.procedure,
+            AnalysisProcedure::ModalExtraction | AnalysisProcedure::TransientResponse
+        )
+        && step.solution_space == SolutionSpace::Direct
+        && step.restart == RestartPolicy::Fresh
+        && step.state_inputs.is_empty()
+        && step.activations.is_empty()
+        && sequence.dependencies.is_empty()
+        && sequence.transitions.is_empty()
+        && sequence.branches.is_empty()
+    {
+        return Ok(PreparedFamily::AcousticResponse);
+    }
     if step.family != PhysicsFamily::Thermal
         || !matches!(
             step.procedure,
@@ -174,7 +207,7 @@ fn structural_root_sequence(sequence: &AnalysisSequence) -> bool {
 }
 
 fn unsupported() -> String {
-    "RM.FEA.TYPED_EXECUTION.UNSUPPORTED_PHYSICS_FAMILY: typed native execution admits structural studies or one fresh independent direct thermal steady/transient, fluid steady, equation-selected static electrical/magnetic, singleton Maxwell harmonic, acoustic harmonic, or electrothermal steady/transient step".into()
+    "RM.FEA.TYPED_EXECUTION.UNSUPPORTED_PHYSICS_FAMILY: typed native execution admits structural studies or one fresh independent direct thermal steady/transient, fluid steady/transient, steady conjugate heat transfer or fluid–structure interaction, equation-selected static electrical/magnetic, Maxwell harmonic, electrothermal steady/transient, or acoustic harmonic, modal or transient step".into()
 }
 
 #[cfg(test)]
@@ -209,7 +242,7 @@ mod tests {
     }
 
     #[test]
-    fn fluid_dispatch_requires_one_fresh_independent_direct_static_step() {
+    fn fluid_dispatch_requires_one_fresh_independent_direct_steady_or_timed_step() {
         let step = ProcedureStep::fluid_static("flow");
         let sequence = AnalysisSequence::from_steps("flow", vec![step.clone()]);
         assert_eq!(
@@ -218,6 +251,17 @@ mod tests {
         );
         let mut transient = step.clone();
         transient.procedure = AnalysisProcedure::TransientResponse;
+        let mut timed = transient.clone();
+        timed.independent_domain = runmat_analysis_core::IndependentDomain::TimeSeconds {
+            origin: 0.0,
+            start: 0.0,
+            end: 1.0,
+            interval_count: 10,
+        };
+        assert_eq!(
+            super::select_family(&AnalysisSequence::from_steps("flow", vec![timed]), None).unwrap(),
+            PreparedFamily::Fluid
+        );
         let mut resumed = step.clone();
         resumed.restart = RestartPolicy::ResumeCheckpoint {
             checkpoint_id: "foreign".into(),

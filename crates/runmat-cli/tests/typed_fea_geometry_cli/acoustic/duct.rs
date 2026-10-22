@@ -165,10 +165,9 @@ fn execute(drive: Drive, quadratic: bool, size: f64, generated: bool) -> Evidenc
         let completed = closure::reopen(&project, &manifest, &retained, &mesh);
         let entry = &completed.entries[0];
         assert_eq!(
-            entry.workload.solver.preconditioner,
-            retained.provenance.preconditioner
+            entry.workload.solver,
+            runmat_analysis_fea::physics::acoustic::AcousticHarmonicPolicy::default()
         );
-        assert_eq!(entry.workload.solver.maximum_iterations, 4096);
         fixture::verify_medium(&entry.workload.model, &mesh);
         fixture::verify_drive(&entry.workload.model, drive, generated);
         let result = &entry.result.result;

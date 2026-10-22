@@ -1,12 +1,10 @@
-//! Sampling/assembly-free sparse real-block congruence and right-factor envelope.
+//! Sampling/assembly-free sparse real-block congruence and certified direct-factor envelope.
 use super::*;
-use crate::contracts::SolverPreconditioner;
 
 pub(crate) fn sparse_workspace_bound(
     support: u64,
     block: u64,
     recovery_row_support: u64,
-    preconditioner: SolverPreconditioner,
 ) -> Result<u64, ResourcePlanningError> {
     if !matches!(recovery_row_support, 1 | 2) {
         return Err(invalid("unsupported acoustic affine row support"));
@@ -21,19 +19,18 @@ pub(crate) fn sparse_workspace_bound(
     // including finalization overlap. Do not substitute K/M/B's support for the
     // potentially denser phase-congruent reduced matrix.
     let matrices = mul(add(full, reduced)?, 160)?;
-    let factors = match preconditioner {
-        SolverPreconditioner::None => 0,
-        // Fixed-support LU: two nnz buffers and two row-sized index buffers.
-        // Twice the exact payload allows allocation capacity; no row maps are
-        // constructed. Source reduced CSR remains retained alongside factors.
-        SolverPreconditioner::Ilu0 => add(mul(reduced, 32)?, mul(add(block, 1)?, 32)?)?,
-        _ => return Err(invalid("unsupported acoustic sparse preconditioner")),
-    };
-    // Both CSR row/header allowances, reduction clone and extra physical
-    // correction/application vectors coexist. Existing Krylov buffers remain
-    // separately reserved, rather than counted here as a replacement.
+    // One certified sparse LU of the reduced operator (factor model plus estimator and
+    // refinement vectors), quoted by the shared certificate layer.
+    let factor = crate::solve::certificate::nonsingularity_reservation_bytes(
+        usize::try_from(block).map_err(|_| invalid("acoustic block dimension"))?,
+        usize::try_from(reduced).map_err(|_| invalid("acoustic reduced nonzeros"))?,
+    );
+    if factor == u64::MAX {
+        return Err(ResourcePlanningError::Overflow("acoustic factor reservation"));
+    }
+    // CSR row/header allowances, reduction clone and solution/residual vectors coexist.
     add(
-        add(matrices, factors)?,
+        add(matrices, factor)?,
         add(mul(add(block, 1)?, 256)?, 4096)?,
     )
 }

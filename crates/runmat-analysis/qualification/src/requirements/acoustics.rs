@@ -409,7 +409,7 @@ const NUMERICS: Requirement = Requirement {
     ),
     owners: &[
         "crates/runmat-analysis/fea/src/physics/acoustic/canonical/response.rs",
-        "crates/runmat-analysis/fea/src/solve/uniqueness/mod.rs",
+        "crates/runmat-analysis/fea/src/solve/certificate.rs",
     ],
     dependencies: &[concat!(
         "Radiation convergence remains a mandatory boundary obligation; candidate ",
@@ -450,11 +450,11 @@ const NUMERICS: Requirement = Requirement {
         obligation(
             "uniqueness",
             concat!(
-                "Source-independent original reduced-operator evidence establishes requested ",
-                "uniqueness before accepting physical residual/power closure. An ",
-                "unsuccessful sufficient check is indeterminate, not a singularity ",
-                "diagnosis; no artificial damping or sampled small matrix substitutes for ",
-                "the operator.",
+                "The sparse LU that solves the original reduced operator certifies its ",
+                "nonsingularity (estimated right-inverse defect contraction below the ",
+                "authored limit) before physical residual/power closure is accepted; above ",
+                "the limit the solve fails closed. No artificial damping or sampled small ",
+                "matrix substitutes for the operator.",
             ),
             EvidenceKind::IndependentReference,
             KERNEL,
@@ -462,10 +462,10 @@ const NUMERICS: Requirement = Requirement {
         obligation(
             "cold_claim",
             concat!(
-                "Retained uniqueness records bind original controls, operator/result and ",
-                "numerical receipt. Cold hashes or decoded producer claims never become ",
-                "trusted mathematical proof; independent replay requires original operator ",
-                "and admitted witness/candidate reconstruction.",
+                "Retained factorization certificates bind the authored limit, original ",
+                "operator identity, result and numerical receipt. Cold hashes or decoded ",
+                "producer claims never become trusted mathematical proof; independent ",
+                "replay requires refactoring the original operator.",
             ),
             EvidenceKind::OriginalStateComparison,
             KERNEL,
@@ -506,33 +506,34 @@ const NUMERICS: Requirement = Requirement {
             "FEA-WITNESS-ACOUSTIC-POLE",
             "runmat-analysis-fea",
             concat!(
-                "physics::acoustic::canonical::response::reduced::tests::uniqueness::original",
-                "_canonical_lossless_discrete_pole_is_not_proved_by_zero_rhs",
+                "physics::acoustic::canonical::response::reduced::tests::certificate::origina",
+                "l_canonical_lossless_discrete_pole_fails_closed_despite_zero_rhs",
             ),
             concat!(
                 "crates/runmat-analysis/fea/src/physics/acoustic/canonical/response/reduced/t",
-                "ests/uniqueness.rs",
+                "ests/certificate.rs",
             ),
             "uniqueness",
             &[KERNEL[0]],
             concat!(
-                "Independent Tet4 antisymmetric discrete pole; requested diagnostic refuses ",
-                "zero-RHS residual acceptance, without asserting exact floating rank.",
+                "Independent Tet4 antisymmetric discrete pole fails the factorization ",
+                "certificate despite a zero right-hand side; the same operator off the pole ",
+                "is certified.",
             )
         ),
         witness!(
             "FEA-WITNESS-ACOUSTIC-COLD-CLAIM",
             "runmat-analysis-fea",
             concat!(
-                "execution::acoustic::tests::uniqueness::required_diagnostic_survives_solve_f",
-                "ree_cold_lineage_and_tampering_fails",
+                "execution::acoustic::tests::certificate::retained_certificate_survives_solve",
+                "_free_cold_lineage_and_tampering_fails",
             ),
-            "crates/runmat-analysis/fea/src/execution/acoustic/tests/uniqueness.rs",
+            "crates/runmat-analysis/fea/src/execution/acoustic/tests/certificate.rs",
             "cold_claim",
             &[KERNEL[0]],
             concat!(
-                "Retained producer claim/receipt provenance and tamper rejection; no cold ",
-                "mathematical uniqueness reproof.",
+                "Retained certificate/receipt provenance and tamper rejection; no cold ",
+                "refactorization.",
             )
         ),
     ],

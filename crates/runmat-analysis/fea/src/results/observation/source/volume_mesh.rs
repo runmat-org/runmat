@@ -1,5 +1,5 @@
 //! Physics-neutral selection over native nodal and element fields retained on the canonical
-//! solver mesh (for example acoustic pressure and particle velocity). Every sample of a
+//! solver mesh (for example acoustic pressure, fluid cell velocity or face volume flux). Every sample of a
 //! required definition is selected; fan-out chooses the evaluated sample.
 use super::*;
 use crate::results::field::{RecoveredFieldDerivation, RecoveredFieldEntityDomain};
@@ -26,11 +26,13 @@ pub(crate) fn validate_volume_mesh_authority(
         if requirement.recovery != RecoveryPolicy::Native
             || !matches!(
                 requirement.entity_domain,
-                RecoveredFieldEntityDomain::Nodes | RecoveredFieldEntityDomain::VolumeElements
+                RecoveredFieldEntityDomain::Nodes
+                    | RecoveredFieldEntityDomain::VolumeElements
+                    | RecoveredFieldEntityDomain::OrientedFaces
             )
         {
             return Err(invalid(
-                "volume-mesh recovery admits native nodal or element quantities",
+                "volume-mesh recovery admits native nodal, element or oriented-face quantities",
             ));
         }
     }

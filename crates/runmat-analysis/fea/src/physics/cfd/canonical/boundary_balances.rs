@@ -31,7 +31,8 @@ fn authority<'a>(boundary: &FaceBoundary<'a>) -> Option<&'a str> {
     match boundary {
         FaceBoundary::Interior => None,
         FaceBoundary::Velocity { authority_id, .. }
-        | FaceBoundary::PressureOutlet { authority_id, .. } => Some(authority_id),
+        | FaceBoundary::PressureOutlet { authority_id, .. }
+        | FaceBoundary::Symmetry { authority_id } => Some(authority_id),
     }
 }
 

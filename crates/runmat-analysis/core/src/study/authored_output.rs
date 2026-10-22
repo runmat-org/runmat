@@ -161,6 +161,26 @@ impl AuthoredOutputExpression {
                     AuthoredFieldProjection::Phase => {
                         Err(AuthoredOutputError::ComplexProjectionRequiresComplex)
                     }
+                    AuthoredFieldProjection::Level
+                        if domain == AuthoredFieldDomain::Complex
+                            && shape == ObservationValueShape::Scalar
+                            && value
+                                == AuthoredOutputValue::Physical(
+                                    ObservationQuantity::AcousticPressure,
+                                ) =>
+                    {
+                        Ok(AuthoredOutputType::Field {
+                            value: AuthoredOutputValue::Physical(
+                                ObservationQuantity::SoundPressureLevel,
+                            ),
+                            shape,
+                            domain: AuthoredFieldDomain::Real,
+                            location,
+                        })
+                    }
+                    AuthoredFieldProjection::Level => {
+                        Err(AuthoredOutputError::ComplexProjectionRequiresComplex)
+                    }
                     AuthoredFieldProjection::Principal(_)
                         if matches!(
                             value,

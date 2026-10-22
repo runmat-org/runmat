@@ -57,6 +57,8 @@ pub fn is_exposed_analysis_identity(
                 AnalysisProcedure::HarmonicResponse
             )
             | (PhysicsFamily::Acoustic, AnalysisProcedure::HarmonicResponse)
+            | (PhysicsFamily::Acoustic, AnalysisProcedure::ModalExtraction)
+            | (PhysicsFamily::Acoustic, AnalysisProcedure::TransientResponse)
             | (PhysicsFamily::Fluid, AnalysisProcedure::Static)
             | (PhysicsFamily::Fluid, AnalysisProcedure::TransientResponse)
             | (
@@ -66,6 +68,10 @@ pub fn is_exposed_analysis_identity(
             | (
                 PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer),
                 AnalysisProcedure::TransientResponse
+            )
+            | (
+                PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction),
+                AnalysisProcedure::Static
             )
             | (
                 PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction),
@@ -123,6 +129,8 @@ mod tests {
                 AnalysisProcedure::HarmonicResponse,
             ),
             (PhysicsFamily::Acoustic, AnalysisProcedure::HarmonicResponse),
+            (PhysicsFamily::Acoustic, AnalysisProcedure::ModalExtraction),
+            (PhysicsFamily::Acoustic, AnalysisProcedure::TransientResponse),
             (PhysicsFamily::Fluid, AnalysisProcedure::Static),
             (PhysicsFamily::Fluid, AnalysisProcedure::TransientResponse),
             (
@@ -132,6 +140,10 @@ mod tests {
             (
                 PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer),
                 AnalysisProcedure::TransientResponse,
+            ),
+            (
+                PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction),
+                AnalysisProcedure::Static,
             ),
             (
                 PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction),
