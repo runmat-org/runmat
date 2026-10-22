@@ -63,6 +63,7 @@ fn study() -> (CompiledAnalysisStudy, SolverMeshArtifact) {
 fn policy() -> FluidStudyPlanningPolicy {
     FluidStudyPlanningPolicy {
         numerical: CanonicalFluidPolicy {
+            pressure_velocity_coupling: Default::default(),
             fixed_point_acceleration: None,
             maximum_outer_iterations: 200,
             maximum_nonorthogonal_iterations: 4,

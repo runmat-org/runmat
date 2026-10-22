@@ -524,3 +524,51 @@ fn couette_vorticity_and_wall_shear_match_the_linear_profile() {
     }
     assert!(walls > 0);
 }
+
+#[test]
+#[ignore = "convergence measurement, run with --ignored --nocapture"]
+fn measure_outer_iterations_against_refinement() {
+    for coupling in [PressureVelocityCoupling::Coupled, PressureVelocityCoupling::Segregated] {
+        for cells in [4, 8] {
+            let mut f = case(cells, ReferenceCase::Duct, false);
+            f.policy = CanonicalFluidPolicy::default();
+            f.policy.pressure_velocity_coupling = coupling;
+            f.policy.maximum_outer_iterations = 5000;
+            let p = CanonicalFluidProblem::prepare(f.input()).unwrap();
+            let start = std::time::Instant::now();
+            match p.solve() {
+                Ok(r) => eprintln!(
+                    "{coupling:?} n={} outer={} linear={} {:?}",
+                    p.topology.cells.len(),
+                    r.outer_iterations,
+                    r.linear_iterations,
+                    start.elapsed()
+                ),
+                Err(e) => eprintln!("{coupling:?} cells={cells} failed {e}"),
+            }
+        }
+    }
+}
+
+// witness: FEA-FLUID-SOLVERS-001/coupled_newton_continuation @ incompressible_laminar_steady/tet4/numerical_kernel;
+//   coverage: partial; boundary: the coupled Picard solve (FGMRES, SIMPLE block preconditioner)
+//   reaches the segregated solver's discrete solution in a fraction of the outer iterations;
+//   Newton linearization, pseudo-transient continuation and the Re 1000 cavity are not covered.
+#[test]
+fn coupled_solve_reaches_the_segregated_fixed_point_in_far_fewer_outer_iterations() {
+    let mut f = case(4, ReferenceCase::Duct, false);
+    f.policy = CanonicalFluidPolicy::default();
+    f.policy.maximum_outer_iterations = 2000;
+    let coupled = CanonicalFluidProblem::prepare(f.input()).unwrap().solve().unwrap();
+    f.policy.pressure_velocity_coupling = PressureVelocityCoupling::Segregated;
+    let segregated = CanonicalFluidProblem::prepare(f.input()).unwrap().solve().unwrap();
+    for (u, v) in coupled.velocity_m_per_s.iter().zip(&segregated.velocity_m_per_s) {
+        assert!(norm(sub(*u, *v)) < 1e-6 * norm(*v).max(1e-3));
+    }
+    assert!(
+        4 * coupled.outer_iterations < segregated.outer_iterations,
+        "coupled {} segregated {}",
+        coupled.outer_iterations,
+        segregated.outer_iterations
+    );
+}

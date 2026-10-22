@@ -227,6 +227,7 @@ pub(super) fn problem<'a>(
             signals: &[],
             excitations: &[],
             policy: CanonicalFluidPolicy {
+                pressure_velocity_coupling: Default::default(),
                 fixed_point_acceleration: None,
                 maximum_outer_iterations: 3000,
                 // Tight outer and linear targets on the coupled reference raise the

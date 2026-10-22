@@ -17,6 +17,9 @@ pub(super) enum MomentumMode {
     Original,
     /// Bounded SIMPLE trial only, never a publishable physical boundary state.
     SolverTrial,
+    /// Unrelaxed operator of the coupled solve's Picard step; trial outlet backflow is
+    /// tolerated as in a SIMPLE trial and never published.
+    Coupled,
 }
 
 #[cfg(test)]

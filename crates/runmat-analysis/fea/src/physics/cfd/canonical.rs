@@ -8,6 +8,7 @@ mod acceleration;
 mod boundary;
 mod boundary_balances;
 mod continuity;
+mod coupled;
 mod flux_evidence;
 mod forcing;
 mod geometry_ops;
@@ -55,6 +56,9 @@ pub use transient::{
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CanonicalFluidPolicy {
+    /// How the pressure–velocity fixed point is reached; the discrete equations are the same.
+    #[serde(default)]
+    pub pressure_velocity_coupling: PressureVelocityCoupling,
     #[serde(deserialize_with = "deserialize_acceleration")]
     pub fixed_point_acceleration: Option<crate::solve::fixed_point::AndersonOnePolicy>,
     pub maximum_outer_iterations: usize,
@@ -70,9 +74,22 @@ pub struct CanonicalFluidPolicy {
     pub maximum_authority_items: usize,
 }
 
+/// Solution path of the incompressible pressure–velocity system.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PressureVelocityCoupling {
+    /// Picard steps on the whole (u, p) system by flexible GMRES with a SIMPLE
+    /// block preconditioner.
+    #[default]
+    Coupled,
+    /// Relaxed SIMPLE outer iteration (segregated momentum and pressure solves).
+    Segregated,
+}
+
 impl Default for CanonicalFluidPolicy {
     fn default() -> Self {
         Self {
+            pressure_velocity_coupling: PressureVelocityCoupling::Coupled,
             fixed_point_acceleration: Some(crate::solve::fixed_point::AndersonOnePolicy::default()),
             maximum_outer_iterations: 200,
             maximum_nonorthogonal_iterations: 4,

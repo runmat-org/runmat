@@ -102,6 +102,7 @@ pub(crate) fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
         model,
         step_id: ProcedureStepId("steady".into()),
         policy: CanonicalFluidPolicy {
+            pressure_velocity_coupling: Default::default(),
             fixed_point_acceleration: None,
             maximum_outer_iterations: 20,
             maximum_nonorthogonal_iterations: 4,

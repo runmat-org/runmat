@@ -46,6 +46,7 @@ pub fn material() -> CfdDomain {
 }
 pub fn policy() -> CanonicalFluidPolicy {
     CanonicalFluidPolicy {
+        pressure_velocity_coupling: PressureVelocityCoupling::Coupled,
         fixed_point_acceleration: None,
         maximum_outer_iterations: 2000,
         maximum_nonorthogonal_iterations: 8,
