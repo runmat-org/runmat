@@ -66,6 +66,14 @@ pub struct FeaThermalRunResult {
     pub ordered_element_ids: Vec<u64>,
     pub time_points_s: Vec<f64>,
     pub temperature_snapshots: Vec<AnalysisField>,
+    /// Mesh nodes of finite-conductance thermal interfaces, in the interface field's order.
+    /// `temperature_snapshots` holds the first side's temperature there.
+    #[serde(default)]
+    pub interface_node_ids: Vec<u64>,
+    /// The second side's temperature at `interface_node_ids`, one field per time point (empty
+    /// when the study has no finite-conductance interface).
+    #[serde(default)]
+    pub interface_temperature_snapshots: Vec<AnalysisField>,
     pub temperature_gradient_snapshots: Vec<AnalysisField>,
     pub heat_flux_snapshots: Vec<AnalysisField>,
     pub energy_storage_rate_snapshots: Vec<AnalysisField>,

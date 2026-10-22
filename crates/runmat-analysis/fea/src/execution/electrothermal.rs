@@ -23,7 +23,7 @@ pub use coupled::{
 };
 mod operating_point;
 pub use operating_point::{
-    electrothermal_conduction_study, is_electrothermal_study, solve_electrothermal_heat_study,
+    conduction_operating_temperatures, electrothermal_conduction_study, is_electrothermal_study, solve_electrothermal_heat_study,
     ElectrothermalOperatingPoint,
 };
 mod transfer;

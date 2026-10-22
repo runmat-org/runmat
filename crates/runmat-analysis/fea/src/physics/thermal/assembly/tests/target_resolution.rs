@@ -29,7 +29,7 @@ fn thermal_boundaries_use_resolved_entities_instead_of_authored_aliases() {
                 value: PrescribedValue::Constant(HeatFlux::new(240.0)),
             },
         }];
-        let facts = crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh).unwrap();
+        let facts = crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[]).unwrap();
         let assemble_model = |model: &AnalysisModel| {
             assemble(
                 model,

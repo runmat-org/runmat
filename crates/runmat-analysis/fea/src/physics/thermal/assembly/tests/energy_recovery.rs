@@ -45,7 +45,7 @@ fn energy_assembly(
     assemble(
         model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &heat_generation(source_density),

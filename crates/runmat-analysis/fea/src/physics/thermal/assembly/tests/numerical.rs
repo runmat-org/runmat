@@ -13,7 +13,7 @@ fn transient_departures_retain_heating_below_absolute_temperature_resolution() {
         let assembly = assemble(
             &model,
             &mesh,
-            crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+            crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
                 .unwrap()
                 .support(),
             &heat_generation(generation),
@@ -72,7 +72,7 @@ fn canonical_tet10_thermal_matrices_pass_constant_patch_and_capacity_integral() 
     let assembly = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::new(Vec::new()),
@@ -127,7 +127,7 @@ fn uniform_heat_generation_is_conserved_and_uniform_temperature_is_preserved() {
     let assembly = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &heat_generation(density),
@@ -179,7 +179,7 @@ fn uniform_heat_generation_is_conserved_and_uniform_temperature_is_preserved() {
     let no_source = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::new(Vec::new()),
@@ -226,7 +226,7 @@ fn exact_face_flux_and_convection_preserve_integrated_power_and_ambient_state() 
     let flux = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::new(Vec::new()),
@@ -250,7 +250,7 @@ fn exact_face_flux_and_convection_preserve_integrated_power_and_ambient_state() 
     let convection = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::new(Vec::new()),
@@ -314,7 +314,7 @@ fn prescribed_face_temperature_is_enforced_exactly() {
     let assembly = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::new(Vec::new()),
@@ -365,7 +365,7 @@ fn backward_euler_converges_at_first_order_to_the_closed_form_tetrahedron_mode()
     let assembly = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::default(),
@@ -452,7 +452,7 @@ fn steady_convection_matches_the_closed_form_single_free_node_balance() {
     let assembly = assemble(
         &model,
         &mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
             .unwrap()
             .support(),
         &RealizedExcitations::default(),

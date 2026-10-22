@@ -86,7 +86,7 @@ fn run(
     assemble(
         model,
         mesh,
-        crate::planning::resource::ThermalOperatorResourceFacts::derive(mesh)
+        crate::planning::resource::ThermalOperatorResourceFacts::derive(mesh, &[])
             .unwrap()
             .support(),
         sources,

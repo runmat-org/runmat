@@ -31,6 +31,8 @@ mod snapshots;
 mod transient;
 #[cfg(test)]
 mod relation_tests;
+#[cfg(test)]
+mod interface_tests;
 use diagnostics::{diagnostics, ThermalDiagnosticsInput};
 use snapshots::{scalar_snapshots, vector_snapshots};
 use transient::{solve_transient, TransientSolveInput};
@@ -181,10 +183,30 @@ pub(super) fn run(
         outcome.device_apply_count as f64 / outcome.device_apply_attempt_count as f64
     };
     let time_points_s = outcome.time_points_s;
-    let temperature_snapshots = scalar_snapshots(
-        outcome.recovered.temperatures,
-        fea_thermal_temperature_field_id,
+    // Projection nodes are the mesh nodes, then the second-side nodes of conductance interfaces.
+    let dofs = &initial_assembly.dofs;
+    let mut interface_temperatures = Vec::new();
+    let mut nodal_temperatures = Vec::with_capacity(outcome.recovered.temperatures.len());
+    for values in outcome.recovered.temperatures {
+        let (nodal, second) = dofs
+            .split(&values)
+            .map_err(|error| FeaRunError::Solve(error))?;
+        nodal_temperatures.push(nodal);
+        if !dofs.is_nodal() {
+            interface_temperatures.push(second.into_iter().map(|(_, value)| value).collect());
+        }
+    }
+    let temperature_snapshots =
+        scalar_snapshots(nodal_temperatures, fea_thermal_temperature_field_id);
+    let interface_temperature_snapshots = scalar_snapshots(
+        interface_temperatures,
+        crate::contracts::fea_thermal_interface_temperature_field_id,
     );
+    let interface_node_ids = dofs
+        .second()
+        .iter()
+        .map(|&(node, _)| initial_assembly.projection.nodes[node].node_id)
+        .collect();
     let temperature_gradient_snapshots = vector_snapshots(
         outcome.recovered.gradients,
         fea_thermal_temperature_gradient_field_id,
@@ -243,6 +265,8 @@ pub(super) fn run(
             .collect(),
         time_points_s,
         temperature_snapshots,
+        interface_node_ids,
+        interface_temperature_snapshots,
         temperature_gradient_snapshots,
         heat_flux_snapshots,
         energy_storage_rate_snapshots,
