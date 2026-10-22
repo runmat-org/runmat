@@ -5,6 +5,13 @@ use crate::cdt::test_fixtures::coupled_quality::{fixture, metric};
 use crate::cdt::*;
 use runmat_meshing_core::NeverCancelled;
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A genuine protected octahedral collar with simultaneous size/shape defects converges
+//   under default quality criteria for uniform/scoped metrics and identity permutations. Each case
+//   observes one shared-state preparation and one terminal handoff, preserves boundary coordinates
+//   and analytic volume, and independently validates topology/quality. This finite fixture does not
+//   certify complete relocation costs, original CAD convergence or whole-task resource demand.
 #[test]
 fn compliant_surface_with_long_interior_edge_and_thin_collars_converges() {
     for permuted in [false, true] {
@@ -108,6 +115,11 @@ fn compliant_surface_with_long_interior_edge_and_thin_collars_converges() {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: The coupled protected-collar fixture rejects pre-cancelled execution and an
+//   insufficient original candidate-evaluation cap without returning a mesh. This covers these
+//   failure boundaries, not every interruption point or native process quiescence.
 #[test]
 fn cancellation_and_original_candidate_budget_fail_without_a_mesh() {
     struct Cancelled;
@@ -164,6 +176,11 @@ fn cancellation_and_original_candidate_budget_fail_without_a_mesh() {
     }
 }
 
+// witness: FEA-MESH-DISCRETIZATION-001/volume_quality_convergence @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Exhausted insertion or repair pass budgets fail without publishing a mesh;
+//   convergence on the bracket, heat sink and fork within the authored time budget is not
+//   demonstrated here.
 #[test]
 fn exhausted_insertion_or_repair_pass_budget_fails_without_a_mesh() {
     for exhausted_refinement in [true, false] {

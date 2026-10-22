@@ -192,6 +192,10 @@ fn errors_from_result(
     sum.map(|value| (value / result.time_points_s.len() as f64).sqrt())
 }
 
+// witness: FEA-DYNAMICS-RESPONSE-001/time_policy_energy_checkpoints @
+//   linear_structural_dynamics/tet4|tet10/numerical_kernel; coverage: partial;
+//   boundary: Affine physical forcing qualifies Tet4 and Tet10 temporal fields and work-energy;
+//   adaptive time stepping and checkpoints are not covered.
 #[test]
 fn affine_physical_forcing_qualifies_tet4_tet10_temporal_fields_and_work_energy() {
     for quadratic in [false, true] {

@@ -140,6 +140,9 @@ mod tests {
         planning::resource::{execute_scoped_chunks, LocalThreadCount},
     };
 
+    // witness: FEA-SHARED-CONSTRAINTS-001/original_reaction_and_work @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+    //   boundary: Independent constraint rows match the diagonal reaction law across workers.
     #[test]
     fn independent_constraint_rows_match_the_diagonal_reaction_law_across_workers() {
         let model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);

@@ -3,6 +3,12 @@ use crate::cdt::test_fixtures::coupled_quality;
 use runmat_meshing_core::NeverCancelled;
 use runmat_meshing_size::metric::MetricTensor3;
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A symmetric two-point block improves the minimum incident shape quality while
+//   preserving exact positive orientation. Metric resolution occurs once per local cell, and
+//   one/four reusable CPU grants produce identical proposals. Numerical probes use prepared local
+//   geometry; this does not establish original-study acceptance or whole-task speedup.
 #[test]
 fn prepared_neighboring_blocks_escape_the_symmetric_minimax_trap_and_preserve_cpu_order() {
     let (topology, _) = coupled_quality::fixture(false, 0);

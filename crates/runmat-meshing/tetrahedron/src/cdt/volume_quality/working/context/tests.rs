@@ -31,6 +31,12 @@ fn raw_context_cache_is_bounded_and_preserves_uncached_resolution() {
     assert_eq!(prepared.raw_cache.borrow().len(), count);
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Prospective Steiner children resolve their actual surviving boundary entities through
+//   the same metric authority as final evaluation. Losing a constrained face restores the declared
+//   global metric rather than retaining a parent constraint. This scope check does not establish
+//   mesh convergence.
 #[test]
 fn steiner_children_do_not_inherit_a_disappearing_boundary_scope() {
     let (topology, provenance) = crate::cdt::test_fixtures::coupled_quality::fixture(false, 0);

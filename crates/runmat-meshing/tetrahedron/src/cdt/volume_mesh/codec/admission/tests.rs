@@ -3,6 +3,10 @@ use crate::cdt::test_fixtures::allocation::AllocationBudget;
 use runmat_geometry_core::GeometryAllocationScope;
 use runmat_meshing_core::NeverCancelled;
 
+// witness: FEA-MESH-EXECUTION-001/bounded_publication_and_cold_materialization @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Cold volume decode admits before materializing and releases on failure;
+//   million-element scale is not asserted here.
 #[test]
 fn cold_current_and_legacy_decode_admit_before_materialization_and_release_on_failure() {
     let (topology, surface) = crate::cdt::constraints::tests::tetrahedron();

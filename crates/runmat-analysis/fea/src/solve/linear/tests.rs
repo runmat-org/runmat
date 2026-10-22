@@ -271,6 +271,14 @@ fn zero_load_warm_start_returns_the_exact_zero_solution() {
     assert_eq!(solved.relative_residual, Some(0.0));
 }
 
+// witness: FEA-SCALE-PARALLEL-001/shared_parallel_kernels @
+//   shared_infrastructure/canonical_mixed_topology/parallel_cpu; coverage: partial;
+//   boundary: A scoped PCG on a two-unknown SPD system equals the serial solution and repeats
+//   exactly; nested scoped execution is rejected. Tiny system, one preconditioner.
+// witness: FEA-SHARED-ACCELERATORS-001/resource_scoped_local_parallelism @
+//   shared_infrastructure/canonical_mixed_topology/parallel_cpu; coverage: partial;
+//   boundary: A scoped pool solve equals the serial solve and nested pools are rejected; global
+//   pool independence and CPU resource accounting are covered in the resources requirement.
 #[test]
 fn scoped_pcg_matches_serial_and_rejects_nested_execution() {
     let operator = system([4.0, 3.0]);
@@ -346,6 +354,9 @@ fn cpu_reference_warm_start_does_not_use_an_absolute_breakdown_threshold() {
     assert!(result.residual_norm <= 1.0e-8);
 }
 
+// witness: FEA-SHARED-OPERATORS-001/compatible_solver_and_preconditioner_selection @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: A noncoercive operator is rejected before preconditioner setup.
 #[test]
 fn noncoercive_operator_is_rejected_before_preconditioner_setup() {
     let operator = system([0.0, 3.0]);

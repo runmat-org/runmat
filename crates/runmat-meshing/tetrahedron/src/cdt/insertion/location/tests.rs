@@ -4,6 +4,13 @@ use crate::cdt::{
 };
 use runmat_meshing_core::{NeverCancelled, StableDigest};
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: After explicitly separate index construction, a bad walking hint still locates the
+//   independently specified final disconnected cell and its exact boundary, and rejects a one-step
+//   outside point across 16/256 cells. Query predicate and checkpoint bounds exclude repeated
+//   whole-inventory traversal in this family; mutation cost, arbitrary cell density, complete
+//   native study work and partial CAD loading remain separate evidence.
 #[test]
 fn maintained_location_finds_disconnected_cells_and_exact_boundary_without_global_scan() {
     for count in [16, 256] {

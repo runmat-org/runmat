@@ -10,6 +10,9 @@ fn assert_relative(actual: f64, expected: f64, relative_tolerance: f64) {
     );
 }
 
+// witness: FEA-STRUCTURAL-CONSTRAINT-001/connectors @ linear_structural/beam/numerical_kernel;
+//   coverage: partial;
+//   boundary: An explicit axial connector matches the parallel-spring reference.
 #[test]
 fn explicit_axial_connector_matches_the_parallel_spring_reference() {
     const APPLIED_FORCE_N: f64 = 1_000.0;

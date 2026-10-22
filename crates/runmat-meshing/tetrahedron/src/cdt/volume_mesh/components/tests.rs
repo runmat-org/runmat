@@ -44,6 +44,11 @@ fn reference(meshes: &[DelaunayVolumeMesh]) -> DelaunayVolumeMesh {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Single-region completion retains the original node, cell and quality allocations and
+//   matches the former rebuild's complete output and independently validated canonical encoding.
+//   This excludes whole-native-study memory peaks and multi-region aggregate allocation bounds.
 #[test]
 fn single_component_moves_storage_and_preserves_independent_encoding() {
     let mesh = component();
@@ -77,6 +82,11 @@ fn single_component_moves_storage_and_preserves_independent_encoding() {
     assert_eq!(encode(&actual), encode(&expected));
 }
 
+// witness: FEA-SHARED-RESOURCES-001/shared_immutable_inventories @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Consuming multi-region assembly matches the original independent rebuild including
+//   merged shared-node provenance and complete quality. This does not establish arbitrary partition
+//   scaling, native throughput or whole-task admission.
 #[test]
 fn multiple_components_match_original_assembly_and_merge_shared_provenance() {
     let first = component();

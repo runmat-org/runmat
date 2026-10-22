@@ -178,6 +178,11 @@ fn field_error_with(
     (error / norm).sqrt()
 }
 
+// witness: FEA-DYNAMICS-RESPONSE-001/direct_modal_procedures @
+//   linear_structural_dynamics/tet4/numerical_kernel;
+//   boundary: Original axial Tet4 rod harmonic traction matrix at three frequencies on both sides
+//   of resonance; independent complex displacement/reaction refinement and phase resultant checks.
+//   Not transient, spectrum or random-response evidence.
 #[test]
 fn solid_rod_harmonic_face_traction_converges_to_independent_continuum() {
     harmonic_continuum(false);
@@ -297,11 +302,25 @@ fn modal_model(model: &AnalysisModel) -> AnalysisModel {
     modal
 }
 
+// witness: FEA-DYNAMICS-MODAL-001/physical_mass_base_state @ modal_structural/tet4/public_study;
+//   boundary: Axial affine Tet4 slab rod frequency refinement and modal truncation against direct
+//   harmonic response. Does not cover beam/shell modes, repeated eigenspaces, every participation
+//   or remote envelope.
 #[test]
 fn solid_rod_modal_frequency_and_retained_response_have_independent_evidence() {
     modal_continuum(false);
 }
 
+// witness: FEA-DYNAMICS-MODAL-001/physical_mass_base_state @ modal_structural/tet10/public_study;
+//   coverage: partial;
+//   boundary: Axial affine Tet10 slab rod frequency refinement and modal truncation against direct
+//   harmonic response; beam and shell modes, repeated eigenspaces and remote envelopes are not
+//   covered.
+// witness: FEA-DYNAMICS-MODAL-001/references @ modal_structural/tet10/public_study; coverage:
+//   partial;
+//   boundary: Axial rod modal frequency against the continuum reference with retained-response
+//   truncation checked against direct harmonic response; no beam modes, repeated modes or
+//   mass-orthogonality series.
 #[test]
 fn solid_rod_tet10_modal_frequency_and_retained_response_have_independent_evidence() {
     modal_continuum(true);

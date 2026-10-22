@@ -1,6 +1,9 @@
 use super::*;
 use runmat_meshing_core::ElementOrder;
 
+// witness: FEA-COUPLING-ELECTROTHERMAL-001/cold @ electrothermal/tet4|tet10/public_study;
+//   boundary: Both-order retained source/target binding and mutated density rejection in one
+//   process; no native termination/restart or remote transfer.
 #[test]
 fn retained_source_cold_binding_authenticates_original_result_and_target() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {

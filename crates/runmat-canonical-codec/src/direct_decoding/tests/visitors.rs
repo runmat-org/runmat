@@ -100,6 +100,12 @@ fn compare<T: DeserializeOwned + PartialEq + std::fmt::Debug>(bytes: &[u8]) {
         assert_eq!(actual, expected, "{}", std::any::type_name::<T>());
     }
 }
+// witness: FEA-SHARED-RESOURCES-001/governed_path_equivalence @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Permissive typed visitors compare method restrictions, numeric dispatch, owned
+//   strings, containers and discarded option/newtype/enum payloads with the original owned JSON
+//   representation. This finite protocol family is not whole-study cold replay or arbitrary
+//   custom-Serde equivalence.
 #[test]
 fn method_dispatch_and_discarded_payloads_match_owned_value_semantics() {
     for value in [

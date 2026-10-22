@@ -322,6 +322,11 @@ fn stream_reconstruction_observes_cancellation_during_chunk_processing() {
     );
 }
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Fragmented records retain the original logical digest with borrowed payload fragments
+//   and reject forged content. This component check does not establish native IO throughput or
+//   whole-task memory admission.
 #[test]
 fn streaming_closure_matches_original_content_across_fragmentation_and_rejects_forged_digest() {
     for size in [512, 1024, 8192] {

@@ -46,6 +46,10 @@ study response {
 }
 "#;
 
+// witness: FEA-AUTHORING-LANGUAGE-002/sweep_identity @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Axis sweeps expand product and zip with stable named case identities; independence of
+//   identity from source order and the placement envelopes are not covered.
 #[test]
 fn axis_sweeps_expand_product_and_zip_with_stable_case_identities() {
     let product = check(&format!(

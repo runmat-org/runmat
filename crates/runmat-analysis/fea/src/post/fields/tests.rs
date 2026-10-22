@@ -84,6 +84,9 @@ fn scoped_beam_and_shell_resultants_match_serial_in_canonical_element_order() {
     }
 }
 
+// witness: FEA-STRUCTURAL-BEAM-001/physical_beam_mixed_dofs @
+//   linear_structural/beam/numerical_kernel; coverage: partial;
+//   boundary: Two-element beam recovery preserves the physical assembly fields.
 #[test]
 fn scoped_two_element_beam_recovery_preserves_physical_assembly_fields() {
     use crate::planning::resource::LocalThreadCount;

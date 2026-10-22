@@ -27,6 +27,13 @@ fn block(
     })
 }
 
+// witness: FEA-NONLINEAR-STATE-001/points @ small_strain_j2/tet4|tet10/prepared_controller;
+//   boundary: Homogeneous core cold blocks; original histories and outputs, not continuum accuracy.
+// witness: FEA-NONLINEAR-STATE-001/initial_outputs @
+//   small_strain_j2/tet4|tet10/prepared_controller;
+//   boundary: Homogeneous core cold blocks; original histories and outputs, not continuum accuracy.
+// witness: FEA-NONLINEAR-STATE-001/chronology @ small_strain_j2/tet4|tet10/prepared_controller;
+//   boundary: Homogeneous core cold blocks; original histories and outputs, not continuum accuracy.
 #[test]
 fn cold_blocks_preserve_original_point_history_schedule_and_physical_outputs() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
@@ -182,6 +189,9 @@ fn cold_blocks_preserve_original_point_history_schedule_and_physical_outputs() {
     }
 }
 
+// witness: FEA-NONLINEAR-STATE-001/cold_validation @ small_strain_j2/tet10/prepared_controller;
+//   boundary: Altered controller and original point state reject; no independent past-trajectory
+//   proof.
 #[test]
 fn altered_cold_controller_and_point_state_reject_without_mutating_original() {
     let (model, summary, options) = uniaxial(ElementOrder::Tet10);
@@ -257,6 +267,8 @@ fn altered_cold_controller_and_point_state_reject_without_mutating_original() {
     assert_eq!(original.work().accepted_increments(), 1);
 }
 
+// witness: FEA-NONLINEAR-STATE-001/chronology @ small_strain_j2/tet4/prepared_controller;
+//   boundary: One-increment cold replay costs count toward original global limits.
 #[test]
 fn one_increment_blocks_count_replay_cost_without_resetting_global_limits() {
     let (model, summary, mut options) = uniaxial(ElementOrder::Tet4);
@@ -290,6 +302,8 @@ fn one_increment_blocks_count_replay_cost_without_resetting_global_limits() {
     assert_eq!(current.continuation.work().controller_evaluations(), 16);
 }
 
+// witness: FEA-NONLINEAR-STATE-001/chronology @ small_strain_j2/tet4|tet10/prepared_controller;
+//   boundary: Original cutback target and failed work survive cold blocks.
 #[test]
 fn cutback_boundary_retains_original_target_and_failed_work_across_cold_blocks() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
@@ -336,6 +350,8 @@ fn cutback_boundary_retains_original_target_and_failed_work_across_cold_blocks()
     }
 }
 
+// witness: FEA-NONLINEAR-STATE-001/rollback @ small_strain_j2/tet4/prepared_controller;
+//   boundary: Cancelled block preserves original prefix and publishes no accepted suffix.
 #[test]
 fn cancelled_continuation_does_not_mutate_or_publish_an_accepted_suffix() {
     let (model, summary, options) = uniaxial(ElementOrder::Tet4);

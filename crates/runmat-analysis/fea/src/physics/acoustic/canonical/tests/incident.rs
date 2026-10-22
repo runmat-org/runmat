@@ -31,6 +31,8 @@ fn solve(model: &AnalysisModel, mesh: &SolverMeshArtifact) -> CanonicalAcousticR
     .unwrap()
 }
 
+// witness: FEA-ACOUSTIC-SOURCE-001/incident @ acoustic_harmonic/tet4|tet10/numerical_kernel;
+//   boundary: Planar incident/impedance fixture, phase and net-power refinement only.
 #[test]
 fn incoming_pressure_reflection_transmission_and_net_power_refine() {
     let mut inventory = std::collections::BTreeSet::new();

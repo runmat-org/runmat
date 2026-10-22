@@ -1,4 +1,7 @@
 use super::*;
+// witness: FEA-NONLINEAR-STATE-001/cold_validation @
+//   small_strain_j2_penalty_coulomb_contact/tet10/prepared_controller;
+//   boundary: Combined scope/material/contact history and GENERAL admission substitution reject.
 #[test]
 fn combined_scope_history_and_general_admission_reject_substitution() {
     let f = CoupledFixture::new(ElementOrder::Tet10, true);

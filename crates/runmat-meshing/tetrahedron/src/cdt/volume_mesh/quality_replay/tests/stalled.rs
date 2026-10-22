@@ -4,6 +4,12 @@ use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
 use runmat_meshing_size::metric::{MetricCombinationRule, MetricTensor3};
 use std::sync::Mutex;
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: An immutable, rejected tetrahedron reaches a host-owned snapshot observer. An
+//   injected optional observer failure preserves the original quality verdict; cold snapshot
+//   decoding preserves bound controls and remains rejected. No accepted mesh or continuation
+//   authority is created, and native cache retention under every budget is not asserted.
 #[test]
 fn stalled_state_reaches_the_host_observer_without_replacing_the_verdict() {
     struct Observer(Mutex<Option<Vec<u8>>>);

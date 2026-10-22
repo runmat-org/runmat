@@ -28,6 +28,14 @@ fn keyword_inventory_matches_the_lexer() {
     }
 }
 
+// witness: FEA-AUTHORING-COMPILER-002/lsp_services @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: The checked editor product drives diagnostics, navigation and signature help across
+//   an imported material file; completion, rename and formatting services are not asserted.
+// witness: FEA-AUTHORING-COMPILER-002/lsp_verification @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Diagnostics, definition and signature help over a complete multi-file source;
+//   incomplete-file recovery and cross-language navigation are not covered here.
 #[test]
 fn checked_editor_product_drives_diagnostics_navigation_and_signature_help() {
     let temporary = tempfile::tempdir().unwrap();

@@ -10,6 +10,12 @@ fn records(bytes: usize) -> Vec<MeshingChunkStream> {
         records: vec![vec![1; bytes]],
     }]
 }
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: All kernel views share the stage ceiling. Imported inputs remain charged while
+//   obsolete kernel storage releases and admitted returned records retain their original capacity
+//   charge through their last use. This finite ownership witness does not establish model capacity
+//   or measured RSS.
 #[test]
 fn publication_releases_kernel_scratch_and_drops_record_charge_at_last_use() {
     let mut request = crate::serial_tests::request();
@@ -45,6 +51,11 @@ fn publication_releases_kernel_scratch_and_drops_record_charge_at_last_use() {
     drop(input_storage);
     assert_eq!(input.usage().live_allocation_bytes, 0);
 }
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A returned record inventory exceeding retained kernel admission rejects without
+//   discarding owned charges before error cleanup. This checks the stage ownership boundary, not
+//   every concrete encoder.
 #[test]
 fn unadmitted_record_transfer_rejects_and_keeps_ownership_until_error_cleanup() {
     let request = crate::serial_tests::request();

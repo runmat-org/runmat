@@ -19,6 +19,10 @@ fn interface(projection: &AnalysisProjection) -> AnalysisInterface {
         }),
     }
 }
+// witness: FEA-CONTACT-OPERATOR-001/surface_search_gap @
+//   penalty_coulomb_contact/tet4|tet10/numerical_kernel; coverage: partial;
+//   boundary: Canonical contact surfaces bind original face occurrences and current geometry for
+//   both element orders.
 #[test]
 fn canonical_contact_surfaces_bind_original_face_occurrences_and_current_geometry() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {

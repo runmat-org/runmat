@@ -10,6 +10,12 @@ fn edit(index: usize) -> TopologyEdit {
         [index as f64, 0., 0.],
     ))
 }
+// witness: FEA-SHARED-RESOURCES-001/shared_immutable_inventories @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Thirty-two retained branches share exact chronological prefixes at 31 and 65,535
+//   edits, copy bounded tail handles, retain one payload per original or new edit and release
+//   rejected branches. This verifies history ownership, not native allocator peaks, whole-study
+//   memory or physical meshing acceptance.
 #[test]
 fn retained_frontiers_share_long_prefixes_and_release_rejected_branches() {
     for length in [31, 65_535] {

@@ -68,6 +68,13 @@ fn exhaustive(topology: &DelaunayVolumeTopology, removed: &[usize], created: &[[
         })
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Replacement membership agrees with an independent exhaustive retained-cell scan
+//   across removed-cell and reordered or duplicate-created-cell cases. Four and sixty-four
+//   disconnected neighborhoods require exactly four checkpoints for the same two-cell query. This
+//   establishes local incidence reuse for the tested membership component, not arbitrary
+//   vertex-valence bounds, full trial ownership, complete recovery or native whole-task scaling.
 #[test]
 fn replacement_membership_matches_exhaustive_with_local_incidence_work() {
     let mut counts = Vec::new();
@@ -108,6 +115,11 @@ fn replacement_membership_matches_exhaustive_with_local_incidence_work() {
     assert_eq!(counts, vec![4, 4]);
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Every checkpoint of the tested indexed membership query rejects without changing
+//   retained cells; retry returns the original complete result. This read-only component evidence
+//   does not establish worker cancellation or complete task admission.
 #[test]
 fn replacement_membership_cancellation_preserves_retained_topology() {
     let topology = neighborhoods(4);

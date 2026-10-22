@@ -2,6 +2,13 @@ use super::*;
 use crate::cdt::volume_quality::tests::{metric_contexts, metric_request, topology};
 use runmat_meshing_core::NeverCancelled;
 
+// witness: FEA-SHARED-RESOURCES-001/shared_immutable_inventories @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Complete cell reconstruction is compared exactly while retaining one quality report,
+//   followed by independent alternate-arithmetic validation. The fixture rejects cell, metadata,
+//   aggregate, worst-cell and inventory tampering, resource exhaustion and cancellation. It
+//   establishes this handoff's acceptance semantics, not whole-study memory bounds or throughput
+//   scaling.
 #[test]
 fn streamed_handoff_matches_full_report_and_rejects_cell_and_summary_tampering() {
     let topology = topology();

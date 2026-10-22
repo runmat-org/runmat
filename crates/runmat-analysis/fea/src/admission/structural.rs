@@ -444,6 +444,9 @@ mod tests {
         assert_eq!(first, reordered);
     }
 
+    // witness: FEA-SHARED-BASELINE-001/exact_realization_and_typed_contracts @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+    //   boundary: Modal response spectrum has a distinct admitted temporal realization.
     #[test]
     fn modal_response_spectrum_has_a_distinct_admitted_temporal_realization() {
         let mut input = structural_input(vec![SourceImplementation::CanonicalBoundaryProjection]);

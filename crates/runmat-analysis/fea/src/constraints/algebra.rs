@@ -629,6 +629,9 @@ mod tests {
         assert!((solution[2] + 5.0 / 3.0).abs() <= 1.0e-12);
     }
 
+    // witness: FEA-SHARED-OPERATORS-001/declared_sparse_operator_properties @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+    //   boundary: Sparse reduction matches dense lifting and preserves operator properties.
     #[test]
     fn sparse_reduction_matches_dense_lifting_and_preserves_operator_properties() {
         let first = [(0, 1.0), (1, -1.0)];

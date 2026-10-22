@@ -22,6 +22,11 @@ fn general(policy: GeneralSolvePolicy, extra: u64) -> GeneralSparseSolveResource
     )
     .unwrap()
 }
+// witness: FEA-SHARED-RESOURCES-001/post_projection_resource_admission @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Three-row general sparse count fixture verifies cold canonical resource plan,
+//   additive resident storage and tolerance identity; estimates are requested storage, not measured
+//   RSS or whole-task admission.
 #[test]
 fn governed_general_workspace_cold_identity_and_original_controls_are_rederived() {
     let mut planned = input(PartitioningPolicy::Monolithic);
@@ -69,6 +74,10 @@ fn general_demand_rejects_understated_proof_work_and_unsupported_partitioning() 
     assert!(build_resource_plan(planned).is_err());
 }
 
+// witness: FEA-SHARED-RESOURCES-001/post_projection_resource_admission @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: General-solve demand rejects the original 100-byte accuracy ceiling; no physical
+//   operator or remote admission evidence.
 #[test]
 fn governed_general_demand_obeys_the_original_resource_ceiling() {
     let mut planned = input(PartitioningPolicy::Monolithic);
@@ -84,6 +93,10 @@ fn governed_general_demand_obeys_the_original_resource_ceiling() {
     ));
 }
 
+// witness: FEA-SHARED-ACCELERATORS-001/provider_owned_native_sparse_work @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Host general-solver demand plus a synthetic GPU requirement rejects planning; no
+//   actual accelerator kernel capability or performance proof.
 #[test]
 fn general_host_solver_demand_does_not_authorize_accelerator_execution() {
     let mut planned = input(PartitioningPolicy::Monolithic);

@@ -1,6 +1,12 @@
 use super::super::test_fixtures::pair;
 use super::*;
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: An exact three-to-two bipyramid replacement retains three removed and two created
+//   connectivity keys with zero or 64 unrelated cells. The delta reconstructs the full ordered
+//   candidate inventory, distinguishes unchanged connectivity and preserves independent full-key
+//   ordering. No sublinear comparison-work, arbitrary cavity or whole-task resource claim.
 #[test]
 fn exact_local_delta_reconstructs_connectivity_and_ignores_unrelated_cells() {
     let mut reference = None;

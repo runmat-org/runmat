@@ -1,5 +1,7 @@
 use super::*;
 
+// witness: FEA-ACOUSTIC-NUMERICS-001/cold_claim @ acoustic_harmonic/tet4/numerical_kernel;
+//   boundary: Retained certificate/receipt provenance and tamper rejection; no cold refactorization.
 #[test]
 fn retained_certificate_survives_solve_free_cold_lineage_and_tampering_fails() {
     let mesh = slab_mesh(1);

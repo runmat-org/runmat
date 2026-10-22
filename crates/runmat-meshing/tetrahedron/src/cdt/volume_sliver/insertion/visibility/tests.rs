@@ -4,6 +4,13 @@ use super::*;
 use runmat_meshing_core::NeverCancelled;
 use runmat_meshing_size::metric::MetricTensor3;
 
+// witness: FEA-SHARED-RESOURCES-001/machine_cpu_execution @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Four starting points with isotropic and anisotropic metrics preserve the original
+//   serial smoothing trajectory bit for bit at one, two and four admitted CPU threads, including
+//   successful searches. This covers prepared cavity geometry and ordered trial selection, not
+//   arbitrary meshing providers, whole-study throughput, memory accounting or distributed
+//   execution.
 #[test]
 fn prepared_parallel_smoothing_preserves_complete_serial_trajectory() {
     let (topology, _) = crate::cdt::volume_sliver::tests::interior_sliver_fixture();
@@ -205,6 +212,11 @@ fn reference_smooth_visibility_cavity_point(
     Ok((best_score > initial_score).then_some(point))
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A four-cell cavity considers other poor interior faces even when its worst face is
+//   protected. The resulting cavity retains exactly the original outer facets. This expansion check
+//   does not guarantee arbitrary protected geometries admit a quality mesh.
 #[test]
 fn protected_worst_face_does_not_hide_other_quality_expansion_faces() {
     let (topology, provenance) = crate::cdt::volume_sliver::tests::interior_sliver_fixture();

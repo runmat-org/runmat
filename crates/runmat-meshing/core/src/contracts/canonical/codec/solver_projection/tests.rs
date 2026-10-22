@@ -163,6 +163,12 @@ fn fresh_authority_preserves_wire_and_keeps_raw_and_cold_checks_independent() {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Both element orders retain original cold projection values, separate typed
+//   materialization and topology scratch admission, preserve the exact denied callback, and reject
+//   canonical but forged topology. This witness does not establish whole-pipeline storage or model
+//   performance.
 #[test]
 fn cold_projection_admission_precedes_materialization_and_independent_validation() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {

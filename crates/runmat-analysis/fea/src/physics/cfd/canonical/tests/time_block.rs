@@ -26,6 +26,10 @@ fn block_model(f: &fixture::Fixture) -> AnalysisModel {
     workload.model
 }
 
+// witness: FEA-FLUID-TRANSIENT-001/history @
+//   incompressible_laminar_transient/canonical_tetrahedra/numerical_kernel;
+//   boundary: Original acceleration history and split replay; chronology/tamper/budget/cancel
+//   checks, no native process credit.
 #[test]
 fn authored_time_block_cold_recovery_and_split_match_original_acceleration() {
     let start = [0.001, 0.002, -0.001];

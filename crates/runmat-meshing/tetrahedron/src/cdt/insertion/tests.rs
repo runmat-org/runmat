@@ -363,6 +363,9 @@ impl MeshingCancellationSignal for Cancelled {
     }
 }
 
+// witness: FEA-MESH-EXECUTION-001/budgets_and_cancellation @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Volume insertion enforces search budgets and cancellation.
 #[test]
 fn insertion_enforces_search_budgets_and_cancellation() {
     let limited = DelaunayInsertionOptions {

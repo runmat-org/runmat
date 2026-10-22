@@ -281,6 +281,10 @@ study response {
     ));
 }
 
+// witness: FEA-THERMAL-PUBLIC-001/film_coefficient_input @
+//   thermal_steady/tet4|tet10/numerical_kernel; coverage: partial;
+//   boundary: Film-coefficient and emissivity inputs realize per bound sweep case at the language
+//   layer; no solve is run.
 #[test]
 fn film_coefficient_and_emissivity_inputs_realize_per_bound_case() {
     let source = r#"
@@ -395,6 +399,9 @@ study cooling {
     ));
 }
 
+// witness: FEA-THERMAL-PUBLIC-001/film_coefficient_input @
+//   thermal_steady/tet4|tet10/numerical_kernel; coverage: partial;
+//   boundary: A film-coefficient input rejects a mismatched quantity.
 #[test]
 fn film_coefficient_input_rejects_a_mismatched_quantity() {
     let source = r#"

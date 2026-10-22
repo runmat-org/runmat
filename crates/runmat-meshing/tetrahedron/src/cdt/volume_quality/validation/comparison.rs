@@ -78,6 +78,12 @@ mod comparison_tests {
 mod extrema_tests {
     use super::*;
 
+    // witness: FEA-SHARED-RESOURCES-001/governed_path_equivalence @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+    //   boundary: Rejected nearly collapsed cells compare primitive Jacobians under the existing
+    //   per-cell arithmetic bound instead of unstable reciprocal ranks. Wrong well-conditioned extrema,
+    //   material primitive substitutions, nonfinite values and missing extrema reject. This does not
+    //   admit a previously rejected physical cell.
     #[test]
     fn rejected_shape_extrema_compare_primitives_without_reciprocal_amplification() {
         let identities = [StableDigest::from_bytes([1; 32]); 4];

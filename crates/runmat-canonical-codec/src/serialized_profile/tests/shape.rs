@@ -1,6 +1,12 @@
 use super::super::*;
 use serde::Serialize;
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Shape profiles reserve complete Serde integer value ranges across CBOR-width
+//   transitions while exact-value encoding profiles remain compact. Strings, collection counts,
+//   variants and optional branches remain the domain caller's envelope responsibility. This codec
+//   policy witness does not establish whole-task memory or numerical qualification.
 #[test]
 fn shape_bounds_integer_transitions_without_changing_exact_encoding_profiles() {
     #[derive(Serialize)]

@@ -48,6 +48,12 @@ fn query(mesh: &TopologyMutation, bounds: Aabb3) -> Vec<u32> {
         .unwrap()
 }
 
+// witness: FEA-SHARED-RESOURCES-001/governed_path_equivalence @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A persistent cell-bounds trial preserves its original owner, resumes after rejected
+//   query synchronization, rejects invalid cavity replacement and retains complete candidates after
+//   canonical node reordering. This component transaction test does not qualify a full native task
+//   or publication path.
 #[test]
 fn cell_bounds_follow_atomic_cavity_trials_and_canonical_node_reordering() {
     let mut original = mesh(1);
@@ -106,6 +112,12 @@ fn cell_bounds_follow_atomic_cavity_trials_and_canonical_node_reordering() {
     .is_empty());
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Prepared physical cell bounds retain exhaustive candidates across four and sixty-four
+//   disconnected cavities with bounded query checkpoint growth. This broad-phase fixture does not
+//   establish connected-mesh asymptotics, exact crossing admission, native heat recovery or
+//   whole-task memory.
 #[test]
 fn prepared_cell_query_prunes_distant_inventory_with_complete_candidates() {
     let mut counts = Vec::new();
@@ -138,6 +150,13 @@ fn prepared_cell_query_prunes_distant_inventory_with_complete_candidates() {
     );
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Sixty-four checked cavity round trips retain only five net changes at the
+//   intermediate step and zero after each exact reversal. No intermediate cell reaches the spatial
+//   index, while final query inventory agrees with original connectivity. Requires separate
+//   cancellation, canonical-handoff and geometric admission checks; excludes arbitrary
+//   changed-inventory and whole-task memory bounds.
 #[test]
 fn cell_change_journal_coalesces_intermediate_churn_without_changing_query_inventory() {
     let mut topology = mesh(1);

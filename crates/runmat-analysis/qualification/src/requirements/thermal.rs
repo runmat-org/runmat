@@ -10,12 +10,13 @@ const fn scopes(execution: ExecutionEnvelope) -> [Envelope; 4] {
         envelope(Formulation::ThermalTransient, MeshOrder::Tet10, execution),
     ]
 }
-const KERNEL: &[Envelope] = &scopes(ExecutionEnvelope::SerialCpuNumericalKernel);
-const PUBLIC: &[Envelope] = &scopes(ExecutionEnvelope::SerialCpuPublicStudy);
-const NATIVE: &[Envelope] = &scopes(ExecutionEnvelope::SerialCpuNativeProcess);
+const KERNEL: &[Envelope] = &scopes(ExecutionEnvelope::NumericalKernel);
+const PUBLIC: &[Envelope] = &scopes(ExecutionEnvelope::PublicStudy);
+const NATIVE: &[Envelope] = &scopes(ExecutionEnvelope::NativeProcess);
 const DURABLE: [Envelope; 4] = scopes(ExecutionEnvelope::Durable);
-const REMOTE: [Envelope; 4] = scopes(ExecutionEnvelope::EncryptedRemote);
-const PARTITIONED: [Envelope; 4] = scopes(ExecutionEnvelope::PartitionedCpu);
+const REMOTE: [Envelope; 4] = scopes(ExecutionEnvelope::RemoteExecution);
+const PARALLEL: [Envelope; 4] = scopes(ExecutionEnvelope::ParallelCpu);
+const PARTITIONED: [Envelope; 4] = scopes(ExecutionEnvelope::DomainDecomposed);
 const ACCELERATOR: [Envelope; 4] = scopes(ExecutionEnvelope::ClaimedAccelerator);
 const EXECUTION: &[Envelope] = &[
     PUBLIC[0],
@@ -34,6 +35,10 @@ const EXECUTION: &[Envelope] = &[
     REMOTE[1],
     REMOTE[2],
     REMOTE[3],
+    PARALLEL[0],
+    PARALLEL[1],
+    PARALLEL[2],
+    PARALLEL[3],
     PARTITIONED[0],
     PARTITIONED[1],
     PARTITIONED[2],
@@ -43,7 +48,6 @@ const EXECUTION: &[Envelope] = &[
     ACCELERATOR[2],
     ACCELERATOR[3],
 ];
-const STEADY_KERNEL: &[Envelope] = &[KERNEL[0], KERNEL[1]];
 const STEADY_PUBLIC: &[Envelope] = &[PUBLIC[0], PUBLIC[1]];
 const TRANSIENT_PUBLIC: &[Envelope] = &[PUBLIC[2], PUBLIC[3]];
 const FEA_THERMAL_DOMAIN_001: Requirement = Requirement {
@@ -91,70 +95,6 @@ const FEA_THERMAL_DOMAIN_001: Requirement = Requirement {
             KERNEL,
         ),
     ],
-    witnesses: &[
-        Witness {
-            id: "FEA-WITNESS-THERMAL-TET10-PATCH",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-                    "physics::thermal::assembly::tests::numerical::canonical_tet10_thermal_matric",
-                    "es_pass_constant_patch_and_capacity_integral",
-                ),
-                source:
-                    "crates/runmat-analysis/fea/src/physics/thermal/assembly/tests/numerical.rs",
-            },
-            claims: &[CoverageClaim {
-                obligation: "assembly",
-                envelopes: &[KERNEL[1], KERNEL[3]],
-                boundary: concat!(
-                    "Single Tet10 conductivity constant patch, integrated capacity, linear ",
-                    "gradient and flux; no general curved-mesh convergence.",
-                ),
-            }],
-        },
-        Witness {
-            id: "FEA-WITNESS-THERMAL-LAYERS",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-                    "physics::thermal::assembly::convergence_tests::two_material_slab_matches_ser",
-                    "ies_resistance_and_authored_order_is_invariant",
-                ),
-                source:
-                    "crates/runmat-analysis/fea/src/physics/thermal/assembly/convergence_tests.rs",
-            },
-            claims: &[CoverageClaim {
-                obligation: "assembly",
-                envelopes: &[KERNEL[0]],
-                boundary: concat!(
-                    "Aligned Tet4 two-material series resistance, temperature and flux plus ",
-                    "property-order invariance; no arbitrary nonuniform interface claim.",
-                ),
-            }],
-        },
-        Witness {
-            id: "FEA-WITNESS-THERMAL-ANCHORS",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-                    "physics::thermal::assembly::tests::steady::disconnected_bodies_have_independ",
-                    "ent_exact_steady_equilibria_and_require_each_anchor",
-                ),
-                source: "crates/runmat-analysis/fea/src/physics/thermal/assembly/tests/steady.rs",
-            },
-            claims: &[CoverageClaim {
-                obligation: "constraints",
-                envelopes: STEADY_KERNEL,
-                boundary: concat!(
-                    "Three components with prescribed/convection anchoring; removal of an anchor ",
-                    "rejects coercivity. Does not exercise tied, periodic or affine jumps.",
-                ),
-            }],
-        },
-    ],
 };
 const FEA_THERMAL_INPUT_001: Requirement = Requirement {
     id: "FEA-THERMAL-INPUT-001",
@@ -201,240 +141,94 @@ const FEA_THERMAL_INPUT_001: Requirement = Requirement {
             PUBLIC,
         ),
     ],
-    witnesses: &[
-        Witness {
-            id: "FEA-WITNESS-THERMAL-SIGNALS",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-                    "physics::thermal::assembly::tests::signals::time_signals_drive_prescribed_te",
-                    "mperature_flux_and_ambient_temperature",
-                ),
-                source: "crates/runmat-analysis/fea/src/physics/thermal/assembly/tests/signals.rs",
-            },
-            claims: &[CoverageClaim {
-                obligation: "boundaries",
-                envelopes: &[KERNEL[2]],
-                boundary: concat!(
-                    "Tet4 assembly samples prescribed temperature, flux and ambient-time ",
-                    "signals; no generated/field-artifact equivalence credit.",
-                ),
-            }],
-        },
-        Witness {
-            id: "FEA-WITNESS-THERMAL-RADIATION-LAW",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-                    "physics::thermal::assembly::tests::radiation::exact_steady_slab_radiation_re",
-                    "sidual_tangent_and_prescribed_power_match_continuum",
-                ),
-                source:
-                    "crates/runmat-analysis/fea/src/physics/thermal/assembly/tests/radiation.rs",
-            },
-            claims: &[CoverageClaim {
-                obligation: "boundaries",
-                envelopes: &[KERNEL[0]],
-                boundary: concat!(
-                    "Tet4 slab exact gray-surface law, finite-difference tangent and physical ",
-                    "power; does not cover arbitrary enclosure radiation.",
-                ),
-            }],
-        },
-    ],
 };
 const FEA_THERMAL_SOLVE_001: Requirement = Requirement {
     id: "FEA-THERMAL-SOLVE-001",
     title: "Distinct steady and transient solves with nonlinear closure",
-    stages: &[
-        Stage::Thermal
-    ],
+    stages: &[Stage::Thermal],
     acceptance: concat!(
-"Use real heat-equation solves rather than graph diffusion or relaxation ",
-"proxies. Document transient integration and nonlinear treatment of ",
-"temperature-dependent coefficients and radiation. Retain actual residual, ",
-"increment and energy-closure evidence before acceptance.",
-),
-    owners: &[
-        "crates/runmat-analysis/fea/src/pipeline/thermal/physical.rs"
-    ],
-    dependencies: &[
-    ],
+        "Use real heat-equation solves rather than graph diffusion or relaxation ",
+        "proxies. Document transient integration and nonlinear treatment of ",
+        "temperature-dependent coefficients and radiation. Retain actual residual, ",
+        "increment and energy-closure evidence before acceptance.",
+    ),
+    owners: &["crates/runmat-analysis/fea/src/pipeline/thermal/physical.rs"],
+    dependencies: &[],
     obligations: &[
         obligation(
             "steady",
             concat!(
-"Solve stationary conductivity/source/boundary equilibrium and verify the ",
-"physical residual on the original operator.",
-),
+                "Solve stationary conductivity/source/boundary equilibrium and verify the ",
+                "physical residual on the original operator.",
+            ),
             EvidenceKind::IndependentReference,
-            STEADY_PUBLIC
+            STEADY_PUBLIC,
         ),
         obligation(
             "transient",
             concat!(
-"Document the transient integration method, initial-state semantics and ",
-"sampling; demonstrate its temporal order independently of spatial error.",
-),
+                "Document the transient integration method, initial-state semantics and ",
+                "sampling; demonstrate its temporal order independently of spatial error.",
+            ),
             EvidenceKind::TemporalConvergence,
-            TRANSIENT_PUBLIC
+            TRANSIENT_PUBLIC,
         ),
         obligation(
             "nonlinear",
             concat!(
-"Temperature-dependent property and radiation iterations meet documented ",
-"physical residual, field-increment and energy-closure criteria. Failed or ",
-"exhausted iterations cannot produce an accepted state.",
-),
+                "Temperature-dependent property and radiation iterations meet documented ",
+                "physical residual, field-increment and energy-closure criteria. Failed or ",
+                "exhausted iterations cannot produce an accepted state.",
+            ),
             EvidenceKind::AccuracyAcceptance,
-            PUBLIC
+            PUBLIC,
         ),
-    ],
-    witnesses: &[
-        Witness {
-            id: "FEA-WITNESS-THERMAL-GRAY-EQUILIBRIUM",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-"pipeline::thermal::physical::nonlinear::tests::fixed_hot_slab_matches_indepe",
-"ndent_gray_surface_scalar_equilibrium",
-),
-                source: "crates/runmat-analysis/fea/src/pipeline/thermal/physical/nonlinear/tests.rs",
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "steady",
-                    envelopes: STEADY_PUBLIC,
-                    boundary: concat!(
-"Tet4/Tet10 fixed-hot slab against independent scalar bisection; original ",
-"fields, power and retained nonlinear evidence checked.",
-)
-                }
-            ]
-        },
-        Witness {
-            id: "FEA-WITNESS-THERMAL-NONLINEAR-TIME",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-"pipeline::thermal::physical::nonlinear::tests::temporal::manufactured_contin",
-"uum_cooling_retains_first_order_backward_euler_and_power_closure",
-),
-                source: "crates/runmat-analysis/fea/src/pipeline/thermal/physical/nonlinear/tests/temporal.rs",
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "transient",
-                    envelopes: TRANSIENT_PUBLIC,
-                    boundary: concat!(
-"Tet4/Tet10 manufactured radiating cooling, 8/16/32 steps, first-order ",
-"temperature/gradient/flux/storage and power closure; not ",
-"temperature-dependent conductivity coverage.",
-)
-                }
-            ]
-        },
     ],
 };
 const FEA_THERMAL_FIELDS_001: Requirement = Requirement {
     id: "FEA-THERMAL-FIELDS-001",
     title: "Physical thermal recovery and energy accounting",
-    stages: &[
-        Stage::Thermal
-    ],
+    stages: &[Stage::Thermal],
     acceptance: concat!(
-"Publish original nodal and integration-point temperature, temperature ",
-"gradient, heat flux, actual authored/generated heat source and ",
-"boundary-face heat transfer with correct units and topology. Compute global ",
-"and per-region energy balances from the same physical transfers used in ",
-"assembly.",
-),
-    owners: &[
-        "crates/runmat-analysis/fea/src/physics/thermal/assembly/recovery.rs"
-    ],
-    dependencies: &[
-    ],
+        "Publish original nodal and integration-point temperature, temperature ",
+        "gradient, heat flux, actual authored/generated heat source and ",
+        "boundary-face heat transfer with correct units and topology. Compute global ",
+        "and per-region energy balances from the same physical transfers used in ",
+        "assembly.",
+    ),
+    owners: &["crates/runmat-analysis/fea/src/physics/thermal/assembly/recovery.rs"],
+    dependencies: &[],
     obligations: &[
         obligation(
             "fields",
             concat!(
-"Retain recoverable original thermal fields, integration inventories and ",
-"boundary-face transfers with explicit locations, components, units and ",
-"canonical topology; recover physical conductivity times temperature ",
-"gradient with the documented sign.",
-),
+                "Retain recoverable original thermal fields, integration inventories and ",
+                "boundary-face transfers with explicit locations, components, units and ",
+                "canonical topology; recover physical conductivity times temperature ",
+                "gradient with the documented sign.",
+            ),
             EvidenceKind::OriginalStateComparison,
-            PUBLIC
+            PUBLIC,
         ),
         obligation(
             "global_energy",
             concat!(
-"Account for supplied heat, boundary transfer, prescribed reactions and ",
-"transient stored energy without counting internal conduction as external ",
-"power or hiding opposing flows through cancellation.",
-),
+                "Account for supplied heat, boundary transfer, prescribed reactions and ",
+                "transient stored energy without counting internal conduction as external ",
+                "power or hiding opposing flows through cancellation.",
+            ),
             EvidenceKind::PhysicalBalance,
-            KERNEL
+            KERNEL,
         ),
         obligation(
             "regional_energy",
             concat!(
-"Compute per-region energy balances and consistent interface exchange so ",
-"regional totals reconcile with the global balance.",
-),
+                "Compute per-region energy balances and consistent interface exchange so ",
+                "regional totals reconcile with the global balance.",
+            ),
             EvidenceKind::PhysicalBalance,
-            PUBLIC
+            PUBLIC,
         ),
-    ],
-    witnesses: &[
-        Witness {
-            id: "FEA-WITNESS-THERMAL-INTERNAL-POWER",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-"physics::thermal::assembly::tests::energy_recovery::internal_conduction_is_n",
-"ot_external_power_and_uniform_flux_is_exactly_zero",
-),
-                source: "crates/runmat-analysis/fea/src/physics/thermal/assembly/tests/energy_recovery.rs",
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "global_energy",
-                    envelopes: KERNEL,
-                    boundary: concat!(
-"Both-order physical heat-recovery identities and uniform zero flux; no ",
-"arbitrary regional partition balance.",
-)
-                }
-            ]
-        },
-        Witness {
-            id: "FEA-WITNESS-THERMAL-REACTIONS",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-"physics::thermal::assembly::tests::energy_recovery::conductive_prescribed_re",
-"actions_have_analytical_sign_and_cancel_internal_pairs",
-),
-                source: "crates/runmat-analysis/fea/src/physics/thermal/assembly/tests/energy_recovery.rs",
-            },
-            claims: &[
-                CoverageClaim {
-                    obligation: "global_energy",
-                    envelopes: KERNEL,
-                    boundary: concat!(
-"Both-order conductive prescribed reaction signs and internal-pair ",
-"cancellation; no transient continuum convergence credit.",
-)
-                }
-            ]
-        },
     ],
 };
 const FEA_THERMAL_ACCURACY_001: Requirement = Requirement {
@@ -485,60 +279,12 @@ const FEA_THERMAL_ACCURACY_001: Requirement = Requirement {
             "gate",
             concat!(
                 "Mandatory thermal accuracy assessments bind original fields, energy ",
-                "diagnostics and realization evidence to the result and block production ",
+                "diagnostics and realization evidence to the result and block ",
                 "acceptance when missing, failed or indeterminate.",
             ),
             EvidenceKind::AccuracyAcceptance,
             PUBLIC,
         ),
-    ],
-    witnesses: &[
-        Witness {
-            id: "FEA-WITNESS-THERMAL-COOLING-SPACE",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-                    "execution::thermal_workload::tests::initial_fields::continuum::resolved_tet4",
-                    "_heated_cube_cold_cooling_has_continuum_spatial_convergence",
-                ),
-                source: concat!(
-                    "crates/runmat-analysis/fea/src/execution/thermal_workload/tests/initial_fiel",
-                    "ds/continuum.rs",
-                ),
-            },
-            claims: &[CoverageClaim {
-                obligation: "space",
-                envelopes: &[PUBLIC[2]],
-                boundary: concat!(
-                    "Tet4 heated-cube cold cooling continuum temperature, flux, stored heat and ",
-                    "power with temporal contamination bound; does not prove Tet10 spatial gate.",
-                ),
-            }],
-        },
-        Witness {
-            id: "FEA-WITNESS-THERMAL-RAMP-TIME",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-                    "execution::thermal_workload::tests::initial_fields::continuum::uniform_ramp_",
-                    "heating_has_continuum_backward_euler_time_convergence",
-                ),
-                source: concat!(
-                    "crates/runmat-analysis/fea/src/execution/thermal_workload/tests/initial_fiel",
-                    "ds/continuum.rs",
-                ),
-            },
-            claims: &[CoverageClaim {
-                obligation: "time",
-                envelopes: TRANSIENT_PUBLIC,
-                boundary: concat!(
-                    "Both-order uniform ramp heating, independent continuum error and energy ",
-                    "law; no nonuniform mesh convergence credit.",
-                ),
-            }],
-        },
     ],
 };
 const FEA_THERMAL_EXECUTION_001: Requirement = Requirement {
@@ -610,50 +356,6 @@ const FEA_THERMAL_EXECUTION_001: Requirement = Requirement {
             EvidenceKind::AccuracyAcceptance,
             PUBLIC,
         ),
-    ],
-    witnesses: &[
-        Witness {
-            id: "FEA-WITNESS-THERMAL-PREASSEMBLY",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-analysis-fea",
-                target: CargoTarget::Library,
-                name: concat!(
-                    "planning::resource::thermal_preassembly::tests::field_construction_scratch_i",
-                    "s_composed_before_assembly",
-                ),
-                source:
-                    "crates/runmat-analysis/fea/src/planning/resource/thermal_preassembly/tests.rs",
-            },
-            claims: &[CoverageClaim {
-                obligation: "admission",
-                envelopes: TRANSIENT_PUBLIC,
-                boundary: concat!(
-                    "Both-order initial-field construction scratch contributes to the ",
-                    "preassembly ceiling; no measured RSS or whole native pipeline evidence.",
-                ),
-            }],
-        },
-        Witness {
-            id: "FEA-WITNESS-THERMAL-NATIVE-IMPORT",
-            locator: WitnessLocator::CargoTest {
-                package: "runmat-execution-runner-native",
-                target: CargoTarget::Library,
-                name: concat!(
-                    "analysis_kernel::thermal::tests::native_thermal_serial_transport_import_and_",
-                    "terminal_state_round_trip",
-                ),
-                source:
-                    "crates/runmat-execution-runner-native/src/analysis_kernel/thermal/tests.rs",
-            },
-            claims: &[CoverageClaim {
-                obligation: "publication",
-                envelopes: &[NATIVE[2], NATIVE[3]],
-                boundary: concat!(
-                    "Both-order serial native artifact import and semantic terminal state ",
-                    "roundtrip; no producer-death, remote, partitioned or GPU credit.",
-                ),
-            }],
-        },
     ],
 };
 pub(crate) const REQUIREMENTS: &[Requirement] = &[

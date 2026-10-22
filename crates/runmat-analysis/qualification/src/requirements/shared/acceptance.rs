@@ -1,6 +1,16 @@
 //! Standing shared acceptance acceptance.
-use super::{ALL, KERNEL};
+use super::ALL;
 use crate::requirement::*;
+/// Ownership and boundary rules are properties of the source tree and the release graph,
+/// not of any numerical execution placement.
+const OWNERSHIP_SCOPE: &[Envelope] = cells!(
+    [Formulation::SharedInfrastructure],
+    [MeshOrder::CanonicalMixedTopology],
+    [
+        ExecutionEnvelope::SourceCheck,
+        ExecutionEnvelope::ReleasePipeline
+    ]
+);
 pub(super) const FEA_SHARED_OWNERSHIP_001: Requirement = Requirement {
     id: "FEA-SHARED-OWNERSHIP-001",
     title: "Domain boundaries and shared platform interoperability",
@@ -39,7 +49,7 @@ pub(super) const FEA_SHARED_OWNERSHIP_001: Requirement = Requirement {
                 "schemas or plaintext model contents.",
             ),
             EvidenceKind::SemanticRealization,
-            ALL,
+            OWNERSHIP_SCOPE,
         ),
         obligation(
             "code_quality",
@@ -69,7 +79,7 @@ pub(super) const FEA_SHARED_OWNERSHIP_001: Requirement = Requirement {
                 "tests and relevant checks pass.",
             ),
             EvidenceKind::SemanticRealization,
-            ALL,
+            OWNERSHIP_SCOPE,
         ),
         obligation(
             "numerical_truth",
@@ -83,7 +93,7 @@ pub(super) const FEA_SHARED_OWNERSHIP_001: Requirement = Requirement {
                 "must fail explicitly rather than select a convenient fallback.",
             ),
             EvidenceKind::SemanticRealization,
-            ALL,
+            OWNERSHIP_SCOPE,
         ),
         obligation(
             "bridge_dependency_boundary",
@@ -113,7 +123,7 @@ pub(super) const FEA_SHARED_OWNERSHIP_001: Requirement = Requirement {
                 "providers runmat-cli -> composes runtime and native execution providers",
             ),
             EvidenceKind::SemanticRealization,
-            ALL,
+            OWNERSHIP_SCOPE,
         ),
         obligation(
             "shared_dependency_graph",
@@ -139,7 +149,7 @@ pub(super) const FEA_SHARED_OWNERSHIP_001: Requirement = Requirement {
                 "dumping ground.",
             ),
             EvidenceKind::SemanticRealization,
-            ALL,
+            OWNERSHIP_SCOPE,
         ),
         obligation(
             "extraction_policy",
@@ -163,7 +173,7 @@ pub(super) const FEA_SHARED_OWNERSHIP_001: Requirement = Requirement {
                 "extraction before adding the crate.",
             ),
             EvidenceKind::SemanticRealization,
-            ALL,
+            OWNERSHIP_SCOPE,
         ),
         obligation(
             "public_platform_convergence",
@@ -194,12 +204,12 @@ pub(super) const FEA_SHARED_OWNERSHIP_001: Requirement = Requirement {
                 "narrow replaceable port against the current public contract.",
             ),
             EvidenceKind::SemanticRealization,
-            ALL,
+            OWNERSHIP_SCOPE,
         ),
         obligation(
             "platform_capability_ownership",
             concat!(
-                "Before production remote, distributed, or GPU promotion, perform a ",
+                "Before remote, distributed, or GPU promotion, perform a ",
                 "mandatory convergence merge from the then-current `dev`, delete superseded ",
                 "compatibility ports, and prove there is one authority for every shared ",
                 "contract. Known incoming contracts that FEA should expect to consume ",
@@ -224,7 +234,7 @@ pub(super) const FEA_SHARED_OWNERSHIP_001: Requirement = Requirement {
                 "creating an FEA-specific spelling.",
             ),
             EvidenceKind::SemanticRealization,
-            ALL,
+            OWNERSHIP_SCOPE,
         ),
         obligation(
             "interoperable_public_storage",
@@ -239,7 +249,7 @@ pub(super) const FEA_SHARED_OWNERSHIP_001: Requirement = Requirement {
                 "cross-cutting invariants and must arrive as one reviewed platform lineage.",
             ),
             EvidenceKind::SemanticRealization,
-            ALL,
+            OWNERSHIP_SCOPE,
         ),
         obligation(
             "platform_fact_ownership",
@@ -267,7 +277,7 @@ pub(super) const FEA_SHARED_OWNERSHIP_001: Requirement = Requirement {
                 "an explicit redistribution plan.",
             ),
             EvidenceKind::SemanticRealization,
-            ALL,
+            OWNERSHIP_SCOPE,
         ),
         obligation(
             "explicit_value_adapters",
@@ -280,7 +290,7 @@ pub(super) const FEA_SHARED_OWNERSHIP_001: Requirement = Requirement {
                 "dynamic-value interpreter.",
             ),
             EvidenceKind::SemanticRealization,
-            ALL,
+            OWNERSHIP_SCOPE,
         ),
         obligation(
             "shared_execution_authorities",
@@ -306,7 +316,7 @@ pub(super) const FEA_SHARED_OWNERSHIP_001: Requirement = Requirement {
                 "providers, feasibility, cost, residency, and truthful fallback evidence.",
             ),
             EvidenceKind::SemanticRealization,
-            ALL,
+            OWNERSHIP_SCOPE,
         ),
         obligation(
             "bulk_collective_contract",
@@ -322,7 +332,7 @@ pub(super) const FEA_SHARED_OWNERSHIP_001: Requirement = Requirement {
                 "semantics.",
             ),
             EvidenceKind::SemanticRealization,
-            ALL,
+            OWNERSHIP_SCOPE,
         ),
         obligation(
             "authored_intent_only",
@@ -342,7 +352,7 @@ pub(super) const FEA_SHARED_OWNERSHIP_001: Requirement = Requirement {
                 "logical study specification.",
             ),
             EvidenceKind::SemanticRealization,
-            ALL,
+            OWNERSHIP_SCOPE,
         ),
         obligation(
             "numerical_domain_owners",
@@ -359,7 +369,7 @@ pub(super) const FEA_SHARED_OWNERSHIP_001: Requirement = Requirement {
                 "solve ambiguity by copying it into both modules.",
             ),
             EvidenceKind::SemanticRealization,
-            ALL,
+            OWNERSHIP_SCOPE,
         ),
         obligation(
             "portable_bridge_only",
@@ -373,7 +383,7 @@ pub(super) const FEA_SHARED_OWNERSHIP_001: Requirement = Requirement {
                 "scheduling, persistence, encryption, transport, or native worker behavior.",
             ),
             EvidenceKind::SemanticRealization,
-            ALL,
+            OWNERSHIP_SCOPE,
         ),
         obligation(
             "runtime_adaptation_only",
@@ -387,7 +397,7 @@ pub(super) const FEA_SHARED_OWNERSHIP_001: Requirement = Requirement {
                 "replacement belongs under `runmat-analysis-fea/topology/flow`.",
             ),
             EvidenceKind::SemanticRealization,
-            ALL,
+            OWNERSHIP_SCOPE,
         ),
         obligation(
             "native_generic_lifecycle",
@@ -398,7 +408,7 @@ pub(super) const FEA_SHARED_OWNERSHIP_001: Requirement = Requirement {
                 "not fork their own schedulers or storage systems.",
             ),
             EvidenceKind::SemanticRealization,
-            ALL,
+            OWNERSHIP_SCOPE,
         ),
         obligation(
             "shared_cli_placement",
@@ -408,7 +418,7 @@ pub(super) const FEA_SHARED_OWNERSHIP_001: Requirement = Requirement {
                 "FEA placement arguments must remain unambiguous under Clap parsing.",
             ),
             EvidenceKind::SemanticRealization,
-            ALL,
+            OWNERSHIP_SCOPE,
         ),
         obligation(
             "content_blind_presentation",
@@ -419,7 +429,7 @@ pub(super) const FEA_SHARED_OWNERSHIP_001: Requirement = Requirement {
                 "result decoder is added.",
             ),
             EvidenceKind::SemanticRealization,
-            ALL,
+            OWNERSHIP_SCOPE,
         ),
         obligation(
             "platform_value_fact_contract",
@@ -442,7 +452,7 @@ pub(super) const FEA_SHARED_OWNERSHIP_001: Requirement = Requirement {
                 "mathematical partition and operator semantics..",
             ),
             EvidenceKind::SemanticRealization,
-            ALL,
+            OWNERSHIP_SCOPE,
         ),
         obligation(
             "exact_transfer_and_evaluation_owners",
@@ -475,10 +485,9 @@ pub(super) const FEA_SHARED_OWNERSHIP_001: Requirement = Requirement {
                 "family..",
             ),
             EvidenceKind::SemanticRealization,
-            ALL,
+            OWNERSHIP_SCOPE,
         ),
     ],
-    witnesses: &[],
 };
 pub(super) const FEA_SHARED_ACCURACY_001: Requirement = Requirement {
     id: "FEA-SHARED-ACCURACY-001",
@@ -578,27 +587,6 @@ pub(super) const FEA_SHARED_ACCURACY_001: Requirement = Requirement {
             ALL,
         ),
     ],
-    witnesses: &[Witness {
-        id: "FEA-WITNESS-SHARED-MISSING-ACCURACY",
-        locator: WitnessLocator::CargoTest {
-            package: "runmat-analysis-fea",
-            target: CargoTarget::Library,
-            name: concat!(
-                "results::accuracy::tests::missing_mandatory_evidence_is_indeterminate_and_bl",
-                "ocks_production",
-            ),
-            source: "crates/runmat-analysis/fea/src/results/accuracy/tests.rs",
-        },
-        claims: &[CoverageClaim {
-            obligation: "mandatory_acceptance_states",
-            envelopes: KERNEL,
-            boundary: concat!(
-                "Typed accuracy evaluator reports missing mandatory evidence as ",
-                "Indeterminate, blocks publication under fail and permits explicit markIndeterminate policy; ",
-                "no independent physical estimator or admitted publication receipt.",
-            ),
-        }],
-    }],
 };
 pub(super) const FEA_SHARED_EXTENSIONS_001: Requirement = Requirement {
     id: "FEA-SHARED-EXTENSIONS-001",
@@ -638,7 +626,6 @@ pub(super) const FEA_SHARED_EXTENSIONS_001: Requirement = Requirement {
         EvidenceKind::SemanticRealization,
         ALL,
     )],
-    witnesses: &[],
 };
 pub(super) const FEA_SHARED_BASELINE_001: Requirement = Requirement {
     id: "FEA-SHARED-BASELINE-001",
@@ -737,23 +724,6 @@ pub(super) const FEA_SHARED_BASELINE_001: Requirement = Requirement {
             ALL,
         ),
     ],
-    witnesses: &[Witness {
-        id: "FEA-WITNESS-SHARED-PRODUCTION-FORGERY",
-        locator: WitnessLocator::CargoTest {
-            package: "runmat-analysis-fea",
-            target: CargoTarget::Library,
-            name: "admission::tests::persisted_identity_is_revalidated_and_cannot_forge_production",
-            source: "crates/runmat-analysis/fea/src/admission/tests.rs",
-        },
-        claims: &[CoverageClaim {
-            obligation: "decode_revalidation_and_proxy_rejection",
-            envelopes: KERNEL,
-            boundary: concat!(
-                "Thermal-transient identity cold decode revalidates and rejects fields ",
-                "outside the registry identity; no end-to-end publication proof.",
-            ),
-        }],
-    }],
 };
 pub(super) const FEA_SHARED_AUTHORITIES_001: Requirement = Requirement {
     id: "FEA-SHARED-AUTHORITIES-001",
@@ -858,5 +828,4 @@ pub(super) const FEA_SHARED_AUTHORITIES_001: Requirement = Requirement {
             ALL,
         ),
     ],
-    witnesses: &[],
 };

@@ -64,6 +64,12 @@ fn decode(
         None,
     )
 }
+// witness: FEA-SHARED-RESOURCES-001/shared_immutable_inventories @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Compact artifact transport exactly preserves topology, provenance, complete accepted
+//   histories, numeric quality and signed-zero bits under uniform/scoped metrics and identity
+//   changes. This finite kernel round-trip does not establish native study acceptance or whole-task
+//   memory.
 #[test]
 fn indexed_volume_preserves_all_topology_provenance_and_quality_values() {
     for permuted in [false, true] {
@@ -119,6 +125,11 @@ fn indexed_volume_preserves_all_topology_provenance_and_quality_values() {
         }
     }
 }
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Foreign indices, duplicate tables/cells and unadmitted owned expansion reject in the
+//   compact transport boundary. This finite hostile-input fixture does not inventory all validator
+//   scratch or measure RSS.
 #[test]
 fn indexed_volume_rejects_foreign_indices_duplicate_tables_and_unadmitted_expansion() {
     let original = mesh(false, 0, true);
@@ -167,6 +178,11 @@ fn indexed_volume_rejects_foreign_indices_duplicate_tables_and_unadmitted_expans
 
 mod scale;
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: The public prepared encoder and its profiler retain a one-shot interruption as
+//   cancellation, rather than re-querying the signal and relabeling it as invalid data. This
+//   adapter regression does not certify all interruption points or native quiescence.
 #[test]
 fn public_encoding_keeps_one_shot_cancellation_distinct_from_invalid_artifacts() {
     use std::sync::atomic::{AtomicBool, Ordering};

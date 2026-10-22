@@ -118,6 +118,18 @@ fn bits(values: &[f64]) -> Vec<u64> {
     values.iter().map(|value| value.to_bits()).collect()
 }
 
+// witness: FEA-SCALE-PARALLEL-001/shared_parallel_kernels @
+//   shared_infrastructure/canonical_mixed_topology/parallel_cpu; coverage: partial;
+//   boundary: Element assembly is bit-identical to the serial loop at 1, 2, 3, 7 and 16 threads on
+//   a synthetic 3,000-element map; no family operator is assembled here.
+// witness: FEA-SHARED-EXECUTION-001/bounded_shared_memory_assembly @
+//   shared_infrastructure/canonical_mixed_topology/parallel_cpu; coverage: partial;
+//   boundary: Parallel element assembly into partition-local buffers merges to a bit-identical
+//   result for every thread count; memory ceilings are not asserted.
+// witness: FEA-SHARED-EXECUTION-001/serial_reference_and_equivalence_policy @
+//   shared_infrastructure/canonical_mixed_topology/parallel_cpu; coverage: partial;
+//   boundary: Parallel assembly equals the serial reference bit for bit; the policy for remote and
+//   distributed equivalence is not exercised.
 #[test]
 fn assembly_is_bitwise_identical_to_the_serial_element_loop_for_every_thread_count() {
     let map = test_map(3_000, 9_000);

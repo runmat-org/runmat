@@ -119,6 +119,12 @@ mod admission_tests {
     use runmat_geometry_core::GeometryAllocationScope;
     use runmat_meshing_core::NeverCancelled;
 
+    // witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+    //   boundary: The finite cold-record fixture rejects zero and one-byte-short stage budgets with
+    //   MemoryBudgetExceeded, accepts its exact requested reconstruction budget, preserves original
+    //   records and releases the consumer scope completely. This does not establish a complete
+    //   projection, original CAD study, native-host ceiling or process RSS bound.
     #[test]
     fn reconstructed_records_share_the_stage_ceiling_and_release_with_consumer_scope() {
         let artifact = crate::tests::fixture(vec![vec![1; 130000], vec![2; 31]], 1024);
