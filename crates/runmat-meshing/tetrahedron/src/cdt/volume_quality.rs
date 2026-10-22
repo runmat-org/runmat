@@ -287,7 +287,7 @@ fn evaluate_from_metric_contexts(
     options: DelaunayVolumeQualityOptions,
     metric_contexts: MetricContexts<'_>,
     boundary_nodes: &BTreeSet<StableDigest>,
-    protected_facets: &BTreeSet<[StableDigest; 3]>,
+    protected_facets: &ProtectedFacets,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<DelaunayVolumeQuality, DelaunayVolumeQualityError> {
     let mut tetrahedra = Vec::with_capacity(topology.tetrahedra.len());
@@ -315,53 +315,53 @@ fn boundary_node_identities(provenance: &DelaunayVolumeProvenance) -> BTreeSet<S
         .collect()
 }
 
-fn protected_facet_identities(
-    provenance: &DelaunayVolumeProvenance,
-) -> BTreeSet<[StableDigest; 3]> {
-    provenance
+/// The published surface the volume stage must preserve: its triangles and, derived from the same
+/// triangles, its edges. An edge is protected because it belongs to the surface, whether or not a
+/// given tetrahedron also carries one of its triangles.
+pub(in crate::cdt) struct ProtectedFacets {
+    pub(in crate::cdt) facets: BTreeSet<[StableDigest; 3]>,
+    pub(in crate::cdt) edges: BTreeSet<[StableDigest; 2]>,
+}
+
+fn protected_facet_identities(provenance: &DelaunayVolumeProvenance) -> ProtectedFacets {
+    let facets = provenance
         .facets
         .iter()
         .map(|facet| facet.node_identities)
-        .collect()
+        .collect::<BTreeSet<_>>();
+    let edges = facets
+        .iter()
+        .flat_map(|&[a, b, c]| {
+            [[a, b], [a, c], [b, c]].map(|mut edge| {
+                edge.sort_unstable();
+                edge
+            })
+        })
+        .collect();
+    ProtectedFacets { facets, edges }
 }
 
 /// Vertex pairs of a tetrahedron's six edges, in the bit order of [`protected_edge_mask`].
 pub(in crate::cdt) const TETRAHEDRON_EDGES: [(usize, usize); 6] =
     [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)];
 
-/// Bit `k` is set when edge `TETRAHEDRON_EDGES[k]` lies on a protected facet: an edge of the
-/// published surface mesh, which the volume stage never splits.
-fn protected_edge_mask(
-    tetrahedron: [StableDigest; 4],
-    protected_facets: &BTreeSet<[StableDigest; 3]>,
-) -> u8 {
+/// Bit `k` is set when edge `TETRAHEDRON_EDGES[k]` is an edge of the published surface mesh,
+/// which the volume stage never splits. A tetrahedron can hold a surface edge without holding
+/// either surface triangle on it; that edge is still the surface stage's, not the volume's.
+fn protected_edge_mask(tetrahedron: [StableDigest; 4], protected: &ProtectedFacets) -> u8 {
     let mut mask = 0u8;
-    for opposite in 0..4 {
-        let mut facet = [StableDigest::ZERO; 3];
-        let mut cursor = 0;
-        for (index, identity) in tetrahedron.iter().copied().enumerate() {
-            if index != opposite {
-                facet[cursor] = identity;
-                cursor += 1;
-            }
-        }
-        facet.sort_unstable();
-        if !protected_facets.contains(&facet) {
-            continue;
-        }
-        for (bit, (left, right)) in TETRAHEDRON_EDGES.iter().enumerate() {
-            if *left != opposite && *right != opposite {
-                mask |= 1 << bit;
-            }
+    for (bit, (left, right)) in TETRAHEDRON_EDGES.iter().enumerate() {
+        let mut edge = [tetrahedron[*left], tetrahedron[*right]];
+        edge.sort_unstable();
+        if protected.edges.contains(&edge) {
+            mask |= 1 << bit;
         }
     }
     mask
 }
 
-fn protected_facet_count(
-    tetrahedron: [StableDigest; 4],
-    protected_facets: &BTreeSet<[StableDigest; 3]>,
-) -> u8 {
+fn protected_facet_count(tetrahedron: [StableDigest; 4], protected: &ProtectedFacets) -> u8 {
+    let protected_facets = &protected.facets;
     (0..4)
         .filter(|opposite| {
             let mut facet = [StableDigest::ZERO; 3];

@@ -124,18 +124,16 @@ pub fn compile_canonical_input(
             .electrical
             .as_ref()
             .ok_or_else(|| invalid("missing Maxwell material law"))?;
-        if !law.conductivity_frequency_response.is_empty() {
-            return Err(MaxwellError::Unsupported(
-                "frequency-dependent conductivity in a harmonic analysis".into(),
-            ));
-        }
+        let scales = frequency_scales(&law.conductivity_frequency_response, frequency_hz)?;
         volumes.push(MaxwellVolumeData {
             element_identity: element.stable_identity,
             permeability_h_per_m: super::super::magnetic::VACUUM_PERMEABILITY_H_PER_M
-                * law.relative_permeability,
+                * law.relative_permeability
+                * scales.permeability,
             permittivity_f_per_m: super::super::electrical::VACUUM_PERMITTIVITY_F_PER_M
-                * law.relative_permittivity,
-            conductivity_s_per_m: law.conductivity_s_per_m,
+                * law.relative_permittivity
+                * scales.permittivity,
+            conductivity_s_per_m: law.conductivity_s_per_m * scales.conductivity,
         });
     }
     let sampling =
@@ -184,4 +182,68 @@ pub fn solve_canonical_harmonic(
         frequency_hz,
     )?;
     super::solve(mesh, &input, residual_target)
+}
+
+struct FrequencyScales {
+    conductivity: f64,
+    permittivity: f64,
+    permeability: f64,
+}
+
+/// A material's tabulated frequency response, interpolated linearly in frequency at the
+/// analysis frequency. An empty table is the reference material at every frequency.
+fn frequency_scales(
+    table: &[runmat_analysis_core::ConductivityFrequencyPoint],
+    frequency_hz: f64,
+) -> Result<FrequencyScales, MaxwellError> {
+    if table.is_empty() {
+        return Ok(FrequencyScales {
+            conductivity: 1.0,
+            permittivity: 1.0,
+            permeability: 1.0,
+        });
+    }
+    if table.iter().any(|point| point.dispersive_loss_scale.is_some()) {
+        return Err(MaxwellError::Unsupported(
+            "a dispersive loss scale needs a complex permittivity law; give the loss as a conductivity scale".into(),
+        ));
+    }
+    if table
+        .windows(2)
+        .any(|pair| !(pair[0].frequency_hz < pair[1].frequency_hz))
+    {
+        return Err(invalid("frequency response points must have increasing frequencies"));
+    }
+    let first = &table[0];
+    let last = &table[table.len() - 1];
+    if frequency_hz < first.frequency_hz || frequency_hz > last.frequency_hz {
+        return Err(MaxwellError::Unsupported(format!(
+            "analysis frequency {frequency_hz} Hz lies outside the material frequency response ({} to {} Hz)",
+            first.frequency_hz, last.frequency_hz
+        )));
+    }
+    let scale = |pick: &dyn Fn(&runmat_analysis_core::ConductivityFrequencyPoint) -> f64| {
+        if table.len() == 1 {
+            return pick(first);
+        }
+        let upper = table
+            .iter()
+            .position(|point| point.frequency_hz >= frequency_hz)
+            .unwrap_or(table.len() - 1)
+            .max(1);
+        let (a, b) = (&table[upper - 1], &table[upper]);
+        let t = (frequency_hz - a.frequency_hz) / (b.frequency_hz - a.frequency_hz);
+        pick(a) + t * (pick(b) - pick(a))
+    };
+    let scales = FrequencyScales {
+        conductivity: scale(&|p| p.conductivity_scale),
+        permittivity: scale(&|p| p.relative_permittivity_scale.unwrap_or(1.0)),
+        permeability: scale(&|p| p.relative_permeability_scale.unwrap_or(1.0)),
+    };
+    if !(scales.conductivity >= 0.0 && scales.permittivity > 0.0 && scales.permeability > 0.0)
+        || !scales.conductivity.is_finite()
+    {
+        return Err(invalid("frequency response scales must be finite, conductivity nonnegative and permittivity and permeability positive"));
+    }
+    Ok(scales)
 }

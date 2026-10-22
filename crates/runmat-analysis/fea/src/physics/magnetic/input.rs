@@ -11,7 +11,7 @@ use crate::{
     topology::AnalysisProjection,
 };
 use runmat_analysis_core::*;
-use runmat_meshing_core::{BoundaryFaceRole, SolverMeshArtifact};
+use runmat_meshing_core::{BoundaryFaceRole, SolverMeshArtifact, StableDigest};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub fn validate_canonical_input<'a>(
@@ -78,10 +78,16 @@ pub fn validate_canonical_input<'a>(
     if model
         .excitations
         .iter()
-        .any(|action| !matches!(action, ExcitationAction::MagneticVolumeCurrentDensity(_)))
+        .any(|action| {
+            !matches!(
+                action,
+                ExcitationAction::MagneticVolumeCurrentDensity(_)
+                    | ExcitationAction::MagneticVectorPotential(_)
+            )
+        })
     {
         return Err(MagnetostaticError::Unsupported(
-            "non-volume magnetic current action".into(),
+            "magnetostatics takes magnetic_volume_current_density and magnetic_vector_potential loads".into(),
         ));
     }
     Ok(step)
@@ -89,6 +95,10 @@ pub fn validate_canonical_input<'a>(
 
 pub(crate) struct CompiledMagneticInput {
     pub projection: AnalysisProjection,
+    /// Exterior faces with tangential A = 0, sorted; every other exterior face is insulated.
+    pub grounded_faces: Vec<StableDigest>,
+    /// Grounded faces held at a nonzero tangential vector potential (Wb/m), sorted by face.
+    pub prescribed_potential: Vec<(StableDigest, [f64; 3])>,
     pub volumes: Vec<MagneticVolumeData>,
 }
 
@@ -184,20 +194,11 @@ pub(crate) fn compile_canonical_input(
             }
         }
     }
-    let exterior: BTreeSet<_> = projection
-        .boundary_faces
-        .iter()
-        .filter(|face| face.role == BoundaryFaceRole::Exterior)
-        .map(|face| face.stable_identity)
-        .collect();
-    if ground_faces != exterior {
+    // The weak Coulomb gauge is a property of the whole field: one authored gauge fixes the
+    // gradient part of A everywhere, in air, iron and conductors alike.
+    if gauged.is_empty() {
         return Err(MagnetostaticError::Unsupported(
-            "magnetostatics grounds the vector potential on every exterior face: add magnetic.vector_potential_ground for the faces that are not yet grounded (including conductor ends that reach the boundary)".into(),
-        ));
-    }
-    if gauged.len() != projection.elements.len() {
-        return Err(MagnetostaticError::Unsupported(
-            "the curl-curl operator has no unique vector potential in a body without a gauge: magnetic.coulomb_gauge must cover every body (iron and conductors as well as air)".into(),
+            "the curl-curl operator has no unique vector potential without a gauge: add magnetic.coulomb_gauge".into(),
         ));
     }
     let properties = crate::properties::compile_solid_property_map(model, mesh)
@@ -212,15 +213,8 @@ pub(crate) fn compile_canonical_input(
             .electrical
             .as_ref()
             .ok_or_else(|| MagnetostaticError::InvalidInput("missing permeability law".into()))?;
-        // No frequency/thermal/conductive coefficient is silently interpreted as
-        // a magnetic constitutive law. Linear isotropic permeability is explicit.
-        if !law.conductivity_frequency_response.is_empty()
-            || law.resistive_heating_coefficient != 0.0
-        {
-            return Err(MagnetostaticError::Unsupported(
-                "frequency/thermal magnetic material dependence".into(),
-            ));
-        }
+        // Magnetostatics uses only the permeability; a material's conductivity laws
+        // (temperature or frequency dependence) belong to the analyses that use conductivity.
         volumes.push(MagneticVolumeData {
             element_identity: element.stable_identity,
             permeability_h_per_m: VACUUM_PERMEABILITY_H_PER_M * law.relative_permeability,
@@ -229,7 +223,39 @@ pub(crate) fn compile_canonical_input(
     }
     let loads = realize_step_excitations(model, step, ExcitationSamplePoint::Static)
         .map_err(|e| MagnetostaticError::InvalidInput(e.to_string()))?;
+    let mut prescribed_potential = Vec::new();
     for load in loads.iter() {
+        if let RealizedExcitationKind::MagneticVectorPotential(value) = load.kind {
+            // A known tangential vector potential on exterior faces: those faces are grounded
+            // at that value rather than at zero.
+            if value.imaginary != [0.0; 3] || value.real.iter().any(|v| !v.is_finite()) {
+                return Err(MagnetostaticError::Unsupported(
+                    "a static vector potential must be finite and real".into(),
+                ));
+            }
+            let RealizedExcitationTarget::Region(target) = &load.target else {
+                return Err(MagnetostaticError::Unsupported(
+                    "a vector potential load needs a face region".into(),
+                ));
+            };
+            let mut matched = 0;
+            for face in projection.boundary_faces_for_target(target) {
+                if face.role != BoundaryFaceRole::Exterior {
+                    return Err(MagnetostaticError::Unsupported(
+                        "a vector potential load applies to exterior faces".into(),
+                    ));
+                }
+                ground_faces.insert(face.stable_identity);
+                prescribed_potential.push((face.stable_identity, value.real));
+                matched += 1;
+            }
+            if matched == 0 {
+                return Err(MagnetostaticError::InvalidInput(
+                    "unmatched vector potential load".into(),
+                ));
+            }
+            continue;
+        }
         let RealizedExcitationKind::MagneticVolumeCurrentDensity(value) = load.kind else {
             return Err(MagnetostaticError::Unsupported(
                 "nonmagnetic current realization".into(),
@@ -283,8 +309,16 @@ pub(crate) fn compile_canonical_input(
             ));
         }
     }
+    if ground_faces.is_empty() {
+        return Err(MagnetostaticError::Unsupported(
+            "magnetostatics needs magnetic.vector_potential_ground on at least one exterior face (the far field); faces without a ground are magnetically insulated".into(),
+        ));
+    }
+    prescribed_potential.sort_by(|a, b| a.0.cmp(&b.0));
     Ok(CompiledMagneticInput {
         projection,
+        grounded_faces: ground_faces.into_iter().collect(),
+        prescribed_potential,
         volumes,
     })
 }
@@ -296,5 +330,11 @@ pub fn solve_canonical_static(
     residual_target: f64,
 ) -> Result<MagnetostaticResponse, MagnetostaticError> {
     let compiled = compile_canonical_input(model, mesh, step_id, residual_target)?;
-    super::solve_full_grounded_volume(&compiled.projection, &compiled.volumes, residual_target)
+    super::solve_grounded_volume(
+        &compiled.projection,
+        &compiled.grounded_faces,
+        &compiled.prescribed_potential,
+        &compiled.volumes,
+        residual_target,
+    )
 }

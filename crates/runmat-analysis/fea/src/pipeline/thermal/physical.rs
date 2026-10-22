@@ -8,7 +8,10 @@ use crate::{
         ThermalEnergyBalance, ThermalProcedureControl, ThermalSolveOptions,
     },
     excitation::{realize_step_excitations, ExcitationSamplePoint},
-    physics::thermal::{assembly::assemble as assemble_thermal_operator, initial_state},
+    physics::{
+        scalar_constraints::ScalarNodeRelation,
+        thermal::{assembly::assemble as assemble_thermal_operator, initial_state},
+    },
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     solve::{
         backend::{
@@ -26,6 +29,8 @@ mod diagnostics;
 mod nonlinear;
 mod snapshots;
 mod transient;
+#[cfg(test)]
+mod relation_tests;
 use diagnostics::{diagnostics, ThermalDiagnosticsInput};
 use snapshots::{scalar_snapshots, vector_snapshots};
 use transient::{solve_transient, TransientSolveInput};
@@ -318,6 +323,10 @@ fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutcome, FeaRunE
             .map(|(value, reference)| value - reference)
             .collect::<Vec<_>>()
     });
+    let relations = crate::physics::scalar_constraints::about_reference(
+        &assembly.relations,
+        &reference_temperature_k,
+    );
     let mut solve = solve_checked(
         &operator,
         requested_solver_backend,
@@ -326,6 +335,7 @@ fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutcome, FeaRunE
         &facts.operators,
         residual_target,
         None,
+        &relations,
     )?;
     drop(initial_increment);
     // Prescribed coordinates are known exactly; avoid losing them in a shift/unshift
@@ -359,6 +369,7 @@ fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutcome, FeaRunE
             &facts.operators,
             target,
             None,
+            &relations,
         )?;
         backend_evidence::retain(
             &mut accelerator_evidence,
@@ -441,6 +452,7 @@ pub(super) fn solve_refinement(
     facts: &crate::planning::resource::ThermalOperatorResourceFacts,
     residual_target: f64,
     preparation: Option<&mut crate::algebra::LinearPreparationReuse>,
+    relations: &[ScalarNodeRelation],
 ) -> Result<LinearSolveResult, FeaRunError> {
     match solve_unchecked(
         operator,
@@ -450,6 +462,7 @@ pub(super) fn solve_refinement(
         facts,
         residual_target,
         preparation,
+        relations,
     )? {
         solve if solve.solution.iter().all(|value| value.is_finite()) => Ok(solve),
         _ => Err(FeaRunError::Assembly(
@@ -466,6 +479,7 @@ pub(super) fn solve_checked(
     facts: &crate::planning::resource::ThermalOperatorResourceFacts,
     residual_target: f64,
     preparation: Option<&mut crate::algebra::LinearPreparationReuse>,
+    relations: &[ScalarNodeRelation],
 ) -> Result<LinearSolveResult, FeaRunError> {
     let solve = solve_unchecked(
         operator,
@@ -475,6 +489,7 @@ pub(super) fn solve_checked(
         facts,
         residual_target,
         preparation,
+        relations,
     )?;
     if solve.converged {
         Ok(solve)
@@ -494,6 +509,7 @@ fn solve_unchecked(
     facts: &crate::planning::resource::ThermalOperatorResourceFacts,
     residual_target: f64,
     preparation: Option<&mut crate::algebra::LinearPreparationReuse>,
+    relations: &[ScalarNodeRelation],
 ) -> Result<LinearSolveResult, FeaRunError> {
     for matrix in [
         operator.operators().stiffness(),
@@ -509,6 +525,9 @@ fn solve_unchecked(
         Some(facts.solver_admission()),
     );
     settings.relative_tolerance = settings.relative_tolerance.min(residual_target);
+    if !relations.is_empty() {
+        return solve_related(operator, settings.relative_tolerance, relations);
+    }
     // Reused preparation keeps the proving Cholesky factor across solves with an unchanged
     // operator (fixed-step transients, refinement re-solves).
     settings.preparation = preparation;
@@ -522,6 +541,45 @@ fn solve_unchecked(
     )
     .map_err(|error| FeaRunError::Solve(error.to_string()))?;
     Ok(solve)
+}
+
+/// Tie, periodic and jump relations eliminate secondary nodes (Galerkin reduction) and solve
+/// the reduced system with the shared sparse direct solver.
+fn solve_related(
+    operator: &crate::algebra::AssembledRealSystem,
+    relative_tolerance: f64,
+    relations: &[ScalarNodeRelation],
+) -> Result<LinearSolveResult, FeaRunError> {
+    let load = operator.load();
+    let known = operator
+        .constrained_dofs()
+        .iter()
+        .zip(load)
+        .map(|(&constrained, &value)| constrained.then_some(value))
+        .collect::<Vec<_>>();
+    let reduced = crate::physics::scalar_constraints::solve(
+        operator.operators().stiffness(),
+        load,
+        &known,
+        relations,
+        relative_tolerance,
+    )
+    .map_err(FeaRunError::Solve)?;
+    Ok(LinearSolveResult {
+        iterations: reduced.iterations,
+        residual_norm: reduced.relative_residual * rhs_norm(load),
+        relative_residual: Some(reduced.relative_residual),
+        converged: true,
+        host_sync_count: 0,
+        solver_backend: LinearAlgebraBackendKind::CpuReference,
+        device_apply_k_count: 0,
+        device_apply_k_attempt_count: 0,
+        accelerator_evidence: None,
+        solution: reduced.solution,
+        solver_method: reduced.method,
+        preconditioner: reduced.preconditioner,
+        diagnostics: Vec::new(),
+    })
 }
 
 fn rhs_norm(rhs: &[f64]) -> f64 {

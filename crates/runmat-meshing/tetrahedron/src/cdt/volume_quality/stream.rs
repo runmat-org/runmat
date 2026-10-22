@@ -8,7 +8,7 @@ pub(super) fn visit_from_metric_contexts(
     options: DelaunayVolumeQualityOptions,
     metric_contexts: MetricContexts<'_>,
     boundary_nodes: &BTreeSet<StableDigest>,
-    protected_facets: &BTreeSet<[StableDigest; 3]>,
+    protected_facets: &ProtectedFacets,
     cancellation: &dyn MeshingCancellationSignal,
     mut visit: impl FnMut(usize, DelaunayTetrahedronQuality) -> Result<(), DelaunayVolumeQualityError>,
 ) -> Result<(), DelaunayVolumeQualityError> {

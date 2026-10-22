@@ -15,8 +15,7 @@ pub(in crate::cdt) struct PreparedLocalQuality<'a> {
     field: ResolvedMetricField,
     raw_cache: std::cell::RefCell<BTreeMap<Vec<PersistentEntityId>, ResolvedMetricEvaluation>>,
     boundary_nodes: BTreeSet<StableDigest>,
-    protected_facets: BTreeSet<[StableDigest; 3]>,
-    protected_edges: BTreeSet<[StableDigest; 2]>,
+    protected_facets: super::super::ProtectedFacets,
     protected_segments: BTreeSet<[StableDigest; 2]>,
 }
 
@@ -47,17 +46,6 @@ impl<'a> PreparedLocalQuality<'a> {
             raw_cache: std::cell::RefCell::new(BTreeMap::new()),
             boundary_nodes: boundary_node_identities(provenance),
             protected_facets: protected_facet_identities(provenance),
-            protected_edges: provenance
-                .facets
-                .iter()
-                .flat_map(|facet| {
-                    let [a, b, c] = facet.node_identities;
-                    [[a, b], [a, c], [b, c]].map(|mut edge| {
-                        edge.sort_unstable();
-                        edge
-                    })
-                })
-                .collect(),
             protected_segments: provenance
                 .segments
                 .iter()
@@ -72,13 +60,13 @@ impl<'a> PreparedLocalQuality<'a> {
     }
 
     pub(in crate::cdt) fn protected_facets(&self) -> &BTreeSet<[StableDigest; 3]> {
-        &self.protected_facets
+        &self.protected_facets.facets
     }
     pub(in crate::cdt) fn request(&self) -> &MetricFieldRequest {
         self.request
     }
     pub(in crate::cdt) fn protected_edges(&self) -> &BTreeSet<[StableDigest; 2]> {
-        &self.protected_edges
+        &self.protected_facets.edges
     }
     pub(in crate::cdt) fn protected_segments(&self) -> &BTreeSet<[StableDigest; 2]> {
         &self.protected_segments

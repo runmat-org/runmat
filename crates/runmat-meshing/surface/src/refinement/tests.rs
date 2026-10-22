@@ -450,21 +450,24 @@ fn shape_candidate_never_rewrites_a_sizing_validated_shared_curve() {
     let evaluator = PortableExactEvaluator::new(&registry, &topology, model).unwrap();
     let face_id = topology.faces[0].id.clone();
     let pslg = one_segment_pslg(face_id.clone());
-    let mut encroaching = candidate(face_id, [0.0, 0.0]);
-    encroaching.reason = ExactFaceRefinementReason::PhysicalAspectRatio;
-
-    assert_eq!(
+    let classify = |uv: [f64; 2]| {
+        let mut shape = candidate(face_id.clone(), uv);
+        shape.reason = ExactFaceRefinementReason::PhysicalAspectRatio;
         classify_exact_face_refinement_candidate(
-            &encroaching,
+            &shape,
             &pslg,
             &topology,
             &metric_request(),
             &evaluator,
             &Control,
         )
-        .unwrap(),
-        ExactFaceCandidateDisposition::Insert
-    );
+        .unwrap()
+    };
+    // A shape point never splits the curve: inside its diametral disk it is inserted. Exactly on
+    // the curve it can be neither inserted nor used to split it, so it is withdrawn.
+    assert_eq!(classify([0.0, 1.5]), ExactFaceCandidateDisposition::Insert);
+    assert_eq!(classify([0.0, 0.1]), ExactFaceCandidateDisposition::Insert);
+    assert_eq!(classify([0.0, 0.0]), ExactFaceCandidateDisposition::Withdraw);
 }
 
 #[test]

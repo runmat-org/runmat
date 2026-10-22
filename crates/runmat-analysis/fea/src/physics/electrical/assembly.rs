@@ -21,6 +21,8 @@ pub(super) struct ElectricalAssembly {
     pub prescribed: Vec<Option<f64>>,
     pub terminal_nodes: Vec<(String, Vec<usize>)>,
     pub charge_sources: Option<super::ElectricalChargeSources>,
+    /// Periodic node relations (equal potentials across paired faces).
+    pub relations: Vec<crate::physics::scalar_constraints::ScalarNodeRelation>,
 }
 
 impl ElectricalAssembly {
@@ -71,11 +73,8 @@ impl ElectricalAssembly {
             let electrical = material.electrical.as_ref().ok_or_else(|| {
                 ElectricalStaticError::Material("missing electrical constitutive model".into())
             })?;
-            if !electrical.conductivity_frequency_response.is_empty() {
-                return Err(ElectricalStaticError::Unsupported(
-                    "frequency-dependent conductivity in a static analysis".into(),
-                ));
-            }
+            // A frequency response table describes the material in harmonic analyses; a
+            // static (DC) solve uses the reference values.
             // A standalone static solve has no temperature field: conductivity is the
             // material's value at its reference temperature. Coupled electrothermal solves
             // pass the conductivity evaluated at each element's temperature.
@@ -160,6 +159,7 @@ impl ElectricalAssembly {
             local_energy: Some(local_energy),
             prescribed: vec![None; count],
             terminal_nodes: Vec::new(),
+            relations: Vec::new(),
             charge_sources: None,
         })
     }

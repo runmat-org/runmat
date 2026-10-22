@@ -74,12 +74,57 @@ pub(crate) fn recover_validated_face_segments(
                 }
             }
             if !flipped {
-                if recover_segment_cavity(&mut triangles, pslg, target, &protected, &mut control)? {
-                    cavity_retriangulation_count = cavity_retriangulation_count.saturating_add(1);
-                } else {
-                    return Err(control.unsatisfied(
-                        "protected segment has no valid deterministic recovery cavity",
-                    ));
+                match recover_segment_cavity(&mut triangles, pslg, target, &protected, &mut control)? {
+                    Ok(()) => {
+                        cavity_retriangulation_count =
+                            cavity_retriangulation_count.saturating_add(1);
+                    }
+                    Err(reason) => {
+                        let uv = |vertex: u32| pslg.vertices[vertex as usize].uv;
+                        let [a, b] = [uv(target[0]), uv(target[1])];
+                        let direction = [b[0] - a[0], b[1] - a[1]];
+                        let length_squared = direction[0].powi(2) + direction[1].powi(2);
+                        let on_segment = pslg
+                            .vertices
+                            .iter()
+                            .enumerate()
+                            .filter(|(index, vertex)| {
+                                let offset = [vertex.uv[0] - a[0], vertex.uv[1] - a[1]];
+                                let along = (offset[0] * direction[0] + offset[1] * direction[1])
+                                    / length_squared;
+                                let across = offset[0] * direction[1] - offset[1] * direction[0];
+                                !target.contains(&(*index as u32))
+                                    && along >= -1e-6
+                                    && along <= 1.0 + 1e-6
+                                    && across.abs() <= 1e-6 * length_squared
+                            })
+                            .map(|(index, vertex)| {
+                                let index = index as u32;
+                                let segment_count = pslg
+                                    .segments
+                                    .iter()
+                                    .filter(|segment| segment.vertex_indices.contains(&index))
+                                    .count();
+                                let triangle_count = triangles
+                                    .iter()
+                                    .filter(|triangle| triangle.vertex_indices.contains(&index))
+                                    .count();
+                                (index, vertex.uv, segment_count, triangle_count)
+                            })
+                            .collect::<Vec<_>>();
+                        let endpoint_triangles = target.map(|vertex| {
+                            triangles
+                                .iter()
+                                .filter(|triangle| triangle.vertex_indices.contains(&vertex))
+                                .map(|triangle| triangle.vertex_indices.map(|corner| (corner, uv(corner))))
+                                .collect::<Vec<_>>()
+                        });
+                        return Err(control.unsatisfied(&format!(
+                            "protected segment {target:?} {a:?} -> {b:?} (endpoint triangles {endpoint_triangles:?}, {} vertices, {} triangles) has no valid deterministic recovery cavity: {reason}; vertices on or near the closed segment (index, uv, segment uses, triangle uses) {on_segment:?}",
+                            pslg.vertices.len(),
+                            triangles.len(),
+                        )));
+                    }
                 }
             }
             // Both flips and cavity replacement invalidate triangle-index incidence.

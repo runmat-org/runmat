@@ -476,6 +476,19 @@ fn quality_rejects_unassigned_topology_limits_bad_policy_and_cancellation() {
     );
 }
 
+fn protected_surface(
+    facets: &[[runmat_meshing_core::StableDigest; 3]],
+) -> super::ProtectedFacets {
+    let edges = facets
+        .iter()
+        .flat_map(|&[a, b, c]| [[a, b], [a, c], [b, c]])
+        .collect();
+    super::ProtectedFacets {
+        facets: facets.iter().copied().collect(),
+        edges,
+    }
+}
+
 #[test]
 fn size_criterion_measures_only_edges_the_volume_stage_can_split() {
     use runmat_meshing_core::StableDigest;
@@ -484,10 +497,18 @@ fn size_criterion_measures_only_edges_the_volume_stage_can_split() {
     // The facet opposite vertex 3 (vertices 0, 1, 2) belongs to the published surface.
     let mut facet = [identity(1), identity(2), identity(3)];
     facet.sort_unstable();
-    let protected = std::collections::BTreeSet::from([facet]);
+    let protected = protected_surface(&[facet]);
     let mask = super::protected_edge_mask(tetrahedron, &protected);
     assert_eq!(mask, 0b001011, "edges (0,1), (0,2) and (1,2) lie on the protected facet");
-    assert_eq!(super::protected_edge_mask(tetrahedron, &Default::default()), 0);
+    assert_eq!(super::protected_edge_mask(tetrahedron, &protected_surface(&[])), 0);
+    // A surface edge is the surface's even when this tetrahedron holds neither surface triangle
+    // on it: here edge (0,1) belongs to a facet with a vertex outside the tetrahedron.
+    let mut neighbor = [identity(1), identity(2), identity(9)];
+    neighbor.sort_unstable();
+    assert_eq!(
+        super::protected_edge_mask(tetrahedron, &protected_surface(&[neighbor])),
+        0b000001
+    );
 
     // A long surface edge (0,1) of 1.25 metric units over a 0.5-unit-high apex: the surface owns
     // the long edge, so only the interior edges count toward refinement.

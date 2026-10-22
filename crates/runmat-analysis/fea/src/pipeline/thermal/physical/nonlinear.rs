@@ -66,6 +66,11 @@ pub(super) fn add_count(total: &mut u32, count: u32) -> Result<(), FeaRunError> 
 }
 
 pub(super) fn solve(input: NonlinearSolveInput<'_>) -> Result<NonlinearOutcome, FeaRunError> {
+    if !input.assembly.relations.is_empty() {
+        return Err(FeaRunError::Assembly(
+            "thermal radiation with tie, periodic or temperature-jump constraints needs the reduced Newton residual, which the radiation route does not yet form".into(),
+        ));
+    }
     let mut current = input.initial_departure_k.to_vec();
     for (node, prescribed) in input.assembly.prescribed_temperature_k.iter().enumerate() {
         if let Some(value) = prescribed {
@@ -129,6 +134,7 @@ pub(super) fn solve(input: NonlinearSolveInput<'_>) -> Result<NonlinearOutcome, 
             &input.facts.operators,
             linear_target,
             None,
+            &[],
         )?;
         maximum_linear_residual = maximum_linear_residual.max(linear_residual(&correction)?);
         add_count(&mut host_sync_count, correction.host_sync_count)?;

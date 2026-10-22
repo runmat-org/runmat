@@ -1,5 +1,7 @@
-//! Independent hull support proof. Adjacent exactly coplanar triangles share
-//! one halfspace; prove that halfspace for every point rather than repeating it.
+//! Independent hull convexity proof. The boundary of the tetrahedral complex is a closed,
+//! connected, consistently oriented surface; such a surface that is convex across each of its
+//! edges bounds a convex body, so the complex covers the convex hull of its vertices. The proof
+//! costs a constant number of predicates per boundary edge rather than one per point and plane.
 use super::{
     error, work::HullWork, DelaunayPointSetError, DelaunayPointSetErrorKind,
     DelaunayPointSetOptions, DelaunayVolumeTopology,
@@ -45,21 +47,35 @@ pub(super) fn validate_convex_hull_closure(
             "convex-hull boundary edge is not manifold",
         ));
     }
-    let mut covered = vec![false; faces.len()];
-    for first in 0..faces.len() {
-        if (first as u64).is_multiple_of(options.insertion.topology.cancellation_check_interval) {
+    if faces.is_empty() {
+        return Err(error(
+            DelaunayPointSetErrorKind::InvalidTopology,
+            "convex-hull complex has no boundary",
+        ));
+    }
+    let mut retained = vec![false; topology.nodes.len()];
+    for tet in &topology.tetrahedra {
+        for vertex in tet.vertex_indices {
+            retained[vertex as usize] = true;
+        }
+    }
+    if let Some(index) = retained.iter().position(|retained| !retained) {
+        return Err(error(
+            DelaunayPointSetErrorKind::InvalidTopology,
+            format!("node {index} is not a vertex of the convex-hull complex; it lies on the exterior side of the hull"),
+        ));
+    }
+    let mut interior_signs = Vec::with_capacity(faces.len());
+    for (index, (face, interior)) in faces.iter().enumerate() {
+        if (index as u64).is_multiple_of(options.insertion.topology.cancellation_check_interval) {
             work.check_cancellation()?;
         }
-        if covered[first] {
-            continue;
-        }
-        let (face, interior) = faces[first];
         let points = face.map(|vertex| topology.nodes[vertex as usize].coordinates_m);
         let interior_sign = work.orient3d([
             points[0],
             points[1],
             points[2],
-            topology.nodes[interior as usize].coordinates_m,
+            topology.nodes[*interior as usize].coordinates_m,
         ])?;
         if interior_sign == PredicateSign::Zero {
             return Err(error(
@@ -67,56 +83,51 @@ pub(super) fn validate_convex_hull_closure(
                 "convex-hull face has a coplanar interior apex",
             ));
         }
-        for (index, node) in topology.nodes.iter().enumerate() {
-            let sign = work.orient3d([points[0], points[1], points[2], node.coordinates_m])?;
-            if sign != PredicateSign::Zero && sign != interior_sign {
+        interior_signs.push(interior_sign);
+    }
+    for (edge, uses) in &edges {
+        for (face_index, other_index) in [(uses[0], uses[1]), (uses[1], uses[0])] {
+            let (face, _) = faces[face_index];
+            let (other, _) = faces[other_index];
+            let apex = other
+                .into_iter()
+                .find(|vertex| !edge.contains(vertex))
+                .expect("a boundary face has a vertex off each of its edges");
+            let points = face.map(|vertex| topology.nodes[vertex as usize].coordinates_m);
+            let sign = work.orient3d([
+                points[0],
+                points[1],
+                points[2],
+                topology.nodes[apex as usize].coordinates_m,
+            ])?;
+            if sign != PredicateSign::Zero && sign != interior_signs[face_index] {
                 return Err(error(DelaunayPointSetErrorKind::InvalidTopology,
-                    format!("boundary face {face:?} does not support the admitted convex hull; node {index} lies on its exterior side")));
+                    format!("boundary face {face:?} does not support the admitted convex hull; node {apex} lies on its exterior side")));
             }
         }
-        covered[first] = true;
-        let mut pending = VecDeque::from([first]);
-        while let Some(index) = pending.pop_front() {
-            let (current, _) = faces[index];
-            for mut edge in [
-                [current[0], current[1]],
-                [current[1], current[2]],
-                [current[2], current[0]],
-            ] {
-                edge.sort_unstable();
-                for next in &edges[&edge] {
-                    if covered[*next] {
-                        continue;
-                    }
-                    if coplanar(topology, points, faces[*next].0, &mut work)? {
-                        covered[*next] = true;
-                        pending.push_back(*next);
-                    }
+    }
+    let mut reached = vec![false; faces.len()];
+    let mut pending = VecDeque::from([0]);
+    reached[0] = true;
+    while let Some(index) = pending.pop_front() {
+        let (face, _) = faces[index];
+        for mut edge in [[face[0], face[1]], [face[1], face[2]], [face[2], face[0]]] {
+            edge.sort_unstable();
+            for next in &edges[&edge] {
+                if !reached[*next] {
+                    reached[*next] = true;
+                    pending.push_back(*next);
                 }
             }
         }
     }
-    Ok(())
-}
-
-fn coplanar(
-    topology: &DelaunayVolumeTopology,
-    plane: [[f64; 3]; 3],
-    face: [u32; 3],
-    work: &mut HullWork<'_>,
-) -> Result<bool, DelaunayPointSetError> {
-    for vertex in face {
-        if work.orient3d([
-            plane[0],
-            plane[1],
-            plane[2],
-            topology.nodes[vertex as usize].coordinates_m,
-        ])? != PredicateSign::Zero
-        {
-            return Ok(false);
-        }
+    if reached.iter().any(|reached| !reached) {
+        return Err(error(
+            DelaunayPointSetErrorKind::InvalidTopology,
+            "convex-hull boundary is not one connected surface",
+        ));
     }
-    Ok(true)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -152,7 +163,7 @@ mod tests {
         )
         .unwrap();
         let mut options = DelaunayPointSetOptions::default();
-        options.insertion.maximum_predicate_evaluations = 1000;
+        options.insertion.maximum_predicate_evaluations = 300;
         validate_convex_hull_closure(&topology, options, &NeverCancelled).unwrap();
     }
 

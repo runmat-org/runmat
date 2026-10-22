@@ -149,11 +149,16 @@ pub(crate) fn select_exact_face_refinement_candidates(
         if matches!(
             reason,
             ExactFaceRefinementReason::MetricAngle | ExactFaceRefinementReason::PhysicalAspectRatio
-        ) && shape_candidate_encroaches_sized_protected_segment(
+        ) && (shape_candidate_encroaches_sized_protected_segment(
             uv,
             pslg,
             triangle.deviation_samples[3].sizing_metric,
-        ) {
+        ) || shape_candidate_crowds_a_shared_curve(
+            uv,
+            pslg,
+            triangle.deviation_samples[3].sizing_metric,
+            quality.minimum_metric_edge_length,
+        )) {
             continue;
         }
         candidates.push(ExactFaceRefinementCandidate {
@@ -186,6 +191,45 @@ pub(super) fn shape_candidate_encroaches_sized_protected_segment(
             return false;
         }
         metric_diametral_disk_contains(candidate, first.uv, second.uv, metric).unwrap_or(false)
+    })
+}
+
+/// Shape refinement never splits a shared curve, so a shape point closer to one than the minimum
+/// metric spacing would make a sliver against it whose own repair point lies closer still; the
+/// cascade ends with points within roundoff of the curve. Such a point is not proposed, as with
+/// the vertex spacing collar.
+fn shape_candidate_crowds_a_shared_curve(
+    candidate: [f64; 2],
+    pslg: &ExactFacePslg,
+    metric: ParametricMetricTensor,
+    minimum_metric_edge_length: f64,
+) -> bool {
+    pslg.segments.iter().any(|segment| {
+        if !matches!(segment.source, crate::ExactFacePslgSegmentSource::ExactTrim { .. }) {
+            return false;
+        }
+        let [Some(first), Some(second)] = segment
+            .vertex_indices
+            .map(|index| pslg.vertices.get(index as usize))
+        else {
+            return false;
+        };
+        let along = [second.uv[0] - first.uv[0], second.uv[1] - first.uv[1]];
+        let offset = [candidate[0] - first.uv[0], candidate[1] - first.uv[1]];
+        let inner = |left: [f64; 2], right: [f64; 2]| {
+            metric.uu * left[0] * right[0]
+                + metric.uv * (left[0] * right[1] + left[1] * right[0])
+                + metric.vv * left[1] * right[1]
+        };
+        let length_squared = inner(along, along);
+        if !(length_squared > 0.0) {
+            return false;
+        }
+        let t = (inner(offset, along) / length_squared).clamp(0.0, 1.0);
+        let gap = [offset[0] - t * along[0], offset[1] - t * along[1]];
+        let distance_squared = inner(gap, gap);
+        distance_squared.is_finite()
+            && distance_squared < minimum_metric_edge_length * minimum_metric_edge_length
     })
 }
 

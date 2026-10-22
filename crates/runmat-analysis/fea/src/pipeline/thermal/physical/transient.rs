@@ -141,6 +141,10 @@ pub(super) fn solve_transient(
                 &reference_temperature_k,
             )
             .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        let relations = crate::physics::scalar_constraints::about_reference(
+            &assembly.relations,
+            &reference_temperature_k,
+        );
         let mut solve = solve_checked(
             &operator,
             input.requested_solver_backend,
@@ -149,6 +153,7 @@ pub(super) fn solve_transient(
             operators,
             input.residual_target,
             Some(&mut preparation),
+            &relations,
         )?;
         host_sync_count = host_sync_count.saturating_add(solve.host_sync_count);
         device_apply_count = device_apply_count.saturating_add(solve.device_apply_k_count);
@@ -188,6 +193,7 @@ pub(super) fn solve_transient(
                 operators,
                 target,
                 Some(&mut preparation),
+                &relations,
             )?;
             host_sync_count = host_sync_count.saturating_add(refined.host_sync_count);
             device_apply_count = device_apply_count.saturating_add(refined.device_apply_k_count);
