@@ -63,13 +63,19 @@ impl ThermalSolverResultManifest {
                     value: nonlinear_profile_value(),
                     count: solves,
                 },
-                Repeated {
-                    value: 0_u64,
-                    count: interface_nodes,
-                },
             ),
             PROFILE_LIMITS,
-        )?)
+        )
+        .map(|mut profile| {
+            // The interface node ids pair with the field rows when the study has them.
+            let ids = (interface_nodes as u64).saturating_mul(9);
+            profile.encoded_bytes_upper_bound =
+                profile.encoded_bytes_upper_bound.saturating_add(ids + 16);
+            profile.materialization_resident_bytes_estimate = profile
+                .materialization_resident_bytes_estimate
+                .saturating_add((interface_nodes as u64).saturating_mul(64) + 64);
+            profile
+        })?)
     }
 
     /// This is a serialization-only skeleton, not a valid or publishable numerical result.

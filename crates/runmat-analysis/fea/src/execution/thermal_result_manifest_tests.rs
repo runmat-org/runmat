@@ -33,7 +33,7 @@ fn manifest_retains_identity_without_histories_and_rejects_malformed_catalogs() 
         let field_ids = manifest
             .fields
             .iter()
-            .map(|entries| entries.iter().map(|entry| entry.field).collect::<Vec<_>>())
+            .map(|entries| [entries[0].field, entries[1].field, entries[2].field, entries[3].field])
             .collect::<Vec<_>>();
         let expected_content = encode_contract(
             b"runmat-thermal-solver-result/v1\0",
@@ -53,7 +53,6 @@ fn manifest_retains_identity_without_histories_and_rejects_malformed_catalogs() 
                 &result.ordered_element_ids,
                 &result.initial_state,
                 &result.nonlinear_evidence,
-                &result.interface_node_ids,
             ),
             CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64),
         )
@@ -95,7 +94,11 @@ fn manifest_retains_identity_without_histories_and_rejects_malformed_catalogs() 
                 <= identity_shape.materialization_resident_bytes_estimate
                     + initial_shape.materialization_resident_bytes_estimate
         );
-        let streamed = super::thermal_result::identity::ManifestFieldIdentities(&manifest.fields);
+        let streamed = super::thermal_result::identity::FieldIdentities {
+            samples: &manifest.fields,
+            interface_node_ids: &manifest.interface_node_ids,
+            identities: super::thermal_result::identity::manifest_entry_identities,
+        };
         let streamed_payload = metadata.identity_serialization(streamed);
         assert_eq!(
             encode_contract(

@@ -42,7 +42,7 @@ pub struct ThermalSolverResultManifest {
     pub reference_temperature_k: f64,
     pub initial_state: ThermalInitialStateEvidence,
     /// Mesh nodes of finite-conductance thermal interfaces (empty without one).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub interface_node_ids: Vec<u64>,
     /// Per sample: temperature, gradient, flux, storage rate, then the second-side interface
     /// temperature when `interface_node_ids` is not empty.
@@ -89,9 +89,14 @@ impl ThermalSolverResultManifest {
             };
             fields.push((0..count).map(entry).collect::<AnalysisExecutionResult<Vec<_>>>()?);
         }
-        let identity = result.metadata().identity(
-            super::thermal_result::identity::ManifestFieldIdentities(&fields),
-        )?;
+        let identity =
+            result
+                .metadata()
+                .identity(super::thermal_result::identity::FieldIdentities {
+                    samples: &fields,
+                    interface_node_ids: &result.interface_node_ids,
+                    identities: super::thermal_result::identity::manifest_entry_identities,
+                })?;
         let run = &result.run;
         let manifest = Self {
             schema_version: 1,
@@ -152,7 +157,6 @@ impl ThermalSolverResultManifest {
             producer: self.producer,
             ordered_node_ids: &self.ordered_node_ids,
             ordered_element_ids: &self.ordered_element_ids,
-            interface_node_ids: &self.interface_node_ids,
             initial_state: &self.initial_state,
         }
     }
@@ -237,9 +241,11 @@ impl ThermalSolverResultManifest {
         drop(identities);
         if self
             .metadata()
-            .identity(super::thermal_result::identity::ManifestFieldIdentities(
-                &self.fields,
-            ))?
+            .identity(super::thermal_result::identity::FieldIdentities {
+                samples: &self.fields,
+                interface_node_ids: &self.interface_node_ids,
+                identities: super::thermal_result::identity::manifest_entry_identities,
+            })?
             != self.identity
         {
             return Err(invalid("numerical identity does not converge"));

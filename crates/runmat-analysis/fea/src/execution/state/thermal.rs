@@ -24,9 +24,9 @@ pub struct CanonicalThermalStatePayload {
     pub maximum_relative_linear_residual: f64,
     /// Mesh nodes of finite-conductance thermal interfaces; `temperature` holds the first
     /// side's temperature there and `interface_temperature` the second side's.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub interface_node_ids: Vec<u64>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interface_temperature: Option<AnalysisField>,
 }
 

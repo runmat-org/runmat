@@ -37,7 +37,6 @@ impl FeaThermalRunResult {
             producer: self.producer,
             ordered_node_ids: &self.ordered_node_ids,
             ordered_element_ids: &self.ordered_element_ids,
-            interface_node_ids: &self.interface_node_ids,
             initial_state: &self.initial_state,
         }
     }
@@ -58,7 +57,12 @@ impl FeaThermalRunResult {
     pub fn source_result_identity(&self) -> AnalysisExecutionResult<SolverResultIdentity> {
         self.validate_complete()?;
         let fields = fields::retained_field_identities(self)?;
-        self.metadata().identity(&fields)
+        self.metadata()
+            .identity(super::thermal_result::identity::FieldIdentities {
+                samples: &fields,
+                interface_node_ids: &self.interface_node_ids,
+                identities: super::thermal_result::identity::retained_identities,
+            })
     }
     /// Checks structural consistency and accepted solver evidence, not independent accuracy.
     pub fn validate_complete(&self) -> AnalysisExecutionResult<()> {
@@ -169,7 +173,6 @@ pub(super) struct ThermalResultMetadata<'a> {
     pub producer: super::StepIdentity,
     pub ordered_node_ids: &'a [u64],
     pub ordered_element_ids: &'a [u64],
-    pub interface_node_ids: &'a [u64],
     pub initial_state: &'a crate::ThermalInitialStateEvidence,
 }
 impl ThermalResultMetadata<'_> {
