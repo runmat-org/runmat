@@ -43,9 +43,11 @@ impl SolverMeshArtifact {
     /// Payload scratch is released before canonical identity encoding. The identity projection
     /// only zeroes two fixed-width digests and has this artifact's serialization widths.
     /// Profiling is not validation and can reject malformed serialization before admission.
+    /// The estimate depends only on inventory sizes: both sealed digests are profiled at their
+    /// widest encoding, so a stale or zeroed seal is reported by validation, after admission.
     pub fn validation_resident_bytes_estimate(&self) -> Result<u64, MeshingContractError> {
         let encoding = serialized_materialization_resident_bytes_estimate(
-            self,
+            &DigestIndependentArtifact::from(self),
             CanonicalLimits::new(usize::MAX, usize::MAX, usize::MAX, 64),
         )
         .map_err(|error| {
@@ -55,6 +57,32 @@ impl SolverMeshArtifact {
             validation_scratch_bytes(&self.topology, self.resolved_request.element_order)?
                 .max(encoding),
         )
+    }
+}
+
+/// The artifact's serialization shape with both sealed digests at their widest encoding.
+/// Field names and order match `SolverMeshArtifact`.
+#[derive(serde::Serialize)]
+struct DigestIndependentArtifact<'a> {
+    schema_version: u16,
+    canonical_digest: StableDigest,
+    root_stage_manifest_digest: StableDigest,
+    geometry: &'a super::GeometryRevisionRef,
+    resolved_request: &'a super::MeshingRequest,
+    topology: &'a SolverMeshTopology,
+}
+
+impl<'a> From<&'a SolverMeshArtifact> for DigestIndependentArtifact<'a> {
+    fn from(artifact: &'a SolverMeshArtifact) -> Self {
+        const WIDEST: StableDigest = StableDigest::from_bytes([u8::MAX; 32]);
+        Self {
+            schema_version: artifact.schema_version,
+            canonical_digest: WIDEST,
+            root_stage_manifest_digest: WIDEST,
+            geometry: &artifact.geometry,
+            resolved_request: &artifact.resolved_request,
+            topology: &artifact.topology,
+        }
     }
 }
 
