@@ -213,6 +213,10 @@ fn uniform_heat_generation_is_conserved_and_uniform_temperature_is_preserved() {
     }
 }
 
+// witness: FEA-THERMAL-INPUT-001/boundaries @ thermal_steady/tet4/numerical_kernel; coverage:
+//   partial;
+//   boundary: Exact face flux and convection preserve integrated power and the ambient state on a
+//   Tet4 fixture.
 #[test]
 fn exact_face_flux_and_convection_preserve_integrated_power_and_ambient_state() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);

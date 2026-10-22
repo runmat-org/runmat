@@ -30,6 +30,10 @@ fn requested_global_plan_and_trial_payloads_cover_actual_allocations_and_precanc
         assert_eq!((retained, peak), (0, 0));
     }
 }
+// witness: FEA-CONTACT-OPERATOR-001/complementarity_penetration @
+//   penalty_coulomb_contact/tet10/numerical_kernel; coverage: partial;
+//   boundary: Explicit operator controls and initial-penetration limits are rejected instead of
+//   defaulted on a Tet10 fixture; complementarity residuals are not asserted.
 #[test]
 fn explicit_operator_controls_and_initial_penetration_limits_reject_instead_of_defaulting() {
     let f = Fixture::new(ElementOrder::Tet10, false);
@@ -94,6 +98,10 @@ fn resource_caps_bind_execution_without_changing_physical_configuration_scope() 
     second.validate_configuration(&state, 0).unwrap();
 }
 
+// witness: FEA-CONTACT-OPERATOR-001/surface_search_gap @
+//   penalty_coulomb_contact/tet10/numerical_kernel; coverage: partial;
+//   boundary: Duplicate secondary laws and conflicting surface roles are rejected on a Tet10
+//   fixture; gap evaluation itself is covered in the penalty tests.
 #[test]
 fn global_duplicate_secondary_laws_and_conflicting_surface_roles_reject() {
     let f = Fixture::new(ElementOrder::Tet10, true);

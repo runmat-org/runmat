@@ -1,4 +1,8 @@
 use super::*;
+// witness: FEA-CONTACT-OPERATOR-001/references @
+//   penalty_coulomb_contact/tet4|tet10/numerical_kernel; coverage: partial;
+//   boundary: Two disjoint canonical bodies under prescribed compression match the closed penalty
+//   force, energy and tangent for both orders; Hertz-type curved contact is not covered.
 #[test]
 fn disjoint_canonical_bodies_under_prescribed_compression_match_closed_penalty_force_energy_and_tangent(
 ) {

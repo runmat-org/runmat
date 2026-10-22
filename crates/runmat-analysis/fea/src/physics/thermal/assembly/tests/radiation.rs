@@ -28,6 +28,11 @@ fn slab() -> (AnalysisModel, runmat_meshing_core::SolverMeshArtifact) {
 // witness: FEA-THERMAL-INPUT-001/boundaries @ thermal_steady/tet4/numerical_kernel;
 //   boundary: Tet4 slab exact gray-surface law, finite-difference tangent and physical power; does
 //   not cover arbitrary enclosure radiation.
+// witness: FEA-THERMAL-PUBLIC-001/radiation_to_ambient @ thermal_steady/tet4/numerical_kernel;
+//   coverage: partial;
+//   boundary: A Tet4 slab with a gray surface matches the Stefan-Boltzmann law with emissivity 0.8
+//   at 350 K surface against a 300 K ambient; convection on the same face and transient radiation
+//   are not covered.
 #[test]
 fn exact_steady_slab_radiation_residual_tangent_and_prescribed_power_match_continuum() {
     let (mut model, mesh) = slab();

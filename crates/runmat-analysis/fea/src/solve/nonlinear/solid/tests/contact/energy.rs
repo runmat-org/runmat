@@ -53,6 +53,14 @@ fn accepted_energy_rejects_missing_negative_foreign_and_changed_point_work() {
     }
 }
 
+// witness: FEA-CONTACT-OPERATOR-001/normal_friction_equilibrium @
+//   penalty_coulomb_contact/tet4|tet10/numerical_kernel; coverage: partial;
+//   boundary: Opening releases stored tangential energy without inventing friction heat in a
+//   coupled solid solve for both orders.
+// witness: FEA-NONLINEAR-GOVERNANCE-001/operator_constitutive_contact @
+//   nonlinear_structural/tet4|tet10/numerical_kernel; coverage: partial;
+//   boundary: A coupled solid contact solve releases stored tangential energy on opening for both
+//   orders; constitutive plasticity is covered in the operator requirement.
 #[test]
 fn opening_releases_stored_tangential_energy_without_inventing_friction_heat() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
