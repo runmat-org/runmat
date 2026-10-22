@@ -10,6 +10,7 @@ mod linear_correction;
 mod mass_flow;
 mod moving;
 mod pressure_reference;
+mod rheology;
 mod reconstruction;
 mod symmetry;
 use super::qualification::reference;

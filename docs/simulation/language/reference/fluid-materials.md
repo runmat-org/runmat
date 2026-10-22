@@ -1,7 +1,7 @@
-# Constant incompressible Newtonian materials
+# Incompressible fluid materials
 
-The shared authored material contract can explicitly declare a constant
-incompressible Newtonian law:
+A fluid material declares its law in the `fluid` block. A constant-viscosity
+Newtonian fluid:
 
 ```fea
 material water {
@@ -34,8 +34,38 @@ all owners to declare identical physical density and viscosity; material names
 may differ. Missing, overlapping, unused, mixed Cell/Solid, and heterogeneous
 ownership rejects. Coefficients are not averaged or selected by node order.
 
-This material prerequisite is not CFD validation, native execution
-admission, a turbulence closure, transient flow, or coupled CHT/FSI support.
-Material compilation represents the explicit laminar envelope with zero
-turbulence intensity in the existing coefficient carrier; it does not infer a
-velocity, characteristic length, pressure profile, or turbulence model.
+## Shear-thinning and yield-stress fluids
+
+Generalized-Newtonian laws make the viscosity a function of the local shear rate
+$\dot\gamma=\sqrt{2\mathbf D:\mathbf D}$, evaluated face by face from the solved velocity
+gradient:
+
+| `law` | Viscosity | Members |
+| --- | --- | --- |
+| `power_law` | $K\dot\gamma^{n-1}$ | `consistency` (Pa·s^n, SI number), `power_index`, `minimum_shear_rate` (default 1e-3 1/s) |
+| `carreau` | $\mu_\infty+(\mu_0-\mu_\infty)[1+(\lambda\dot\gamma)^2]^{(n-1)/2}$ | `zero_shear_viscosity`, `infinite_shear_viscosity`, `relaxation_time`, `power_index` |
+| `carreau_yasuda` | as Carreau with exponent $a$ | plus `transition_exponent` |
+| `cross` | $\mu_\infty+(\mu_0-\mu_\infty)/(1+(\lambda\dot\gamma)^m)$ | `zero_shear_viscosity`, `infinite_shear_viscosity`, `time_constant`, `rate_index` |
+| `bingham` | $\tau_y(1-e^{-m\dot\gamma})/\dot\gamma+\mu_p$ | `yield_stress`, `plastic_viscosity`, `regularization` (default 1000 s) |
+| `herschel_bulkley` | $\tau_y(1-e^{-m\dot\gamma})/\dot\gamma+K\dot\gamma^{n-1}$ | `yield_stress`, `consistency`, `power_index`, `regularization` |
+| `casson` | $(\sqrt{\tau_y(1-e^{-m\dot\gamma})/\dot\gamma}+\sqrt{\mu_p})^2$ | `yield_stress`, `plastic_viscosity`, `regularization` |
+
+Blood as a Carreau fluid:
+
+```fea
+material blood {
+    mass_density = 1060 kg/m^3
+    fluid {
+        law = carreau
+        zero_shear_viscosity = 0.056 Pa*s
+        infinite_shear_viscosity = 0.00345 Pa*s
+        relaxation_time = 3.313 s
+        power_index = 0.3568
+    }
+}
+```
+
+Yield-stress laws use Papanastasiou regularization, so unyielded regions flow with a large
+but finite viscosity set by `regularization`; `minimum_shear_rate` holds a shear-thinning
+viscosity finite where the fluid is at rest.
+

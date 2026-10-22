@@ -415,6 +415,7 @@ fn sample_cfd_domain() -> runmat_analysis_core::CfdDomain {
         density: MassDensity::new(1.225),
         dynamic_viscosity: DynamicViscosity::new(1.81e-5),
         turbulence_intensity: TurbulenceIntensity::new(0.06),
+        rheology: None,
     }
 }
 
