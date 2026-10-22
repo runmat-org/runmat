@@ -521,3 +521,64 @@ fn thermal_operators_are_bitwise_independent_of_the_admitted_thread_count() {
         );
     }
 }
+
+#[test]
+fn ambient_temperature_excitation_supplies_the_convection_ambient_on_its_faces() {
+    let (mut model, mesh, _, _) = thermal_reference_model();
+    let projection = AnalysisProjection::derive(&mesh).unwrap();
+    let selector = projection.boundary_faces[0].provenance[0]
+        .analysis_selection_id()
+        .unwrap();
+    let authored = PrescribedValue::Constant(Temperature::new(295.0));
+    model.boundaries.push(AnalysisBoundary {
+        boundary_id: "film".into(),
+        target: RegionTarget::boundary(selector.clone()),
+        operator: BoundaryOperator::ThermalConvection {
+            ambient_temperature: authored.clone(),
+            coefficient: HeatTransferCoefficient::new(4.0),
+        },
+    });
+    let sample = || ExcitationSamplePoint::Static;
+    assert_eq!(
+        super::sample_ambient_temperature(&model, "film", &authored, sample()).unwrap(),
+        295.0
+    );
+    model.signals.push(PhysicalSignal::Temperature(Signal {
+        signal_id: SignalId("chamber".into()),
+        shape: SignalShape::Scalar,
+        frame: None,
+        representation: SignalRepresentation::Constant(SignalValue::Scalar(Temperature::new(
+            310.0,
+        ))),
+        precision: SignalPrecision::Real64,
+        provenance: SignalProvenance::Authored,
+        evidence: SignalApproximationEvidence {
+            max_absolute_error: Some(0.0),
+            max_relative_error: Some(0.0),
+            derivative_max_absolute_error: None,
+            sample_count: 1,
+        },
+    }));
+    model
+        .excitations
+        .push(runmat_analysis_core::ExcitationAction::AmbientTemperature(runmat_analysis_core::AnalysisExcitation {
+            excitation_id: ExcitationId("chamber".into()),
+            target: runmat_analysis_core::ExcitationTarget::Region(RegionTarget::boundary(selector)),
+            frame: CoordinateFrame::Global,
+            direction: None,
+            distribution: ExcitationDistribution::IntensityPerArea,
+            kinematics: ExcitationKinematics::FixedFrame,
+            signal_id: SignalId("chamber".into()),
+            active_step_ids: Vec::new(),
+            combination_group: None,
+            projection: ProjectionRequirement {
+                preserve_resultant: false,
+                preserve_moment: false,
+                relative_tolerance: 1e-12,
+            },
+        }));
+    assert_eq!(
+        super::sample_ambient_temperature(&model, "film", &authored, sample()).unwrap(),
+        310.0
+    );
+}
