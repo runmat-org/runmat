@@ -40,6 +40,10 @@ fn elevate(mut mesh: SolverMeshArtifact) -> SolverMeshArtifact {
     mesh
 }
 
+// witness: FEA-ADAPTATION-LOOP-001/qualified_transfer_governed_loop @
+//   adaptive_analysis/tet4|tet10/numerical_kernel; coverage: partial;
+//   boundary: Quadratic refinement transfer preserves all polynomial modes and cold lineage for
+//   Tet4 and Tet10; plastic, contact and coupled-interface state transfer are not covered.
 #[test]
 fn quadratic_refinement_preserves_all_polynomial_modes_and_cold_lineage() {
     let (topology, provenance, metric, quality_options, refinement) = adaptation();

@@ -24,7 +24,7 @@ fn evidence(value: f64) -> AccuracyEvidence {
     .unwrap()
 }
 
-// witness: FEA-RELEASE-COMPLETION-001/truthful_fields_operators_and_accuracy @
+// witness: FEA-SHARED-ACCURACY-001/mandatory_acceptance_states @
 //   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
 //   boundary: Scalar residual criterion failure remains blocking through a typed accuracy artifact;
 //   no complete governed family corpus, release attestation or public receipt qualification.

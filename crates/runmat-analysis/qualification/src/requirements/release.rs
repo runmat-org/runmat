@@ -1,46 +1,18 @@
 //! Standing cross-family acceptance with explicit domain boundaries. Required envelopes
 //! without a discovered witness remain open; declarations never imply a test verdict.
 use crate::requirement::*;
+/// Release obligations are properties of the release lane and its evidence, checked by the
+/// release pipeline; numerical placements do not apply to them.
 const ALL: &[Envelope] = &[
     envelope(
         Formulation::SharedInfrastructure,
         MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::NumericalKernel,
+        ExecutionEnvelope::ReleasePipeline,
     ),
     envelope(
         Formulation::SharedInfrastructure,
-        MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::PublicStudy,
-    ),
-    envelope(
-        Formulation::SharedInfrastructure,
-        MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::NativeProcess,
-    ),
-    envelope(
-        Formulation::SharedInfrastructure,
-        MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::Durable,
-    ),
-    envelope(
-        Formulation::SharedInfrastructure,
-        MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::RemoteExecution,
-    ),
-    envelope(
-        Formulation::SharedInfrastructure,
-        MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::ParallelCpu,
-    ),
-    envelope(
-        Formulation::SharedInfrastructure,
-        MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::DomainDecomposed,
-    ),
-    envelope(
-        Formulation::SharedInfrastructure,
-        MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::ClaimedAccelerator,
+        MeshOrder::MeshIndependent,
+        ExecutionEnvelope::SourceCheck,
     ),
 ];
 const FEA_RELEASE_PLATFORM_001: Requirement = Requirement {
