@@ -244,7 +244,8 @@ fn solid_mesh_quality_reasons(
         return Vec::new();
     };
     let mut reasons = Vec::new();
-    if mesh.topology.volume_elements.is_empty() {
+    // Sheet and wire meshes carry shells and beams realized on faces and edges, not volumes.
+    if mesh.topology.volume_elements.is_empty() && mesh.resolved_request.dimension.is_solid() {
         reasons.push(QualityReason {
             code: QualityReasonCode::SolidMeshNoVolumeElements,
             detail: "solver mesh has no volume elements".to_string(),
@@ -348,11 +349,23 @@ fn mesh_has_boundary_target(
     mesh: &SolverMeshArtifact,
     target: &runmat_analysis_core::RegionTarget,
 ) -> bool {
-    mesh.topology.boundary_faces.iter().any(|face| {
-        face.provenance
+    // Face, edge and vertex targets resolve through the provenance of boundary faces, boundary
+    // edges and nodes respectively.
+    let matches = |provenance: &[runmat_geometry_core::PersistentEntityId]| {
+        provenance
             .iter()
             .any(|entity| target.matches_persistent_entity(entity))
-    })
+    };
+    mesh.topology
+        .boundary_faces
+        .iter()
+        .any(|face| matches(&face.provenance))
+        || mesh
+            .topology
+            .boundary_edges
+            .iter()
+            .any(|edge| matches(&edge.provenance))
+        || mesh.topology.nodes.iter().any(|node| matches(&node.provenance))
 }
 
 fn primary_solver_mesh_field_expected_count(

@@ -128,6 +128,7 @@ use structural_study::{
 #[cfg(test)]
 use structural_study::{persist_immutable_study_evidence, run_evidence_stage};
 pub use study_completion_identity::AnalysisStudyCompletionIdentity;
+pub use study_completion_identity::split_attempt_run_id;
 pub use study_contract::analysis_study_content_digest;
 use study_contract::{
     sanitize_study_sweep_id, study_fingerprint, study_fingerprint_from_digest, study_issue_message,

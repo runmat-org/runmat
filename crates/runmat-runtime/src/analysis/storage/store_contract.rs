@@ -43,6 +43,14 @@ pub trait AnalysisArtifactStore: Send + Sync {
     fn persist_run(&self, run: &AnalysisRunResult) -> Result<AnalysisArtifactRecord, String>;
     fn load_run(&self, run_id: &str) -> Result<Option<AnalysisRunResult>, String>;
     fn load_run_metadata(&self, run_id: &str) -> Result<Option<AnalysisRunResult>, String>;
+    /// A definition run id resolves to its latest committed attempt; any other id is itself.
+    fn resolve_run_attempt(&self, run_id: &str) -> Result<String, String> {
+        Ok(run_id.to_owned())
+    }
+    /// Committed attempts of a definition run id, oldest first.
+    fn run_attempts(&self, _definition_run_id: &str) -> Result<Vec<String>, String> {
+        Ok(Vec::new())
+    }
     /// Authenticate scalar evidence without exceeding the caller's artifact byte budget.
     /// Every store implements this boundary; an unbounded metadata fallback is not permitted.
     fn load_assessment_metadata(

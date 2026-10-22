@@ -23,7 +23,22 @@ pub(super) struct LocalRunSummary {
     elements: usize,
     boundary_faces: usize,
     step_run_ids: Vec<String>,
+    /// Definition run ids of the steps; each resolves to its latest committed attempt, while
+    /// `step_run_ids` name this execution's attempts.
+    definition_run_ids: Vec<String>,
+    /// Every committed attempt of each definition run id, oldest first (this execution last).
+    attempt_run_ids: Vec<Vec<String>>,
     result_manifest_artifact_path: String,
+}
+
+pub(super) fn definition_run_ids(step_run_ids: &[String]) -> Vec<String> {
+    step_run_ids
+        .iter()
+        .map(|id| {
+            runmat_runtime::analysis::split_attempt_run_id(id)
+                .map_or_else(|| id.clone(), |(definition, _)| definition.to_owned())
+        })
+        .collect()
 }
 
 #[derive(Serialize)]
@@ -89,6 +104,8 @@ pub(super) fn local_summary(
             .iter()
             .map(|step| step.run_id.clone())
             .collect(),
+        definition_run_ids: Vec::new(),
+            attempt_run_ids: Vec::new(),
         result_manifest_artifact_path: publication
             .result_manifest_artifact_path
             .clone()
@@ -107,7 +124,14 @@ pub(crate) fn print_fea_result(
     print_completed_fea_result(study_id, completed, publication, json)
 }
 
-fn print_summary(study_id: &str, summary: LocalRunSummary, json: bool) -> Result<()> {
+fn print_summary(study_id: &str, mut summary: LocalRunSummary, json: bool) -> Result<()> {
+    summary.definition_run_ids = definition_run_ids(&summary.step_run_ids);
+    summary.attempt_run_ids = summary
+        .definition_run_ids
+        .iter()
+        .map(|definition| runmat_runtime::analysis::storage::run_attempts(definition))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(anyhow::Error::msg)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&summary)?);
         return Ok(());

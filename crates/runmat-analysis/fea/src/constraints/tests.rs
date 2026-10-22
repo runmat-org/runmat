@@ -1563,6 +1563,72 @@ fn nonlinear_accepted_states_preserve_complete_constraint_kinematics() {
 }
 
 // witness: FEA-STRUCTURAL-CONSTRAINT-001/distributing_ties_equations @
+//   linear_structural/tet4/public_study; coverage: partial;
+//   boundary: The linear static pipeline admits and solves a reference-point wrench through a
+//   distributing coupling under its preflight solver admission. Resultant accuracy is covered by
+//   the kernel test below; rigid couplings and other procedures are not exercised.
+#[test]
+fn preflight_admits_a_reference_point_wrench_through_distributing_coupling() {
+    let (mut model, mesh) = model_and_mesh();
+    let boundary_ids = mesh
+        .topology
+        .boundary_faces
+        .iter()
+        .map(|face| {
+            face.provenance
+                .iter()
+                .find(|entity| entity.source_topology_id != "root")
+                .unwrap()
+                .source_topology_id
+                .clone()
+        })
+        .collect::<Vec<_>>();
+    model.constraints = vec![
+        AnalysisConstraint::Structural(StructuralConstraint {
+            constraint_id: "anchor".into(),
+            frame: CoordinateFrame::Global,
+            kind: StructuralConstraintKind::Fixed {
+                target: RegionTarget::boundary(&boundary_ids[0]),
+            },
+        }),
+        AnalysisConstraint::Structural(StructuralConstraint {
+            constraint_id: "remote_load".into(),
+            frame: CoordinateFrame::Global,
+            kind: StructuralConstraintKind::DistributingCoupling(ReferencePointCoupling {
+                target: RegionTarget::boundary(&boundary_ids[3]),
+                reference_point: ReferencePoint {
+                    reference_point_id: "control".into(),
+                    position: Position::new([1.0 / 3.0; 3]),
+                },
+            }),
+        }),
+    ];
+    replace_fixture_excitations(
+        &mut model,
+        vec![FixtureExcitation {
+            id: "remote_wrench".into(),
+            region_id: "control".into(),
+            kind: FixtureExcitationKind::Wrench {
+                force: [10.0, 0.0, 0.0],
+                moment: [0.0, 1.0, 0.0],
+                point_m: [1.0 / 3.0; 3],
+            },
+        }],
+    );
+
+    let result = crate::run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        crate::LinearStaticSolveOptions {
+            solver_mesh: Some(mesh),
+            ..crate::LinearStaticSolveOptions::default()
+        },
+    );
+    assert!(result.is_ok(), "{:?}", result.err());
+}
+
+
+// witness: FEA-STRUCTURAL-CONSTRAINT-001/distributing_ties_equations @
 //   linear_structural/tet4/numerical_kernel; coverage: partial;
 //   boundary: A reference-point wrench solves through distributing coupling on a fixture solid.
 #[test]

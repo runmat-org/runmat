@@ -10,7 +10,7 @@ use runmat_meshing_core::{
 use std::collections::BTreeMap;
 const TETRAHEDRON_FACES: [[usize; 3]; 4] = [[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]];
 
-pub(super) fn structured_cantilever(divisions: usize, order: ElementOrder) -> SolverMeshArtifact {
+pub(crate) fn structured_cantilever(divisions: usize, order: ElementOrder) -> SolverMeshArtifact {
     assert!(divisions > 0);
     let mut artifact = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(order);
     let solid = entity(PersistentEntityKind::Solid, "cantilever");

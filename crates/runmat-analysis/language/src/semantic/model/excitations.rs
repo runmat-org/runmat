@@ -147,6 +147,8 @@ fn explicit_excitation(
     let target = if matches!(&target_expression.kind, CheckedExpressionKind::Enum(name) if name == "whole_model")
     {
         AuthoredExcitationTarget::WholeModel
+    } else if let Some(constraint_id) = coupling_reference_point(target_expression) {
+        AuthoredExcitationTarget::ReferencePoint { constraint_id }
     } else {
         AuthoredExcitationTarget::Region(region_source(
             bound,
@@ -378,8 +380,12 @@ fn load(
             diagnostics,
         )?))
     };
-    let target =
-        AuthoredExcitationTarget::Region(region_source(bound, declaration, target, diagnostics)?);
+    let target = match coupling_reference_point(target) {
+        Some(constraint_id) => AuthoredExcitationTarget::ReferencePoint { constraint_id },
+        None => {
+            AuthoredExcitationTarget::Region(region_source(bound, declaration, target, diagnostics)?)
+        }
+    };
     let frame = match &signal {
         LoweredLoadSignal::Concrete(signal) => signal.frame().cloned(),
         LoweredLoadSignal::Parameterized(signal) => signal.frame.clone(),
@@ -405,6 +411,22 @@ fn load(
             },
         },
     ))
+}
+
+/// `constraint.<coupling>.reference_point`: the reference point a rigid or distributing coupling
+/// defines. Model realization binds it to that coupling's identity and position.
+fn coupling_reference_point(expression: &CheckedExpression) -> Option<String> {
+    let CheckedExpressionKind::Reference(path) = &expression.kind else {
+        return None;
+    };
+    match path.as_slice() {
+        [namespace, constraint, member]
+            if namespace == "constraint" && member == "reference_point" =>
+        {
+            Some(constraint.clone())
+        }
+        _ => None,
+    }
 }
 
 enum LoweredLoadSignal {

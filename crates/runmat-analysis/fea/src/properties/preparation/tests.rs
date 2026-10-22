@@ -8,6 +8,7 @@ use runmat_meshing_core::fixtures::{
     canonical_tetrahedron_solver_mesh, three_region_tetrahedron_solver_mesh_with_order,
 };
 use runmat_meshing_core::ElementOrder;
+use runmat_canonical_codec::serialized_materialization_resident_bytes_estimate;
 
 fn solid_model(mesh: &SolverMeshArtifact) -> AnalysisModel {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
@@ -56,8 +57,9 @@ fn exact_admission_boundary_preserves_owned_properties_and_identities() {
                 actual
                     .solid_material(element.stable_identity)
                     .unwrap()
-                    .material,
-                model.materials[0]
+                    .material
+                    .as_ref(),
+                &model.materials[0]
             );
         }
         super::super::identity::tests::assert_legacy_identity(&actual);
@@ -168,8 +170,10 @@ fn selected_metadata_scales_with_actual_material_occurrences() {
             }
             super::super::identity::tests::assert_legacy_identity(&compiled);
         }
-        assert!(deltas[0] > 0);
-        assert_eq!(deltas[1], 3 * deltas[0]);
+        // The direct encoding writes the grown name once per selected occurrence; held-buffer
+        // peaks are not additive, so growth is bounded below by the written bytes.
+        assert!(deltas[0] >= 1000);
+        assert!(deltas[1] >= 3 * 1000 && deltas[1] > deltas[0]);
     }
 }
 
@@ -284,8 +288,9 @@ fn explicit_profile_envelopes_cover_beam_shell_and_repeated_laminate_materials()
         assert_profile_envelope(&compiled, required);
         super::super::identity::tests::assert_legacy_identity(&compiled);
     }
-    assert!(deltas[1] > 0);
-    assert_eq!(deltas[0], 2 * deltas[1]);
+    // Material 0 fills two plies and material 1 one ply of every element.
+    assert!(deltas[1] >= 1000);
+    assert!(deltas[0] >= 2 * 1000 && deltas[0] > deltas[1]);
 }
 
 #[test]
@@ -455,4 +460,44 @@ fn changed_topology_gets_fresh_cache_and_cannot_use_another_models_identities() 
         Some(fresh_digest)
     );
     super::super::identity::tests::assert_legacy_identity(&compiled);
+}
+
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: A 196,608-element single-material Tet4 model compiles its property map within a
+//   per-element budget: elements share one material owner and the estimate charges it once.
+//   Requested-heap estimates only, not measured RSS; multi-material and laminate inventories are
+//   covered by the occurrence tests above.
+#[test]
+fn single_material_large_model_compiles_within_an_element_proportional_budget() {
+    let mesh = crate::adaptation::structural_recovery::qualification_tests::mesh::structured_cantilever(
+        32,
+        ElementOrder::Tet4,
+    );
+    let elements = mesh.topology.volume_elements.len() as u64;
+    assert_eq!(elements, 6 * 32 * 32 * 32);
+    let model = solid_model(&mesh);
+    let prepared = PreparedProperties::prepare(&model, Some(&mesh), u64::MAX).unwrap();
+    // The mesh's own canonical-validation scratch is charged alongside; the property-owned part
+    // (typed inventory, shared material table and identity encoding) is a few KiB per element.
+    let budget = mesh.validation_resident_bytes_estimate().unwrap() + elements * 4096 + 4 * 1024 * 1024;
+    assert!(
+        prepared.estimated_resident_bytes <= budget,
+        "{} bytes for {elements} elements (metadata {}, mesh validation {})",
+        prepared.estimated_resident_bytes,
+        prepared.selected_metadata_bytes,
+        mesh.validation_resident_bytes_estimate().unwrap()
+    );
+    let compiled = prepared.materialize().unwrap();
+    let retained = compiled
+        .retained_storage_bytes_estimate(CanonicalLimits::new(usize::MAX, usize::MAX, 65_536, 64))
+        .unwrap();
+    assert!(retained <= elements * 1024 + 1024 * 1024, "{retained} retained bytes");
+    // Every element references the one shared material owner.
+    let mut owners = compiled
+        .solid_materials()
+        .map(|entry| std::sync::Arc::as_ptr(&entry.material) as usize)
+        .collect::<Vec<_>>();
+    owners.dedup();
+    assert_eq!(owners.len(), 1);
 }

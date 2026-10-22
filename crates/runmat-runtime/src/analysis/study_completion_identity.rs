@@ -3,7 +3,13 @@ use runmat_analysis_core::{CoupledPhysicsFamily, PhysicsFamily, ProcedureStepId}
 use runmat_execution::Digest;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AnalysisStudyCompletionIdentity(String);
+pub struct AnalysisStudyCompletionIdentity {
+    server_run_id: String,
+    /// One execution of the definition. Each execution publishes under its own attempt run id
+    /// (`<definition run id>_<attempt>`), so a rerun is a new attempt and never collides with an
+    /// earlier attempt's publication; the definition run id resolves to the latest attempt.
+    attempt: Option<String>,
+}
 
 impl AnalysisStudyCompletionIdentity {
     pub fn new(server_run_id: impl Into<String>) -> Result<Self, String> {
@@ -16,7 +22,42 @@ impl AnalysisStudyCompletionIdentity {
         {
             return Err("remote analysis study completion identity is invalid".into());
         }
-        Ok(Self(server_run_id))
+        Ok(Self {
+            server_run_id,
+            attempt: None,
+        })
+    }
+
+    /// A completion of one execution attempt. `attempt` is a lowercase alphanumeric token that
+    /// orders attempts of the same definition chronologically when compared as strings.
+    pub fn with_attempt(
+        server_run_id: impl Into<String>,
+        attempt: impl Into<String>,
+    ) -> Result<Self, String> {
+        let attempt = attempt.into();
+        if attempt.is_empty()
+            || attempt.len() > 40
+            || !attempt
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+        {
+            return Err("analysis study attempt identity is invalid".into());
+        }
+        let mut identity = Self::new(server_run_id)?;
+        identity.attempt = Some(attempt);
+        Ok(identity)
+    }
+
+    /// A fresh, chronologically ordered attempt token for one execution in this process.
+    pub fn fresh_attempt() -> String {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos() as u64)
+            .unwrap_or(0);
+        let sequence = COUNTER.fetch_add(1, Ordering::Relaxed) as u32;
+        format!("a{nanos:016x}{:05x}{sequence:03x}", std::process::id() & 0xfffff)
     }
 
     pub(super) fn local_run_id(
@@ -52,17 +93,33 @@ impl AnalysisStudyCompletionIdentity {
                 domain,
                 super::storage::ARTIFACT_SCHEMA_VERSION.as_bytes(),
                 b"\0".as_slice(),
-                self.0.as_bytes(),
+                self.server_run_id.as_bytes(),
                 authored_study_digest.bytes(),
                 step_id.as_str().as_bytes(),
             ]
             .concat(),
         );
-        format!(
+        let base = format!(
             "run_remote_{}",
             digest.to_string().trim_start_matches("sha256:")
-        )
+        );
+        match &self.attempt {
+            Some(attempt) => format!("{base}_{attempt}"),
+            None => base,
+        }
     }
+}
+
+/// The definition run id and attempt token of an attempt run id, if it is one.
+pub fn split_attempt_run_id(run_id: &str) -> Option<(&str, &str)> {
+    let (base, attempt) = run_id.rsplit_once('_')?;
+    (base.starts_with("run_remote_")
+        && base.len() == "run_remote_".len() + 64
+        && attempt.starts_with('a')
+        && attempt
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit()))
+    .then_some((base, attempt))
 }
 
 #[cfg(test)]

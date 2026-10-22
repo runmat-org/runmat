@@ -58,12 +58,16 @@ pub fn prepare_study_publication(
         AnalysisStudyCompletionIdentity, PrecisionMode, QualityPolicy,
     };
     let context = || runmat_runtime::operations::OperationContext::new(None, None);
-    let identity = |digest: runmat_execution::Digest, root: &runmat_execution::Digest| {
-        AnalysisStudyCompletionIdentity::new(format!(
-            "{placement}:{}:{}",
-            digest.to_string().trim_start_matches("sha256:"),
-            root,
-        ))
+    // Every execution is its own attempt of the definition: a rerun publishes a fresh attempt
+    // rather than colliding with, or silently reusing, an earlier publication.
+    let attempt = AnalysisStudyCompletionIdentity::fresh_attempt();
+    // The definition run id is derived from the authored definition alone; the attempt fences
+    // each execution's publication (its authenticated completion root is part of that attempt).
+    let identity = |digest: runmat_execution::Digest, _root: &runmat_execution::Digest| {
+        AnalysisStudyCompletionIdentity::with_attempt(
+            format!("{placement}:{}", digest.to_string().trim_start_matches("sha256:")),
+            attempt.clone(),
+        )
     };
     let publication = match result {
         CompletedFeaStudyResult::Electrical(result) => {
@@ -221,10 +225,10 @@ pub fn prepare_study_publication(
             runmat_runtime::analysis::prepare_structural_study_publication(
                 result,
                 context(),
-                AnalysisStudyCompletionIdentity::new(format!(
-                    "{placement}:{}",
-                    digest.to_string().trim_start_matches("sha256:")
-                ))?,
+                AnalysisStudyCompletionIdentity::with_attempt(
+                    format!("{placement}:{}", digest.to_string().trim_start_matches("sha256:")),
+                    attempt.clone(),
+                )?,
             )
         }
         CompletedFeaStudyResult::Thermal(result) => {
@@ -235,8 +239,7 @@ pub fn prepare_study_publication(
                 .map_err(|e| e.to_string())?;
             let workload = &result.completion.workload;
             // A fresh execution can retain different attempt/accounting objects even when its
-            // scientific definition and fields are unchanged. Fence publication by the
-            // authenticated completion, not the authored definition alone.
+            // scientific definition and fields are unchanged; it publishes as its own attempt.
             runmat_runtime::analysis::prepare_thermal_study_publication(
                 &result.completion,
                 &result.source,

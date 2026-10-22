@@ -61,7 +61,24 @@ pub enum CompiledPropertyAuditOwner {
 pub struct CompiledElementMaterial {
     pub element_id: u64,
     pub element_identity: StableDigest,
-    pub material: MaterialModel,
+    /// Shared with every element of the same material: one table entry, many references.
+    #[serde(with = "shared_material")]
+    pub material: Arc<MaterialModel>,
+}
+
+mod shared_material {
+    use super::*;
+    pub(super) fn serialize<S: serde::Serializer>(
+        material: &Arc<MaterialModel>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        material.as_ref().serialize(serializer)
+    }
+    pub(super) fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Arc<MaterialModel>, D::Error> {
+        MaterialModel::deserialize(deserializer).map(Arc::new)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

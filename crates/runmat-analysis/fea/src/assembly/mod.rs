@@ -2089,12 +2089,11 @@ mod tests {
                 SourceImplementation::ExplicitRegionNodalDistribution,
             ]
         );
+        // The fixed solid face holds the beam's attached root node, so its support is compiled in
+        // the mixed node space and also fixes that node's rotations.
         assert_eq!(
             summary.structural_boundary_transfers,
-            vec![
-                BoundaryTransferImplementation::CanonicalBoundaryProjection,
-                BoundaryTransferImplementation::ExplicitRegionConnectivity,
-            ]
+            vec![BoundaryTransferImplementation::ExplicitRegionConnectivity]
         );
         assert!(summary
             .operator

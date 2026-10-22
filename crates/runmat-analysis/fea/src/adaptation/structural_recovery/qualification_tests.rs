@@ -44,7 +44,7 @@ mod heterogeneous;
 #[path = "qualification_tests/manufactured.rs"]
 mod manufactured;
 #[path = "qualification_tests/mesh.rs"]
-mod mesh;
+pub(crate) mod mesh;
 use mesh::{entity, structured_cantilever};
 
 #[test]
