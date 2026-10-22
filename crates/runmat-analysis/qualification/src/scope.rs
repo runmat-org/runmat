@@ -172,6 +172,7 @@ pub struct Trace {
     pub status: TraceStatus,
     pub cells: usize,
     pub pass: usize,
+    pub partial: usize,
     pub tagged: usize,
     pub fail: usize,
 }
@@ -202,10 +203,11 @@ pub fn trace(row: &ScopeRow, cells: &[Cell]) -> Trace {
         }
     }
     let count = |v: Verdict| selected.values().filter(|x| **x == v).count();
-    let (pass, fail, tagged) = (
+    let (pass, fail, tagged, partial) = (
         count(Verdict::Pass),
         count(Verdict::Fail),
         count(Verdict::Tagged),
+        count(Verdict::Partial),
     );
     let status = if selected.is_empty() {
         if row
@@ -221,7 +223,7 @@ pub fn trace(row: &ScopeRow, cells: &[Cell]) -> Trace {
         TraceStatus::Fail
     } else if pass == selected.len() {
         TraceStatus::Pass
-    } else if pass + tagged > 0 {
+    } else if pass + tagged + partial > 0 {
         TraceStatus::Tied
     } else {
         TraceStatus::Open
@@ -230,6 +232,7 @@ pub fn trace(row: &ScopeRow, cells: &[Cell]) -> Trace {
         status,
         cells: selected.len(),
         pass,
+        partial,
         tagged,
         fail,
     }

@@ -28,7 +28,7 @@ fn all_witness_tags_are_valid_against_the_register() {
 
 #[test]
 fn tag_text_parses_alternatives_and_rejects_unknown_names() {
-    let (requirement, obligation, envelopes, boundary) = parse_tag_text(
+    let (requirement, obligation, envelopes, boundary, complete) = parse_tag_text(
         "FEA-X-001/obl @ thermal_steady|thermal_transient/tet4|tet10/numerical_kernel, \
          shared_infrastructure/mesh_independent/source_check; boundary: only a patch",
     )
@@ -44,6 +44,15 @@ fn tag_text_parses_alternatives_and_rejects_unknown_names() {
         execution: ExecutionEnvelope::NumericalKernel,
     }));
     assert_eq!(boundary, "only a patch");
+    assert!(!complete);
+    assert!(
+        parse_tag_text("A/b @ thermal_steady/tet4/durable; coverage: complete; boundary: x")
+            .unwrap()
+            .4
+    );
+    assert!(
+        parse_tag_text("A/b @ thermal_steady/tet4/durable; coverage: most; boundary: x").is_err()
+    );
     assert!(parse_tag_text("A/b @ thermal_steady/tet4/serial; boundary: x").is_err());
     assert!(parse_tag_text("A/b @ thermal_steady/tet4/durable;").is_err());
     assert!(parse_tag_text("A/b @ thermal_steady/tet4/durable; boundary:  ").is_err());

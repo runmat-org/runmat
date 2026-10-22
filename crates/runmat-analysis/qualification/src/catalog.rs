@@ -14,8 +14,10 @@ pub enum TestResult {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Verdict {
-    /// Every tagged test passed in this run.
+    /// Every tagged test passed and at least one tag declares complete coverage.
     Pass,
+    /// Every tagged test passed, but no tag claims to discharge the whole criterion.
+    Partial,
     /// At least one tagged test failed, was ignored, or could not be found.
     Fail,
     /// No test is tagged for this cell.
@@ -28,6 +30,7 @@ impl Verdict {
     pub fn label(self) -> &'static str {
         match self {
             Verdict::Pass => "PASS",
+            Verdict::Partial => "PARTIAL",
             Verdict::Fail => "FAIL",
             Verdict::Open => "OPEN",
             Verdict::Tagged => "TAGGED",
@@ -39,6 +42,7 @@ impl Verdict {
 pub struct CellTest {
     pub locator: TestLocator,
     pub boundary: String,
+    pub complete: bool,
     pub result: Option<TestResult>,
 }
 
@@ -87,6 +91,7 @@ pub fn cells(
                     .map(|tag| CellTest {
                         locator: tag.test.clone(),
                         boundary: tag.boundary.clone(),
+                        complete: tag.complete,
                         result: results.map(|r| {
                             r.get(&tag.test.describe()).cloned().unwrap_or_else(|| {
                                 TestResult::Failed("test not found in cargo test run".into())
@@ -119,6 +124,7 @@ pub fn cells(
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Totals {
     pub pass: usize,
+    pub partial: usize,
     pub fail: usize,
     pub open: usize,
     pub tagged: usize,
@@ -128,12 +134,13 @@ impl Totals {
     pub fn add(&mut self, verdict: Verdict) {
         match verdict {
             Verdict::Pass => self.pass += 1,
+            Verdict::Partial => self.partial += 1,
             Verdict::Fail => self.fail += 1,
             Verdict::Open => self.open += 1,
             Verdict::Tagged => self.tagged += 1,
         }
     }
     pub fn total(&self) -> usize {
-        self.pass + self.fail + self.open + self.tagged
+        self.pass + self.partial + self.fail + self.open + self.tagged
     }
 }

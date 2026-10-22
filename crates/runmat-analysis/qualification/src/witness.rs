@@ -1,12 +1,14 @@
 //! Witnesses are declared at the test that supports an obligation, never in the register.
 //!
 //! ```text
-//! // witness: FEA-XXX-001/obligation_id @ formulation/mesh[|mesh]/execution[, ...];
+//! // witness: FEA-XXX-001/obligation_id @ formulation/mesh[|mesh]/execution[, ...]; coverage: complete|partial;
 //! //   boundary: what the assertions support and what they do not.
 //! #[test]
 //! fn the_test() { .. }
 //! ```
 //!
+//! `coverage: complete` states the listed tests discharge the whole criterion for those
+//! envelopes; the default `partial` records narrower support and never yields PASS.
 //! A tag is a `// witness:` comment line plus its `//` continuation lines, placed directly
 //! above the test function (attributes may sit between). Several tags may stack on one test.
 //! The scanner is std-only so no crate depends on the qualification crate. A tag declares what
@@ -52,6 +54,8 @@ pub struct Tag {
     pub obligation: String,
     pub envelopes: Vec<Envelope>,
     pub boundary: String,
+    /// The author states these tests discharge the whole criterion for the envelopes.
+    pub complete: bool,
     pub test: TestLocator,
 }
 
@@ -72,10 +76,22 @@ pub fn repository_root() -> PathBuf {
 }
 
 /// Parse the joined text of one tag (after `witness:`).
-pub fn parse_tag_text(text: &str) -> Result<(String, String, Vec<Envelope>, String), String> {
+pub fn parse_tag_text(text: &str) -> Result<(String, String, Vec<Envelope>, String, bool), String> {
     let (head, boundary) = text
         .split_once("; boundary:")
         .ok_or("missing `; boundary: <text>`")?;
+    let (head, complete) = match head.split_once("; coverage:") {
+        Some((head, coverage)) => match coverage.trim() {
+            "complete" => (head, true),
+            "partial" => (head, false),
+            other => {
+                return Err(format!(
+                    "coverage must be complete or partial, not `{other}`"
+                ))
+            }
+        },
+        None => (head, false),
+    };
     let boundary = boundary.trim();
     if boundary.is_empty() {
         return Err("empty boundary".into());
@@ -123,6 +139,7 @@ pub fn parse_tag_text(text: &str) -> Result<(String, String, Vec<Envelope>, Stri
         obligation.trim().to_string(),
         cells,
         boundary.to_string(),
+        complete,
     ))
 }
 
@@ -369,13 +386,15 @@ fn scan_file(
                     for (tag_line, text) in pending.drain(..) {
                         let location = format!("{display}:{tag_line}");
                         match parse_tag_text(&text) {
-                            Ok((requirement, obligation, envelopes, boundary)) => tags.push(Tag {
-                                requirement,
-                                obligation,
-                                envelopes,
-                                boundary,
-                                test: locator.clone(),
-                            }),
+                            Ok((requirement, obligation, envelopes, boundary, complete)) => tags
+                                .push(Tag {
+                                    requirement,
+                                    obligation,
+                                    envelopes,
+                                    boundary,
+                                    complete,
+                                    test: locator.clone(),
+                                }),
                             Err(message) => problems.push(Problem { location, message }),
                         }
                     }
