@@ -43,6 +43,11 @@ fn fields<'a>(
     }
 }
 
+// witness: FEA-FLUID-TRANSIENT-001/inertia @
+//   incompressible_laminar_transient/canonical_tetrahedra/numerical_kernel; coverage:
+//   partial;
+//   boundary: A uniformly accelerating field has the exact inertia-driven pressure and binds cold;
+//   a nontrivial unsteady reference is not covered here.
 #[test]
 fn original_uniform_acceleration_has_exact_inertia_pressure_and_cold_binding() {
     let acceleration = [0.01, -0.005, 0.002];

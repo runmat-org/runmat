@@ -6,6 +6,9 @@ use runmat_analysis_core::{
     Pressure, SignalRepresentation, SignalValue, Velocity,
 };
 
+// witness: FEA-FLUID-EQUATIONS-001/pressure_state @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel; coverage: partial;
+//   boundary: A uniform translation is balanced at both pressure references.
 #[test]
 fn independent_uniform_translation_is_balanced_at_both_pressure_references() {
     for reference in [0.0, 101325.0] {

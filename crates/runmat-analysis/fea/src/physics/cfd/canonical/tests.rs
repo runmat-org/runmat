@@ -339,6 +339,11 @@ fn rectangular_duct_compares_fourier_reference_with_controlled_tail() {
     );
 }
 
+// witness: FEA-FLUID-INPUTS-001/boundaries @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel; coverage: partial;
+//   boundary: A tangential moving wall is supported and normal wall motion is rejected unless an
+//   ALE formulation governs it; velocity components, symmetry, periodic and pressure-reference
+//   boundaries are other cases.
 #[test]
 fn tangential_moving_wall_supported_but_normal_motion_requires_ale() {
     let mut f = case(1, ReferenceCase::Couette, false);

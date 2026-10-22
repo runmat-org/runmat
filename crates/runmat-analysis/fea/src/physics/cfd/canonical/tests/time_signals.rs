@@ -226,6 +226,11 @@ fn full_original_signal_payload_is_admitted_before_time_realization() {
     ));
 }
 
+// witness: FEA-FLUID-INPUTS-001/signals @
+//   incompressible_laminar_transient/canonical_tetrahedra/numerical_kernel; coverage:
+//   partial;
+//   boundary: A tabulated vector velocity signal with a one-sided jump is realized on the original
+//   boundary faces; pressure, mass-flow and body-force signals are separate tests.
 #[test]
 fn one_sided_velocity_jump_is_realized_on_original_boundary_faces() {
     let mut f = closed(2, [0.001, 0.0, 0.0], 0.0);
