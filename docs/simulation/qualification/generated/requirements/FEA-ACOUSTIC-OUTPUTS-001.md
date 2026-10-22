@@ -1,6 +1,6 @@
 # FEA-ACOUSTIC-OUTPUTS-001: Sound pressure level, transmission loss, intensity and power
 
-0 PASS, 0 PARTIAL, 0 FAIL, 20 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 1 PARTIAL, 0 FAIL, 19 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## sound_pressure_level
 
@@ -32,7 +32,7 @@ Evidence kind: IndependentReference. Criterion: The active intensity field and `
 |---|---|---|---|---|
 | acoustic_harmonic | tet4 | numerical_kernel | OPEN |  |
 | acoustic_harmonic | tet4 | public_study | OPEN |  |
-| acoustic_harmonic | tet10 | numerical_kernel | OPEN |  |
+| acoustic_harmonic | tet10 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::execution::acoustic::tests::sound_power_through_the_matched_end_is_the_plane_wave_intensity_times_area` (crates/runmat-analysis/fea/src/execution/acoustic/tests.rs:166) - On a quadratic duct the NormalFlux reduction of the acoustic intensity through the matched end equals the plane-wave value |p|^2/(2 rho c) times area (1/12 W) w... |
 | acoustic_harmonic | tet10 | public_study | OPEN |  |
 
 ## frequency_set_generation

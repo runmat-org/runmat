@@ -730,7 +730,7 @@
       "title": "Exact geometry, persistent topology and engineering exchange"
     },
     {
-      "fail": 1,
+      "fail": 0,
       "id": "FEA-AUTHORING-OUTPUT-002",
       "obligations": [
         {
@@ -772,16 +772,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Output operations are one shared public identity with FEA overloads.",
-                  "line": 542,
+                  "line": 578,
                   "name": "operations::output::tests::output_operations_are_one_shared_public_identity_with_fea_overloads",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test failed"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/src/operations/output.rs",
                   "target": "Library"
                 }
@@ -980,7 +978,7 @@
         }
       ],
       "open": 5,
-      "partial": 7,
+      "partial": 8,
       "pass": 0,
       "tagged": 0,
       "title": "Typed source queries, recovery and retained result objects"
@@ -2736,7 +2734,7 @@
       "title": "Immutable exact geometry and truthful engineering exchange"
     },
     {
-      "fail": 0,
+      "fail": 1,
       "id": "FEA-AUTHORING-CUTOVER-001",
       "obligations": [
         {
@@ -2745,8 +2743,20 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "OPEN",
-              "tests": []
+              "status": "FAIL",
+              "tests": [
+                {
+                  "boundary": "scripts/fea/check-language-surface-ledger.mjs passes: every accepted field and variant of the authoring surface has a reviewed disposition in the ledger; semantic equivalence of old and new forms is not checked by it.",
+                  "line": 63,
+                  "name": "language_surface_ledger_has_no_unreviewed_field",
+                  "package": "runmat-analysis-qualification",
+                  "result": {
+                    "failed": "test failed"
+                  },
+                  "source": "crates/runmat-analysis/qualification/tests/release_checks.rs",
+                  "target": "Integration(\"release_checks\")"
+                }
+              ]
             },
             {
               "execution": "public_study",
@@ -3034,14 +3044,14 @@
           "id": "complete_public_surface"
         }
       ],
-      "open": 35,
+      "open": 34,
       "partial": 0,
       "pass": 0,
       "tagged": 0,
       "title": "Complete authoring surface and one compiler authority"
     },
     {
-      "fail": 0,
+      "fail": 2,
       "id": "FEA-SHARED-OWNERSHIP-001",
       "obligations": [
         {
@@ -3071,8 +3081,20 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "canonical_mixed_topology",
-              "status": "OPEN",
-              "tests": []
+              "status": "FAIL",
+              "tests": [
+                {
+                  "boundary": "scripts/development/check-architecture-boundaries.mjs passes: dependency direction, forbidden imports and module-size debt ceilings; it does not review code quality beyond those rules.",
+                  "line": 36,
+                  "name": "architecture_boundary_check_passes",
+                  "package": "runmat-analysis-qualification",
+                  "result": {
+                    "failed": "test failed"
+                  },
+                  "source": "crates/runmat-analysis/qualification/tests/release_checks.rs",
+                  "target": "Integration(\"release_checks\")"
+                }
+              ]
             },
             {
               "execution": "release_pipeline",
@@ -3113,8 +3135,20 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "canonical_mixed_topology",
-              "status": "OPEN",
-              "tests": []
+              "status": "FAIL",
+              "tests": [
+                {
+                  "boundary": "The same architecture script enforces the dependency edges between the analysis crates and the shared platform; the full edge list in the obligation is not compared one by one.",
+                  "line": 49,
+                  "name": "architecture_boundary_check_enforces_dependency_edges",
+                  "package": "runmat-analysis-qualification",
+                  "result": {
+                    "failed": "test failed"
+                  },
+                  "source": "crates/runmat-analysis/qualification/tests/release_checks.rs",
+                  "target": "Integration(\"release_checks\")"
+                }
+              ]
             },
             {
               "execution": "release_pipeline",
@@ -3507,7 +3541,7 @@
           "id": "exact_transfer_and_evaluation_owners"
         }
       ],
-      "open": 44,
+      "open": 42,
       "partial": 0,
       "pass": 0,
       "tagged": 0,
@@ -7758,7 +7792,7 @@
       "title": "Typed field recovery, bounded observations and monitors"
     },
     {
-      "fail": 1,
+      "fail": 0,
       "id": "FEA-SHARED-EXECUTION-001",
       "obligations": [
         {
@@ -8309,16 +8343,14 @@
               "execution": "remote_execution",
               "formulation": "shared_infrastructure",
               "mesh": "canonical_mixed_topology",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "A remote rank failure releases a peer blocked in a collective within five seconds and surfaces the primary structured error with its source ordinal; SPMD runtime program, not a numerical solve.",
                   "line": 2013,
                   "name": "remote::pool_tests::remote_rank_failure_releases_a_peer_blocked_in_a_collective",
                   "package": "runmat-execution-runner-native",
-                  "result": {
-                    "failed": "test failed"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-execution-runner-native/src/remote/pool_tests.rs",
                   "target": "Library"
                 }
@@ -8968,7 +9000,7 @@
         }
       ],
       "open": 138,
-      "partial": 5,
+      "partial": 6,
       "pass": 0,
       "tagged": 0,
       "title": "Placement-independent logical studies and governed scheduling"
@@ -19351,6 +19383,42 @@
                   "result": "passed",
                   "source": "crates/runmat-analysis/fea/src/physics/thermal/assembly/tests/steady.rs",
                   "target": "Library"
+                },
+                {
+                  "boundary": "A two-layer linear-mesh box with a contact conductance (or equivalent resistance) matches the one-dimensional series-resistance solution at every node, the interface jump equals flux over conductance, and the energy balance closes; Tet10 is not run.",
+                  "line": 126,
+                  "name": "pipeline::thermal::physical::interface_tests::contact_conductance_carries_the_series_resistance_flux_and_jump",
+                  "package": "runmat-analysis-fea",
+                  "result": "passed",
+                  "source": "crates/runmat-analysis/fea/src/pipeline/thermal/physical/interface_tests.rs",
+                  "target": "Library"
+                },
+                {
+                  "boundary": "Perfect contact shares the interface temperature across the joint.",
+                  "line": 168,
+                  "name": "pipeline::thermal::physical::interface_tests::perfect_contact_shares_the_interface_temperature",
+                  "package": "runmat-analysis-fea",
+                  "result": "passed",
+                  "source": "crates/runmat-analysis/fea/src/pipeline/thermal/physical/interface_tests.rs",
+                  "target": "Library"
+                },
+                {
+                  "boundary": "A periodic cell with a 20 K temperature jump and a convective left face reproduces T = 300 + 20 x exactly (within 1e-8 relative) on linear and quadratic meshes, with energy-balance residuals within target; tied and affine relations beyond one periodic pair are not covered.",
+                  "line": 45,
+                  "name": "pipeline::thermal::physical::relation_tests::temperature_jump_carries_a_linear_profile_through_a_periodic_cell",
+                  "package": "runmat-analysis-fea",
+                  "result": "passed",
+                  "source": "crates/runmat-analysis/fea/src/pipeline/thermal/physical/relation_tests.rs",
+                  "target": "Library"
+                },
+                {
+                  "boundary": "A source-free periodic cell settles at the film ambient temperature.",
+                  "line": 79,
+                  "name": "pipeline::thermal::physical::relation_tests::periodic_cell_without_sources_settles_at_the_film_ambient",
+                  "package": "runmat-analysis-fea",
+                  "result": "passed",
+                  "source": "crates/runmat-analysis/fea/src/pipeline/thermal/physical/relation_tests.rs",
+                  "target": "Library"
                 }
               ]
             },
@@ -19367,6 +19435,24 @@
                   "package": "runmat-analysis-fea",
                   "result": "passed",
                   "source": "crates/runmat-analysis/fea/src/physics/thermal/assembly/tests/steady.rs",
+                  "target": "Library"
+                },
+                {
+                  "boundary": "A periodic cell with a 20 K temperature jump and a convective left face reproduces T = 300 + 20 x exactly (within 1e-8 relative) on linear and quadratic meshes, with energy-balance residuals within target; tied and affine relations beyond one periodic pair are not covered.",
+                  "line": 45,
+                  "name": "pipeline::thermal::physical::relation_tests::temperature_jump_carries_a_linear_profile_through_a_periodic_cell",
+                  "package": "runmat-analysis-fea",
+                  "result": "passed",
+                  "source": "crates/runmat-analysis/fea/src/pipeline/thermal/physical/relation_tests.rs",
+                  "target": "Library"
+                },
+                {
+                  "boundary": "A source-free periodic cell settles at the film ambient temperature.",
+                  "line": 79,
+                  "name": "pipeline::thermal::physical::relation_tests::periodic_cell_without_sources_settles_at_the_film_ambient",
+                  "package": "runmat-analysis-fea",
+                  "result": "passed",
+                  "source": "crates/runmat-analysis/fea/src/pipeline/thermal/physical/relation_tests.rs",
                   "target": "Library"
                 }
               ]
@@ -23117,8 +23203,18 @@
               "execution": "numerical_kernel",
               "formulation": "electrostatic",
               "mesh": "tet4",
-              "status": "OPEN",
-              "tests": []
+              "status": "PARTIAL",
+              "tests": [
+                {
+                  "boundary": "A charged slab with a translation-periodic right face matches the same slab grounded on both faces to 1e-8, and the grounded face carries the full flux; terminal voltage, floating and integral-current constraints are separate tests.",
+                  "line": 642,
+                  "name": "physics::electrical::tests::periodic_faces_share_their_potential",
+                  "package": "runmat-analysis-fea",
+                  "result": "passed",
+                  "source": "crates/runmat-analysis/fea/src/physics/electrical/tests.rs",
+                  "target": "Library"
+                }
+              ]
             },
             {
               "execution": "numerical_kernel",
@@ -23175,6 +23271,15 @@
                   "boundary": "Affine Tet4/Tet10 volume-current, full grounded-boundary and gauge plan compared with same kernel; rejects missing gauge, surface-current substitution and wrong domain. No independent physical-reference or periodic claim.",
                   "line": 200,
                   "name": "physics::magnetic::tests::authored_material_current_ground_and_gauge_compile_into_physical_solve",
+                  "package": "runmat-analysis-fea",
+                  "result": "passed",
+                  "source": "crates/runmat-analysis/fea/src/physics/magnetic/tests.rs",
+                  "target": "Library"
+                },
+                {
+                  "boundary": "A prescribed tangential vector potential on one face with grounds and insulated sides drives the exact uniform flux density A = (0, a x/L, 0); gauge, periodic and phase-shifted relations are not covered.",
+                  "line": 384,
+                  "name": "physics::magnetic::tests::prescribed_tangential_potential_drives_the_exact_uniform_field",
                   "package": "runmat-analysis-fea",
                   "result": "passed",
                   "source": "crates/runmat-analysis/fea/src/physics/magnetic/tests.rs",
@@ -23281,8 +23386,8 @@
           "id": "excitation"
         }
       ],
-      "open": 9,
-      "partial": 5,
+      "open": 8,
+      "partial": 6,
       "pass": 0,
       "tagged": 0,
       "title": "Typed electrical and magnetic sources and rank-correct constraints"
@@ -28270,7 +28375,7 @@
       "title": "Independent formulation evidence and truthful claims"
     },
     {
-      "fail": 0,
+      "fail": 1,
       "id": "FEA-RELEASE-CI-001",
       "obligations": [
         {
@@ -28279,8 +28384,20 @@
               "execution": "release_pipeline",
               "formulation": "shared_infrastructure",
               "mesh": "canonical_mixed_topology",
-              "status": "OPEN",
-              "tests": []
+              "status": "FAIL",
+              "tests": [
+                {
+                  "boundary": "The meshing release-evidence validator passes: release promotion depends on meshing release evidence; FEA release evidence and the rest of the graph are not checked.",
+                  "line": 111,
+                  "name": "meshing_release_evidence_is_a_release_dependency",
+                  "package": "runmat-analysis-qualification",
+                  "result": {
+                    "failed": "test failed"
+                  },
+                  "source": "crates/runmat-analysis/qualification/tests/release_checks.rs",
+                  "target": "Integration(\"release_checks\")"
+                }
+              ]
             },
             {
               "execution": "source_check",
@@ -28337,7 +28454,7 @@
           "id": "attested_release_and_publication_rejection"
         }
       ],
-      "open": 6,
+      "open": 5,
       "partial": 0,
       "pass": 0,
       "tagged": 0,
@@ -28915,8 +29032,18 @@
               "execution": "numerical_kernel",
               "formulation": "acoustic_harmonic",
               "mesh": "tet10",
-              "status": "OPEN",
-              "tests": []
+              "status": "PARTIAL",
+              "tests": [
+                {
+                  "boundary": "On a quadratic duct the NormalFlux reduction of the acoustic intensity through the matched end equals the plane-wave value |p|^2/(2 rho c) times area (1/12 W) within 0.1 percent and equals the solver's mean input power; a monopole sphere and a named-surface CLI run are not covered.",
+                  "line": 166,
+                  "name": "execution::acoustic::tests::sound_power_through_the_matched_end_is_the_plane_wave_intensity_times_area",
+                  "package": "runmat-analysis-fea",
+                  "result": "passed",
+                  "source": "crates/runmat-analysis/fea/src/execution/acoustic/tests.rs",
+                  "target": "Library"
+                }
+              ]
             },
             {
               "execution": "public_study",
@@ -29001,8 +29128,8 @@
           "id": "output_arithmetic_across_analyses"
         }
       ],
-      "open": 20,
-      "partial": 0,
+      "open": 19,
+      "partial": 1,
       "pass": 0,
       "tagged": 0,
       "title": "Sound pressure level, transmission loss, intensity and power"
@@ -29052,8 +29179,27 @@
               "execution": "numerical_kernel",
               "formulation": "acoustic_harmonic",
               "mesh": "tet4",
-              "status": "OPEN",
-              "tests": []
+              "status": "PARTIAL",
+              "tests": [
+                {
+                  "boundary": "A complex impedance termination on a linear-mesh duct converges to the two-wave duct solution with power closure; frequency tables and the Delany-Bazley porous layer are not covered by this test.",
+                  "line": 611,
+                  "name": "physics::acoustic::canonical::tests::complex_impedance_termination_converges_to_the_two_wave_duct_solution",
+                  "package": "runmat-analysis-fea",
+                  "result": "passed",
+                  "source": "crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests.rs",
+                  "target": "Library"
+                },
+                {
+                  "boundary": "Language lowering of Delany-Bazley and sampled impedance tables only; no solve against the closed-form absorption.",
+                  "line": 58,
+                  "name": "delany_bazley_and_sampled_impedance_tables_lower_into_their_boundaries",
+                  "package": "runmat-analysis-language",
+                  "result": "passed",
+                  "source": "crates/runmat-analysis/language/tests/impedance_tables.rs",
+                  "target": "Integration(\"impedance_tables\")"
+                }
+              ]
             },
             {
               "execution": "public_study",
@@ -29066,8 +29212,18 @@
               "execution": "numerical_kernel",
               "formulation": "acoustic_harmonic",
               "mesh": "tet10",
-              "status": "OPEN",
-              "tests": []
+              "status": "PARTIAL",
+              "tests": [
+                {
+                  "boundary": "Language lowering of Delany-Bazley and sampled impedance tables only; no solve against the closed-form absorption.",
+                  "line": 58,
+                  "name": "delany_bazley_and_sampled_impedance_tables_lower_into_their_boundaries",
+                  "package": "runmat-analysis-language",
+                  "result": "passed",
+                  "source": "crates/runmat-analysis/language/tests/impedance_tables.rs",
+                  "target": "Integration(\"impedance_tables\")"
+                }
+              ]
             },
             {
               "execution": "public_study",
@@ -29087,8 +29243,18 @@
               "execution": "numerical_kernel",
               "formulation": "acoustic_harmonic",
               "mesh": "tet4",
-              "status": "OPEN",
-              "tests": []
+              "status": "PARTIAL",
+              "tests": [
+                {
+                  "boundary": "A linear-mesh duct with damping ratio 0.05 converges (error ratio above 3 per refinement, below 0.004 at 8 cells) to the complex-wavenumber standing wave and the driven end supplies exactly the dissipated power; Tet10, the transient formulation and damping in the CLI are not covered.",
+                  "line": 345,
+                  "name": "physics::acoustic::canonical::tests::damped_duct_converges_to_the_complex_wavenumber_standing_wave_and_dissipates_its_input",
+                  "package": "runmat-analysis-fea",
+                  "result": "passed",
+                  "source": "crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests.rs",
+                  "target": "Library"
+                }
+              ]
             },
             {
               "execution": "public_study",
@@ -29180,8 +29346,8 @@
           "id": "bloch_band_gap"
         }
       ],
-      "open": 20,
-      "partial": 0,
+      "open": 17,
+      "partial": 3,
       "pass": 0,
       "tagged": 0,
       "title": "Radiation, frequency-dependent impedance and air damping"
@@ -32205,7 +32371,7 @@
               "tests": [
                 {
                   "boundary": "A part-in-air assembly imports as two named solids; with shared interfaces it yields six interface faces, keeps the names Part, Air, Outer boundary and the part's face name on the shared face, and builds its closure.",
-                  "line": 72,
+                  "line": 74,
                   "name": "separate_parts_stay_independent_unless_interfaces_are_shared",
                   "package": "runmat-geometry-io",
                   "result": "passed",
@@ -32214,8 +32380,17 @@
                 },
                 {
                   "boundary": "A General Fuse compound imports with its shared faces and solid names.",
-                  "line": 136,
+                  "line": 138,
                   "name": "a_general_fuse_compound_imports_with_its_shared_faces_and_solid_names",
+                  "package": "runmat-geometry-io",
+                  "result": "passed",
+                  "source": "crates/runmat-geometry/io/tests/shared_interfaces.rs",
+                  "target": "Integration(\"shared_interfaces\")"
+                },
+                {
+                  "boundary": "Imprinted coincident faces of an assembly become one shared face with one source ordinal.",
+                  "line": 182,
+                  "name": "imprinted_coincident_faces_become_one_shared_face_with_one_source_ordinal",
                   "package": "runmat-geometry-io",
                   "result": "passed",
                   "source": "crates/runmat-geometry/io/tests/shared_interfaces.rs",
@@ -32252,7 +32427,7 @@
               "tests": [
                 {
                   "boundary": "Authored face names (Fixed end, Loaded end) and a solid name (Bar) reach the exact model and are stable under file rename and reimport; resolution at check and at run through the CLI is not asserted.",
-                  "line": 54,
+                  "line": 56,
                   "name": "authored_face_and_body_names_reach_the_exact_model",
                   "package": "runmat-geometry-io",
                   "result": "passed",
@@ -32450,6 +32625,15 @@
               "status": "PARTIAL",
               "tests": [
                 {
+                  "boundary": "Regression: a point just inside a hull edge keeps the hull edge in the exact face triangulation; the dense-surface and many-trim cases are separate tests.",
+                  "line": 158,
+                  "name": "exact_cdt::triangulation::tests::a_point_just_inside_a_hull_edge_keeps_the_hull_edge",
+                  "package": "runmat-meshing-surface",
+                  "result": "passed",
+                  "source": "crates/runmat-meshing/surface/src/exact_cdt/triangulation/tests.rs",
+                  "target": "Library"
+                },
+                {
                   "boundary": "A dense face of 90,601 nodes and 180,000 triangles has a bounded publication representation inside the 512 MiB default component memory and round-trips through the record and global codecs; seams, poles and many trims are not asserted here.",
                   "line": 87,
                   "name": "face_pipeline_tests::publication_scale::representative_dense_face_publication_fits_default_component_memory",
@@ -32494,6 +32678,15 @@
                   "package": "runmat-meshing-tetrahedron",
                   "result": "passed",
                   "source": "crates/runmat-meshing/tetrahedron/src/cavity/constrained/tests/shared_face_split.rs",
+                  "target": "Library"
+                },
+                {
+                  "boundary": "Regression: a point on a flat hull cap replaces exactly the cells whose circumcircle contains it in the incremental point-set construction; facet recovery and carving are separate tests.",
+                  "line": 307,
+                  "name": "cdt::point_set::tests::a_point_on_a_flat_hull_cap_replaces_the_cells_whose_circumcircle_holds_it",
+                  "package": "runmat-meshing-tetrahedron",
+                  "result": "passed",
+                  "source": "crates/runmat-meshing/tetrahedron/src/cdt/point_set/tests.rs",
                   "target": "Library"
                 }
               ]
@@ -32876,7 +33069,7 @@
       "title": "Real parts mesh with a published success rate"
     },
     {
-      "fail": 1,
+      "fail": 2,
       "id": "FEA-MESH-EXECUTION-001",
       "obligations": [
         {
@@ -33181,6 +33374,54 @@
         },
         {
           "cells": [
+            {
+              "execution": "source_check",
+              "formulation": "shared_infrastructure",
+              "mesh": "canonical_mixed_topology",
+              "status": "FAIL",
+              "tests": [
+                {
+                  "boundary": "The meshing conformance catalog validator passes (15 cases covering the 16 required feature classes); the SLO report freshness and the other validators are separate witnesses.",
+                  "line": 73,
+                  "name": "meshing_conformance_catalog_validates",
+                  "package": "runmat-analysis-qualification",
+                  "result": "passed",
+                  "source": "crates/runmat-analysis/qualification/tests/release_checks.rs",
+                  "target": "Integration(\"release_checks\")"
+                },
+                {
+                  "boundary": "The meshing corpus validator passes: the fixture inventory matches the registered corpus.",
+                  "line": 82,
+                  "name": "meshing_corpus_catalog_validates",
+                  "package": "runmat-analysis-qualification",
+                  "result": {
+                    "failed": "test failed"
+                  },
+                  "source": "crates/runmat-analysis/qualification/tests/release_checks.rs",
+                  "target": "Integration(\"release_checks\")"
+                },
+                {
+                  "boundary": "The meshing differential catalog validator passes (independent mesher cases dispositioned).",
+                  "line": 91,
+                  "name": "meshing_differential_catalog_validates",
+                  "package": "runmat-analysis-qualification",
+                  "result": "passed",
+                  "source": "crates/runmat-analysis/qualification/tests/release_checks.rs",
+                  "target": "Integration(\"release_checks\")"
+                },
+                {
+                  "boundary": "The meshing reliability catalog validator passes: every reliability control (budgets, cancellation, atomic writes, restart, worker loss, stale publication) anchors to an existing test.",
+                  "line": 101,
+                  "name": "meshing_reliability_catalog_anchors_exist",
+                  "package": "runmat-analysis-qualification",
+                  "result": {
+                    "failed": "test failed"
+                  },
+                  "source": "crates/runmat-analysis/qualification/tests/release_checks.rs",
+                  "target": "Integration(\"release_checks\")"
+                }
+              ]
+            },
             {
               "execution": "public_study",
               "formulation": "shared_infrastructure",
@@ -33917,9 +34158,35 @@
         {
           "cells": [
             {
+              "execution": "source_check",
+              "formulation": "shared_infrastructure",
+              "mesh": "mesh_independent",
+              "status": "PARTIAL",
+              "tests": [
+                {
+                  "boundary": "sound_power and intensity flux lower to the same normal-flux observation; the other output forms are separate.",
+                  "line": 47,
+                  "name": "sound_power_and_intensity_flux_lower_to_the_same_normal_flux_observation",
+                  "package": "runmat-analysis-language",
+                  "result": "passed",
+                  "source": "crates/runmat-analysis/language/tests/acoustic_power_outputs.rs",
+                  "target": "Integration(\"acoustic_power_outputs\")"
+                },
+                {
+                  "boundary": "Flux outputs reject volume regions and scalar fields.",
+                  "line": 75,
+                  "name": "flux_rejects_volume_regions_and_scalar_fields",
+                  "package": "runmat-analysis-language",
+                  "result": "passed",
+                  "source": "crates/runmat-analysis/language/tests/acoustic_power_outputs.rs",
+                  "target": "Integration(\"acoustic_power_outputs\")"
+                }
+              ]
+            },
+            {
               "execution": "public_study",
               "formulation": "shared_infrastructure",
-              "mesh": "canonical_mixed_topology",
+              "mesh": "mesh_independent",
               "status": "OPEN",
               "tests": []
             }
@@ -33952,9 +34219,35 @@
         {
           "cells": [
             {
+              "execution": "source_check",
+              "formulation": "shared_infrastructure",
+              "mesh": "mesh_independent",
+              "status": "PARTIAL",
+              "tests": [
+                {
+                  "boundary": "Delany-Bazley and sampled impedance tables lower into their acoustic boundaries; the other input forms (film coefficient, CSV samples, species, porous, lubrication) are separate.",
+                  "line": 58,
+                  "name": "delany_bazley_and_sampled_impedance_tables_lower_into_their_boundaries",
+                  "package": "runmat-analysis-language",
+                  "result": "passed",
+                  "source": "crates/runmat-analysis/language/tests/impedance_tables.rs",
+                  "target": "Integration(\"impedance_tables\")"
+                },
+                {
+                  "boundary": "Impedance tables reject unknown models, wrong quantities and unsorted samples.",
+                  "line": 113,
+                  "name": "impedance_tables_reject_unknown_models_quantities_and_unsorted_samples",
+                  "package": "runmat-analysis-language",
+                  "result": "passed",
+                  "source": "crates/runmat-analysis/language/tests/impedance_tables.rs",
+                  "target": "Integration(\"impedance_tables\")"
+                }
+              ]
+            },
+            {
               "execution": "public_study",
               "formulation": "shared_infrastructure",
-              "mesh": "canonical_mixed_topology",
+              "mesh": "mesh_independent",
               "status": "OPEN",
               "tests": []
             }
@@ -34000,7 +34293,7 @@
         }
       ],
       "open": 12,
-      "partial": 3,
+      "partial": 5,
       "pass": 0,
       "tagged": 0,
       "title": "Authored language surface the published studies rely on"
@@ -37926,10 +38219,10 @@
   "schema_version": 1,
   "tests_run": true,
   "totals": {
-    "cells": 3677,
-    "fail": 18,
-    "open": 3338,
-    "partial": 321,
+    "cells": 3680,
+    "fail": 21,
+    "open": 3329,
+    "partial": 330,
     "pass": 0,
     "tagged": 0
   }

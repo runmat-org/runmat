@@ -1,6 +1,6 @@
 # FEA-MESH-EXECUTION-001: Deterministic, distributed and bounded meshing
 
-0 PASS, 4 PARTIAL, 1 FAIL, 17 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 4 PARTIAL, 2 FAIL, 17 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## worker_batches
 
@@ -92,5 +92,6 @@ Evidence kind: PerformanceMeasurement. Criterion: A versioned performance and re
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
+| shared_infrastructure | canonical_mixed_topology | source_check | FAIL | `runmat-analysis-qualification[test:release_checks]::meshing_conformance_catalog_validates` (crates/runmat-analysis/qualification/tests/release_checks.rs:73) - The meshing conformance catalog validator passes (15 cases covering the 16 required feature classes); the SLO report freshness and the other validators are sepa...<br>`runmat-analysis-qualification[test:release_checks]::meshing_corpus_catalog_validates` (crates/runmat-analysis/qualification/tests/release_checks.rs:82) - The meshing corpus validator passes: the fixture inventory matches the registered corpus.<br>`runmat-analysis-qualification[test:release_checks]::meshing_differential_catalog_validates` (crates/runmat-analysis/qualification/tests/release_checks.rs:91) - The meshing differential catalog validator passes (independent mesher cases dispositioned).<br>`runmat-analysis-qualification[test:release_checks]::meshing_reliability_catalog_anchors_exist` (crates/runmat-analysis/qualification/tests/release_checks.rs:101) - The meshing reliability catalog validator passes: every reliability control (budgets, cancellation, atomic writes, restart, worker loss, stale publication) anch... |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 

@@ -1,6 +1,6 @@
 # FEA-AUTHORING-CUTOVER-001: Complete authoring surface and one compiler authority
 
-0 PASS, 0 PARTIAL, 0 FAIL, 35 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 PARTIAL, 1 FAIL, 34 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## surface_inventory
 
@@ -8,7 +8,7 @@ Evidence kind: SemanticRealization. Criterion: Complete source-authoring admissi
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | OPEN |  |
+| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-qualification[test:release_checks]::language_surface_ledger_has_no_unreviewed_field` (crates/runmat-analysis/qualification/tests/release_checks.rs:63) - scripts/fea/check-language-surface-ledger.mjs passes: every accepted field and variant of the authoring surface has a reviewed disposition in the ledger; semant... |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
