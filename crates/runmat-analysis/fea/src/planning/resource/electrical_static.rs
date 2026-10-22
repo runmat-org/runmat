@@ -23,6 +23,9 @@ pub struct PreparedElectricalStaticResourceFacts {
     pub receipt_output: PreparedOutputResourceFacts,
     pub state_profiles_output: PreparedOutputResourceFacts,
     pub output_set: PreparedOutputSetResourceFacts,
+    /// Memory this machine admits for work (the shared machine-capacity authority), or, when a
+    /// plan is replayed, the solver budget the plan recorded.
+    pub machine_memory_bytes: u64,
 }
 
 const LIMITS: CanonicalLimits = CanonicalLimits::new(usize::MAX, usize::MAX, usize::MAX, 64);
@@ -302,13 +305,20 @@ pub fn build_electrical_static_resource_plan(
     // the solve then factors directly when the exact symbolic factor fits beside the persistent
     // state within the ceiling, and otherwise runs algebraic-multigrid preconditioned CG.
     let proof = admission.resident_bytes_upper_bound.0;
-    let ceiling = step.accuracy.resources.maximum_resident_bytes;
-    let direct = electrical_direct_solve(persistent, envelope.factor_resident_limit(), ceiling);
-    let solve = if direct {
-        envelope.factor_resident_limit()
-    } else {
-        iterative_solve_bytes(nodes, support)?
-    };
+    // The effective budget: the authored ceiling, bounded by what this machine admits.
+    let budget = step
+        .accuracy
+        .resources
+        .maximum_resident_bytes
+        .min(prepared.machine_memory_bytes);
+    let iterative = iterative_solve_bytes(nodes, support)?;
+    let direct = electrical_direct_solve(
+        persistent,
+        &envelope,
+        iterative_solve_flops(nodes, support),
+        budget,
+    );
+    let solve = if direct { envelope.factor_resident_limit() } else { iterative };
     tracing::info!(
         nodes,
         elements,
@@ -327,10 +337,11 @@ pub fn build_electrical_static_resource_plan(
         direct,
         "electrical static reservation components (bytes)"
     );
-    // Support preparation precedes assembly; the proof and the solve follow it.
+    // Support preparation precedes assembly; the proof completes and releases its graph before
+    // the solve starts, so the three are successive phases.
     let reservation = add(
         persistent,
-        support_preparation_bytes(mesh)?.max(add(proof, solve)?),
+        support_preparation_bytes(mesh)?.max(proof).max(solve),
     )?;
     let source = workload.identity().map_err(invalid)?;
     build_resource_plan(FeaResourcePlanningInput {
@@ -345,6 +356,7 @@ pub fn build_electrical_static_resource_plan(
             numerical_reservation_bytes: ByteCount(reservation),
             solver_admission: admission,
             direct_solve: direct,
+            solver_memory_budget: ByteCount(budget),
             inputs: prepared.inputs,
             result_output: prepared.result_output,
             receipt_output: prepared.receipt_output,
@@ -369,11 +381,27 @@ pub fn build_electrical_static_resource_plan(
     })
 }
 
-/// The electrical solve factors directly when the exact symbolic factor and the persistent
-/// state fit within 70 % of the resource ceiling; otherwise it runs AMG-preconditioned CG.
-/// The plan records the choice, so the solve does not depend on the executing host's memory.
-fn electrical_direct_solve(persistent: u64, factor: u64, ceiling: u64) -> bool {
-    persistent.saturating_add(factor) as f64 <= 0.7 * ceiling as f64
+/// The electrical solve factors directly when the factor and the persistent state fit within
+/// 70 % of the effective budget and the factorization's estimated work is below that of
+/// AMG-preconditioned CG; otherwise it runs AMG-preconditioned CG. The plan records the choice and
+/// the budget, so a replay solves exactly as planned, whatever the executing host's memory.
+fn electrical_direct_solve(
+    persistent: u64,
+    envelope: &CoercivityWorkEnvelope,
+    iterative_flops: u64,
+    budget: u64,
+) -> bool {
+    persistent.saturating_add(envelope.factor_resident_limit()) as f64 <= 0.7 * budget as f64
+        && envelope.factor_flop_limit() <= iterative_flops
+}
+
+/// AMG-PCG work: about 100 iterations, each applying the operator and a V-cycle of roughly
+/// four operator-complexity applications (2 flops per stored coupling).
+fn iterative_solve_flops(nodes: u64, entries: u64) -> u64 {
+    entries
+        .saturating_mul(2 * 5)
+        .saturating_add(nodes.saturating_mul(20))
+        .saturating_mul(100)
 }
 
 /// AMG hierarchy (operator complexity, prolongators and level vectors) plus CG workspace for

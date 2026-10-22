@@ -33,8 +33,10 @@ pub(crate) struct CoercivityWorkEnvelope {
     factor_nonzero_limit: u64,
     update_limit: u64,
     resident_bytes_limit: u64,
-    /// Resident peak of a sparse Cholesky factorization of the pattern (with headroom).
+    /// Resident peak and floating point work of a sparse Cholesky factorization of the pattern
+    /// (with headroom).
     factor_resident_limit: u64,
+    factor_flop_limit: u64,
     /// Graph-count budgets of the anchored local-energy proof (independent of factorization).
     energy_operation_limit: u64,
     energy_resident_limit: u64,
@@ -88,6 +90,8 @@ impl CoercivityWorkEnvelope {
                 .max(energy_resident_limit),
             factor_resident_limit: with_headroom(estimate.peak_bytes())
                 .ok_or(CoercivityError::WorkOverflow)?,
+            factor_flop_limit: with_headroom(flop_count(estimate))
+                .ok_or(CoercivityError::WorkOverflow)?,
         })
     }
 
@@ -105,6 +109,9 @@ impl CoercivityWorkEnvelope {
     }
     pub(crate) fn factor_resident_limit(self) -> u64 {
         self.factor_resident_limit
+    }
+    pub(crate) fn factor_flop_limit(self) -> u64 {
+        self.factor_flop_limit
     }
     pub(crate) fn energy_operation_limit(self) -> u64 {
         self.energy_operation_limit

@@ -27,6 +27,7 @@ pub fn prepare_electrical_static_inputs(
     mesh: &SolverMeshArtifact,
     policy: AnalysisOutputPolicy,
     local_execution: LocalExecutionPlan,
+    machine_memory_bytes: u64,
 ) -> AnalysisBridgeResult<PreparedElectricalStaticInputs> {
     let result_output = projected_result(workload, mesh, policy)?;
     let workload_objects = prepare_analysis_objects(
@@ -61,6 +62,7 @@ pub fn prepare_electrical_static_inputs(
             )?,
             state_profiles_output: projected_state_profiles(workload, mesh, policy)?,
             output_set: projected_output_set_resource_facts(),
+            machine_memory_bytes,
         },
     )?;
     Ok(PreparedElectricalStaticInputs {
@@ -128,6 +130,13 @@ pub fn rederive_electrical_static_resource_plan(
         .find(|input| input.manifest.kind == ResourcePlan)
         .ok_or_else(|| invalid("electrical resource plan missing"))?;
     let imported = FeaResourcePlan::from_canonical_bytes(&input.payload())?;
+    // A replay solves under the budget the plan recorded, not this host's memory.
+    let runmat_analysis_fea::planning::resource::FeaResourceDemand::ElectricalStatic(demand) =
+        &imported.input.demand
+    else {
+        return Err(invalid("electrical resource plan has another demand"));
+    };
+    let recorded_budget = demand.solver_memory_budget.0;
     let plan = build_electrical_static_resource_plan(
         workload,
         mesh,
@@ -145,6 +154,7 @@ pub fn rederive_electrical_static_resource_plan(
             )?,
             state_profiles_output: projected_state_profiles(workload, mesh, policy)?,
             output_set: projected_output_set_resource_facts(),
+            machine_memory_bytes: recorded_budget,
         },
     )?;
     if imported != plan || input.manifest.logical_identity != plan.identity.digest() {

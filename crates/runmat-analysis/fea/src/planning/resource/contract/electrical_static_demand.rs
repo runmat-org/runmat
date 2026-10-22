@@ -14,6 +14,8 @@ pub struct ElectricalStaticResourceDemand {
     pub solver_admission: SolverAdmissionResourcePolicy,
     /// The planned solve: sparse Cholesky when true, AMG-preconditioned CG otherwise.
     pub direct_solve: bool,
+    /// The effective memory budget the solve was chosen under: min(authored ceiling, machine).
+    pub solver_memory_budget: ByteCount,
     pub inputs: PreparedInputResourceFacts,
     pub result_output: PreparedOutputResourceFacts,
     pub receipt_output: PreparedOutputResourceFacts,
