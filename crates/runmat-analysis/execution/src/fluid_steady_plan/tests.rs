@@ -276,6 +276,7 @@ fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
         dynamic_viscosity: DynamicViscosity::new(1.0),
         turbulence_intensity: TurbulenceIntensity::new(0.0),
         rheology: None,
+        porous_zones: Vec::new(),
     });
     model.sequence = AnalysisSequence::from_steps(
         "retained-fluid",

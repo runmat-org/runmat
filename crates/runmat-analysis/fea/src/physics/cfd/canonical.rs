@@ -177,6 +177,8 @@ pub struct CanonicalFluidProblem<'a> {
     viscosity: f64,
     /// Shear-rate dependent viscosity law; `viscosity` is then its low-shear reference.
     rheology: Option<runmat_analysis_core::GeneralizedNewtonianLaw>,
+    /// Per cell: the porous-zone linear (μ/K) and quadratic (½ρC₂) resistance coefficients.
+    porous: Vec<Option<(f64, f64)>>,
     boundaries: Vec<boundary::FaceBoundary<'a>>,
     boundary_balance_plan: boundary_balances::BoundaryBalancePlan,
     body_force_n_per_m3: Vec<[f64; 3]>,
@@ -331,6 +333,29 @@ impl<'a> CanonicalFluidProblem<'a> {
         if material.rheology.is_some_and(|law| !law.is_valid()) {
             return Err(CanonicalFluidError::Invalid("generalized-Newtonian viscosity law"));
         }
+        if material
+            .porous_zones
+            .iter()
+            .any(|zone| !zone.law.is_valid() || zone.regions.is_empty())
+        {
+            return Err(CanonicalFluidError::Invalid("porous zone law or regions"));
+        }
+        let porous = topology
+            .cells
+            .iter()
+            .map(|cell| {
+                material
+                    .porous_zones
+                    .iter()
+                    .find(|zone| zone.regions.binary_search(&cell.region).is_ok())
+                    .map(|zone| {
+                        (
+                            viscosity / zone.law.permeability_m2,
+                            0.5 * density * zone.law.inertial_coefficient_per_m,
+                        )
+                    })
+            })
+            .collect::<Vec<_>>();
         if material.turbulence_intensity.ratio != 0.0 {
             return Err(CanonicalFluidError::Unsupported("turbulence closure"));
         }
@@ -365,7 +390,7 @@ impl<'a> CanonicalFluidProblem<'a> {
                 topology.projection_digest,
                 topology.geometry_digest,
                 density,
-                (viscosity, material.rheology),
+                (viscosity, material.rheology, &material.porous_zones),
                 &boundaries,
                 &body_force_n_per_m3,
                 &pressure_reference_pa,
@@ -380,6 +405,7 @@ impl<'a> CanonicalFluidProblem<'a> {
             density,
             viscosity,
             rheology: material.rheology,
+            porous,
             boundaries,
             boundary_balance_plan,
             body_force_n_per_m3,

@@ -103,10 +103,22 @@ fn validate_material(material: &MaterialModel) -> Result<(), AnalysisValidationE
     if let Some(density) = material.mass_density_kg_per_m3 {
         require_positive(material, "mass density", density)?;
     }
-    if material.fluid.is_some() {
-        material
-            .require_incompressible_fluid()
-            .map_err(|error| invalid_material(material, error.to_string()))?;
+    match material.fluid {
+        Some(crate::MaterialFluidModel::PorousMedium { law }) => {
+            if !law.is_valid() {
+                return Err(invalid_material(
+                    material,
+                    "porous medium needs a positive permeability, a nonnegative inertial \
+                     coefficient and a porosity in (0, 1]",
+                ));
+            }
+        }
+        Some(_) => {
+            material
+                .require_incompressible_fluid()
+                .map_err(|error| invalid_material(material, error.to_string()))?;
+        }
+        None => {}
     }
     if let Some(crate::MaterialElasticityModel::IsotropicLinear(mechanical)) = &material.elasticity
     {

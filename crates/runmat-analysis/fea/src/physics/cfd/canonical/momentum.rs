@@ -122,6 +122,16 @@ pub(super) fn assemble_with_time(
             }
         }
     }
+    // Porous-zone resistance, implicit in each component: V (μ/K + ½ρC₂|u|), the quadratic
+    // part Picard-lagged on the current speed.
+    for c in 0..n {
+        if let Some((linear, quadratic)) = p.porous[c] {
+            let coefficient =
+                p.topology.cells[c].volume_m3 * (linear + quadratic * norm(u[c]));
+            a.add(c, c, coefficient);
+            diagonal[c] += coefficient;
+        }
+    }
     if let Some(time) = time {
         for c in 0..n {
             let coefficient = time.coefficient(p, c)?;

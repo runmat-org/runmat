@@ -42,6 +42,7 @@ pub fn material() -> CfdDomain {
         dynamic_viscosity: DynamicViscosity::new(1.0),
         turbulence_intensity: TurbulenceIntensity::new(0.0),
         rheology: None,
+        porous_zones: Vec::new(),
     }
 }
 pub fn policy() -> CanonicalFluidPolicy {

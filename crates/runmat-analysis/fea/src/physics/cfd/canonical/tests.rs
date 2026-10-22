@@ -9,6 +9,7 @@ use super::qualification::fixture;
 mod linear_correction;
 mod mass_flow;
 mod moving;
+mod porous;
 mod pressure_reference;
 mod rheology;
 mod reconstruction;

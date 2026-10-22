@@ -136,7 +136,7 @@ pub use problem::constraint::{
 };
 pub use problem::coordinate_frame::{AxialFrame, CartesianFrame, CoordinateFrame, SphericalFrame};
 pub use problem::domains::{
-    CfdDomain, ElectroThermalDomain, ElectromagneticDomain, MagnetostaticFormulation,
+    CfdDomain, ElectroThermalDomain, ElectromagneticDomain, MagnetostaticFormulation, PorousZone,
     StaticElectricalEquation, ThermalDomain, ThermoMechanicalDomain,
 };
 pub use problem::excitation::{
@@ -164,7 +164,8 @@ pub use problem::materials::{
     IncompressibleNewtonianMaterial, MaterialAcousticModel, MaterialCapability,
     MaterialElasticityModel, MaterialElectricalModel, MaterialFluidModel, MaterialMechanicalModel,
     MaterialModel, MaterialOrthotropicLaminaModel, MaterialPlasticModel, MaterialProvenance,
-    MaterialThermalModel, MechanicalDampingModel, MissingMaterialCapability, SolverMaterialModel,
+    MaterialThermalModel, MechanicalDampingModel, MissingMaterialCapability, PorousMediumLaw,
+    SolverMaterialModel,
 };
 pub use problem::model::{
     AnalysisModel, AnalysisModelId, SolverAnalysisModel, SolverAnalysisSequence,

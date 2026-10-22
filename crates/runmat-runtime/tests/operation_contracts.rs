@@ -455,6 +455,7 @@ fn contract_cht_model(model_id: &str) -> AnalysisModel {
         dynamic_viscosity: runmat_analysis_core::DynamicViscosity::new(1.81e-5),
         turbulence_intensity: runmat_analysis_core::TurbulenceIntensity::new(0.06),
         rheology: None,
+        porous_zones: Vec::new(),
     });
     model
 }
@@ -1326,6 +1327,7 @@ fn analysis_run_cfd_requires_authored_execution_without_proxy_fields() {
         dynamic_viscosity: runmat_analysis_core::DynamicViscosity::new(1.81e-5),
         turbulence_intensity: runmat_analysis_core::TurbulenceIntensity::new(0.06),
         rheology: None,
+        porous_zones: Vec::new(),
     });
     model.boundaries.clear();
     // Explicit signed components are authored by this fixture, never inferred from speed.
@@ -1530,6 +1532,7 @@ fn analysis_run_fsi_contract_requires_an_authored_study() {
         dynamic_viscosity: runmat_analysis_core::DynamicViscosity::new(1.81e-5),
         turbulence_intensity: runmat_analysis_core::TurbulenceIntensity::new(0.06),
         rheology: None,
+        porous_zones: Vec::new(),
     });
     append_inlet_velocity_history(&mut model, "fsi_inlet_velocity", [(0.0, 2.4), (1.0, 4.0)]);
 

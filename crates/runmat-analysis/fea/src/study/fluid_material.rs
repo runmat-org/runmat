@@ -100,6 +100,7 @@ pub fn derive_fluid_cells(
     }
     let mut coefficients = None;
     let mut regions = Vec::new();
+    let mut porous = Vec::new();
     for element in &mesh.topology.volume_elements {
         let Some(owner) = properties.cell_material(element.stable_identity) else {
             if !coupled {
@@ -114,6 +115,14 @@ pub fn derive_fluid_cells(
                 element_id: element.element_id,
             });
         }
+        regions.push(element.region_id.clone());
+        // A porous-zone material is resistance in the flowing fluid, not a second fluid.
+        if let Some(runmat_analysis_core::MaterialFluidModel::PorousMedium { law }) =
+            owner.material.fluid
+        {
+            porous.push((element.region_id.clone(), law));
+            continue;
+        }
         let current = owner.material.require_incompressible_fluid()?;
         if coefficients.is_some_and(|prior| prior != current) {
             return Err(FluidMaterialCompilationError::HeterogeneousCoefficients {
@@ -121,7 +130,6 @@ pub fn derive_fluid_cells(
             });
         }
         coefficients = Some(current);
-        regions.push(element.region_id.clone());
     }
     let coefficients = coefficients.ok_or(FluidMaterialCompilationError::NonCellInventory)?;
     let selection = if coupled {
@@ -145,6 +153,7 @@ pub fn derive_fluid_cells(
         // inferred turbulence closure, velocity/length scale, or material default.
         turbulence_intensity: TurbulenceIntensity::new(0.0),
         rheology: coefficients.rheology,
+        porous_zones: porous_zones(porous)?,
     };
     if model
         .cfd
@@ -158,3 +167,31 @@ pub fn derive_fluid_cells(
 
 #[cfg(test)]
 mod tests;
+
+/// Group porous cells into zones by law; a region carries exactly one law.
+fn porous_zones(
+    mut cells: Vec<(
+        runmat_meshing_core::PersistentEntityId,
+        runmat_analysis_core::PorousMediumLaw,
+    )>,
+) -> Result<Vec<runmat_analysis_core::PorousZone>, FluidMaterialCompilationError> {
+    cells.sort_by(|a, b| a.0.cmp(&b.0));
+    cells.dedup();
+    if cells.windows(2).any(|pair| pair[0].0 == pair[1].0) {
+        return Err(FluidMaterialCompilationError::NonCellInventory);
+    }
+    let mut zones: Vec<runmat_analysis_core::PorousZone> = Vec::new();
+    for (region, law) in cells {
+        match zones.iter_mut().find(|zone| zone.law == law) {
+            Some(zone) => zone.regions.push(region),
+            None => zones.push(runmat_analysis_core::PorousZone {
+                regions: vec![region],
+                law,
+            }),
+        }
+    }
+    for zone in &mut zones {
+        zone.regions.sort();
+    }
+    Ok(zones)
+}
