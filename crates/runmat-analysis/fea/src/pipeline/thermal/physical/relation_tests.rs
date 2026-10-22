@@ -36,6 +36,9 @@ fn convective_left(input: &mut crate::execution::ThermalWorkload, ambient_k: f64
     });
 }
 
+// witness: FEA-THERMAL-DOMAIN-001/constraints @ thermal_steady/tet4|tet10/numerical_kernel; coverage: partial;
+//   boundary: A translation-periodic affine temperature jump reproduces the exact linear profile
+//   and energy closure on Tet4 and Tet10 slabs; steady only, no tie on separate meshes.
 #[test]
 fn temperature_jump_carries_a_linear_profile_through_a_periodic_cell() {
     // The right face sits 20 K above the left one, which exchanges heat with a 300 K film.
@@ -67,6 +70,8 @@ fn temperature_jump_carries_a_linear_profile_through_a_periodic_cell() {
     }
 }
 
+// witness: FEA-THERMAL-DOMAIN-001/constraints @ thermal_steady/tet4/numerical_kernel; coverage: partial;
+//   boundary: A periodic pair anchored only by a convective film settles at the film ambient.
 #[test]
 fn periodic_cell_without_sources_settles_at_the_film_ambient() {
     // No source acts and the right face follows the left one, so the left film holds the
@@ -81,6 +86,9 @@ fn periodic_cell_without_sources_settles_at_the_film_ambient() {
     }
 }
 
+// witness: FEA-THERMAL-DOMAIN-001/constraints @ thermal_steady/tet4|tet10/numerical_kernel; coverage: partial;
+//   boundary: Radiation Newton with a periodic jump matches the independent scalar balance of film
+//   and gray-surface radiation and the exact linear profile on Tet4 and Tet10; steady only.
 #[test]
 fn radiating_periodic_cell_balances_film_and_radiation_through_the_jump() {
     // The right face radiates and sits 20 K above the left one, which exchanges heat with a
