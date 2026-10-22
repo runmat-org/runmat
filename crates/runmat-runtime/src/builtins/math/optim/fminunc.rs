@@ -326,7 +326,12 @@ fn bool_value(field: &str, value: &Value) -> BuiltinResult<bool> {
         Value::String(s) => bool_from_text(field, s),
         Value::StringArray(sa) if sa.data().len() == 1 => bool_from_text(field, &sa.data()[0]),
         Value::CharArray(chars) if chars.rows == 1 => {
-            let text: String = chars.data().iter().collect();
+            let text = runmat_value::decode_utf16_code_units(chars.data()).map_err(|error| {
+                fminunc_error_with_detail(
+                    &FMINUNC_ERROR_INVALID_ARGUMENT,
+                    format!("option {field} contains {error}"),
+                )
+            })?;
             bool_from_text(field, &text)
         }
         other => Err(fminunc_error_with_detail(

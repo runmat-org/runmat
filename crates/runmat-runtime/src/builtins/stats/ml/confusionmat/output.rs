@@ -69,7 +69,9 @@ pub(super) fn labels_to_value(labels: &[Label], kind: LabelKind) -> BuiltinResul
                 StringArray::new(values, vec![1, labels.len()])
                     .map_err(|err| internal(format!("confusionmat: {err}")))?,
             );
-            crate::builtins::table::categorical_from_args(vec![value_array, categories])
+            crate::builtins::table::categorical_from_args(
+                crate::call::FunctionArgumentView::from_slice(&[value_array, categories]),
+            )
         }
     }
 }
@@ -84,26 +86,30 @@ pub(super) fn text_labels(labels: &[Label]) -> Vec<String> {
         .collect()
 }
 
-pub(super) fn char_rows(array: &CharArray) -> Vec<String> {
+pub(super) fn char_rows(array: &CharArray) -> BuiltinResult<Vec<String>> {
     let mut rows = Vec::with_capacity(array.rows);
     for row in 0..array.rows {
         let start = row * array.cols;
-        rows.push(array.data()[start..start + array.cols].iter().collect());
+        rows.push(
+            runmat_value::decode_utf16_code_units(&array.data()[start..start + array.cols])
+                .map_err(|source| internal(format!("confusionmat: {source}")))?,
+        );
     }
-    rows
+    Ok(rows)
 }
 
 pub(super) fn char_array_from_rows(rows: &[String]) -> BuiltinResult<CharArray> {
     let width = rows
         .iter()
-        .map(|row| row.chars().count())
+        .map(|row| row.encode_utf16().count())
         .max()
         .unwrap_or(0);
     let mut data = Vec::with_capacity(rows.len() * width);
     for row in rows {
-        let mut chars = row.chars().collect::<Vec<_>>();
-        chars.resize(width, ' ');
-        data.extend(chars);
+        let units = row.encode_utf16().count();
+        data.extend(row.chars());
+        data.extend(std::iter::repeat_n(' ', width - units));
     }
-    CharArray::new(data, rows.len(), width).map_err(|err| internal(format!("confusionmat: {err}")))
+    CharArray::from_unicode_scalars(data, rows.len(), width)
+        .map_err(|err| internal(format!("confusionmat: {err}")))
 }

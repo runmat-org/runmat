@@ -14,7 +14,7 @@ impl MovingOptions {
         let mut omit_nan = false;
         let mut idx = 0;
         while idx < args.len() {
-            if let Some(text) = scalar_text(&args[idx]) {
+            if let Some(text) = scalar_text(&args[idx])? {
                 match text.to_ascii_lowercase().as_str() {
                     "omitnan" | "omitmissing" => omit_nan = true,
                     "includenan" | "includemissing" => omit_nan = false,

@@ -18,6 +18,39 @@ pub enum MirRootStep {
 }
 
 impl MirPlace {
+    /// Private selector regions, in root-to-leaf evaluation order. The caller
+    /// owns the phase in which the destination is prepared.
+    pub fn visit_selector_regions(
+        &self,
+        mut visitor: impl FnMut(crate::MirExpressionRegionRef<'_>),
+    ) {
+        fn visit(place: &MirPlace, visitor: &mut dyn FnMut(crate::MirExpressionRegionRef<'_>)) {
+            match place {
+                MirPlace::Local(_) | MirPlace::Binding(_) => {}
+                MirPlace::Member(base, _) | MirPlace::DynamicMember(base, _) => {
+                    visit(base, visitor)
+                }
+                MirPlace::Index(base, indexing) => {
+                    visit(base, visitor);
+                    indexing.visit_direct_expression_regions_dyn(visitor);
+                }
+            }
+        }
+        visit(self, &mut visitor);
+    }
+
+    pub fn has_expanding_selectors(&self) -> bool {
+        match self {
+            Self::Local(_) | Self::Binding(_) => false,
+            Self::Member(base, _) | Self::DynamicMember(base, _) => base.has_expanding_selectors(),
+            Self::Index(base, indexing) => {
+                base.has_expanding_selectors()
+                    || indexing.components.iter().any(|component| {
+                        matches!(component, crate::MirIndexComponent::Expansion(_))
+                    })
+            }
+        }
+    }
     pub fn root_local(&self) -> Option<MirLocalId> {
         match self {
             Self::Local(local) => Some(*local),

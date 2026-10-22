@@ -168,21 +168,25 @@ pub(super) fn parse_string_vector(value: &Value) -> Result<Vec<String>, String> 
             .iter()
             .map(|text| text.as_str().to_owned())
             .collect()),
-        Value::CharArray(chars) if chars.rows == 1 => Ok(vec![chars.data().iter().collect()]),
-        Value::CharArray(chars) => Ok((0..chars.rows)
+        Value::CharArray(chars) if chars.rows == 1 => {
+            Ok(vec![runmat_value::decode_utf16_code_units(chars.data())
+                .map_err(|source| source.to_string())?])
+        }
+        Value::CharArray(chars) => (0..chars.rows)
             .map(|row| {
-                (0..chars.cols)
-                    .map(|col| chars.data()[row + col * chars.rows])
-                    .collect::<String>()
-                    .trim_end()
-                    .to_string()
+                Ok(runmat_value::decode_utf16_code_units(
+                    &chars.data()[row * chars.cols..(row + 1) * chars.cols],
+                )
+                .map_err(|source| source.to_string())?
+                .trim_end()
+                .to_owned())
             })
-            .collect()),
+            .collect(),
         Value::Cell(cell) if is_vector_shape(&cell.shape) => cell
             .data()
             .iter()
             .map(|entry| {
-                scalar_text(entry).ok_or_else(|| {
+                scalar_text(entry)?.ok_or_else(|| {
                     "expected cell array of string or character node names".to_string()
                 })
             })
@@ -193,19 +197,22 @@ pub(super) fn parse_string_vector(value: &Value) -> Result<Vec<String>, String> 
     }
 }
 
-fn is_vector_shape(shape: &[usize]) -> bool {
+pub(super) fn is_vector_shape(shape: &[usize]) -> bool {
     shape.len() <= 2 && (shape.len() < 2 || shape[0] <= 1 || shape[1] <= 1)
 }
 
-pub(super) fn scalar_text(value: &Value) -> Option<String> {
-    match value {
+pub(super) fn scalar_text(value: &Value) -> Result<Option<String>, String> {
+    Ok(match value {
         Value::String(text) => Some(text.as_str().to_owned()),
         Value::StringArray(array) if array.data().len() == 1 => {
             Some(array.data()[0].as_str().to_owned())
         }
-        Value::CharArray(chars) if chars.rows == 1 => Some(chars.data().iter().collect()),
+        Value::CharArray(chars) if chars.rows == 1 => Some(
+            runmat_value::decode_utf16_code_units(chars.data())
+                .map_err(|source| source.to_string())?,
+        ),
         _ => None,
-    }
+    })
 }
 
 pub(super) fn canonical(text: &str) -> String {

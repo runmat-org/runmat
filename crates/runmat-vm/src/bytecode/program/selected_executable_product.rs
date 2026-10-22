@@ -18,6 +18,22 @@ use runmat_hir::FunctionId;
 
 use super::FunctionRegistry;
 
+/// Why an exact selected product could not be attached to current definitions.
+/// The fingerprint stage retains its original typed cause for source tracing.
+#[derive(Debug, thiserror::Error)]
+pub enum SelectedExecutableAttachmentError {
+    #[error("selected executable body fingerprints are invalid: {0}")]
+    Fingerprints(#[source] crate::RetainedCallableStageError),
+    #[error("selected executable has no matching current definition {0:?}")]
+    MissingDefinition(FunctionId),
+    #[error("selected executable body {0:?} has no portable origin")]
+    MissingOrigin(FunctionId),
+    #[error("selected executable body {0:?} differs from definition/source authority")]
+    AuthorityMismatch(FunctionId),
+    #[error("selected executable body {0:?} would replace an exact prior product")]
+    PriorProductConflict(FunctionId),
+}
+
 #[path = "selected_executable_product/code.rs"]
 mod code;
 pub use code::SelectedExecutableCode;
@@ -580,7 +596,175 @@ impl SelectedExecutableProduct {
     }
 }
 
+fn validate_product_source_and_prior(
+    body: &super::FunctionBytecode,
+    id: FunctionId,
+    product: &Rc<SelectedExecutableProduct>,
+) -> Result<(), SelectedExecutableAttachmentError> {
+    if body
+        .selected_source_owner
+        .as_ref()
+        .is_none_or(|owner| !owner.same_issuance(product.source_owner()))
+        || !body
+            .source_id
+            .and_then(super::BytecodeSourceRef::runtime)
+            .is_some_and(|source| product.source_owner().owns_source(source))
+    {
+        return Err(SelectedExecutableAttachmentError::AuthorityMismatch(id));
+    }
+    if body
+        .selected_executable_product
+        .as_ref()
+        .is_some_and(|existing| {
+            existing.full_digest() != product.full_digest()
+                || !existing
+                    .source_owner()
+                    .same_issuance(product.source_owner())
+                || existing.foreign_basis() != product.foreign_basis()
+                || match (existing.interop_receipt(), product.interop_receipt()) {
+                    (None, None) => false,
+                    (Some(left), Some(right)) => !left.same_selected_admission(right),
+                    _ => true,
+                }
+        })
+    {
+        return Err(SelectedExecutableAttachmentError::PriorProductConflict(id));
+    }
+    Ok(())
+}
+
+fn validate_selected_product_body(
+    body: &super::FunctionBytecode,
+    id: FunctionId,
+    fingerprint: Option<&(FunctionBindingOrigin, String)>,
+    product: &Rc<SelectedExecutableProduct>,
+) -> Result<(), SelectedExecutableAttachmentError> {
+    let origin = body
+        .binding_origin
+        .ok_or(SelectedExecutableAttachmentError::MissingOrigin(id))?;
+    if origin.program != product.code.program
+        || fingerprint.is_none_or(|(checked, value)| {
+            *checked != origin || product.code.body_fingerprints.get(&origin) != Some(value)
+        })
+    {
+        return Err(SelectedExecutableAttachmentError::AuthorityMismatch(id));
+    }
+    validate_product_source_and_prior(body, id, product)
+}
+
 impl FunctionRegistry {
+    /// Publish an already checked selected product into the named session
+    /// registry. The executing registry is the compiler-selected complete
+    /// graph; the named registry deliberately omits private companions.
+    /// Recheck the complete graph here, then prove every named body is the
+    /// same definition owner and semantic body before transferring the
+    /// product. No missing local can be supplied by a later numeric slot.
+    pub fn attach_published_selected_executable_product(
+        &mut self,
+        ids: impl IntoIterator<Item = FunctionId>,
+        executing: &FunctionRegistry,
+        product: Rc<SelectedExecutableProduct>,
+    ) -> Result<(), SelectedExecutableAttachmentError> {
+        let ids = ids.into_iter().collect::<Vec<_>>();
+        let mut selected_bodies = HashMap::with_capacity(product.code.body_fingerprints.len());
+        let mut selected_origins = HashSet::with_capacity(product.code.body_fingerprints.len());
+        for body in executing.selected_execution_bodies() {
+            let Some(origin) = body.binding_origin else {
+                continue;
+            };
+            if !product.code.body_fingerprints.contains_key(&origin) {
+                continue;
+            }
+            if !selected_origins.insert(origin)
+                || selected_bodies.insert(body.function, body).is_some()
+            {
+                return Err(SelectedExecutableAttachmentError::Fingerprints(
+                    crate::RetainedCallableStageError::DuplicateOrigin,
+                ));
+            }
+        }
+        let mut selected_ids = selected_bodies.keys().copied().collect::<Vec<_>>();
+        selected_ids.sort_by_key(|id| id.0);
+        let selected_fingerprints = executing
+            .selected_runtime_body_fingerprints_with_imports(
+                &selected_ids,
+                &product.fingerprint_imports(),
+            )
+            .map_err(SelectedExecutableAttachmentError::Fingerprints)?;
+        if selected_origins.len() != product.code.body_fingerprints.len() {
+            return Err(SelectedExecutableAttachmentError::Fingerprints(
+                crate::RetainedCallableStageError::IncompleteDefinitionGraph,
+            ));
+        }
+        for id in selected_ids {
+            let selected = selected_bodies
+                .get(&id)
+                .copied()
+                .ok_or(SelectedExecutableAttachmentError::MissingDefinition(id))?;
+            validate_selected_product_body(selected, id, selected_fingerprints.get(&id), &product)?;
+            if selected
+                .selected_executable_product
+                .as_ref()
+                .is_none_or(|attached| !Rc::ptr_eq(attached, &product))
+            {
+                return Err(SelectedExecutableAttachmentError::AuthorityMismatch(id));
+            }
+        }
+        for id in &ids {
+            let selected = selected_bodies
+                .get(id)
+                .copied()
+                .ok_or(SelectedExecutableAttachmentError::MissingDefinition(*id))?;
+            let published = self
+                .functions
+                .get(id)
+                .ok_or(SelectedExecutableAttachmentError::MissingDefinition(*id))?;
+            let origin = selected
+                .binding_origin
+                .ok_or(SelectedExecutableAttachmentError::MissingOrigin(*id))?;
+            let selected_body =
+                super::semantic_fingerprint::semantic_definition_fingerprint(selected)
+                    .map_err(|_| SelectedExecutableAttachmentError::AuthorityMismatch(*id))?;
+            let published_body =
+                super::semantic_fingerprint::semantic_definition_fingerprint_with_source(
+                    published,
+                    selected.source_id,
+                )
+                .map_err(|_| SelectedExecutableAttachmentError::AuthorityMismatch(*id))?;
+            let source_alias_matches = selected
+                .source_id
+                .and_then(super::BytecodeSourceRef::runtime)
+                .zip(
+                    published
+                        .source_id
+                        .and_then(super::BytecodeSourceRef::runtime),
+                )
+                .and_then(|(issued, durable)| {
+                    product
+                        .source_owner()
+                        .source_ordinal_for(issued)
+                        .zip(product.source_owner().source_ordinal_for(durable))
+                })
+                .is_some_and(|(issued, durable)| issued == durable);
+            if selected.function != published.function
+                || !Arc::ptr_eq(&selected.definition_owner, &published.definition_owner)
+                || published.binding_origin != Some(origin)
+                || selected_body != published_body
+                || !source_alias_matches
+            {
+                return Err(SelectedExecutableAttachmentError::AuthorityMismatch(*id));
+            }
+            validate_product_source_and_prior(published, *id, &product)?;
+        }
+        for id in ids {
+            self.functions
+                .get_mut(&id)
+                .expect("published selected executable body was validated")
+                .selected_executable_product = Some(Rc::clone(&product));
+        }
+        Ok(())
+    }
+
     /// Capture the complete immutable import graph on only the freshly
     /// selected current definitions. Reused prior bodies keep their capture.
     pub fn attach_current_selected_static_capture(
@@ -629,55 +813,17 @@ impl FunctionRegistry {
         &mut self,
         ids: impl IntoIterator<Item = FunctionId>,
         product: Rc<SelectedExecutableProduct>,
-    ) -> Result<(), &'static str> {
+    ) -> Result<(), SelectedExecutableAttachmentError> {
         let ids = ids.into_iter().collect::<Vec<_>>();
         let selected_fingerprints = self
             .selected_runtime_body_fingerprints_with_imports(&ids, &product.fingerprint_imports())
-            .map_err(|_| "selected executable body fingerprints are invalid")?;
+            .map_err(SelectedExecutableAttachmentError::Fingerprints)?;
         for id in &ids {
             let body = self
                 .functions
                 .get(id)
-                .ok_or("selected executable has no matching current definition")?;
-            let origin = body
-                .binding_origin
-                .ok_or("selected executable body has no portable origin")?;
-            if origin.program != product.code.program
-                || selected_fingerprints
-                    .get(id)
-                    .is_none_or(|(checked, fingerprint)| {
-                        *checked != origin
-                            || product.code.body_fingerprints.get(&origin) != Some(fingerprint)
-                    })
-                || body
-                    .selected_source_owner
-                    .as_ref()
-                    .is_none_or(|owner| !owner.same_issuance(product.source_owner()))
-                || !body
-                    .source_id
-                    .and_then(super::BytecodeSourceRef::runtime)
-                    .is_some_and(|source| product.source_owner().owns_source(source))
-            {
-                return Err("selected executable differs from definition/source authority");
-            }
-            if body
-                .selected_executable_product
-                .as_ref()
-                .is_some_and(|existing| {
-                    existing.full_digest() != product.full_digest()
-                        || !existing
-                            .source_owner()
-                            .same_issuance(product.source_owner())
-                        || existing.foreign_basis() != product.foreign_basis()
-                        || match (existing.interop_receipt(), product.interop_receipt()) {
-                            (None, None) => false,
-                            (Some(left), Some(right)) => !left.same_selected_admission(right),
-                            _ => true,
-                        }
-                })
-            {
-                return Err("selected executable would replace an exact prior product");
-            }
+                .ok_or(SelectedExecutableAttachmentError::MissingDefinition(*id))?;
+            validate_selected_product_body(body, *id, selected_fingerprints.get(id), &product)?;
         }
         for id in ids {
             self.functions
@@ -686,5 +832,33 @@ impl FunctionRegistry {
                 .selected_executable_product = Some(Rc::clone(&product));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod attachment_error_tests {
+    use std::error::Error;
+
+    use super::SelectedExecutableAttachmentError;
+    use crate::RetainedCallableStageError;
+
+    #[test]
+    fn fingerprint_rejection_retains_its_typed_stage_source() {
+        let error = SelectedExecutableAttachmentError::Fingerprints(
+            RetainedCallableStageError::MissingPortableSource,
+        );
+        assert!(matches!(
+            &error,
+            SelectedExecutableAttachmentError::Fingerprints(
+                RetainedCallableStageError::MissingPortableSource
+            )
+        ));
+        assert!(error.source().is_some_and(|source| {
+            source
+                .downcast_ref::<RetainedCallableStageError>()
+                .is_some_and(|source| {
+                    matches!(source, RetainedCallableStageError::MissingPortableSource)
+                })
+        }));
     }
 }

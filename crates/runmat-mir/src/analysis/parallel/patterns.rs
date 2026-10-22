@@ -107,6 +107,7 @@ fn statement_preserves_slice_pattern(
     writes: &mut usize,
 ) -> bool {
     match &statement.kind {
+        MirStmtKind::PrepareFixedAssignment(_) | MirStmtKind::PreparedAssign { .. } => false,
         MirStmtKind::Assign { place, value } => {
             place_preserves_slice_pattern(place, context, access, writes)
                 && rvalue_preserves_slice_pattern(value, context, access)

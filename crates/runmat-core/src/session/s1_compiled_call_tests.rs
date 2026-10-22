@@ -8,6 +8,156 @@ use runmat_execution::{
 use runmat_runtime::context::{RuntimePlacementService, RuntimeWholeWorkSelection};
 use std::cell::RefCell;
 
+#[cfg(not(target_arch = "wasm32"))]
+struct ControlledReadyPlacement {
+    actual: Rc<runmat_accelerate::placement::PlacementSession>,
+    winner: runmat_execution::ExecutionCandidateKind,
+    offered: RefCell<Vec<Vec<runmat_execution::ExecutionCandidateKind>>>,
+    chosen: RefCell<Vec<runmat_execution::ExecutionCandidateKind>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl RuntimePlacementService for ControlledReadyPlacement {
+    fn whole_work_host_service_revision(
+        &self,
+        program: Option<runmat_execution::ProgramRevision>,
+        host: runmat_execution::Digest,
+    ) -> Option<PlacementRevision> {
+        self.actual.whole_work_host_service_revision(program, host)
+    }
+
+    fn select_whole_work(
+        &self,
+        mut request: WholeWorkPlacementRequest,
+    ) -> Result<RuntimeWholeWorkSelection, RuntimeError> {
+        if request.signature.operation == "core.ready-invocation" {
+            self.offered
+                .borrow_mut()
+                .push(request.candidates.iter().map(|item| item.kind).collect());
+            for item in &mut request.candidates {
+                item.cost = runmat_execution::CandidateCostEvidence::Estimated(
+                    runmat_execution::ExecutionCostEstimate {
+                        components: runmat_execution::ExecutionCostComponents {
+                            execution_ns: if item.kind == self.winner {
+                                1_000
+                            } else {
+                                100_000
+                            },
+                            ..Default::default()
+                        },
+                        scratch_bytes: None,
+                        confidence: runmat_execution::EstimateConfidence::Exact,
+                        source: runmat_execution::EstimateSource::Synthetic,
+                    },
+                );
+            }
+        }
+        let selected = RuntimePlacementService::select_whole_work(self.actual.as_ref(), request)?;
+        self.chosen
+            .borrow_mut()
+            .push(selected.decision.selected.kind);
+        Ok(selected)
+    }
+
+    // Controlled costs are the oracle. Real-time measurements must not replace
+    // them and make the deterministic winner depend on machine noise.
+    fn observe_selected_whole_work(
+        &self,
+        _: &RuntimeWholeWorkSelection,
+        _: u64,
+        _: WholeWorkObservationOutcome,
+    ) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    fn plan(&self, request: PlacementPlanRequest) -> Result<PlacementDecision, RuntimeError> {
+        RuntimePlacementService::plan(self.actual.as_ref(), request)
+    }
+    fn observe(&self, feedback: PlacementFeedback) -> Result<(), RuntimeError> {
+        RuntimePlacementService::observe(self.actual.as_ref(), feedback)
+    }
+    fn invalidate(&self, invalidation: PlacementInvalidation) {
+        RuntimePlacementService::invalidate(self.actual.as_ref(), invalidation)
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn controlled_ready_routes(winner: runmat_execution::ExecutionCandidateKind, profileless: bool) {
+    use runmat_execution::ExecutionCandidateKind;
+    let mut session = RunMatSession::with_options(true, false).expect("Core session");
+    session.set_native_tiering_config_for_testing(runmat_jit::tiering::TieringConfig {
+        generic_hot_threshold: 1,
+        specialized_hot_threshold: 2,
+        max_profile_bytes: if profileless { 1 } else { 64 * 1024 },
+        deterministic: true,
+        ..Default::default()
+    });
+    let unit = futures::executor::block_on(session.compile_executable_unit(
+        crate::ExecutableSource::new(
+            "all-ready-routes@1",
+            "allReady.m",
+            "function y = allReady(x)\ny=x+1;\nend\n",
+        ),
+        None,
+    ))
+    .expect("compile all-ready fixture");
+    let service = Rc::new(ControlledReadyPlacement {
+        actual: session.placement_session.clone(),
+        winner,
+        offered: RefCell::new(Vec::new()),
+        chosen: RefCell::new(Vec::new()),
+    });
+    let ports = session
+        .runtime_context
+        .service_ports()
+        .clone()
+        .with_placement(service.clone());
+    session.runtime_context = session.runtime_context.clone().with_service_ports(ports);
+    for _ in 0..12 {
+        let output = futures::executor::block_on(session.invoke_executable(
+            &unit,
+            crate::ProcedureInvocation {
+                target: crate::ProcedureTarget::Function("allReady".into()),
+                arguments: crate::ProcedureArguments::Source(vec![Value::Num(4.0)]),
+                requested_outputs: 1,
+            },
+            &crate::InvocationControl::default(),
+        ))
+        .expect("selected ready route executes");
+        assert_eq!(output.as_slice(), &[Value::Num(5.0)]);
+    }
+    let offered = service.offered.borrow();
+    let last = offered.last().expect("ready routes reach placement");
+    assert!(last.contains(&ExecutionCandidateKind::SharedRuntime));
+    assert!(last.contains(&ExecutionCandidateKind::GenericNativeCpu));
+    assert_eq!(
+        last.contains(&ExecutionCandidateKind::SpecializedNativeCpu),
+        !profileless
+    );
+    assert_eq!(service.chosen.borrow().last(), Some(&winner));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn all_published_ready_routes_compete_and_each_can_win() {
+    use runmat_execution::ExecutionCandidateKind;
+    for winner in [
+        ExecutionCandidateKind::SharedRuntime,
+        ExecutionCandidateKind::GenericNativeCpu,
+        ExecutionCandidateKind::SpecializedNativeCpu,
+    ] {
+        controlled_ready_routes(winner, false);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn profileless_ready_generic_still_competes_with_interpreter() {
+    controlled_ready_routes(
+        runmat_execution::ExecutionCandidateKind::GenericNativeCpu,
+        true,
+    );
+}
+
 struct RecordingPlacement {
     actual: Rc<runmat_accelerate::placement::PlacementSession>,
     decisions: RefCell<Vec<WholeWorkDecision>>,

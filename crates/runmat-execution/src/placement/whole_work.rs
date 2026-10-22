@@ -37,26 +37,23 @@ pub struct WholeWorkCandidate {
     pub transactional_results: bool,
 }
 
-impl WholeWorkCandidate {
-    /// Opaque placement identity derived only from typed route facts. Neither
-    /// user layer labels nor unstable allocation IDs are consulted by policy.
-    pub fn selected(&self, node: &str) -> SelectedExecutionCandidate {
-        SelectedExecutionCandidate {
-            node: node.to_owned(),
-            candidate: self.identity_digest().to_string(),
-            kind: self.kind,
-        }
-    }
-
-    /// The canonical route identity without the presentation String objects
-    /// owned by a selected decision. This is useful for exact post-selection
-    /// validation before another node/candidate String would be allocated.
-    pub fn identity_digest(&self) -> Digest {
+/// Read-only route identity: no resources, executor, or selection authority.
+pub struct WholeWorkRouteIdentity<'a> {
+    pub kind: ExecutionCandidateKind,
+    pub execution_location: CandidateExecutionLocation,
+    pub preparation: CandidatePreparationState,
+    pub output_residency: CandidateOutputResidency,
+    pub presentation: &'a CandidateOutputPresentation,
+    pub route_facts: Digest,
+}
+impl WholeWorkRouteIdentity<'_> {
+    pub fn digest(&self) -> Digest {
         let mut encoded = DigestStream::new();
         encoded.update(b"runmat.whole-work.candidate.v2\0");
         encoded.update(&[match self.kind {
             ExecutionCandidateKind::SharedRuntime => 0,
             ExecutionCandidateKind::OriginalVmRegion => 9,
+            ExecutionCandidateKind::OriginalNativeRegion => 10,
             ExecutionCandidateKind::GenericNativeCpu => 1,
             ExecutionCandidateKind::SpecializedNativeCpu => 2,
             ExecutionCandidateKind::VectorizedNativeCpu => 3,
@@ -68,12 +65,17 @@ impl WholeWorkCandidate {
         }]);
         match self.execution_location {
             CandidateExecutionLocation::Host => encoded.update(&[0]),
+            CandidateExecutionLocation::NativeSource => encoded.update(&[4]),
             CandidateExecutionLocation::Provider { device_id } => {
                 encoded.update(&[1]);
                 encoded.update(&device_id.to_le_bytes());
             }
             CandidateExecutionLocation::VmRegion { device_id } => {
                 encoded.update(&[2]);
+                encoded.update(&device_id.to_le_bytes());
+            }
+            CandidateExecutionLocation::NativeRegion { device_id } => {
+                encoded.update(&[3]);
                 encoded.update(&device_id.to_le_bytes());
             }
         }
@@ -123,7 +125,33 @@ impl WholeWorkCandidate {
         encoded.update(self.route_facts.bytes());
         encoded.finish()
     }
+}
 
+impl WholeWorkCandidate {
+    /// Opaque placement identity derived only from typed route facts. Neither
+    /// user layer labels nor unstable allocation IDs are consulted by policy.
+    pub fn selected(&self, node: &str) -> SelectedExecutionCandidate {
+        SelectedExecutionCandidate {
+            node: node.to_owned(),
+            candidate: self.identity_digest().to_string(),
+            kind: self.kind,
+        }
+    }
+
+    /// The canonical route identity without the presentation String objects
+    /// owned by a selected decision. This is useful for exact post-selection
+    /// validation before another node/candidate String would be allocated.
+    pub fn identity_digest(&self) -> Digest {
+        WholeWorkRouteIdentity {
+            kind: self.kind,
+            execution_location: self.execution_location,
+            preparation: self.preparation,
+            output_residency: self.output_residency,
+            presentation: &self.presentation,
+            route_facts: self.route_facts,
+        }
+        .digest()
+    }
     fn validate(&self) -> Result<(), &'static str> {
         if !self.kind.matches_location(self.execution_location) {
             return Err("whole-work candidate kind and location disagree");
@@ -248,6 +276,7 @@ impl WholeWorkConstraint {
                     candidate.execution_location,
                     CandidateExecutionLocation::Provider { device_id: selected }
                         | CandidateExecutionLocation::VmRegion { device_id: selected }
+                        | CandidateExecutionLocation::NativeRegion { device_id: selected }
                         if selected == device_id
                 ) {
                     return Err("provider-required work contains a host or foreign-device route");
@@ -312,6 +341,35 @@ pub struct WholeWorkObservation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn original_native_keeps_distinct_location_and_explicit_intent_excludes_both_cpu_kinds() {
+        let mut original = candidate(
+            ExecutionCandidateKind::OriginalNativeRegion,
+            b"native-source",
+        );
+        original.execution_location = CandidateExecutionLocation::NativeRegion { device_id: 7 };
+        original.output_residency = CandidateOutputResidency::Unknown;
+        original.transactional_results = false;
+        assert!(original.validate().is_ok());
+        let resources = PlacementResourceSnapshot::default();
+        let constraint = WholeWorkConstraint::ProviderRequired { device_id: 7 };
+        assert!(constraint
+            .validate_candidates(std::slice::from_ref(&original), &resources)
+            .is_ok());
+        original.execution_location = CandidateExecutionLocation::VmRegion { device_id: 7 };
+        assert!(
+            original.validate().is_err(),
+            "native source is not a VM installation"
+        );
+        for kind in [
+            ExecutionCandidateKind::SpecializedNativeCpu,
+            ExecutionCandidateKind::VectorizedNativeCpu,
+        ] {
+            let cpu = candidate(kind, b"host");
+            assert!(constraint.validate_candidates(&[cpu], &resources).is_err());
+        }
+    }
     use crate::{
         CandidateCostUnavailable, EstimateConfidence, EstimateSource, ExecutionCostComponents,
         ExecutionCostEstimate, PlacementRevision, ProgramRevision, ResourceByteBound,
@@ -383,6 +441,7 @@ mod tests {
         legacy.push(match route.kind {
             ExecutionCandidateKind::SharedRuntime => 0,
             ExecutionCandidateKind::OriginalVmRegion => 9,
+            ExecutionCandidateKind::OriginalNativeRegion => 10,
             ExecutionCandidateKind::GenericNativeCpu => 1,
             ExecutionCandidateKind::SpecializedNativeCpu => 2,
             ExecutionCandidateKind::VectorizedNativeCpu => 3,
@@ -394,12 +453,17 @@ mod tests {
         });
         match route.execution_location {
             CandidateExecutionLocation::Host => legacy.push(0),
+            CandidateExecutionLocation::NativeSource => legacy.push(4),
             CandidateExecutionLocation::Provider { device_id } => {
                 legacy.push(1);
                 legacy.extend_from_slice(&device_id.to_le_bytes());
             }
             CandidateExecutionLocation::VmRegion { device_id } => {
                 legacy.push(2);
+                legacy.extend_from_slice(&device_id.to_le_bytes());
+            }
+            CandidateExecutionLocation::NativeRegion { device_id } => {
+                legacy.push(3);
                 legacy.extend_from_slice(&device_id.to_le_bytes());
             }
         }
@@ -631,6 +695,14 @@ mod tests {
         assert!(host.validate().is_ok());
         let direct = candidate(ExecutionCandidateKind::SharedRuntime, b"host");
         assert_ne!(host.selected("work"), direct.selected("work"));
+        // A synchronous provider still owns its output; no fictitious queue
+        // slot is needed to validate that physical presentation route.
+        if let CandidateOutputPresentation::ProviderUpload { queue_slots, .. } =
+            &mut host.presentation
+        {
+            *queue_slots = 0;
+        }
+        assert!(host.validate().is_ok());
         host.presentation = CandidateOutputPresentation::ProviderUpload {
             device_id: 8,
             transfer_bytes: Some(16),

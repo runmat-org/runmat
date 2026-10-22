@@ -1,42 +1,59 @@
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+pub use runmat_builtins::REGISTER_TEST_CLASSES_DESCRIPTOR;
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-const REGISTER_TEST_CLASSES_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "status",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Registration status value.",
-}];
-
-const REGISTER_TEST_CLASSES_INPUTS: [BuiltinParamDescriptor; 0] = [];
-
-const REGISTER_TEST_CLASSES_SIGNATURES: [BuiltinSignatureDescriptor; 1] =
-    [BuiltinSignatureDescriptor {
-        label: "status = __register_test_classes()",
-        inputs: &REGISTER_TEST_CLASSES_INPUTS,
-        outputs: &REGISTER_TEST_CLASSES_OUTPUT,
-    }];
-
-pub const REGISTER_TEST_CLASSES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &REGISTER_TEST_CLASSES_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::HiddenInternal,
-    errors: &[],
-};
+pub async fn register_test_classes_builtin() -> crate::BuiltinResult<Value> {
+    crate::register_test_classes_builtin().await
+}
 
 #[runtime_builtin(
     name = "__register_test_classes",
-    category = "introspection",
-    summary = "Register internal test classes used by runtime/unit contract tests.",
-    keywords = "test,classdef,registration,internal",
-    descriptor(crate::builtins::introspection::test_classes::REGISTER_TEST_CLASSES_DESCRIPTOR),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::introspection::test_classes"
 )]
-pub async fn register_test_classes_builtin() -> crate::BuiltinResult<Value> {
-    crate::register_test_classes_builtin().await
+pub async fn register_test_classes_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &REGISTER_TEST_CLASSES_DESCRIPTOR,
+        &runmat_builtins::REGISTER_TEST_CLASSES_ERROR_OUTPUTS,
+        "__register_test_classes",
+    )?;
+    if !args.is_empty() {
+        return Err(crate::runtime_descriptor_error(
+            "__register_test_classes",
+            &runmat_builtins::REGISTER_TEST_CLASSES_ERROR_ARITY,
+        ));
+    }
+    use crate::context::host_allocation::{
+        host_allocation_runtime_error, HostAllocationPolicy, HostAllocationReceipt,
+    };
+    let policy = HostAllocationReceipt::policy(runtime.as_ref()).map_err(|cause| {
+        host_allocation_runtime_error(
+            runtime.as_ref(),
+            "RunMat:Placement:ResourceLimit",
+            "__register_test_classes: allocation authority unavailable",
+            cause,
+        )
+    })?;
+    if policy == HostAllocationPolicy::Managed {
+        return Err(crate::build_runtime_error(
+            "__register_test_classes: construction backing has no certified finite-resource bound",
+        )
+        .with_builtin("__register_test_classes")
+        .with_identifier("RunMat:Placement:InsufficientResourceEvidence")
+        .build());
+    }
+
+    let future = async {
+        let result = register_test_classes_builtin().await;
+        drop(args);
+        result
+    };
+    match runtime.as_ref() {
+        Some(context) => context.scope(future).await,
+        None => future.await,
+    }
 }

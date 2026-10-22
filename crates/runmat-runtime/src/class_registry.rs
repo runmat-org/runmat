@@ -590,6 +590,15 @@ pub fn registered_public_static_method(name: &str) -> Option<RegisteredStaticMet
     }
     let class = registered_constructor_identity(class_name)?;
     let method = MethodName::from(method_name);
+    registered_public_static_member(class, method)
+}
+
+/// Typed continuation after the external/source name boundary has parsed its
+/// class and member. Class inheritance and visibility remain registry-owned.
+pub(crate) fn registered_public_static_member(
+    class: ClassIdentity,
+    method: MethodName,
+) -> Option<RegisteredStaticMethodName> {
     let (declaration, declaring_class) = lookup_method(&class, &method)?;
     (declaration.is_static && declaration.access == MemberAccess::Public).then_some(
         RegisteredStaticMethodName {

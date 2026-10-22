@@ -2,6 +2,123 @@ use super::*;
 use crate::context::{RuntimeBuiltinService, RuntimeContext, RuntimeServicePorts};
 use std::{cell::Cell, rc::Rc};
 
+#[test]
+fn retained_descriptor_requires_target_only_selection() {
+    let selected = CallableDescriptor::resolved(
+        CallableIdentity::Builtin(BuiltinId("numel".into())),
+        vec![Value::Num(1.)],
+        1,
+        CallableFallbackPolicy::None,
+        CallableCallKind::Direct,
+    );
+    let arguments = crate::execution::RootedValues::new(Vec::new()).unwrap();
+    assert!(selected.with_retained_arguments(arguments.into()).is_err());
+}
+
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn retained_arguments_survive_required_and_optional_cold_target_futures() {
+    fn check(future: impl std::future::Future, handle: runmat_gc_api::GcHandle) {
+        runmat_gc::gc_collect_major().unwrap();
+        assert!(runmat_gc::gc_with_value(&handle, |_| ()).is_ok());
+        drop(future);
+        runmat_gc::gc_collect_major().unwrap();
+        assert!(runmat_gc::gc_with_value(&handle, |_| ()).is_err());
+    }
+    for optional in [false, true] {
+        for identity in [
+            CallableIdentity::Builtin(BuiltinId("numel".into())),
+            CallableIdentity::BoundFunction(FunctionId(9)),
+            CallableIdentity::ExternalFunction {
+                function: FunctionId(9),
+                display_name: "external".into(),
+            },
+        ] {
+            runmat_gc::gc_test_context(|| {
+                let root = runmat_gc::gc_allocate_rooted(Value::Num(17.)).unwrap();
+                let handle = root.handle();
+                let arguments = crate::execution::RootedValues::new(vec![Value::HandleObject(
+                    runmat_value::HandleRef {
+                        class_name: "ColdArguments".into(),
+                        target: handle,
+                        valid: true,
+                    },
+                )])
+                .unwrap();
+                let pointer = arguments.values().as_ptr();
+                let descriptor = CallableDescriptor::resolved(
+                    identity,
+                    Vec::new(),
+                    1,
+                    CallableFallbackPolicy::None,
+                    CallableCallKind::Direct,
+                )
+                .with_retained_arguments(arguments.into())
+                .unwrap();
+                assert_eq!(descriptor.args.first().unwrap() as *const Value, pointer);
+                root.unroot().unwrap();
+                if optional {
+                    check(
+                        try_execute_retained_callable_descriptor(None, descriptor),
+                        handle,
+                    )
+                } else {
+                    check(
+                        execute_retained_callable_descriptor(None, descriptor),
+                        handle,
+                    )
+                }
+            });
+        }
+    }
+}
+
+#[test]
+fn retained_identity_survives_required_and_optional_cold_futures_without_a_new_owner() {
+    for identity in [
+        crate::call::identity::external_qualified_identity("pkg.Point", "origin"),
+        CallableIdentity::BoundFunction(FunctionId(9)),
+        CallableIdentity::Builtin(BuiltinId("numel".into())),
+        CallableIdentity::ExternalFunction {
+            function: FunctionId(9),
+            display_name: "external".into(),
+        },
+    ] {
+        let source = std::sync::Arc::new(identity);
+        let descriptor = CallableDescriptor::resolved_retained(
+            std::sync::Arc::clone(&source),
+            Vec::new(),
+            1,
+            CallableFallbackPolicy::ExternalBoundary,
+            CallableCallKind::Direct,
+        );
+        let CallableTarget::Resolved {
+            identity: CallableIdentityOwner::Retained(owner),
+            ..
+        } = &descriptor.target
+        else {
+            panic!("descriptor replaced the retained identity")
+        };
+        assert!(std::sync::Arc::ptr_eq(&source, owner));
+        let future = execute_callable_descriptor(descriptor);
+        assert_eq!(std::sync::Arc::strong_count(&source), 2);
+        drop(future);
+        assert_eq!(std::sync::Arc::strong_count(&source), 1);
+
+        let descriptor = CallableDescriptor::resolved_retained(
+            std::sync::Arc::clone(&source),
+            Vec::new(),
+            1,
+            CallableFallbackPolicy::ExternalBoundary,
+            CallableCallKind::Direct,
+        );
+        let future = try_execute_callable_descriptor(descriptor);
+        assert_eq!(std::sync::Arc::strong_count(&source), 2);
+        drop(future);
+        assert_eq!(std::sync::Arc::strong_count(&source), 1);
+    }
+}
+
 thread_local! {
     static CALLS: Cell<usize> = const { Cell::new(0) };
     static DIAGNOSTIC: Cell<&'static str> = const { Cell::new("RunMat:UndefinedFunction") };
@@ -38,7 +155,13 @@ fn captured_builtin(
 ) -> crate::builtin::RuntimeBuiltinFuture {
     let input = match invocation.into_continuation_input() {
         Ok(input) => input,
-        Err(error) => return Box::pin(std::future::ready(Err(error))),
+        Err(error) => {
+            return crate::builtin::admitted_builtin_future(
+                None,
+                "fixture",
+                std::future::ready(Err(error)),
+            )
+        }
     };
     let runtime = input.context.clone();
     crate::builtin::admitted_builtin_future_with(runtime, "horzcat", move |_| captured_body(input))
@@ -192,7 +315,7 @@ fn bounded_captured_builtin_preserves_original_generations_and_pending_roots() {
                 );
                 let mut descriptor = CallableDescriptor::from_feval_value(
                     Value::Closure(closure),
-                    vec![Value::Num(73.)],
+                    Vec::new(),
                     0,
                     &Resolver,
                 );
@@ -204,16 +327,28 @@ fn bounded_captured_builtin_preserves_original_generations_and_pending_roots() {
                 else {
                     panic!("captured descriptor")
                 };
-                assert!(matches!(identity, CallableIdentity::Builtin(_)));
+                assert!(matches!(
+                    identity.as_identity(),
+                    CallableIdentity::Builtin(_)
+                ));
                 if dynamic {
                     // Exercise semantic Continue on the same selected capture
                     // generation, not the new-callee normalization adapter.
                     *identity =
-                        CallableIdentity::DynamicName(runmat_types::SymbolName("horzcat".into()));
+                        CallableIdentity::DynamicName(runmat_types::SymbolName("horzcat".into()))
+                            .into();
                     *fallback_policy = CallableFallbackPolicy::RuntimeNameResolution;
                 }
-                let mut future =
-                    Box::pin(execute_callable_descriptor_in_context(&runtime, descriptor));
+                let supplied =
+                    crate::execution::RootedValues::try_initialize_in_context(1, &runtime, |_| {
+                        Ok::<_, RuntimeError>(Value::Num(73.))
+                    })
+                    .expect("admit the original supplied argument owner");
+                let descriptor = descriptor.with_retained_arguments(supplied.into()).unwrap();
+                let mut future = Box::pin(execute_retained_callable_descriptor(
+                    Some(&runtime),
+                    descriptor,
+                ));
                 root.unroot().unwrap();
                 runmat_gc::gc_collect_major().unwrap();
                 assert!(runmat_gc::gc_clone_value(&handle).is_ok());

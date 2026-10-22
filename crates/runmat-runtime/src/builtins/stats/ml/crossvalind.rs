@@ -7,7 +7,9 @@ use runmat_builtins::{
     CROSSVALIND_ERROR_INTERNAL, CROSSVALIND_ERROR_INVALID_ARGUMENT,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{CharArray, LogicalArray, StringArray, Tensor, Value};
+use runmat_value::{
+    decode_utf16_code_units, CharArray, LogicalArray, StringArray, Tensor, Utf16DecodeError, Value,
+};
 
 use super::partition_shared::PartitionLabel;
 use crate::builtins::common::random;
@@ -31,6 +33,18 @@ fn builtin_error(
 
 fn invalid_argument(message: impl Into<String>) -> RuntimeError {
     builtin_error(message, &CROSSVALIND_ERROR_INVALID_ARGUMENT)
+}
+
+fn invalid_utf16(context: &str, error: Utf16DecodeError) -> RuntimeError {
+    let mut builder = build_runtime_error(format!(
+        "crossvalind: {context} is not valid UTF-16 text: {error}"
+    ))
+    .with_builtin(NAME)
+    .with_source(error);
+    if let Some(identifier) = CROSSVALIND_ERROR_INVALID_ARGUMENT.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn internal_error(message: impl Into<String>) -> RuntimeError {
@@ -504,7 +518,7 @@ fn classes_from_value(value: &Value, n: usize) -> BuiltinResult<Vec<Option<Parti
         Value::Int(integer) => vec![Some(PartitionLabel::integer(integer))],
         Value::LogicalArray(array) => logical_labels(array)?,
         Value::StringArray(array) => string_array_labels(array)?,
-        Value::CharArray(chars) => char_row_labels(chars),
+        Value::CharArray(chars) => char_row_labels(chars)?,
         Value::String(text) => vec![Some(PartitionLabel::Text(text.clone()))],
         Value::Bool(flag) => vec![Some(PartitionLabel::Logical(*flag))],
         other => {
@@ -554,16 +568,15 @@ fn string_array_labels(array: &StringArray) -> BuiltinResult<Vec<Option<Partitio
         .collect())
 }
 
-fn char_row_labels(chars: &CharArray) -> Vec<Option<PartitionLabel>> {
+fn char_row_labels(chars: &CharArray) -> BuiltinResult<Vec<Option<PartitionLabel>>> {
     let mut labels = Vec::with_capacity(chars.rows);
     for row in 0..chars.rows {
-        let mut label = String::with_capacity(chars.cols);
-        for col in 0..chars.cols {
-            label.push(chars.data()[row * chars.cols + col]);
-        }
+        let start = row * chars.cols;
+        let label = decode_utf16_code_units(&chars.data()[start..start + chars.cols])
+            .map_err(|error| invalid_utf16("class label", error))?;
         labels.push(Some(PartitionLabel::Text(label.trim_end().into())));
     }
-    labels
+    Ok(labels)
 }
 
 fn ensure_vector(shape: &[usize], len: usize, label: &str) -> BuiltinResult<()> {
@@ -638,7 +651,9 @@ fn scalar_text<'a>(value: &'a Value, label: &str) -> BuiltinResult<std::borrow::
         Value::StringArray(array) if array.data().len() == 1 => {
             Ok(std::borrow::Cow::Borrowed(array.data()[0].as_str()))
         }
-        Value::CharArray(chars) => Ok(std::borrow::Cow::Owned(chars.data().iter().collect())),
+        Value::CharArray(chars) => decode_utf16_code_units(chars.data())
+            .map(std::borrow::Cow::Owned)
+            .map_err(|error| invalid_utf16(label, error)),
         other => Err(invalid_argument(format!(
             "crossvalind: {label} must be a text scalar, got {other:?}"
         ))),

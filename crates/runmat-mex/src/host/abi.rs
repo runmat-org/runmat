@@ -342,14 +342,13 @@ impl MexCallState {
         state.warnings.clear();
         state.console.clear();
         state.field_name_cache.clear();
-        let retired_services = if !state.services.is_concurrent() {
-            Some((
-                state.local_service_guard.take(),
-                std::mem::replace(&mut state.services, BoundaryServiceSlot::Unavailable),
-            ))
-        } else {
-            None
-        };
+        // This slot belongs to the completed invocation. Retained engine
+        // contexts and asynchronous requests own their own service leases;
+        // module clear/shutdown installs fresh lifecycle services separately.
+        let retired_services = (
+            state.local_service_guard.take(),
+            std::mem::replace(&mut state.services, BoundaryServiceSlot::Unavailable),
+        );
         drop(state);
         drop(retired_arrays);
         drop(retired_services);

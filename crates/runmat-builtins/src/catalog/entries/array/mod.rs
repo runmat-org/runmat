@@ -10,6 +10,7 @@ mod grouping;
 mod indexing;
 mod introspection;
 mod shape;
+mod sorting_sets;
 
 pub use self::accumulation::*;
 pub use self::binning::*;
@@ -19,6 +20,7 @@ pub use self::grouping::*;
 pub use self::indexing::*;
 pub use self::introspection::*;
 pub use self::shape::*;
+pub use self::sorting_sets::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(accumulation::ENTRIES.iter().copied());
@@ -33,6 +35,7 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     );
     shape::extend_entries(values);
     values.extend(indexing::ENTRIES.iter().copied());
+    sorting_sets::extend_entries(values);
 }
 
 pub(super) fn extend_constants(values: &mut Vec<crate::BuiltinConstantCatalogEntry>) {

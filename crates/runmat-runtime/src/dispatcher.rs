@@ -23,15 +23,17 @@ pub use constructor::{
     call_rooted_bound_constructor_sequence_in_context, PreparedConstructorInvoke,
 };
 use constructor::{ConstructorArguments, ConstructorInvocationTarget};
-#[path = "dispatcher/owned_gather.rs"]
-mod owned_gather;
 #[path = "dispatcher/cell_alias.rs"]
 mod cell_alias;
+#[path = "dispatcher/managed_gather.rs"]
+mod managed_gather;
+#[path = "dispatcher/owned_gather.rs"]
+mod owned_gather;
 use crate::execution::structure::replacement as structure_alias;
+mod constructor_normalization;
 #[path = "dispatcher/owned_gpu.rs"]
 mod owned_gpu;
 mod provenance;
-mod constructor_normalization;
 #[path = "dispatcher/workspace_effect.rs"]
 mod workspace_effect;
 
@@ -158,6 +160,17 @@ pub fn value_contains_gpu(value: &Value) -> bool {
 /// Convert GPU-resident values to host tensors when an acceleration provider exists.
 /// Non-GPU inputs are passed through unchanged.
 pub async fn gather_if_needed_async(value: &Value) -> Result<Value, RuntimeError> {
+    let runtime = crate::context::legacy::active();
+    gather_if_needed_in_context_async(value, runtime.as_ref()).await
+}
+
+pub(crate) async fn gather_if_needed_in_context_async(
+    value: &Value,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> Result<Value, RuntimeError> {
+    if managed_gather::is_managed(runtime)? {
+        return managed_gather::borrowed(value, runtime.expect("managed gather context")).await;
+    }
     try_visit_gathered_gpu_handles(value, &mut |_| {})?;
     gather_if_needed_async_impl(value).await
 }
@@ -178,7 +191,7 @@ pub(crate) async fn gather_builtin_arguments_async(
     }
     values
         .try_map_preserving_roots_async(values.len(), runtime, async |index| {
-            gather_if_needed_async_impl(&values[index]).await
+            gather_if_needed_in_context_async(&values[index], runtime).await
         })
         .await
 }
@@ -562,7 +575,7 @@ async fn try_call_retained_builtin_sequence_with_policy(
         if let Some(result) =
             try_call_registered_static_method(name, &args, output_count, context.as_ref()).await?
         {
-            return compatibility_checked_builtin_sequence(name, args.view(), result).map(Some);
+            return Ok(Some(result));
         }
         // Fallback: treat as class constructor if class is registered.
         if crate::class_registry::registered_constructor_identity(name).is_some() {
@@ -843,7 +856,12 @@ fn distributed_literal_context(
                     runmat_types::LiteralValue::String(value.data()[0].as_str().to_owned())
                 }
                 Value::CharArray(value) if value.rows == 1 => {
-                    runmat_types::LiteralValue::Character(value.data().iter().collect())
+                    // Inference cannot publish an argument error; the selected
+                    // builtin decodes and validates the actual text.
+                    match value.try_row_string() {
+                        Ok(Some(text)) => runmat_types::LiteralValue::Character(text),
+                        Ok(None) | Err(_) => runmat_types::LiteralValue::Unknown,
+                    }
                 }
                 _ => runmat_types::LiteralValue::Unknown,
             })
@@ -1224,6 +1242,13 @@ pub fn observe_registered_static_method(
     qualified_name: &str,
 ) -> Option<RegisteredStaticMethodResolution> {
     let registration = crate::class_registry::registered_public_static_method(qualified_name)?;
+    observe_registered_static_member(qualified_name, registration)
+}
+
+pub(crate) fn observe_registered_static_member(
+    qualified_name: &str,
+    registration: crate::class_registry::RegisteredStaticMethodName,
+) -> Option<RegisteredStaticMethodResolution> {
     if let Some(binding) =
         crate::class_registry::lookup_bound_method(&registration.class, &registration.method_name)
             .and_then(|method| method.bound_function)
@@ -1269,6 +1294,21 @@ async fn try_call_registered_static_method(
     let Some(resolved) = observe_registered_static_method(qualified_name) else {
         return Ok(None);
     };
+    invoke_registered_static_method(qualified_name, resolved, args, output_count, context)
+        .await
+        .map(Some)
+}
+
+/// Execute the exact registry-selected body once. A selected body that fails
+/// or becomes unavailable is terminal, never a name-fallback invitation.
+pub(crate) async fn invoke_registered_static_method(
+    qualified_name: &str,
+    resolved: RegisteredStaticMethodResolution,
+    args: &crate::call::BuiltinArguments,
+    output_count: Option<usize>,
+    context: Option<&crate::context::RuntimeContext>,
+) -> Result<crate::execution::RootedValueSequence, RuntimeError> {
+    let original_arguments = args.fork();
     let method = resolved.registration.declaration;
     let args = if let Some(class) = method.implicit_class_argument.as_ref() {
         let text = crate::call::argument_text::copy_str(class.display_name(), context)?;
@@ -1291,7 +1331,7 @@ async fn try_call_registered_static_method(
     } else {
         args.fork()
     };
-    match resolved.target {
+    let result = match resolved.target {
         RegisteredStaticMethodTarget::Bound(binding) => {
             let requested = output_count.unwrap_or(1);
             let invoked = match context {
@@ -1305,14 +1345,12 @@ async fn try_call_registered_static_method(
                     crate::user_functions::try_call_rooted_bound_function(binding, args.into_supplied_function_arguments(context)?, requested).await
                 }
             };
-            invoked
-                .ok_or_else(|| {
-                    crate::runtime_error::semantic_error(
-                        "UnavailableBoundFunction",
-                        "registered static method has no bound executor",
-                    )
-                })?
-                .map(Some)
+            invoked.ok_or_else(|| {
+                crate::runtime_error::semantic_error(
+                    "UnavailableBoundFunction",
+                    "registered static method has no bound executor",
+                )
+            })?
         }
         RegisteredStaticMethodTarget::Semantic(function) => {
             crate::user_functions::try_call_rooted_semantic_function_in_context(
@@ -1322,19 +1360,44 @@ async fn try_call_registered_static_method(
                 output_count.unwrap_or(1),
             )
             .await
-            .transpose()
+            .ok_or_else(|| {
+                crate::runtime_error::semantic_error(
+                    "UnavailableFunction",
+                    "registered static method has no semantic executor",
+                )
+            })?
         }
-        RegisteredStaticMethodTarget::Builtin(name) => {
-            try_call_retained_builtin_sequence_async(
-                &name.0,
-                args,
-                output_count,
-                context.cloned(),
-                None,
+        RegisteredStaticMethodTarget::Builtin(name) => try_call_retained_builtin_sequence_async(
+            &name.0,
+            args,
+            output_count,
+            context.cloned(),
+            None,
+        )
+        .await
+        .and_then(|result| {
+            result.ok_or_else(|| {
+                crate::runtime_error::semantic_error(
+                    "UnavailableBuiltin",
+                    "registered static method has no builtin executor",
+                )
+            })
+        }),
+    };
+    result
+        .and_then(|result| {
+            compatibility_checked_builtin_sequence(
+                qualified_name,
+                original_arguments.view(),
+                result,
             )
-            .await
-        }
-    }
+        })
+        .map_err(|mut error| {
+            // The selected body was attempted. Preserve its original cause and
+            // control fields, but an outer feval gather retry must not replay it.
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            error
+        })
 }
 
 #[cfg(test)]
@@ -1491,14 +1554,21 @@ async fn call_class_constructor(
                     })??;
                     return Ok(Some(resolve_single_sequence(result)?));
                 }
-                ConstructorInvocationTarget::ExactPrepared { invoke, .. } => {
+                ConstructorInvocationTarget::ExactPrepared { owner, invoke } => {
                     let selected = context.ok_or_else(|| {
                         build_runtime_error("prepared constructor lacks a selected runtime")
                             .with_identifier("RunMat:ConstructorOwnerInvalid")
                             .build()
                     })?;
+                    // Capture and root the exact constructor instance while this
+                    // receiver poll guard is active. The child may not be polled
+                    // until after this parent yields to the local-task driver.
+                    let selected = selected
+                        .clone()
+                        .with_constructor_receiver_for_method(Some(&owner))?;
+                    let future = invoke(selected.clone());
                     return Ok(Some(resolve_single_sequence(
-                        invoke(selected.clone()).await?,
+                        crate::context::run_owned_request_continuation(&selected, future).await?,
                     )?));
                 }
                 ConstructorInvocationTarget::Registered => {
@@ -2518,6 +2588,18 @@ mod tests {
                         role: runmat_types::ClassMethodRole::Ordinary,
                     },
                 );
+                let mut private = methods[&runmat_types::MethodName::from("zero")].clone();
+                private.name = "privateZero".into();
+                private.access = MemberAccess::Private;
+                methods.insert(private.name.clone(), private);
+                let mut instance = methods[&runmat_types::MethodName::from("zero")].clone();
+                instance.name = "instanceZero".into();
+                instance.is_static = false;
+                methods.insert(instance.name.clone(), instance);
+                let mut unavailable = methods[&runmat_types::MethodName::from("zero")].clone();
+                unavailable.name = "unavailableZero".into();
+                unavailable.function_name = unique_class_name("unavailable_static_body");
+                methods.insert(unavailable.name.clone(), unavailable);
                 methods
             },
         });
@@ -2527,11 +2609,20 @@ mod tests {
             std::sync::Arc::new(move |name| (name == fn_name_for_resolver).then_some(20202)),
         ))
         .expect("call-port scope");
+        let calls = std::sync::Arc::new(AtomicU64::new(0));
+        let invoker_calls = calls.clone();
         let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
             std::sync::Arc::new(move |function, _args, requested_outputs| {
                 assert_eq!(function, 20202);
+                invoker_calls.fetch_add(1, Ordering::SeqCst);
                 Box::pin(async move {
-                    if requested_outputs == 1 {
+                    if requested_outputs == 3 {
+                        Err(crate::build_runtime_error("selected static body failed")
+                            .with_identifier("RunMat:StaticFixture:Failure")
+                            .with_source(std::io::Error::other("original static body source"))
+                            .with_gpu_gather_retry(crate::GpuGatherRetry::Requested)
+                            .build())
+                    } else if requested_outputs == 1 {
                         crate::user_functions::test_support::rooted_single_value_sequence(
                             Value::Num(77.0),
                         )
@@ -2555,6 +2646,61 @@ mod tests {
         let out = call_builtin(&format!("{class_name}.zero"), &[])
             .expect("dotted static class method call should dispatch");
         assert_eq!(out, Value::Num(77.0));
+        let child = unique_class_name("runtime_static_child");
+        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
+            events: Default::default(),
+            name: child.clone().into(),
+            parent: Some(class_name.clone().into()),
+            properties: HashMap::new(),
+            methods: HashMap::new(),
+        });
+        for owner in [&class_name, &child] {
+            for requested in [0, 1, 2] {
+                let before = calls.load(Ordering::SeqCst);
+                let result = block_on(crate::call_feval_sequence_async_with_outputs(
+                    Value::from(format!("{owner}.zero")),
+                    &[],
+                    requested,
+                ))
+                .expect("qualified feval selects the registered inherited static body");
+                let expected = if requested == 1 {
+                    vec![Value::Num(77.0)]
+                } else {
+                    (0..requested).map(|i| Value::Num(i as f64)).collect()
+                };
+                assert_eq!(
+                    result.as_slice(),
+                    expected.as_slice(),
+                    "qualified static call must preserve requested cardinality and values"
+                );
+                assert_eq!(calls.load(Ordering::SeqCst), before + 1);
+            }
+        }
+        for member in ["privateZero", "instanceZero", "unavailableZero", "abs"] {
+            let before = calls.load(Ordering::SeqCst);
+            let error = block_on(crate::call_feval_sequence_async_with_outputs(
+                Value::from(format!("{class_name}.{member}")),
+                &[],
+                1,
+            ))
+            .expect_err("qualified spelling is not executable public static authority");
+            assert_eq!(error.identifier(), Some("RunMat:UndefinedFunction"));
+            assert_eq!(calls.load(Ordering::SeqCst), before);
+        }
+        let before = calls.load(Ordering::SeqCst);
+        let error = block_on(crate::call_feval_sequence_async_with_outputs(
+            Value::from(format!("{class_name}.zero")),
+            &[],
+            3,
+        ))
+        .expect_err("a selected static error cannot become fallback or gather retry");
+        assert_eq!(calls.load(Ordering::SeqCst), before + 1);
+        assert_eq!(error.identifier(), Some("RunMat:StaticFixture:Failure"));
+        assert_eq!(error.message(), "selected static body failed");
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        assert!(error.source.as_deref().is_some_and(|source| source
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|source| source.to_string() == "original static body source")));
         for requested_outputs in [0, 2] {
             let out = block_on(super::try_call_registered_static_method(
                 &format!("{class_name}.zero"),

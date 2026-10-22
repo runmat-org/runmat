@@ -1,12 +1,13 @@
-mod driver;
 mod canonical;
+mod driver;
+mod inputs;
 mod invoke;
+pub(crate) mod native_input;
+pub(crate) mod paired;
+pub(crate) mod persisted;
 mod plan;
-mod paired;
 pub(crate) mod publication;
 mod response;
-mod inputs;
-pub(crate) mod native_input;
 mod selected;
 mod toolchain;
 
@@ -16,6 +17,7 @@ pub use driver::{discover_linker, LinkerDriver, LinkerFamily};
 pub use inputs::HostedNativeBuildTrees;
 pub use invoke::{link_standalone, LinkRequest, LinkedProgram, VerifiedSelectedImage};
 pub use paired::{link_selected_native_pair, LinkedNativePair, PairedLinkRequests};
+pub use persisted::{PersistedSelectedImage, PERSISTED_SELECTED_IMAGE_SCHEMA_VERSION};
 pub use plan::{
     build_link_plan, LinkPlan, NativeProgramLinkIdentity, NATIVE_LINK_PLAN_SCHEMA_VERSION,
 };

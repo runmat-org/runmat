@@ -19,7 +19,14 @@ pub(super) fn parse_controls(
     for (index, argument) in arguments.iter().enumerate() {
         let value = match argument {
             Value::String(value) => Cow::Borrowed(value.as_str()),
-            Value::CharArray(value) if value.rows == 1 => Cow::Owned(value.data().iter().collect()),
+            Value::CharArray(value) if value.rows == 1 => Cow::Owned(
+                runmat_value::decode_utf16_code_units(value.data()).map_err(|source| {
+                    let mut error =
+                        drawnow_error(&DRAWNOW_ERROR_INVALID_CONTROL, source.to_string());
+                    error.source = Some(Box::new(source));
+                    error
+                })?,
+            ),
             Value::StringArray(value) if value.data().len() == 1 => {
                 Cow::Borrowed(value.data()[0].as_str())
             }

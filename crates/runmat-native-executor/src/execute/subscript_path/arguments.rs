@@ -36,7 +36,7 @@ pub(super) fn materialize(
     Ok(components)
 }
 
-fn materialize_call_region(
+pub(super) fn materialize_call_region(
     state: &mut HostState,
     region: &MirCallArgumentRegion,
 ) -> NativeExecutorResult<Vec<Value>> {

@@ -4,8 +4,8 @@ use runmat_types::{FunctionId, ProgramSourceId};
 
 use crate::NativeTarget;
 
-pub const NATIVE_OBJECT_SCHEMA_VERSION: u16 = 16;
-pub const AOT_PROGRAM_MANIFEST_SCHEMA_VERSION: u16 = 10;
+pub const NATIVE_OBJECT_SCHEMA_VERSION: u16 = 20;
+pub const AOT_PROGRAM_MANIFEST_SCHEMA_VERSION: u16 = 13;
 const MAX_AOT_PROGRAM_FUNCTIONS: usize = 100_000;
 const MAX_AOT_PROGRAM_MANIFEST_BYTES: usize = 64 * 1024 * 1024;
 pub const AOT_ENTRY_SYMBOL: &str = "runmat_aot_entry";
@@ -13,6 +13,12 @@ pub const AOT_RUNTIME_MAIN_SYMBOL: &str = "runmat_aot_main";
 pub const AOT_RUNTIME_TEST_MAIN_SYMBOL: &str = "runmat_aot_test_main";
 pub const AOT_PAIRED_PRODUCT_SYMBOL: &str = "runmat_aot_paired_product";
 pub const AOT_SOURCE_SERVICE_FACTORY_SYMBOL: &str = "runmat_aot_source_evaluation_component_v2";
+pub const AOT_CLOCK_SERVICE_FACTORY_SYMBOL: &str = "runmat_aot_clock_component_v1";
+pub const AOT_LOCAL_SERVICE_FACTORY_SYMBOL: &str = "runmat_aot_local_component_v1";
+pub const AOT_NETWORK_SERVICE_FACTORY_SYMBOL: &str = "runmat_aot_network_component_v1";
+pub const AOT_UI_SERVICE_FACTORY_SYMBOL: &str = "runmat_aot_ui_component_v2";
+pub const AOT_HOST_CALLBACK_FACTORY_SYMBOL: &str = "runmat_aot_host_callback_component_v2";
+pub const AOT_HOSTED_DYNAMIC_FACTORY_SYMBOL: &str = "runmat_aot_hosted_dynamic_component_v1";
 pub const AOT_NATIVE_IR_SYMBOL: &str = "runmat_aot_native_ir";
 pub const AOT_PROGRAM_SYMBOL: &str = "runmat_aot_program";
 pub const AOT_RESUME_POINTS_SYMBOL: &str = "runmat_aot_resume_points";
@@ -67,6 +73,12 @@ pub struct AotProgramManifest {
     pub native_ir_digest: Digest,
     /// The bounded, canonical Config-owned policy captured with this program.
     pub foreign_policy: Option<runmat_execution_artifact::LogicalObject>,
+    /// Exact application-invocation policy. Hosted ambient clocks use None;
+    /// deterministic clocks require explicit inputs captured in linked bytes.
+    pub clock_inputs: Option<runmat_execution::host::NativeClockInputs>,
+    /// Invocation-local environment, random-stream, and virtual filesystem
+    /// inputs. These bytes bind data, not linked service implementation rights.
+    pub local_service_inputs: Option<runmat_execution::host::NativeLocalServiceInputs>,
     pub source_map: runmat_execution::ExecutableSourceMapV2,
     pub functions: Vec<AotProgramFunction>,
     pub runtime_binding_mode: AotRuntimeBindingMode,
@@ -185,6 +197,8 @@ impl AotProgramManifest {
             entrypoint: assembly.selected_entrypoint,
             native_ir_digest,
             foreign_policy,
+            clock_inputs: None,
+            local_service_inputs: None,
             source_map,
             functions,
             runtime_binding_mode,
@@ -207,6 +221,23 @@ impl AotProgramManifest {
         }
         self.product.validate().map_err(|error| {
             crate::NativeCodegenError::new("native.aot.program.product", error.to_string())
+        })?;
+        runmat_execution::host::validate_native_clock_inputs(
+            self.product.selected(),
+            self.clock_inputs.as_ref(),
+        )
+        .map_err(|error| {
+            crate::NativeCodegenError::new("native.aot.program.clock_inputs", error.to_string())
+        })?;
+        runmat_execution::host::validate_native_local_inputs(
+            self.product.selected(),
+            self.local_service_inputs.as_ref(),
+        )
+        .map_err(|error| {
+            crate::NativeCodegenError::new(
+                "native.aot.program.local_service_inputs",
+                error.to_string(),
+            )
         })?;
         self.executable.program.validate().map_err(|error| {
             crate::NativeCodegenError::new("native.aot.program", error.to_string())

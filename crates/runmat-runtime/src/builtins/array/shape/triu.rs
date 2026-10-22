@@ -608,21 +608,43 @@ pub(crate) mod tests {
 
     #[test]
     fn triu_character_matrix_preserves_class_and_row_major_layout() {
-        let chars = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).expect("character matrix");
+        let chars = CharArray::from_code_units(
+            [0xD800, 65, 0xDC00, 0xFFFF]
+                .map(runmat_value::Utf16CodeUnit::from_raw)
+                .to_vec(),
+            2,
+            2,
+        )
+        .expect("character matrix");
         let value = triu_builtin(Value::CharArray(chars), Vec::new()).expect("triu char");
         let Value::CharArray(result) = value else {
             panic!("expected character result");
         };
         assert_eq!(result.rows, 2);
         assert_eq!(result.cols, 2);
-        assert_eq!(result.data(), vec!['a', 'b', '\0', 'd']);
+        assert_eq!(
+            result
+                .data()
+                .iter()
+                .map(|unit| unit.raw())
+                .collect::<Vec<_>>(),
+            vec![0xD800, 65, 0, 0xFFFF]
+        );
 
-        let pages = CharArray::new_with_shape("abcdefgh".chars().collect(), vec![2, 2, 2]).unwrap();
+        let pages =
+            CharArray::from_unicode_scalars_with_shape("abcdefgh".chars().collect(), vec![2, 2, 2])
+                .unwrap();
         let original = pages.clone();
         let masked = triu_char_array(pages, 0).unwrap();
         assert_eq!(masked.shape.as_slice(), &[2, 2, 2]);
-        assert_eq!(masked.data(), &['a', 'b', '\0', 'd', 'e', 'f', '\0', 'h']);
-        assert_eq!(original.data(), &['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']);
+        assert_eq!(
+            masked.data(),
+            runmat_value::encode_utf16_code_units("ab\0def\0h")
+        );
+        assert_eq!(
+            original.data(),
+            runmat_value::encode_utf16_code_units("abcdefgh")
+        );
         let pointer = masked.data().as_ptr();
         let reused = triu_char_array(masked, isize::MIN).unwrap();
         assert_eq!(reused.data().as_ptr(), pointer);
@@ -635,7 +657,9 @@ pub(crate) mod tests {
     fn triu_paged_arrays_are_an_explicit_language_extension() {
         let tensor =
             Tensor::new((1..=8).map(f64::from).collect(), vec![2, 2, 2]).expect("paged tensor");
-        let chars = CharArray::new_with_shape("abcdefgh".chars().collect(), vec![2, 2, 2]).unwrap();
+        let chars =
+            CharArray::from_unicode_scalars_with_shape("abcdefgh".chars().collect(), vec![2, 2, 2])
+                .unwrap();
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = triu_builtin(Value::Tensor(tensor.clone()), Vec::new())
             .expect_err("paged input must gate");
@@ -667,7 +691,10 @@ pub(crate) mod tests {
             panic!("expected character output")
         };
         assert_eq!(output.shape.as_slice(), &[2, 2, 2]);
-        assert_eq!(output.data(), &['a', 'b', '\0', 'd', 'e', 'f', '\0', 'h']);
+        assert_eq!(
+            output.data(),
+            runmat_value::encode_utf16_code_units("ab\0def\0h")
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

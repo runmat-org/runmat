@@ -91,6 +91,8 @@ fn paired_entries_and_request_results_keep_exact_product_and_attempt_identity() 
     assert!(wrong.validate().is_err());
 
     let request = NativeTargetTestRequest {
+        clock_inputs: None,
+        local_service_inputs: None,
         schema_version: NATIVE_TARGET_TEST_PROTOCOL_SCHEMA_VERSION,
         build_binding: binding.digest().unwrap(),
         suite,
@@ -166,4 +168,81 @@ fn paired_entries_and_request_results_keep_exact_product_and_attempt_identity() 
     result.status = NativeTargetTestStatus::Failed(NativeTargetTestFailure::ProcessFailure);
     result.usage = None;
     result.validate_for(&request, &binding).unwrap();
+
+    // Structural policy/request identity only: no executable/service issuer
+    // is manufactured from this synthetic selected-product fixture.
+    let mut clock_binding = binding.clone();
+    clock_binding
+        .selected_product
+        .reached_effects
+        .0
+        .insert(runmat_types::EffectKind::Clock);
+    clock_binding.selected_product.services.push(
+        runmat_execution::host::NativeSelectedServiceBinding {
+            kind: runmat_execution::host::NativeDeploymentServiceKind::Effect(
+                runmat_types::EffectKind::Clock,
+            ),
+            abi: runmat_execution::host::native_clock_service_abi(),
+            implementation: clock_binding.selected_product.runtime_component,
+            behavior:
+                runmat_execution::host::NativeDeploymentServiceBehavior::DeterministicDeclared,
+        },
+    );
+    let mut clock_request = request.clone();
+    clock_request.build_binding = clock_binding.digest().unwrap();
+    assert!(
+        clock_request.validate_for(&clock_binding).is_err(),
+        "deterministic inputs cannot default to an arbitrary epoch"
+    );
+    clock_request.clock_inputs = Some(runmat_execution::host::NativeClockInputs {
+        schema_version: runmat_execution::host::NATIVE_CLOCK_INPUTS_SCHEMA_VERSION,
+        initial_monotonic_nanos: 17,
+        initial_wall_unix_seconds: 1_700_000_000,
+        initial_wall_nanosecond: 0,
+        read_step_nanos: 1_000,
+        local_offset_seconds: 0,
+        process_cpu: None,
+    });
+    let digest = clock_request.digest_for(&clock_binding).unwrap();
+    assert_eq!(
+        NativeTargetTestRequest::from_canonical_bytes(
+            &clock_request.to_canonical_bytes(&clock_binding).unwrap(),
+            &clock_binding
+        )
+        .unwrap(),
+        clock_request
+    );
+    let before = runmat_execution::host::NativeClockInvocationIdentity::new(
+        digest,
+        clock_request.clock_inputs.as_ref(),
+    )
+    .unwrap();
+    clock_request.clock_inputs.as_mut().unwrap().read_step_nanos += 1;
+    let changed = clock_request.digest_for(&clock_binding).unwrap();
+    assert_ne!(
+        digest, changed,
+        "replay policy is part of the exact attempt identity"
+    );
+    assert_ne!(
+        before,
+        runmat_execution::host::NativeClockInvocationIdentity::new(
+            changed,
+            clock_request.clock_inputs.as_ref()
+        )
+        .unwrap()
+    );
+    clock_request.clock_inputs.as_mut().unwrap().read_step_nanos = 0;
+    assert!(clock_request.validate_for(&clock_binding).is_err());
+    clock_binding.selected_product.profile =
+        runmat_execution::host::NativeDeploymentProfile::HostedNative;
+    clock_binding.selected_product.services[0].behavior =
+        runmat_execution::host::NativeDeploymentServiceBehavior::HostedAmbient;
+    clock_request.build_binding = clock_binding.digest().unwrap();
+    clock_request.clock_inputs.as_mut().unwrap().read_step_nanos = 1_000;
+    assert!(
+        clock_request.validate_for(&clock_binding).is_err(),
+        "ambient policy must not accept even valid virtual inputs"
+    );
+    clock_request.clock_inputs = None;
+    clock_request.validate_for(&clock_binding).unwrap();
 }

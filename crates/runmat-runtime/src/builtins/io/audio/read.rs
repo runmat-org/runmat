@@ -143,7 +143,7 @@ pub(super) fn parse_audioread_options(
         0 => {}
         1 => {
             let single = &args[0];
-            if let Some(text) = scalar_text(single) {
+            if let Some(text) = scalar_text(single)? {
                 datatype = parse_audioread_datatype(&text)?;
             } else {
                 range = Some(parse_sample_range(single)?);
@@ -152,7 +152,7 @@ pub(super) fn parse_audioread_options(
         2 => {
             let (samples, datatype_value) = (&args[0], &args[1]);
             range = Some(parse_sample_range(samples)?);
-            let text = scalar_text(datatype_value).ok_or_else(|| {
+            let text = scalar_text(datatype_value)?.ok_or_else(|| {
                 audioread_error_with(
                     &AUDIOREAD_ERROR_ARGUMENT,
                     "audioread: datatype must be \"native\" or \"double\"",
@@ -224,12 +224,19 @@ pub(super) fn parse_positive_integer(value: f64, label: &str) -> BuiltinResult<u
     Ok(value as usize)
 }
 
-pub(super) fn scalar_text(value: &Value) -> Option<String> {
+pub(super) fn scalar_text(value: &Value) -> BuiltinResult<Option<String>> {
     match value {
-        Value::String(s) => Some(s.as_str().to_owned()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data().iter().collect()),
-        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].as_str().to_owned()),
-        _ => None,
+        Value::String(s) => Ok(Some(s.as_str().to_owned())),
+        Value::CharArray(ca) if ca.rows == 1 => {
+            crate::builtins::io::utf16::decode_utf16_with_error(ca.data(), || {
+                audioread_error(&AUDIOREAD_ERROR_ARGUMENT)
+            })
+            .map(Some)
+        }
+        Value::StringArray(sa) if sa.data().len() == 1 => {
+            Ok(Some(sa.data()[0].as_str().to_owned()))
+        }
+        _ => Ok(None),
     }
 }
 
@@ -291,7 +298,9 @@ pub(super) fn resolve_audioread_path(value: &Value) -> BuiltinResult<PathBuf> {
     match value {
         Value::String(s) => normalize_audioread_path(s),
         Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data().iter().collect();
+            let text = crate::builtins::io::utf16::decode_utf16_with_error(ca.data(), || {
+                audioread_error(&AUDIOREAD_ERROR_ARGUMENT)
+            })?;
             normalize_audioread_path(&text)
         }
         Value::StringArray(sa) if sa.data().len() == 1 => normalize_audioread_path(&sa.data()[0]),

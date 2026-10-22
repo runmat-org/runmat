@@ -186,7 +186,7 @@ fn mod_rejects_complex_operands() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn mod_char_array_support() {
-    let chars = CharArray::new("ABC".chars().collect(), 1, 3).unwrap();
+    let chars = CharArray::from_unicode_scalars("ABC".chars().collect(), 1, 3).unwrap();
     let result = mod_builtin(Value::CharArray(chars), Value::Num(5.0)).expect("mod");
     match result {
         Value::Tensor(t) => assert_eq!(t.materialize_f64(), vec![0.0, 1.0, 2.0]),

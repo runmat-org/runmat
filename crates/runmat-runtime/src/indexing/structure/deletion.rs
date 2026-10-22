@@ -71,16 +71,28 @@ pub(super) fn delete_with_plan(base: Value, plan: &IndexPlan) -> Result<Value, R
     let removed_coordinates = &coordinate_sets[removed_dimension];
     let strides = column_major_strides(&effective_shape)?;
     let removed_extent = effective_shape[removed_dimension];
-    let mut output_shape = effective_shape;
-    output_shape[removed_dimension] -= removed_coordinates.len();
-    output_shape.resize(output_shape.len().max(2), 1);
+    let context = crate::context::legacy::active();
+    let output_shape = crate::indexing::plan::admission::shape(
+        context.as_ref(),
+        effective_shape.len().max(2),
+        |dimension| {
+            let extent = effective_shape.get(dimension).copied().unwrap_or(1);
+            if dimension == removed_dimension {
+                extent
+                    .checked_sub(removed_coordinates.len())
+                    .ok_or_else(|| mex("IndexOutOfBounds", "Index dimensions overflow"))
+            } else {
+                Ok(extent)
+            }
+        },
+    )?;
     let linear_removal = (0..checked_shape_len(&shape)?)
         .filter(|linear| {
             let coordinate = linear / strides[removed_dimension] % removed_extent;
             removed_coordinates.contains(&coordinate)
         })
         .collect::<HashSet<_>>();
-    remove_from_base(base, &linear_removal, output_shape)
+    remove_from_base(base, &linear_removal, &output_shape)
 }
 
 fn delete_linear(
@@ -104,17 +116,17 @@ fn delete_linear(
     } else {
         vec![retained_len, 1]
     };
-    remove_from_base(base, &removal, output_shape)
+    remove_from_base(base, &removal, &output_shape)
 }
 
 fn remove_from_base(
     base: Value,
     removal: &HashSet<usize>,
-    output_shape: Vec<usize>,
+    output_shape: &[usize],
 ) -> Result<Value, RuntimeError> {
     match base {
-        value @ Value::Struct(_) => struct_ops::empty_like(&value, &output_shape),
-        Value::StructArray(array) => struct_ops::remove(&array, removal, &output_shape),
+        value @ Value::Struct(_) => struct_ops::empty_like(&value, output_shape),
+        Value::StructArray(array) => struct_ops::remove(&array, removal, output_shape),
         _ => unreachable!("deletion admission checked the structure target"),
     }
     .map_err(|error| struct_ops::remap(error, |message| mex("StructDeletion", message)))

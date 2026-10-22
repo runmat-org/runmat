@@ -14,6 +14,7 @@ fn fitclinear_header_keeps_typed_options_and_ignored_payload_policy() {
         &first,
         crate::call::FunctionArgumentView::from_slice(&values),
     )
+    .unwrap()
     .validate(values.len())
     .unwrap();
     assert_eq!(header.option_start, 1);
@@ -32,6 +33,7 @@ fn fitclinear_header_keeps_typed_options_and_ignored_payload_policy() {
         &first,
         crate::call::FunctionArgumentView::from_slice(&invalid)
     )
+    .unwrap()
     .validate(invalid.len())
     .is_err());
 }
@@ -56,6 +58,7 @@ fn typed_fitclinear_actions_preserve_ignored_payload_and_response_orientation() 
         &first,
         crate::call::FunctionArgumentView::from_slice(&values),
     )
+    .unwrap()
     .validate(values.len())
     .unwrap()
     .preflight_values(crate::call::FunctionArgumentView::from_slice(&values))
@@ -83,6 +86,7 @@ fn typed_fitclinear_actions_preserve_ignored_payload_and_response_orientation() 
         &first,
         crate::call::FunctionArgumentView::from_slice(&wrong_y),
     )
+    .unwrap()
     .validate(wrong_y.len())
     .unwrap()
     .preflight_values(crate::call::FunctionArgumentView::from_slice(&wrong_y))
@@ -104,6 +108,7 @@ fn typed_fitclinear_actions_preserve_ignored_payload_and_response_orientation() 
         &first,
         crate::call::FunctionArgumentView::from_slice(&invalid)
     )
+    .unwrap()
     .validate(invalid.len())
     .unwrap()
     .preflight_values(crate::call::FunctionArgumentView::from_slice(&invalid))

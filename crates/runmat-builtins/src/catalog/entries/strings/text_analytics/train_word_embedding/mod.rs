@@ -3,6 +3,7 @@ use runmat_types::CapabilityRequirement;
 
 mod contract;
 mod inference;
+mod documentation;
 pub use contract::*;
 
 pub const TRAIN_WORD_EMBEDDING_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
@@ -12,12 +13,7 @@ pub const TRAIN_WORD_EMBEDDING_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatal
         name: "trainWordEmbedding",
     },
     category: "strings/text_analytics",
-    // Preserve docs/builtins/reference/trainWordEmbedding.json as the prose
-    // authority until the exporter mechanically conserves and retires it.
-    documentation: BuiltinDocumentation {
-        summary: "Train a word embedding from a text file or tokenized documents.",
-        ..BuiltinDocumentation::EMPTY
-    },
+    documentation: documentation::DOCUMENTATION,
     descriptor: &TRAIN_WORD_EMBEDDING_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Incomplete,

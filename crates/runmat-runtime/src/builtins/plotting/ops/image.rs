@@ -1,15 +1,11 @@
+use runmat_builtins::BuiltinErrorDescriptor;
+use runmat_builtins::{
+    IMAGE_ERROR_INTERNAL, IMAGE_ERROR_INVALID_ARGUMENT, IMAGE_FOUR_CHANNEL_EXTENSION,
+};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode, SurfacePlot};
 use runmat_value::{NumericDType, NumericScalar, Tensor, Value};
@@ -25,173 +21,10 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor as tensor_utils;
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
+
 use crate::{build_runtime_error, RuntimeError};
 
 const BUILTIN_NAME: &str = "image";
-
-const IMAGE_FOUR_CHANNEL_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "image-four-channel-cdata",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "image with M-by-N-by-4 CData is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:ImageFourChannelCDataExtension"),
-};
-
-pub const IMAGE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [IMAGE_FOUR_CHANNEL_EXTENSION];
-
-const IMAGE_INTEGER_CDATA: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "CData",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::Documented,
-    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-    notes: "Indexed and truecolor CData accept every built-in integer class; exact CData remains authoritative on the image object.",
-}];
-pub const IMAGE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "h = image(integer_CData, ...)",
-        inputs: &IMAGE_INTEGER_CDATA,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Indexed values retain direct-mapping provenance, truecolor values normalize across their native class range, and renderer conversion is explicit.",
-    }];
-
-const IMAGE_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Handle to the rendered image object.",
-}];
-
-const IMAGE_INPUTS_C: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "C",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Image data array (indexed matrix or truecolor MxNx3/MxNx4).",
-}];
-
-const IMAGE_INPUTS_X_Y_C: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinates or extent vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y coordinates or extent vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "C",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Image data array (indexed matrix or truecolor MxNx3/MxNx4).",
-    },
-];
-
-const IMAGE_INPUTS_C_PROPS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "C",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Image data array (indexed matrix or truecolor MxNx3/MxNx4).",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/value surface style options.",
-    },
-];
-
-const IMAGE_INPUTS_X_Y_C_PROPS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinates or extent vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y coordinates or extent vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "C",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Image data array (indexed matrix or truecolor MxNx3/MxNx4).",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/value surface style options.",
-    },
-];
-
-const IMAGE_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "h = image(C)",
-        inputs: &IMAGE_INPUTS_C,
-        outputs: &IMAGE_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = image(X, Y, C)",
-        inputs: &IMAGE_INPUTS_X_Y_C,
-        outputs: &IMAGE_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = image(C, Name, Value, ...)",
-        inputs: &IMAGE_INPUTS_C_PROPS,
-        outputs: &IMAGE_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = image(X, Y, C, Name, Value, ...)",
-        inputs: &IMAGE_INPUTS_X_Y_C_PROPS,
-        outputs: &IMAGE_OUTPUT_HANDLE,
-    },
-];
-
-pub const IMAGE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IMAGE.INVALID_ARGUMENT",
-    identifier: Some("RunMat:image:InvalidArgument"),
-    when: "Image data, axis inputs, or name/value style arguments are invalid.",
-    message: "image: invalid argument",
-};
-
-pub const IMAGE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IMAGE.INTERNAL",
-    identifier: Some("RunMat:image:Internal"),
-    when: "Internal image/surface construction or rendering fails unexpectedly.",
-    message: "image: internal operation failed",
-};
-
-const IMAGE_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [IMAGE_ERROR_INVALID_ARGUMENT, IMAGE_ERROR_INTERNAL];
-
-pub const IMAGE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &IMAGE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &IMAGE_ERRORS,
-};
 
 fn image_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -209,14 +42,28 @@ fn map_image_invalid_argument(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    image_error_with_detail(&IMAGE_ERROR_INVALID_ARGUMENT, err.message)
+    let mapped = image_error_with_detail(&IMAGE_ERROR_INVALID_ARGUMENT, err.message.clone());
+    let mut builder = crate::build_runtime_error(mapped.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = mapped.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn map_image_internal(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    image_error_with_detail(&IMAGE_ERROR_INTERNAL, err.message)
+    let mapped = image_error_with_detail(&IMAGE_ERROR_INTERNAL, err.message.clone());
+    let mut builder = crate::build_runtime_error(mapped.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = mapped.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::image")]
@@ -248,22 +95,33 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "image",
-    category = "plotting",
-    summary = "Display indexed or truecolor images.",
-    keywords = "image,plotting,imshow,colormap",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::image::IMAGE_DESCRIPTOR),
-    extensions(crate::builtins::plotting::image::IMAGE_EXTENSIONS),
-    integer_capabilities(crate::builtins::plotting::image::IMAGE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::image"
 )]
-pub async fn image_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+pub async fn image_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<f64> {
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > 1) {
+        return Err(crate::runtime_error::semantic_error(
+            "RunMat:plotting:TooManyOutputs",
+            "image: too many output arguments",
+        ));
+    }
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "image")?;
+    let _arguments = args.fork();
+    work.finish(image_impl(runtime.as_ref(), args, &work).await)
+}
+async fn image_impl(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> crate::BuiltinResult<f64> {
     let (x, y, c, rest) =
         parse_image_call_args(args, BUILTIN_NAME).map_err(map_image_invalid_argument)?;
-    let (c_data_mapping, rest) =
-        extract_cdata_mapping(rest, "direct", BUILTIN_NAME).map_err(map_image_invalid_argument)?;
+    let (c_data_mapping, rest) = extract_cdata_mapping(runtime, rest, "direct", BUILTIN_NAME)
+        .map_err(map_image_invalid_argument)?;
     if image_channel_count(&c) == Some(4) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &IMAGE_FOUR_CHANNEL_EXTENSION,
@@ -279,12 +137,8 @@ pub async fn image_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let defaults =
         SurfaceStyleDefaults::new(ColorMap::Parula, ShadingMode::None, false, 1.0, true, false);
     let style = Arc::new(
-        parse_surface_style_args(
-            BUILTIN_NAME,
-            crate::call::FunctionArgumentView::from_slice(&rest),
-            defaults,
-        )
-        .map_err(map_image_invalid_argument)?,
+        parse_surface_style_args(BUILTIN_NAME, rest.view(), defaults)
+            .map_err(map_image_invalid_argument)?,
     );
     let color_limits = color_limits_snapshot();
 
@@ -326,6 +180,7 @@ pub async fn image_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let plot_index_out = Rc::new(RefCell::new(None));
     let plot_index_slot = Rc::clone(&plot_index_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();
+    work.check()?;
     let render_result = render_active_plot(
         BUILTIN_NAME,
         PlotRenderOptions {
@@ -360,54 +215,74 @@ pub async fn image_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
 }
 
 pub(crate) fn extract_cdata_mapping(
-    rest: Vec<Value>,
+    runtime: Option<&crate::context::RuntimeContext>,
+    rest: crate::call::BuiltinArguments,
     default: &str,
     builtin: &'static str,
-) -> crate::BuiltinResult<(String, Vec<Value>)> {
+) -> crate::BuiltinResult<(String, crate::call::BuiltinArguments)> {
     let contains_mapping = rest.iter().any(|value| {
-        value_as_string(value).is_some_and(|name| name.trim().eq_ignore_ascii_case("CDataMapping"))
+        crate::builtins::plotting::style::value_text_equals_ascii(value, "CDataMapping", true)
     });
     if !contains_mapping {
         return Ok((default.to_string(), rest));
     }
     if !rest.len().is_multiple_of(2) {
-        return Err(build_runtime_error(format!(
-            "{builtin}: name-value arguments must come in pairs"
-        ))
-        .build());
+        return Err(super::plotting_error(
+            builtin,
+            format!("{builtin}: name-value arguments must come in pairs"),
+        ));
     }
     let mut mapping = default.to_string();
-    let mut retained = Vec::with_capacity(rest.len());
-    let mut seen = false;
-    for pair in rest.chunks_exact(2) {
-        let is_mapping = value_as_string(&pair[0])
-            .is_some_and(|name| name.trim().eq_ignore_ascii_case("CDataMapping"));
-        if !is_mapping {
-            retained.extend_from_slice(pair);
+    let mut skipped = None;
+    for (index, pair) in rest.chunks_exact(2).enumerate() {
+        if !value_as_string(&pair[0])
+            .map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    builtin,
+                    source.to_string(),
+                    source,
+                )
+            })?
+            .is_some_and(|name| name.trim().eq_ignore_ascii_case("CDataMapping"))
+        {
             continue;
         }
-        if seen {
-            return Err(build_runtime_error(format!(
-                "{builtin}: CDataMapping may be specified only once"
-            ))
-            .build());
+        if skipped.is_some() {
+            return Err(super::plotting_error(
+                builtin,
+                format!("{builtin}: CDataMapping may be specified only once"),
+            ));
         }
-        let value = value_as_string(&pair[1]).ok_or_else(|| {
-            build_runtime_error(format!(
-                "{builtin}: CDataMapping must be 'direct' or 'scaled'"
-            ))
-            .build()
-        })?;
-        let value = value.trim().to_ascii_lowercase();
+        let value = value_as_string(&pair[1])
+            .map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    builtin,
+                    source.to_string(),
+                    source,
+                )
+            })?
+            .ok_or_else(|| {
+                super::plotting_error(
+                    builtin,
+                    format!("{builtin}: CDataMapping must be 'direct' or 'scaled'"),
+                )
+            })?
+            .trim()
+            .to_ascii_lowercase();
         if value != "direct" && value != "scaled" {
-            return Err(build_runtime_error(format!(
-                "{builtin}: CDataMapping must be 'direct' or 'scaled'"
-            ))
-            .build());
+            return Err(super::plotting_error(
+                builtin,
+                format!("{builtin}: CDataMapping must be 'direct' or 'scaled'"),
+            ));
         }
         mapping = value;
-        seen = true;
+        skipped = Some(index * 2);
     }
+    let skip = skipped.expect("mapping found in validated pairs");
+    let count = rest.len() - 2;
+    let retained = rest.try_map_preserving_roots(count, runtime, |index, source| {
+        Ok(source[index + if index >= skip { 2 } else { 0 }].clone())
+    })?;
     Ok((mapping, retained))
 }
 
@@ -828,6 +703,14 @@ fn normalized_truecolor_sample(
 #[cfg(test)]
 mod tests {
     use super::*;
+    async fn image_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+        super::image_builtin(
+            crate::context::legacy::active(),
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )
+        .await
+    }
+
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::set::set_builtin;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
@@ -1102,7 +985,7 @@ mod tests {
 
     #[test]
     fn image_descriptor_signatures_cover_core_forms() {
-        let labels: Vec<&str> = IMAGE_DESCRIPTOR
+        let labels: Vec<&str> = runmat_builtins::IMAGE_DESCRIPTOR
             .signatures
             .iter()
             .map(|sig| sig.label)

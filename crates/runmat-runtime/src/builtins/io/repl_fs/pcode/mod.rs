@@ -104,7 +104,8 @@ fn parse_options(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<P
     };
 
     for arg in args {
-        let text = value_to_string_scalar(arg).ok_or_else(|| pcode_error(&PCODE_ERROR_ARG_TYPE))?;
+        let text =
+            value_to_string_scalar(arg)?.ok_or_else(|| pcode_error(&PCODE_ERROR_ARG_TYPE))?;
         if text.is_empty() {
             return Err(pcode_error(&PCODE_ERROR_EMPTY_ITEM));
         }
@@ -126,19 +127,22 @@ fn parse_options(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<P
     Ok(options)
 }
 
-fn value_to_string_scalar(value: &Value) -> Option<String> {
+fn value_to_string_scalar(value: &Value) -> BuiltinResult<Option<String>> {
     match value {
-        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::String(text) => Ok(Some(text.as_str().to_owned())),
         Value::CharArray(array)
             if array.rows == 1
                 && crate::builtins::common::shape::effective_rank(&array.shape) <= 2 =>
         {
-            Some(array.data().iter().collect())
+            crate::builtins::io::utf16::decode_utf16_with_error(array.data(), || {
+                pcode_error(&PCODE_ERROR_ARG_TYPE)
+            })
+            .map(Some)
         }
         Value::StringArray(array) if array.data().len() == 1 => {
-            Some(array.data()[0].as_str().to_owned())
+            Ok(Some(array.data()[0].as_str().to_owned()))
         }
-        _ => None,
+        _ => Ok(None),
     }
 }
 

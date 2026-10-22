@@ -1,4 +1,5 @@
 use super::*;
+use runmat_value::{decode_utf16_code_units, Utf16DecodeError};
 
 #[derive(Clone, Debug)]
 pub(super) struct PartitionInput {
@@ -42,7 +43,7 @@ impl PartitionInput {
             Value::StringArray(array) => string_array_labels(array),
             Value::CharArray(chars) => Ok(Self {
                 n: chars.rows,
-                labels: Some(char_row_labels(chars)),
+                labels: Some(char_row_labels(chars)?),
             }),
             other => Err(invalid_argument(format!(
                 "cvpartition: first input must be an observation count or grouping variable, got {other:?}"
@@ -138,16 +139,29 @@ pub(super) fn string_array_labels(array: StringArray) -> BuiltinResult<Partition
     })
 }
 
-pub(super) fn char_row_labels(chars: runmat_value::CharArray) -> Vec<Option<PartitionLabel>> {
+pub(super) fn char_row_labels(
+    chars: runmat_value::CharArray,
+) -> BuiltinResult<Vec<Option<PartitionLabel>>> {
     let mut labels = Vec::with_capacity(chars.rows);
     for row in 0..chars.rows {
-        let mut label = String::with_capacity(chars.cols);
-        for col in 0..chars.cols {
-            label.push(chars.data()[row * chars.cols + col]);
-        }
+        let start = row * chars.cols;
+        let label = decode_utf16_code_units(&chars.data()[start..start + chars.cols])
+            .map_err(|error| invalid_utf16("stratification label", error))?;
         labels.push(Some(PartitionLabel::Text(label.into())));
     }
-    labels
+    Ok(labels)
+}
+
+fn invalid_utf16(context: &str, error: Utf16DecodeError) -> RuntimeError {
+    let mut builder = build_runtime_error(format!(
+        "cvpartition: {context} is not valid UTF-16 text: {error}"
+    ))
+    .with_builtin(CVPARTITION_NAME)
+    .with_source(error);
+    if let Some(identifier) = CVPARTITION_ERROR_INVALID_ARGUMENT.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 pub(super) fn parse_kind(text: &str) -> BuiltinResult<PartitionKind> {

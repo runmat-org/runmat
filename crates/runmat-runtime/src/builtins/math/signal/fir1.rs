@@ -142,7 +142,11 @@ async fn evaluate_with_cooperation(
     let mut window: Option<Value> = None;
 
     for arg in rest {
-        if let Some(word) = keyword(arg) {
+        if let Some(word) = keyword(arg).map_err(|source| {
+            let mut error = fir1_error(&FIR1_ERROR_INVALID_OPTION);
+            error.source = Some(Box::new(source));
+            error
+        })? {
             match word.as_str() {
                 "low" | "lowpass" => options.kind = FilterKind::Lowpass,
                 "high" | "highpass" => options.kind = FilterKind::Highpass,
@@ -314,7 +318,17 @@ fn ensure_input_extensions(
         &FIR1_LOGICAL_CUTOFF_EXTENSION,
         &FIR1_SINGLE_CUTOFF_EXTENSION,
     )?;
-    for value in rest.iter().filter(|value| keyword(value).is_none()) {
+    for value in rest.iter() {
+        if keyword(value)
+            .map_err(|source| {
+                let mut error = fir1_error(&FIR1_ERROR_INVALID_OPTION);
+                error.source = Some(Box::new(source));
+                error
+            })?
+            .is_some()
+        {
+            continue;
+        }
         ensure_role_extensions(
             value,
             &FIR1_INTEGER_WINDOW_EXTENSION,

@@ -5,8 +5,6 @@ use runmat_execution::value::{InlineValue, ValuePayload};
 mod aggregate;
 #[path = "task/aggregate_output.rs"]
 mod aggregate_output;
-#[path = "task/structure.rs"]
-mod structure;
 #[path = "task/dense.rs"]
 mod dense;
 #[path = "task/durable.rs"]
@@ -17,6 +15,8 @@ mod exception;
 mod expansion;
 #[path = "task/sparse.rs"]
 mod sparse;
+#[path = "task/structure.rs"]
+mod structure;
 #[path = "task/text.rs"]
 mod text;
 #[path = "task/text_value.rs"]
@@ -221,9 +221,14 @@ fn decode_task<'a>(
             let task = TextValueTask::string(value, path, runtime)?;
             machine.tasks.push(Task::Text(task))?;
         }
-        InlineValue::Char { shape, code_points } => machine.tasks.push(Task::Text(
-            TextValueTask::character(shape, code_points, path)?,
-        ))?,
+        InlineValue::Char {
+            encoding: runmat_execution::value::CharacterEncoding::Utf16CodeUnitsV1,
+            shape,
+            code_units,
+        } => {
+            let task = TextValueTask::character(shape, code_units, path, machine.runtime())?;
+            machine.tasks.push(Task::Text(task))?;
+        }
         InlineValue::StringArray { shape, values } => machine.tasks.push(Task::Text(
             TextValueTask::string_array(shape, values, path)?,
         ))?,
@@ -231,9 +236,15 @@ fn decode_task<'a>(
             let task = DenseTask::new_with_runtime(value, path, machine.runtime())?;
             machine.tasks.push(Task::Dense(task))?;
         }
-        InlineValue::Sparse(value) => machine
-            .tasks
-            .push(Task::Sparse(machine.boxed(SparseTask::new(value, path)?)?))?,
+        InlineValue::Sparse(value) => {
+            machine
+                .tasks
+                .push(Task::Sparse(machine.boxed(SparseTask::new(
+                    value,
+                    path,
+                    machine.runtime(),
+                )?)?))?
+        }
         InlineValue::Symbolic(_) => {
             return Err(ValueCodecError::unsupported(
                 &path,

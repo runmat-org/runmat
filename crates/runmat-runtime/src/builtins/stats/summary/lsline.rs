@@ -105,11 +105,14 @@ mod tests {
     #[test]
     fn lsline_adds_least_squares_line_to_current_axes() {
         let _guard = setup();
-        block_on(scatter_builtin(
-            tensor(vec![1.0, 2.0, 3.0], 1, 3),
-            tensor(vec![2.0, 4.0, 6.0], 1, 3),
-            Vec::new(),
-        ))
+        block_on(scatter_builtin(None, {
+            let mut coordinates = vec![
+                tensor(vec![1.0, 2.0, 3.0], 1, 3),
+                tensor(vec![2.0, 4.0, 6.0], 1, 3),
+            ];
+            coordinates.extend(Vec::new());
+            crate::builtins::common::test_support::builtin_arguments(coordinates)
+        }))
         .unwrap();
 
         let handle = block_on(lsline_builtin(
@@ -128,18 +131,21 @@ mod tests {
     fn lsline_targets_axes_and_returns_one_line_per_eligible_plot() {
         let _guard = setup();
         configure_subplot(1, 2, 0).unwrap();
-        block_on(scatter_builtin(
-            tensor(vec![100.0, 200.0], 1, 2),
-            tensor(vec![10.0, 20.0], 1, 2),
-            Vec::new(),
-        ))
+        block_on(scatter_builtin(None, {
+            let mut coordinates = vec![
+                tensor(vec![100.0, 200.0], 1, 2),
+                tensor(vec![10.0, 20.0], 1, 2),
+            ];
+            coordinates.extend(Vec::new());
+            crate::builtins::common::test_support::builtin_arguments(coordinates)
+        }))
         .unwrap();
         configure_subplot(1, 2, 1).unwrap();
-        block_on(scatter_builtin(
-            tensor(vec![2.0, 4.0], 1, 2),
-            tensor(vec![1.0, 5.0], 1, 2),
-            Vec::new(),
-        ))
+        block_on(scatter_builtin(None, {
+            let mut coordinates = vec![tensor(vec![2.0, 4.0], 1, 2), tensor(vec![1.0, 5.0], 1, 2)];
+            coordinates.extend(Vec::new());
+            crate::builtins::common::test_support::builtin_arguments(coordinates)
+        }))
         .unwrap();
 
         let fig = current_figure_handle();

@@ -17,8 +17,8 @@ mod logical;
 mod matmul;
 mod median;
 mod nan;
-mod numeric_reduction;
 mod numeric_download;
+mod numeric_reduction;
 #[cfg(test)]
 mod owning_routes;
 mod power;
@@ -3698,7 +3698,10 @@ fn simple_trapezoid(
     } else {
         input.shape().to_vec()
     };
-    while shape.len() <= dim {
+    let stored_rank = shape.len();
+    let virtual_axis = dim >= stored_rank;
+    let dim = dim.min(stored_rank);
+    if virtual_axis {
         shape.push(1);
     }
     let logical_len = shape.iter().copied().product::<usize>();
@@ -3747,7 +3750,7 @@ fn simple_trapezoid(
     let block = stride_before * len_dim;
     if cumulative {
         let mut output = vec![0.0; data.len()];
-        if len_dim > 0 {
+        if len_dim > 0 && !output.is_empty() {
             for after in 0..stride_after {
                 let base = after * block;
                 for before in 0..stride_before {
@@ -3768,17 +3771,23 @@ fn simple_trapezoid(
                 }
             }
         }
+        if virtual_axis {
+            shape.truncate(stored_rank);
+        }
         return Ok((output, shape));
     }
 
     let mut output_shape = shape;
     output_shape[dim] = 1;
+    if virtual_axis {
+        output_shape.truncate(stored_rank);
+    }
     let output_logical_len = output_shape.iter().copied().product::<usize>();
     let output_raw_len = output_logical_len
         .checked_mul(lane_factor)
         .ok_or_else(|| anyhow!("trapezoid: output length overflow"))?;
     let mut output = vec![0.0; output_raw_len];
-    if len_dim > 1 {
+    if len_dim > 1 && !output.is_empty() {
         for after in 0..stride_after {
             let base = after * block;
             for before in 0..stride_before {
@@ -3903,8 +3912,8 @@ impl AccelProvider for InProcessProvider {
         query: &runmat_accelerate_api::ProviderFeasibilityQuery,
     ) -> Option<runmat_accelerate_api::ProviderUploadPhysicalEvidence> {
         use runmat_accelerate_api::{
-            ProviderFeasibility, ProviderOperationFamily, ProviderResidency, ProviderStorage,
-            ProviderWorkload,
+            ProviderElementType, ProviderFeasibility, ProviderOperationFamily, ProviderResidency,
+            ProviderStorage, ProviderWorkload,
         };
         use runmat_execution::ResourceByteBound;
         if query.operation.0 != "transfer.upload"
@@ -3927,7 +3936,13 @@ impl AccelProvider for InProcessProvider {
             || input.storage != output.storage
             || input.layout != output.layout
             || input.shape != output.shape
-            || output.storage != ProviderStorage::DenseReal
+            || output.storage
+                != match output.element_type {
+                    ProviderElementType::ComplexF32 | ProviderElementType::ComplexF64 => {
+                        ProviderStorage::DenseComplexInterleaved
+                    }
+                    _ => ProviderStorage::DenseReal,
+                }
         {
             return None;
         }
@@ -4996,8 +5011,8 @@ impl AccelProvider for InProcessProvider {
         handle: &'a GpuTensorHandle,
         columns: &'a [SortRowsColumnSpec],
         comparison: SortComparison,
-    ) -> AccelProviderFuture<'a, SortResult> {
-        Box::pin(async move {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<SortResult>> {
+        let pending = async move {
             let data = {
                 let guard = registry(self.device_id).lock().unwrap();
                 guard
@@ -5022,6 +5037,13 @@ impl AccelProvider for InProcessProvider {
                     storage: GpuTensorStorage::Real,
                 },
             })
+        };
+        Box::pin(async move {
+            pending.await.map(Some).map_err(
+                |cause: runmat_accelerate_api::ProviderExecutionError| {
+                    cause.with_unproven_effects()
+                },
+            )
         })
     }
 
@@ -7980,23 +8002,40 @@ impl AccelProvider for InProcessProvider {
         handle: &GpuTensorHandle,
         order: usize,
         dim: usize,
-    ) -> Result<GpuTensorHandle> {
-        if order == 0 {
-            return Ok(handle.clone());
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        // Pure metadata admission: decline before registry reads, staging, or execution.
+        if runmat_accelerate_api::handle_integer_type(handle).is_some()
+            || runmat_accelerate_api::handle_is_logical(handle)
+            || runmat_accelerate_api::handle_precision(handle) != Some(self.precision())
+            || runmat_accelerate_api::handle_storage(handle) != GpuTensorStorage::Real
+        {
+            return Ok(None);
         }
-        let data = {
-            let guard = registry(self.device_id).lock().unwrap();
-            guard
-                .get(handle)
-                .ok_or_else(|| anyhow!("diff_dim: unknown tensor handle {}", handle.buffer_id()))?
-                .clone()
-        };
-        let tensor =
-            Tensor::new(data, handle.shape().to_vec()).map_err(|e| anyhow!("diff_dim: {e}"))?;
-        let diffed =
-            diff_tensor_host(tensor, order, Some(dim + 1)).map_err(|e| anyhow!("diff_dim: {e}"))?;
-        let shape = diffed.shape().to_vec();
-        self.allocate_tensor(diffed.materialize_f64(), shape)
+
+        (|| -> anyhow::Result<GpuTensorHandle> {
+            if order == 0 {
+                return Ok(handle.clone());
+            }
+            let data = {
+                let guard = registry(self.device_id).lock().unwrap();
+                guard
+                    .get(handle)
+                    .ok_or_else(|| {
+                        anyhow!("diff_dim: unknown tensor handle {}", handle.buffer_id())
+                    })?
+                    .clone()
+            };
+            let tensor =
+                Tensor::new(data, handle.shape().to_vec()).map_err(|e| anyhow!("diff_dim: {e}"))?;
+            let diffed = diff_tensor_host(tensor, order, Some(dim + 1))
+                .map_err(|e| anyhow!("diff_dim: {e}"))?;
+            let shape = diffed.shape().to_vec();
+            self.allocate_tensor(diffed.materialize_f64(), shape)
+        })()
+        .map(Some)
+        .map_err(|source| {
+            runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+        })
     }
 
     fn gradient_dim(
@@ -8004,49 +8043,64 @@ impl AccelProvider for InProcessProvider {
         handle: &GpuTensorHandle,
         dim: usize,
         spacing: f64,
-    ) -> Result<GpuTensorHandle> {
-        let data = {
-            let guard = registry(self.device_id).lock().unwrap();
-            guard
-                .get(handle)
-                .ok_or_else(|| {
-                    anyhow!("gradient_dim: unknown tensor handle {}", handle.buffer_id())
-                })?
-                .clone()
-        };
-        if runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::ComplexInterleaved {
-            ensure!(
-                data.len() % 2 == 0,
-                "gradient_dim: complex-interleaved buffer has odd length"
-            );
-            let complex_data = data
-                .chunks_exact(2)
-                .map(|pair| (pair[0], pair[1]))
-                .collect::<Vec<_>>();
-            let tensor = ComplexTensor::new(complex_data, handle.shape().to_vec())
-                .map_err(|e| anyhow!("gradient_dim: {e}"))?;
-            let gradiented =
-                gradient_complex_tensor_host(tensor, dim + 1, spacing).map_err(|e| anyhow!(e))?;
-            let shape = gradiented.shape().to_vec();
-            let data = gradiented.materialize_f64();
-            let mut interleaved = Vec::with_capacity(data.len() * 2);
-            for (re, im) in data {
-                interleaved.push(re);
-                interleaved.push(im);
-            }
-            return self.allocate_tensor_with_storage(
-                interleaved,
-                shape,
-                GpuTensorStorage::ComplexInterleaved,
-            );
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        // Pure metadata admission: decline before registry reads, staging, or execution.
+        if runmat_accelerate_api::handle_integer_type(handle).is_some()
+            || runmat_accelerate_api::handle_is_logical(handle)
+            || runmat_accelerate_api::handle_precision(handle) != Some(self.precision())
+        {
+            return Ok(None);
         }
 
-        let tensor =
-            Tensor::new(data, handle.shape().to_vec()).map_err(|e| anyhow!("gradient_dim: {e}"))?;
-        let gradiented =
-            gradient_real_tensor_host(tensor, dim + 1, spacing).map_err(|e| anyhow!(e))?;
-        let shape = gradiented.shape().to_vec();
-        self.allocate_tensor(gradiented.materialize_f64(), shape)
+        (|| -> anyhow::Result<GpuTensorHandle> {
+            let data = {
+                let guard = registry(self.device_id).lock().unwrap();
+                guard
+                    .get(handle)
+                    .ok_or_else(|| {
+                        anyhow!("gradient_dim: unknown tensor handle {}", handle.buffer_id())
+                    })?
+                    .clone()
+            };
+            if runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::ComplexInterleaved
+            {
+                ensure!(
+                    data.len() % 2 == 0,
+                    "gradient_dim: complex-interleaved buffer has odd length"
+                );
+                let complex_data = data
+                    .chunks_exact(2)
+                    .map(|pair| (pair[0], pair[1]))
+                    .collect::<Vec<_>>();
+                let tensor = ComplexTensor::new(complex_data, handle.shape().to_vec())
+                    .map_err(|e| anyhow!("gradient_dim: {e}"))?;
+                let gradiented = gradient_complex_tensor_host(tensor, dim + 1, spacing)
+                    .map_err(|e| anyhow!(e))?;
+                let shape = gradiented.shape().to_vec();
+                let data = gradiented.materialize_f64();
+                let mut interleaved = Vec::with_capacity(data.len() * 2);
+                for (re, im) in data {
+                    interleaved.push(re);
+                    interleaved.push(im);
+                }
+                return self.allocate_tensor_with_storage(
+                    interleaved,
+                    shape,
+                    GpuTensorStorage::ComplexInterleaved,
+                );
+            }
+
+            let tensor = Tensor::new(data, handle.shape().to_vec())
+                .map_err(|e| anyhow!("gradient_dim: {e}"))?;
+            let gradiented =
+                gradient_real_tensor_host(tensor, dim + 1, spacing).map_err(|e| anyhow!(e))?;
+            let shape = gradiented.shape().to_vec();
+            self.allocate_tensor(gradiented.materialize_f64(), shape)
+        })()
+        .map(Some)
+        .map_err(|source| {
+            runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+        })
     }
 
     fn gradient_dim_with_coordinates(
@@ -8122,8 +8176,8 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         handle: &'a GpuTensorHandle,
         options: &'a UniqueOptions,
-    ) -> AccelProviderFuture<'a, UniqueResult> {
-        Box::pin(async move {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<UniqueResult>> {
+        let pending = async move {
             let data = {
                 let guard = registry(self.device_id).lock().unwrap();
                 guard
@@ -8136,13 +8190,24 @@ impl AccelProvider for InProcessProvider {
             let eval = match unique::unique_numeric_from_tensor(tensor, options) {
                 Ok(eval) => eval,
                 Err(err) => {
-                    return Err(anyhow!("{err}"));
+                    return Err(runmat_accelerate_api::ProviderExecutionError::from_source(
+                        err,
+                    ));
                 }
             };
             match eval.into_numeric_unique_result() {
                 Ok(result) => Ok(result),
-                Err(err) => Err(anyhow!("{err}")),
+                Err(err) => Err(runmat_accelerate_api::ProviderExecutionError::from_source(
+                    err,
+                )),
             }
+        };
+        Box::pin(async move {
+            pending.await.map(Some).map_err(
+                |cause: runmat_accelerate_api::ProviderExecutionError| {
+                    cause.with_unproven_effects()
+                },
+            )
         })
     }
 
@@ -8151,14 +8216,15 @@ impl AccelProvider for InProcessProvider {
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
         options: &'a SetdiffOptions,
-    ) -> AccelProviderFuture<'a, SetdiffResult> {
-        Box::pin(async move {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<SetdiffResult>> {
+        let pending = async move {
             if runmat_accelerate_api::handle_integer_type(a).is_some()
                 || runmat_accelerate_api::handle_integer_type(b).is_some()
             {
-                return Err(anyhow!(
-                    "setdiff: resident integer inputs require exact runtime fallback"
-                ));
+                return Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "setdiff: resident integer inputs require exact runtime fallback",
+                )
+                .into());
             }
             let data_a = {
                 let guard = registry(self.device_id).lock().unwrap();
@@ -8183,13 +8249,22 @@ impl AccelProvider for InProcessProvider {
             ) {
                 Ok(eval) => eval,
                 Err(err) => {
-                    return Err(anyhow!("setdiff: {err}"));
+                    return Err(runmat_accelerate_api::ProviderExecutionError::from_source(err));
                 }
             };
             match eval.into_numeric_setdiff_result() {
                 Ok(result) => Ok(result),
-                Err(err) => Err(anyhow!("setdiff: {err}")),
+                Err(err) => Err(runmat_accelerate_api::ProviderExecutionError::from_source(
+                    err,
+                )),
             }
+        };
+        Box::pin(async move {
+            pending.await.map(Some).map_err(
+                |cause: runmat_accelerate_api::ProviderExecutionError| {
+                    cause.with_unproven_effects()
+                },
+            )
         })
     }
 
@@ -8280,18 +8355,31 @@ impl AccelProvider for InProcessProvider {
     fn reduce_prod<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        // Pure metadata admission: decline before registry reads, staging, or execution.
+        if runmat_accelerate_api::handle_integer_type(a).is_some()
+            || runmat_accelerate_api::handle_is_logical(a)
+            || runmat_accelerate_api::handle_precision(a) != Some(self.precision())
+            || runmat_accelerate_api::handle_storage(a) != GpuTensorStorage::Real
+        {
+            return Box::pin(async { Ok(None) });
+        }
+
         Box::pin(async move {
-            if runmat_accelerate_api::handle_integer_type(a).is_some() {
-                return self.reduce_integer_prod_native(a).await;
-            }
-            let guard = registry(self.device_id).lock().unwrap();
-            let abuf = guard
-                .get(a)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
-            let p: f64 = abuf.iter().product();
-            drop(guard);
-            self.allocate_tensor_with_storage(vec![p], vec![1, 1], GpuTensorStorage::Real)
+            (async {
+                let guard = registry(self.device_id).lock().unwrap();
+                let abuf = guard
+                    .get(a)
+                    .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
+                let p: f64 = abuf.iter().product();
+                drop(guard);
+                self.allocate_tensor_with_storage(vec![p], vec![1, 1], GpuTensorStorage::Real)
+            })
+            .await
+            .map(Some)
+            .map_err(|source| {
+                runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+            })
         })
     }
 
@@ -8299,61 +8387,82 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         a: &'a GpuTensorHandle,
         dim: usize,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        // Pure metadata admission: decline before registry reads, staging, or execution.
+        if runmat_accelerate_api::handle_integer_type(a).is_some()
+            || runmat_accelerate_api::handle_is_logical(a)
+            || runmat_accelerate_api::handle_precision(a) != Some(self.precision())
+            || runmat_accelerate_api::handle_storage(a) != GpuTensorStorage::Real
+            || a.shape().len() != 2
+            || dim > 1
+        {
+            return Box::pin(async { Ok(None) });
+        }
+
         Box::pin(async move {
-            if runmat_accelerate_api::handle_integer_type(a).is_some() {
-                return self.reduce_integer_prod_native_dim(a, dim).await;
-            }
-            if a.shape().len() != 2 {
-                return Err(anyhow::anyhow!("reduce_prod_dim: only 2D supported"));
-            }
-            let rows = a.shape()[0];
-            let cols = a.shape()[1];
-            let guard = registry(self.device_id).lock().unwrap();
-            let abuf = guard
-                .get(a)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
-            let out = if dim == 0 {
-                let mut v = vec![1.0f64; cols];
-                for c in 0..cols {
-                    let mut prod = 1.0;
-                    for r in 0..rows {
-                        prod *= abuf[r + c * rows];
-                    }
-                    v[c] = prod;
-                }
-                v
-            } else {
-                let mut v = vec![1.0f64; rows];
-                for r in 0..rows {
-                    let mut prod = 1.0;
+            (async {
+                let rows = a.shape()[0];
+                let cols = a.shape()[1];
+                let guard = registry(self.device_id).lock().unwrap();
+                let abuf = guard
+                    .get(a)
+                    .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
+                let out = if dim == 0 {
+                    let mut v = vec![1.0f64; cols];
                     for c in 0..cols {
-                        prod *= abuf[r + c * rows];
+                        let mut prod = 1.0;
+                        for r in 0..rows {
+                            prod *= abuf[r + c * rows];
+                        }
+                        v[c] = prod;
                     }
-                    v[r] = prod;
-                }
-                v
-            };
-            drop(guard);
-            let shape = if dim == 0 {
-                vec![1, cols]
-            } else {
-                vec![rows, 1]
-            };
-            self.allocate_tensor(out, shape)
+                    v
+                } else {
+                    let mut v = vec![1.0f64; rows];
+                    for r in 0..rows {
+                        let mut prod = 1.0;
+                        for c in 0..cols {
+                            prod *= abuf[r + c * rows];
+                        }
+                        v[r] = prod;
+                    }
+                    v
+                };
+                drop(guard);
+                let shape = if dim == 0 {
+                    vec![1, cols]
+                } else {
+                    vec![rows, 1]
+                };
+                self.allocate_tensor(out, shape)
+            })
+            .await
+            .map(Some)
+            .map_err(|source| {
+                runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+            })
         })
     }
 
     fn reduce_integer_prod_native<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
         Box::pin(async move {
             let mut current = a.clone();
             for dim in 0..a.shape().len() {
-                current = self.reduce_integer_prod_native_dim(&current, dim).await?;
+                let next = self.reduce_integer_prod_native_dim(&current, dim).await?;
+                let Some(next) = next else {
+                    return Err(runmat_accelerate_api::ProviderExecutionError::from(
+                        runmat_accelerate_api::unsupported_provider_operation(
+                            "native product declined after entering its reduction pipeline",
+                        ),
+                    )
+                    .with_unproven_effects());
+                };
+                current = next;
             }
-            Ok(current)
+            Ok(Some(current))
         })
     }
 
@@ -8361,16 +8470,23 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         a: &'a GpuTensorHandle,
         dim: usize,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
         Box::pin(async move {
-            let data = integer_registry(self.device_id)
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .get(a)
-                .cloned()
-                .ok_or_else(|| anyhow!("integer buffer not found: {}", a.buffer_id()))?;
-            let (out, shape) = reduce_integer_data_dim(&data, a.shape(), dim, true)?;
-            self.allocate_integer_tensor(out, shape)
+            (async {
+                let data = integer_registry(self.device_id)
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(a)
+                    .cloned()
+                    .ok_or_else(|| anyhow!("integer buffer not found: {}", a.buffer_id()))?;
+                let (out, shape) = reduce_integer_data_dim(&data, a.shape(), dim, true)?;
+                self.allocate_integer_tensor(out, shape)
+            })
+            .await
+            .map(Some)
+            .map_err(|source| {
+                runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+            })
         })
     }
 
@@ -8793,48 +8909,58 @@ impl AccelProvider for InProcessProvider {
         })
     }
 
-    fn cumsum_scan(
-        &self,
-        _input: &GpuTensorHandle,
+    fn cumsum_scan<'a>(
+        &'a self,
+        _input: &'a GpuTensorHandle,
         _dim: usize,
         _direction: ProviderScanDirection,
         _nan_mode: ProviderNanMode,
-    ) -> Result<GpuTensorHandle> {
-        Err(runmat_accelerate_api::unsupported_provider_operation(
-            "cumsum_scan not supported by provider",
-        ))
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        Box::pin(async { Ok(None) })
     }
 
-    fn integer_cumsum_scan(
-        &self,
-        input: &GpuTensorHandle,
+    fn integer_cumsum_scan<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
         dim: usize,
         direction: ProviderScanDirection,
-    ) -> Result<GpuTensorHandle> {
-        let data = integer_registry(self.device_id)
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(input)
-            .cloned()
-            .ok_or_else(|| anyhow!("integer buffer not found: {}", input.buffer_id()))?;
-        let (values, _) = scan_integer_data_dim(&data, input.shape(), dim, 0, direction)?;
-        self.allocate_integer_tensor(values, input.shape().to_vec())
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        Box::pin(async move {
+            (|| -> anyhow::Result<GpuTensorHandle> {
+                let data = integer_registry(self.device_id)
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(input)
+                    .cloned()
+                    .ok_or_else(|| anyhow!("integer buffer not found: {}", input.buffer_id()))?;
+                let (values, _) = scan_integer_data_dim(&data, input.shape(), dim, 0, direction)?;
+                self.allocate_integer_tensor(values, input.shape().to_vec())
+            })()
+            .map(Some)
+            .map_err(Into::into)
+        })
     }
 
-    fn integer_cumprod_scan(
-        &self,
-        input: &GpuTensorHandle,
+    fn integer_cumprod_scan<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
         dim: usize,
         direction: ProviderScanDirection,
-    ) -> Result<GpuTensorHandle> {
-        let data = integer_registry(self.device_id)
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(input)
-            .cloned()
-            .ok_or_else(|| anyhow!("integer buffer not found: {}", input.buffer_id()))?;
-        let (values, _) = scan_integer_data_dim(&data, input.shape(), dim, 1, direction)?;
-        self.allocate_integer_tensor(values, input.shape().to_vec())
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        Box::pin(async move {
+            (|| -> anyhow::Result<GpuTensorHandle> {
+                let data = integer_registry(self.device_id)
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(input)
+                    .cloned()
+                    .ok_or_else(|| anyhow!("integer buffer not found: {}", input.buffer_id()))?;
+                let (values, _) = scan_integer_data_dim(&data, input.shape(), dim, 1, direction)?;
+                self.allocate_integer_tensor(values, input.shape().to_vec())
+            })()
+            .map(Some)
+            .map_err(Into::into)
+        })
     }
 
     fn trapz_dim(
@@ -8842,13 +8968,27 @@ impl AccelProvider for InProcessProvider {
         input: &GpuTensorHandle,
         dim: usize,
         spacing: ProviderTrapezoidSpacing<'_>,
-    ) -> Result<GpuTensorHandle> {
-        let (output, shape) = simple_trapezoid(self.device_id, input, dim, spacing, false)?;
-        self.allocate_tensor_with_storage(
-            output,
-            shape,
-            runmat_accelerate_api::handle_storage(input),
-        )
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        // Pure metadata admission: decline before registry reads, staging, or execution.
+        if runmat_accelerate_api::handle_integer_type(input).is_some()
+            || runmat_accelerate_api::handle_is_logical(input)
+            || runmat_accelerate_api::handle_precision(input) != Some(self.precision())
+        {
+            return Ok(None);
+        }
+
+        (|| -> anyhow::Result<GpuTensorHandle> {
+            let (output, shape) = simple_trapezoid(self.device_id, input, dim, spacing, false)?;
+            self.allocate_tensor_with_storage(
+                output,
+                shape,
+                runmat_accelerate_api::handle_storage(input),
+            )
+        })()
+        .map(Some)
+        .map_err(|source| {
+            runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+        })
     }
 
     fn cumtrapz_dim(
@@ -8856,62 +8996,102 @@ impl AccelProvider for InProcessProvider {
         input: &GpuTensorHandle,
         dim: usize,
         spacing: ProviderTrapezoidSpacing<'_>,
-    ) -> Result<GpuTensorHandle> {
-        let (output, shape) = simple_trapezoid(self.device_id, input, dim, spacing, true)?;
-        self.allocate_tensor_with_storage(
-            output,
-            shape,
-            runmat_accelerate_api::handle_storage(input),
-        )
-    }
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        // Pure metadata admission: decline before registry reads, staging, or execution.
+        if runmat_accelerate_api::handle_integer_type(input).is_some()
+            || runmat_accelerate_api::handle_is_logical(input)
+            || runmat_accelerate_api::handle_precision(input) != Some(self.precision())
+        {
+            return Ok(None);
+        }
 
-    fn cummin_scan(
-        &self,
-        _input: &GpuTensorHandle,
-        _dim: usize,
-        _direction: ProviderScanDirection,
-        _nan_mode: ProviderNanMode,
-    ) -> Result<runmat_accelerate_api::ProviderCumminResult> {
-        Err(runmat_accelerate_api::unsupported_provider_operation(
-            "cummin_scan not supported by provider",
-        ))
-    }
-
-    fn integer_cummin_scan(
-        &self,
-        input: &GpuTensorHandle,
-        dim: usize,
-        direction: ProviderScanDirection,
-    ) -> Result<runmat_accelerate_api::ProviderCumminResult> {
-        let data = integer_registry(self.device_id)
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(input)
-            .cloned()
-            .ok_or_else(|| anyhow!("integer buffer not found: {}", input.buffer_id()))?;
-        let (values, indices) = scan_integer_data_dim(&data, input.shape(), dim, 2, direction)?;
-        Ok(runmat_accelerate_api::ProviderCumminResult {
-            values: self.allocate_integer_tensor(values, input.shape().to_vec())?,
-            indices: self.allocate_tensor(indices.unwrap_or_default(), input.shape().to_vec())?,
+        (|| -> anyhow::Result<GpuTensorHandle> {
+            let (output, shape) = simple_trapezoid(self.device_id, input, dim, spacing, true)?;
+            self.allocate_tensor_with_storage(
+                output,
+                shape,
+                runmat_accelerate_api::handle_storage(input),
+            )
+        })()
+        .map(Some)
+        .map_err(|source| {
+            runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
         })
     }
 
-    fn integer_cummax_scan(
-        &self,
-        input: &GpuTensorHandle,
+    fn cummin_scan<'a>(
+        &'a self,
+        _input: &'a GpuTensorHandle,
+        _dim: usize,
+        _direction: ProviderScanDirection,
+        _nan_mode: ProviderNanMode,
+        _demand: runmat_accelerate_api::ProviderExtremaDemand,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<
+        'a,
+        Option<runmat_accelerate_api::ProviderCumminResult>,
+    > {
+        Box::pin(async { Ok(None) })
+    }
+
+    fn integer_cummin_scan<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
         dim: usize,
         direction: ProviderScanDirection,
-    ) -> Result<runmat_accelerate_api::ProviderCummaxResult> {
-        let data = integer_registry(self.device_id)
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(input)
-            .cloned()
-            .ok_or_else(|| anyhow!("integer buffer not found: {}", input.buffer_id()))?;
-        let (values, indices) = scan_integer_data_dim(&data, input.shape(), dim, 3, direction)?;
-        Ok(runmat_accelerate_api::ProviderCummaxResult {
-            values: self.allocate_integer_tensor(values, input.shape().to_vec())?,
-            indices: self.allocate_tensor(indices.unwrap_or_default(), input.shape().to_vec())?,
+        _demand: runmat_accelerate_api::ProviderExtremaDemand,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<
+        'a,
+        Option<runmat_accelerate_api::ProviderCumminResult>,
+    > {
+        Box::pin(async move {
+            (|| -> anyhow::Result<runmat_accelerate_api::ProviderCumminResult> {
+                let data = integer_registry(self.device_id)
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(input)
+                    .cloned()
+                    .ok_or_else(|| anyhow!("integer buffer not found: {}", input.buffer_id()))?;
+                let (values, indices) =
+                    scan_integer_data_dim(&data, input.shape(), dim, 2, direction)?;
+                Ok(runmat_accelerate_api::ProviderCumminResult {
+                    values: self.allocate_integer_tensor(values, input.shape().to_vec())?,
+                    indices: self
+                        .allocate_tensor(indices.unwrap_or_default(), input.shape().to_vec())?,
+                })
+            })()
+            .map(Some)
+            .map_err(Into::into)
+        })
+    }
+
+    fn integer_cummax_scan<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+        dim: usize,
+        direction: ProviderScanDirection,
+        _demand: runmat_accelerate_api::ProviderExtremaDemand,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<
+        'a,
+        Option<runmat_accelerate_api::ProviderCummaxResult>,
+    > {
+        Box::pin(async move {
+            (|| -> anyhow::Result<runmat_accelerate_api::ProviderCummaxResult> {
+                let data = integer_registry(self.device_id)
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(input)
+                    .cloned()
+                    .ok_or_else(|| anyhow!("integer buffer not found: {}", input.buffer_id()))?;
+                let (values, indices) =
+                    scan_integer_data_dim(&data, input.shape(), dim, 3, direction)?;
+                Ok(runmat_accelerate_api::ProviderCummaxResult {
+                    values: self.allocate_integer_tensor(values, input.shape().to_vec())?,
+                    indices: self
+                        .allocate_tensor(indices.unwrap_or_default(), input.shape().to_vec())?,
+                })
+            })()
+            .map(Some)
+            .map_err(Into::into)
         })
     }
 
@@ -10060,6 +10240,8 @@ mod tests {
         let cases = vec![
             HostNumericDataOwned::F64(vec![1.0, 2.0, 3.0, 4.0]),
             HostNumericDataOwned::F32(vec![1.0, 2.0, 3.0, 4.0]),
+            HostNumericDataOwned::F64(vec![]),
+            HostNumericDataOwned::F32(vec![]),
             HostNumericDataOwned::I8(vec![i8::MIN, -1, 1, i8::MAX]),
             HostNumericDataOwned::I16(vec![i16::MIN, -1, 1, i16::MAX]),
             HostNumericDataOwned::I32(vec![i32::MIN, -1, 1, i32::MAX]),
@@ -10071,9 +10253,13 @@ mod tests {
         ];
 
         for data in cases {
+            let scalar_count = data.as_view().len();
             for (shape, storage) in [
-                (vec![1, 4], GpuTensorStorage::Real),
-                (vec![1, 2], GpuTensorStorage::ComplexInterleaved),
+                (vec![1, scalar_count], GpuTensorStorage::Real),
+                (
+                    vec![1, scalar_count / 2],
+                    GpuTensorStorage::ComplexInterleaved,
+                ),
             ] {
                 let expected_type = data.element_type();
                 let transfer = HostNumericTensorView {
@@ -10081,6 +10267,66 @@ mod tests {
                     shape: &shape,
                     storage,
                 };
+                if matches!(
+                    expected_type,
+                    NumericElementType::F32 | NumericElementType::F64
+                ) {
+                    use runmat_accelerate_api::{
+                        class_preserving_upload_query, ProviderElementType as E, ProviderLayout,
+                        ProviderRepresentation, ProviderResidency, ProviderStorage as S,
+                    };
+                    let (element_type, representation_storage, scalar_bytes) =
+                        match (expected_type, storage) {
+                            (NumericElementType::F32, GpuTensorStorage::Real) => {
+                                (E::F32, S::DenseReal, 4)
+                            }
+                            (NumericElementType::F64, GpuTensorStorage::Real) => {
+                                (E::F64, S::DenseReal, 8)
+                            }
+                            (NumericElementType::F32, GpuTensorStorage::ComplexInterleaved) => {
+                                (E::ComplexF32, S::DenseComplexInterleaved, 4)
+                            }
+                            (NumericElementType::F64, GpuTensorStorage::ComplexInterleaved) => {
+                                (E::ComplexF64, S::DenseComplexInterleaved, 8)
+                            }
+                            _ => unreachable!(),
+                        };
+                    let mut query = class_preserving_upload_query(vec![ProviderRepresentation {
+                        element_type,
+                        storage: representation_storage,
+                        layout: ProviderLayout::ColumnMajorContiguous,
+                        shape: shape.iter().map(|&d| d as u64).collect(),
+                        residency: ProviderResidency::Device,
+                    }])
+                    .unwrap();
+                    let evidence = provider
+                        .upload_physical_evidence(&query)
+                        .expect("native direct-copy evidence");
+                    assert_eq!(
+                        evidence.output_requested_bytes,
+                        (scalar_count * scalar_bytes) as u64
+                    );
+                    assert_eq!(
+                        evidence.host_workspace_bytes,
+                        runmat_execution::ResourceByteBound::Known(0)
+                    );
+                    assert_eq!(
+                        evidence.provider_scratch_bytes,
+                        runmat_execution::ResourceByteBound::Known(0)
+                    );
+                    assert_eq!(evidence.completion_queue_slots, 0);
+                    query.inputs[0].shape[0] = 2;
+                    assert!(provider.upload_physical_evidence(&query).is_none());
+                    query.inputs[0].shape[0] = 1;
+                    let wrong_storage = if representation_storage == S::DenseReal {
+                        S::DenseComplexInterleaved
+                    } else {
+                        S::DenseReal
+                    };
+                    query.inputs[0].storage = wrong_storage;
+                    query.outputs[0].storage = wrong_storage;
+                    assert!(provider.upload_physical_evidence(&query).is_none());
+                }
                 let handle = provider
                     .upload_numeric(&transfer)
                     .expect("shared native upload");
@@ -10443,8 +10689,9 @@ mod tests {
             .expect("upload native integer");
         let sum = block_on(provider.reduce_integer_sum_native_dim(&handle, 0))
             .expect("native integer sum dim");
-        let prod =
-            block_on(provider.reduce_integer_prod_native(&handle)).expect("native integer prod");
+        let prod = block_on(provider.reduce_integer_prod_native(&handle))
+            .expect("native integer prod")
+            .expect("provider accepted numerical operation");
         assert_eq!(
             block_on(provider.download_integer(&sum))
                 .expect("download sum")
@@ -10569,6 +10816,38 @@ mod tests {
     }
 
     #[test]
+    fn inprocess_trapezoid_virtual_axes_preserve_shape_complexity_and_empty_storage() {
+        let provider = InProcessProvider::new();
+        for (data, shape) in [(&[1., 2., 3., 4.][..], &[1, 2][..]), (&[][..], &[0, 2][..])] {
+            let input = provider
+                .upload_numeric(&runmat_accelerate_api::HostNumericTensorView {
+                    data: runmat_accelerate_api::HostNumericDataView::F64(data),
+                    shape,
+                    storage: GpuTensorStorage::ComplexInterleaved,
+                })
+                .unwrap();
+            for dimension in [2, usize::MAX] {
+                for output in [
+                    provider.trapz_dim(&input, dimension, ProviderTrapezoidSpacing::Unit),
+                    provider.cumtrapz_dim(&input, dimension, ProviderTrapezoidSpacing::Unit),
+                ] {
+                    let output = output.unwrap().expect("virtual-axis provider route");
+                    assert_eq!(output.shape(), shape);
+                    assert_eq!(
+                        runmat_accelerate_api::handle_precision(&output),
+                        runmat_accelerate_api::handle_precision(&input)
+                    );
+                    let host = futures::executor::block_on(provider.download(&output)).unwrap();
+                    assert_eq!(host.storage, GpuTensorStorage::ComplexInterleaved);
+                    assert_eq!(host.data, vec![0.; data.len()]);
+                    output.release().unwrap();
+                }
+            }
+            input.release().unwrap();
+        }
+    }
+
+    #[test]
     fn inprocess_ordinary_sum_is_floating_while_native_integer_sum_saturates() {
         let provider = InProcessProvider::new();
         let input = provider
@@ -10581,7 +10860,10 @@ mod tests {
         let sum = block_on(provider.reduce_sum(&input)).expect("ordinary uint64 sum");
         let native_sum =
             block_on(provider.reduce_integer_sum_native(&input)).expect("native uint64 sum");
-        let product = block_on(provider.reduce_prod(&input)).expect("public uint64 product");
+        assert!(block_on(provider.reduce_prod(&input)).unwrap().is_none());
+        let product = block_on(provider.reduce_integer_prod_native(&input))
+            .expect("native uint64 product")
+            .expect("provider accepted numerical operation");
         let mean = block_on(provider.reduce_mean_dim(&input, 0))
             .expect("public uint64 mean")
             .expect("admitted integer mean");
@@ -10697,8 +10979,9 @@ mod tests {
             .expect("sum across third dimension");
         let sum_all =
             block_on(provider.reduce_integer_sum_native(&handle)).expect("sum across all dims");
-        let prod_all =
-            block_on(provider.reduce_integer_prod_native(&handle)).expect("prod across all dims");
+        let prod_all = block_on(provider.reduce_integer_prod_native(&handle))
+            .expect("prod across all dims")
+            .expect("provider accepted numerical operation");
         assert_eq!(
             block_on(provider.download_integer(&sum_pages))
                 .expect("download page sums")
@@ -10731,12 +11014,14 @@ mod tests {
                 shape: &[3, 2],
             })
             .expect("upload native integer");
-        let forward = provider
-            .integer_cumsum_scan(&handle, 0, ProviderScanDirection::Forward)
-            .expect("integer cumsum");
-        let reverse = provider
-            .integer_cumprod_scan(&handle, 0, ProviderScanDirection::Reverse)
-            .expect("integer cumprod reverse");
+        let forward =
+            block_on(provider.integer_cumsum_scan(&handle, 0, ProviderScanDirection::Forward))
+                .unwrap()
+                .expect("integer cumsum");
+        let reverse =
+            block_on(provider.integer_cumprod_scan(&handle, 0, ProviderScanDirection::Reverse))
+                .unwrap()
+                .expect("integer cumprod reverse");
         assert_eq!(
             block_on(provider.download_integer(&forward))
                 .expect("download cumsum")
@@ -10768,12 +11053,22 @@ mod tests {
                 shape: &[2, 3, 2],
             })
             .expect("upload native integer ndarray");
-        let mins = provider
-            .integer_cummin_scan(&handle, 1, ProviderScanDirection::Forward)
-            .expect("integer cummin");
-        let maxes = provider
-            .integer_cummax_scan(&handle, 2, ProviderScanDirection::Reverse)
-            .expect("integer cummax reverse");
+        let mins = block_on(provider.integer_cummin_scan(
+            &handle,
+            1,
+            ProviderScanDirection::Forward,
+            runmat_accelerate_api::ProviderExtremaDemand::ValuesOnly,
+        ))
+        .unwrap()
+        .expect("integer cummin");
+        let maxes = block_on(provider.integer_cummax_scan(
+            &handle,
+            2,
+            ProviderScanDirection::Reverse,
+            runmat_accelerate_api::ProviderExtremaDemand::ValuesOnly,
+        ))
+        .unwrap()
+        .expect("integer cummax reverse");
         assert_eq!(
             block_on(provider.download_integer(&mins.values))
                 .expect("download cummin values")
@@ -11550,8 +11845,9 @@ mod tests {
         assert_eq!(max_indices.shape, vec![1, 1]);
         assert_eq!(max_indices.data, vec![3.0]);
 
-        let prod_result =
-            futures::executor::block_on(provider.reduce_prod_dim(&handle, 1)).expect("prod dim1");
+        let prod_result = futures::executor::block_on(provider.reduce_prod_dim(&handle, 1))
+            .expect("prod dim1")
+            .expect("provider accepted numerical operation");
         let prod_values =
             futures::executor::block_on(provider.download(&prod_result)).expect("prod values");
         assert_eq!(prod_values.shape, vec![1, 1]);

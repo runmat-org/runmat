@@ -34,7 +34,11 @@ async fn sym_builtin(value: Value, rest: crate::call::BuiltinArguments) -> Built
     if let Some(expr) = value_to_symbolic_scalar(&value) {
         return Ok(symbolic_expr_to_value(expr));
     }
-    if let Some(text) = text_scalar(&value) {
+    if let Some(text) = text_scalar(&value).map_err(|source| {
+        let mut error = sym_error(&SYM_ERRORS[2]);
+        error.source = Some(Box::new(source));
+        error
+    })? {
         let trimmed = text.trim();
         if is_valid_identifier(trimmed) {
             return Ok(Value::Symbolic(SymbolicExpr::variable(trimmed)));
@@ -124,7 +128,9 @@ mod tests {
 
     #[test]
     fn invalid_rank_options_and_output_arity_have_stable_errors() {
-        let chars = runmat_value::CharArray::new_with_shape(vec!['x', 'y'], vec![1, 1, 2]).unwrap();
+        let chars =
+            runmat_value::CharArray::from_unicode_scalars_with_shape(vec!['x', 'y'], vec![1, 1, 2])
+                .unwrap();
         let error =
             futures::executor::block_on(sym_builtin_source(Value::CharArray(chars), vec![]))
                 .unwrap_err();

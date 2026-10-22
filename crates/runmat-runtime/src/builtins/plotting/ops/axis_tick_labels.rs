@@ -28,7 +28,13 @@ pub fn axis_tick_labels_builtin(
     match (args.len(), args.first()) {
         (0, _) => query_labels(builtin, axis, &target.resolve(builtin)?),
         (1, Some(value)) => {
-            if let Some(text) = value_as_string(value) {
+            if let Some(text) = value_as_string(value).map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    builtin,
+                    source.to_string(),
+                    source,
+                )
+            })? {
                 match text.trim().to_ascii_lowercase().as_str() {
                     "auto" => {
                         super::op_common::axes_output::validate_setter_output(builtin)?;
@@ -278,7 +284,7 @@ fn labels_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<
     match value {
         Value::String(s) => Ok(vec![s.as_str().to_owned()]),
         Value::StringArray(strings) => Ok(strings.data().iter().map(|text| text.as_str().to_owned()).collect()),
-        Value::CharArray(chars) => Ok(char_array_rows(chars)),
+        Value::CharArray(chars) => Ok(char_array_rows(chars).map_err(|source|crate::builtins::plotting::plotting_error_with_source(builtin,source.to_string(),source))?),
         Value::Cell(cell) => {
             let mut labels = Vec::with_capacity(cell.data().len());
             for entry in cell.data() {
@@ -294,19 +300,19 @@ fn labels_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<
     }
 }
 
-fn char_array_rows(chars: &CharArray) -> Vec<String> {
+fn char_array_rows(chars: &CharArray) -> Result<Vec<String>, runmat_value::Utf16DecodeError> {
     if chars.rows == 0 || chars.cols == 0 {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     (0..chars.rows)
         .map(|row| {
             let start = row * chars.cols;
             let end = start + chars.cols;
-            chars.data()[start..end]
-                .iter()
-                .collect::<String>()
-                .trim_end()
-                .to_string()
+            Ok(
+                runmat_value::decode_utf16_code_units(&chars.data()[start..end])?
+                    .trim_end()
+                    .to_string(),
+            )
         })
         .collect()
 }
@@ -319,12 +325,14 @@ fn label_value(labels: Vec<String>) -> Value {
     Value::Cell(CellArray::new(values, 1, labels.len()).expect("valid tick-label cell array"))
 }
 
-fn value_as_string(value: &Value) -> Option<String> {
-    match value {
+fn value_as_string(value: &Value) -> Result<Option<String>, runmat_value::Utf16DecodeError> {
+    Ok(match value {
         Value::String(s) => Some(s.as_str().to_owned()),
-        Value::CharArray(chars) if chars.rows == 1 => Some(chars.data().iter().collect()),
+        Value::CharArray(chars) if chars.rows == 1 => {
+            Some(runmat_value::decode_utf16_code_units(chars.data())?)
+        }
         _ => None,
-    }
+    })
 }
 
 #[cfg(test)]
@@ -335,7 +343,8 @@ pub(crate) fn label_cell_texts(value: &Value) -> Vec<String> {
     cell.data()
         .iter()
         .map(|entry| match entry {
-            Value::CharArray(chars) => chars.data().iter().collect(),
+            Value::CharArray(chars) => runmat_value::decode_utf16_code_units(chars.data())
+                .expect("fixture label is well-formed UTF-16"),
             other => panic!("expected char label, got {other:?}"),
         })
         .collect()

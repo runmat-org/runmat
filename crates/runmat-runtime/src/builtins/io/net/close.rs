@@ -164,7 +164,7 @@ mod tests {
     #[test]
     fn scalar_selector_compatibility_precedes_browser_target_rejection() {
         let trailing = Value::CharArray(
-            CharArray::new_with_shape("clients".chars().collect(), vec![1, 7, 1])
+            CharArray::from_unicode_scalars_with_shape("clients".chars().collect(), vec![1, 7, 1])
                 .expect("trailing singleton"),
         );
         {

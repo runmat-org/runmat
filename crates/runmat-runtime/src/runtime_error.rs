@@ -4,9 +4,9 @@ pub use runmat_async::{
     RuntimeErrorOwner, RuntimeErrorSourceBound, RuntimeFailureOrigin, SharedRuntimeErrorSource,
 };
 
+mod cleanup;
 #[cfg(test)]
 mod provider_sources;
-mod cleanup;
 pub use cleanup::complete_with_cleanup;
 
 /// An evaluated assertion condition failed. The originating builtin attaches
@@ -28,6 +28,7 @@ pub fn with_provider_execution_source(
             fallback.identifier = runtime.identifier.clone();
             fallback.span = runtime.span;
             fallback.context = runtime.context.clone();
+            fallback.failure_origin = runtime.failure_origin;
             break;
         }
         let Some(next) = cursor.source() else { break };
@@ -36,6 +37,14 @@ pub fn with_provider_execution_source(
     fallback.gpu_gather_retry = GpuGatherRetry::Never;
     fallback.source = Some(Box::new(source));
     fallback
+}
+
+/// Whether an error chain carries one of Runtime's typed execution-control
+/// cancellation causes. Presentation owners use this after an outer scope has
+/// retained the reason (for example, user cancellation versus a deadline).
+/// Identifiers and messages are deliberately not authority for this decision.
+pub fn error_has_control_cancellation_origin(error: &RuntimeError) -> bool {
+    error.failure_origin() == RuntimeFailureOrigin::ExecutionControlCancellation
 }
 
 /// Construct a language-semantic runtime error in the active session's
@@ -193,6 +202,32 @@ mod tests {
             semantic_error("IndexOutOfBounds", "bad index").identifier(),
             Some("Acme:IndexOutOfBounds")
         );
+    }
+
+    #[test]
+    fn control_cancellation_follows_retained_runtime_owners_but_not_text() {
+        let original = crate::execution::ExecutionServiceError::Cancelled.into_runtime_error();
+        let retained: RuntimeErrorOwner = original.into();
+        let outward = RuntimeError::from_shared_original(retained.clone());
+        assert!(error_has_control_cancellation_origin(&outward));
+
+        let coincidental = build_runtime_error("execution was cancelled")
+            .with_identifier("RunMat:parallel:Cancelled")
+            .with_source(std::io::Error::other("ordinary language failure"))
+            .build();
+        assert!(!error_has_control_cancellation_origin(&coincidental));
+    }
+
+    #[test]
+    fn typed_source_alone_does_not_mint_control_origin() {
+        let checkpoint = build_runtime_error("checkpoint stopped")
+            .with_source(
+                crate::context::host_allocation::HostAllocationError::Resource(
+                    crate::context::host_effect::HostEffectAllocationError::Cancelled,
+                ),
+            )
+            .build();
+        assert!(!error_has_control_cancellation_origin(&checkpoint));
     }
 
     #[test]

@@ -5,8 +5,8 @@
 
 use crate::builtins::common::integer_conversion::{integer_values, IntegerClass, IntegerClassExt};
 use runmat_value::{
-    CharArray, IntValue, NumericDType, NumericScalar, NumericStorage, SymbolicArray, SymbolicExpr,
-    Tensor, Value,
+    decode_utf16_code_units, CharArray, IntValue, NumericDType, NumericScalar, NumericStorage,
+    SymbolicArray, SymbolicExpr, Tensor, Utf16CodeUnit, Value,
 };
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -17,6 +17,12 @@ pub use host_matrix::{create_host_matrix_from_values, host_matrix_can_run_inline
 
 fn concat_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).build()
+}
+
+fn concat_utf16_error(context: &str, error: runmat_value::Utf16DecodeError) -> RuntimeError {
+    build_runtime_error(format!("{context}: {error}"))
+        .with_source(error)
+        .build()
 }
 
 /// A language-level matrix literal whose already-evaluated numeric rows have
@@ -49,30 +55,29 @@ fn numeric_matrix_columns(value: &Value) -> Option<usize> {
     }
 }
 
-/// Converts an f64 code point to a 1x1 `CharArray`.
+/// Converts an f64 character code unit to a 1x1 `CharArray`.
 ///
-/// Validates that the value is a finite integer in the valid Unicode code point range,
-/// then constructs a single-character array. The `error_prefix` is prepended to error
+/// Validates that the value is a finite integer in the physical UTF-16 range,
+/// then constructs a single-code-unit array. The `error_prefix` is prepended to error
 /// messages (e.g., "cat" or "char concat").
 pub fn char_array_from_f64_with_prefix(value: f64, error_prefix: &str) -> BuiltinResult<CharArray> {
-    let ch = char_from_f64_code_point(value, error_prefix)?;
-    CharArray::new(vec![ch], 1, 1).map_err(concat_error)
+    let unit = char_from_f64_code_unit(value, error_prefix)?;
+    CharArray::from_code_units(vec![unit], 1, 1).map_err(concat_error)
 }
 
-/// The same code-point validation without allocating a character array.
-pub fn char_from_f64_code_point(value: f64, error_prefix: &str) -> BuiltinResult<char> {
+/// The same code-unit validation without allocating a character array.
+pub fn char_from_f64_code_unit(value: f64, error_prefix: &str) -> BuiltinResult<Utf16CodeUnit> {
     if !value.is_finite() || value.fract() != 0.0 {
         return Err(concat_error(format!(
-            "{error_prefix}: expected integer code point"
+            "{error_prefix}: expected integer character code unit"
         )));
     }
-    if value < 0.0 || value > u32::MAX as f64 {
+    if value < 0.0 || value > u16::MAX as f64 {
         return Err(concat_error(format!(
-            "{error_prefix}: code point out of range"
+            "{error_prefix}: character code unit out of range"
         )));
     }
-    let code = value as u32;
-    char::from_u32(code).ok_or_else(|| concat_error(format!("{error_prefix}: invalid code point")))
+    Ok(Utf16CodeUnit::from_raw(value as u16))
 }
 
 fn char_array_from_f64(value: f64) -> BuiltinResult<CharArray> {
@@ -355,18 +360,17 @@ fn vcat_symbolic_values(values: &[Value]) -> BuiltinResult<Value> {
 
 fn char_array_from_int(value: &IntValue) -> BuiltinResult<CharArray> {
     let code = match value {
-        IntValue::I8(value) => u32::try_from(*value),
-        IntValue::I16(value) => u32::try_from(*value),
-        IntValue::I32(value) => u32::try_from(*value),
-        IntValue::I64(value) => u32::try_from(*value),
-        IntValue::U8(value) => Ok(u32::from(*value)),
-        IntValue::U16(value) => Ok(u32::from(*value)),
-        IntValue::U32(value) => Ok(*value),
-        IntValue::U64(value) => u32::try_from(*value),
+        IntValue::I8(value) => u16::try_from(*value),
+        IntValue::I16(value) => u16::try_from(*value),
+        IntValue::I32(value) => u16::try_from(*value),
+        IntValue::I64(value) => u16::try_from(*value),
+        IntValue::U8(value) => Ok(u16::from(*value)),
+        IntValue::U16(value) => Ok(*value),
+        IntValue::U32(value) => u16::try_from(*value),
+        IntValue::U64(value) => u16::try_from(*value),
     };
-    let code = code.map_err(|_| concat_error("char concat: code point out of range"))?;
-    let ch = char::from_u32(code).ok_or_else(|| concat_error("char concat: invalid code point"))?;
-    CharArray::new(vec![ch], 1, 1).map_err(concat_error)
+    let code = code.map_err(|_| concat_error("char concat: character code unit out of range"))?;
+    CharArray::from_code_units(vec![Utf16CodeUnit::from_raw(code)], 1, 1).map_err(concat_error)
 }
 
 /// Horizontally concatenate two matrices [A, B]
@@ -630,10 +634,14 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
                     }
                     let mut out: Vec<String> = Vec::with_capacity(ca.rows);
                     for r in 0..ca.rows {
-                        let mut s = String::with_capacity(ca.cols);
-                        for c in 0..ca.cols {
-                            s.push(ca.data()[r * ca.cols + c]);
-                        }
+                        let start = r * ca.cols;
+                        let s = decode_utf16_code_units(&ca.data()[start..start + ca.cols])
+                            .map_err(|error| {
+                                concat_utf16_error(
+                                    "string hcat: character row is not valid UTF-16 text",
+                                    error,
+                                )
+                            })?;
                         out.push(s);
                     }
                     let sa = runmat_value::StringArray::new(out, vec![ca.rows, 1]).unwrap();
@@ -763,7 +771,7 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
             }
         }
         let rows = rows.unwrap_or(0);
-        let mut data: Vec<char> = Vec::with_capacity(rows * cols_total);
+        let mut data: Vec<Utf16CodeUnit> = Vec::with_capacity(rows * cols_total);
         for r in 0..rows {
             for block in &blocks {
                 for c in 0..block.cols {
@@ -771,7 +779,7 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
                 }
             }
         }
-        let ca = CharArray::new(data, rows, cols_total)
+        let ca = CharArray::from_code_units(data, rows, cols_total)
             .map_err(|e| concat_error(format!("char hcat: {e}")))?;
         return Ok(Value::CharArray(ca));
     }
@@ -912,7 +920,12 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
                     if ca.cols == 0 {
                         continue;
                     }
-                    let out: String = ca.data().iter().collect();
+                    let out = decode_utf16_code_units(ca.data()).map_err(|error| {
+                        concat_utf16_error(
+                            "string vcat: character value is not valid UTF-16 text",
+                            error,
+                        )
+                    })?;
                     let sa = runmat_value::StringArray::new(vec![out], vec![1, 1]).unwrap();
                     rows_total += 1;
                     if cols.is_none() {
@@ -1037,7 +1050,7 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
             }
         }
         let cols = cols.unwrap_or(0);
-        let mut data: Vec<char> = Vec::with_capacity(rows_total * cols);
+        let mut data: Vec<Utf16CodeUnit> = Vec::with_capacity(rows_total * cols);
         for block in &blocks {
             for r in 0..block.rows {
                 for c in 0..cols {
@@ -1045,7 +1058,7 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
                 }
             }
         }
-        let ca = CharArray::new(data, rows_total, cols)
+        let ca = CharArray::from_code_units(data, rows_total, cols)
             .map_err(|e| concat_error(format!("char vcat: {e}")))?;
         return Ok(Value::CharArray(ca));
     }

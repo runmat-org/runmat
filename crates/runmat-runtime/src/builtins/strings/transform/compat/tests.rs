@@ -134,15 +134,39 @@ fn append_extract_insert_and_replace_work() {
     assert_eq!(
         block(replace_between_builtin(
             Value::String("a[old]b".into()),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::String("[".into()),
                 Value::String("]".into()),
                 Value::String("new".into()),
-            ],
+            ])
         ))
         .unwrap(),
         Value::String("a[new]b".into())
     );
+}
+
+#[test]
+fn replace_between_rejects_trailing_arguments_before_provider_access() {
+    let provider = counted_boundary_provider();
+    let position = resident_position(provider);
+    let error = block(replace_between_builtin(
+        Value::string("abc"),
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            position.clone(),
+            Value::Num(2.0),
+            Value::string("X"),
+            Value::string("ignored"),
+        ]),
+    ))
+    .expect_err("extra control must not be silently ignored");
+    assert_eq!(
+        error.identifier(),
+        runmat_builtins::REPLACE_BETWEEN_ERROR_ARGUMENT_COUNT.identifier
+    );
+    assert_eq!(provider.downloads(), 0);
+    if let Value::GpuTensor(handle) = position {
+        handle.release().expect("release position");
+    }
 }
 
 #[test]
@@ -350,11 +374,11 @@ fn text_boundary_positions_read_typed_integer_storage_exactly() {
     assert_eq!(
         block(replace_between_builtin(
             Value::String("abcde".into()),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::Tensor(start),
                 Value::Tensor(stop),
                 Value::String("X".into()),
-            ],
+            ])
         ))
         .unwrap(),
         Value::String("aXe".into())
@@ -408,11 +432,11 @@ fn replace_between_accepts_all_integer_position_classes_and_same_size_arrays() {
         assert_eq!(
             block(replace_between_builtin(
                 Value::String("abc".into()),
-                vec![
+                crate::builtins::common::test_support::builtin_arguments(vec![
                     Value::Int(position.clone()),
                     Value::Int(position),
                     Value::String("X".into()),
-                ],
+                ])
             ))
             .expect("integer positions"),
             Value::String("aXc".into())
@@ -430,7 +454,7 @@ fn replace_between_accepts_all_integer_position_classes_and_same_size_arrays() {
         Value::StringArray(StringArray::new(vec!["X".into(), "Q".into()], vec![2, 1]).unwrap());
     let Value::StringArray(output) = block(replace_between_builtin(
         text,
-        vec![starts, stops, replacements],
+        crate::builtins::common::test_support::builtin_arguments(vec![starts, stops, replacements]),
     ))
     .expect("same-size positions") else {
         panic!("string array")
@@ -654,8 +678,9 @@ fn insertion_compatibility_gates_precede_resident_gather() {
         INSERT_AFTER_RESIDENT_POSITION_EXTENSION.error_identifier
     );
 
-    let matrix =
-        Value::CharArray(CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).expect("character matrix"));
+    let matrix = Value::CharArray(
+        CharArray::from_unicode_scalars(vec!['a', 'b', 'c', 'd'], 2, 2).expect("character matrix"),
+    );
     let error = block(insert_before_builtin(
         matrix,
         crate::builtins::common::test_support::builtin_arguments(vec![
@@ -691,6 +716,21 @@ fn splitlines_reverse_deblank_and_matches_work() {
         .unwrap(),
         Value::Bool(true)
     );
+    let cell = make_cell_with_shape(
+        ["hit", "miss", "hit", "miss"]
+            .into_iter()
+            .map(|text| Value::CharArray(CharArray::new_row(text)))
+            .collect(),
+        vec![2, 2],
+    )
+    .expect("physical cell order");
+    let Value::LogicalArray(result) =
+        block(matches_builtin(cell, Value::string("hit"))).expect("cell matches")
+    else {
+        panic!("logical output");
+    };
+    assert_eq!(result.shape.as_slice(), &[2, 2]);
+    assert_eq!(result.data.as_slice(), &[1, 1, 0, 0]);
     assert_eq!(
         block(erase_urls_builtin(Value::String(
             "see https://example.com now".into()
@@ -796,8 +836,9 @@ fn erase_text_builtins_reject_all_integer_classes_and_logical_values() {
 
 #[test]
 fn erase_text_broad_container_extensions_are_independently_gated() {
-    let matrix =
-        Value::CharArray(CharArray::new(vec!['a', '!', 'b', '?'], 2, 2).expect("character matrix"));
+    let matrix = Value::CharArray(
+        CharArray::from_unicode_scalars(vec!['a', '!', 'b', '?'], 2, 2).expect("character matrix"),
+    );
     let broad_cell = Value::Cell(
         CellArray::new(vec![Value::String("https://example.com!".into())], 1, 1)
             .expect("broad text cell"),
@@ -958,8 +999,9 @@ fn extract_before_and_after_apply_same_size_native_integer_positions() {
 #[test]
 fn extract_before_and_after_enforce_strict_extensions_before_gather() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-    let matrix =
-        Value::CharArray(CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).expect("character matrix"));
+    let matrix = Value::CharArray(
+        CharArray::from_unicode_scalars(vec!['a', 'b', 'c', 'd'], 2, 2).expect("character matrix"),
+    );
     let before = block(extract_before_builtin(
         matrix,
         crate::builtins::common::test_support::builtin_arguments(vec![Value::Int(IntValue::U8(1))]),
@@ -1052,7 +1094,7 @@ fn extract_before_and_after_reject_zero_floating_positions() {
 
 #[test]
 fn extract_before_and_after_accept_empty_character_boundary_without_panicking() {
-    let boundary = Value::CharArray(CharArray::new(Vec::new(), 0, 0).unwrap());
+    let boundary = Value::CharArray(CharArray::from_code_units(Vec::new(), 0, 0).unwrap());
     assert_eq!(
         block(extract_before_builtin(
             Value::String("abc".into()),

@@ -45,5 +45,9 @@ pub use text::HostTextError;
 pub(crate) use text::{HostText, HostTextAllocation};
 pub(crate) use trace_scratch::HostTraceScratchPermit;
 
+mod array;
 #[cfg(test)]
 mod tests;
+pub use array::{
+    initialize_host_array, prepare_host_array, prepare_host_array_optional, PreparedHostArray,
+};

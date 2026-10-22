@@ -112,7 +112,7 @@ pub(super) async fn datetime_builtin(
 
     match positional.len() {
         0 => {
-            let now = Local::now().naive_local();
+            let now = current_naive_local(runtime.as_ref())?;
             datetime_object_from_serials(
                 runtime.as_ref(),
                 vec![datenum_from_naive(now)],
@@ -125,9 +125,10 @@ pub(super) async fn datetime_builtin(
         1 => match &positional[0] {
             Value::Object(obj) if obj.is_class(DATETIME_CLASS) => {
                 let serials = serials_from_datetime_value(&positional[0])?;
-                let format = options
-                    .format
-                    .unwrap_or_else(|| datetime_format_from_value(&positional[0]));
+                let format = match options.format {
+                    Some(format) => format,
+                    None => datetime_format_from_value(&positional[0])?,
+                };
                 datetime_object_from_serial_tensor(runtime.as_ref(), serials, format)
             }
             Value::Cell(_) => {
@@ -152,8 +153,11 @@ pub(super) async fn datetime_builtin(
                 )
             }
             Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
-                let (serials, shape, inferred_format) =
-                    parse_text_input(&positional[0], options.input_format.as_deref())?;
+                let (serials, shape, inferred_format) = parse_text_input_with_runtime(
+                    &positional[0],
+                    options.input_format.as_deref(),
+                    runtime.as_ref(),
+                )?;
                 datetime_object_from_serials(
                     runtime.as_ref(),
                     serials,

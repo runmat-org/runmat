@@ -1301,7 +1301,8 @@ mod tests {
         assert_eq!(figure.plots().count(), 1);
         let metadata = figure.axes_metadata(0).unwrap();
         assert_eq!(metadata.x_tick_labels.as_ref().unwrap(), &vec!["8", "9"]);
-        assert_eq!(metadata.y_tick_labels.as_ref().unwrap(), &vec!["A", "B"]);
+        // Rendering reverses rows and labels together; source table order stays A, B below.
+        assert_eq!(metadata.y_tick_labels.as_ref().unwrap(), &vec!["B", "A"]);
         let indexed = parse_table_heatmap_args(&[
             table.clone(),
             Value::Num(1.0),

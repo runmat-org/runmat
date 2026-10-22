@@ -67,7 +67,7 @@ impl WritableData {
                 shape: array.shape.to_vec(),
             }),
             Value::CharArray(chars) => Ok(Self::Strings {
-                data: encode_strings(builtin, &char_rows(&chars))?,
+                data: encode_strings(builtin, &char_rows(builtin, &chars)?)?,
                 shape: vec![chars.rows.max(1), 1],
             }),
             _ => Err(hdf5_error(

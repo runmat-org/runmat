@@ -39,7 +39,14 @@ pub(super) async fn parse_invocation(
 
     let mut explicit_format = None;
     if idx < args.len() {
-        if let Some(text) = crate::builtins::image::checked_text::scalar_text(&args[idx]) {
+        if let Some(text) =
+            crate::builtins::image::checked_text::scalar_text(&args[idx]).map_err(|source| {
+                let mut error =
+                    imwrite_error_with_detail(&IMWRITE_ERROR_INVALID_OPTION, source.to_string());
+                error.source = Some(Box::new(source));
+                error
+            })?
+        {
             if ImwriteOption::from_name(&text).is_none() {
                 explicit_format = Some(parse_format_hint(&text)?);
                 idx += 1;
@@ -117,7 +124,9 @@ pub(super) async fn parse_invocation(
 }
 
 pub(super) fn is_string_like(value: &Value) -> bool {
-    crate::builtins::image::checked_text::scalar_text(value).is_some()
+    matches!(value, Value::String(_))
+        || matches!(value, Value::StringArray(a) if a.data().len()==1)
+        || matches!(value, Value::CharArray(a) if a.rows==1)
 }
 
 pub(super) fn string_arg(
@@ -125,12 +134,18 @@ pub(super) fn string_arg(
     value: &Value,
     error: &'static BuiltinErrorDescriptor,
 ) -> BuiltinResult<String> {
-    crate::builtins::image::checked_text::scalar_text(value).ok_or_else(|| {
-        imwrite_error_with_detail(
-            error,
-            format!("{label} must be a string scalar or char vector"),
-        )
-    })
+    crate::builtins::image::checked_text::scalar_text(value)
+        .map_err(|source| {
+            let mut error = imwrite_error_with_detail(error, source.to_string());
+            error.source = Some(Box::new(source));
+            error
+        })?
+        .ok_or_else(|| {
+            imwrite_error_with_detail(
+                error,
+                format!("{label} must be a string scalar or char vector"),
+            )
+        })
 }
 
 pub(super) fn numeric_scalar(value: &Value, label: &str) -> BuiltinResult<f64> {

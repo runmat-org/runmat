@@ -1,6 +1,48 @@
 use crate::runtime_error::semantic_error as mex;
 use crate::RuntimeError;
 
+/// Only scalar replication or the original column-major order is permitted.
+/// Singleton-axis alignment needs no shape/coordinate allocation.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct AssignmentRhsLayout {
+    scalar: bool,
+    count: usize,
+}
+impl AssignmentRhsLayout {
+    pub(super) fn linear(source_len: usize, count: usize) -> Result<Self, RuntimeError> {
+        if source_len != 1 && source_len != count {
+            return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
+        }
+        Ok(Self {
+            scalar: source_len == 1,
+            count,
+        })
+    }
+    pub(super) fn multidimensional(
+        source_shape: &[usize],
+        source_len: usize,
+        selection: &[usize],
+    ) -> Result<Self, RuntimeError> {
+        validate_assignment_rhs_shape(source_shape, source_len, selection)?;
+        let count = checked_assignment_element_count(selection)?;
+        Ok(Self {
+            scalar: source_len == 1,
+            count: if selection.is_empty() { 0 } else { count },
+        })
+    }
+    pub(super) fn count(self) -> usize {
+        self.count
+    }
+    pub(super) fn source_index(self, ordinal: usize) -> usize {
+        assert!(ordinal < self.count, "validated RHS output ordinal");
+        if self.scalar {
+            0
+        } else {
+            ordinal
+        }
+    }
+}
+
 pub(super) fn checked_assignment_element_count(shape: &[usize]) -> Result<usize, RuntimeError> {
     shape.iter().try_fold(1usize, |length, &dimension| {
         length

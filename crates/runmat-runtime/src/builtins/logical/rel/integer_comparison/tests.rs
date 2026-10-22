@@ -343,7 +343,8 @@ fn complex_ordering_accepts_logical_and_character_numeric_operands() {
     );
 
     let chars = Value::CharArray(
-        runmat_value::CharArray::new(vec!['A', 'C', 'B', 'D'], 2, 2).expect("character array"),
+        runmat_value::CharArray::from_unicode_scalars(vec!['A', 'C', 'B', 'D'], 2, 2)
+            .expect("character array"),
     );
     assert_eq!(
         try_complex_ordering_comparison(

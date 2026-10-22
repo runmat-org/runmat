@@ -129,10 +129,13 @@ mod typed_element {
     impl Sealed for f32 {}
     impl Sealed for f64 {}
     impl Sealed for usize {}
+    impl Sealed for u32 {}
     impl Sealed for u64 {}
     impl Sealed for u8 {}
     impl Sealed for num_complex::Complex32 {}
     impl Sealed for num_complex::Complex64 {}
+    impl Sealed for runmat_value::ComplexElement<f32> {}
+    impl Sealed for runmat_value::ComplexElement<f64> {}
 }
 
 /// A scratch vector whose exact physical backing and live stage claim remain

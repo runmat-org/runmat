@@ -28,7 +28,7 @@ pub const DIAG_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         portability: BuiltinPortability::NativeAndWasm,
         accelerator: BuiltinAcceleratorPolicy::Optional,
         residency: BuiltinResidencyPolicy::PreserveInputs,
-        fusion: BuiltinFusionPolicy::Boundary,
+        fusion: BuiltinFusionPolicy::Candidate,
         distributed: BuiltinDistributedPolicy::Unsupported,
     },
     link: BuiltinLinkContract {

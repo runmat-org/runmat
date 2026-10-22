@@ -1,3 +1,5 @@
+#[path = "cumulative_scan.rs"]
+mod cumulative_scan;
 use super::allocation_state::AllocationState;
 use super::*;
 #[path = "trait_impl/typed_elementwise.rs"]
@@ -228,40 +230,48 @@ fn confirm_extrema_kernel_submission(
 }
 
 impl AccelProvider for WgpuProvider {
-    fn vm_region_queue_tail_resources(
+    fn region_queue_tail_resources(
         &self,
-    ) -> Option<runmat_accelerate_api::ProviderVmRegionTailResources> {
+    ) -> Option<runmat_accelerate_api::ProviderRegionTailResources> {
         #[cfg(not(target_arch = "wasm32"))]
         {
             self.observation_progress
                 .as_ref()
                 .is_some_and(|progress| progress.is_available())
-                .then_some(runmat_accelerate_api::ProviderVmRegionTailResources {
+                .then_some(runmat_accelerate_api::ProviderRegionTailResources {
                     queue_slots: 1,
                     provider_scratch_bytes: 0,
+                    completion_control_host_bytes: self.region_tail_control_host_bytes(),
                 })
         }
         #[cfg(target_arch = "wasm32")]
         {
             let bytes = crate::backend::wgpu::dispatch::observation::FENCE_REQUESTED_BYTES;
             (self.observation_budget.wgpu_query_requested_byte_limit() >= bytes).then_some(
-                runmat_accelerate_api::ProviderVmRegionTailResources {
+                runmat_accelerate_api::ProviderRegionTailResources {
                     queue_slots: 1,
                     provider_scratch_bytes: bytes,
+                    completion_control_host_bytes: self.region_tail_control_host_bytes(),
                 },
             )
         }
     }
 
-    fn observe_vm_region_queue_tail<'a>(
+    fn observe_region_queue_tail<'a>(
         &'a self,
         device_id: u32,
+        completion_claim: Option<
+            std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>,
+        >,
     ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, ()> {
-        Box::pin(self.observe_vm_region_queue_tail_exec(device_id))
+        Box::pin(self.observe_region_queue_tail_exec(device_id, completion_claim))
     }
 
     fn wgpu_device_access(&self) -> Option<&runmat_accelerate_api::WgpuDeviceAccess> {
         Some(&self.access)
+    }
+    fn gpu_device_control(&self) -> Option<&dyn runmat_accelerate_api::ProviderDeviceControl> {
+        Some(self)
     }
 
     fn propose_real_binary(
@@ -2692,16 +2702,30 @@ impl AccelProvider for WgpuProvider {
         dim: usize,
         order: SortOrder,
         comparison: SortComparison,
-    ) -> AccelProviderFuture<'a, SortResult> {
-        Box::pin(async move { self.sort_dim_exec(a, dim, order, comparison).await })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<SortResult>> {
+        let pending = async move { self.sort_dim_exec(a, dim, order, comparison).await };
+        Box::pin(async move {
+            pending.await.map(Some).map_err(
+                |cause: runmat_accelerate_api::ProviderExecutionError| {
+                    cause.with_unproven_effects()
+                },
+            )
+        })
     }
     fn sort_rows<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
         columns: &'a [SortRowsColumnSpec],
         comparison: SortComparison,
-    ) -> AccelProviderFuture<'a, SortResult> {
-        Box::pin(async move { self.sort_rows_exec(a, columns, comparison).await })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<SortResult>> {
+        let pending = async move { self.sort_rows_exec(a, columns, comparison).await };
+        Box::pin(async move {
+            pending.await.map(Some).map_err(
+                |cause: runmat_accelerate_api::ProviderExecutionError| {
+                    cause.with_unproven_effects()
+                },
+            )
+        })
     }
 
     fn transpose(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
@@ -2809,8 +2833,21 @@ impl AccelProvider for WgpuProvider {
         handle: &GpuTensorHandle,
         order: usize,
         dim: usize,
-    ) -> Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        // Pure metadata admission: decline before registry reads, staging, or execution.
+        if runmat_accelerate_api::handle_integer_type(handle).is_some()
+            || runmat_accelerate_api::handle_is_logical(handle)
+            || runmat_accelerate_api::handle_precision(handle) != Some(self.precision())
+            || runmat_accelerate_api::handle_storage(handle) != GpuTensorStorage::Real
+        {
+            return Ok(None);
+        }
+
         self.diff_exec(handle, dim, order)
+            .map(Some)
+            .map_err(|source| {
+                runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+            })
     }
 
     fn gradient_dim(
@@ -2818,8 +2855,20 @@ impl AccelProvider for WgpuProvider {
         handle: &GpuTensorHandle,
         dim: usize,
         spacing: f64,
-    ) -> Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        // Pure metadata admission: decline before registry reads, staging, or execution.
+        if runmat_accelerate_api::handle_integer_type(handle).is_some()
+            || runmat_accelerate_api::handle_is_logical(handle)
+            || runmat_accelerate_api::handle_precision(handle) != Some(self.precision())
+        {
+            return Ok(None);
+        }
+
         self.gradient_exec(handle, dim, spacing)
+            .map(Some)
+            .map_err(|source| {
+                runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+            })
     }
 
     fn gradient_dim_with_coordinates(
@@ -2831,24 +2880,51 @@ impl AccelProvider for WgpuProvider {
         self.gradient_exec_with_coordinates(handle, dim, coordinates)
     }
 
-    fn cumsum_scan(
-        &self,
-        input: &GpuTensorHandle,
+    fn cumsum_scan<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
         dim: usize,
         direction: ProviderScanDirection,
         nan_mode: ProviderNanMode,
-    ) -> Result<GpuTensorHandle> {
-        self.cumsum_exec(input, dim, direction, nan_mode)
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        Box::pin(async move {
+            if !cumulative_scan::admitted(
+                self,
+                input,
+                dim,
+                runmat_accelerate_api::ProviderExtremaDemand::ValuesOnly,
+            )? {
+                return Ok(None);
+            }
+            self.cumsum_exec(input, dim, direction, nan_mode)
+                .map(Some)
+                .map_err(Into::into)
+        })
     }
 
-    fn integer_cumsum_scan(
-        &self,
-        input: &GpuTensorHandle,
+    fn integer_cumsum_scan<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
         dim: usize,
         direction: ProviderScanDirection,
-    ) -> Result<GpuTensorHandle> {
-        let (values, _) = self.integer_cumulative_scan_exec(0, "cumsum", input, dim, direction)?;
-        Ok(values)
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        Box::pin(async move {
+            if !cumulative_scan::admitted(
+                self,
+                input,
+                dim,
+                runmat_accelerate_api::ProviderExtremaDemand::ValuesOnly,
+            )? {
+                return Ok(None);
+            }
+            (|| -> anyhow::Result<GpuTensorHandle> {
+                let (values, _) =
+                    self.integer_cumulative_scan_exec(0, "cumsum", input, dim, direction)?;
+                Ok(values)
+            })()
+            .map(Some)
+            .map_err(Into::into)
+        })
     }
 
     fn trapz_dim(
@@ -2856,8 +2932,20 @@ impl AccelProvider for WgpuProvider {
         input: &GpuTensorHandle,
         dim: usize,
         spacing: ProviderTrapezoidSpacing<'_>,
-    ) -> Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        // Pure metadata admission: decline before registry reads, staging, or execution.
+        if runmat_accelerate_api::handle_integer_type(input).is_some()
+            || runmat_accelerate_api::handle_is_logical(input)
+            || runmat_accelerate_api::handle_precision(input) != Some(self.precision())
+        {
+            return Ok(None);
+        }
+
         self.trapz_exec(input, dim, spacing)
+            .map(Some)
+            .map_err(|source| {
+                runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+            })
     }
 
     fn cumtrapz_dim(
@@ -2865,75 +2953,162 @@ impl AccelProvider for WgpuProvider {
         input: &GpuTensorHandle,
         dim: usize,
         spacing: ProviderTrapezoidSpacing<'_>,
-    ) -> Result<GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        // Pure metadata admission: decline before registry reads, staging, or execution.
+        if runmat_accelerate_api::handle_integer_type(input).is_some()
+            || runmat_accelerate_api::handle_is_logical(input)
+            || runmat_accelerate_api::handle_precision(input) != Some(self.precision())
+        {
+            return Ok(None);
+        }
+
         self.cumtrapz_exec(input, dim, spacing)
+            .map(Some)
+            .map_err(|source| {
+                runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+            })
     }
 
-    fn cumprod_scan(
-        &self,
-        input: &GpuTensorHandle,
+    fn cumprod_scan<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
         dim: usize,
         direction: ProviderScanDirection,
         nan_mode: ProviderNanMode,
-    ) -> Result<GpuTensorHandle> {
-        self.cumprod_exec(input, dim, direction, nan_mode)
-    }
-
-    fn integer_cumprod_scan(
-        &self,
-        input: &GpuTensorHandle,
-        dim: usize,
-        direction: ProviderScanDirection,
-    ) -> Result<GpuTensorHandle> {
-        let (values, _) = self.integer_cumulative_scan_exec(1, "cumprod", input, dim, direction)?;
-        Ok(values)
-    }
-
-    fn cummin_scan(
-        &self,
-        input: &GpuTensorHandle,
-        dim: usize,
-        direction: ProviderScanDirection,
-        nan_mode: ProviderNanMode,
-    ) -> Result<runmat_accelerate_api::ProviderCumminResult> {
-        self.cummin_exec(input, dim, direction, nan_mode)
-    }
-
-    fn integer_cummin_scan(
-        &self,
-        input: &GpuTensorHandle,
-        dim: usize,
-        direction: ProviderScanDirection,
-    ) -> Result<runmat_accelerate_api::ProviderCumminResult> {
-        let (values, indices) =
-            self.integer_cumulative_scan_exec(2, "cummin", input, dim, direction)?;
-        Ok(runmat_accelerate_api::ProviderCumminResult {
-            values,
-            indices: indices.expect("cummin integer scan returns indices"),
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        Box::pin(async move {
+            if !cumulative_scan::admitted(
+                self,
+                input,
+                dim,
+                runmat_accelerate_api::ProviderExtremaDemand::ValuesOnly,
+            )? {
+                return Ok(None);
+            }
+            self.cumprod_exec(input, dim, direction, nan_mode)
+                .map(Some)
+                .map_err(Into::into)
         })
     }
 
-    fn cummax_scan(
-        &self,
-        input: &GpuTensorHandle,
+    fn integer_cumprod_scan<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+        dim: usize,
+        direction: ProviderScanDirection,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        Box::pin(async move {
+            if !cumulative_scan::admitted(
+                self,
+                input,
+                dim,
+                runmat_accelerate_api::ProviderExtremaDemand::ValuesOnly,
+            )? {
+                return Ok(None);
+            }
+            (|| -> anyhow::Result<GpuTensorHandle> {
+                let (values, _) =
+                    self.integer_cumulative_scan_exec(1, "cumprod", input, dim, direction)?;
+                Ok(values)
+            })()
+            .map(Some)
+            .map_err(Into::into)
+        })
+    }
+
+    fn cummin_scan<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
         dim: usize,
         direction: ProviderScanDirection,
         nan_mode: ProviderNanMode,
-    ) -> Result<runmat_accelerate_api::ProviderCummaxResult> {
-        self.cummax_exec(input, dim, direction, nan_mode)
+        demand: runmat_accelerate_api::ProviderExtremaDemand,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<
+        'a,
+        Option<runmat_accelerate_api::ProviderCumminResult>,
+    > {
+        Box::pin(async move {
+            if !cumulative_scan::admitted(self, input, dim, demand)? {
+                return Ok(None);
+            }
+            self.cummin_exec(input, dim, direction, nan_mode)
+                .map(Some)
+                .map_err(Into::into)
+        })
     }
 
-    fn integer_cummax_scan(
-        &self,
-        input: &GpuTensorHandle,
+    fn integer_cummin_scan<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
         dim: usize,
         direction: ProviderScanDirection,
-    ) -> Result<runmat_accelerate_api::ProviderCummaxResult> {
-        let (values, indices) =
-            self.integer_cumulative_scan_exec(3, "cummax", input, dim, direction)?;
-        Ok(runmat_accelerate_api::ProviderCummaxResult {
-            values,
-            indices: indices.expect("cummax integer scan returns indices"),
+        demand: runmat_accelerate_api::ProviderExtremaDemand,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<
+        'a,
+        Option<runmat_accelerate_api::ProviderCumminResult>,
+    > {
+        Box::pin(async move {
+            if !cumulative_scan::admitted(self, input, dim, demand)? {
+                return Ok(None);
+            }
+            (|| -> anyhow::Result<runmat_accelerate_api::ProviderCumminResult> {
+                let (values, indices) =
+                    self.integer_cumulative_scan_exec(2, "cummin", input, dim, direction)?;
+                Ok(runmat_accelerate_api::ProviderCumminResult {
+                    values,
+                    indices: indices.expect("cummin integer scan returns indices"),
+                })
+            })()
+            .map(Some)
+            .map_err(Into::into)
+        })
+    }
+
+    fn cummax_scan<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+        dim: usize,
+        direction: ProviderScanDirection,
+        nan_mode: ProviderNanMode,
+        demand: runmat_accelerate_api::ProviderExtremaDemand,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<
+        'a,
+        Option<runmat_accelerate_api::ProviderCummaxResult>,
+    > {
+        Box::pin(async move {
+            if !cumulative_scan::admitted(self, input, dim, demand)? {
+                return Ok(None);
+            }
+            self.cummax_exec(input, dim, direction, nan_mode)
+                .map(Some)
+                .map_err(Into::into)
+        })
+    }
+
+    fn integer_cummax_scan<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+        dim: usize,
+        direction: ProviderScanDirection,
+        demand: runmat_accelerate_api::ProviderExtremaDemand,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<
+        'a,
+        Option<runmat_accelerate_api::ProviderCummaxResult>,
+    > {
+        Box::pin(async move {
+            if !cumulative_scan::admitted(self, input, dim, demand)? {
+                return Ok(None);
+            }
+            (|| -> anyhow::Result<runmat_accelerate_api::ProviderCummaxResult> {
+                let (values, indices) =
+                    self.integer_cumulative_scan_exec(3, "cummax", input, dim, direction)?;
+                Ok(runmat_accelerate_api::ProviderCummaxResult {
+                    values,
+                    indices: indices.expect("cummax integer scan returns indices"),
+                })
+            })()
+            .map(Some)
+            .map_err(Into::into)
         })
     }
 
@@ -3033,16 +3208,30 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         handle: &'a GpuTensorHandle,
         options: &'a UniqueOptions,
-    ) -> AccelProviderFuture<'a, UniqueResult> {
-        Box::pin(async move { self.unique_exec(handle, options).await })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<UniqueResult>> {
+        let pending = async move { self.unique_exec(handle, options).await };
+        Box::pin(async move {
+            pending.await.map(Some).map_err(
+                |cause: runmat_accelerate_api::ProviderExecutionError| {
+                    cause.with_unproven_effects()
+                },
+            )
+        })
     }
     fn ismember<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
         options: &'a IsMemberOptions,
-    ) -> AccelProviderFuture<'a, IsMemberResult> {
-        Box::pin(async move { self.ismember_exec(a, b, options).await })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<IsMemberResult>> {
+        let pending = async move { self.ismember_exec(a, b, options).await };
+        Box::pin(async move {
+            pending.await.map(Some).map_err(
+                |cause: runmat_accelerate_api::ProviderExecutionError| {
+                    cause.with_unproven_effects()
+                },
+            )
+        })
     }
 
     fn union<'a>(
@@ -3050,16 +3239,30 @@ impl AccelProvider for WgpuProvider {
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
         options: &'a UnionOptions,
-    ) -> AccelProviderFuture<'a, UnionResult> {
-        Box::pin(async move { self.union_exec(a, b, options).await })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<UnionResult>> {
+        let pending = async move { self.union_exec(a, b, options).await };
+        Box::pin(async move {
+            pending.await.map(Some).map_err(
+                |cause: runmat_accelerate_api::ProviderExecutionError| {
+                    cause.with_unproven_effects()
+                },
+            )
+        })
     }
     fn setdiff<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
         options: &'a SetdiffOptions,
-    ) -> AccelProviderFuture<'a, SetdiffResult> {
-        Box::pin(async move { self.setdiff_exec(a, b, options).await })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<SetdiffResult>> {
+        let pending = async move { self.setdiff_exec(a, b, options).await };
+        Box::pin(async move {
+            pending.await.map(Some).map_err(
+                |cause: runmat_accelerate_api::ProviderExecutionError| {
+                    cause.with_unproven_effects()
+                },
+            )
+        })
     }
 
     fn cat(&self, dim: usize, inputs: &[GpuTensorHandle]) -> Result<GpuTensorHandle> {
@@ -3412,44 +3615,89 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         a: &'a GpuTensorHandle,
         dim: usize,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        // Pure metadata admission: decline before registry reads, staging, or execution.
+        if runmat_accelerate_api::handle_integer_type(a).is_some()
+            || runmat_accelerate_api::handle_is_logical(a)
+            || runmat_accelerate_api::handle_precision(a) != Some(self.precision())
+            || runmat_accelerate_api::handle_storage(a) != GpuTensorStorage::Real
+            || dim >= a.shape().len()
+        {
+            return Box::pin(async { Ok(None) });
+        }
+
         Box::pin(async move {
-            self.reduce_dim_sum_mean_exec(
-                a,
-                dim,
-                crate::backend::wgpu::types::DimReduceOp::CountNonZero,
-            )
+            (async {
+                self.reduce_dim_sum_mean_exec(
+                    a,
+                    dim,
+                    crate::backend::wgpu::types::DimReduceOp::CountNonZero,
+                )
+            })
+            .await
+            .map(Some)
+            .map_err(|source| {
+                runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+            })
         })
     }
     fn reduce_prod_dim<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
         dim: usize,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        // Pure metadata admission: decline before registry reads, staging, or execution.
+        if runmat_accelerate_api::handle_integer_type(a).is_some()
+            || runmat_accelerate_api::handle_is_logical(a)
+            || runmat_accelerate_api::handle_precision(a) != Some(self.precision())
+            || runmat_accelerate_api::handle_storage(a) != GpuTensorStorage::Real
+        {
+            return Box::pin(async { Ok(None) });
+        }
+
         Box::pin(async move {
-            if self.get_entry_raw(a)?.integer_type().is_some() {
-                self.integer_reduce_sum_prod_dim_exec(true, dim, "prod", a)
-            } else {
+            (async {
                 self.reduce_dim_sum_mean_exec(
                     a,
                     dim,
                     crate::backend::wgpu::types::DimReduceOp::Prod,
                 )
-            }
+            })
+            .await
+            .map(Some)
+            .map_err(|source| {
+                runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+            })
         })
     }
     fn reduce_integer_prod_native<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.integer_reduce_sum_prod_global_exec(true, "prod", a) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        Box::pin(async move {
+            (async { self.integer_reduce_sum_prod_global_exec(true, "prod", a) })
+                .await
+                .map(Some)
+                .map_err(|source| {
+                    runmat_accelerate_api::ProviderExecutionError::from(source)
+                        .with_unproven_effects()
+                })
+        })
     }
     fn reduce_integer_prod_native_dim<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
         dim: usize,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.integer_reduce_sum_prod_dim_exec(true, dim, "prod", a) })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        Box::pin(async move {
+            (async { self.integer_reduce_sum_prod_dim_exec(true, dim, "prod", a) })
+                .await
+                .map(Some)
+                .map_err(|source| {
+                    runmat_accelerate_api::ProviderExecutionError::from(source)
+                        .with_unproven_effects()
+                })
+        })
     }
     fn reduce_integer_mean_native<'a>(
         &'a self,
@@ -3598,22 +3846,53 @@ impl AccelProvider for WgpuProvider {
     fn reduce_nnz<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        // Pure metadata admission: decline before registry reads, staging, or execution.
+        if runmat_accelerate_api::handle_integer_type(a).is_some()
+            || runmat_accelerate_api::handle_is_logical(a)
+            || runmat_accelerate_api::handle_precision(a) != Some(self.precision())
+            || runmat_accelerate_api::handle_storage(a) != GpuTensorStorage::Real
+        {
+            return Box::pin(async { Ok(None) });
+        }
+
         Box::pin(async move {
-            self.reduce_global_exec(a, crate::backend::wgpu::types::GlobalReduceOp::CountNonZero)
+            (async {
+                self.reduce_global_exec(
+                    a,
+                    crate::backend::wgpu::types::GlobalReduceOp::CountNonZero,
+                )
+            })
+            .await
+            .map(Some)
+            .map_err(|source| {
+                runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+            })
         })
     }
 
     fn reduce_prod<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        // Pure metadata admission: decline before registry reads, staging, or execution.
+        if runmat_accelerate_api::handle_integer_type(a).is_some()
+            || runmat_accelerate_api::handle_is_logical(a)
+            || runmat_accelerate_api::handle_precision(a) != Some(self.precision())
+            || runmat_accelerate_api::handle_storage(a) != GpuTensorStorage::Real
+        {
+            return Box::pin(async { Ok(None) });
+        }
+
         Box::pin(async move {
-            if self.get_entry_raw(a)?.integer_type().is_some() {
-                self.integer_reduce_sum_prod_global_exec(true, "prod", a)
-            } else {
+            (async {
                 self.reduce_global_exec(a, crate::backend::wgpu::types::GlobalReduceOp::Prod)
-            }
+            })
+            .await
+            .map(Some)
+            .map_err(|source| {
+                runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+            })
         })
     }
 
@@ -4124,12 +4403,14 @@ impl AccelProvider for WgpuProvider {
             None
         } else {
             Some(self.with_emission(|emission, _| {
-                emission.device().create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("runmat-numeric-download-staging"),
-                    size: entry.allocated_bytes,
-                    usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                })
+                runmat_accelerate_api::WgpuBufferOwner::new(emission.device().create_buffer(
+                    &wgpu::BufferDescriptor {
+                        label: Some("runmat-numeric-download-staging"),
+                        size: entry.allocated_bytes,
+                        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    },
+                ))
             })?)
         };
         AllocationState::prepare_numeric_download_stage(
@@ -4158,7 +4439,12 @@ impl AccelProvider for WgpuProvider {
         super::core::map_completion_host_upper_bytes()
             .and_then(|callback| callback.checked_add(future_bytes?))
             .and_then(|bytes| {
-                bytes.checked_add(super::allocation_state::numeric_download_stage_host_bytes()?)
+                // Common map control already funds the one stage owner/fact.
+                // A selected numeric stage adds just its two boxed handles.
+                bytes.checked_add(
+                    super::allocation_state::numeric_download_stage_host_bytes()?
+                        .checked_sub(super::allocation_state::mapped_stage_host_bytes()?)?,
+                )
             })
             .map(runmat_execution::ResourceByteBound::Known)
             .unwrap_or(runmat_execution::ResourceByteBound::Unavailable(

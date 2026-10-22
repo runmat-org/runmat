@@ -11,6 +11,7 @@ mod object;
 mod parallel;
 mod prepared_outputs;
 mod route;
+mod sequence_captures;
 mod slot_authority;
 pub(crate) use parallel::encode_spmd_interpreter_output;
 mod stack;
@@ -22,7 +23,7 @@ use crate::interpreter::vars::InterpreterVars;
 use crate::runtime::workspace::{workspace_slot_assigned, workspace_slot_name};
 use runmat_runtime::RuntimeError;
 use runmat_value::{Tensor, Value};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::future::Future;
 
 pub(crate) use arrays::MatrixConstructionAtSource;
@@ -94,17 +95,23 @@ pub struct SequenceRegister {
     pub len: usize,
 }
 
-#[derive(Default)]
 pub struct SequenceState {
     pub assignment: Option<SequenceRegister>,
     call_outputs: Option<SequenceRegister>,
-    captures: BTreeMap<usize, SequenceRegister>,
+    captures: crate::runtime::workspace::FrameMap<usize, SequenceRegister>,
+    capture_gate: runmat_runtime::context::host_allocation::FrameCollectionGate,
+    capture_context: Option<runmat_runtime::context::RuntimeContext>,
     output_targets: Vec<PreparedOutputTarget>,
+    fixed_target: Option<PreparedOutputTarget>,
     expected_output_targets: Option<usize>,
+    fixed_assignment_owner: Option<(runmat_types::StmtId, usize)>,
     destination_builder: Option<PendingSequenceDestination>,
     prepared_index_component_count: Option<usize>,
-    contextual_indices: Vec<(usize, Vec<usize>)>,
-    subscript_receivers: Vec<(
+    prepared_index_receiver: Option<runmat_runtime::object::protocol::PreparedSubscriptReceiver>,
+    contextual_indices:
+        crate::runtime::workspace::FrameVec<(usize, crate::runtime::workspace::FrameVec<usize>)>,
+    cleanup_windows: crate::runtime::workspace::FrameVec<SequenceRegister>,
+    subscript_receivers: crate::runtime::workspace::FrameVec<(
         runmat_runtime::object::protocol::PreparedSubscriptReceiver,
         usize,
         usize,
@@ -114,8 +121,9 @@ pub struct SequenceState {
 struct PendingSequenceDestination {
     root_slot: usize,
     builder: runmat_runtime::sequence::SequenceDestinationBuilder,
-    absent_root: Option<Box<Value>>,
+    absent_root: Option<Value>,
     root_creation: runmat_mir::SequenceRootCreation,
+    prepared_root: Option<Value>,
 }
 
 pub(super) enum PreparedOutputTarget {
@@ -124,23 +132,28 @@ pub(super) enum PreparedOutputTarget {
     Sequence {
         root_slot: usize,
         endpoint: runmat_runtime::sequence::PreparedSequenceDestination,
-        absent_root: Option<Box<Value>>,
+        absent_root: Option<Value>,
         root_creation: runmat_mir::SequenceRootCreation,
+        prepared_root: Option<Value>,
     },
 }
 
 impl SequenceState {
     /// Non-stack roots retained while an indexing destination spans calls.
     pub(crate) fn visit_retained_values(&self, visit: &mut impl FnMut(&Value)) {
-        for target in &self.output_targets {
+        for target in self.output_targets.iter().chain(self.fixed_target.iter()) {
             match target {
                 PreparedOutputTarget::Sequence {
                     endpoint,
                     absent_root,
+                    prepared_root,
                     ..
                 } => {
                     endpoint.visit_retained_values(visit);
                     if let Some(root) = absent_root {
+                        visit(root);
+                    }
+                    if let Some(root) = prepared_root {
                         visit(root);
                     }
                 }
@@ -149,11 +162,17 @@ impl SequenceState {
         }
         if let Some(pending) = &self.destination_builder {
             pending.builder.visit_retained_values(visit);
+            if let Some(root) = &pending.prepared_root {
+                visit(root);
+            }
             if let Some(root) = &pending.absent_root {
                 visit(root);
             }
         }
         for (receiver, _, _) in &self.subscript_receivers {
+            visit(receiver.receiver());
+        }
+        if let Some(receiver) = &self.prepared_index_receiver {
             visit(receiver.receiver());
         }
     }
@@ -162,7 +181,10 @@ impl SequenceState {
         &mut self,
         target_count: usize,
     ) -> Result<(), RuntimeError> {
-        if self.expected_output_targets.is_some() || !self.output_targets.is_empty() {
+        if self.expected_output_targets.is_some()
+            || !self.output_targets.is_empty()
+            || self.fixed_target.is_some()
+        {
             return Err(crate::interpreter::errors::mex(
                 "RunMat:CommaSeparatedListState",
                 "output-assignment destination state was overwritten before consumption",
@@ -175,15 +197,30 @@ impl SequenceState {
         Ok(())
     }
 
-    pub(super) fn push_output_target(&mut self, target: PreparedOutputTarget) {
-        self.output_targets.push(target);
+    pub(super) fn push_output_target(
+        &mut self,
+        target: PreparedOutputTarget,
+    ) -> Result<(), RuntimeError> {
+        if self.fixed_assignment_owner.is_some() {
+            if self.fixed_target.is_some() {
+                return Err(crate::interpreter::errors::mex(
+                    "RunMat:PreparedAssignmentOwner",
+                    "fixed assignment has multiple destinations",
+                ));
+            }
+            self.fixed_target = Some(target);
+        } else {
+            self.output_targets.push(target);
+        }
+        Ok(())
     }
 
     pub(super) fn begin_destination(
         &mut self,
+        context: &runmat_runtime::context::RuntimeContext,
         root_slot: usize,
         root: &Value,
-        absent_root: Option<Box<Value>>,
+        absent_root: Option<Value>,
         root_creation: runmat_mir::SequenceRootCreation,
     ) -> Result<(), RuntimeError> {
         if self.destination_builder.is_some() {
@@ -192,11 +229,25 @@ impl SequenceState {
                 "a prepared destination path is already live",
             ));
         }
+        let builder =
+            runmat_runtime::sequence::SequenceDestinationBuilder::new_in_context(context, root)?;
+        let builder = match root_creation {
+            runmat_mir::SequenceRootCreation::Ordinary(creation) => {
+                builder.with_assignment_creation(creation)
+            }
+            runmat_mir::SequenceRootCreation::OrdinaryCell => builder.with_assignment_creation(
+                runmat_types::AssignmentCreationPolicy::CreateArrayByIndex,
+            ),
+            _ => builder,
+        };
         self.destination_builder = Some(PendingSequenceDestination {
             root_slot,
-            builder: runmat_runtime::sequence::SequenceDestinationBuilder::new(root)?,
+            builder,
             absent_root,
             root_creation,
+            prepared_root: root_creation
+                .retains_original_receiver()
+                .then(|| root.clone()),
         });
         Ok(())
     }
@@ -232,6 +283,7 @@ impl SequenceState {
                 "prepared index-selector context is incomplete or inconsistent",
             ));
         }
+        self.prepared_index_receiver = None;
         Ok(())
     }
 
@@ -247,9 +299,28 @@ impl SequenceState {
     pub(super) fn begin_contextual_index(
         &mut self,
         component_count: usize,
-        shape: Vec<usize>,
+        shape: &[usize],
     ) -> Result<(), RuntimeError> {
-        self.contextual_indices.push((component_count, shape));
+        let mut retained_shape = self.frame_vector(shape.len())?;
+        retained_shape.extend_from_slice(shape);
+        if self.contextual_indices.len() == self.contextual_indices.capacity() {
+            let capacity = self
+                .contextual_indices
+                .len()
+                .checked_add(1)
+                .and_then(|n| n.checked_mul(2))
+                .ok_or_else(|| {
+                    crate::interpreter::errors::mex(
+                        "RunMat:ContextualIndexState",
+                        "context depth overflows",
+                    )
+                })?;
+            let mut replacement = self.frame_vector(capacity)?;
+            replacement.extend(self.contextual_indices.drain(..));
+            self.contextual_indices = replacement;
+        }
+        self.contextual_indices
+            .push((component_count, retained_shape));
         Ok(())
     }
 
@@ -287,9 +358,11 @@ impl SequenceState {
         receiver: runmat_runtime::object::protocol::PreparedSubscriptReceiver,
         prefix_start: usize,
         stack_index: usize,
-    ) {
+    ) -> Result<(), RuntimeError> {
+        self.prepare_subscript_receiver()?;
         self.subscript_receivers
             .push((receiver, prefix_start, stack_index));
+        Ok(())
     }
 
     pub(super) fn subscript_receiver(
@@ -430,8 +503,22 @@ impl SequenceState {
         }))
     }
 
+    pub(super) fn output_cardinality(&self) -> Result<usize, RuntimeError> {
+        if self.fixed_assignment_owner.is_some() {
+            if self.expected_output_targets == Some(1) && self.fixed_target.is_some() {
+                return Ok(1);
+            }
+            return Err(crate::interpreter::errors::mex(
+                "RunMat:PreparedAssignmentOwner",
+                "fixed destination is incomplete",
+            ));
+        }
+        Ok(self.output_layout()?.total())
+    }
+
     pub(super) fn take_output_targets(&mut self) -> Vec<PreparedOutputTarget> {
         self.expected_output_targets = None;
+        self.fixed_assignment_owner = None;
         std::mem::take(&mut self.output_targets)
     }
 
@@ -447,6 +534,7 @@ impl SequenceState {
                 "captured sequence slot was overwritten before consumption",
             ));
         }
+        self.reserve_capture_entry()?;
         let values = values.into();
         let window = SequenceRegister {
             start: stack.len(),
@@ -461,11 +549,13 @@ impl SequenceState {
         &mut self,
         stack: &mut crate::interpreter::stack::InterpreterStack,
         slots: &[usize],
-    ) -> Result<HashMap<usize, Vec<Value>>, RuntimeError> {
-        let mut seen = BTreeSet::new();
-        let mut windows = Vec::with_capacity(slots.len());
+    ) -> Result<
+        crate::runtime::workspace::FrameMap<usize, runmat_value::OutputListStorage>,
+        RuntimeError,
+    > {
+        let mut windows = self.frame_vector(slots.len())?;
         for slot in slots {
-            if !seen.insert(*slot) {
+            if windows.iter().any(|(seen, _)| seen == slot) {
                 return Err(crate::interpreter::errors::mex(
                     "RunMat:CommaSeparatedListState",
                     "call references the same captured sequence more than once",
@@ -491,23 +581,23 @@ impl SequenceState {
             }
             windows.push((*slot, window));
         }
-        windows.sort_by_key(|(_, window)| std::cmp::Reverse(window.start));
+        windows.sort_unstable_by_key(|(_, window)| std::cmp::Reverse(window.start));
         for pair in windows.windows(2) {
             let later = pair[0].1;
             let earlier = pair[1].1;
-            let earlier_end = earlier.start + earlier.len;
-            if earlier_end > later.start {
+            if earlier.start + earlier.len > later.start {
                 return Err(crate::interpreter::errors::mex(
                     "RunMat:CommaSeparatedListState",
                     "captured sequence stack windows overlap",
                 ));
             }
         }
-        let mut values = HashMap::with_capacity(windows.len());
+        let mut values = self.frame_map(slots.len())?;
         for (slot, window) in windows {
-            self.captures.remove(&slot);
             let end = window.start + window.len;
-            values.insert(slot, stack.drain(window.start..end).collect());
+            let output = stack.try_extract_output_range(window.start, end)?;
+            self.captures.remove(&slot);
+            values.insert(slot, output);
             for remaining in self.captures.values_mut() {
                 if remaining.start >= end {
                     remaining.start -= window.len;
@@ -518,20 +608,50 @@ impl SequenceState {
                     assignment.start -= window.len;
                 }
             }
+            if let Some(call) = self.call_outputs.as_mut() {
+                if call.start >= end {
+                    call.start -= window.len;
+                }
+            }
         }
         Ok(values)
     }
 
     pub fn clear(&mut self, stack: &mut crate::interpreter::stack::InterpreterStack) {
-        let mut windows = self.captures.values().copied().collect::<Vec<_>>();
-        if let Some(window) = self.assignment.take() {
-            windows.push(window);
-        }
-        if let Some(window) = self.call_outputs.take() {
-            windows.push(window);
-        }
-        windows.sort_by_key(|window| std::cmp::Reverse(window.start));
-        for window in windows {
+        // Every capture/receiver reserved its cleanup slot before publication.
+        // Cancellation and catch retirement must not request another grant.
+        self.cleanup_windows.clear();
+        self.cleanup_windows.extend(self.captures.values().copied());
+        self.cleanup_windows
+            .extend(
+                self.subscript_receivers
+                    .iter()
+                    .map(|(_, _, start)| SequenceRegister {
+                        start: *start,
+                        len: 1,
+                    }),
+            );
+        self.cleanup_windows
+            .sort_unstable_by_key(|window| window.start);
+        let mut inline = [self.assignment.take(), self.call_outputs.take()];
+        loop {
+            let mut choice = None;
+            for (index, window) in inline.iter().enumerate() {
+                if let Some(window) = window {
+                    if choice.is_none_or(|(_, start)| window.start >= start) {
+                        choice = Some((index, window.start));
+                    }
+                }
+            }
+            let window = match (self.cleanup_windows.last(), choice) {
+                (Some(window), Some((index, start))) if start >= window.start => {
+                    inline[index].take()
+                }
+                (Some(_), _) => self.cleanup_windows.pop(),
+                (None, Some((index, _))) => inline[index].take(),
+                (None, None) => break,
+            };
+            let Some(window) = window else { break };
             if let Some(end) = window.start.checked_add(window.len) {
                 if end <= stack.len() {
                     stack.drain(window.start..end);
@@ -539,22 +659,15 @@ impl SequenceState {
             }
         }
         self.captures.clear();
+        self.fixed_assignment_owner = None;
         self.output_targets.clear();
+        self.fixed_target = None;
         self.expected_output_targets = None;
         self.destination_builder = None;
         self.prepared_index_component_count = None;
         self.contextual_indices.clear();
-        let mut receiver_roots = self
-            .subscript_receivers
-            .drain(..)
-            .map(|(_, _, index)| index)
-            .collect::<Vec<_>>();
-        receiver_roots.sort_unstable_by(|left, right| right.cmp(left));
-        for index in receiver_roots {
-            if index < stack.len() {
-                stack.remove(index);
-            }
-        }
+        self.prepared_index_receiver = None;
+        self.subscript_receivers.clear();
     }
 }
 
@@ -621,12 +734,23 @@ fn materialize_aggregate_rows(
                     })?);
                 }
                 crate::bytecode::AggregateElementSpec::CapturedSequence { slot } => {
-                    row.extend(captures.remove(slot).ok_or_else(|| {
-                        crate::interpreter::errors::mex(
-                            "CommaSeparatedListState",
-                            "aggregate sequence was consumed more than once",
-                        )
-                    })?);
+                    row.extend(
+                        captures
+                            .remove(slot)
+                            .ok_or_else(|| {
+                                crate::interpreter::errors::mex(
+                                    "CommaSeparatedListState",
+                                    "aggregate sequence was consumed more than once",
+                                )
+                            })?
+                            .try_into_owned()
+                            .map_err(|_| {
+                                crate::interpreter::errors::mex(
+                                    "RunMat:CommaSeparatedListState",
+                                    "captured aggregate output unexpectedly shares storage",
+                                )
+                            })?,
+                    );
                 }
             }
         }

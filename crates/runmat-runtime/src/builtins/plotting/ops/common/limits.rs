@@ -60,7 +60,15 @@ pub fn parse_limit_command(
         return Ok(LimitCommand::Query);
     }
     let arg = &args[0];
-    if let Some(text) = crate::builtins::plotting::style::value_as_string(arg) {
+    if let Some(text) =
+        crate::builtins::plotting::style::value_as_string(arg).map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                builtin,
+                source.to_string(),
+                source,
+            )
+        })?
+    {
         let normalized = text.trim().to_ascii_lowercase();
         return match normalized.as_str() {
             "auto" => Ok(LimitCommand::Set(None)),

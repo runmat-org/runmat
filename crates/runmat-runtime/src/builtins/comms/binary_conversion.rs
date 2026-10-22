@@ -455,17 +455,25 @@ async fn decimal_to_text_builtin(
     let mut width = 1usize.max(min_digits);
     for decimal in decimals {
         let row = format_decimal_item(decimal, conversion.radix(), min_digits, builtin)?;
-        width = width.max(row.text.chars().count());
+        width = width.max(row.text.encode_utf16().count());
         rows.push(row);
     }
     let output_len = checked_decimal_text_output_len(rows.len(), width, builtin)?;
     let mut chars = Vec::with_capacity(output_len);
     for row in &rows {
-        let pad = width.saturating_sub(row.text.chars().count());
-        chars.extend(std::iter::repeat_n(row.pad, pad));
-        chars.extend(row.text.chars());
+        let pad = width.saturating_sub(row.text.encode_utf16().count());
+        chars.extend(std::iter::repeat_n(
+            // Radix formatting admits only ASCII padding digits.
+            runmat_value::Utf16CodeUnit::from_raw(row.pad as u16),
+            pad,
+        ));
+        chars.extend(
+            row.text
+                .encode_utf16()
+                .map(runmat_value::Utf16CodeUnit::from_raw),
+        );
     }
-    CharArray::new(chars, rows.len(), width)
+    CharArray::from_code_units(chars, rows.len(), width)
         .map(Value::CharArray)
         .map_err(|err| conversion_error(builtin, format!("{builtin}: {err}")))
 }
@@ -529,10 +537,8 @@ async fn decimal_items_from_value(
             .map(|value| DecimalItem::Unsigned(u128::from(value != 0)))
             .collect()),
         Value::CharArray(chars) => Ok(chars
-            .data()
-            .iter()
-            .copied()
-            .map(|ch| DecimalItem::Unsigned(u128::from(ch as u32)))
+            .iter_column_major()
+            .map(|ch| DecimalItem::Unsigned(u128::from(ch.raw())))
             .collect()),
         Value::GpuTensor(handle) => {
             let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
@@ -754,7 +760,16 @@ fn text_items_from_value(value: Value, builtin: &'static str) -> BuiltinResult<P
             for row in 0..chars.rows {
                 let start = row * chars.cols;
                 let end = start + chars.cols;
-                items.push(chars.data()[start..end].iter().collect::<String>().into());
+                items.push(
+                    runmat_value::decode_utf16_code_units(&chars.data()[start..end])
+                        .map_err(|source| {
+                            build_runtime_error(format!("{builtin}: invalid UTF-16 text: {source}"))
+                                .with_builtin(builtin)
+                                .with_source(source)
+                                .build()
+                        })?
+                        .into(),
+                );
             }
             Ok(ParsedTextItems {
                 items: runmat_value::ExactArrayStorage::unbounded(items),
@@ -789,7 +804,7 @@ fn text_items_from_value(value: Value, builtin: &'static str) -> BuiltinResult<P
 fn text_items_from_cell(cell: CellArray, builtin: &'static str) -> BuiltinResult<ParsedTextItems> {
     let mut items = Vec::with_capacity(cell.data().len());
     for value in cell.data() {
-        let Some(text) = value_as_string(value) else {
+        let Some(text) = value_as_string(value, builtin)? else {
             return Err(conversion_error(
                 builtin,
                 format!("{builtin}: cell array elements must be text"),
@@ -1408,7 +1423,7 @@ fn ensure_exact_range(value: u128, builtin: &'static str) -> BuiltinResult<()> {
 
 fn parse_order(value: &Value, operation: DigitConversion) -> BuiltinResult<Option<DigitOrder>> {
     let builtin = operation.name();
-    let Some(text) = value_as_string(value) else {
+    let Some(text) = value_as_string(value, builtin)? else {
         return Ok(None);
     };
     match normalize_flag(&text).as_str() {
@@ -1430,13 +1445,25 @@ fn parse_required_order(value: &Value, operation: DigitConversion) -> BuiltinRes
     })
 }
 
-fn value_as_string(value: &Value) -> Option<runmat_value::Utf8Text> {
-    match value {
+fn value_as_string(
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<Option<runmat_value::Utf8Text>> {
+    Ok(match value {
         Value::String(s) => Some(s.clone()),
         Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data().iter().collect::<String>().into()),
+        Value::CharArray(ca) if ca.rows == 1 => Some(
+            runmat_value::decode_utf16_code_units(ca.data())
+                .map_err(|source| {
+                    build_runtime_error(format!("{builtin}: invalid UTF-16 text: {source}"))
+                        .with_builtin(builtin)
+                        .with_source(source)
+                        .build()
+                })?
+                .into(),
+        ),
         _ => None,
-    }
+    })
 }
 
 fn normalize_flag(flag: &str) -> String {
@@ -1704,7 +1731,8 @@ mod tests {
             .map(|row| {
                 let start = row * chars.cols;
                 let end = start + chars.cols;
-                chars.data()[start..end].iter().collect()
+                runmat_value::decode_utf16_code_units(&chars.data()[start..end])
+                    .expect("valid text fixture")
             })
             .collect()
     }
@@ -1969,6 +1997,19 @@ mod tests {
 
     #[test]
     fn dec2bin_converts_scalars_vectors_and_min_digits() {
+        let raw = CharArray::from_code_units(
+            [1, 2, 0xD800, 0xFFFF]
+                .into_iter()
+                .map(runmat_value::Utf16CodeUnit::from_raw)
+                .collect(),
+            2,
+            2,
+        )
+        .unwrap();
+        assert_eq!(
+            char_rows(&dec2hex(Value::CharArray(raw), vec![])),
+            ["0001", "D800", "0002", "FFFF"]
+        );
         assert_eq!(char_rows(&dec2bin(Value::Num(23.0), vec![])), vec!["10111"]);
         assert_eq!(
             char_rows(&dec2bin(Value::Num(23.0), vec![Value::Num(8.0)])),
@@ -2161,8 +2202,12 @@ mod tests {
             vec![23.0]
         );
 
-        let chars = CharArray::new("111111111100011110100000001110".chars().collect(), 3, 10)
-            .expect("char matrix");
+        let chars = CharArray::from_unicode_scalars(
+            "111111111100011110100000001110".chars().collect(),
+            3,
+            10,
+        )
+        .expect("char matrix");
         let Value::Tensor(out) = bin2dec(Value::CharArray(chars)) else {
             panic!("expected tensor");
         };
@@ -2299,7 +2344,8 @@ mod tests {
                 .expect("two-item string array"),
         );
         let bad_char = Value::CharArray(
-            CharArray::new("1010".chars().collect(), 2, 2).expect("two-row char array"),
+            CharArray::from_unicode_scalars("1010".chars().collect(), 2, 2)
+                .expect("two-row char array"),
         );
         for nested in [bad_string, bad_char] {
             let cell = CellArray::new(vec![nested], 1, 1).expect("cell");

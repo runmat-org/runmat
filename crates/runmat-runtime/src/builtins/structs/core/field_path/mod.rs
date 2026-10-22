@@ -21,6 +21,7 @@ pub(super) enum PathErrorKind {
 pub(super) struct PathError {
     pub kind: PathErrorKind,
     pub detail: String,
+    pub source: Option<runmat_value::Utf16DecodeError>,
 }
 
 #[derive(Debug, Default)]

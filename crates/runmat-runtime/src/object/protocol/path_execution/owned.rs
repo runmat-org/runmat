@@ -61,14 +61,13 @@ where
     Read: FnOnce(Value, ObjectSubscript) -> ReadFuture,
     ReadFuture: Future<Output = Result<RootedValue, RuntimeError>>,
 {
-    let mut steps = path.into_steps().into_iter();
+    let mut steps = path.into_steps_in_context(runtime)?.into_iter();
     let first = steps.next().ok_or_else(empty_path_error)?;
     let value = read_first(base, first).await?;
-    let remaining: Vec<_> = steps.collect();
-    if remaining.is_empty() {
+    if steps.len() == 0 {
         Ok(value)
     } else {
-        let suffix = ObjectSubscriptPath::new(remaining)?;
+        let suffix = ObjectSubscriptPath::from_remaining_in_context(runtime, steps)?;
         match runtime {
             Some(runtime) => {
                 super::read_subscript_path_in_context(
@@ -183,14 +182,13 @@ where
     Write: FnOnce(Value, ObjectSubscript, Vec<Value>) -> WriteFuture,
     WriteFuture: Future<Output = Result<RootedValue, RuntimeError>>,
 {
-    let mut steps = path.into_steps().into_iter();
+    let mut steps = path.into_steps_in_context(runtime)?.into_iter();
     let first = steps.next().ok_or_else(empty_path_error)?;
-    let remaining: Vec<_> = steps.collect();
-    if remaining.is_empty() {
+    if steps.len() == 0 {
         return write_first(base, first, values).await;
     }
     let child = read_first(base.clone(), first.clone()).await?;
-    let suffix = ObjectSubscriptPath::new(remaining)?;
+    let suffix = ObjectSubscriptPath::from_remaining_in_context(runtime, steps)?;
     let updated = match runtime {
         Some(runtime) => {
             super::assign_subscript_path_in_context(

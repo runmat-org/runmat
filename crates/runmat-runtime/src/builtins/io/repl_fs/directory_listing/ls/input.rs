@@ -27,12 +27,10 @@ fn text(value: &Value) -> BuiltinResult<String> {
             if chars.rows == 1
                 && crate::builtins::common::shape::effective_rank(&chars.shape) <= 2 =>
         {
-            Ok(chars
-                .data()
-                .iter()
-                .collect::<String>()
-                .trim_end()
-                .to_string())
+            crate::builtins::io::utf16::decode_utf16_with_error(chars.data(), || {
+                super::error::contract(&runmat_builtins::LS_ERROR_NAME)
+            })
+            .map(|text| text.trim_end().to_string())
         }
         _ => Err(super::error::contract(&runmat_builtins::LS_ERROR_NAME)),
     }

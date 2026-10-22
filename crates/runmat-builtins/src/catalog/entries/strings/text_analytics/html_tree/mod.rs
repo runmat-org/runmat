@@ -2,6 +2,7 @@ use crate::*;
 
 mod contract;
 mod inference;
+mod documentation;
 pub use contract::*;
 
 pub const HTML_TREE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
@@ -11,10 +12,7 @@ pub const HTML_TREE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     category: "strings/text_analytics",
     // The legacy sidecar retains full prose/examples authority; its summary
     // is mirrored here until complete documentation conservation.
-    documentation: BuiltinDocumentation {
-        summary: "Parse HTML code into a lightweight htmlTree object.",
-        ..BuiltinDocumentation::EMPTY
-    },
+    documentation: documentation::DOCUMENTATION,
     descriptor: &HTML_TREE_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Incomplete,

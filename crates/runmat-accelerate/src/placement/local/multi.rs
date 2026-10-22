@@ -56,7 +56,7 @@ pub(crate) enum PreparedPhysicalAuthority<'a> {
     Compound(&'a runmat_runtime::context::preparation::AdmittedBuiltinCompound),
     ImageStages {
         plan: &'a crate::fusion_exec::image_stages::PreparedImageStages,
-        tail: Option<runmat_accelerate_api::ProviderVmRegionTailResources>,
+        tail: Option<runmat_accelerate_api::ProviderRegionTailResources>,
     },
     ImageHostStages(&'a crate::fusion_exec::image_stages::HostSingleImageSource),
 }
@@ -176,6 +176,8 @@ pub(crate) enum LocalCpuAdmission {
     /// Whole-route comparison is legal only with an unbounded aggregate
     /// resource policy; this does not grant an ordinary host fallback.
     VmRegionAtUse,
+    /// Exact native MIR source sites keep their ordinary operation owners.
+    NativeRegionAtUse,
     /// No executable host route was admitted; do not fabricate a CPU candidate.
     Unavailable,
 }
@@ -184,6 +186,7 @@ pub(crate) enum LocalCpuAdmission {
 pub(crate) enum LocalPublicationSemantics {
     Atomic,
     SourceOrderedVm,
+    SourceOrderedNative,
 }
 
 /// Source implementation admission is separate from provider feasibility.
@@ -330,6 +333,17 @@ fn plan_local_multi_with_provider_mode(
         compare_profitability,
         runtime,
     } = request;
+    let native_original_current = cpu
+        .native_origin
+        .as_ref()
+        .is_some_and(|right| runtime.is_some_and(|runtime| right.is_current(runtime)))
+        && cpu.route.kind == ExecutionCandidateKind::OriginalNativeRegion;
+    if cpu.native_origin.is_some() && !native_original_current {
+        return Err(Box::new(runmat_runtime::runtime_error::semantic_error(
+            "RunMat:Placement:InvalidNativeRegion",
+            "native region selection authority changed before placement",
+        )));
+    }
     let semantic_identity = match implementation {
         LocalProviderAdmission::Available => semantic_identity,
         LocalProviderAdmission::ImplementationUnavailable => Some(
@@ -356,6 +370,9 @@ fn plan_local_multi_with_provider_mode(
         LocalCpuAdmission::VmRegionAtUse => (cpu.route.kind
             == ExecutionCandidateKind::OriginalVmRegion)
             .then_some(cpu.route.resources),
+        LocalCpuAdmission::NativeRegionAtUse => (cpu.route.kind
+            == ExecutionCandidateKind::OriginalNativeRegion)
+            .then_some(cpu.route.resources),
         LocalCpuAdmission::Unavailable => None,
     };
     let constraint = physical
@@ -374,8 +391,10 @@ fn plan_local_multi_with_provider_mode(
     let cpu_resources = if matches!(
         constraint,
         runmat_execution::WholeWorkConstraint::ProviderRequired { .. }
-    ) && cpu.route.kind != ExecutionCandidateKind::OriginalVmRegion
-    {
+    ) && !matches!(
+        cpu.route.kind,
+        ExecutionCandidateKind::OriginalVmRegion | ExecutionCandidateKind::OriginalNativeRegion
+    ) {
         None
     } else {
         cpu_resources
@@ -400,7 +419,13 @@ fn plan_local_multi_with_provider_mode(
                 .components
                 .download_ns
                 .saturating_add(transfer_prior_ns(bytes));
-        } else if resident_bytes > 0 && cpu.route.kind != ExecutionCandidateKind::OriginalVmRegion {
+        } else if resident_bytes > 0
+            && !matches!(
+                cpu.route.kind,
+                ExecutionCandidateKind::OriginalVmRegion
+                    | ExecutionCandidateKind::OriginalNativeRegion
+            )
+        {
             cost.components.synchronization_ns =
                 cost.components.synchronization_ns.saturating_add(5_000);
             cost.components.download_ns = cost
@@ -679,6 +704,7 @@ fn plan_local_multi_with_provider_mode(
             // conversion body, but only after typed provider feasibility
             // rejection. Neither is a host candidate or a completion receipt.
             if vm_right.is_some()
+                || native_original_current
                 || vm_decline
                     .is_some_and(|right| runtime.is_some_and(|context| right.is_current(context)))
                 || (source_decline == LocalSourceDecline::PlainFloatingCast
@@ -699,6 +725,15 @@ fn plan_local_multi_with_provider_mode(
                 .with_identifier("RunMat:Placement:NoLegalCandidate")
                 .build(),
             ));
+        }
+        if cpu.route.cost.estimate().is_none() && native_original_current {
+            if let Some((_, _, code)) = rejected.first() {
+                return Ok(LocalPlacementOutcome::ProviderRejected {
+                    code: *code,
+                    cpu_cost,
+                    feedback: None,
+                });
+            }
         }
         if cpu.route.cost.estimate().is_none()
             && cpu.route.kind == ExecutionCandidateKind::OriginalVmRegion

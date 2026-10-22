@@ -39,12 +39,12 @@ impl Options {
 fn option_name(value: Value) -> crate::BuiltinResult<String> {
     match value {
         Value::String(value) => Ok(value.trim().to_ascii_lowercase()),
-        Value::CharArray(value) if value.rows == 1 => Ok(value
-            .data()
-            .iter()
-            .collect::<String>()
-            .trim()
-            .to_ascii_lowercase()),
+        Value::CharArray(value) if value.rows == 1 => {
+            crate::builtins::common::text::decode_utf16_with_error(value.data(), || {
+                error::invalid("structfun: option name is not valid UTF-16 text")
+            })
+            .map(|text| text.trim().to_ascii_lowercase())
+        }
         Value::StringArray(array) if array.data().len() == 1 => {
             Ok(array.data()[0].trim().to_ascii_lowercase())
         }
@@ -61,7 +61,11 @@ fn boolean(value: Value) -> crate::BuiltinResult<bool> {
         Value::Int(value) => Ok(!value.is_zero()),
         Value::String(value) => boolean_text(&value),
         Value::CharArray(value) if value.rows == 1 => {
-            boolean_text(&value.data().iter().collect::<String>())
+            let text =
+                crate::builtins::common::text::decode_utf16_with_error(value.data(), || {
+                    error::uniform("structfun: UniformOutput is not valid UTF-16 text")
+                })?;
+            boolean_text(&text)
         }
         Value::StringArray(array) if array.data().len() == 1 => boolean_text(&array.data()[0]),
         _ => Err(boolean_error()),

@@ -3,7 +3,6 @@ use glam::Vec4;
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_plot::plots::surface::ColorMap;
 use runmat_value::{Tensor, Value};
-use std::collections::VecDeque;
 
 use crate::builtins::common::{map_control_flow_with_builtin, tensor};
 use crate::{gather_if_needed_async, BuiltinResult};
@@ -11,8 +10,7 @@ use crate::{gather_if_needed_async, BuiltinResult};
 use super::plotting_error;
 
 use super::style::{
-    parse_color_value, parse_line_style_args, value_as_f64, value_as_string, LineStyleParseOptions,
-    ParsedLineStyle,
+    parse_color_value, value_as_f64, value_as_string, LineStyleParseOptions, ParsedLineStyle,
 };
 
 const POINTS_TO_PX: f32 = 96.0 / 72.0;
@@ -51,40 +49,58 @@ pub enum PointColorArg {
 }
 
 impl PointArgs {
-    pub fn parse(rest: Vec<Value>, opts: LineStyleParseOptions) -> BuiltinResult<Self> {
-        let mut queue: VecDeque<Value> = VecDeque::from(rest);
-        let mut size = PointSizeArg::Default;
-        if queue.front().is_some_and(is_numeric_candidate) {
-            let value = queue.pop_front().expect("queue peeked");
-            size = PointSizeArg::from_value(value, opts.builtin_name)?;
-        }
-
-        let mut color = PointColorArg::Default;
-        if let Some(token) = queue.front() {
-            if !is_filled_token(token) && is_color_positional_candidate(token) {
-                let value = queue.pop_front().expect("queue peeked");
-                color = PointColorArg::from_value(value, &opts)?;
-            }
-        }
-
+    /// Borrow segmented canonical arguments without collecting or dropping their
+    /// root owner. The caller retains that owner through rendering suspension.
+    pub fn parse_arguments(
+        rest: crate::call::FunctionArgumentView<'_>,
+        opts: LineStyleParseOptions,
+    ) -> BuiltinResult<Self> {
+        let mut index = 0;
+        let size = if rest.get(index).is_some_and(is_numeric_candidate) {
+            let value = rest[index].clone();
+            index += 1;
+            PointSizeArg::from_value(value, opts.builtin_name)?
+        } else {
+            PointSizeArg::Default
+        };
+        let color = if rest
+            .get(index)
+            .map(|token| {
+                Ok::<_, crate::RuntimeError>(
+                    !is_filled_token(token, opts.builtin_name)?
+                        && is_color_positional_candidate(token, opts.builtin_name)?,
+                )
+            })
+            .transpose()?
+            .unwrap_or(false)
+        {
+            let value = rest[index].clone();
+            index += 1;
+            PointColorArg::from_value(value, &opts)?
+        } else {
+            PointColorArg::Default
+        };
         let mut filled = false;
-        while let Some(token) = queue.front() {
-            if is_filled_token(token) {
-                filled = true;
-                queue.pop_front();
-            } else {
-                break;
-            }
+        while rest
+            .get(index)
+            .map(|token| is_filled_token(token, opts.builtin_name))
+            .transpose()?
+            .unwrap_or(false)
+        {
+            filled = true;
+            index += 1;
         }
-
-        let remaining: Vec<Value> = queue.into();
-        let style = parse_line_style_args(&remaining, &opts)?;
+        let style = super::style::parse_line_style_arguments(rest.range(index..)?, &opts)?;
         Ok(Self {
             size,
             color,
             filled,
             style,
         })
+    }
+
+    pub fn parse(rest: Vec<Value>, opts: LineStyleParseOptions) -> BuiltinResult<Self> {
+        Self::parse_arguments(crate::call::FunctionArgumentView::from_slice(&rest), opts)
     }
 }
 
@@ -126,6 +142,13 @@ impl PointColorArg {
             return Ok(Self::Default);
         }
         if value_as_string(&value)
+            .map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    opts.builtin_name,
+                    source.to_string(),
+                    source,
+                )
+            })?
             .map(|text| text.trim().eq_ignore_ascii_case("auto"))
             .unwrap_or(false)
         {
@@ -184,16 +207,27 @@ fn is_numeric_candidate(value: &Value) -> bool {
     )
 }
 
-fn is_color_positional_candidate(value: &Value) -> bool {
-    match value {
-        Value::Tensor(_) | Value::GpuTensor(_) | Value::Num(_) | Value::Int(_) | Value::Bool(_) => {
-            true
+fn is_color_positional_candidate(value: &Value, builtin: &str) -> crate::BuiltinResult<bool> {
+    Ok({
+        match value {
+            Value::Tensor(_)
+            | Value::GpuTensor(_)
+            | Value::Num(_)
+            | Value::Int(_)
+            | Value::Bool(_) => true,
+            Value::CharArray(_) | Value::String(_) => value_as_string(value)
+                .map_err(|source| {
+                    crate::builtins::plotting::plotting_error_with_source(
+                        builtin,
+                        source.to_string(),
+                        source,
+                    )
+                })?
+                .map(|text| is_color_literal(&text))
+                .unwrap_or(false),
+            _ => false,
         }
-        Value::CharArray(_) | Value::String(_) => value_as_string(value)
-            .map(|text| is_color_literal(&text))
-            .unwrap_or(false),
-        _ => false,
-    }
+    })
 }
 
 fn is_color_literal(token: &str) -> bool {
@@ -218,10 +252,19 @@ fn is_color_literal(token: &str) -> bool {
     )
 }
 
-fn is_filled_token(value: &Value) -> bool {
-    value_as_string(value)
-        .map(|text| text.trim().eq_ignore_ascii_case("filled"))
-        .unwrap_or(false)
+fn is_filled_token(value: &Value, builtin: &str) -> crate::BuiltinResult<bool> {
+    Ok({
+        value_as_string(value)
+            .map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    builtin,
+                    source.to_string(),
+                    source,
+                )
+            })?
+            .map(|text| text.trim().eq_ignore_ascii_case("filled"))
+            .unwrap_or(false)
+    })
 }
 
 fn value_is_empty(value: &Value) -> bool {

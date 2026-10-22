@@ -47,7 +47,7 @@ pub(super) fn select(
     let (resources, digest, host_epoch, transactional) = physical_facts;
     let mut candidates = Vec::new();
     candidates
-        .try_reserve_exact(admitted.len().checked_add(1).ok_or_else(|| {
+        .try_reserve_exact(admitted.len().checked_add(3).ok_or_else(|| {
             plan_error(crate::placement::PlacementPlanError {
                 code: "RunMat:Placement:ResourceOverflow",
                 message: "physical candidate count overflows".into(),
@@ -64,6 +64,43 @@ pub(super) fn select(
             let mut host = cpu.route.clone();
             host.resources = resources;
             candidates.push(host);
+        }
+        for alternative in [
+            cpu.native_alternative.as_ref(),
+            cpu.native_host_alternative.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            let legal_intent = match constraint {
+                runmat_execution::WholeWorkConstraint::AnyLegal => true,
+                runmat_execution::WholeWorkConstraint::ProviderRequired { device_id } => matches!(
+                    alternative.descriptor.execution_location,
+                    CandidateExecutionLocation::Provider { device_id: selected }
+                        | CandidateExecutionLocation::NativeRegion { device_id: selected }
+                        | CandidateExecutionLocation::VmRegion { device_id: selected }
+                        if selected == device_id
+                ),
+            };
+            if legal_intent {
+                candidates.push(WholeWorkCandidate {
+                    kind: alternative.descriptor.kind,
+                    execution_location: alternative.descriptor.execution_location,
+                    preparation: alternative.descriptor.preparation,
+                    output_residency: alternative.descriptor.output_residency,
+                    presentation: alternative.descriptor.presentation.clone(),
+                    route_facts: Digest::sha256_serialized(&(
+                        "native-host-alternative-v2",
+                        &alternative.descriptor,
+                    ))
+                    .expect("native alternative serializes"),
+                    cost: runmat_execution::CandidateCostEvidence::Estimated(
+                        alternative.descriptor.cost,
+                    ),
+                    resources: alternative.resources,
+                    transactional_results: alternative.transactional_results,
+                });
+            }
         }
     }
     let provider_offset = candidates.len();
@@ -148,6 +185,10 @@ pub(super) fn select(
     });
     if candidates.is_empty() {
         if vm_decline.is_some_and(|right| runtime.is_some_and(|context| right.is_current(context)))
+            || cpu
+                .native_origin
+                .as_ref()
+                .is_some_and(|right| runtime.is_some_and(|context| right.is_current(context)))
         {
             return Ok(LocalPlacementOutcome::ProviderRejected {
                 code: rejected
@@ -169,6 +210,7 @@ pub(super) fn select(
             matches!(
                 observation_contract,
                 TotalCandidateObservationContract::FullCall
+                    | TotalCandidateObservationContract::NativeFullCall
             )
         })
         .filter(|runtime| {
@@ -183,6 +225,7 @@ pub(super) fn select(
                 observation_contract,
                 prepared_authority,
                 vm_right,
+                cpu.native_origin.as_ref(),
                 digest,
                 policy,
             )?;
@@ -295,43 +338,74 @@ pub(super) fn select(
             .service_ports()
             .placement()
             .expect("revision requires selected placement service");
-        let selection = service
-            .select_whole_work_borrowed(WholeWorkPlacementRequestRef {
-                signature: (&signature).into(),
+        let selection = if observation_contract == TotalCandidateObservationContract::NativeFullCall
+        {
+            // Reuse the existing typed optional boundary for graph-only
+            // services. This owned metadata path is unbounded only; finite
+            // execution uses the managed borrowed branch above.
+            service
+                .try_select_whole_work(runmat_execution::WholeWorkPlacementRequest {
+                    signature: signature.clone(),
+                    constraint,
+                    candidates: candidates.clone(),
+                    resources: resources.clone(),
+                    deterministic: false,
+                    require_transactional_results,
+                })
+                .map_err(Box::new)?
+        } else {
+            Some(
+                service
+                    .select_whole_work_borrowed(WholeWorkPlacementRequestRef {
+                        signature: (&signature).into(),
+                        constraint,
+                        candidates: &candidates,
+                        resources: &resources,
+                        deterministic: false,
+                        require_transactional_results,
+                    })
+                    .map_err(Box::new)?,
+            )
+        };
+        match selection {
+            Some(selection) => {
+                if selection.decision.signature != signature {
+                    return Err(Box::new(
+                        runmat_runtime::build_runtime_error(
+                            "placement returned a different whole-work signature",
+                        )
+                        .with_identifier("RunMat:Placement:InvalidDecision")
+                        .build(),
+                    ));
+                }
+                let decision = &selection.decision;
+                let result = (
+                    decision.selected.clone(),
+                    decision.kind,
+                    decision.predicted_total_ns,
+                );
+                if selection.observation_permit.is_some() && selection.observation_is_current() {
+                    feedback = Some(Box::new(LocalPlacementFeedback {
+                        runtime: runtime.clone(),
+                        signature: decision.signature.clone(),
+                        candidate: decision.selected.candidate.clone(),
+                        kind: decision.selected.kind,
+                        authority: LocalPlacementFeedbackAuthority::WholeWork(std::sync::Arc::new(
+                            std::sync::Mutex::new(Some(selection)),
+                        )),
+                    }));
+                }
+                result
+            }
+            None => crate::placement::session::select_unobserved(
+                operation,
+                &candidates,
                 constraint,
-                candidates: &candidates,
-                resources: &resources,
-                deterministic: false,
+                &resources,
                 require_transactional_results,
-            })
-            .map_err(Box::new)?;
-        if selection.decision.signature != signature {
-            return Err(Box::new(
-                runmat_runtime::build_runtime_error(
-                    "placement returned a different whole-work signature",
-                )
-                .with_identifier("RunMat:Placement:InvalidDecision")
-                .build(),
-            ));
+            )
+            .map_err(plan_error)?,
         }
-        let decision = &selection.decision;
-        let result = (
-            decision.selected.clone(),
-            decision.kind,
-            decision.predicted_total_ns,
-        );
-        if selection.observation_permit.is_some() && selection.observation_is_current() {
-            feedback = Some(Box::new(LocalPlacementFeedback {
-                runtime: runtime.clone(),
-                signature: decision.signature.clone(),
-                candidate: decision.selected.candidate.clone(),
-                kind: decision.selected.kind,
-                authority: LocalPlacementFeedbackAuthority::WholeWork(std::sync::Arc::new(
-                    std::sync::Mutex::new(Some(selection)),
-                )),
-            }));
-        }
-        result
     } else {
         crate::placement::session::select_unobserved(
             operation,

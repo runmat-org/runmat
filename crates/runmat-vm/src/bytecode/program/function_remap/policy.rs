@@ -381,7 +381,25 @@ fn remap_subscript_steps_in(context: &RemapContext<'_>, steps: &mut [BytecodeSub
             ..
         } = step
         {
-            remap_identity_in(context, identity);
+            let changed = match identity.as_ref() {
+                CallableIdentity::BoundFunction(function)
+                | CallableIdentity::AnonymousFunction(function) => context
+                    .ids
+                    .get(function)
+                    .is_some_and(|next| next != function),
+                CallableIdentity::ExternalFunction { function, .. }
+                    if matches!(context.policy, RemapPolicy::ClosedUnit) =>
+                {
+                    context
+                        .ids
+                        .get(function)
+                        .is_some_and(|next| next != function)
+                }
+                _ => false,
+            };
+            if changed {
+                remap_identity_in(context, std::sync::Arc::make_mut(identity));
+            }
         }
     }
 }

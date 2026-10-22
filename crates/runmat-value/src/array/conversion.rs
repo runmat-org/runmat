@@ -129,7 +129,11 @@ impl TryFrom<&Value> for String {
             Value::CharArray(ca) => {
                 // Convert full char array to one string if it is a single row; else error
                 if ca.shape.len() <= 2 && ca.rows == 1 {
-                    Ok(ca.data.iter().collect())
+                    ca.try_row_string()
+                        .map_err(|error| error.to_string())?
+                        .ok_or_else(|| {
+                            "cannot convert multi-row char array to scalar string".into()
+                        })
                 } else {
                     Err("cannot convert multi-row char array to scalar string".to_string())
                 }

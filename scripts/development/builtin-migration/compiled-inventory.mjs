@@ -59,7 +59,7 @@ function parseBuild(value) {
 function parseDeclared(value) {
   exact(value, ["namespace_scope", "catalog_schema_version", "catalog_fingerprint", "catalog_entries", "catalog_aliases", "catalog_provenance", "constants", "legacy_functions", "legacy_documentation"], "compiled declared inventory");
   if (value.namespace_scope !== "function_callables_and_constants_are_reported_separately") throw new Error("compiled namespace scope is unsupported");
-  if (value.catalog_schema_version !== 8) throw new Error("compiled catalog schema version must be 8"); if (!/^[a-f0-9]{64}$/.test(value.catalog_fingerprint)) throw new Error("compiled catalog fingerprint must be lowercase sha256");
+  if (value.catalog_schema_version !== 10) throw new Error("compiled catalog schema version must be 10"); if (!/^[a-f0-9]{64}$/.test(value.catalog_fingerprint)) throw new Error("compiled catalog fingerprint must be lowercase sha256");
   array(value.catalog_entries, "compiled catalog entries", { empty: true }).forEach(catalogEntry);
   array(value.catalog_aliases, "compiled catalog aliases", { empty: true }).forEach(catalogAlias);
   array(value.catalog_provenance, "compiled catalog provenance", { empty: true }).forEach(catalogProvenance);

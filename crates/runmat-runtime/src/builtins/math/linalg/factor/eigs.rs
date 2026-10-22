@@ -1,10 +1,8 @@
 //! MATLAB-compatible `eigs` builtin for subset eigenvalue queries.
 //!
-//! RunMat currently computes the exact dense/generalized decomposition through
-//! the shared `eig` implementation, then applies MATLAB-compatible subset
-//! selection. Sparse and GPU inputs are accepted by gathering/materialising to
-//! host first; native iterative sparse/GPU eigensolver hooks belong in the
-//! acceleration layer once the provider API exposes them.
+//! Native sparse and selected callable operands use owned restarted iteration.
+//! Dense and explicit GPU/nonfloating compatibility inputs retain the shared
+//! exact eig decomposition. No iterative route materializes a dense A.
 
 use std::cmp::Ordering;
 
@@ -27,6 +25,9 @@ use crate::builtins::common::tensor;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 use super::eig;
+mod allocation;
+mod controls;
+mod iterative;
 
 const NAME: &str = "eigs";
 const DEFAULT_K: usize = 6;
@@ -76,38 +77,65 @@ async fn eigs_builtin_context(
     a: Value,
     rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    if crate::value_contains_gpu(&a) || rest.iter().any(crate::value_contains_gpu) {
+    let resident_inputs =
+        crate::value_contains_gpu(&a) || rest.iter().any(crate::value_contains_gpu);
+    if resident_inputs {
         crate::compatibility::ensure_builtin_extension_enabled(&EIGS_GPU_INPUT_EXTENSION, NAME)?;
     }
     ensure_eigs_coefficient_class_enabled(&a)?;
-    preflight_eigs_extensions(rest.view())?;
-    crate::builtins::common::validation::reject_typed_complex_integer(&a, "eigs")?;
-    for value in &rest {
-        crate::builtins::common::validation::reject_typed_complex_integer(value, "eigs")?;
-    }
-    let a = crate::execution::RootedValue::in_optional_context(a, runtime.as_ref())?;
-    let args = crate::builtins::common::mapped_callable::prepend_rooted_argument(
-        &rest,
-        a,
-        runtime.as_ref(),
-    )
-    .await?;
-    let args = gather_eigs_arguments(args, runtime.as_ref()).await?;
-    let request = Request::parse(args).await?;
-    let eval = compute_subset(request).await?;
+    let selected = allocation::Selected::admit(&a, &rest, resident_inputs, runtime.as_ref())?;
+    let iterative_selected = matches!(&selected, allocation::Selected::Iterative);
+    // Root/carrier admission is part of the selected host execution too. Keep
+    // its original allocation/control cause, but never replay it through gather.
+    async {
+        if matches!(&selected, allocation::Selected::Legacy(_)) {
+            preflight_eigs_extensions(rest.view())?;
+        }
+        crate::builtins::common::validation::reject_typed_complex_integer(&a, "eigs")?;
+        for value in &rest {
+            crate::builtins::common::validation::reject_typed_complex_integer(value, "eigs")?;
+        }
+        let a = crate::execution::RootedValue::in_optional_context(a, runtime.as_ref())?;
+        let args = crate::builtins::common::mapped_callable::prepend_rooted_argument(
+            &rest,
+            a,
+            runtime.as_ref(),
+        )
+        .await?;
+        let legacy = match selected {
+            allocation::Selected::Iterative => {
+                return iterative::evaluate(args, runtime.as_ref()).await;
+            }
+            allocation::Selected::Legacy(work) => work,
+        };
+        legacy.check()?;
+        let args = gather_eigs_arguments(args, runtime.as_ref()).await?;
+        legacy.check()?;
+        let request = Request::parse(args).await?;
+        legacy.check()?;
+        let eval = compute_subset(request).await?;
+        legacy.check()?;
 
-    match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::output_list(Vec::new())),
-        Some(1) => Ok(Value::output_list(vec![eval.values])),
-        Some(2) => Ok(Value::output_list(vec![eval.vectors, eval.diagonal])),
-        Some(3) => Ok(Value::output_list(vec![
-            eval.vectors,
-            eval.diagonal,
-            Value::Num(0.0),
-        ])),
-        Some(_) => Err(eigs_error(&ERROR_INVALID_ARGUMENT)),
-        None => Ok(eval.values),
+        legacy.finish(match crate::output_count::current_output_count() {
+            Some(0) => Ok(Value::output_list(Vec::new())),
+            Some(1) => Ok(Value::output_list(vec![eval.values])),
+            Some(2) => Ok(Value::output_list(vec![eval.vectors, eval.diagonal])),
+            Some(3) => Ok(Value::output_list(vec![
+                eval.vectors,
+                eval.diagonal,
+                Value::Num(0.0),
+            ])),
+            Some(_) => Err(eigs_error(&ERROR_INVALID_ARGUMENT)),
+            None => Ok(eval.values),
+        })
     }
+    .await
+    .map_err(|mut error| {
+        if iterative_selected {
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        }
+        error
+    })
 }
 
 async fn gather_eigs_arguments(
@@ -131,7 +159,10 @@ async fn gather_eigs_arguments(
 
 #[cfg(test)]
 async fn eigs_builtin(a: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
-    eigs_builtin_context(None, a, rest).await
+    let runtime = crate::context::RuntimeContext::new(std::rc::Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ));
+    eigs_builtin_context(Some(runtime), a, rest).await
 }
 
 fn ensure_eigs_coefficient_class_enabled(value: &Value) -> BuiltinResult<()> {
@@ -194,7 +225,7 @@ fn preflight_start_vector_extension(
     }
     let mut idx = 0usize;
     while idx + 1 < args.len() {
-        if text_value(&args[idx]).is_some_and(|name| {
+        if text_value(&args[idx])?.is_some_and(|name| {
             matches!(
                 name.trim().to_ascii_lowercase().as_str(),
                 "startvector" | "v0"
@@ -319,6 +350,7 @@ impl Request {
         let mut b = None;
         let mut k = DEFAULT_K.min(n);
         let mut sigma = Sigma::LargestAbs;
+        let mut imaginary_alias = controls::ImaginaryAlias::Explicit;
         let mut options = ParsedOptions::default();
 
         if let Some(candidate) = args.first() {
@@ -346,6 +378,15 @@ impl Request {
         if cursor < args.len() {
             if let Some(parsed_sigma) = parse_sigma(&args[cursor])? {
                 sigma = parsed_sigma;
+                if let Some(text) = controls::Text::of(&args[cursor]) {
+                    let text = text.trim(&mut None).await.map_err(|error| match error {
+                        crate::builtins::math::linalg::ops::linear_operator::CooperativeOperatorError::Execution(source) => source.into_runtime_error_in_context(None),
+                        source => build_runtime_error(format!("eigs: selector parsing failed: {source:?}")).with_gpu_gather_retry(crate::GpuGatherRetry::Never).build(),
+                    })?;
+                    if let Some((_, alias)) = controls::selector(text) {
+                        imaginary_alias = alias;
+                    }
+                }
                 cursor += 1;
             }
         }
@@ -358,6 +399,12 @@ impl Request {
             parse_options(option_args, n, k, &mut options)?;
         }
 
+        sigma = imaginary_alias.resolve(
+            sigma,
+            matches!(&a, Value::ComplexTensor(_) | Value::Complex(..))
+                || b.as_ref()
+                    .is_some_and(|b| matches!(b, Value::ComplexTensor(_) | Value::Complex(..))),
+        );
         validate_option_combination(sigma, &options)?;
 
         if let Some(b_value) = b.as_mut() {
@@ -457,18 +504,18 @@ fn is_generalized_b(value: &Value) -> bool {
 }
 
 fn parse_k(value: &Value) -> BuiltinResult<Option<usize>> {
-    parse_integer_scalar(value).map(|parsed| parsed.map(|k| k as usize))
+    parse_integer_scalar(value)
 }
 
-fn parse_integer_scalar(value: &Value) -> BuiltinResult<Option<i64>> {
+fn parse_integer_scalar(value: &Value) -> BuiltinResult<Option<usize>> {
     if let Some(value) = exact_integer_scalar(value) {
-        let Some(raw) = value.try_to_i64() else {
+        let Some(raw) = value.try_to_usize() else {
             return Err(error_with_detail(
                 "eigs: k is too large for this platform",
                 &ERROR_INVALID_ARGUMENT,
             ));
         };
-        if raw <= 0 {
+        if raw == 0 {
             return Err(error_with_detail(
                 "eigs: k must be a positive integer scalar",
                 &ERROR_INVALID_ARGUMENT,
@@ -501,17 +548,17 @@ fn parse_integer_scalar(value: &Value) -> BuiltinResult<Option<i64>> {
             &ERROR_INVALID_ARGUMENT,
         ));
     }
-    if raw >= i64::MAX as f64 {
+    if raw > usize::MAX as f64 || (usize::BITS == 64 && raw == usize::MAX as f64) {
         return Err(error_with_detail(
             "eigs: k is too large for this platform",
             &ERROR_INVALID_ARGUMENT,
         ));
     }
-    Ok(Some(raw as i64))
+    Ok(Some(raw as usize))
 }
 
 fn parse_sigma(value: &Value) -> BuiltinResult<Option<Sigma>> {
-    if let Some(text) = text_value(value) {
+    if let Some(text) = text_value(value)? {
         return Ok(Some(parse_sigma_text(&text)?));
     }
     match value {
@@ -544,20 +591,11 @@ fn parse_sigma(value: &Value) -> BuiltinResult<Option<Sigma>> {
 }
 
 fn parse_sigma_text(text: &str) -> BuiltinResult<Sigma> {
-    match text.trim().to_ascii_lowercase().as_str() {
-        "largestabs" | "lm" => Ok(Sigma::LargestAbs),
-        "smallestabs" | "sm" => Ok(Sigma::SmallestAbs),
-        "largestreal" | "lr" | "la" => Ok(Sigma::LargestReal),
-        "smallestreal" | "sr" | "sa" => Ok(Sigma::SmallestReal),
-        "bothendsreal" | "be" => Ok(Sigma::BothEndsReal),
-        "largestimag" | "li" => Ok(Sigma::LargestImag),
-        "smallestimag" | "si" => Ok(Sigma::SmallestImag),
-        "bothendsimag" => Ok(Sigma::BothEndsImag),
-        other => Err(error_with_detail(
-            format!("eigs: unsupported sigma '{other}'"),
-            &ERROR_INVALID_ARGUMENT,
-        )),
-    }
+    controls::selector(controls::Text::Utf8(text.trim()))
+        .map(|(sigma, _)| sigma)
+        .ok_or_else(|| {
+            error_with_detail("eigs: unsupported sigma selector", &ERROR_INVALID_ARGUMENT)
+        })
 }
 
 fn parse_options(
@@ -582,7 +620,7 @@ fn parse_options(
     }
     let mut idx = 0usize;
     while idx < args.len() {
-        let name = text_value(&args[idx]).ok_or_else(|| {
+        let name = text_value(&args[idx])?.ok_or_else(|| {
             error_with_detail(
                 "eigs: option names must be character vectors or string scalars",
                 &ERROR_INVALID_ARGUMENT,
@@ -651,7 +689,7 @@ fn parse_named_option(
             }
         }
         "failuretreatment" => {
-            let text = text_value(value).ok_or_else(|| {
+            let text = text_value(value)?.ok_or_else(|| {
                 error_with_detail(
                     "eigs: FailureTreatment must be a text scalar",
                     &ERROR_INVALID_ARGUMENT,
@@ -693,22 +731,9 @@ fn parse_named_option(
 }
 
 fn canonical_option_name(name: &str) -> BuiltinResult<String> {
-    match name.trim().to_ascii_lowercase().as_str() {
-        "tol" | "tolerance" => Ok("tolerance".to_string()),
-        "maxit" | "maxiterations" => Ok("maxiterations".to_string()),
-        "p" | "subspacedimension" => Ok("subspacedimension".to_string()),
-        "v0" | "startvector" => Ok("startvector".to_string()),
-        "fail" | "failuretreatment" => Ok("failuretreatment".to_string()),
-        "disp" | "display" => Ok("display".to_string()),
-        "issym" | "isfunctionsymmetric" => Ok("isfunctionsymmetric".to_string()),
-        "cholb" | "ischolesky" => Ok("ischolesky".to_string()),
-        "permb" | "choleskypermutation" => Ok("choleskypermutation".to_string()),
-        "spdb" | "issymmetricdefinite" => Ok("issymmetricdefinite".to_string()),
-        other => Err(error_with_detail(
-            format!("eigs: unsupported option '{other}'"),
-            &ERROR_INVALID_ARGUMENT,
-        )),
-    }
+    controls::option(controls::Text::Utf8(name.trim()))
+        .map(|key| key.name().to_owned())
+        .ok_or_else(|| error_with_detail("eigs: unsupported option", &ERROR_INVALID_ARGUMENT))
 }
 
 fn validate_option_combination(sigma: Sigma, options: &ParsedOptions) -> BuiltinResult<()> {
@@ -1287,26 +1312,36 @@ fn numeric_vector_values(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
     }
 }
 
-fn text_value(value: &Value) -> Option<String> {
-    match value {
+fn text_value(value: &Value) -> BuiltinResult<Option<String>> {
+    Ok(match value {
         Value::String(text) => Some(text.as_str().to_owned()),
         Value::StringArray(array) if array.data().len() == 1 => {
             Some(array.data()[0].as_str().to_owned())
         }
-        Value::CharArray(chars) if chars.rows == 1 => Some(chars.data().iter().collect()),
+        Value::CharArray(chars) if chars.rows == 1 => Some(
+            runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
+                let mut error = error_with_detail(source.to_string(), &ERROR_INVALID_ARGUMENT);
+                error.source = Some(Box::new(source));
+                error
+            })?,
+        ),
         _ => None,
-    }
+    })
 }
 
 fn is_text(value: &Value) -> bool {
-    text_value(value).is_some()
+    matches!(value, Value::String(_))
+        || matches!(value,Value::StringArray(a) if a.data().len()==1)
+        || matches!(value,Value::CharArray(a) if a.rows==1)
 }
 
 fn error_with_detail(
     message: impl Into<String>,
     descriptor: &'static BuiltinErrorDescriptor,
 ) -> RuntimeError {
-    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    let mut builder = build_runtime_error(message)
+        .with_builtin(NAME)
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never);
     if let Some(identifier) = descriptor.identifier {
         builder = builder.with_identifier(identifier);
     }
@@ -1318,11 +1353,7 @@ fn eigs_error(descriptor: &'static BuiltinErrorDescriptor) -> RuntimeError {
 }
 
 fn with_context(mut error: RuntimeError) -> RuntimeError {
-    if error.message() == "interaction pending..." {
-        return build_runtime_error("interaction pending...")
-            .with_builtin(NAME)
-            .build();
-    }
+    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
     if error.context.builtin.is_none() {
         error.context = error.context.with_builtin(NAME);
     }
@@ -1654,7 +1685,9 @@ mod tests {
             )
             .unwrap(),
         );
-        assert_eq!(out.materialize_f64(), vec![2.0, -4.0]);
+        for (actual, expected) in out.materialize_f64().iter().zip([2.0, -4.0]) {
+            assert!((actual - expected).abs() < 1e-10);
+        }
     }
 
     #[test]
@@ -1823,7 +1856,7 @@ mod tests {
             (usize::MAX as f64) + 1.0
         };
         assert!(positive_integer_option(&Value::Num(boundary), "MaxIterations").is_err());
-        assert!(parse_k(&Value::Num(i64::MAX as f64)).is_err());
+        assert!(parse_k(&Value::Num(usize::MAX as f64 + 1.0)).is_err());
     }
 
     #[test]

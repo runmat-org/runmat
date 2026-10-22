@@ -7,10 +7,10 @@ use runmat_accelerate_api::{
 };
 
 #[cfg(test)]
-mod tests;
-#[cfg(test)]
 #[path = "resident/functional_scatter_tests.rs"]
 mod functional_scatter_tests;
+#[cfg(test)]
+mod tests;
 
 fn optional<T>(result: anyhow::Result<T>, context: &str) -> Result<Option<T>, RuntimeError> {
     match result {
@@ -70,9 +70,18 @@ pub async fn assign_gpu_slice_with_plan(
         super::empty_rhs::validate_resident_rhs(target, rhs, plan)?;
         return Ok(Value::GpuTensor(target.clone()));
     }
-    let mut indices = plan.indices.clone();
-    indices.sort_unstable();
-    if indices.windows(2).any(|pair| pair[0] == pair[1]) {
+    let context = crate::context::legacy::active();
+    let owner = crate::indexing::plan::admission::Owner::new(context.as_ref())?;
+    let mut indices = crate::indexing::plan::admission::Scratch::<u32>::new(
+        context.as_ref(),
+        plan.indices.len(),
+    )?;
+    indices.as_mut_slice().copy_from_slice(&plan.indices);
+    owner.check()?;
+    // The existing sort is an indivisible CPU operation; check both sides.
+    indices.as_mut_slice().sort_unstable();
+    owner.check()?;
+    if indices.as_slice().windows(2).any(|pair| pair[0] == pair[1]) {
         return Err(mex(
             "RepeatedGpuAssignmentIndex",
             "gpuArray indexed assignment does not support repeated target subscripts",

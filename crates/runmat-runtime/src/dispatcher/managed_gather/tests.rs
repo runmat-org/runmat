@@ -1,0 +1,381 @@
+use super::*;
+use crate::context::host_effect::ManagedHostEffectLedger;
+use crate::context::{
+    ParallelCapability, RuntimeParallelResources, RuntimeParallelService, RuntimeServicePorts,
+};
+use futures::executor::block_on;
+use runmat_accelerate_api::{
+    test_support::TestAllocationOwner, AccelProvider, GpuTensorHandle, GpuTensorStorage,
+    HostNumericDataOwned, HostNumericTensorOwned, NumericDownloadStageLease, NumericElementType,
+    PreparedNumericDownloadStage, ProviderFeasibilityQuery,
+};
+use runmat_execution::{cancellation::CancellationSource, CancellationReason, ResourceByteBound};
+use runmat_value::{CellArray, ClosureData, ObjectArray, ObjectInstance, StructArray, Tensor};
+use std::{
+    future::Future,
+    rc::Rc,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    },
+    task::{Context, Poll},
+};
+
+struct Parallel(ManagedHostEffectLedger);
+impl RuntimeParallelService for Parallel {
+    fn supports(&self, _: ParallelCapability) -> bool {
+        false
+    }
+    fn placement_resources(&self) -> RuntimeParallelResources {
+        let snapshot = self.0.snapshot();
+        RuntimeParallelResources {
+            memory_available_bytes: Some(snapshot.free_bytes()),
+            epoch: snapshot.epoch,
+            ..RuntimeParallelResources::default()
+        }
+    }
+    fn managed_host_effect_ledger(&self) -> Option<ManagedHostEffectLedger> {
+        Some(self.0.clone())
+    }
+}
+
+fn runtime(ledger: &ManagedHostEffectLedger, stop: &CancellationSource) -> RuntimeContext {
+    RuntimeContext::with_cancellation(
+        Rc::new(crate::execution::RuntimeExecutionService::new()),
+        stop.token(),
+    )
+    .with_service_ports(
+        RuntimeServicePorts::default().with_parallel(Rc::new(Parallel(ledger.clone()))),
+    )
+}
+
+struct Lease(Arc<()>);
+impl NumericDownloadStageLease for Lease {
+    fn clone_for_callback(&self) -> Box<dyn NumericDownloadStageLease> {
+        Box::new(Self(self.0.clone()))
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+struct Provider {
+    owner: TestAllocationOwner,
+    ordinary: AtomicUsize,
+    factories: AtomicUsize,
+    pending: AtomicUsize,
+    physical: Mutex<Option<PreparedNumericDownloadStage>>,
+    marker: Arc<()>,
+}
+impl Provider {
+    fn staged<'a>(
+        &'a self,
+        handle: &'a GpuTensorHandle,
+        mut stage: Option<PreparedNumericDownloadStage>,
+    ) -> impl Future<Output = anyhow::Result<HostNumericTensorOwned>> + 'a {
+        async move {
+            let callback = stage.as_mut().unwrap().take_callback().unwrap();
+            *self.physical.lock().unwrap() = Some(callback);
+            if self.pending.load(Ordering::SeqCst) != 0 {
+                return futures::future::pending().await;
+            }
+            drop(self.physical.lock().unwrap().take());
+            drop(stage);
+            Ok(HostNumericTensorOwned {
+                data: HostNumericDataOwned::F64(vec![17.0; handle.shape().iter().product()]),
+                shape: handle.shape().to_vec(),
+                storage: GpuTensorStorage::Real,
+            })
+        }
+    }
+}
+impl AccelProvider for Provider {
+    fn device_id(&self) -> u32 {
+        self.owner.device_id()
+    }
+    fn device_info(&self) -> String {
+        "managed gather staging fixture".into()
+    }
+    fn upload(&self, _: &runmat_accelerate_api::HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+        anyhow::bail!("unused upload")
+    }
+    fn download<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+    ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+        Box::pin(async { anyhow::bail!("ordinary download must not run") })
+    }
+    fn download_numeric<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+    ) -> runmat_accelerate_api::AccelNumericDownloadFuture<'a> {
+        self.ordinary.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async { Err(anyhow::anyhow!("ordinary download must not run")) })
+    }
+    fn download_numeric_host_workspace_bound(&self, handle: &GpuTensorHandle) -> ResourceByteBound {
+        ResourceByteBound::Known(
+            (handle.shape().iter().product::<usize>() * 8 + std::mem::size_of_val(handle.shape()))
+                as u64,
+        )
+    }
+    fn download_numeric_provider_scratch_bound(&self, _: &GpuTensorHandle) -> ResourceByteBound {
+        ResourceByteBound::Known(0)
+    }
+    fn download_numeric_completion_host_bound(
+        &self,
+        handle: &GpuTensorHandle,
+    ) -> ResourceByteBound {
+        let future = self.staged(handle, None);
+        ResourceByteBound::Known(
+            (std::mem::size_of_val(&future) + 2 * std::mem::size_of::<Lease>()) as u64,
+        )
+    }
+    fn prepare_numeric_download_stage(
+        &self,
+        handle: &GpuTensorHandle,
+        query: &ProviderFeasibilityQuery,
+        claim: Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>,
+    ) -> anyhow::Result<PreparedNumericDownloadStage> {
+        assert!(query.matches_numeric_download(handle));
+        Ok(PreparedNumericDownloadStage::issued(
+            Box::new(Lease(self.marker.clone())),
+            claim,
+            handle,
+            0,
+            0,
+        ))
+    }
+    fn download_numeric_admitted_stage<'a>(
+        &'a self,
+        handle: &'a GpuTensorHandle,
+        stage: PreparedNumericDownloadStage,
+    ) -> runmat_accelerate_api::AccelNumericDownloadFuture<'a> {
+        assert!(stage.matches_source(handle));
+        self.factories.fetch_add(1, Ordering::SeqCst);
+        Box::pin(self.staged(handle, Some(stage)))
+    }
+}
+
+fn provider() -> &'static Provider {
+    let provider = Box::leak(Box::new(Provider {
+        owner: TestAllocationOwner::new(),
+        ordinary: AtomicUsize::new(0),
+        factories: AtomicUsize::new(0),
+        pending: AtomicUsize::new(0),
+        physical: Mutex::new(None),
+        marker: Arc::new(()),
+    }));
+    // A distinct durable fixture device, never the process's active provider.
+    unsafe {
+        runmat_accelerate_api::register_device_provider(provider);
+    }
+    provider
+}
+
+#[test]
+fn managed_borrowed_all_aggregate_slots_share_payloads_and_settle_exact_downloads() {
+    let provider = provider();
+    let allocation = provider
+        .owner
+        .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let gpu = || Value::GpuTensor(allocation.handle.clone());
+    let record = || {
+        let mut record = runmat_value::UnboundedStructValueBuilder::new();
+        record.insert("payload", gpu());
+        record.finish()
+    };
+    let object = || {
+        let mut object = ObjectInstance::new("ManagedGather");
+        object.replace_property_unbounded("payload".into(), gpu());
+        object
+    };
+    let transformed = Closure::from_data(ClosureData {
+        function_name: "gatherFixture".into(),
+        binding: None,
+        source_role: runmat_types::FunctionSourceRole::Unknown,
+        source_file: None,
+        captures: vec![gpu()].into(),
+        lexical_environment: None,
+    });
+    let transformed_id = transformed.instance_id();
+    let unchanged = Closure::from_data(ClosureData {
+        function_name: "hostFixture".into(),
+        binding: None,
+        source_role: runmat_types::FunctionSourceRole::Unknown,
+        source_file: None,
+        captures: vec![Value::Num(9.0)].into(),
+        lexical_environment: None,
+    });
+    let unchanged_id = unchanged.instance_id();
+    let host = Tensor::new(vec![23.0], vec![1, 1]).unwrap();
+    let host_ptr = host.as_f64_slice().unwrap().as_ptr();
+    let mut chars = runmat_value::CharArray::new_row("original UTF16");
+    let _chars_before_cow = chars.clone();
+    chars.make_data_unique_unbounded().unwrap();
+    assert!(chars.data_owner().is_shallow_clone());
+    let chars_ptr = chars.data().as_ptr();
+    let mut strings =
+        runmat_value::StringArray::new(vec!["original UTF8".into()], vec![1, 1]).unwrap();
+    let _strings_before_cow = strings.clone();
+    strings.make_data_unique_unbounded().unwrap();
+    assert!(strings.data_owner().is_shallow_clone());
+    let strings_ptr = strings.data().as_ptr();
+    let mut symbolic = runmat_value::SymbolicArray::new(
+        vec![runmat_value::SymbolicExpr::Variable("x".into())],
+        vec![1, 1],
+    )
+    .unwrap();
+    let _symbolic_before_cow = symbolic.clone();
+    symbolic.make_data_unique_unbounded().unwrap();
+    assert!(symbolic.data_owner().is_shallow_clone());
+    let symbolic_ptr = symbolic.data().as_ptr();
+    let input = Value::Cell(
+        CellArray::new(
+            vec![
+                Value::Tensor(host),
+                gpu(),
+                Value::Struct(record()),
+                Value::StructArray(StructArray::new(vec![record(), record()], vec![1, 2]).unwrap()),
+                Value::Object(object()),
+                Value::ObjectArray(
+                    ObjectArray::from_objects("ManagedGather", vec![object()], vec![1, 1]).unwrap(),
+                ),
+                Value::Closure(transformed),
+                Value::Closure(unchanged),
+                Value::CharArray(chars),
+                Value::StringArray(strings),
+                Value::SymbolicArray(symbolic),
+            ],
+            1,
+            11,
+        )
+        .unwrap(),
+    );
+    let ledger = ManagedHostEffectLedger::new(8 * 1024 * 1024);
+    let stop = CancellationSource::new();
+    let runtime = runtime(&ledger, &stop);
+    // No ambient scope: prove the explicit owner, including the console joint.
+    let output = block_on(super::super::gather_if_needed_in_context_async(
+        &input,
+        Some(&runtime),
+    ))
+    .unwrap();
+    assert_eq!(provider.ordinary.load(Ordering::SeqCst), 0);
+    assert_eq!(provider.factories.load(Ordering::SeqCst), 7);
+    assert!(provider.physical.lock().unwrap().is_none());
+    let Value::Cell(output_cell) = &output else {
+        panic!("cell output")
+    };
+    let Value::Tensor(host) = &output_cell.data()[0] else {
+        panic!("retained host")
+    };
+    assert_eq!(host.as_f64_slice().unwrap().as_ptr(), host_ptr);
+    assert!(output_cell.data_owner().is_exact());
+    assert!(super::super::owned_gpu::has_transformable_gpu(&input));
+    assert!(!super::super::owned_gpu::has_transformable_gpu(&output));
+    let Value::Closure(transformed) = &output_cell.data()[6] else {
+        panic!("transformed closure")
+    };
+    let Value::Closure(unchanged) = &output_cell.data()[7] else {
+        panic!("unchanged closure")
+    };
+    assert_ne!(transformed.instance_id(), transformed_id);
+    assert_eq!(unchanged.instance_id(), unchanged_id);
+    assert!(
+        matches!(&output_cell.data()[8], Value::CharArray(array) if array.data().as_ptr() == chars_ptr)
+    );
+    assert!(
+        matches!(&output_cell.data()[9], Value::StringArray(array) if array.data().as_ptr() == strings_ptr)
+    );
+    assert!(
+        matches!(&output_cell.data()[10], Value::SymbolicArray(array) if array.data().as_ptr() == symbolic_ptr)
+    );
+    assert!(ledger.snapshot().live_claimed_bytes > 0);
+    assert_eq!(allocation.probe.retirements(), 0);
+    drop(output);
+    {
+        let _scope = runtime.enter();
+        let output = block_on(super::super::owned_gather::gather_if_needed_owned_async(
+            input.clone(),
+            None,
+        ))
+        .unwrap();
+        assert!(!super::super::owned_gpu::has_transformable_gpu(&output));
+        assert_eq!(provider.factories.load(Ordering::SeqCst), 14);
+        drop(output);
+    }
+    drop(input);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    allocation.handle.release().unwrap();
+    assert_eq!(allocation.probe.retirements(), 1);
+}
+
+#[test]
+fn managed_deny_cancel_and_revocation_never_publish_or_retire_physical_callback_early() {
+    for revoke in [false, true] {
+        let provider = provider();
+        let allocation = provider
+            .owner
+            .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        let input = Value::GpuTensor(allocation.handle.clone());
+        let stop = CancellationSource::new();
+        let denied = ManagedHostEffectLedger::new(0);
+        assert_eq!(
+            block_on(borrowed(&Value::Num(9.0), &runtime(&denied, &stop))).unwrap(),
+            Value::Num(9.0)
+        );
+        assert!(block_on(borrowed(&input, &runtime(&denied, &stop))).is_err());
+        assert_eq!(provider.factories.load(Ordering::SeqCst), 0);
+        assert_eq!(denied.snapshot().live_reserved_bytes, 0);
+        for reason in [CancellationReason::User, CancellationReason::Deadline] {
+            let already = CancellationSource::new();
+            already.cancel(reason);
+            let ledger = ManagedHostEffectLedger::new(1024 * 1024);
+            let error = block_on(super::super::gather_if_needed_in_context_async(
+                &input,
+                Some(&runtime(&ledger, &already)),
+            ))
+            .unwrap_err();
+            assert!(matches!(
+                error
+                    .source
+                    .as_deref()
+                    .and_then(|source| (source as &dyn std::error::Error)
+                        .downcast_ref::<crate::execution::ExecutionServiceError>()),
+                Some(crate::execution::ExecutionServiceError::Cancelled)
+            ));
+            assert_eq!(provider.factories.load(Ordering::SeqCst), 0);
+            assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+        }
+        let ledger = ManagedHostEffectLedger::new(1024 * 1024);
+        let runtime = runtime(&ledger, &stop);
+        provider.pending.store(1, Ordering::SeqCst);
+        let mut pending = Box::pin(borrowed(&input, &runtime));
+        let mut cx = Context::from_waker(std::task::Waker::noop());
+        assert!(pending.as_mut().poll(&mut cx).is_pending());
+        assert_eq!(provider.factories.load(Ordering::SeqCst), 1);
+        assert!(provider.physical.lock().unwrap().is_some());
+        if revoke {
+            ledger.revoke();
+        } else {
+            stop.cancel(CancellationReason::User);
+        }
+        assert!(matches!(
+            pending.as_mut().poll(&mut cx),
+            Poll::Ready(Err(_))
+        ));
+        // Drop the logical frame; the physical callback keeps its exact claim.
+        drop(pending);
+        assert!(ledger.snapshot().live_claimed_bytes > 0);
+        assert_eq!(allocation.probe.retirements(), 0);
+        drop(provider.physical.lock().unwrap().take());
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+        assert_eq!(provider.ordinary.load(Ordering::SeqCst), 0);
+        drop(input);
+        allocation.handle.release().unwrap();
+    }
+}

@@ -4,13 +4,16 @@
 mod assertions;
 mod errors;
 mod warnings;
+mod runtests;
 
 pub use self::assertions::*;
 pub use self::errors::*;
+pub use self::runtests::*;
 pub use self::warnings::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(assertions::ENTRIES.iter().copied());
     values.extend(errors::ENTRIES.iter().copied());
     values.extend(warnings::ENTRIES.iter().copied());
+    values.extend(runtests::ENTRIES.iter().copied());
 }

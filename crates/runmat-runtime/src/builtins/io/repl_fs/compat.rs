@@ -1,17 +1,9 @@
 //! Compatibility filesystem, path, process, preference, and environment helpers.
 
-use std::path::{Path, PathBuf};
-#[cfg(windows)]
-use std::process::Command;
-
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, FileAttributeControl, FileAttributeControlError, RehashMode,
-    FILEATTRIB_ERROR_TOO_MANY_OUTPUTS, FILEATTRIB_ERROR_UNSUPPORTED_PERMISSION, MEMMAPFILE_CLASS,
-    MEMMAPFILE_DESCRIPTOR, MEMMAPFILE_ERROR_INVALID_CALL, MEMMAPFILE_ERROR_INVALID_CONTROL,
+    FileAttributeControl, FileAttributeControlError, RehashMode, FILEATTRIB_ERROR_TOO_MANY_OUTPUTS,
+    FILEATTRIB_ERROR_UNSUPPORTED_PERMISSION, MEMMAPFILE_CLASS, MEMMAPFILE_DESCRIPTOR,
+    MEMMAPFILE_ERROR_INVALID_CALL, MEMMAPFILE_ERROR_INVALID_CONTROL,
     MEMMAPFILE_ERROR_INVALID_FILENAME, MEMMAPFILE_ERROR_READ_FAILED,
     MEMMAPFILE_ERROR_TOO_MANY_OUTPUTS, MEMMAPFILE_EXPLICIT_GPU_EXTENSION,
     MEMMAPFILE_INTEGER_CONTROLS_EXTENSION,
@@ -21,76 +13,13 @@ use runmat_macros::runtime_builtin;
 #[cfg(any(test, windows))]
 use runmat_value::CellArray;
 use runmat_value::{CharArray, StructValue, UnboundedObjectBuilder, Value};
+use std::path::{Path, PathBuf};
 
 use crate::builtins::common::fs::{expand_user_path, path_to_string};
 use crate::output_count;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-const INPUTS_THREE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "input1",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First input argument.",
-    },
-    BuiltinParamDescriptor {
-        name: "input2",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Second input argument.",
-    },
-    BuiltinParamDescriptor {
-        name: "input3",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Optional third input argument.",
-    },
-];
-const OUTPUT_VALUE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "value",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Result value.",
-}];
-macro_rules! simple_descriptor {
-    ($sig:ident, $desc:ident, $label:expr, $inputs:expr, $outputs:expr, $mode:expr) => {
-        const $sig: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-            label: $label,
-            inputs: $inputs,
-            outputs: $outputs,
-        }];
-        pub const $desc: BuiltinDescriptor = BuiltinDescriptor {
-            signatures: &$sig,
-            output_mode: $mode,
-            completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &[],
-        };
-    };
-}
-
-simple_descriptor!(
-    WINQUERYREG_SIGNATURES,
-    WINQUERYREG_DESCRIPTOR,
-    "value = winqueryreg(root, key, valuename)",
-    &INPUTS_THREE,
-    &OUTPUT_VALUE,
-    BuiltinOutputMode::Fixed
-);
-pub const WINQUERYREG_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "value = winqueryreg(rootkey, subkey, valname) for REG_DWORD",
-        inputs: &[],
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Text-only registry lookup inputs can return a documented exact int32 scalar for a 32-bit REG_DWORD value. The Windows command output is decoded as a 32-bit bit pattern without a floating conversion.",
-    }];
+pub use runmat_builtins::{WINQUERYREG_DESCRIPTOR, WINQUERYREG_INTEGER_CAPABILITIES};
 
 pub(super) fn compat_error(name: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(name).build()
@@ -107,21 +36,22 @@ pub(super) fn map_control_flow(name: &str, err: RuntimeError) -> RuntimeError {
     builder.build()
 }
 
-pub(super) async fn gather_args(name: &str, args: &[Value]) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(args.len());
-    for value in args {
-        out.push(
-            gather_if_needed_async(value)
-                .await
-                .map_err(|err| map_control_flow(name, err))?,
-        );
-    }
-    Ok(out)
-}
-
 pub(super) fn scalar_text(value: &Value, name: &str, arg: &str) -> BuiltinResult<String> {
-    match crate::builtins::common::validation::value_text_scalar_string(value) {
-        Some(mut text) => {
+    match value {
+        Value::String(text) => Ok(text.as_str().to_owned()),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(array.data()[0].as_str().to_owned())
+        }
+        Value::CharArray(array) if array.rows == 1 => {
+            let mut text = crate::builtins::io::utf16::decode_utf16_with_error(
+                &array.data()[..array.cols],
+                || {
+                    compat_error(
+                        name,
+                        format!("{name}: {arg} contains malformed UTF-16 text"),
+                    )
+                },
+            )?;
             if matches!(value, Value::CharArray(_)) {
                 while text.ends_with(' ') {
                     text.pop();
@@ -129,19 +59,28 @@ pub(super) fn scalar_text(value: &Value, name: &str, arg: &str) -> BuiltinResult
             }
             Ok(text)
         }
-        None => Err(compat_error(
+        _ => Err(compat_error(
             name,
             format!("{name}: {arg} must be a string scalar or character vector"),
         )),
     }
 }
 
-fn char_row_to_string(array: &CharArray) -> String {
-    let mut text: String = array.data().iter().take(array.cols).collect();
+fn char_row_to_string(array: &CharArray) -> BuiltinResult<String> {
+    if array.rows == 0 {
+        return Ok(String::new());
+    }
+    let mut text =
+        crate::builtins::io::utf16::decode_utf16_with_error(&array.data()[..array.cols], || {
+            compat_error(
+                "memmapfile",
+                "memmapfile: value contains malformed UTF-16 text",
+            )
+        })?;
     while text.ends_with(' ') {
         text.pop();
     }
-    text
+    Ok(text)
 }
 
 pub(super) fn char_value(text: &str) -> Value {
@@ -240,18 +179,18 @@ async fn system_builtin(
     Ok(Value::Num(result.0 as f64))
 }
 
-fn truthy(value: &Value) -> bool {
-    match value {
+fn truthy(value: &Value) -> BuiltinResult<bool> {
+    Ok(match value {
         Value::Bool(v) => *v,
         Value::Num(v) => *v != 0.0,
         Value::Int(v) => !v.is_zero(),
         Value::String(s) => !s.is_empty() && s != "0" && !s.eq_ignore_ascii_case("false"),
         Value::CharArray(ca) => {
-            let s = char_row_to_string(ca);
+            let s = char_row_to_string(ca)?;
             !s.is_empty() && s != "0" && !s.eq_ignore_ascii_case("false")
         }
         _ => true,
-    }
+    })
 }
 
 #[cfg(windows)]
@@ -548,7 +487,7 @@ async fn memmapfile_builtin(
         };
         let value = gathered.map_err(|source| map_control_flow("memmapfile", source))?;
         match option {
-            MemmapOption::Writable => writable = truthy(&value),
+            MemmapOption::Writable => writable = truthy(&value)?,
             MemmapOption::Offset => offset = numeric_usize(&value, "Offset")?,
             MemmapOption::Format => format = MemmapFormat::from_value(&value)?,
             MemmapOption::Repeat => {
@@ -693,14 +632,14 @@ async fn memmapfile_builtin(
     Ok(Value::Object(object))
 }
 
-mod captured_fs_path;
 #[cfg(test)]
 #[path = "compat/tests/bindings.rs"]
 mod binding_tests;
-#[path = "compat/user_path.rs"]
-mod user_path;
+mod captured_fs_path;
 #[path = "compat/system.rs"]
 mod system;
+#[path = "compat/user_path.rs"]
+mod user_path;
 use captured_fs_path::CapturedFsPath;
 pub(crate) mod memmapfile;
 #[cfg(test)]
@@ -709,121 +648,197 @@ use memmapfile::{numeric_usize, MemmapFormat, MemmapOption};
 
 #[runtime_builtin(
     name = "winqueryreg",
-    category = "io/repl_fs",
-    summary = "Query values from the Windows registry.",
-    keywords = "winqueryreg,windows,registry",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::data_unknown_type),
-    descriptor(crate::builtins::io::repl_fs::compat::WINQUERYREG_DESCRIPTOR),
-    integer_capabilities(crate::builtins::io::repl_fs::compat::WINQUERYREG_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::io::repl_fs::compat"
 )]
-async fn winqueryreg_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn winqueryreg_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    output_count::validate_fixed_outputs(
+        &WINQUERYREG_DESCRIPTOR,
+        &runmat_builtins::WINQUERYREG_ERROR_TOO_MANY_OUTPUTS,
+        "winqueryreg",
+    )?;
     if args.iter().any(|value| {
         crate::builtins::common::validation::value_contains_native_integer_class(value)
             || value_contains_resident(value)
     }) {
-        return Err(compat_error(
-            "winqueryreg",
-            "winqueryreg: registry selectors must be host string scalars or character vectors",
-        ));
+        return Err(registry_control_error());
     }
-    let args = gather_args("winqueryreg", &args).await?;
     if args.len() < 2 || args.len() > 3 {
-        return Err(compat_error(
-            "winqueryreg",
-            "winqueryreg: expected root, key, and optional value name",
+        return Err(registry_control_error());
+    }
+    #[cfg(windows)]
+    if crate::context::complete_process_output_requires_evidence(runtime.as_ref()) {
+        return Err(registry_typed_error(
+            &runmat_builtins::WINQUERYREG_ERROR_INSUFFICIENT_RESOURCE,
         ));
     }
-    let root = scalar_text(&args[0], "winqueryreg", "root")?;
+    let root = registry_text(&args[0])?;
     if root == "name" && args.len() == 3 {
-        let rootkey = scalar_text(&args[1], "winqueryreg", "root")?;
-        let subkey = scalar_text(&args[2], "winqueryreg", "key")?;
-        return query_windows_registry_names(&rootkey, &subkey);
+        let rootkey = registry_text(&args[1])?;
+        let subkey = registry_text(&args[2])?;
+        return query_windows_registry_names(runtime.as_ref(), &rootkey, &subkey).await;
     }
-    let key = scalar_text(&args[1], "winqueryreg", "key")?;
-    let value = args
-        .get(2)
-        .map(|value| scalar_text(value, "winqueryreg", "value"))
-        .transpose()?;
-    query_windows_registry(&root, &key, value.as_deref())
+    let key = registry_text(&args[1])?;
+    let value = args.get(2).map(registry_text).transpose()?;
+    query_windows_registry(runtime.as_ref(), &root, &key, value.as_deref()).await
+}
+
+fn registry_control_error() -> RuntimeError {
+    registry_typed_error(&runmat_builtins::WINQUERYREG_ERROR_INVALID_INPUT)
+}
+
+fn registry_typed_error(error: &runmat_builtins::BuiltinErrorDescriptor) -> RuntimeError {
+    build_runtime_error(error.message)
+        .with_builtin("winqueryreg")
+        .with_identifier(error.identifier.expect("typed registry diagnostic"))
+        .build()
+}
+
+fn registry_text(value: &Value) -> BuiltinResult<String> {
+    scalar_text(value, "winqueryreg", "selector").map_err(|source| {
+        build_runtime_error(runmat_builtins::WINQUERYREG_ERROR_INVALID_INPUT.message)
+            .with_builtin("winqueryreg")
+            .with_identifier("RunMat:winqueryreg:InvalidInput")
+            .with_source(source)
+            .build()
+    })
 }
 
 #[cfg(windows)]
-fn query_windows_registry(root: &str, key: &str, value: Option<&str>) -> BuiltinResult<Value> {
+async fn query_windows_registry(
+    runtime: Option<&crate::context::RuntimeContext>,
+    root: &str,
+    key: &str,
+    value: Option<&str>,
+) -> BuiltinResult<Value> {
     let mut full = root.to_string();
     if !key.is_empty() {
         full.push('\\');
         full.push_str(key);
     }
-    let mut cmd = Command::new("reg");
-    cmd.args(["query", &full]);
-    if let Some(value) = value {
-        cmd.args(["/v", value]);
+    let mut command = runmat_process_host::HostCommand::new("reg");
+    command.arguments = vec!["query".into(), full.into()];
+    match runmat_builtins::WinqueryregSelection::value(value.map(str::to_owned)) {
+        runmat_builtins::WinqueryregSelection::NamedValue(value) => {
+            command.arguments.extend(["/v".into(), value.into()])
+        }
+        runmat_builtins::WinqueryregSelection::DefaultValue => command.arguments.push("/ve".into()),
+        runmat_builtins::WinqueryregSelection::ValueNames => unreachable!("value form"),
     }
-    runtime_env::apply_to_command(&mut cmd);
-    let output = cmd
-        .output()
-        .map_err(|err| compat_error("winqueryreg", format!("winqueryreg: {err}")))?;
-    if !output.status.success() {
-        return Err(compat_error(
-            "winqueryreg",
-            String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        ));
+    let output = registry_output(runtime, command).await?;
+    if output.exit.code != Some(0) {
+        return Err(build_runtime_error(format!(
+            "winqueryreg: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ))
+        .with_builtin("winqueryreg")
+        .with_identifier("RunMat:winqueryreg:QueryFailed")
+        .build());
     }
     parse_registry_query_value(&String::from_utf8_lossy(&output.stdout))
 }
 
+#[cfg(windows)]
+async fn registry_output(
+    runtime: Option<&crate::context::RuntimeContext>,
+    mut command: runmat_process_host::HostCommand,
+) -> BuiltinResult<runmat_process_host::CompleteProcessOutput> {
+    use crate::context::process_invocation::{output_complete, ProcessInvocationError};
+    if crate::context::complete_process_output_requires_evidence(runtime) {
+        return Err(registry_typed_error(
+            &runmat_builtins::WINQUERYREG_ERROR_INSUFFICIENT_RESOURCE,
+        ));
+    }
+    // Explicitly clear ambient environment and publish only the selected
+    // session's snapshot. Missing context never grants ambient process access.
+    command.environment = runtime
+        .map(|runtime| runtime.environment_snapshot().into_iter().collect())
+        .unwrap_or_default();
+    command.environment_policy = runmat_process_host::environment::EnvironmentPolicy::Clear;
+    output_complete(runtime, command, None, None)
+        .await
+        .map_err(|source| {
+            if let ProcessInvocationError::Execution(source) = source {
+                return source.into_runtime_error();
+            }
+            let identifier = match &source {
+                ProcessInvocationError::ResourceEvidence => {
+                    "RunMat:Placement:InsufficientResourceEvidence"
+                }
+                ProcessInvocationError::Capability(_) => {
+                    "RunMat:RuntimeContext:CapabilityUnavailable"
+                }
+                ProcessInvocationError::StaleDirectory(_)
+                | ProcessInvocationError::StaleExecutable(_) => {
+                    "RunMat:winqueryreg:StaleFilesystem"
+                }
+                _ => "RunMat:winqueryreg:ProcessFailed",
+            };
+            build_runtime_error(format!("winqueryreg: {source}"))
+                .with_builtin("winqueryreg")
+                .with_identifier(identifier)
+                .with_source(source)
+                .build()
+        })
+}
+
 #[cfg_attr(not(windows), allow(dead_code))]
 fn parse_registry_query_value(output: &str) -> BuiltinResult<Value> {
-    for line in output
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-    {
+    for line in output.lines().filter(|line| !line.trim().is_empty()) {
         let fields: Vec<&str> = line.split_whitespace().collect();
         if let Some(index) = fields.iter().position(|field| *field == "REG_DWORD") {
-            let raw = fields.get(index + 1).ok_or_else(|| {
-                compat_error("winqueryreg", "winqueryreg: malformed REG_DWORD output")
-            })?;
+            let raw = fields
+                .get(index + 1)
+                .ok_or_else(|| registry_typed_error(&runmat_builtins::WINQUERYREG_ERROR_QUERY))?;
             let bits = raw
                 .strip_prefix("0x")
                 .map_or_else(|| raw.parse::<u32>(), |hex| u32::from_str_radix(hex, 16))
-                .map_err(|_| {
-                    compat_error("winqueryreg", "winqueryreg: malformed REG_DWORD value")
-                })?;
+                .map_err(|_| registry_typed_error(&runmat_builtins::WINQUERYREG_ERROR_QUERY))?;
             return Ok(Value::Int(runmat_value::IntValue::I32(bits as i32)));
         }
         for kind in ["REG_SZ", "REG_EXPAND_SZ"] {
             if let Some(index) = fields.iter().position(|field| *field == kind) {
-                return Ok(char_value(&fields[index + 1..].join(" ")));
+                // reg.exe separates the type and payload with four spaces.
+                // Remove only that delimiter: payload whitespace is data.
+                let marker = fields[index];
+                let offset = marker.as_ptr() as usize - line.as_ptr() as usize + marker.len();
+                let payload = &line[offset..];
+                let payload = payload.strip_prefix("    ").unwrap_or(payload);
+                return Ok(char_value(payload));
             }
         }
     }
-    Err(compat_error(
-        "winqueryreg",
-        "winqueryreg: registry query returned no supported value",
+    Err(registry_typed_error(
+        &runmat_builtins::WINQUERYREG_ERROR_QUERY,
     ))
 }
 
 #[cfg(windows)]
-fn query_windows_registry_names(root: &str, key: &str) -> BuiltinResult<Value> {
+async fn query_windows_registry_names(
+    runtime: Option<&crate::context::RuntimeContext>,
+    root: &str,
+    key: &str,
+) -> BuiltinResult<Value> {
     let mut full = root.to_string();
     if !key.is_empty() {
         full.push('\\');
         full.push_str(key);
     }
-    let mut command = Command::new("reg");
-    command.args(["query", &full]);
-    runtime_env::apply_to_command(&mut command);
-    let output = command
-        .output()
-        .map_err(|err| compat_error("winqueryreg", format!("winqueryreg: {err}")))?;
-    if !output.status.success() {
-        return Err(compat_error(
-            "winqueryreg",
-            String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        ));
+    let mut command = runmat_process_host::HostCommand::new("reg");
+    command.arguments = vec!["query".into(), full.into()];
+    let output = registry_output(runtime, command).await?;
+    if output.exit.code != Some(0) {
+        return Err(build_runtime_error(format!(
+            "winqueryreg: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ))
+        .with_builtin("winqueryreg")
+        .with_identifier("RunMat:winqueryreg:QueryFailed")
+        .build());
     }
     let names = String::from_utf8_lossy(&output.stdout)
         .lines()
@@ -840,18 +855,25 @@ fn query_windows_registry_names(root: &str, key: &str) -> BuiltinResult<Value> {
 }
 
 #[cfg(not(windows))]
-fn query_windows_registry_names(_root: &str, _key: &str) -> BuiltinResult<Value> {
-    Err(compat_error(
-        "winqueryreg",
-        "winqueryreg: Windows registry is unavailable on this platform",
+async fn query_windows_registry_names(
+    _runtime: Option<&crate::context::RuntimeContext>,
+    _root: &str,
+    _key: &str,
+) -> BuiltinResult<Value> {
+    Err(registry_typed_error(
+        &runmat_builtins::WINQUERYREG_ERROR_UNSUPPORTED_PLATFORM,
     ))
 }
 
 #[cfg(not(windows))]
-fn query_windows_registry(_root: &str, _key: &str, _value: Option<&str>) -> BuiltinResult<Value> {
-    Err(compat_error(
-        "winqueryreg",
-        "winqueryreg: Windows registry is unavailable on this platform",
+async fn query_windows_registry(
+    _runtime: Option<&crate::context::RuntimeContext>,
+    _root: &str,
+    _key: &str,
+    _value: Option<&str>,
+) -> BuiltinResult<Value> {
+    Err(registry_typed_error(
+        &runmat_builtins::WINQUERYREG_ERROR_UNSUPPORTED_PLATFORM,
     ))
 }
 
@@ -896,6 +918,120 @@ mod tests {
         )
         .expect("full DWORD bit pattern");
         assert_eq!(bit_pattern, Value::Int(runmat_value::IntValue::I32(-1)));
+    }
+
+    #[test]
+    fn winqueryreg_preserves_string_payload_whitespace() {
+        let value = parse_registry_query_value(
+            "HKEY_CURRENT_USER\\Software\\RunMat\n    Text    REG_SZ      one  two  \n",
+        )
+        .expect("registry text");
+        assert_eq!(value, char_value("  one  two  "));
+        assert_eq!(
+            parse_registry_query_value("    Empty    REG_SZ    \n").unwrap(),
+            char_value("")
+        );
+    }
+
+    #[test]
+    fn winqueryreg_invalid_controls_fail_before_platform_or_process_access() {
+        let args = crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::Num(1.0),
+            Value::String("Software".into()),
+        ]);
+        let error = run(winqueryreg_builtin(None, args)).unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:winqueryreg:InvalidInput"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn winqueryreg_uses_exact_process_arguments_and_selected_environment() {
+        use runmat_process_host::{CompleteProcessOutput, HostCommand, ProcessHostResult};
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        struct Process(Rc<RefCell<Vec<HostCommand>>>);
+        impl crate::context::RuntimeProcessService for Process {
+            fn output_complete(
+                &self,
+                command: HostCommand,
+            ) -> crate::context::RuntimeServiceFuture<ProcessHostResult<CompleteProcessOutput>>
+            {
+                self.0.borrow_mut().push(command);
+                Box::pin(async {
+                    Ok(CompleteProcessOutput {
+                        exit: runmat_process_host::child::ProcessExit {
+                            code: Some(0),
+                            signal: None,
+                            success: true,
+                        },
+                        stdout: b"    Count    REG_DWORD    0xffffffff\r\n".to_vec(),
+                        stderr: Vec::new(),
+                    })
+                })
+            }
+            fn output_complete_with_input(
+                &self,
+                _command: HostCommand,
+                _input: Vec<u8>,
+            ) -> crate::context::RuntimeServiceFuture<ProcessHostResult<CompleteProcessOutput>>
+            {
+                panic!("registry query never supplies process stdin")
+            }
+        }
+        let _serial = vfs::provider_override_lock();
+        let _native = vfs::replace_provider(Arc::new(vfs::NativeFsProvider));
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let runtime = crate::context::RuntimeContext::new(Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ))
+        .with_service_ports(
+            crate::context::RuntimeServicePorts::default()
+                .with_process(Rc::new(Process(calls.clone()))),
+        );
+        runtime
+            .install_environment_snapshot(vec![("RUNMAT_REGISTRY_ENV".into(), "selected".into())])
+            .unwrap();
+        for value in [None, Some(""), Some(" spaced value ")] {
+            let result = run(query_windows_registry(
+                Some(&runtime),
+                "HKEY_CURRENT_USER",
+                "Software\\RunMat",
+                value,
+            ))
+            .unwrap();
+            assert_eq!(result, Value::Int(runmat_value::IntValue::I32(-1)));
+        }
+        let calls = calls.borrow();
+        assert_eq!(calls.len(), 3);
+        for command in calls.iter() {
+            assert_eq!(command.executable, PathBuf::from("reg"));
+            assert_eq!(
+                command.environment_policy,
+                runmat_process_host::environment::EnvironmentPolicy::Clear
+            );
+            assert_eq!(command.environment.len(), 1);
+            assert_eq!(
+                command
+                    .environment
+                    .get("RUNMAT_REGISTRY_ENV")
+                    .map(String::as_str),
+                Some("selected")
+            );
+        }
+        assert_eq!(
+            calls[0].arguments,
+            ["query", "HKEY_CURRENT_USER\\Software\\RunMat", "/ve"]
+        );
+        assert_eq!(calls[1].arguments, calls[0].arguments);
+        assert_eq!(
+            calls[2].arguments,
+            [
+                "query",
+                "HKEY_CURRENT_USER\\Software\\RunMat",
+                "/v",
+                " spaced value "
+            ]
+        );
     }
 
     fn unregistered_resident_value() -> Value {
@@ -1633,11 +1769,12 @@ mod tests {
         vfs::set_current_dir(&root).unwrap();
 
         let page = Value::CharArray(
-            CharArray::new_with_shape(vec!['-', 'w'], vec![1, 1, 2]).expect("two pages"),
+            CharArray::from_unicode_scalars_with_shape(vec!['-', 'w'], vec![1, 1, 2])
+                .expect("two pages"),
         );
         assert!(scalar_text(&page, "fileattrib", "attribute").is_err());
         let accepted = Value::CharArray(
-            CharArray::new_with_shape(vec!['-', 'w', ' '], vec![1, 3, 1])
+            CharArray::from_unicode_scalars_with_shape(vec!['-', 'w', ' '], vec![1, 3, 1])
                 .expect("trailing singleton page"),
         );
         assert_eq!(
@@ -1665,6 +1802,15 @@ mod tests {
         assert!(!futures::executor::block_on(provider.metadata(&path))
             .unwrap()
             .is_readonly());
+    }
+
+    #[test]
+    fn zero_row_character_truth_control_is_empty_without_slicing_storage() {
+        let empty = Value::CharArray(
+            CharArray::from_code_units_with_shape(Vec::new(), vec![0, 4])
+                .expect("zero-row character array"),
+        );
+        assert!(!truthy(&empty).expect("zero-row text is an empty control value"));
     }
 
     #[test]

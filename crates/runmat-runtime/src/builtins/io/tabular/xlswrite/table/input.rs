@@ -255,25 +255,24 @@ impl XlsTable {
         let rows = if chars.rows == 1 { 1 } else { chars.rows };
         let mut cells = reserved_cells(rows)?;
         let character_count = chars.data().len();
-        let mut characters = chars.data().iter().copied();
         let mut work = 0;
-        for _row in 0..rows {
-            let mut text = String::new();
+        for row in 0..rows {
             let used_columns = if rows == 1 {
                 character_count
             } else {
                 chars.cols
             };
-            text.try_reserve(used_columns).map_err(|source| {
-                xlswrite_error_with_source(
-                    &XLSWRITE_ERROR_DATA,
-                    "xlswrite: character cell allocation failed",
-                    source,
-                )
-            })?;
-            for _col in 0..used_columns {
-                let character = characters.next().expect("character shape is authoritative");
-                text.push(character);
+            let start = if rows == 1 { 0 } else { row * chars.cols };
+            let text = crate::builtins::io::utf16::decode_utf16_with_error(
+                &chars.data()[start..start + used_columns],
+                || {
+                    xlswrite_error_with(
+                        &XLSWRITE_ERROR_DATA,
+                        "xlswrite: character input contains malformed UTF-16 text",
+                    )
+                },
+            )?;
+            for _ in 0..used_columns {
                 work += 1;
                 if work == 1024 {
                     checkpoint_input(cooperation, selected, work).await?;
@@ -319,17 +318,14 @@ async fn cell_value_from_scalar(
         Value::Bool(b) => Ok(CellValue::Boolean(*b)),
         Value::String(s) => Ok(CellValue::Text(s.as_str().to_owned())),
         Value::CharArray(chars) if chars.rows == 1 => {
-            let mut text = String::new();
-            text.try_reserve(chars.data().len()).map_err(|source| {
-                xlswrite_error_with_source(
+            let text = crate::builtins::io::utf16::decode_utf16_with_error(chars.data(), || {
+                xlswrite_error_with(
                     &XLSWRITE_ERROR_DATA,
-                    "xlswrite: character cell allocation failed",
-                    source,
+                    "xlswrite: character cell contains malformed UTF-16 text",
                 )
             })?;
             let mut work = 0;
-            for character in chars.data().iter() {
-                text.push(*character);
+            for _ in chars.data() {
                 work += 1;
                 if work == 1024 {
                     checkpoint_input(cooperation, selected, work).await?;

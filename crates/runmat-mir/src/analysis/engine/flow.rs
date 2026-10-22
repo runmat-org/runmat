@@ -15,15 +15,16 @@ use super::state::FlowState;
 use crate::analysis::inference::FunctionSummary;
 use crate::analysis::inference::{
     append_inference_diagnostics, apply_rvalue_contract, assign_place, infer_expansion_sequence,
-    infer_rvalue, infer_rvalue_outputs, operand_fact, rvalue_literal,
-    statement_contract_with_facts,
+    infer_rvalue, infer_rvalue_outputs, operand_fact, rvalue_literal, statement_phase_contract,
 };
 use crate::analysis::workspace_effect::statement_exposes_current_workspace;
-use crate::analysis::{AssignmentFact, ProgramLocalFact, ProgramPointFacts};
+use crate::analysis::{AssignmentFact, MirOperationContract, ProgramLocalFact, ProgramPointFacts};
 
 #[path = "flow/call_observations.rs"]
 mod call_observations;
 pub(crate) use call_observations::CallObservation;
+#[path = "flow/operation_contracts.rs"]
+mod operation_contracts;
 #[path = "flow/sequence.rs"]
 mod sequence;
 mod spmd;
@@ -33,6 +34,7 @@ const MAX_BLOCK_UPDATES: usize = 64;
 
 pub(crate) struct BodyFlow {
     pub points: Vec<ProgramPointFacts>,
+    pub operation_contracts: Vec<MirOperationContract>,
     pub final_state: FlowState,
     pub return_facts: Vec<Vec<ValueFact>>,
     pub widened: bool,
@@ -52,6 +54,7 @@ pub(crate) fn analyze_body(
     if body.blocks.is_empty() {
         return BodyFlow {
             points: Vec::new(),
+            operation_contracts: Vec::new(),
             final_state: FlowState::entry(body, parameters, captures, constructor_instance),
             return_facts: Vec::new(),
             widened: false,
@@ -118,6 +121,7 @@ pub(crate) fn analyze_body(
     let mut return_facts = Vec::new();
     let mut diagnostics = Vec::new();
     let mut calls = Vec::new();
+    let mut operation_contracts = Vec::new();
     for (block_index_value, block) in body.blocks.iter().enumerate() {
         let Some(mut state) = entries[block_index_value].clone() else {
             continue;
@@ -132,6 +136,15 @@ pub(crate) fn analyze_body(
         );
         let mut pending_mutation = None;
         for (statement_index, statement) in block.statements.iter().enumerate() {
+            operation_contracts::record_statement(
+                &mut operation_contracts,
+                function,
+                block,
+                statement_index,
+                statement,
+                &state,
+                summaries,
+            );
             call_observations::collect(statement, &state, summaries, &mut calls);
             transfer_statement(
                 statement,
@@ -149,6 +162,13 @@ pub(crate) fn analyze_body(
                 &state,
             );
         }
+        operation_contracts::record_terminator(
+            &mut operation_contracts,
+            function,
+            block,
+            &state,
+            summaries,
+        );
         if let MirTerminatorKind::Return(outputs) = &block.terminator.kind {
             return_facts.push(
                 outputs
@@ -164,10 +184,13 @@ pub(crate) fn analyze_body(
             final_state.join_from(&state, false);
         }
     }
+    operation_contracts::complete_missing(body, function, &mut operation_contracts, summaries);
     points.sort_by_key(|point| point.point);
+    operation_contracts.sort_by(|left, right| left.site.cmp(&right.site));
 
     BodyFlow {
         points,
+        operation_contracts,
         final_state,
         return_facts,
         widened,
@@ -202,7 +225,120 @@ fn transfer_statement(
     summaries: &BTreeMap<FunctionId, FunctionSummary>,
     diagnostics: &mut Vec<crate::MirDiagnostic>,
 ) {
+    let facts = state.value_facts();
+    let (effects, capabilities) = statement_phase_contract(statement, summaries, &facts);
+    state.effects.0.extend(effects.0);
+    state.capabilities.0.extend(capabilities.0);
     match &statement.kind {
+        MirStmtKind::PrepareFixedAssignment(owner) => {
+            if matches!(
+                owner.phase,
+                crate::MirFixedPreparationPhase::CaptureReceiver
+            ) {
+                state.fixed_receiver = owner.assignment.mutation.place.root_local().map(|root| {
+                    (
+                        owner.assignment.source_statement,
+                        root,
+                        state.locals[root.0].clone(),
+                    )
+                });
+            }
+            for step in owner.steps() {
+                let nested = match step {
+                    crate::MirExpressionStep::Let { local, value, span } => MirStmt {
+                        kind: MirStmtKind::Assign {
+                            place: crate::MirPlace::Local(*local),
+                            value: value.clone(),
+                        },
+                        span: *span,
+                    },
+                    crate::MirExpressionStep::CaptureSequence {
+                        destination,
+                        source,
+                        span,
+                    } => MirStmt {
+                        kind: MirStmtKind::CaptureSequence {
+                            destination: *destination,
+                            source: source.clone(),
+                        },
+                        span: *span,
+                    },
+                };
+                transfer_statement(&nested, state, &mut None, summaries, diagnostics);
+            }
+            if let crate::MirFixedPreparationPhase::EvaluateSelector {
+                region,
+                destination: crate::MirFixedSelectorDestination::Scalar(local),
+                ..
+            } = &owner.phase
+            {
+                if let crate::MirCallArg::Single(operand) = &region.argument {
+                    let value = crate::MirRvalue::Use(operand.clone());
+                    let assigned =
+                        infer_rvalue(&value, state, summaries, statement.span, diagnostics);
+                    let literal = rvalue_literal(&value, state);
+                    assign_place(
+                        &crate::MirPlace::Local(*local),
+                        assigned,
+                        literal,
+                        None,
+                        state,
+                    );
+                }
+            }
+            if let crate::MirFixedPreparationPhase::EvaluateSelector {
+                region,
+                destination: crate::MirFixedSelectorDestination::Sequence(destination),
+                ..
+            } = &owner.phase
+            {
+                let sequence = match &region.argument {
+                    crate::MirCallArg::CapturedSequence(source) => state
+                        .sequence_facts()
+                        .get(source)
+                        .cloned()
+                        .unwrap_or_else(runmat_types::ValueSequenceFact::dynamic),
+                    crate::MirCallArg::Expansion(source) => {
+                        infer_expansion_sequence(source, state, summaries).sequence
+                    }
+                    crate::MirCallArg::Single(_) => runmat_types::ValueSequenceFact::dynamic(),
+                };
+                state.set_sequence(*destination, sequence);
+            }
+            if statement_exposes_current_workspace(&statement.kind) {
+                state.invalidate_current_workspace_bindings();
+            }
+        }
+        MirStmtKind::PreparedAssign { preparation, value } => {
+            transfer_short_circuit_temps(value, state, summaries, diagnostics);
+            let assigned = infer_rvalue(value, state, summaries, statement.span, diagnostics);
+            let literal = rvalue_literal(value, state);
+            apply_rvalue_contract(value, state, summaries);
+            if statement_exposes_current_workspace(&statement.kind) {
+                state.invalidate_current_workspace_bindings();
+            }
+            if let Some(root) = preparation.mutation.place.root_local() {
+                state.locals[root.0] = match state.fixed_receiver.take() {
+                    Some((source, original_root, original))
+                        if source == preparation.source_statement && original_root == root =>
+                    {
+                        original
+                    }
+                    _ => super::state::LocalState::assigned(
+                        ValueFact::unknown(DynamicReason::RuntimeValue),
+                        LiteralValue::Unknown,
+                    ),
+                };
+            }
+            assign_place(
+                &preparation.mutation.place,
+                assigned,
+                literal,
+                Some(&preparation.mutation),
+                state,
+            );
+            *pending_mutation = None;
+        }
         MirStmtKind::Assign { place, value } => {
             transfer_short_circuit_temps(value, state, summaries, diagnostics);
             let assigned = infer_rvalue(value, state, summaries, statement.span, diagnostics);
@@ -273,11 +409,6 @@ fn transfer_statement(
                 diagnostics,
             );
             state.set_sequence(*destination, inferred.sequence);
-            let facts = state.value_facts();
-            let (effects, capabilities) =
-                statement_contract_with_facts(statement, summaries, &facts);
-            state.effects.0.extend(effects.0);
-            state.capabilities.0.extend(capabilities.0);
             if statement_exposes_current_workspace(&statement.kind) {
                 state.invalidate_current_workspace_bindings();
             }
@@ -290,13 +421,7 @@ fn transfer_statement(
                 state.invalidate_current_workspace_bindings();
             }
         }
-        MirStmtKind::StatementOutput(_) => {
-            let facts = state.value_facts();
-            let (effects, capabilities) =
-                statement_contract_with_facts(statement, summaries, &facts);
-            state.effects.0.extend(effects.0);
-            state.capabilities.0.extend(capabilities.0);
-        }
+        MirStmtKind::StatementOutput(_) => {}
         MirStmtKind::PlaceMutation(mutation) => *pending_mutation = Some(mutation.clone()),
         MirStmtKind::WorkspaceEffect { bindings, .. } => {
             state.effects.0.insert(EffectKind::WorkspaceWrite);
@@ -341,6 +466,14 @@ fn edge_states(
     state: &FlowState,
     summaries: &BTreeMap<FunctionId, FunctionSummary>,
 ) -> Vec<(BasicBlockId, FlowState)> {
+    let mut contracted = state.clone();
+    for value in crate::analysis::terminator_rvalues(kind) {
+        apply_rvalue_contract(&value, &mut contracted, summaries);
+    }
+    let (effects, capabilities) = operation_contracts::terminator(kind);
+    contracted.effects.0.extend(effects.0);
+    contracted.capabilities.0.extend(capabilities.0);
+    let state = &contracted;
     match kind {
         MirTerminatorKind::Goto(target) => vec![(*target, state.clone())],
         MirTerminatorKind::Branch {
@@ -397,6 +530,7 @@ fn edge_states(
             catch_binding,
         } => {
             let mut caught = state.clone();
+            caught.fixed_receiver = None;
             if let Some(local) = catch_binding {
                 caught.locals[local.0].set(
                     ValueFact::scalar(ValueKindFact::Exception(runmat_types::ExceptionFact {

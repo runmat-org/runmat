@@ -21,7 +21,7 @@ fn construct_empty_map_defaults() {
     .expect("KeyType");
     assert_eq!(
         key_type,
-        Value::CharArray(CharArray::new("char".chars().collect(), 1, 4).unwrap())
+        Value::CharArray(CharArray::from_unicode_scalars("char".chars().collect(), 1, 4).unwrap())
     );
 
     let value_type = containers_map_subsref(
@@ -32,7 +32,7 @@ fn construct_empty_map_defaults() {
     .expect("ValueType");
     assert_eq!(
         value_type,
-        Value::CharArray(CharArray::new("any".chars().collect(), 1, 3).unwrap())
+        Value::CharArray(CharArray::from_unicode_scalars("any".chars().collect(), 1, 3).unwrap())
     );
 }
 
@@ -119,7 +119,9 @@ fn key_type_single_roundtrip() {
         .expect("keytype");
     assert_eq!(
         key_type,
-        Value::CharArray(CharArray::new("single".chars().collect(), 1, 6).unwrap())
+        Value::CharArray(
+            CharArray::from_unicode_scalars("single".chars().collect(), 1, 6).unwrap()
+        )
     );
 
     let single_key = Value::Tensor(Tensor::from_f32(vec![1.0], vec![1, 1]).unwrap());

@@ -1,4 +1,4 @@
-use runmat_value::{CharArray, Value};
+use runmat_value::{CharArray, Utf16CodeUnit, Value};
 
 use crate::builtins::cells::core::block_layout::extend_with_ones;
 use crate::builtins::cells::core::cell2mat::error::{
@@ -11,7 +11,8 @@ use crate::BuiltinResult;
 pub(super) fn assemble(entries: &[CellEntry], plan: &AssemblyPlan) -> BuiltinResult<Value> {
     let rows = plan.output_shape.first().copied().unwrap_or(0);
     let columns = plan.output_shape.get(1).copied().unwrap_or(1);
-    let mut output = vec!['\0'; rows.checked_mul(columns).ok_or_else(size_exceeded)?];
+    let mut output =
+        vec![Utf16CodeUnit::from_raw(0); rows.checked_mul(columns).ok_or_else(size_exceeded)?];
     for (entry, coordinates) in entries.iter().zip(&plan.cell_coordinates) {
         let EntryData::Character(data) = &entry.data else {
             continue;
@@ -32,7 +33,7 @@ pub(super) fn assemble(entries: &[CellEntry], plan: &AssemblyPlan) -> BuiltinRes
             output[destination] = *value;
         }
     }
-    CharArray::new(output, rows, columns)
+    CharArray::from_code_units(output, rows, columns)
         .map(Value::CharArray)
         .map_err(|error| {
             cell2mat_error_with_message(format!("cell2mat: {error}"), &CELL2MAT_ERROR_INTERNAL)

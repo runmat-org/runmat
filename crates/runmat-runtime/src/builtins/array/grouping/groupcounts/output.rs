@@ -152,5 +152,6 @@ fn select_observed_rows(column: &GroupColumn, atoms: &[KeyAtom]) -> BuiltinResul
                 .ok_or_else(|| error::internal("groupcounts: group label has no source value"))
         })
         .collect::<BuiltinResult<Vec<_>>>()?;
-    select_group_rows(column.value(), &rows).map_err(error::internal)
+    select_group_rows(column.value(), &rows)
+        .map_err(|source| source.attach(error::internal("group label selection failed")))
 }

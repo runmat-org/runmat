@@ -107,16 +107,18 @@ enum OptionToken {
     Unsupported(String),
 }
 
-fn option_token(value: &Value) -> Option<OptionToken> {
-    let text = value_to_string_scalar(value)?;
+fn option_token(value: &Value, owner: WorkspaceQueryOwner) -> BuiltinResult<Option<OptionToken>> {
+    let Some(text) = value_to_string_scalar(value, owner, QueryError::SelectorType)? else {
+        return Ok(None);
+    };
     if !text.starts_with('-') {
-        return None;
+        return Ok(None);
     }
-    Some(match text.to_ascii_lowercase().as_str() {
+    Ok(Some(match text.to_ascii_lowercase().as_str() {
         "-file" => OptionToken::File,
         "-regexp" => OptionToken::Regexp,
         _ => OptionToken::Unsupported(text.to_ascii_lowercase()),
-    })
+    }))
 }
 
 pub(super) fn parse_request(
@@ -129,7 +131,7 @@ pub(super) fn parse_request(
     let mut regex_patterns = Vec::new();
     let mut only_global = false;
     while index < values.len() {
-        if let Some(token) = option_token(&values[index]) {
+        if let Some(token) = option_token(&values[index], owner)? {
             match token {
                 OptionToken::File => {
                     index += 1;
@@ -146,7 +148,7 @@ pub(super) fn parse_request(
                 OptionToken::Regexp => {
                     index += 1;
                     let before = regex_patterns.len();
-                    while index < values.len() && option_token(&values[index]).is_none() {
+                    while index < values.len() && option_token(&values[index], owner)?.is_none() {
                         let candidates = extract_name_list(&values[index], owner)?;
                         if candidates.is_empty() {
                             return Err(owner.reject(QueryError::RegexpEmptyPattern));
@@ -194,8 +196,8 @@ pub(super) fn parse_request(
     }
 
     let source = if let Some(value) = path {
-        let text =
-            value_to_string_scalar(value).ok_or_else(|| owner.reject(QueryError::FilenameType))?;
+        let text = value_to_string_scalar(value, owner, QueryError::FilenameType)?
+            .ok_or_else(|| owner.reject(QueryError::FilenameType))?;
         let mut path = PathBuf::from(text);
         if path.extension().is_none() {
             path.set_extension("mat");
@@ -234,7 +236,7 @@ pub(super) fn parse_request(
 fn extract_name_list(value: &Value, owner: WorkspaceQueryOwner) -> BuiltinResult<Vec<String>> {
     match value {
         Value::String(text) => Ok(vec![text.as_str().to_owned()]),
-        Value::CharArray(array) => Ok(char_array_rows_as_strings(array)),
+        Value::CharArray(array) => char_array_rows_as_strings(array, owner),
         Value::StringArray(array) => Ok(array
             .data()
             .iter()
@@ -244,36 +246,46 @@ fn extract_name_list(value: &Value, owner: WorkspaceQueryOwner) -> BuiltinResult
             .data()
             .iter()
             .map(|item| {
-                value_to_string_scalar(item).ok_or_else(|| owner.reject(QueryError::CellMemberType))
+                value_to_string_scalar(item, owner, QueryError::CellMemberType)?
+                    .ok_or_else(|| owner.reject(QueryError::CellMemberType))
             })
             .collect(),
         _ => Err(owner.reject(QueryError::SelectorType)),
     }
 }
 
-fn value_to_string_scalar(value: &Value) -> Option<String> {
+fn value_to_string_scalar(
+    value: &Value,
+    owner: WorkspaceQueryOwner,
+    error: QueryError,
+) -> BuiltinResult<Option<String>> {
     match value {
-        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::String(text) => Ok(Some(text.as_str().to_owned())),
         Value::CharArray(array) if array.rows == 1 => {
-            char_array_rows_as_strings(array).into_iter().next()
+            Ok(char_array_rows_as_strings(array, owner)?.into_iter().next())
         }
         Value::StringArray(array) if array.data().len() == 1 => {
-            Some(array.data()[0].as_str().to_owned())
+            Ok(Some(array.data()[0].as_str().to_owned()))
         }
-        _ => None,
+        Value::CharArray(_) => Err(owner.reject(error)),
+        _ => Ok(None),
     }
 }
 
-pub(super) fn char_array_rows_as_strings(array: &CharArray) -> Vec<String> {
+pub(super) fn char_array_rows_as_strings(
+    array: &CharArray,
+    owner: WorkspaceQueryOwner,
+) -> BuiltinResult<Vec<String>> {
     let mut rows = Vec::with_capacity(array.rows);
     for row in 0..array.rows {
-        let mut value = String::with_capacity(array.cols);
-        for column in 0..array.cols {
-            value.push(array.data()[row * array.cols + column]);
-        }
+        let start = row * array.cols;
+        let value =
+            super::text::decode_utf16_with_error(&array.data()[start..start + array.cols], || {
+                owner.reject(QueryError::SelectorType)
+            })?;
         rows.push(value.trim_end_matches([' ', '\0']).to_string());
     }
-    rows
+    Ok(rows)
 }
 
 #[cfg(test)]

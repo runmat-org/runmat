@@ -81,121 +81,13 @@ impl RepeatableCallable {
         arguments: BuiltinArguments,
         requested_outputs: usize,
     ) -> Result<RootedValueSequence, RuntimeError> {
-        match &self.selected.target {
-            CallableTarget::Bound(binding) => {
-                super::execution::invoke_bound(
-                    runtime,
-                    binding.clone(),
-                    self.prepare_arguments(runtime, arguments)?,
-                    requested_outputs,
-                    self.selected.metadata.clone(),
-                    None,
-                )
-                .await
-            }
-            CallableTarget::BoundLexical { binding, closure } => {
-                super::execution::invoke_bound(
-                    runtime,
-                    binding.clone(),
-                    self.prepare_arguments(runtime, arguments)?,
-                    requested_outputs,
-                    self.selected.metadata.clone(),
-                    closure.as_closure().lexical_environment.clone(),
-                )
-                .await
-            }
-            CallableTarget::Resolved {
-                identity,
-                fallback_policy,
-            } => {
-                super::resolved_execution::invoke_descriptor_required(
-                    runtime,
-                    identity.clone(),
-                    self.prepare_arguments(runtime, arguments)?,
-                    requested_outputs,
-                    &self.selected.metadata,
-                    *fallback_policy,
-                )
-                .await
-            }
-            CallableTarget::CapturedResolved {
-                identity,
-                fallback_policy,
-                ..
-            } => {
-                super::resolved_execution::invoke_descriptor_required(
-                    runtime,
-                    identity.clone(),
-                    self.prepare_arguments(runtime, arguments)?,
-                    requested_outputs,
-                    &self.selected.metadata,
-                    *fallback_policy,
-                )
-                .await
-            }
-            CallableTarget::FevalForward(value) => {
-                Box::pin(crate::call::feval::invoke_retained(
-                    runtime,
-                    value.clone(),
-                    arguments,
-                    requested_outputs,
-                    self.selected.metadata.function_input_callsite.clone(),
-                ))
-                .await
-            }
-            CallableTarget::RetainedFevalForward(value) => {
-                let Some(name) = retained_target_name(value.value()) else {
-                    return crate::call::feval::invoke_object_retained(
-                        runtime,
-                        value.value().clone(),
-                        arguments,
-                        requested_outputs,
-                    )
-                    .await;
-                };
-                let rooted = self.prepare_arguments(runtime, arguments)?;
-                match crate::user_functions::try_call_rooted_semantic_name_in_context(
-                    runtime,
-                    name,
-                    rooted,
-                    requested_outputs,
-                )
-                .await
-                {
-                    std::ops::ControlFlow::Break(result) => result,
-                    std::ops::ControlFlow::Continue(arguments) => {
-                        let (identity, fallback) = match value.value() {
-                            Value::ExternalFunctionHandle(name) => (
-                                crate::external_callable_identity_for_name(name),
-                                runmat_types::CallableFallbackPolicy::ExternalBoundary,
-                            ),
-                            Value::MethodFunctionHandle(name) => (
-                                runmat_types::CallableIdentity::Method(runmat_types::MethodId(
-                                    name.name().to_owned(),
-                                )),
-                                runmat_types::CallableFallbackPolicy::RuntimeNameResolution,
-                            ),
-                            _ => (
-                                crate::callable_identity_for_handle_name(name).0,
-                                runmat_types::CallableFallbackPolicy::RuntimeNameResolution,
-                            ),
-                        };
-                        crate::dispatch_prepared_callable_with_policy_in_runtime(
-                            runtime,
-                            identity,
-                            fallback,
-                            arguments,
-                            requested_outputs,
-                            self.selected.metadata.function_input_callsite.clone(),
-                        )
-                        .await
-                    }
-                }
-            }
-        }
+        let mut selected = self.selected.clone();
+        selected.requested_outputs = requested_outputs;
+        let selected = selected.with_retained_arguments(arguments)?;
+        super::execute_retained_callable_descriptor(runtime, selected).await
     }
 }
-fn retained_target_name(value: &Value) -> Option<&str> {
+pub(super) fn retained_target_name(value: &Value) -> Option<&str> {
     match value {
         Value::String(text) => crate::call::admission::text_target_name(text),
         Value::StringArray(array) if array.data().len() == 1 => {

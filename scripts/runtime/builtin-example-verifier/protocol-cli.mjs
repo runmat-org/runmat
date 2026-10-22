@@ -1,6 +1,5 @@
 // @ts-check
 
-import { execFileSync } from "node:child_process";
 import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { buildInventory } from "./inventory.mjs";
@@ -12,6 +11,7 @@ import { reconcileShardResults } from "./reconcile.mjs";
 import { executeShard } from "./runner-process.mjs";
 import { computeRunnerDigest, readJson, repositoryRoot, sourceIdentity, writeJson } from "./io.mjs";
 import { renderReconciliationHtml, renderReconciliationMarkdown } from "./report-renderer.mjs";
+import { productionExampleDocumentation, validateCurrentExampleInventory } from "./production-inventory.mjs";
 
 export const PROTOCOL_COMMANDS = Object.freeze(["artifacts", "probe", "inventory", "plan", "matrix", "run", "reconcile"]);
 
@@ -102,7 +102,7 @@ function inventoryCommand(options) {
     const source = options["source-revision"]
         ? { sourceRevision: options["source-revision"], sourceState: options["source-state"] ?? "clean" }
         : sourceIdentity(root);
-    const exported = options.export ? readJson(options.export) : exportDocuments(root);
+    const exported = options.export ? readJson(options.export) : productionExampleDocumentation(root);
     const inventory = buildInventory(exported, {
         ...source,
         runnerDigest: options["runner-digest"] ?? computeRunnerDigest(root),
@@ -169,6 +169,18 @@ function runCommand(options) {
 function reconcileCommand(options) {
     const inventory = readJson(required(options.inventory, "--inventory"));
     const plan = readJson(required(options.plan, "--plan"));
+    if (booleanOption(options.closure)) {
+        const root = repositoryRoot();
+        const source = sourceIdentity(root);
+        // Fail before compiling on a dirty checkout; caller-supplied clean
+        // labels, source revisions and runner digests are not observations.
+        if (source.sourceState !== "clean") throw new Error("Closure requires a current clean source state");
+        const runnerDigest = computeRunnerDigest(root);
+        validateCurrentExampleInventory(inventory, productionExampleDocumentation(root), { ...source, runnerDigest });
+        const after = sourceIdentity(root);
+        if (after.sourceRevision !== source.sourceRevision || after.sourceState !== "clean"
+            || computeRunnerDigest(root) !== runnerDigest) throw new Error("Source or runner changed during closure inventory verification");
+    }
     const paths = [...options.positionals];
     if (options.result) paths.push(...arrayOption(options.result));
     if (options["results-dir"]) {
@@ -213,15 +225,6 @@ function findShardResults(root) {
     };
     visit(root);
     return results.sort();
-}
-
-function exportDocuments(root) {
-    const override = process.env.RUNMAT_EXAMPLE_DOCUMENTATION_BINARY;
-    const command = override ? resolve(root, override) : "cargo";
-    const args = override
-        ? ["--transition"]
-        : ["run", "--quiet", "-p", "runmat-builtins", "--bin", "export_builtin_documentation", "--", "--transition"];
-    return JSON.parse(execFileSync(command, args, { cwd: root, encoding: "utf8", maxBuffer: 128 * 1024 * 1024 }));
 }
 
 function parseOptions(args, command) {

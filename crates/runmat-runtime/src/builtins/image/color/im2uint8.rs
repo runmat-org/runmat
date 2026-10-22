@@ -224,12 +224,19 @@ fn parse_indexed_mode(
     let Some(value) = rest.first() else {
         return Ok(ImageIndexMode::Intensity);
     };
-    crate::builtins::image::color::conversion_mode::decode(value).ok_or_else(|| {
-        im2uint8_error_with_detail(
-            &IM2UINT8_ERROR_INVALID_INPUT,
-            "second input must be the text \"indexed\"",
-        )
-    })
+    crate::builtins::image::color::conversion_mode::decode(value)
+        .map_err(|source| {
+            let mut error =
+                im2uint8_error_with_detail(&IM2UINT8_ERROR_INVALID_INPUT, source.to_string());
+            error.source = Some(Box::new(source));
+            error
+        })?
+        .ok_or_else(|| {
+            im2uint8_error_with_detail(
+                &IM2UINT8_ERROR_INVALID_INPUT,
+                "second input must be the text \"indexed\"",
+            )
+        })
 }
 
 fn quantize_u16_to_u8(value: u16) -> u8 {

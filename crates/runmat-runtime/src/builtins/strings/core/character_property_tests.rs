@@ -64,7 +64,8 @@ fn text_unicode_numeric_and_empty_shapes_remain_distinct() {
         evaluate(isspace_builtin(Value::String("\u{2003}".into()))).unwrap(),
         Value::Bool(true)
     );
-    let character = Value::CharArray(CharArray::new(vec!['a', ' ', '1', 'B'], 2, 2).unwrap());
+    let character =
+        Value::CharArray(CharArray::from_unicode_scalars(vec!['a', ' ', '1', 'B'], 2, 2).unwrap());
     assert_eq!(
         evaluate(isletter_builtin(character.clone())).unwrap(),
         Value::LogicalArray(LogicalArray::new(vec![1, 0, 0, 1], vec![2, 2]).unwrap())

@@ -324,18 +324,16 @@ impl MexHostServices for RuntimeMexHostServices {
                 .assign_with_context(&self.runtime, name, value)
                 .map_err(runtime_diagnostic),
             MexWorkspace::Base => {
-                let owner = self
+                let base = self
                     .runtime
                     .service_ports()
                     .require_base_workspace("write the MEX base workspace")
-                    .map_err(capability_diagnostic)?
-                    .owner();
-                crate::workspace::assign_logical_base_value_with_context(
-                    &owner,
+                    .map_err(capability_diagnostic)?;
+                base.assign_logical_ref_with_context(
                     &self.runtime.session_variable_authority(),
                     &self.runtime,
                     name,
-                    value,
+                    &value,
                 )
                 .map_err(runtime_diagnostic)
             }

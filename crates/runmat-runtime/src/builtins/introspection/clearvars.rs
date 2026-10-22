@@ -134,7 +134,13 @@ fn collect_clearvars_words(arg: &Value, out: &mut Vec<String>) -> BuiltinResult<
                     "clearvars: character array inputs must be a row vector or scalar text value",
                 ));
             }
-            out.push(chars.data().iter().collect::<String>().trim().to_string());
+            out.push(
+                super::text::decode_utf16_with_error(chars.data(), || {
+                    clearvars_error("clearvars: character input is not valid UTF-16 text")
+                })?
+                .trim()
+                .to_string(),
+            );
             Ok(())
         }
         Value::StringArray(array) => {

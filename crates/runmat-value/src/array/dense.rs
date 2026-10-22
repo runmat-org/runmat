@@ -135,6 +135,11 @@ impl Tensor {
         self.storage.try_as_f64_slice_mut_unique()
     }
 
+    /// Borrow the existing native payload without allocation or implicit COW.
+    pub fn try_unique_numeric_mutation(&mut self) -> Option<super::UniqueHostNumericMutation<'_>> {
+        self.storage.try_unique_mutation()
+    }
+
     /// Borrow unique native storage without growing it or triggering a COW copy.
     pub fn try_as_f32_slice_mut_unique(&mut self) -> Option<&mut [f32]> {
         self.storage.try_as_f32_slice_mut_unique()

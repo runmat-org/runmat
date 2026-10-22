@@ -103,7 +103,7 @@ impl HostState {
     pub fn optimized_region(
         &self,
         request: runmat_runtime::native::NativeSiteRequest,
-    ) -> Option<crate::region::OptimizedRegionPlan> {
+    ) -> Option<crate::region::OptimizedRegionPlanLease> {
         self.optimized_regions
             .get(&optimized_site_identity(request))
             .cloned()
@@ -112,54 +112,118 @@ impl HostState {
     pub fn optimized_region_inputs(
         &mut self,
         plan: &crate::region::OptimizedRegionPlan,
-    ) -> NativeExecutorResult<Option<Vec<&runmat_value::Value>>> {
+    ) -> NativeExecutorResult<Option<crate::region::NumericRegionInputViews<'_>>> {
         // Session bindings may replace local references while refreshing. Finish
         // every mutable authority lookup before borrowing values from the arena.
-        let references = plan
-            .inputs
-            .iter()
-            .map(|value| self.local_reference(value.local as usize))
-            .collect::<NativeExecutorResult<Vec<_>>>()?;
+        let references = self.optimized_region_input_references(plan)?;
         let mut unavailable = false;
-        let mut inputs = Vec::with_capacity(references.len());
-        for reference in references {
+        for reference in references.iter() {
             if reference.is_null() {
                 unavailable = true;
-            } else {
-                // A stale non-NULL reference remains a real execution error,
-                // even when another required input is still unassigned.
-                inputs.push(self.arena.get(reference)?);
             }
         }
-        Ok((!unavailable).then_some(inputs))
+        if unavailable {
+            return Ok(None);
+        }
+        crate::region::NumericRegionInputViews::try_from_iter(
+            references
+                .iter()
+                .map(|reference| self.arena.get(*reference)),
+        )
+        .map(Some)
     }
 
-    pub fn publish_optimized_region(
+    pub fn optimized_region_input_references(
         &mut self,
         plan: &crate::region::OptimizedRegionPlan,
-        computed_outputs: Vec<runmat_value::Value>,
-    ) -> NativeExecutorResult<()> {
-        if computed_outputs.len() != plan.program.outputs.len() {
+    ) -> NativeExecutorResult<crate::region::NumericRegionReferences> {
+        if plan.inputs.len() > runmat_runtime::numeric_region::MAX_NODES {
             return Err(NativeExecutorError::Host(
-                "numeric region output count is inconsistent".into(),
+                "numeric region input count exceeds validated program limit".into(),
             ));
         }
-        let input_references = plan
-            .inputs
-            .iter()
-            .map(|input| {
+        let references = crate::region::NumericRegionReferences::try_from_iter(
+            plan.inputs
+                .iter()
+                .map(|value| self.local_reference(value.local as usize)),
+        )?;
+        for reference in references.iter() {
+            if !reference.is_null() {
+                // A stale non-NULL reference remains a real execution error,
+                // even when another required input is still unassigned.
+                self.arena.get(*reference)?;
+            }
+        }
+        Ok(references)
+    }
+
+    pub fn publish_optimized_region<I>(
+        &mut self,
+        plan: &crate::region::OptimizedRegionPlan,
+        computed_outputs: I,
+    ) -> NativeExecutorResult<()>
+    where
+        I: IntoIterator<Item = runmat_value::Value>,
+        I::IntoIter: ExactSizeIterator,
+    {
+        let input_references = crate::region::NumericRegionReferences::try_from_iter(
+            plan.inputs.iter().map(|input| {
                 self.locals
                     .get(input.local as usize)
                     .copied()
                     .ok_or_else(|| {
                         NativeExecutorError::Host("numeric region input local is invalid".into())
                     })
-            })
-            .collect::<NativeExecutorResult<Vec<_>>>()?;
-        let computed_references = computed_outputs
-            .into_iter()
-            .map(|value| self.arena.insert(value))
-            .collect::<Vec<_>>();
+            }),
+        )?;
+        self.publish_optimized_region_from_inputs(plan, &input_references, computed_outputs)
+    }
+
+    /// An asynchronous region publishes aliases from its original input
+    /// generations, never from locals refreshed by workspace reconciliation.
+    pub fn publish_optimized_region_from_inputs<I>(
+        &mut self,
+        plan: &crate::region::OptimizedRegionPlan,
+        input_references: &[NativeValueRef],
+        computed_outputs: I,
+    ) -> NativeExecutorResult<()>
+    where
+        I: IntoIterator<Item = runmat_value::Value>,
+        I::IntoIter: ExactSizeIterator,
+    {
+        let computed_outputs = computed_outputs.into_iter();
+        if computed_outputs.len() != plan.program.outputs.len()
+            || input_references.len() != plan.inputs.len()
+            || computed_outputs.len() > runmat_runtime::numeric_region::MAX_OUTPUTS
+        {
+            return Err(NativeExecutorError::Host(
+                "numeric region input/output count is inconsistent".into(),
+            ));
+        }
+        // Validate the complete alias vector before mutating any local/SSA
+        // output or marking any original instruction as skipped.
+        for reference in input_references {
+            self.arena.get(*reference)?;
+        }
+        // Validate every index before allocating/publishing any output slot.
+        for output in &plan.outputs {
+            let valid = match output.source {
+                crate::region::RegionOutputSource::Input(index) => index < input_references.len(),
+                crate::region::RegionOutputSource::Computed(index) => {
+                    index < computed_outputs.len()
+                }
+            };
+            if !valid {
+                return Err(NativeExecutorError::Host(
+                    "numeric region publication index is invalid".into(),
+                ));
+            }
+        }
+        let mut computed_references =
+            [NativeValueRef::NULL; runmat_runtime::numeric_region::MAX_OUTPUTS];
+        for (slot, value) in computed_references.iter_mut().zip(computed_outputs) {
+            *slot = self.arena.insert(value);
+        }
         for output in &plan.outputs {
             let reference = match output.source {
                 crate::region::RegionOutputSource::Input(index) => {

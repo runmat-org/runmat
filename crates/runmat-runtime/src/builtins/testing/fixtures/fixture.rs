@@ -300,7 +300,11 @@ fn set_handle_property(
 fn scalar_text(builtin: &'static str, value: Value) -> BuiltinResult<String> {
     match value {
         Value::String(value) => Ok(value.into_string_unbounded()),
-        Value::CharArray(chars) if chars.rows <= 1 => Ok(chars.data().iter().collect()),
+        Value::CharArray(chars) if chars.rows <= 1 => {
+            crate::builtins::common::text::decode_utf16_with_error(chars.data(), || {
+                testing_error(builtin, format!("{builtin}: text is not valid UTF-16"))
+            })
+        }
         _ => Err(testing_error(
             builtin,
             format!("{builtin}: expected scalar text"),

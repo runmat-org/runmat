@@ -415,7 +415,7 @@ impl RuntimeBuiltinService for Selected {
     }
 }
 fn replacement(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
-    Box::pin(async {
+    runmat_runtime::builtin::admitted_builtin_future(None, "fixture", async {
         let sequence = runmat_value::ValueSequence::single(Value::Num(99.0))
             .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?;
         runmat_runtime::execution::RootedValueSequence::new(sequence)

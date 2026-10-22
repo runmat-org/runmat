@@ -49,7 +49,7 @@ fn genuinely_pending_branch_completion_restores_origin_scope_and_resumes_once() 
             request,
             embedded: None,
             retained_roots: Vec::new(),
-            future,
+            future: crate::execute::call_suspension::PendingCompletionFuture::Ordinary(future),
         });
         assert_eq!(polls.get(), 0);
         let waker = futures::task::noop_waker();

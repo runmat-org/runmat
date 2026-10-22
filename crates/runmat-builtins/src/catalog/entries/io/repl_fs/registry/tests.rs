@@ -33,6 +33,7 @@ fn registry_preserves_reviewed_family_order_and_entry_identity() {
         super::super::uiputfile::ENTRIES,
         super::super::userpath::ENTRIES,
         super::super::filesystem::ENTRIES,
+        super::super::winqueryreg::ENTRIES,
     ];
     let expected: Vec<_> = reviewed_groups.into_iter().flatten().copied().collect();
     let mut actual = Vec::new();

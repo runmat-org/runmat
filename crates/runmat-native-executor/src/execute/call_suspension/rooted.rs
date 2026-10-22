@@ -36,7 +36,7 @@ pub(in crate::execute) fn begin_lexical_call(
         request,
         embedded,
         retained_roots: Vec::new(),
-        future,
+        future: crate::execute::call_suspension::PendingCompletionFuture::Ordinary(future),
     });
     Err(NativeExecutorError::CallSuspended)
 }
@@ -92,7 +92,7 @@ pub(super) fn begin_arguments(
         request,
         embedded,
         retained_roots: Vec::new(),
-        future,
+        future: crate::execute::call_suspension::PendingCompletionFuture::Ordinary(future),
     });
     Err(NativeExecutorError::CallSuspended)
 }
@@ -142,7 +142,7 @@ pub(in crate::execute) fn begin_rooted_sequence_with_roots(
         request,
         embedded,
         retained_roots,
-        future,
+        future: crate::execute::call_suspension::PendingCompletionFuture::Ordinary(future),
     });
     Err(NativeExecutorError::CallSuspended)
 }

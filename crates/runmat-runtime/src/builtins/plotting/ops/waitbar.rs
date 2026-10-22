@@ -98,7 +98,7 @@ pub fn waitbar_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult<f64
 
     if request.has_figure_properties {
         for pair in request.figure_properties.chunks_exact(2) {
-            let name = text_value(&pair[0]).expect("validated waitbar property name");
+            let name = text_value(&pair[0])?.expect("validated waitbar property name");
             if is_waitbar_or_figure_property(&name) {
                 set_properties_with_runtime(None, PlotHandle::Figure(handle), pair, BUILTIN_NAME)?;
             }
@@ -118,19 +118,19 @@ fn parse_request(args: crate::call::BuiltinArguments) -> BuiltinResult<WaitbarRe
     let mut message = None;
 
     if let Some(value) = args.get(idx) {
-        if let Some(text) = message_text(value) {
+        if let Some(text) = message_text(value)? {
             message = Some(text);
             idx += 1;
         } else if let Some(handle) = figure_handle(value) {
             target = Some(handle);
             idx += 1;
             if let Some(value) = args.get(idx) {
-                if let Some(text) = message_text(value) {
+                if let Some(text) = message_text(value)? {
                     if !looks_like_property_pair(
                         args.view()
                             .range(idx..)
                             .expect("bounded waitbar option tail"),
-                    ) {
+                    )? {
                         message = Some(text);
                         idx += 1;
                     }
@@ -210,33 +210,44 @@ fn figure_handle(value: &Value) -> Option<FigureHandle> {
     }
 }
 
-fn message_text(value: &Value) -> Option<String> {
-    match value {
-        Value::String(_) | Value::CharArray(_) => text_value(value),
-        Value::StringArray(array) => Some(array.data().join("\n")),
-        Value::Cell(cell) => {
-            let mut parts = Vec::with_capacity(cell.data().len());
-            for item in cell.data() {
-                parts.push(message_text(item)?);
+fn message_text(value: &Value) -> crate::BuiltinResult<Option<String>> {
+    Ok({
+        match value {
+            Value::String(_) | Value::CharArray(_) => text_value(value)?,
+            Value::StringArray(array) => Some(array.data().join("\n")),
+            Value::Cell(cell) => {
+                let mut parts = Vec::with_capacity(cell.data().len());
+                for item in cell.data() {
+                    let Some(part) = message_text(item)? else {
+                        return Ok(None);
+                    };
+                    parts.push(part);
+                }
+                Some(parts.join("\n"))
             }
-            Some(parts.join("\n"))
+            _ => None,
         }
-        _ => None,
+    })
+}
+
+fn text_value(value: &Value) -> crate::BuiltinResult<Option<String>> {
+    Ok({
+        super::style::value_as_string(value).map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                "waitbar",
+                source.to_string(),
+                source,
+            )
+        })?
+    })
+}
+
+fn looks_like_property_pair(tail: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<bool> {
+    if tail.len() < 2 || !tail.len().is_multiple_of(2) {
+        return Ok(false);
     }
-}
-
-fn text_value(value: &Value) -> Option<String> {
-    super::style::value_as_string(value)
-}
-
-fn looks_like_property_pair(tail: crate::call::FunctionArgumentView<'_>) -> bool {
-    tail.len() >= 2
-        && tail.len().is_multiple_of(2)
-        && tail
-            .first()
-            .and_then(text_value)
-            .map(|name| is_waitbar_or_figure_property(&name))
-            .unwrap_or(false)
+    Ok(text_value(tail.first().expect("nonempty pair tail"))?
+        .is_some_and(|name| is_waitbar_or_figure_property(&name)))
 }
 
 fn parse_property_tail(tail: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<bool> {
@@ -248,7 +259,7 @@ fn parse_property_tail(tail: crate::call::FunctionArgumentView<'_>) -> BuiltinRe
     }
     let mut has_figure_properties = false;
     for pair in tail.chunks_exact(2) {
-        let name = text_value(&pair[0]).ok_or_else(|| invalid("property names must be text"))?;
+        let name = text_value(&pair[0])?.ok_or_else(|| invalid("property names must be text"))?;
         match name.trim().to_ascii_lowercase().as_str() {
             "createcancelbtn" | "cancelbutton" | "units" | "windowstyle" => {}
             _ if is_waitbar_or_figure_property(&name) => has_figure_properties = true,

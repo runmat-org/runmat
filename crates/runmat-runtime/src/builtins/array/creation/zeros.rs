@@ -170,7 +170,9 @@ impl ParsedZeros {
         let mut idx = 0;
         while idx < args.len() {
             let arg = args[idx].clone();
-            if let Some(keyword) = keyword_of(&arg) {
+            if let Some(keyword) =
+                crate::builtins::common::arg_tokens::scalar_keyword_of(&arg, "zeros")?
+            {
                 if keyword == "like" {
                     if like_proto.is_some() {
                         return Err(zeros_error(&ZEROS_ERROR_LIKE_DUPLICATE));
@@ -580,18 +582,6 @@ fn log_zeros_fallback(shape: &[usize], dtype: NumericDType, reason: &str) {
         reason,
         "[zeros_debug] fallback"
     );
-}
-
-fn keyword_of(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => Some(s.to_ascii_lowercase()),
-        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].to_ascii_lowercase()),
-        Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data().iter().collect();
-            Some(text.to_ascii_lowercase())
-        }
-        _ => None,
-    }
 }
 
 fn shape_from_value(value: &Value) -> Result<Vec<usize>, String> {
@@ -1292,6 +1282,14 @@ pub(crate) mod tests {
             assert!(
                 matches!(primitive.value(), Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::U8)
             );
+            let primitive_feval = block_on(crate::call_feval_async_with_outputs(
+                Value::from("uint8.zeros"),
+                &[Value::Num(2.0)],
+                1,
+            ))
+            .expect("feval primitive static zeros");
+            assert!(matches!(primitive_feval.value(), Value::Tensor(tensor)
+                if tensor.numeric_dtype() == NumericDType::U8 && tensor.shape() == [2, 2]));
         });
     }
 

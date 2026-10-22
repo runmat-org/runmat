@@ -75,7 +75,7 @@ pub const EIGS_INTEGER_START_INPUT: [BuiltinIntegerInputCapability; 1] =
         classes: &ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "RunMat-only initial-vector class; current dense fallback validates shape but does not consume iterative values.",
+        notes: "RunMat-only initial-vector class. Sparse/callable iteration consumes exactly representable values; the separate dense route only validates this control.",
     }];
 
 pub const EIGS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
@@ -166,7 +166,7 @@ const OUTPUT_VDFLAG: [BuiltinParamDescriptor; 3] = [
         ty: BuiltinParamType::NumericScalar,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Convergence flag; exact host fallback returns 0.",
+        description: "Convergence flag: 0 when all selected eigenpairs converged, 1 otherwise. Successful exact dense fallback returns 0.",
     },
 ];
 
@@ -181,10 +181,10 @@ const INPUT_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
 const INPUT_A_REST: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "A",
-        ty: BuiltinParamType::NumericArray,
+        ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Square numeric, sparse, logical, complex, or gpuArray matrix.",
+        description: "Square matrix or selected callable operator Afun; callable form requires order n before other arguments.",
     },
     BuiltinParamDescriptor {
         name: "args",
@@ -195,7 +195,12 @@ const INPUT_A_REST: [BuiltinParamDescriptor; 2] = [
     },
 ];
 
-const SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
+const SIGNATURES: [BuiltinSignatureDescriptor; 9] = [
+    BuiltinSignatureDescriptor {
+        label: "d = eigs(Afun, n, ...)",
+        inputs: &INPUT_A_REST,
+        outputs: &OUTPUT_D,
+    },
     BuiltinSignatureDescriptor {
         label: "d = eigs(A)",
         inputs: &INPUT_A,
@@ -255,7 +260,7 @@ pub const EIGS_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescrip
 pub const EIGS_ERROR_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.EIGS.UNSUPPORTED",
     identifier: Some("RunMat:eigs:UnsupportedInput"),
-    when: "Function-handle or provider-only eigs behavior is requested.",
+    when: "An unsupported operator storage or provider-only eigs form is requested.",
     message: "eigs: unsupported input form",
 };
 
@@ -266,11 +271,47 @@ pub const EIGS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "eigs: internal runtime failure",
 };
 
-const ERRORS: [BuiltinErrorDescriptor; 4] = [
+pub const EIGS_ERROR_OPERATOR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.EIGS.OPERATOR",
+    identifier: Some("RunMat:eigs:Operator"),
+    when: "A native coefficient application fails numerically or structurally.",
+    message: "eigs: coefficient application failed",
+};
+pub const EIGS_ERROR_FACTORIZATION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.EIGS.FACTORIZATION",
+    identifier: Some("RunMat:eigs:Factorization"),
+    when: "A reusable inverse factor is singular, unusable, or has invalid geometry.",
+    message: "eigs: reusable inverse action failed",
+};
+pub const EIGS_ERROR_PROJECTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.EIGS.PROJECTED",
+    identifier: Some("RunMat:eigs:ProjectedNoConvergence"),
+    when: "The bounded projected eigendecomposition does not converge.",
+    message: "eigs: projected eigendecomposition did not converge",
+};
+pub const EIGS_ERROR_BREAKDOWN: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.EIGS.BREAKDOWN",
+    identifier: Some("RunMat:eigs:NumericalBreakdown"),
+    when: "The positive B-metric invariant subspace has fewer finite eigenpairs than requested.",
+    message: "eigs: insufficient finite invariant subspace",
+};
+pub const EIGS_ERROR_DENSE_WORKSPACE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.EIGS.DENSE_WORKSPACE",
+    identifier: Some("RunMat:eigs:DenseWorkspace"),
+    when:
+        "The separate exact dense compatibility EVD is requested under finite Managed allocation.",
+    message: "eigs: exact dense compatibility EVD requires unrestricted allocation",
+};
+const ERRORS: [BuiltinErrorDescriptor; 9] = [
     EIGS_ERROR_INVALID_ARGUMENT,
     EIGS_ERROR_INVALID_INPUT,
     EIGS_ERROR_UNSUPPORTED,
     EIGS_ERROR_INTERNAL,
+    EIGS_ERROR_OPERATOR,
+    EIGS_ERROR_FACTORIZATION,
+    EIGS_ERROR_PROJECTED,
+    EIGS_ERROR_BREAKDOWN,
+    EIGS_ERROR_DENSE_WORKSPACE,
 ];
 
 pub const EIGS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {

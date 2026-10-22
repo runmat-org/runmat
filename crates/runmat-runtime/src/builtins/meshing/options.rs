@@ -152,7 +152,14 @@ pub(super) fn parse_force_option(args: &[Value]) -> BuiltinResult<bool> {
 pub(super) fn text(builtin: &'static str, value: &Value) -> BuiltinResult<String> {
     match value {
         Value::String(value) => Ok(value.to_string()),
-        Value::CharArray(value) if value.rows == 1 => Ok(value.data().iter().collect()),
+        Value::CharArray(value) if value.rows == 1 => Ok(runmat_value::decode_utf16_code_units(
+            value.data(),
+        )
+        .map_err(|source| {
+            let mut error = error(builtin, source.to_string());
+            error.source = Some(Box::new(source));
+            error
+        })?),
         _ => Err(error(builtin, "expected a text scalar")),
     }
 }

@@ -18,16 +18,23 @@ use std::pin::Pin;
 use std::rc::Rc;
 use std::task::{Context, Poll};
 
-struct PendingTurn(Rc<Cell<bool>>);
+struct PendingTurn {
+    dropped: Rc<Cell<bool>>,
+    ready: Option<Rc<Cell<bool>>>,
+}
 impl Future for PendingTurn {
     type Output = Result<(), ExecutionServiceError>;
     fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
-        Poll::Pending
+        if self.ready.as_ref().is_some_and(|ready| ready.get()) {
+            Poll::Ready(Ok(()))
+        } else {
+            Poll::Pending
+        }
     }
 }
 impl Drop for PendingTurn {
     fn drop(&mut self) {
-        self.0.set(true);
+        self.dropped.set(true);
     }
 }
 
@@ -35,6 +42,7 @@ struct PendingDateService {
     turns: Rc<Cell<usize>>,
     dropped: Rc<Cell<bool>>,
     quantum: u64,
+    ready: Option<Rc<Cell<bool>>>,
 }
 impl RuntimeExecutionServices for PendingDateService {
     fn cpu_cooperation_policy(&self) -> CpuCooperationPolicy {
@@ -42,7 +50,10 @@ impl RuntimeExecutionServices for PendingDateService {
     }
     fn cooperate_cpu(&self) -> RuntimeServiceFuture<Result<(), ExecutionServiceError>> {
         self.turns.set(self.turns.get() + 1);
-        Box::pin(PendingTurn(self.dropped.clone()))
+        Box::pin(PendingTurn {
+            dropped: self.dropped.clone(),
+            ready: self.ready.clone(),
+        })
     }
     fn scope_id(&self) -> ExecutionScopeId {
         ExecutionScopeId::derive(&[b"datetime-cellstr-test"])
@@ -114,6 +125,7 @@ fn public_datetime_cellstr_parse_turn_cancels_or_drops_without_publication() {
             Rc::new(PendingDateService {
                 turns: turns.clone(),
                 dropped: dropped.clone(),
+                ready: None,
                 // Preflight and owned gather each charge 256 cells; the first
                 // decoded character reaches the parse-phase service turn.
                 quantum: 513,
@@ -175,6 +187,7 @@ fn canonical_dispatcher_passes_invocation_cooperation_to_datetime() {
         Rc::new(PendingDateService {
             turns: turns.clone(),
             dropped: dropped.clone(),
+            ready: None,
             quantum: 1,
         }),
         source.token(),
@@ -221,6 +234,7 @@ fn one_large_cellstr_character_vector_suspends_during_bounded_decode() {
         Rc::new(PendingDateService {
             turns: turns.clone(),
             dropped: dropped.clone(),
+            ready: None,
             quantum: 2048,
         }),
         source.token(),
@@ -263,4 +277,110 @@ fn one_large_cellstr_character_vector_suspends_during_bounded_decode() {
         serial_tensor_for_object(&object).unwrap().materialize_f64(),
         vec![serial_for_date(2024, 4, 9)]
     );
+}
+
+struct ComponentParallel {
+    finite: Cell<bool>,
+    ledger: crate::context::host_effect::ManagedHostEffectLedger,
+}
+impl crate::context::RuntimeParallelService for ComponentParallel {
+    fn supports(&self, _: crate::context::ParallelCapability) -> bool {
+        false
+    }
+    fn placement_resources(&self) -> crate::context::RuntimeParallelResources {
+        let snapshot = self.ledger.snapshot();
+        crate::context::RuntimeParallelResources {
+            memory_available_bytes: self.finite.get().then_some(snapshot.free_bytes()),
+            epoch: snapshot.epoch,
+            ..Default::default()
+        }
+    }
+    fn managed_host_effect_ledger(
+        &self,
+    ) -> Option<crate::context::host_effect::ManagedHostEffectLedger> {
+        Some(self.ledger.clone())
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn stored_second_pending_work_releases_exact_output_on_cancel_rotation_or_upgrade() {
+    #[derive(Clone, Copy)]
+    enum Stop {
+        Cancel,
+        Rotate,
+        Upgrade,
+    }
+    for stop in [Stop::Cancel, Stop::Rotate, Stop::Upgrade] {
+        let ledger = crate::context::host_effect::ManagedHostEffectLedger::new(1_048_576);
+        let parallel = Rc::new(ComponentParallel {
+            finite: Cell::new(!matches!(stop, Stop::Upgrade)),
+            ledger: ledger.clone(),
+        });
+        let source = CancellationSource::new();
+        let ready = Rc::new(Cell::new(false));
+        let turns = Rc::new(Cell::new(0));
+        let dropped = Rc::new(Cell::new(false));
+        let runtime = RuntimeContext::with_cancellation(
+            Rc::new(PendingDateService {
+                turns: turns.clone(),
+                dropped: dropped.clone(),
+                quantum: 1,
+                ready: Some(ready.clone()),
+            }),
+            source.token(),
+        )
+        .with_service_ports(
+            crate::context::RuntimeServicePorts::default().with_parallel(parallel.clone()),
+        );
+        let input = super::super::datetime_object_from_serials(
+            None,
+            vec![719_529.0; 2],
+            vec![1, 2],
+            "yyyy-MM-dd",
+        )
+        .unwrap();
+        let mut call = Box::pin(super::super::second_builtin::second_builtin(
+            Some(runtime),
+            input,
+        ));
+        let waker = futures::task::noop_waker();
+        assert!(matches!(
+            call.as_mut().poll(&mut Context::from_waker(&waker)),
+            Poll::Pending
+        ));
+        assert_eq!(turns.get(), 1);
+        if !matches!(stop, Stop::Upgrade) {
+            assert!(ledger.snapshot().live_claimed_bytes > 0);
+        }
+        match stop {
+            Stop::Cancel => {
+                source.cancel(CancellationReason::User);
+            }
+            Stop::Rotate => ledger.revoke(),
+            Stop::Upgrade => parallel.finite.set(true),
+        }
+        ready.set(true);
+        let Poll::Ready(Err(error)) = call.as_mut().poll(&mut Context::from_waker(&waker)) else {
+            panic!("authority loss cannot publish a component")
+        };
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        match stop {
+            Stop::Cancel => assert!(matches!(
+                error
+                    .source()
+                    .and_then(|e| e.downcast_ref::<ExecutionServiceError>()),
+                Some(ExecutionServiceError::Cancelled)
+            )),
+            Stop::Rotate | Stop::Upgrade => assert!(matches!(
+                error
+                    .source()
+                    .and_then(|e| e.downcast_ref::<ExecutionServiceError>()),
+                Some(ExecutionServiceError::Infrastructure(_))
+            )),
+        }
+        drop(call);
+        assert!(dropped.get());
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    }
 }

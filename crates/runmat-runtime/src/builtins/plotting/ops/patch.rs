@@ -175,7 +175,10 @@ fn parse_patch_plot_view(args: crate::call::FunctionArgumentView<'_>) -> Builtin
         args
     };
 
-    if remaining.first().and_then(value_as_string).is_some() {
+    if remaining
+        .first()
+        .is_some_and(|value| matches!(value, Value::String(_) | Value::CharArray(_)))
+    {
         apply_property_pairs(&mut opts, remaining)?;
     } else {
         apply_positional_data(&mut opts, &mut remaining)?;
@@ -251,15 +254,28 @@ fn apply_positional_data(
     Ok(())
 }
 
-pub(super) fn is_color_literal(value: &Value) -> bool {
-    if value_as_string(value).is_some() {
-        return parse_color_value(&LineStyleParseOptions::generic(BUILTIN_NAME), value).is_ok();
-    }
-    let Ok(tensor) = Tensor::try_from(value) else {
-        return false;
-    };
-    patch_tensor_dimensions(tensor.shape()) == (1, 3)
-        && parse_color_value(&LineStyleParseOptions::generic(BUILTIN_NAME), value).is_ok()
+pub(super) fn is_color_literal(value: &Value) -> crate::BuiltinResult<bool> {
+    Ok({
+        if value_as_string(value)
+            .map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    "patch",
+                    source.to_string(),
+                    source,
+                )
+            })?
+            .is_some()
+        {
+            return Ok(
+                parse_color_value(&LineStyleParseOptions::generic(BUILTIN_NAME), value).is_ok(),
+            );
+        }
+        let Ok(tensor) = Tensor::try_from(value) else {
+            return Ok(false);
+        };
+        patch_tensor_dimensions(tensor.shape()) == (1, 3)
+            && parse_color_value(&LineStyleParseOptions::generic(BUILTIN_NAME), value).is_ok()
+    })
 }
 
 fn apply_struct_options(opts: &mut PatchOptions, st: &StructValue) -> BuiltinResult<()> {
@@ -283,6 +299,13 @@ fn apply_property_pairs(
     }
     for pair in args.chunks_exact(2) {
         let key = value_as_string(&pair[0])
+            .map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    BUILTIN_NAME,
+                    source.to_string(),
+                    source,
+                )
+            })?
             .ok_or_else(|| patch_invalid("patch: property names must be strings"))?;
         apply_property(opts, &key, &pair[1])?;
     }
@@ -341,7 +364,15 @@ fn apply_property(opts: &mut PatchOptions, key: &str, value: &Value) -> BuiltinR
             }
             opts.line_width = width as f32;
         }
-        "displayname" => opts.label = value_as_string(value),
+        "displayname" => {
+            opts.label = value_as_string(value).map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    BUILTIN_NAME,
+                    source.to_string(),
+                    source,
+                )
+            })?
+        }
         "visible" => {
             opts.visible = visible_value(value)?;
         }
@@ -362,7 +393,9 @@ fn property_scalar_f64(value: &Value) -> Option<f64> {
 }
 
 fn visible_value(value: &Value) -> BuiltinResult<bool> {
-    if let Some(text) = value_as_string(value) {
+    if let Some(text) = value_as_string(value).map_err(|source| {
+        crate::builtins::plotting::plotting_error_with_source("patch", source.to_string(), source)
+    })? {
         return match text.trim().to_ascii_lowercase().as_str() {
             "on" => Ok(true),
             "off" => Ok(false),
@@ -597,7 +630,7 @@ fn tensor_from_value(value: Value) -> BuiltinResult<Tensor> {
 }
 
 fn apply_color_argument(opts: &mut PatchOptions, value: &Value) -> BuiltinResult<()> {
-    if is_color_literal(value) {
+    if is_color_literal(value)? {
         let color = parse_color_value(&LineStyleParseOptions::generic(BUILTIN_NAME), value)?;
         opts.face_color = color;
         opts.face_color_mode = PatchFaceColorMode::Color;
@@ -611,7 +644,13 @@ fn apply_color_argument(opts: &mut PatchOptions, value: &Value) -> BuiltinResult
 }
 
 fn apply_face_color(opts: &mut PatchOptions, value: &Value) -> BuiltinResult<()> {
-    if let Some(text) = value_as_string(value) {
+    if let Some(text) = value_as_string(value).map_err(|source| {
+        crate::builtins::plotting::plotting_error_with_source(
+            BUILTIN_NAME,
+            source.to_string(),
+            source,
+        )
+    })? {
         match text.trim().to_ascii_lowercase().as_str() {
             "none" => {
                 opts.face_color_mode = PatchFaceColorMode::None;
@@ -638,7 +677,13 @@ fn apply_face_color(opts: &mut PatchOptions, value: &Value) -> BuiltinResult<()>
 }
 
 fn apply_edge_color(opts: &mut PatchOptions, value: &Value) -> BuiltinResult<()> {
-    if let Some(text) = value_as_string(value) {
+    if let Some(text) = value_as_string(value).map_err(|source| {
+        crate::builtins::plotting::plotting_error_with_source(
+            BUILTIN_NAME,
+            source.to_string(),
+            source,
+        )
+    })? {
         if text.trim().eq_ignore_ascii_case("none") {
             opts.edge_color_mode = PatchEdgeColorMode::None;
             return Ok(());
@@ -796,29 +841,26 @@ fn patch_tensor_dimensions(shape: &[usize]) -> (usize, usize) {
 }
 
 pub(super) fn is_property_name(value: &Value) -> bool {
-    value_as_string(value)
-        .map(|name| {
-            matches!(
-                name.trim().to_ascii_lowercase().as_str(),
-                "xdata"
-                    | "ydata"
-                    | "zdata"
-                    | "faces"
-                    | "vertices"
-                    | "cdata"
-                    | "facevertexcdata"
-                    | "cdatamapping"
-                    | "facecolor"
-                    | "edgecolor"
-                    | "facealpha"
-                    | "edgealpha"
-                    | "linewidth"
-                    | "displayname"
-                    | "visible"
-                    | "color"
-            )
-        })
-        .unwrap_or(false)
+    [
+        "xdata",
+        "ydata",
+        "zdata",
+        "faces",
+        "vertices",
+        "cdata",
+        "facevertexcdata",
+        "cdatamapping",
+        "facecolor",
+        "edgecolor",
+        "facealpha",
+        "edgealpha",
+        "linewidth",
+        "displayname",
+        "visible",
+        "color",
+    ]
+    .into_iter()
+    .any(|key| crate::builtins::plotting::style::value_text_equals_ascii(value, key, true))
 }
 
 #[cfg(test)]

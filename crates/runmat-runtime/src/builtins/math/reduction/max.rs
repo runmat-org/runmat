@@ -12,9 +12,6 @@ use super::extrema_provider;
 use crate::BuiltinResult;
 pub(super) use runmat_builtins::MAX_ERROR_INTERNAL;
 
-mod nanmax_contract;
-pub use nanmax_contract::{NANMAX_DESCRIPTOR, NANMAX_EXTENSIONS, NANMAX_INTEGER_CAPABILITIES};
-
 mod diagnostics;
 use diagnostics::{max_internal_error, max_invalid_argument, max_invalid_input, max_size_mismatch};
 
@@ -80,12 +77,27 @@ pub(super) async fn evaluate_for_demand(
     rest: crate::call::FunctionArgumentView<'_>,
     demand: super::extrema_provider::ExtremaDemand,
 ) -> BuiltinResult<super::extrema_provider::ExtremaResult> {
+    evaluate_for_missing(runtime, value, rest, demand, None).await
+}
+async fn evaluate_for_missing(
+    runtime: Option<&crate::context::RuntimeContext>,
+    value: Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+    demand: super::extrema_provider::ExtremaDemand,
+    missing: Option<ReductionNaN>,
+) -> BuiltinResult<super::extrema_provider::ExtremaResult> {
     if crate::builtins::common::validation::is_typed_complex_integer(&value) {
         return Err(max_invalid_input(
             "operations involving complex numbers with integer types are not supported",
         ));
     }
-    let parsed = parse_call(rest).await?;
+    let mut parsed = parse_call(rest).await?;
+    if let Some(missing) = missing {
+        match &mut parsed {
+            ParsedCall::Reduction(args) => args.nan_mode = missing,
+            ParsedCall::Elementwise(args) => args.nan_mode = missing,
+        }
+    }
     if std::env::var("RUNMAT_DEBUG_MAX").is_ok() {
         let call_label = match &parsed {
             ParsedCall::Reduction(_) => "reduction",

@@ -88,7 +88,7 @@ pub(super) async fn prepare_timer_setter_value(
             value: gather_timer_value(runtime, &value).await?,
         })
     } else {
-        normalize_property_value(property, value.clone())?;
+        let value = normalize_property_value(property, value)?;
         checkpoint_timer(runtime).await?;
         Ok(PreparedTimerPair { property, value })
     }

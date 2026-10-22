@@ -356,7 +356,7 @@ impl HostCallbackRouter {
                 "isolated Python host cannot invoke a local bound callable by driver callback ID",
             ));
         };
-        let callback_id = callback_id(identity).ok_or_else(|| {
+        let callback_id = callback_id(identity.as_identity()).ok_or_else(|| {
             wire_error(
                 "RunMat:Python:CallbackProtocol",
                 "isolated Python host received a non-driver callback identity",

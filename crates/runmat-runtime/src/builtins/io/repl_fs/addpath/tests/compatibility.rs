@@ -37,7 +37,7 @@ fn all_integer_classes_are_exact_and_mode_gated() {
 
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     for storage in storages {
-        crate::builtins::common::path_state::set_path_string("");
+        crate::builtins::common::path_state::set_path_string("").expect("test search path update");
         let value =
             Value::Tensor(Tensor::new_integer(storage, vec![1, codes.len()]).expect("codes"));
         super::run(vec![value]).expect("RunMat extension");

@@ -31,7 +31,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn character_matrix_reports_true() {
-        let chars = CharArray::new(vec!['a', 'b', 'c', 'd', 'e', 'f'], 2, 3).expect("char array");
+        let chars = CharArray::from_unicode_scalars(vec!['a', 'b', 'c', 'd', 'e', 'f'], 2, 3)
+            .expect("char array");
         let result = ischar_builtin(Value::CharArray(chars)).expect("ischar");
         assert_eq!(result, Value::Bool(true));
     }
@@ -123,7 +124,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn empty_character_array_reports_true() {
-        let chars = CharArray::new(Vec::new(), 0, 0).expect("empty char array");
+        let chars = CharArray::from_code_units(Vec::new(), 0, 0).expect("empty char array");
         let result = ischar_builtin(Value::CharArray(chars)).expect("ischar");
         assert_eq!(result, Value::Bool(true));
     }

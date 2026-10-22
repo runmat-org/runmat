@@ -72,13 +72,17 @@ pub(super) fn group_labels(
             .iter()
             .map(|value| Some(KeyAtom::Text(value.as_str().to_owned())))
             .collect()),
-        Value::CharArray(chars) if chars.rows == expected_len => Ok((0..chars.rows)
-            .map(|row| {
+        Value::CharArray(chars) if chars.rows == expected_len => (0..chars.rows)
+            .map(|row| -> BuiltinResult<Option<KeyAtom>> {
                 let start = row * chars.cols;
                 let end = start + chars.cols;
-                Some(KeyAtom::Text(chars.data()[start..end].iter().collect::<String>().trim().to_string()))
+                let text = crate::builtins::stats::decode_utf16_with_error(
+                    &chars.data()[start..end],
+                    || invalid("scatterhist: Group label is not valid UTF-16 text"),
+                )?;
+                Ok(Some(KeyAtom::Text(text.trim().to_string())))
             })
-            .collect()),
+            .collect(),
         Value::Cell(cell) => group_labels_from_cell(cell, expected_len),
         Value::Object(object) if object.is_class(runmat_types::standard::CATEGORICAL) => {
             let labels = crate::builtins::table::categorical_observation_labels(object)
@@ -108,7 +112,11 @@ fn scalar_group_label(value: &Value) -> BuiltinResult<Option<KeyAtom>> {
         Value::Int(value) => Ok(Some(KeyAtom::Integer(value.clone()))),
         Value::Bool(value) => Ok(Some(KeyAtom::Logical(*value))),
         Value::String(value) => Ok(Some(KeyAtom::Text(value.as_str().to_owned()))),
-        Value::CharArray(chars) => Ok(Some(KeyAtom::Text(chars.data().iter().collect()))),
+        Value::CharArray(chars) => Ok(Some(KeyAtom::Text(
+            crate::builtins::stats::decode_utf16_with_error(chars.data(), || {
+                invalid("scatterhist: Group label is not valid UTF-16 text")
+            })?,
+        ))),
         Value::StringArray(array) => Ok(Some(KeyAtom::Text(array.data()[0].as_str().to_owned()))),
         Value::Tensor(tensor) => Ok(tensor.numeric_value_at(0).and_then(scatterhist_numeric_key)),
         Value::LogicalArray(array) => Ok(Some(KeyAtom::Logical(array.data[0] != 0))),

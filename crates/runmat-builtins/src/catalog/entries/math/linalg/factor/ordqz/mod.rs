@@ -253,3 +253,5 @@ pub const ORDQZ_CATALOG_ENTRY: BuiltinCatalogEntry =
         residency: BuiltinResidencyPolicy::Host,
         maturity: BuiltinContractMaturity::Incomplete,
     });
+
+pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[&ORDQZ_CATALOG_ENTRY];

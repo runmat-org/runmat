@@ -12,10 +12,17 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 mod cancellation;
-mod platform;
 mod numeric_download_stage;
+mod platform;
 pub use numeric_download_stage::{NumericDownloadStageLease, PreparedNumericDownloadStage};
+mod device_control;
 mod provider_registry;
+pub use device_control::{
+    current_device_allocation_scope, device_control_provider_is_authorized,
+    register_device_allocation_scope_resolver, validate_device_allocation_scope,
+    DeviceAllocationAdmission, DeviceAllocationScope, ProviderDeviceControl,
+    ProviderGpuDeviceFacts, StaleDeviceAllocationScope,
+};
 pub mod random;
 pub mod stochastic_evolution;
 #[cfg(any(test, feature = "test-support"))]
@@ -147,6 +154,9 @@ pub enum ExecutionProviderAuthorization {
 /// grants provider authorization.
 pub enum ExecutionProviderAdmission<'a> {
     Provider(&'a dyn AccelProvider),
+    DeviceControl(&'a dyn AccelProvider),
+    #[cfg(feature = "wgpu")]
+    DeviceAccess(&'a WgpuDeviceAccess),
     DeviceEffect(ExecutionDeviceEffect),
     #[cfg(feature = "wgpu")]
     CanonicalWgpuSubmit(&'a WgpuDeviceAccess),
@@ -167,7 +177,7 @@ pub enum ExecutionDeviceEffect {
 /// the same runtime callback as provider authorization, not a second registry.
 pub fn observe_execution_device_effect(effect: ExecutionDeviceEffect) {
     #[cfg(feature = "wgpu")]
-    observation::record_vm_region_unattributed_device_effect();
+    observation::record_source_region_unattributed_device_effect();
     if let Some(authorizer) = EXECUTION_PROVIDER_AUTHORIZER.get() {
         let _ = authorizer(ExecutionProviderAdmission::DeviceEffect(effect));
     }
@@ -175,7 +185,7 @@ pub fn observe_execution_device_effect(effect: ExecutionDeviceEffect) {
 
 #[cfg(feature = "wgpu")]
 fn observe_canonical_wgpu_submit(access: &WgpuDeviceAccess) {
-    observation::record_vm_region_wgpu_submission(access);
+    observation::record_source_region_wgpu_submission(access);
     if let Some(authorizer) = EXECUTION_PROVIDER_AUTHORIZER.get() {
         let _ = authorizer(ExecutionProviderAdmission::CanonicalWgpuSubmit(access));
     }
@@ -1670,9 +1680,11 @@ pub type AccelNumericDownloadFuture<'a> = AccelProviderFuture<'a, crate::HostNum
 /// Provider-owned physical demand for one post-region queue-tail completion.
 /// Child operations retain their own receipts; this grants no execution right.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct ProviderVmRegionTailResources {
+pub struct ProviderRegionTailResources {
     pub queue_slots: u32,
     pub provider_scratch_bytes: u64,
+    /// Actual request-owned host completion backing. None is unknown, not0.
+    pub completion_control_host_bytes: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -1715,13 +1727,16 @@ pub trait AccelProvider: AcceleratorThreadBound {
         None
     }
 
-    fn vm_region_queue_tail_resources(&self) -> Option<ProviderVmRegionTailResources> {
+    fn region_queue_tail_resources(&self) -> Option<ProviderRegionTailResources> {
         None
     }
 
-    fn observe_vm_region_queue_tail<'a>(
+    fn observe_region_queue_tail<'a>(
         &'a self,
         _device_id: u32,
+        _completion_claim: Option<
+            std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>,
+        >,
     ) -> ProviderExecutionFuture<'a, ()> {
         unsupported_execution_future("VM region queue-tail observation is unsupported")
     }
@@ -2793,6 +2808,11 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _values: &'a GpuTensorHandle,
     ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
         unsupported_execution_future("functional scatter_linear not supported by provider")
+    }
+
+    /// Optional genuine GPU object/control authority, never inferred from metadata.
+    fn gpu_device_control(&self) -> Option<&dyn ProviderDeviceControl> {
+        None
     }
 
     /// Structured device information (optional to override). Default adapts from `device_info()`.
@@ -4063,22 +4083,26 @@ pub trait AccelProvider: AcceleratorThreadBound {
     fn scalar_div(&self, _a: &GpuTensorHandle, _scalar: f64) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("scalar_div not supported by provider"))
     }
+    /// None certifies no staging, allocation, submission, or execution attempt.
+    /// A failure is terminal and never authorizes host replay.
     fn sort_dim<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
         _dim: usize,
         _order: SortOrder,
         _comparison: SortComparison,
-    ) -> AccelProviderFuture<'a, SortResult> {
-        unsupported_future("sort_dim not supported by provider")
+    ) -> ProviderExecutionFuture<'a, Option<SortResult>> {
+        Box::pin(async { Ok(None) })
     }
+    /// None certifies no staging, allocation, submission, or execution attempt.
+    /// A failure is terminal and never authorizes host replay.
     fn sort_rows<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
         _columns: &'a [SortRowsColumnSpec],
         _comparison: SortComparison,
-    ) -> AccelProviderFuture<'a, SortResult> {
-        unsupported_future("sort_rows not supported by provider")
+    ) -> ProviderExecutionFuture<'a, Option<SortResult>> {
+        Box::pin(async { Ok(None) })
     }
     fn matmul<'a>(
         &'a self,
@@ -4376,25 +4400,25 @@ pub trait AccelProvider: AcceleratorThreadBound {
     ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("circshift not supported by provider"))
     }
+    /// `None` certifies no staging, allocation, submission, or execution occurred.
+    /// Errors are terminal and never authorize replay of this operation.
     fn diff_dim(
         &self,
         _handle: &GpuTensorHandle,
         _order: usize,
         _dim: usize,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(unsupported_provider_operation(
-            "diff_dim not supported by provider",
-        ))
+    ) -> ProviderExecutionResult<Option<GpuTensorHandle>> {
+        Ok(None)
     }
+    /// `None` certifies no staging, allocation, submission, or execution occurred.
+    /// Errors are terminal and never authorize replay of this operation.
     fn gradient_dim(
         &self,
         _handle: &GpuTensorHandle,
         _dim: usize,
         _spacing: f64,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(unsupported_provider_operation(
-            "gradient_dim not supported by provider",
-        ))
+    ) -> ProviderExecutionResult<Option<GpuTensorHandle>> {
+        Ok(None)
     }
     fn gradient_dim_with_coordinates(
         &self,
@@ -4439,36 +4463,44 @@ pub trait AccelProvider: AcceleratorThreadBound {
             Err(unsupported_provider_operation("fft_extract_real not supported by provider").into())
         })
     }
+    /// None certifies no staging, allocation, submission, or execution attempt.
+    /// A failure is terminal and never authorizes host replay.
     fn unique<'a>(
         &'a self,
         _handle: &'a GpuTensorHandle,
         _options: &'a UniqueOptions,
-    ) -> AccelProviderFuture<'a, UniqueResult> {
-        Box::pin(async move { Err(anyhow::anyhow!("unique not supported by provider")) })
+    ) -> ProviderExecutionFuture<'a, Option<UniqueResult>> {
+        Box::pin(async { Ok(None) })
     }
+    /// None certifies no staging, allocation, submission, or execution attempt.
+    /// A failure is terminal and never authorizes host replay.
     fn union<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
         _b: &'a GpuTensorHandle,
         _options: &'a UnionOptions,
-    ) -> AccelProviderFuture<'a, UnionResult> {
-        Box::pin(async move { Err(anyhow::anyhow!("union not supported by provider")) })
+    ) -> ProviderExecutionFuture<'a, Option<UnionResult>> {
+        Box::pin(async { Ok(None) })
     }
+    /// None certifies no staging, allocation, submission, or execution attempt.
+    /// A failure is terminal and never authorizes host replay.
     fn setdiff<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
         _b: &'a GpuTensorHandle,
         _options: &'a SetdiffOptions,
-    ) -> AccelProviderFuture<'a, SetdiffResult> {
-        Box::pin(async move { Err(anyhow::anyhow!("setdiff not supported by provider")) })
+    ) -> ProviderExecutionFuture<'a, Option<SetdiffResult>> {
+        Box::pin(async { Ok(None) })
     }
+    /// None certifies no staging, allocation, submission, or execution attempt.
+    /// A failure is terminal and never authorizes host replay.
     fn ismember<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
         _b: &'a GpuTensorHandle,
         _options: &'a IsMemberOptions,
-    ) -> AccelProviderFuture<'a, IsMemberResult> {
-        Box::pin(async move { Err(anyhow::anyhow!("ismember not supported by provider")) })
+    ) -> ProviderExecutionFuture<'a, Option<IsMemberResult>> {
+        Box::pin(async { Ok(None) })
     }
     fn reshape(
         &self,
@@ -4609,47 +4641,59 @@ pub trait AccelProvider: AcceleratorThreadBound {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("dot not supported by provider")
     }
+    /// `None` certifies no staging, allocation, submission, or execution occurred.
+    /// Errors are terminal and never authorize replay of this operation.
     fn reduce_nnz<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("reduce_nnz not supported by provider")
+    ) -> ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        Box::pin(async { Ok(None) })
     }
+    /// `None` certifies no staging, allocation, submission, or execution occurred.
+    /// Errors are terminal and never authorize replay of this operation.
     fn reduce_nnz_dim<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
         _dim: usize,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("reduce_nnz_dim not supported by provider")
+    ) -> ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        Box::pin(async { Ok(None) })
     }
+    /// `None` certifies no staging, allocation, submission, or execution occurred.
+    /// Errors are terminal and never authorize replay of this operation.
     fn reduce_prod<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("reduce_prod not supported by provider")
+    ) -> ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        Box::pin(async { Ok(None) })
     }
+    /// `None` certifies no staging, allocation, submission, or execution occurred.
+    /// Errors are terminal and never authorize replay of this operation.
     fn reduce_prod_dim<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
         _dim: usize,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("reduce_prod_dim not supported by provider")
+    ) -> ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        Box::pin(async { Ok(None) })
     }
     /// Reduce a native integer gpuArray by product while preserving its exact
     /// element class, distinct from MATLAB's default floating-point output.
+    /// `None` certifies no staging, allocation, submission, or execution occurred.
+    /// Errors are terminal and never authorize replay of this operation.
     fn reduce_integer_prod_native<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("reduce_integer_prod_native not supported by provider")
+    ) -> ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        Box::pin(async { Ok(None) })
     }
     /// Dimension form of [`Self::reduce_integer_prod_native`].
+    /// `None` certifies no staging, allocation, submission, or execution occurred.
+    /// Errors are terminal and never authorize replay of this operation.
     fn reduce_integer_prod_native_dim<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
         _dim: usize,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("reduce_integer_prod_native_dim not supported by provider")
+    ) -> ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        Box::pin(async { Ok(None) })
     }
     /// Compute MATLAB's explicit native-output mean for a native integer
     /// gpuArray. Providers must avoid floating-point accumulation so int64 and
@@ -5025,99 +5069,113 @@ pub trait AccelProvider: AcceleratorThreadBound {
     ) -> ProviderExecutionFuture<'a, ReduceDimResult> {
         unsupported_execution_future("reduce_max_dim not supported by provider")
     }
-    fn cumsum_scan(
-        &self,
-        _input: &GpuTensorHandle,
+    /// Returns `None` only before staging, allocation, submission, or execution.
+    /// An error is terminal and never authorizes a host replay of this scan.
+    fn cumsum_scan<'a>(
+        &'a self,
+        _input: &'a GpuTensorHandle,
         _dim: usize,
         _direction: ProviderScanDirection,
         _nan_mode: ProviderNanMode,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("cumsum_scan not supported by provider"))
+    ) -> ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        Box::pin(async { Ok(None) })
     }
-    fn integer_cumsum_scan(
-        &self,
-        _input: &GpuTensorHandle,
+    /// Returns `None` only before staging, allocation, submission, or execution.
+    /// An error is terminal and never authorizes a host replay of this scan.
+    fn integer_cumsum_scan<'a>(
+        &'a self,
+        _input: &'a GpuTensorHandle,
         _dim: usize,
         _direction: ProviderScanDirection,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!(
-            "integer_cumsum_scan not supported by provider"
-        ))
+    ) -> ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        Box::pin(async { Ok(None) })
     }
+    /// `None` certifies no staging, allocation, submission, or execution occurred.
+    /// Errors are terminal and never authorize replay of this operation.
     fn trapz_dim(
         &self,
         _input: &GpuTensorHandle,
         _dim: usize,
         _spacing: ProviderTrapezoidSpacing<'_>,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("trapz_dim not supported by provider"))
+    ) -> ProviderExecutionResult<Option<GpuTensorHandle>> {
+        Ok(None)
     }
+    /// `None` certifies no staging, allocation, submission, or execution occurred.
+    /// Errors are terminal and never authorize replay of this operation.
     fn cumtrapz_dim(
         &self,
         _input: &GpuTensorHandle,
         _dim: usize,
         _spacing: ProviderTrapezoidSpacing<'_>,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(unsupported_provider_operation(
-            "cumtrapz_dim not supported by provider",
-        ))
+    ) -> ProviderExecutionResult<Option<GpuTensorHandle>> {
+        Ok(None)
     }
-    fn cumprod_scan(
-        &self,
-        _input: &GpuTensorHandle,
+    /// Returns `None` only before staging, allocation, submission, or execution.
+    /// An error is terminal and never authorizes a host replay of this scan.
+    fn cumprod_scan<'a>(
+        &'a self,
+        _input: &'a GpuTensorHandle,
         _dim: usize,
         _direction: ProviderScanDirection,
         _nan_mode: ProviderNanMode,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("cumprod_scan not supported by provider"))
+    ) -> ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        Box::pin(async { Ok(None) })
     }
-    fn integer_cumprod_scan(
-        &self,
-        _input: &GpuTensorHandle,
+    /// Returns `None` only before staging, allocation, submission, or execution.
+    /// An error is terminal and never authorizes a host replay of this scan.
+    fn integer_cumprod_scan<'a>(
+        &'a self,
+        _input: &'a GpuTensorHandle,
         _dim: usize,
         _direction: ProviderScanDirection,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!(
-            "integer_cumprod_scan not supported by provider"
-        ))
+    ) -> ProviderExecutionFuture<'a, Option<GpuTensorHandle>> {
+        Box::pin(async { Ok(None) })
     }
-    fn cummin_scan(
-        &self,
-        _input: &GpuTensorHandle,
-        _dim: usize,
-        _direction: ProviderScanDirection,
-        _nan_mode: ProviderNanMode,
-    ) -> anyhow::Result<ProviderCumminResult> {
-        Err(anyhow::anyhow!("cummin_scan not supported by provider"))
-    }
-    fn integer_cummin_scan(
-        &self,
-        _input: &GpuTensorHandle,
-        _dim: usize,
-        _direction: ProviderScanDirection,
-    ) -> anyhow::Result<ProviderCumminResult> {
-        Err(anyhow::anyhow!(
-            "integer_cummin_scan not supported by provider"
-        ))
-    }
-    fn cummax_scan(
-        &self,
-        _input: &GpuTensorHandle,
+    /// Returns `None` only before staging, allocation, submission, or execution.
+    /// An error is terminal and never authorizes a host replay of this scan.
+    fn cummin_scan<'a>(
+        &'a self,
+        _input: &'a GpuTensorHandle,
         _dim: usize,
         _direction: ProviderScanDirection,
         _nan_mode: ProviderNanMode,
-    ) -> anyhow::Result<ProviderCummaxResult> {
-        Err(anyhow::anyhow!("cummax_scan not supported by provider"))
+        _demand: ProviderExtremaDemand,
+    ) -> ProviderExecutionFuture<'a, Option<ProviderCumminResult>> {
+        Box::pin(async { Ok(None) })
     }
-    fn integer_cummax_scan(
-        &self,
-        _input: &GpuTensorHandle,
+    /// Returns `None` only before staging, allocation, submission, or execution.
+    /// An error is terminal and never authorizes a host replay of this scan.
+    fn integer_cummin_scan<'a>(
+        &'a self,
+        _input: &'a GpuTensorHandle,
         _dim: usize,
         _direction: ProviderScanDirection,
-    ) -> anyhow::Result<ProviderCummaxResult> {
-        Err(anyhow::anyhow!(
-            "integer_cummax_scan not supported by provider"
-        ))
+        _demand: ProviderExtremaDemand,
+    ) -> ProviderExecutionFuture<'a, Option<ProviderCumminResult>> {
+        Box::pin(async { Ok(None) })
+    }
+    /// Returns `None` only before staging, allocation, submission, or execution.
+    /// An error is terminal and never authorizes a host replay of this scan.
+    fn cummax_scan<'a>(
+        &'a self,
+        _input: &'a GpuTensorHandle,
+        _dim: usize,
+        _direction: ProviderScanDirection,
+        _nan_mode: ProviderNanMode,
+        _demand: ProviderExtremaDemand,
+    ) -> ProviderExecutionFuture<'a, Option<ProviderCummaxResult>> {
+        Box::pin(async { Ok(None) })
+    }
+    /// Returns `None` only before staging, allocation, submission, or execution.
+    /// An error is terminal and never authorizes a host replay of this scan.
+    fn integer_cummax_scan<'a>(
+        &'a self,
+        _input: &'a GpuTensorHandle,
+        _dim: usize,
+        _direction: ProviderScanDirection,
+        _demand: ProviderExtremaDemand,
+    ) -> ProviderExecutionFuture<'a, Option<ProviderCummaxResult>> {
+        Box::pin(async { Ok(None) })
     }
 
     /// Certifies that this provider admits the exact find request before any
@@ -5555,7 +5613,7 @@ fn audit_vm_region_provider_selection(
 ) -> Option<&'static dyn AccelProvider> {
     #[cfg(feature = "wgpu")]
     if let Some(provider) = selected {
-        observation::record_vm_region_provider_selection(provider);
+        observation::record_source_region_provider_selection(provider);
     }
     selected
 }
@@ -5596,6 +5654,13 @@ pub fn provider_for_device(device_id: u32) -> Option<&'static dyn AccelProvider>
 /// the process lifetime.
 pub fn registered_providers() -> Vec<&'static dyn AccelProvider> {
     provider_registry::all()
+}
+
+/// Inspect retained owners without a candidate-vector allocation. The registry
+/// lock is released before a caller invokes provider code. This does not grant
+/// execution/control authority or change ambient selection.
+pub fn next_registered_provider(after: Option<u32>) -> Option<(u32, &'static dyn AccelProvider)> {
+    provider_registry::next_after(after)
 }
 
 pub fn provider_for_handle(handle: &GpuTensorHandle) -> Option<&'static dyn AccelProvider> {

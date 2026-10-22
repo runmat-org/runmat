@@ -1,4 +1,5 @@
 use super::*;
+use runmat_value::{decode_utf16_code_units, Utf16DecodeError};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum LabelKind {
@@ -88,7 +89,7 @@ pub(super) fn labels_from_value(value: Value, name: &str) -> BuiltinResult<Label
             })
         }
         Value::CharArray(array) => Ok(LabelVector {
-            labels: char_rows(&array).into_iter().map(Label::Text).collect(),
+            labels: char_rows(&array, name)?.into_iter().map(Label::Text).collect(),
             kind: LabelKind::Char,
             categories: None,
         }),
@@ -380,16 +381,17 @@ pub(super) fn label_display(label: &Label) -> String {
     }
 }
 
-pub(super) fn char_rows(array: &CharArray) -> Vec<String> {
-    (0..array.rows)
-        .map(|row| {
-            let mut text = String::with_capacity(array.cols);
-            for col in 0..array.cols {
-                text.push(array.data()[row + col * array.rows]);
-            }
-            text.trim_end().to_string()
-        })
-        .collect()
+pub(super) fn char_rows(array: &CharArray, name: &str) -> BuiltinResult<Vec<String>> {
+    let mut rows = Vec::with_capacity(array.rows);
+    for row in 0..array.rows {
+        let mut units = Vec::with_capacity(array.cols);
+        for col in 0..array.cols {
+            units.push(array.data()[row + col * array.rows]);
+        }
+        let text = decode_utf16_code_units(&units).map_err(|error| invalid_utf16(name, error))?;
+        rows.push(text.trim_end().to_string());
+    }
+    Ok(rows)
 }
 
 pub(super) fn scalar_text(value: &Value, name: &str) -> BuiltinResult<String> {
@@ -398,7 +400,9 @@ pub(super) fn scalar_text(value: &Value, name: &str) -> BuiltinResult<String> {
         Value::StringArray(array) if array.data().len() == 1 => {
             Ok(array.data()[0].as_str().to_owned())
         }
-        Value::CharArray(array) if array.rows == 1 => Ok(array.data().iter().collect::<String>()),
+        Value::CharArray(array) if array.rows == 1 => {
+            decode_utf16_code_units(array.data()).map_err(|error| invalid_utf16(name, error))
+        }
         Value::Num(value) if value.is_finite() => Ok(format_number(*value)),
         Value::Int(value) => Ok(value.decimal_string()),
         Value::Bool(value) => Ok(value.to_string()),
@@ -406,6 +410,18 @@ pub(super) fn scalar_text(value: &Value, name: &str) -> BuiltinResult<String> {
             "perfcurve: {name} must be text scalar; got {other:?}"
         ))),
     }
+}
+
+fn invalid_utf16(name: &str, error: Utf16DecodeError) -> RuntimeError {
+    let mut builder = build_runtime_error(format!(
+        "perfcurve: {name} is not valid UTF-16 text: {error}"
+    ))
+    .with_builtin(NAME)
+    .with_source(error);
+    if let Some(identifier) = ERROR_INVALID_ARGUMENT.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 pub(super) fn format_number(value: f64) -> String {

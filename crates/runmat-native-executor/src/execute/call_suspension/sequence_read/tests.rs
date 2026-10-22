@@ -31,15 +31,11 @@ fn sequence_read_reenters_only_the_exact_typed_site_without_replaying() {
         let polls = Arc::new(AtomicUsize::new(0));
         let observed = Arc::clone(&polls);
         assert!(matches!(
-            begin_sequence_read(
-                &mut state,
-                stage,
-                Box::pin(async move {
-                    observed.fetch_add(1, Ordering::SeqCst);
-                    RootedValueSequence::new(ValueSequence::single(Value::Num(9.0)).unwrap())
-                        .map_err(|error| NativeExecutorError::from(error.into_runtime_error()))
-                }),
-            ),
+            begin_sequence_read(&mut state, stage, || async move {
+                observed.fetch_add(1, Ordering::SeqCst);
+                RootedValueSequence::new(ValueSequence::single(Value::Num(9.0)).unwrap())
+                    .map_err(|error| NativeExecutorError::from(error.into_runtime_error()))
+            },),
             Err(NativeExecutorError::CallSuspended)
         ));
         assert_eq!(polls.load(Ordering::SeqCst), 0);
@@ -96,10 +92,10 @@ fn unpolled_sequence_input_lease_retires_only_after_pending_future_drop() {
                 SequenceReadStage::Capture {
                     destination: MirSequenceLocalId(0),
                 },
-                Box::pin(async move {
+                || async move {
                     let _retained = (input, roots);
                     std::future::pending::<NativeExecutorResult<RootedValueSequence>>().await
-                }),
+                },
             ),
             Err(NativeExecutorError::CallSuspended)
         ));

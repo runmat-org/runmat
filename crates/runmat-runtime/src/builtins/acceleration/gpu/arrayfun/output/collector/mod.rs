@@ -1,7 +1,7 @@
 mod push;
 
 use crate::BuiltinResult;
-use runmat_value::{IntValue, IntegerStorage, Value};
+use runmat_value::{IntValue, IntegerStorage, Utf16CodeUnit, Value};
 
 use super::classify::{classify_value, ClassifiedValue};
 
@@ -22,7 +22,7 @@ pub(in crate::builtins::acceleration::gpu::arrayfun) enum UniformCollector {
         real_values: Vec<IntValue>,
         imag_values: Vec<IntValue>,
     },
-    Char(Vec<char>),
+    Char(Vec<Utf16CodeUnit>),
 }
 
 impl UniformCollector {

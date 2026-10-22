@@ -5,13 +5,13 @@ pub(super) fn retained_arguments(values: Vec<Value>) -> crate::call::BuiltinArgu
         .expect("ordinary validator fixture arguments")
         .into()
 }
-mod class_shape;
 mod admission;
-mod ownership;
-mod numeric_cutover;
-mod integer_aggregate;
+mod class_shape;
 mod download_lifecycle;
 mod filesystem;
+mod integer_aggregate;
+mod numeric_cutover;
+mod ownership;
 mod text_shape;
 use crate::builtins::common::identifiers::MATLAB_NAME_LENGTH_MAX;
 use crate::builtins::common::test_support;
@@ -448,7 +448,7 @@ fn complex_validators_use_component_integrality_real_ordering_and_exact_membersh
     ok(
         "mustBeInteger",
         vec![Value::CharArray(
-            CharArray::new(vec!['a', 'b'], 1, 2).expect("character row"),
+            CharArray::from_unicode_scalars(vec!['a', 'b'], 1, 2).expect("character row"),
         )],
     );
     ok("mustBeNonzero", vec![Value::Num(f64::INFINITY)]);

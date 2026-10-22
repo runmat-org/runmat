@@ -106,7 +106,7 @@ fn admit(obj: &ObjectInstance, field: &str, caller: Option<&str>) -> Result<Stor
 pub(super) async fn store_value(
     context: Option<&crate::context::RuntimeContext>,
     mut obj: ObjectInstance,
-    field: String,
+    field: runmat_value::Utf8Text,
     rhs: Value,
     caller: Option<&str>,
     on_write: &mut impl FnMut(&Value, &Value),
@@ -190,7 +190,7 @@ fn replace_stored_property(
 pub(super) async fn store_handle(
     context: Option<&crate::context::RuntimeContext>,
     handle: HandleRef,
-    field: String,
+    field: runmat_value::Utf8Text,
     rhs: Value,
     caller: Option<&str>,
 ) -> Result<RootedValue, RuntimeError> {

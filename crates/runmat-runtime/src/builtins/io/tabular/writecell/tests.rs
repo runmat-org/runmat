@@ -98,14 +98,15 @@ fn writecell_descriptor_signatures_cover_core_forms() {
 #[test]
 fn scalar_text_geometry_rejects_paged_controls_and_accepts_singleton_pages() {
     let paged = Value::CharArray(
-        CharArray::new_with_shape("ab".chars().collect(), vec![1, 1, 2]).expect("paged characters"),
+        CharArray::from_unicode_scalars_with_shape("ab".chars().collect(), vec![1, 1, 2])
+            .expect("paged characters"),
     );
     assert!(resolve_path(&paged).is_err());
     assert!(string_scalar_from_value(&paged, "Delimiter").is_err());
     assert!(table::cell_value_from_value(paged).is_err());
 
     let singleton = Value::CharArray(
-        CharArray::new_with_shape("ab".chars().collect(), vec![1, 2, 1])
+        CharArray::from_unicode_scalars_with_shape("ab".chars().collect(), vec![1, 2, 1])
             .expect("singleton character page"),
     );
     assert_eq!(

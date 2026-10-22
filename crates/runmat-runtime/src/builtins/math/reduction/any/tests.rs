@@ -215,7 +215,7 @@ fn any_handles_nan_modes() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn any_char_array_support() {
-    let chars = CharArray::new("a\0c".chars().collect(), 1, 3).unwrap();
+    let chars = CharArray::from_unicode_scalars("a\0c".chars().collect(), 1, 3).unwrap();
     let result =
         any_builtin(Value::CharArray(chars), vec![Value::Int(IntValue::I32(1))]).expect("any");
     match result {

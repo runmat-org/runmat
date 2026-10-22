@@ -101,11 +101,16 @@ impl ExecutionServiceError {
                 Self::UnknownHandle.to_string(),
                 Self::UnknownHandle,
             ),
-            Self::Cancelled => crate::runtime_error::semantic_error_with_source(
-                "RunMat:parallel:Cancelled",
-                Self::Cancelled.to_string(),
-                Self::Cancelled,
-            ),
+            Self::Cancelled => {
+                let mut error = crate::runtime_error::semantic_error_with_source(
+                    "RunMat:parallel:Cancelled",
+                    Self::Cancelled.to_string(),
+                    Self::Cancelled,
+                );
+                error.failure_origin =
+                    crate::runtime_error::RuntimeFailureOrigin::ExecutionControlCancellation;
+                error
+            }
             Self::WorkerLost(message) => crate::runtime_error::semantic_error_with_source(
                 "RunMat:parallel:WorkerLost",
                 format!("execution worker was lost: {message}"),

@@ -403,7 +403,10 @@ fn feval_function_handle_qualified_name_classifies_as_external_boundary() {
     else {
         panic!("expected resolved target");
     };
-    assert!(matches!(identity, CallableIdentity::ExternalName(_)));
+    assert!(matches!(
+        identity.as_identity(),
+        CallableIdentity::ExternalName(_)
+    ));
     assert_eq!(*fallback_policy, CallableFallbackPolicy::ExternalBoundary);
 }
 
@@ -422,7 +425,10 @@ fn feval_method_function_handle_classifies_as_method_identity() {
     else {
         panic!("expected resolved target");
     };
-    assert!(matches!(identity, CallableIdentity::Method(_)));
+    assert!(matches!(
+        identity.as_identity(),
+        CallableIdentity::Method(_)
+    ));
     assert_eq!(
         *fallback_policy,
         CallableFallbackPolicy::RuntimeNameResolution
@@ -580,7 +586,7 @@ fn malformed_qualified_function_handle_remains_dynamic_name() {
         panic!("expected resolved target");
     };
     assert!(matches!(
-        identity,
+        identity.as_identity(),
         CallableIdentity::DynamicName(SymbolName(name)) if name == "pkg..remote_inc"
     ));
     assert_eq!(
@@ -605,7 +611,7 @@ fn malformed_qualified_external_function_handle_remains_dynamic_name() {
         panic!("expected resolved target");
     };
     assert!(matches!(
-        identity,
+        identity.as_identity(),
         CallableIdentity::DynamicName(SymbolName(name)) if name == "pkg..remote_inc"
     ));
     assert_eq!(
@@ -630,7 +636,7 @@ fn single_segment_external_function_handle_uses_runtime_name_resolution() {
         panic!("expected resolved target");
     };
     assert!(matches!(
-        identity,
+        identity.as_identity(),
         CallableIdentity::DynamicName(SymbolName(name)) if name == "origin"
     ));
     assert_eq!(

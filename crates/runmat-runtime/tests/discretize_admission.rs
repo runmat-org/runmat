@@ -94,7 +94,11 @@ fn text_options_use_effective_rank_and_scalar_string_arrays() {
     let input = array(vec![1.0], vec![1, 1]);
     let edges = array(vec![0.0, 1.0, 2.0], vec![1, 3, 1]);
     let option = Value::CharArray(
-        CharArray::new_with_shape("IncludedEdge".chars().collect(), vec![1, 12, 1]).unwrap(),
+        CharArray::from_unicode_scalars_with_shape(
+            "IncludedEdge".chars().collect(),
+            vec![1, 12, 1],
+        )
+        .unwrap(),
     );
     let output = invoke(
         &[input.clone(), edges.clone(), option, Value::from("right")],
@@ -106,7 +110,8 @@ fn text_options_use_effective_rank_and_scalar_string_arrays() {
     };
     assert_eq!(output.materialize_f64(), vec![1.0]);
     let pages = Value::CharArray(
-        CharArray::new_with_shape("IncludedEdge".chars().collect(), vec![1, 6, 2]).unwrap(),
+        CharArray::from_unicode_scalars_with_shape("IncludedEdge".chars().collect(), vec![1, 6, 2])
+            .unwrap(),
     );
     assert!(invoke(&[input, edges, pages, Value::from("right")], 1).is_err());
 }

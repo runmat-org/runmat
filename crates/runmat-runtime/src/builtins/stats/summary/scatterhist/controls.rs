@@ -136,7 +136,7 @@ pub(super) fn nonnegative_scalar_cycle(value: &Value, name: &str) -> BuiltinResu
 }
 
 pub(super) fn option_bool(value: &Value, name: &str) -> BuiltinResult<bool> {
-    if let Some(text) = scalar_text(value) {
+    if let Some(text) = scalar_text(value)? {
         return match text.trim().to_ascii_lowercase().as_str() {
             "on" | "true" | "yes" => Ok(true),
             "off" | "false" | "no" => Ok(false),
@@ -170,7 +170,7 @@ pub(super) fn option_bool(value: &Value, name: &str) -> BuiltinResult<bool> {
 }
 
 pub(super) fn parse_kernel(value: &Value) -> BuiltinResult<KernelMode> {
-    if let Some(text) = scalar_text(value) {
+    if let Some(text) = scalar_text(value)? {
         return match text.trim().to_ascii_lowercase().as_str() {
             "on" | "true" | "yes" => Ok(KernelMode::On),
             "off" | "false" | "no" => Ok(KernelMode::Off),
@@ -188,7 +188,7 @@ pub(super) fn parse_kernel(value: &Value) -> BuiltinResult<KernelMode> {
 }
 
 pub(super) fn parse_style(value: &Value) -> BuiltinResult<(KernelMode, HistStyle)> {
-    let text = scalar_text(value).ok_or_else(|| invalid("scatterhist: Style must be text"))?;
+    let text = scalar_text(value)?.ok_or_else(|| invalid("scatterhist: Style must be text"))?;
     match text.trim().to_ascii_lowercase().as_str() {
         "bar" | "histogram" => Ok((KernelMode::Off, HistStyle::Bar)),
         "stairs" => Ok((KernelMode::Off, HistStyle::Stairs)),
@@ -199,7 +199,7 @@ pub(super) fn parse_style(value: &Value) -> BuiltinResult<(KernelMode, HistStyle
 }
 
 pub(super) fn parse_location(value: &Value) -> BuiltinResult<Location> {
-    let text = scalar_text(value).ok_or_else(|| invalid("scatterhist: Location must be text"))?;
+    let text = scalar_text(value)?.ok_or_else(|| invalid("scatterhist: Location must be text"))?;
     match text.trim().to_ascii_lowercase().as_str() {
         "northeast" => Ok(Location::NorthEast),
         "southeast" => Ok(Location::SouthEast),
@@ -212,7 +212,7 @@ pub(super) fn parse_location(value: &Value) -> BuiltinResult<Location> {
 }
 
 pub(super) fn parse_direction(value: &Value) -> BuiltinResult<Direction> {
-    let text = scalar_text(value).ok_or_else(|| invalid("scatterhist: Direction must be text"))?;
+    let text = scalar_text(value)?.ok_or_else(|| invalid("scatterhist: Direction must be text"))?;
     match text.trim().to_ascii_lowercase().as_str() {
         "out" => Ok(Direction::Out),
         "in" => Ok(Direction::In),

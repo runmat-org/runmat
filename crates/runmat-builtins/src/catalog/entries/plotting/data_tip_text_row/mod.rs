@@ -1,6 +1,7 @@
 mod contract;
 pub use contract::*;
 mod inference;
+mod documentation;
 use crate::*;
 pub const DATA_TIP_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     audience: BuiltinCatalogAudience::Public,
@@ -9,10 +10,7 @@ pub const DATA_TIP_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         name: "dataTipTextRow",
     },
     category: "plotting",
-    documentation: BuiltinDocumentation {
-        summary: "Create a data-tip text row object for plot data tips.",
-        ..BuiltinDocumentation::EMPTY
-    },
+    documentation: documentation::DOCUMENTATION,
     descriptor: &DATA_TIP_TEXT_ROW_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Incomplete,

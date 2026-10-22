@@ -328,9 +328,9 @@ fn value_to_text_scalar(value: &Value) -> BuiltinResult<std::borrow::Cow<'_, str
     match value {
         Value::String(text) => Ok(std::borrow::Cow::Borrowed(text.as_str())),
         Value::StringArray(array) => string_array_scalar(array),
-        Value::CharArray(array) if array.rows <= 1 => {
-            Ok(std::borrow::Cow::Owned(char_row_or_empty(array)))
-        }
+        Value::CharArray(array) if array.rows <= 1 => Ok(std::borrow::Cow::Owned(
+            char_row_or_empty(array, &UNICODE2NATIVE_ERROR_INVALID_INPUT)?,
+        )),
         Value::CharArray(_) => Err(unicode2native_error_with_message(
             "unicode2native: character input must be a row vector",
             &UNICODE2NATIVE_ERROR_INVALID_INPUT,
@@ -343,9 +343,9 @@ fn value_to_encoding_name(value: &Value) -> BuiltinResult<std::borrow::Cow<'_, s
     match value {
         Value::String(text) => Ok(std::borrow::Cow::Borrowed(text.as_str())),
         Value::StringArray(array) => string_array_scalar(array),
-        Value::CharArray(array) if array.rows <= 1 => {
-            Ok(std::borrow::Cow::Owned(char_row_or_empty(array)))
-        }
+        Value::CharArray(array) if array.rows <= 1 => Ok(std::borrow::Cow::Owned(
+            char_row_or_empty(array, &UNICODE2NATIVE_ERROR_INVALID_ENCODING)?,
+        )),
         Value::CharArray(_) => Err(unicode2native_error_with_message(
             "unicode2native: encoding must be a character row vector",
             &UNICODE2NATIVE_ERROR_INVALID_ENCODING,
@@ -368,11 +368,23 @@ fn string_array_scalar(array: &StringArray) -> BuiltinResult<std::borrow::Cow<'_
     }
 }
 
-fn char_row_or_empty(array: &CharArray) -> String {
+fn char_row_or_empty(
+    array: &CharArray,
+    descriptor: &'static BuiltinErrorDescriptor,
+) -> BuiltinResult<String> {
     if array.rows == 0 {
-        String::new()
+        Ok(String::new())
     } else {
-        char_row_to_string(array, 0)
+        char_row_to_string(array, 0).map_err(|source| {
+            let mut builder =
+                build_runtime_error("unicode2native: malformed UTF-16 character input")
+                    .with_builtin(BUILTIN_NAME)
+                    .with_source(source);
+            if let Some(identifier) = descriptor.identifier {
+                builder = builder.with_identifier(identifier);
+            }
+            builder.build()
+        })
     }
 }
 
@@ -568,7 +580,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unicode2native_rejects_char_matrices() {
-        let chars = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap();
+        let chars = CharArray::from_unicode_scalars(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap();
         let err = unicode2native_builtin(Value::CharArray(chars), vec![]).unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:unicode2native:InvalidInput"));
     }

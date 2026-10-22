@@ -1,26 +1,26 @@
 //! Word embedding compatibility objects and lookup helpers.
+use runmat_builtins::BuiltinErrorDescriptor;
+pub use runmat_builtins::{
+    DOC2SEQUENCE_DESCRIPTOR,
+    DOC2SEQUENCE_ERROR_DOC2SEQUENCE_INVALID_INPUT as ERROR_DOC2SEQUENCE_INVALID_INPUT,
+    DOC2SEQUENCE_INTEGER_CAPABILITIES, VEC2WORD_DESCRIPTOR,
+    VEC2WORD_ERROR_VEC2WORD_INVALID_INPUT as ERROR_VEC2WORD_INVALID_INPUT, VEC2WORD_EXTENSIONS,
+    VEC2WORD_INTEGER_CAPABILITIES, VEC2WORD_INTEGER_K_EXTENSION, VEC2WORD_INTEGER_MATRIX_EXTENSION,
+    WORD2VEC_DESCRIPTOR, WORD2VEC_ERROR_WORD2VEC_INVALID_INPUT as ERROR_WORD2VEC_INVALID_INPUT,
+    WORD2VEC_INTEGER_AUDIT, WRITE_WORD_EMBEDDING_DESCRIPTOR,
+    WRITE_WORD_EMBEDDING_ERROR_WRITE_INVALID_INPUT as ERROR_WRITE_INVALID_INPUT,
+    WRITE_WORD_EMBEDDING_ERROR_WRITE_IO as ERROR_WRITE_IO, WRITE_WORD_EMBEDDING_INTEGER_AUDIT,
+};
 use runmat_types::MemberAccess;
 
 mod geometry;
 use geometry::embedding_matrix_dimensions;
 
-use runmat_builtins::{
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerAuditDescriptor,
-    BuiltinIntegerAuditKind,
-};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::io::{Cursor, Read, Write};
 use std::path::Path;
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ResolveContext, Type,
-};
 pub use runmat_builtins::{
     FASTTEXT_WORD_EMBEDDING_DESCRIPTOR, READ_WORD_EMBEDDING_DESCRIPTOR,
     READ_WORD_EMBEDDING_INTEGER_AUDIT, TRAIN_WORD_EMBEDDING_DESCRIPTOR,
@@ -57,417 +57,12 @@ const MAX_DOC2SEQUENCE_DENSE_VALUES: usize = 50_000_000;
 static WORD_EMBEDDING_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
     crate::class_registry::ClassRegistration::new(WORD_EMBEDDING_CLASS);
 
-const OUT_MATRIX: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "M",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Embedding vectors, one word per row.",
-}];
-
-const OUT_WORDS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "words",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Closest vocabulary words.",
-}];
-
-const OUT_WORDS_DIST: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "words",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Closest vocabulary words.",
-    },
-    BuiltinParamDescriptor {
-        name: "dist",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Distances to input vectors.",
-    },
-];
-
-const OUT_SEQUENCES: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "sequences",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Cell array of document embedding-vector or word-index sequences.",
-}];
-
-const OUT_NONE: [BuiltinParamDescriptor; 0] = [];
-const IN_EMBEDDING_FILENAME: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "emb",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "wordEmbedding object.",
-    },
-    BuiltinParamDescriptor {
-        name: "filename",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target UTF-8 word2vec text file.",
-    },
-];
-
-const IN_WORDS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "emb",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "wordEmbedding object.",
-    },
-    BuiltinParamDescriptor {
-        name: "words",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Words to map to vectors.",
-    },
-];
-
-const IN_WORDS_REST: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "emb",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "wordEmbedding object.",
-    },
-    BuiltinParamDescriptor {
-        name: "words",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Words to map to vectors.",
-    },
-    BuiltinParamDescriptor {
-        name: "NameValue",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name-value options: IgnoreCase.",
-    },
-];
-
-const IN_VECTORS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "emb",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "wordEmbedding object.",
-    },
-    BuiltinParamDescriptor {
-        name: "M",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Embedding vectors, one vector per row.",
-    },
-];
-
-const IN_VECTORS_REST: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "emb",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "wordEmbedding object.",
-    },
-    BuiltinParamDescriptor {
-        name: "M",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Embedding vectors, one vector per row.",
-    },
-    BuiltinParamDescriptor {
-        name: "k",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("1"),
-        description: "Number of nearest words.",
-    },
-    BuiltinParamDescriptor {
-        name: "NameValue",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name-value options: Distance ('cosine' or 'euclidean').",
-    },
-];
-
-const IN_MAP_DOCUMENTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "embOrEnc",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "wordEmbedding or wordEncoding object.",
-    },
-    BuiltinParamDescriptor {
-        name: "documents",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "tokenizedDocument object.",
-    },
-];
-
-const IN_MAP_DOCUMENTS_REST: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "embOrEnc",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "wordEmbedding or wordEncoding object.",
-    },
-    BuiltinParamDescriptor {
-        name: "documents",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "tokenizedDocument object.",
-    },
-    BuiltinParamDescriptor {
-        name: "NameValue",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name-value options: UnknownWord, PaddingDirection, PaddingValue, Length.",
-    },
-];
-
-const ERROR_WRITE_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.WRITEWORDEMBEDDING.INVALID_INPUT",
-    identifier: Some("RunMat:writeWordEmbedding:InvalidInput"),
-    when: "Inputs do not match the supported writeWordEmbedding form.",
-    message: "writeWordEmbedding received invalid input",
-};
-
-const ERROR_WORD2VEC_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.WORD2VEC.INVALID_INPUT",
-    identifier: Some("RunMat:word2vec:InvalidInput"),
-    when: "Inputs do not match a supported word2vec form.",
-    message: "word2vec received invalid input",
-};
-
-const ERROR_VEC2WORD_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.VEC2WORD.INVALID_INPUT",
-    identifier: Some("RunMat:vec2word:InvalidInput"),
-    when: "Inputs do not match a supported vec2word form.",
-    message: "vec2word received invalid input",
-};
-
-const ERROR_DOC2SEQUENCE_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DOC2SEQUENCE.INVALID_INPUT",
-    identifier: Some("RunMat:doc2sequence:InvalidInput"),
-    when: "Inputs do not match a supported doc2sequence form.",
-    message: "doc2sequence received invalid input",
-};
-
-const ERROR_WRITE_IO: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.WRITEWORDEMBEDDING.IO",
-    identifier: Some("RunMat:writeWordEmbedding:IOError"),
-    when: "The requested word embedding file cannot be written.",
-    message: "Unable to write word embedding file",
-};
-
 const ERROR_WORD_EMBEDDING_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.WORDEMBEDDING.INVALID_INPUT",
     identifier: Some("RunMat:wordEmbedding:InvalidInput"),
     when: "Internal wordEmbedding object construction receives invalid data.",
     message: "wordEmbedding received invalid input",
 };
-
-const WRITE_ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_WRITE_INVALID_INPUT, ERROR_WRITE_IO];
-const WORD2VEC_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_WORD2VEC_INVALID_INPUT];
-const VEC2WORD_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_VEC2WORD_INVALID_INPUT];
-const DOC2SEQUENCE_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_DOC2SEQUENCE_INVALID_INPUT];
-
-fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Unknown
-}
-
-pub const WRITE_WORD_EMBEDDING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[BuiltinSignatureDescriptor {
-        label: "writeWordEmbedding(emb, filename)",
-        inputs: &IN_EMBEDDING_FILENAME,
-        outputs: &OUT_NONE,
-    }],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &WRITE_ERRORS,
-};
-pub const WRITE_WORD_EMBEDDING_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "writeWordEmbedding accepts a wordEmbedding object and a host text filename. Numeric and resident filename values are invalid and reject before provider or filesystem access; numeric vector properties inside the embedding object are model data, not public numeric inputs.",
-    };
-
-pub const WORD2VEC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[
-        BuiltinSignatureDescriptor {
-            label: "M = word2vec(emb, words)",
-            inputs: &IN_WORDS,
-            outputs: &OUT_MATRIX,
-        },
-        BuiltinSignatureDescriptor {
-            label: "M = word2vec(emb, words, 'IgnoreCase', true)",
-            inputs: &IN_WORDS_REST,
-            outputs: &OUT_MATRIX,
-        },
-    ],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &WORD2VEC_ERRORS,
-};
-pub const WORD2VEC_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "word2vec accepts a wordEmbedding object, textual words, and a logical IgnoreCase option and returns floating embedding rows. Integer and resident numeric word/control inputs are invalid and reject before provider access.",
-};
-
-pub const VEC2WORD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[
-        BuiltinSignatureDescriptor {
-            label: "words = vec2word(emb, M)",
-            inputs: &IN_VECTORS,
-            outputs: &OUT_WORDS,
-        },
-        BuiltinSignatureDescriptor {
-            label: "[words, dist] = vec2word(emb, M, k, 'Distance', distance)",
-            inputs: &IN_VECTORS_REST,
-            outputs: &OUT_WORDS_DIST,
-        },
-    ],
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &VEC2WORD_ERRORS,
-};
-
-pub const VEC2WORD_INTEGER_MATRIX_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "vec2word-integer-vectors",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "vec2word with typed-integer embedding vectors is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:Vec2wordIntegerVectorsExtension"),
-    };
-pub const VEC2WORD_INTEGER_K_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "vec2word-integer-k",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "vec2word with a typed-integer neighbor count is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Vec2wordIntegerKExtension"),
-};
-pub const VEC2WORD_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    VEC2WORD_INTEGER_MATRIX_EXTENSION,
-    VEC2WORD_INTEGER_K_EXTENSION,
-];
-
-const VEC2WORD_INTEGER_MATRIX_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "M",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "RunMat mode accepts typed-integer query vectors only when every value is exactly representable at the binary64 distance boundary.",
-    }];
-const VEC2WORD_INTEGER_K_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "k",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The typed neighbor count is decoded exactly as a positive platform-sized structural value; it does not enter distance arithmetic.",
-    }];
-pub const VEC2WORD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "words = vec2word(emb, integer_M, ___)",
-        inputs: &VEC2WORD_INTEGER_MATRIX_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "The gated integer matrix crosses one checked binary64 cosine or Euclidean distance boundary. Words are strings and optional distances are double.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "words = vec2word(emb, M, integer_k, ___)",
-        inputs: &VEC2WORD_INTEGER_K_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The gated typed k selects an exact result count and never enters floating distance computation.",
-    },
-];
-
-pub const DOC2SEQUENCE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[
-        BuiltinSignatureDescriptor {
-            label: "sequences = doc2sequence(emb, documents)",
-            inputs: &IN_MAP_DOCUMENTS,
-            outputs: &OUT_SEQUENCES,
-        },
-        BuiltinSignatureDescriptor {
-            label: "sequences = doc2sequence(enc, documents)",
-            inputs: &IN_MAP_DOCUMENTS,
-            outputs: &OUT_SEQUENCES,
-        },
-        BuiltinSignatureDescriptor {
-            label: "sequences = doc2sequence(emb, documents, Name, Value)",
-            inputs: &IN_MAP_DOCUMENTS_REST,
-            outputs: &OUT_SEQUENCES,
-        },
-        BuiltinSignatureDescriptor {
-            label: "sequences = doc2sequence(enc, documents, Name, Value)",
-            inputs: &IN_MAP_DOCUMENTS_REST,
-            outputs: &OUT_SEQUENCES,
-        },
-    ],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &DOC2SEQUENCE_ERRORS,
-};
-
-const DOC2SEQUENCE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "Length",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The compatibility target documents every built-in integer class and integer-valued single/double scalars; typed storage is validated exactly before conversion to a platform length.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "PaddingValue",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The compatibility target documents every built-in integer class for the scalar padding value; it is converted at the floating sequence-output boundary.",
-    },
-];
-
-pub const DOC2SEQUENCE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "sequences = doc2sequence(enc_or_emb, documents, Length=integer_length, PaddingValue=integer_value)",
-        inputs: &DOC2SEQUENCE_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Length is an exact positive structural control; PaddingValue crosses explicitly to RunMat's current host floating sequence storage. doc2sequence has no documented GPU-array capability.",
-    }];
 
 #[runtime_builtin(
     name = "fastTextWordEmbedding",
@@ -529,62 +124,66 @@ async fn read_word_embedding_builtin(
 
 #[runtime_builtin(
     name = "writeWordEmbedding",
-    category = "strings/text_analytics",
-    summary = "Write a word embedding model as UTF-8 word2vec text.",
-    keywords = "writeWordEmbedding,wordEmbedding,text analytics,word2vec,write",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(
-        crate::builtins::strings::text_analytics::embeddings::WRITE_WORD_EMBEDDING_DESCRIPTOR
-    ),
-    integer_audit(
-        crate::builtins::strings::text_analytics::embeddings::WRITE_WORD_EMBEDDING_INTEGER_AUDIT
-    ),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::text_analytics::embeddings"
 )]
-async fn write_word_embedding_builtin(emb: Value, filename: Value) -> BuiltinResult<Value> {
-    if contains_numeric_or_resident_text_input(&filename) {
-        return Err(embedding_error(
-            "writeWordEmbedding",
-            "writeWordEmbedding: filename must be a host text scalar",
-        ));
-    }
-    let emb = gather_if_needed_async(&emb)
-        .await
-        .map_err(|err| embedding_error("writeWordEmbedding", err.to_string()))?;
-    let filename = gather_if_needed_async(&filename)
-        .await
-        .map_err(|err| embedding_error("writeWordEmbedding", err.to_string()))?;
-    let filename = embedding_filename_text(&filename, "writeWordEmbedding")
-        .map_err(|err| embedding_error("writeWordEmbedding", err.to_string()))?;
-    let object = match emb {
-        Value::Object(object) => object,
-        other => {
-            return Err(embedding_error(
-                "writeWordEmbedding",
-                format!("writeWordEmbedding: expected wordEmbedding object, got {other:?}"),
-            ));
+async fn write_word_embedding_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    emb: Value,
+    filename: Value,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &WRITE_WORD_EMBEDDING_DESCRIPTOR,
+        &runmat_builtins::WRITE_WORD_EMBEDDING_ERROR_TOO_MANY_OUTPUTS,
+        "writeWordEmbedding",
+    )?;
+    let work =
+        super::model_admission::UnboundedModelWork::admit(runtime.as_ref(), "writeWordEmbedding")?;
+    work.finish(
+        async {
+            if contains_numeric_or_resident_text_input(&filename) {
+                return Err(embedding_error(
+                    "writeWordEmbedding",
+                    "writeWordEmbedding: filename must be a host text scalar",
+                ));
+            }
+            let emb = work.wait(gather_if_needed_async(&emb)).await?;
+            let filename = work.wait(gather_if_needed_async(&filename)).await?;
+            let filename = embedding_filename_text(&filename, "writeWordEmbedding")
+                .map_err(|err| embedding_error("writeWordEmbedding", err.to_string()))?;
+            let object = match emb {
+                Value::Object(object) => object,
+                other => {
+                    return Err(embedding_error(
+                        "writeWordEmbedding",
+                        format!("writeWordEmbedding: expected wordEmbedding object, got {other:?}"),
+                    ));
+                }
+            };
+            let embedding = embedding_from_object(&object, "writeWordEmbedding")?;
+            let mut file = File::create_async(Path::new(&filename))
+                .await
+                .map_err(|err| {
+                    embedding_error_with_source(
+                        "writeWordEmbedding",
+                        format!("writeWordEmbedding: unable to create '{filename}': {err}"),
+                        err,
+                    )
+                })?;
+            work.check()?;
+            write_embedding_text(&embedding, &mut file, &filename)?;
+            file.flush().map_err(|err| {
+                embedding_error_with_source(
+                    "writeWordEmbedding",
+                    format!("writeWordEmbedding: unable to flush '{filename}': {err}"),
+                    err,
+                )
+            })?;
+            Ok(Value::Num(0.0))
         }
-    };
-    let embedding = embedding_from_object(&object, "writeWordEmbedding")?;
-    let mut file = File::create_async(Path::new(&filename))
-        .await
-        .map_err(|err| {
-            embedding_error_with_source(
-                "writeWordEmbedding",
-                format!("writeWordEmbedding: unable to create '{filename}': {err}"),
-                err,
-            )
-        })?;
-    write_embedding_text(&embedding, &mut file, &filename)?;
-    file.flush().map_err(|err| {
-        embedding_error_with_source(
-            "writeWordEmbedding",
-            format!("writeWordEmbedding: unable to flush '{filename}': {err}"),
-            err,
-        )
-    })?;
-    Ok(Value::Num(0.0))
+        .await,
+    )
 }
 
 #[runtime_builtin(
@@ -653,186 +252,220 @@ fn is_typed_integer_value(value: &Value) -> bool {
 
 #[runtime_builtin(
     name = "doc2sequence",
-    category = "strings/text_analytics",
-    summary = "Convert tokenized documents to word-vector or word-index sequences.",
-    keywords = "doc2sequence,wordEmbedding,wordEncoding,tokenizedDocument,text analytics,sequences",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::text_analytics::embeddings::DOC2SEQUENCE_DESCRIPTOR),
-    integer_capabilities(DOC2SEQUENCE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::text_analytics::embeddings"
 )]
-async fn doc2sequence_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    if args.iter().any(crate::value_contains_gpu) {
-        return Err(embedding_error(
-            "doc2sequence",
-            "doc2sequence: gpuArray inputs are not supported",
-        ));
-    }
-    let gathered = gather_args(args, "doc2sequence").await?;
-    let (sequence_object, document_object, options) = parse_doc2sequence_args(gathered)?;
-    let document_shape = document_shape_from_object(&document_object, "doc2sequence")?;
-    let documents = documents_from_object(&document_object, "doc2sequence")?;
-    if sequence_object.is_class(WORD_EMBEDDING_CLASS) {
-        let embedding = embedding_from_object(&sequence_object, "doc2sequence")?;
-        doc2sequence_value(&embedding, &documents, &document_shape, options)
-    } else if sequence_object.is_class(WORD_ENCODING_CLASS) {
-        let encoding = word_encoding_from_object(&sequence_object, "doc2sequence")?;
-        doc2sequence_indices_value(&encoding, &documents, &document_shape, options)
-    } else {
-        Err(embedding_error(
-            "doc2sequence",
-            format!(
-                "doc2sequence: expected wordEmbedding or wordEncoding object, got {}",
-                sequence_object.class_name()
-            ),
-        ))
-    }
+async fn doc2sequence_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::DOC2SEQUENCE_DESCRIPTOR,
+        &runmat_builtins::DOC2SEQUENCE_ERROR_TOO_MANY_OUTPUTS,
+        "doc2sequence",
+    )?;
+    let work = super::model_admission::UnboundedModelWork::admit(runtime.as_ref(), "doc2sequence")?;
+    work.finish(
+        async {
+            if args.iter().any(crate::value_contains_gpu) {
+                return Err(embedding_error(
+                    "doc2sequence",
+                    "doc2sequence: gpuArray inputs are not supported",
+                ));
+            }
+            let gathered = gather_model_arguments("doc2sequence", &args, runtime.as_ref()).await?;
+            work.check()?;
+            let (sequence_object, document_object, options) =
+                parse_doc2sequence_args(gathered.view())?;
+            let document_shape = document_shape_from_object(&document_object, "doc2sequence")?;
+            let documents = documents_from_object(&document_object, "doc2sequence")?;
+            if sequence_object.is_class(WORD_EMBEDDING_CLASS) {
+                let embedding = embedding_from_object(&sequence_object, "doc2sequence")?;
+                doc2sequence_value(&embedding, &documents, &document_shape, options)
+            } else if sequence_object.is_class(WORD_ENCODING_CLASS) {
+                let encoding = word_encoding_from_object(&sequence_object, "doc2sequence")?;
+                doc2sequence_indices_value(&encoding, &documents, &document_shape, options)
+            } else {
+                Err(embedding_error(
+                    "doc2sequence",
+                    format!(
+                        "doc2sequence: expected wordEmbedding or wordEncoding object, got {}",
+                        sequence_object.class_name()
+                    ),
+                ))
+            }
+        }
+        .await,
+    )
 }
 
 #[runtime_builtin(
     name = "word2vec",
-    category = "strings/text_analytics",
-    summary = "Map words to rows of a word embedding matrix.",
-    keywords = "word2vec,wordEmbedding,text analytics,vectors",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::text_analytics::embeddings::WORD2VEC_DESCRIPTOR),
-    integer_audit(crate::builtins::strings::text_analytics::embeddings::WORD2VEC_INTEGER_AUDIT),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::text_analytics::embeddings"
 )]
-async fn word2vec_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    if args.iter().skip(1).any(|value| {
-        crate::builtins::common::validation::value_contains_native_integer_class(value)
-            || crate::value_contains_gpu(value)
-    }) {
-        return Err(embedding_error(
+async fn word2vec_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::WORD2VEC_DESCRIPTOR,
+        &runmat_builtins::WORD2VEC_ERROR_TOO_MANY_OUTPUTS,
+        "word2vec",
+    )?;
+    let work = super::model_admission::UnboundedModelWork::admit(runtime.as_ref(), "word2vec")?;
+    work.finish(
+        async {
+            if args.iter().skip(1).any(|value| {
+                crate::builtins::common::validation::value_contains_native_integer_class(value)
+                    || crate::value_contains_gpu(value)
+            }) {
+                return Err(embedding_error(
             "word2vec",
             "word2vec: words and option names must be host text and IgnoreCase must be logical",
         ));
-    }
-    let gathered = gather_args(args, "word2vec").await?;
-    let (object, words, options) = parse_word2vec_args(gathered)?;
-    let embedding = embedding_from_object(&object, "word2vec")?;
-    let lookup = build_word_lookup(&embedding.vocabulary, options.ignore_case);
-    let word_count = words.len();
-    let mut rows = Vec::with_capacity(word_count);
-    for word in words {
-        let key = if options.ignore_case {
-            word.to_lowercase()
-        } else {
-            word
-        };
-        if let Some(&row) = lookup.get(&key) {
-            let start = row * embedding.dimension;
-            rows.push(embedding.vectors[start..start + embedding.dimension].to_vec());
-        } else {
-            rows.push(vec![f64::NAN; embedding.dimension]);
+            }
+            let gathered = gather_model_arguments("word2vec", &args, runtime.as_ref()).await?;
+            work.check()?;
+            let (object, words, options) = parse_word2vec_args(gathered.view())?;
+            let embedding = embedding_from_object(&object, "word2vec")?;
+            let lookup = build_word_lookup(&embedding.vocabulary, options.ignore_case);
+            let word_count = words.len();
+            let mut rows = Vec::with_capacity(word_count);
+            for word in words {
+                let key = if options.ignore_case {
+                    word.to_lowercase()
+                } else {
+                    word
+                };
+                if let Some(&row) = lookup.get(&key) {
+                    let start = row * embedding.dimension;
+                    rows.push(embedding.vectors[start..start + embedding.dimension].to_vec());
+                } else {
+                    rows.push(vec![f64::NAN; embedding.dimension]);
+                }
+            }
+            let mut out = Vec::with_capacity(word_count * embedding.dimension);
+            for col in 0..embedding.dimension {
+                for row in &rows {
+                    out.push(row[col]);
+                }
+            }
+            Tensor::new(out, vec![word_count, embedding.dimension])
+                .map(Value::Tensor)
+                .map_err(|err| embedding_error("word2vec", err))
         }
-    }
-    let mut out = Vec::with_capacity(word_count * embedding.dimension);
-    for col in 0..embedding.dimension {
-        for row in &rows {
-            out.push(row[col]);
-        }
-    }
-    Tensor::new(out, vec![word_count, embedding.dimension])
-        .map(Value::Tensor)
-        .map_err(|err| embedding_error("word2vec", err))
+        .await,
+    )
 }
 
 #[runtime_builtin(
     name = "vec2word",
-    category = "strings/text_analytics",
-    summary = "Map embedding vectors to nearest vocabulary words.",
-    keywords = "vec2word,wordEmbedding,text analytics,nearest",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::text_analytics::embeddings::VEC2WORD_DESCRIPTOR),
-    extensions(crate::builtins::strings::text_analytics::embeddings::VEC2WORD_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::strings::text_analytics::embeddings::VEC2WORD_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::text_analytics::embeddings"
 )]
-async fn vec2word_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    enforce_vec2word_integer_policy(&args).await?;
-    let gathered = gather_args(args, "vec2word").await?;
-    let (object, matrix, options) = parse_vec2word_args(gathered)?;
-    let embedding = embedding_from_object(&object, "vec2word")?;
-    let (matrix_rows, matrix_cols) = embedding_matrix_dimensions(&matrix);
-    if matrix_cols != embedding.dimension {
-        return Err(embedding_error(
-            "vec2word",
-            format!(
-                "vec2word: input matrix must have {} columns, got {}",
-                embedding.dimension, matrix_cols
-            ),
-        ));
-    }
-    if options.k == 0 || options.k > embedding.vocabulary.len() {
-        return Err(embedding_error(
-            "vec2word",
-            format!(
-                "vec2word: k must be between 1 and vocabulary size ({})",
-                embedding.vocabulary.len()
-            ),
-        ));
-    }
+async fn vec2word_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_bounded_outputs(
+        &runmat_builtins::VEC2WORD_DESCRIPTOR,
+        &runmat_builtins::VEC2WORD_ERROR_TOO_MANY_OUTPUTS,
+        "vec2word",
+    )?;
+    let work = super::model_admission::UnboundedModelWork::admit(runtime.as_ref(), "vec2word")?;
+    work.finish(
+        async {
+            work.wait(enforce_vec2word_integer_policy(args.view()))
+                .await?;
+            let gathered = gather_model_arguments("vec2word", &args, runtime.as_ref()).await?;
+            work.check()?;
+            let (object, matrix, options) = parse_vec2word_args(gathered.view())?;
+            let embedding = embedding_from_object(&object, "vec2word")?;
+            let (matrix_rows, matrix_cols) = embedding_matrix_dimensions(&matrix);
+            if matrix_cols != embedding.dimension {
+                return Err(embedding_error(
+                    "vec2word",
+                    format!(
+                        "vec2word: input matrix must have {} columns, got {}",
+                        embedding.dimension, matrix_cols
+                    ),
+                ));
+            }
+            if options.k == 0 || options.k > embedding.vocabulary.len() {
+                return Err(embedding_error(
+                    "vec2word",
+                    format!(
+                        "vec2word: k must be between 1 and vocabulary size ({})",
+                        embedding.vocabulary.len()
+                    ),
+                ));
+            }
 
-    let mut row_words = Vec::with_capacity(matrix_rows);
-    let mut row_distances = Vec::with_capacity(matrix_rows);
-    for row in 0..matrix_rows {
-        let query = row_slice(&matrix, row);
-        let mut scored = embedding
-            .vectors
-            .chunks(embedding.dimension)
-            .enumerate()
-            .map(|(idx, candidate)| {
-                (
-                    idx,
-                    match options.distance {
-                        DistanceMetric::Cosine => cosine_distance(&query, candidate),
-                        DistanceMetric::Euclidean => euclidean_distance(&query, candidate),
-                    },
-                )
-            })
-            .collect::<Vec<_>>();
-        scored.sort_by(|left, right| compare_scores(left.1, right.1).then(left.0.cmp(&right.0)));
-        let mut words = Vec::with_capacity(options.k);
-        let mut distances = Vec::with_capacity(options.k);
-        for (idx, distance) in scored.into_iter().take(options.k) {
-            words.push(embedding.vocabulary[idx].clone());
-            distances.push(distance);
-        }
-        row_words.push(words);
-        row_distances.push(distances);
-    }
+            let mut row_words = Vec::with_capacity(matrix_rows);
+            let mut row_distances = Vec::with_capacity(matrix_rows);
+            for row in 0..matrix_rows {
+                let query = row_slice(&matrix, row);
+                let mut scored = embedding
+                    .vectors
+                    .chunks(embedding.dimension)
+                    .enumerate()
+                    .map(|(idx, candidate)| {
+                        (
+                            idx,
+                            match options.distance {
+                                DistanceMetric::Cosine => cosine_distance(&query, candidate),
+                                DistanceMetric::Euclidean => euclidean_distance(&query, candidate),
+                            },
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                scored.sort_by(|left, right| {
+                    compare_scores(left.1, right.1).then(left.0.cmp(&right.0))
+                });
+                let mut words = Vec::with_capacity(options.k);
+                let mut distances = Vec::with_capacity(options.k);
+                for (idx, distance) in scored.into_iter().take(options.k) {
+                    words.push(embedding.vocabulary[idx].clone());
+                    distances.push(distance);
+                }
+                row_words.push(words);
+                row_distances.push(distances);
+            }
 
-    let word_shape = if options.k == 1 {
-        vec![matrix_rows, 1]
-    } else {
-        vec![matrix_rows, options.k]
-    };
-    let mut words = Vec::with_capacity(matrix_rows * options.k);
-    let mut distances = Vec::with_capacity(matrix_rows * options.k);
-    for col in 0..options.k {
-        for row in 0..matrix_rows {
-            words.push(row_words[row][col].clone());
-            distances.push(row_distances[row][col]);
+            let word_shape = if options.k == 1 {
+                vec![matrix_rows, 1]
+            } else {
+                vec![matrix_rows, options.k]
+            };
+            let mut words = Vec::with_capacity(matrix_rows * options.k);
+            let mut distances = Vec::with_capacity(matrix_rows * options.k);
+            for col in 0..options.k {
+                for row in 0..matrix_rows {
+                    words.push(row_words[row][col].clone());
+                    distances.push(row_distances[row][col]);
+                }
+            }
+            let words = Value::StringArray(
+                StringArray::new(words, word_shape)
+                    .map_err(|err| embedding_error("vec2word", err))?,
+            );
+            let dist = Value::Tensor(
+                Tensor::new(distances, vec![matrix_rows, options.k])
+                    .map_err(|err| embedding_error("vec2word", err))?,
+            );
+            Ok(Value::output_list(vec![words, dist]))
         }
-    }
-    let words = Value::StringArray(
-        StringArray::new(words, word_shape).map_err(|err| embedding_error("vec2word", err))?,
-    );
-    let dist = Value::Tensor(
-        Tensor::new(distances, vec![matrix_rows, options.k])
-            .map_err(|err| embedding_error("vec2word", err))?,
-    );
-    Ok(Value::output_list(vec![words, dist]))
+        .await,
+    )
 }
 
-async fn enforce_vec2word_integer_policy(args: &[Value]) -> BuiltinResult<()> {
+async fn enforce_vec2word_integer_policy(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     if let Some(matrix) = args.get(1) {
         crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
             matrix,
@@ -854,14 +487,16 @@ async fn enforce_vec2word_integer_policy(args: &[Value]) -> BuiltinResult<()> {
     Ok(())
 }
 
-async fn gather_args(args: Vec<Value>, fn_name: &str) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(args.len());
-    for arg in args {
-        out.push(gather_if_needed_async(&arg).await.map_err(|err| {
-            embedding_error(fn_name, format!("{fn_name}: failed to gather input: {err}"))
-        })?);
-    }
-    Ok(out)
+async fn gather_model_arguments(
+    fn_name: &str,
+    args: &crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    let work = super::model_admission::UnboundedModelWork::admit(runtime, fn_name)?;
+    args.try_map_preserving_roots_async(args.len(), runtime, async |index| {
+        work.wait(gather_if_needed_async(&args[index])).await
+    })
+    .await
 }
 
 async fn gather_builtin_arguments(
@@ -1194,7 +829,7 @@ fn embedding_filename_text(value: &Value, fn_name: &str) -> BuiltinResult<String
     match value {
         Value::Cell(cell) if cell.data().len() == 1 => match &cell.data()[0] {
             Value::CharArray(array) if array.rows == 0 => Ok(String::new()),
-            Value::CharArray(array) if array.rows == 1 => Ok(char_row_to_string(array)),
+            Value::CharArray(array) if array.rows == 1 => char_row_to_string(array, 0, fn_name),
             other => Err(embedding_error(
                 fn_name,
                 format!("{fn_name}: 1-by-1 filename cell must contain a character vector, got {other:?}"),
@@ -2035,7 +1670,7 @@ struct Word2VecOptions {
 }
 
 fn parse_word2vec_args(
-    args: Vec<Value>,
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<(ObjectInstance, Vec<String>, Word2VecOptions)> {
     if args.len() < 2 {
         return Err(embedding_error(
@@ -2043,9 +1678,8 @@ fn parse_word2vec_args(
             "word2vec: expected word2vec(emb, words)",
         ));
     }
-    let mut iter = args.into_iter();
-    let object = match iter.next().expect("checked") {
-        Value::Object(object) => object,
+    let object = match &args[0] {
+        Value::Object(object) => object.clone(),
         other => {
             return Err(embedding_error(
                 "word2vec",
@@ -2053,10 +1687,10 @@ fn parse_word2vec_args(
             ));
         }
     };
-    let words_value = iter.next().expect("checked");
-    let words = words_from_value(&words_value, "word2vec")?;
+    let words_value = &args[1];
+    let words = words_from_value(words_value, "word2vec")?;
     let mut options = Word2VecOptions::default();
-    let rest = iter.collect::<Vec<_>>();
+    let rest = args.range(2..)?;
     let mut idx = 0;
     while idx < rest.len() {
         if idx + 1 >= rest.len() {
@@ -2104,7 +1738,7 @@ impl Default for Vec2WordOptions {
 }
 
 fn parse_vec2word_args(
-    args: Vec<Value>,
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<(ObjectInstance, Tensor, Vec2WordOptions)> {
     if args.len() < 2 {
         return Err(embedding_error(
@@ -2112,9 +1746,8 @@ fn parse_vec2word_args(
             "vec2word: expected vec2word(emb, M)",
         ));
     }
-    let mut iter = args.into_iter();
-    let object = match iter.next().expect("checked") {
-        Value::Object(object) => object,
+    let object = match &args[0] {
+        Value::Object(object) => object.clone(),
         other => {
             return Err(embedding_error(
                 "vec2word",
@@ -2122,10 +1755,10 @@ fn parse_vec2word_args(
             ));
         }
     };
-    let matrix = match iter.next().expect("checked") {
-        Value::Tensor(tensor) => tensor,
+    let matrix = match &args[1] {
+        Value::Tensor(tensor) => tensor.clone(),
         Value::Num(value) => {
-            Tensor::new(vec![value], vec![1, 1]).map_err(|err| embedding_error("vec2word", err))?
+            Tensor::new(vec![*value], vec![1, 1]).map_err(|err| embedding_error("vec2word", err))?
         }
         other => {
             return Err(embedding_error(
@@ -2134,10 +1767,11 @@ fn parse_vec2word_args(
             ));
         }
     };
-    let mut rest = iter.collect::<Vec<_>>();
+    let mut rest = args.range(2..)?;
     let mut options = Vec2WordOptions::default();
     if rest.first().is_some_and(is_numeric_scalar) {
-        options.k = parse_positive_integer(&rest.remove(0), "vec2word")?;
+        options.k = parse_positive_integer(&rest[0], "vec2word")?;
+        rest = rest.range(1..)?;
     }
     let mut idx = 0;
     while idx < rest.len() {
@@ -2218,7 +1852,7 @@ impl Default for Doc2SequenceOptions {
 }
 
 fn parse_doc2sequence_args(
-    args: Vec<Value>,
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<(ObjectInstance, ObjectInstance, Doc2SequenceOptions)> {
     if args.len() < 2 {
         return Err(embedding_error(
@@ -2563,14 +2197,11 @@ fn words_from_value(value: &Value, fn_name: &str) -> BuiltinResult<Vec<String>> 
     match value {
         Value::String(text) => Ok(vec![text.as_str().to_owned()]),
         Value::StringArray(array) => Ok(array.data().iter().map(|text| text.as_str().to_owned()).collect()),
-        Value::CharArray(array) if array.rows <= 1 => Ok(vec![char_row_to_string(array)]),
+        Value::CharArray(array) if array.rows <= 1 => Ok(vec![char_row_to_string(array, 0, fn_name)?]),
         Value::CharArray(array) => {
             let mut words = Vec::with_capacity(array.rows);
             for row in 0..array.rows {
-                let mut text = String::with_capacity(array.cols);
-                for col in 0..array.cols {
-                    text.push(array.data()[row + col * array.rows]);
-                }
+                let text = char_row_to_string(array, row, fn_name)?;
                 words.push(text.trim_end().to_string());
             }
             Ok(words)
@@ -2581,7 +2212,7 @@ fn words_from_value(value: &Value, fn_name: &str) -> BuiltinResult<Vec<String>> 
             .map(|item| match item {
                 Value::String(text) => Ok(text.as_str().to_owned()),
                 Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].as_str().to_owned()),
-                Value::CharArray(array) if array.rows <= 1 => Ok(char_row_to_string(array)),
+                Value::CharArray(array) if array.rows <= 1 => char_row_to_string(array, 0, fn_name),
                 other => Err(embedding_error(
                     fn_name,
                     format!("{fn_name}: cell word inputs must contain scalar text, got {other:?}"),
@@ -2653,8 +2284,19 @@ fn compare_scores(left: f64, right: f64) -> Ordering {
     }
 }
 
-fn char_row_to_string(array: &CharArray) -> String {
-    array.data().iter().collect()
+fn char_row_to_string(array: &CharArray, row: usize, fn_name: &str) -> BuiltinResult<String> {
+    if array.rows == 0 {
+        return Ok(String::new());
+    }
+    crate::builtins::strings::common::char_row_to_string_slice(array.data(), array.cols, row)
+        .map_err(|source| {
+            let mut diagnostic = embedding_error(
+                fn_name,
+                format!("{fn_name}: malformed UTF-16 character input"),
+            );
+            diagnostic.source = Some(Box::new(source));
+            diagnostic
+        })
 }
 
 fn parse_bool_scalar(value: &Value, fn_name: &str) -> BuiltinResult<bool> {
@@ -3034,7 +2676,23 @@ mod tests {
             .unwrap(),
         );
 
-        let result = write_word_embedding_builtin(emb, filename).await.unwrap();
+        {
+            let _outputs = crate::output_count::push_output_count(Some(1)).unwrap();
+            let error = write_word_embedding_builtin(None, emb.clone(), filename.clone())
+                .await
+                .unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                runmat_builtins::WRITE_WORD_EMBEDDING_ERROR_TOO_MANY_OUTPUTS.identifier
+            );
+            assert!(
+                !path.exists(),
+                "invalid output arity must not create the file"
+            );
+        }
+        let result = write_word_embedding_builtin(None, emb, filename)
+            .await
+            .unwrap();
         assert_eq!(result, Value::Num(0.0));
         let contents = std::fs::read_to_string(&path).unwrap();
         assert_eq!(contents, "2 2\nalpha 1 2.5\nbeta 3 4.25\n");
@@ -3064,10 +2722,13 @@ mod tests {
                 .to_string()
                 .into(),
         );
-        let err =
-            write_word_embedding_builtin(Value::String("not an embedding".into()), path.clone())
-                .await
-                .unwrap_err();
+        let err = write_word_embedding_builtin(
+            None,
+            Value::String("not an embedding".into()),
+            path.clone(),
+        )
+        .await
+        .unwrap_err();
         assert!(
             err.to_string().contains("expected wordEmbedding object"),
             "{err}"
@@ -3083,7 +2744,7 @@ mod tests {
             VECTOR_PROPERTY.to_string(),
             Value::Tensor(Tensor::new(vec![f64::NAN], vec![1, 1]).unwrap()),
         );
-        let err = write_word_embedding_builtin(Value::Object(object), path)
+        let err = write_word_embedding_builtin(None, Value::Object(object), path)
             .await
             .unwrap_err();
         assert!(
@@ -3106,7 +2767,7 @@ mod tests {
                 .to_string()
                 .into(),
         );
-        let err = write_word_embedding_builtin(valid, missing_parent)
+        let err = write_word_embedding_builtin(None, valid, missing_parent)
             .await
             .unwrap_err();
         assert!(
@@ -3129,22 +2790,31 @@ mod tests {
             Some(&Value::Num(300.0))
         );
 
-        let italy = word2vec_builtin(vec![
-            Value::Object(object.clone()),
-            Value::String("Italy".into()),
-        ])
+        let italy = word2vec_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Object(object.clone()),
+                Value::String("Italy".into()),
+            ]),
+        )
         .await
         .unwrap();
-        let rome = word2vec_builtin(vec![
-            Value::Object(object.clone()),
-            Value::String("Rome".into()),
-        ])
+        let rome = word2vec_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Object(object.clone()),
+                Value::String("Rome".into()),
+            ]),
+        )
         .await
         .unwrap();
-        let paris = word2vec_builtin(vec![
-            Value::Object(object.clone()),
-            Value::String("Paris".into()),
-        ])
+        let paris = word2vec_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Object(object.clone()),
+                Value::String("Paris".into()),
+            ]),
+        )
         .await
         .unwrap();
         let (Value::Tensor(italy), Value::Tensor(rome), Value::Tensor(paris)) =
@@ -3159,11 +2829,14 @@ mod tests {
             .zip(&paris.materialize_f64())
             .map(|((i, r), p)| i - r + p)
             .collect::<Vec<_>>();
-        let nearest = vec2word_builtin(vec![
-            Value::Object(object),
-            Value::Tensor(Tensor::new(query, vec![1, 300]).unwrap()),
-            Value::Num(1.0),
-        ])
+        let nearest = vec2word_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Object(object),
+                Value::Tensor(Tensor::new(query, vec![1, 300]).unwrap()),
+                Value::Num(1.0),
+            ]),
+        )
         .await
         .unwrap();
         let Value::OutputList(outputs) = nearest else {
@@ -3212,9 +2885,15 @@ mod tests {
         assert_eq!(model.vocabulary, vec!["alpha", "beta", "gamma"]);
         assert_eq!(model.vectors.len(), 24);
 
-        let lookup = word2vec_builtin(vec![Value::Object(object), Value::String("alpha".into())])
-            .await
-            .unwrap();
+        let lookup = word2vec_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Object(object),
+                Value::String("alpha".into()),
+            ]),
+        )
+        .await
+        .unwrap();
         let Value::Tensor(tensor) = lookup else {
             panic!("expected tensor");
         };
@@ -3266,7 +2945,12 @@ mod tests {
             vec!["missing", "beta"],
         ]));
 
-        let result = doc2sequence_builtin(vec![emb, documents]).await.unwrap();
+        let result = doc2sequence_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![emb, documents]),
+        )
+        .await
+        .unwrap();
         let Value::Cell(cell) = result else {
             panic!("expected cell array");
         };
@@ -3299,18 +2983,21 @@ mod tests {
             vec!["beta"],
         ]));
 
-        let result = doc2sequence_builtin(vec![
-            emb,
-            documents,
-            Value::String("UnknownWord".into()),
-            Value::String("nan".into()),
-            Value::String("PaddingDirection".into()),
-            Value::String("right".into()),
-            Value::String("PaddingValue".into()),
-            Value::Num(-5.0),
-            Value::String("Length".into()),
-            Value::Num(3.0),
-        ])
+        let result = doc2sequence_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                emb,
+                documents,
+                Value::String("UnknownWord".into()),
+                Value::String("nan".into()),
+                Value::String("PaddingDirection".into()),
+                Value::String("right".into()),
+                Value::String("PaddingValue".into()),
+                Value::Num(-5.0),
+                Value::String("Length".into()),
+                Value::Num(3.0),
+            ]),
+        )
         .await
         .unwrap();
         let Value::Cell(cell) = result else {
@@ -3347,14 +3034,17 @@ mod tests {
             vec!["a"],
         ]));
 
-        let result = doc2sequence_builtin(vec![
-            emb,
-            documents,
-            Value::String("PaddingDirection".into()),
-            Value::String("none".into()),
-            Value::String("Length".into()),
-            Value::Num(2.0),
-        ])
+        let result = doc2sequence_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                emb,
+                documents,
+                Value::String("PaddingDirection".into()),
+                Value::String("none".into()),
+                Value::String("Length".into()),
+                Value::Num(2.0),
+            ]),
+        )
         .await
         .unwrap();
         let Value::Cell(cell) = result else {
@@ -3395,16 +3085,19 @@ mod tests {
                 StringArray::new(vec!["alpha".into(), "beta".into()], vec![1, 2]).unwrap(),
             ),
         );
-        let result = doc2sequence_builtin(vec![
-            Value::Object(word_encoding),
-            documents.clone(),
-            Value::String("UnknownWord".into()),
-            Value::String("nan".into()),
-            Value::String("PaddingDirection".into()),
-            Value::String("right".into()),
-            Value::String("Length".into()),
-            Value::Num(4.0),
-        ])
+        let result = doc2sequence_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Object(word_encoding),
+                documents.clone(),
+                Value::String("UnknownWord".into()),
+                Value::String("nan".into()),
+                Value::String("PaddingDirection".into()),
+                Value::String("right".into()),
+                Value::String("Length".into()),
+                Value::Num(4.0),
+            ]),
+        )
         .await
         .unwrap();
         let Value::Cell(cell) = result else {
@@ -3426,21 +3119,30 @@ mod tests {
         assert_eq!(second.shape(), [1, 4]);
         assert_eq!(second.materialize_f64(), vec![2.0, 0.0, 0.0, 0.0]);
 
-        let err = doc2sequence_builtin(vec![Value::Num(1.0), documents.clone()])
-            .await
-            .unwrap_err();
+        let err = doc2sequence_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(1.0),
+                documents.clone(),
+            ]),
+        )
+        .await
+        .unwrap_err();
         assert!(
             err.to_string()
                 .contains("wordEmbedding or wordEncoding object"),
             "{err}"
         );
 
-        let err = doc2sequence_builtin(vec![
-            embedding_object(model).unwrap(),
-            documents,
-            Value::String("PaddingDirection".into()),
-            Value::String("middle".into()),
-        ])
+        let err = doc2sequence_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                embedding_object(model).unwrap(),
+                documents,
+                Value::String("PaddingDirection".into()),
+                Value::String("middle".into()),
+            ]),
+        )
         .await
         .unwrap_err();
         assert!(err.to_string().contains("PaddingDirection"), "{err}");
@@ -3465,10 +3167,13 @@ mod tests {
             vec!["gamma"],
         ]));
 
-        let left = doc2sequence_builtin(vec![
-            Value::Object(word_encoding.clone()),
-            documents.clone(),
-        ])
+        let left = doc2sequence_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Object(word_encoding.clone()),
+                documents.clone(),
+            ]),
+        )
         .await
         .unwrap();
         let Value::Cell(left) = left else {
@@ -3485,12 +3190,15 @@ mod tests {
         assert_eq!(second.shape(), [1, 3]);
         assert_eq!(second.materialize_f64(), vec![0.0, 0.0, 3.0]);
 
-        let none = doc2sequence_builtin(vec![
-            Value::Object(word_encoding.clone()),
-            documents.clone(),
-            Value::String("PaddingDirection".into()),
-            Value::String("none".into()),
-        ])
+        let none = doc2sequence_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Object(word_encoding.clone()),
+                documents.clone(),
+                Value::String("PaddingDirection".into()),
+                Value::String("none".into()),
+            ]),
+        )
         .await
         .unwrap();
         let Value::Cell(none) = none else {
@@ -3502,12 +3210,15 @@ mod tests {
         assert_eq!(second.shape(), [1, 1]);
         assert_eq!(second.materialize_f64(), vec![3.0]);
 
-        let shortest = doc2sequence_builtin(vec![
-            Value::Object(word_encoding),
-            documents,
-            Value::String("Length".into()),
-            Value::String("shortest".into()),
-        ])
+        let shortest = doc2sequence_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Object(word_encoding),
+                documents,
+                Value::String("Length".into()),
+                Value::String("shortest".into()),
+            ]),
+        )
         .await
         .unwrap();
         let Value::Cell(shortest) = shortest else {
@@ -3534,16 +3245,19 @@ mod tests {
         };
         let emb = embedding_object(model).unwrap();
         let documents = Value::Object(tokenized_document_object(vec![vec!["alpha"]]));
-        let result = doc2sequence_builtin(vec![
-            emb,
-            documents,
-            Value::String("PaddingDirection".into()),
-            Value::String("left".into()),
-            Value::String("PaddingValue".into()),
-            Value::Num(f64::NAN),
-            Value::String("Length".into()),
-            Value::Num(2.0),
-        ])
+        let result = doc2sequence_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                emb,
+                documents,
+                Value::String("PaddingDirection".into()),
+                Value::String("left".into()),
+                Value::String("PaddingValue".into()),
+                Value::Num(f64::NAN),
+                Value::String("Length".into()),
+                Value::Num(2.0),
+            ]),
+        )
         .await
         .unwrap();
         let Value::Cell(cell) = result else {
@@ -3577,10 +3291,17 @@ mod tests {
                 .expect("resident numeric admission fixture")
                 .handle,
         );
-        let error =
-            doc2sequence_builtin(vec![emb, documents, Value::from("Length"), resident_length])
-                .await
-                .unwrap_err();
+        let error = doc2sequence_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                emb,
+                documents,
+                Value::from("Length"),
+                resident_length,
+            ]),
+        )
+        .await
+        .unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:doc2sequence:InvalidInput"));
         assert!(error
             .message()
@@ -3612,10 +3333,13 @@ mod tests {
             provider.reset_telemetry();
             let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
 
-            let error = futures::executor::block_on(doc2sequence_builtin(vec![
-                Value::Object(embedding),
-                documents,
-            ]))
+            let error = futures::executor::block_on(doc2sequence_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Object(embedding),
+                    documents,
+                ]),
+            ))
             .expect_err("nested resident vectors must reject before gather");
             assert_eq!(error.identifier(), Some("RunMat:doc2sequence:InvalidInput"));
             assert!(error
@@ -3703,7 +3427,12 @@ mod tests {
         let words = Value::StringArray(
             StringArray::new(vec!["queen".into(), "missing".into()], vec![1, 2]).unwrap(),
         );
-        let result = word2vec_builtin(vec![emb, words]).await.unwrap();
+        let result = word2vec_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![emb, words]),
+        )
+        .await
+        .unwrap();
         let Value::Tensor(tensor) = result else {
             panic!("expected tensor");
         };
@@ -3722,12 +3451,15 @@ mod tests {
             dimension: 2,
         };
         let emb = embedding_object(model).unwrap();
-        let result = word2vec_builtin(vec![
-            emb,
-            Value::String("ALPHA".into()),
-            Value::String("IgnoreCase".into()),
-            Value::Bool(true),
-        ])
+        let result = word2vec_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                emb,
+                Value::String("ALPHA".into()),
+                Value::String("IgnoreCase".into()),
+                Value::Bool(true),
+            ]),
+        )
         .await
         .unwrap();
         let Value::Tensor(tensor) = result else {
@@ -3738,10 +3470,13 @@ mod tests {
 
     #[tokio::test]
     async fn word2vec_rejects_integer_words_before_object_validation() {
-        let error = word2vec_builtin(vec![
-            Value::String("not an object".into()),
-            Value::Int(IntValue::U8(1)),
-        ])
+        let error = word2vec_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("not an object".into()),
+                Value::Int(IntValue::U8(1)),
+            ]),
+        )
         .await
         .expect_err("integer words are outside the text-only surface");
         assert!(error.message().contains("must be host text"));
@@ -3750,6 +3485,7 @@ mod tests {
     #[tokio::test]
     async fn write_word_embedding_rejects_integer_filename_before_object_validation() {
         let error = write_word_embedding_builtin(
+            None,
             Value::String("not an object".into()),
             Value::Int(IntValue::U8(1)),
         )
@@ -3769,13 +3505,16 @@ mod tests {
         };
         let emb = embedding_object(model).unwrap();
         let query = Value::Tensor(Tensor::new(vec![0.6, 0.8], vec![1, 2]).unwrap());
-        let result = vec2word_builtin(vec![
-            emb,
-            query,
-            Value::Num(2.0),
-            Value::String("Distance".into()),
-            Value::String("cosine".into()),
-        ])
+        let result = vec2word_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                emb,
+                query,
+                Value::Num(2.0),
+                Value::String("Distance".into()),
+                Value::String("cosine".into()),
+            ]),
+        )
         .await
         .unwrap();
         let Value::OutputList(outputs) = result else {
@@ -3811,10 +3550,13 @@ mod tests {
             Value::Object(object)
         };
 
-        let result = vec2word_builtin(vec![
-            embedding(),
-            Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![2]).unwrap()),
-        ])
+        let result = vec2word_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                embedding(),
+                Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![2]).unwrap()),
+            ]),
+        )
         .await
         .expect("rank-one model storage and query are one embedding row");
         let Value::OutputList(outputs) = result else {
@@ -3825,10 +3567,13 @@ mod tests {
         };
         assert_eq!(words.data(), vec!["east"]);
 
-        let error = vec2word_builtin(vec![
-            embedding(),
-            Value::Tensor(Tensor::new(vec![1.0], Vec::new()).unwrap()),
-        ])
+        let error = vec2word_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                embedding(),
+                Value::Tensor(Tensor::new(vec![1.0], Vec::new()).unwrap()),
+            ]),
+        )
         .await
         .expect_err("rank-zero query has no embedding columns");
         assert!(error.message().contains("must have 2 columns, got 0"));
@@ -3846,18 +3591,27 @@ mod tests {
         };
 
         let compatibility = crate::compatibility::push_runmat_extensions_enabled(false);
-        let error = vec2word_builtin(vec![embedding_object(model()).unwrap(), matrix()])
-            .await
-            .expect_err("typed vectors must be gated");
+        let error = vec2word_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                embedding_object(model()).unwrap(),
+                matrix(),
+            ]),
+        )
+        .await
+        .expect_err("typed vectors must be gated");
         assert_eq!(
             error.identifier(),
             VEC2WORD_INTEGER_MATRIX_EXTENSION.error_identifier
         );
-        let error = vec2word_builtin(vec![
-            embedding_object(model()).unwrap(),
-            Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap()),
-            Value::Int(runmat_value::IntValue::U8(1)),
-        ])
+        let error = vec2word_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                embedding_object(model()).unwrap(),
+                Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap()),
+                Value::Int(runmat_value::IntValue::U8(1)),
+            ]),
+        )
         .await
         .expect_err("typed k must be gated");
         assert_eq!(
@@ -3867,11 +3621,14 @@ mod tests {
         drop(compatibility);
 
         let extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-        let result = vec2word_builtin(vec![
-            embedding_object(model()).unwrap(),
-            matrix(),
-            Value::Int(runmat_value::IntValue::U8(1)),
-        ])
+        let result = vec2word_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                embedding_object(model()).unwrap(),
+                matrix(),
+                Value::Int(runmat_value::IntValue::U8(1)),
+            ]),
+        )
         .await
         .expect("RunMat typed vec2word forms");
         assert!(matches!(result, Value::OutputList(_)));
@@ -3882,9 +3639,15 @@ mod tests {
             )
             .unwrap(),
         );
-        let error = vec2word_builtin(vec![embedding_object(model()).unwrap(), wide])
-            .await
-            .expect_err("lossy integer vector must reject");
+        let error = vec2word_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                embedding_object(model()).unwrap(),
+                wide,
+            ]),
+        )
+        .await
+        .expect_err("lossy integer vector must reject");
         assert!(error.message().contains("exactly representable as double"));
         drop(extensions);
     }
@@ -3898,7 +3661,12 @@ mod tests {
         };
         let emb = embedding_object(model).unwrap();
         let query = Value::Tensor(Tensor::new(vec![1.0, 0.0, 0.5], vec![1, 3]).unwrap());
-        let err = vec2word_builtin(vec![emb, query]).await.unwrap_err();
+        let err = vec2word_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![emb, query]),
+        )
+        .await
+        .unwrap_err();
         assert!(err.to_string().contains("must have 2 columns"), "{err}");
     }
 
@@ -3911,9 +3679,16 @@ mod tests {
         };
         let emb = embedding_object(model).unwrap();
         let query = Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap());
-        let err = vec2word_builtin(vec![emb, query, Value::Num(0.0)])
-            .await
-            .unwrap_err();
+        let err = vec2word_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                emb,
+                query,
+                Value::Num(0.0),
+            ]),
+        )
+        .await
+        .unwrap_err();
         assert!(
             err.to_string().contains("expected positive integer scalar"),
             "{err}"

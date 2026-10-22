@@ -155,7 +155,7 @@ fn compatibility_failure_does_not_publish_a_successful_prepared_body() {
     }
     fn sparse_return(invocation: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
         let sink = invocation.call_observation;
-        Box::pin(async move {
+        crate::builtin::admitted_builtin_future(None, "fixture", async move {
             if let Some(right) = sink.and_then(|sink| {
                 sink.prepared_right(
                     runmat_builtins::BuiltinBindingIdentity {

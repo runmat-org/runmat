@@ -3,10 +3,13 @@ use super::*;
 #[test]
 fn hgload_applies_property_overrides_and_returns_old_values() {
     let _guard = setup();
-    let fig = figure_builtin(vec![
-        Value::String("Name".into()),
-        Value::String("Before".into()),
-    ])
+    let fig = figure_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::String("Name".into()),
+            Value::String("Before".into()),
+        ]),
+    )
     .expect("figure");
     let path = temp_path("hgload");
     let _ = std::fs::remove_file(&path);
@@ -47,7 +50,11 @@ fn hgload_applies_property_overrides_and_returns_old_values() {
 #[test]
 fn hgload_output_admission_failure_rolls_back_imported_figures() {
     let _guard = setup();
-    let figure = figure_builtin(vec![]).expect("source figure");
+    let figure = figure_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    )
+    .expect("source figure");
     let path = temp_path("hgload_output_rollback");
     let _ = std::fs::remove_file(&path);
     block_on(hgsave_builtin(vec![

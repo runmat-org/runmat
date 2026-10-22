@@ -20,7 +20,8 @@ pub(super) fn admit(value: Value) -> BuiltinResult<AdmittedText> {
             if chars.rows == 1
                 && crate::builtins::common::shape::effective_rank(&chars.shape) <= 2 =>
         {
-            Ok(AdmittedText::Text(chars.data().iter().collect()))
+            crate::builtins::common::text::decode_utf16_with_error(chars.data(), invalid_input)
+                .map(AdmittedText::Text)
         }
         Value::Tensor(tensor) => numeric_text(tensor).map(AdmittedText::Text),
         Value::GpuTensor(ref handle) if numeric_row(handle.shape()) => {

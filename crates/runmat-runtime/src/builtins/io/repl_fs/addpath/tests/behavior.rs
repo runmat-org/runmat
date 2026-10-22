@@ -15,7 +15,8 @@ fn prepends_returns_previous_path_and_deduplicates() {
     crate::builtins::common::path_state::set_path_string(&format!(
         "{first}{}{second}",
         crate::builtins::common::path_state::PATH_LIST_SEPARATOR
-    ));
+    ))
+    .expect("test search path update");
 
     let returned = super::run(vec![Value::String(second.clone().into())]).expect("addpath");
     assert_eq!(
@@ -45,7 +46,7 @@ fn appends_text_containers_and_character_rows() {
         1,
     )
     .expect("cell");
-    crate::builtins::common::path_state::set_path_string("");
+    crate::builtins::common::path_state::set_path_string("").expect("test search path update");
     super::run(vec![
         Value::StringArray(strings),
         Value::Cell(cells),
@@ -71,7 +72,7 @@ fn asymmetric_cell_paths_follow_column_major_order() {
         2,
     )
     .unwrap();
-    crate::builtins::common::path_state::set_path_string("");
+    crate::builtins::common::path_state::set_path_string("").expect("test search path update");
     super::run(vec![Value::Cell(cells), Value::from("-end")]).unwrap();
     assert_eq!(
         crate::builtins::common::path_state::current_path_segments(),
@@ -88,9 +89,13 @@ fn trailing_singleton_character_folder_is_admitted() {
         .to_string_lossy()
         .chars()
         .collect::<Vec<_>>();
-    let shape = vec![1, characters.len(), 1];
-    let value = CharArray::new_with_shape(characters, shape).unwrap();
-    crate::builtins::common::path_state::set_path_string("");
+    let shape = vec![
+        1,
+        directory.path().to_string_lossy().encode_utf16().count(),
+        1,
+    ];
+    let value = CharArray::from_unicode_scalars_with_shape(characters, shape).unwrap();
+    crate::builtins::common::path_state::set_path_string("").expect("test search path update");
     super::run(vec![Value::CharArray(value)]).unwrap();
     assert_eq!(
         crate::builtins::common::path_state::current_path_segments(),

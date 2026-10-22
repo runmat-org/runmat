@@ -110,7 +110,10 @@ pub fn axis_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult
         return Ok(Value::Bool(true));
     }
 
-    let Some(mode) = as_lower_str(&args[0]) else {
+    let Some(mode) = as_lower_str(&args[0]).map_err(|source| {
+        crate::builtins::plotting::plotting_error_with_source("cmds", source.to_string(), source)
+    })?
+    else {
         return Err(axis_invalid_argument());
     };
     match mode.trim() {

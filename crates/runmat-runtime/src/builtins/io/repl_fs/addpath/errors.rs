@@ -17,6 +17,11 @@ pub(super) fn decode(error: super::super::path_mutation::text::DecodeError) -> c
     use super::super::path_mutation::text::DecodeError;
     match error {
         DecodeError::InvalidInput => descriptor(&runmat_builtins::ADDPATH_ERROR_ARGUMENT_TYPE),
+        DecodeError::Encoding(source) => {
+            let mut error = descriptor(&runmat_builtins::ADDPATH_ERROR_ARGUMENT_TYPE);
+            error.source = Some(Box::new(source));
+            error
+        }
         DecodeError::Provider(source) => {
             detail(&runmat_builtins::ADDPATH_ERROR_PROVIDER, source.message())
         }

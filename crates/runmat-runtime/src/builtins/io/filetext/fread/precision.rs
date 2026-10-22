@@ -1,6 +1,8 @@
 use super::*;
+use crate::builtins::common::tensor;
 use runmat_builtins::{parse_fread_precision, FreadOutputKind, FreadPrecisionSpec};
 
+pub(super) use runmat_builtins::FreadInputSource as InputSource;
 pub(super) use runmat_builtins::FreadInputType as InputType;
 
 #[derive(Clone, Copy, Debug)]
@@ -11,7 +13,7 @@ pub(super) enum OutputKind {
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct PrecisionSpec {
-    pub(super) input: InputType,
+    pub(super) input: InputSource,
     pub(super) output: OutputKind,
     pub(super) repeat: usize,
 }

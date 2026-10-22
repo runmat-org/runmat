@@ -28,18 +28,18 @@ pub struct LinkedProgram {
     /// Issued only after the selected linker succeeds and its image is
     /// validated and hashed. Public compatibility fields are checked against
     /// this private receipt before any consumer may rely on them.
-    selected_image: Option<VerifiedSelectedImage>,
+    pub(super) selected_image: Option<VerifiedSelectedImage>,
 }
 
 /// Proof of one completed selected image, not merely a reproducible recipe.
 /// This cannot be constructed from decoded metadata or an ambient link.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VerifiedSelectedImage {
-    canonical_plan: super::CanonicalSelectedLinkReceipt,
-    output_digest: runmat_execution::Digest,
-    product: runmat_execution::host::NativeSelectedProductBinding,
-    selected_build: super::NativeLinkBuildIdentity,
-    inputs: super::NativeProgramLinkIdentity,
+    pub(super) canonical_plan: super::CanonicalSelectedLinkReceipt,
+    pub(super) output_digest: runmat_execution::Digest,
+    pub(super) product: runmat_execution::host::NativeSelectedProductBinding,
+    pub(super) selected_build: super::NativeLinkBuildIdentity,
+    pub(super) inputs: super::NativeProgramLinkIdentity,
 }
 
 impl VerifiedSelectedImage {

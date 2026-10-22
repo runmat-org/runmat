@@ -5,11 +5,25 @@ mod contract;
 mod documentation;
 mod inference;
 mod selector;
+mod properties;
+mod methods;
+pub use properties::{GpuDeviceProperty, GPU_DEVICE_CLASS};
 #[cfg(test)]
 mod tests;
 
 pub use contract::*;
-pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&GPU_DEVICE_CATALOG_ENTRY];
+pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[
+    &GPU_DEVICE_CATALOG_ENTRY,
+    &methods::NAME,
+    &methods::INDEX,
+    &methods::TOTAL_MEMORY,
+    &methods::AVAILABLE_MEMORY,
+    &methods::SUPPORTS_DOUBLE,
+    &methods::AVAILABLE,
+    &methods::SELECTED,
+    &methods::RESET,
+    &methods::WAIT,
+];
 pub use selector::{
     gpu_device_index_from_float, gpu_device_index_from_integer, GpuDeviceIndexError,
     GPU_DEVICE_ACTIVE_INDEX,
@@ -27,13 +41,18 @@ pub const GPU_DEVICE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         inference_rule: BuiltinInferenceRule::Identity(IdentityInferenceRule::new(
             inference::infer,
         )),
-        compatibility: BuiltinCompatibility::RunMat,
-        async_behavior: BuiltinAsyncBehavior::NeverSuspends,
-        purity: BuiltinPurity::DeterministicReadOnly,
+        compatibility: BuiltinCompatibility::Matlab,
+        async_behavior: BuiltinAsyncBehavior::MaySuspend,
+        purity: BuiltinPurity::Impure,
         semantic_kind: BuiltinSemanticKind::General,
         workspace_effect: None,
         environment_effect: None,
-        effects: &[EffectKind::EnvironmentRead, EffectKind::MayThrow],
+        effects: &[
+            EffectKind::EnvironmentRead,
+            EffectKind::EnvironmentWrite,
+            EffectKind::MaySuspend,
+            EffectKind::MayThrow,
+        ],
         capabilities: &[CapabilityRequirement::Accelerator],
     },
     placement: BuiltinPlacementContract {

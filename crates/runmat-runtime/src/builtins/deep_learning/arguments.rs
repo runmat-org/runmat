@@ -6,7 +6,14 @@ pub(in crate::builtins) fn scalar_text(
 ) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.to_string()),
-        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data().iter().collect()),
+        Value::CharArray(chars) if chars.rows == 1 => Ok(runmat_value::decode_utf16_code_units(
+            chars.data(),
+        )
+        .map_err(|source| {
+            let mut error = deep_learning_error(function, source.to_string());
+            error.source = Some(Box::new(source));
+            error
+        })?),
         Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].to_string()),
         other => Err(deep_learning_error(
             function,

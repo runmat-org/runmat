@@ -180,7 +180,7 @@ impl WriteSpec {
     }
 }
 
-pub(super) fn parse_precision(arg: Option<&Value>) -> Result<WriteSpec, String> {
+pub(super) fn parse_precision(arg: Option<&Value>) -> BuiltinResult<WriteSpec> {
     match arg {
         None => Ok(WriteSpec::default()),
         Some(value) => {
@@ -189,6 +189,7 @@ pub(super) fn parse_precision(arg: Option<&Value>) -> Result<WriteSpec, String> 
                 "fwrite: precision argument must be a string scalar or character vector",
             )?;
             parse_precision_string(&text)
+                .map_err(|detail| fwrite_error_with_detail(&FWRITE_ERROR_INVALID_OPTION, detail))
         }
     }
 }
@@ -291,7 +292,7 @@ pub(super) enum Endianness {
 pub(super) fn parse_machine_format(
     arg: Option<&Value>,
     default_label: &str,
-) -> Result<MachineFormat, String> {
+) -> BuiltinResult<MachineFormat> {
     match arg {
         Some(value) => {
             let text = scalar_string(
@@ -299,8 +300,10 @@ pub(super) fn parse_machine_format(
                 "fwrite: machine format must be a string scalar or character vector",
             )?;
             machine_format_from_label(&text)
+                .map_err(|detail| fwrite_error_with_detail(&FWRITE_ERROR_INVALID_OPTION, detail))
         }
-        None => machine_format_from_label(default_label),
+        None => machine_format_from_label(default_label)
+            .map_err(|detail| fwrite_error_with_detail(&FWRITE_ERROR_INVALID_OPTION, detail)),
     }
 }
 
@@ -338,12 +341,16 @@ pub(super) fn machine_format_from_label(label: &str) -> Result<MachineFormat, St
     Err(format!("fwrite: unsupported machine format '{trimmed}'"))
 }
 
-pub(super) fn scalar_string(value: &Value, err: &str) -> Result<String, String> {
+pub(super) fn scalar_string(value: &Value, err: &str) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.as_str().to_owned()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data().iter().collect()),
+        Value::CharArray(ca) if ca.rows == 1 => {
+            crate::builtins::io::utf16::decode_utf16_with_error(ca.data(), || {
+                fwrite_error_with_detail(&FWRITE_ERROR_INVALID_OPTION, err)
+            })
+        }
         Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].as_str().to_owned()),
-        _ => Err(err.to_string()),
+        _ => Err(fwrite_error_with_detail(&FWRITE_ERROR_INVALID_OPTION, err)),
     }
 }
 

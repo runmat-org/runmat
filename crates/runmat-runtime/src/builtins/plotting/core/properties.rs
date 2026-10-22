@@ -1,3 +1,5 @@
+#[path = "properties/text_input.rs"]
+mod text_input;
 use runmat_plot::plots::figure::AxisLimitAxis;
 use runmat_plot::plots::{
     ColorMap, LegendStyle, NumericPlotData, PolarHistogramDisplayStyle, ShadingMode, TextStyle,
@@ -6,6 +8,7 @@ use runmat_value::{
     CellArray, CharArray, NumericScalar, StringArray, Tensor, UnboundedStructValueBuilder, Value,
 };
 use std::borrow::Cow;
+use text_input::{ValidatedStylePairs, ValidatedStyleValue};
 
 #[path = "properties/async_readback.rs"]
 mod async_readback;
@@ -14,16 +17,16 @@ pub(crate) use async_readback::set_properties_async_with_runtime;
 #[path = "properties/read_source.rs"]
 mod read_source;
 use read_source::PropertyReadSource;
-#[path = "properties/figure_read.rs"]
-mod figure_read;
 #[path = "properties/axes_read.rs"]
 mod axes_read;
-#[path = "properties/set_target.rs"]
-mod set_target;
-#[path = "properties/receiver.rs"]
-mod receiver;
 #[path = "properties/figure_plan.rs"]
 mod figure_plan;
+#[path = "properties/figure_read.rs"]
+mod figure_read;
+#[path = "properties/receiver.rs"]
+mod receiver;
+#[path = "properties/set_target.rs"]
+mod set_target;
 pub(crate) use receiver::select as select_graphics_property;
 pub(crate) use receiver::{get_receiver_properties, set_receiver_properties_with_runtime};
 use set_target::PropertySetHandle;
@@ -409,9 +412,17 @@ pub fn validate_heatmap_property_pairs(
                 }
             }
             "colormap" => {
-                let name = value_as_string(&pair[1]).ok_or_else(|| {
-                    plotting_error(builtin, format!("{builtin}: Colormap must be a string"))
-                })?;
+                let name = value_as_string(&pair[1])
+                    .map_err(|source| {
+                        crate::builtins::plotting::plotting_error_with_source(
+                            builtin,
+                            source.to_string(),
+                            source,
+                        )
+                    })?
+                    .ok_or_else(|| {
+                        plotting_error(builtin, format!("{builtin}: Colormap must be a string"))
+                    })?;
                 parse_colormap_name(&name, builtin)?;
             }
             "xdisplaylabels" => {
@@ -590,6 +601,13 @@ fn apply_root_property(
         }
         "units" => {
             let units = value_as_text_string(value)
+                .map_err(|source| {
+                    crate::builtins::plotting::plotting_error_with_source(
+                        builtin,
+                        source.to_string(),
+                        source,
+                    )
+                })?
                 .ok_or_else(|| plotting_error(builtin, format!("{builtin}: Units must be text")))?
                 .trim()
                 .to_ascii_lowercase();
@@ -677,7 +695,15 @@ fn root_property_value_from_value(
         Value::Num(value) => Ok(RootPropertyValue::Num(*value)),
         Value::Int(value) => Ok(RootPropertyValue::Num(value.to_f64())),
         Value::String(value) => Ok(RootPropertyValue::String(value.as_str().to_owned())),
-        Value::CharArray(value) => Ok(RootPropertyValue::String(value.data().iter().collect())),
+        Value::CharArray(value) => Ok(RootPropertyValue::String(
+            runmat_value::decode_utf16_code_units(value.data()).map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    builtin,
+                    source.to_string(),
+                    source,
+                )
+            })?,
+        )),
         Value::Tensor(value) => Ok(RootPropertyValue::Tensor(value.clone())),
         Value::StringArray(value) => Ok(RootPropertyValue::StringArray(value.clone())),
         _ => Err(plotting_error(
@@ -973,24 +999,22 @@ fn property_name(value: &Value, builtin: &'static str) -> BuiltinResult<String> 
 }
 
 pub(crate) fn is_heatmap_property_name(value: &Value) -> bool {
-    let Some(name) = value_as_string(value) else {
-        return false;
-    };
-    matches!(
-        canonical_property_name(name.trim()).as_ref(),
-        "title"
-            | "subtitle"
-            | "xlabel"
-            | "ylabel"
-            | "colorbar"
-            | "colorbarvisible"
-            | "gridvisible"
-            | "fontsize"
-            | "colorlimits"
-            | "colormap"
-            | "xdisplaylabels"
-            | "ydisplaylabels"
-    )
+    [
+        "title",
+        "subtitle",
+        "xlabel",
+        "ylabel",
+        "colorbar",
+        "colorbarvisible",
+        "gridvisible",
+        "fontsize",
+        "colorlimits",
+        "colormap",
+        "xdisplaylabels",
+        "ydisplaylabels",
+    ]
+    .into_iter()
+    .any(|key| crate::builtins::plotting::style::value_text_equals_ascii(value, key, true))
 }
 
 pub(crate) fn property_name_text(value: &Value, builtin: &'static str) -> BuiltinResult<String> {
@@ -1003,7 +1027,15 @@ pub(crate) fn property_name_text(value: &Value, builtin: &'static str) -> Builti
     let text = match value {
         Value::String(text) => text.as_str().to_owned(),
         Value::StringArray(strings) => strings.data()[0].as_str().to_owned(),
-        Value::CharArray(chars) => chars.data().iter().collect(),
+        Value::CharArray(chars) => {
+            runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    builtin,
+                    source.to_string(),
+                    source,
+                )
+            })?
+        }
         _ => {
             return Err(plotting_error(
                 builtin,
@@ -1036,12 +1068,20 @@ pub(crate) fn data_aspect_ratio_mode_from_value(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<&'static str> {
-    let mode = value_as_string(value).ok_or_else(|| {
-        plotting_error(
-            builtin,
-            format!("{builtin}: DataAspectRatioMode must be text"),
-        )
-    })?;
+    let mode = value_as_string(value)
+        .map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                builtin,
+                source.to_string(),
+                source,
+            )
+        })?
+        .ok_or_else(|| {
+            plotting_error(
+                builtin,
+                format!("{builtin}: DataAspectRatioMode must be text"),
+            )
+        })?;
     match mode.trim().to_ascii_lowercase().as_str() {
         "auto" => Ok("auto"),
         "manual" => Ok("manual"),
@@ -1167,12 +1207,23 @@ fn apply_text_property(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    let text_input = ValidatedStyleValue::new(value, builtin)?;
     let opts = LineStyleParseOptions::generic(builtin);
     match key {
         "string" => {
-            *text = Some(value_as_text_string(value).ok_or_else(|| {
-                plotting_error(builtin, format!("{builtin}: String must be text"))
-            })?);
+            *text = Some(
+                value_as_text_string(value)
+                    .map_err(|source| {
+                        crate::builtins::plotting::plotting_error_with_source(
+                            builtin,
+                            source.to_string(),
+                            source,
+                        )
+                    })?
+                    .ok_or_else(|| {
+                        plotting_error(builtin, format!("{builtin}: String must be text"))
+                    })?,
+            );
         }
         "color" => style.color = Some(parse_color_value(&opts, value)?),
         "fontsize" => {
@@ -1190,17 +1241,17 @@ fn apply_text_property(
             style.font_size = Some(font_size as f32);
         }
         "fontweight" => {
-            style.font_weight = Some(value_as_string(value).ok_or_else(|| {
+            style.font_weight = Some(text_input.text().ok_or_else(|| {
                 plotting_error(builtin, format!("{builtin}: FontWeight must be a string"))
             })?)
         }
         "fontangle" => {
-            style.font_angle = Some(value_as_string(value).ok_or_else(|| {
+            style.font_angle = Some(text_input.text().ok_or_else(|| {
                 plotting_error(builtin, format!("{builtin}: FontAngle must be a string"))
             })?)
         }
         "interpreter" => {
-            style.interpreter = Some(value_as_string(value).ok_or_else(|| {
+            style.interpreter = Some(text_input.text().ok_or_else(|| {
                 plotting_error(builtin, format!("{builtin}: Interpreter must be a string"))
             })?)
         }
@@ -1227,12 +1278,14 @@ fn apply_legend_property(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    let text_input = ValidatedStyleValue::new(value, builtin)?;
     let opts = LineStyleParseOptions::generic(builtin);
     match key {
         "string" => *labels = Some(collect_label_strings(builtin, std::slice::from_ref(value))?),
         "location" => {
             style.location = Some(
-                value_as_string(value)
+                text_input
+                    .text()
                     .ok_or_else(|| plotting_error(builtin, "legend: Location must be a string"))?,
             )
         }
@@ -1245,19 +1298,20 @@ fn apply_legend_property(
         }
         "fontweight" => {
             style.font_weight =
-                Some(value_as_string(value).ok_or_else(|| {
+                Some(text_input.text().ok_or_else(|| {
                     plotting_error(builtin, "legend: FontWeight must be a string")
                 })?)
         }
         "fontangle" => {
             style.font_angle = Some(
-                value_as_string(value)
+                text_input
+                    .text()
                     .ok_or_else(|| plotting_error(builtin, "legend: FontAngle must be a string"))?,
             )
         }
         "interpreter" => {
             style.interpreter =
-                Some(value_as_string(value).ok_or_else(|| {
+                Some(text_input.text().ok_or_else(|| {
                     plotting_error(builtin, "legend: Interpreter must be a string")
                 })?)
         }
@@ -1276,7 +1330,7 @@ fn apply_legend_property(
         }
         "orientation" => {
             style.orientation =
-                Some(value_as_string(value).ok_or_else(|| {
+                Some(text_input.text().ok_or_else(|| {
                     plotting_error(builtin, "legend: Orientation must be a string")
                 })?)
         }
@@ -1306,6 +1360,7 @@ fn apply_axes_property(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    let text_input = ValidatedStyleValue::new(value, builtin)?;
     match key {
         "legendvisible" => {
             let visible = value_as_bool(value).ok_or_else(|| {
@@ -1464,7 +1519,7 @@ fn apply_axes_property(
             Ok(())
         }
         "colormap" => {
-            let name = value_as_string(value).ok_or_else(|| {
+            let name = text_input.text().ok_or_else(|| {
                 plotting_error(builtin, format!("{builtin}: Colormap must be a string"))
             })?;
             let cmap = parse_colormap_name(&name, builtin)?;
@@ -1863,7 +1918,8 @@ fn apply_axes_property(
             Ok(())
         }
         "ydir" => {
-            let direction = match value_as_string(value)
+            let direction = match text_input
+                .text()
                 .map(|text| text.trim().to_ascii_lowercase())
                 .as_deref()
             {
@@ -1882,7 +1938,8 @@ fn apply_axes_property(
             .map_err(|err| map_figure_error(builtin, err))
         }
         "yaxislocation" => {
-            let location = value_as_string(value)
+            let location = text_input
+                .text()
                 .ok_or_else(|| {
                     plotting_error(builtin, format!("{builtin}: YAxisLocation must be text"))
                 })?
@@ -1909,7 +1966,8 @@ fn apply_axes_property(
             Ok(())
         }
         "units" => {
-            let units = value_as_string(value)
+            let units = text_input
+                .text()
                 .ok_or_else(|| plotting_error(builtin, format!("{builtin}: Units must be text")))?
                 .trim()
                 .to_ascii_lowercase();
@@ -2729,9 +2787,19 @@ fn apply_world_text_property(
     let mut style = annotation.style;
     match canonical_property_name(key).as_ref() {
         "string" => {
-            text = Some(value_as_text_string(value).ok_or_else(|| {
-                plotting_error(builtin, format!("{builtin}: String must be text"))
-            })?);
+            text = Some(
+                value_as_text_string(value)
+                    .map_err(|source| {
+                        crate::builtins::plotting::plotting_error_with_source(
+                            builtin,
+                            source.to_string(),
+                            source,
+                        )
+                    })?
+                    .ok_or_else(|| {
+                        plotting_error(builtin, format!("{builtin}: String must be text"))
+                    })?,
+            );
         }
         "position" => {
             let source = text_position_source(value, builtin)?;
@@ -4572,9 +4640,11 @@ fn apply_histogram_property(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    let text_input = ValidatedStyleValue::new(value, builtin)?;
     match key {
         "normalization" => {
-            let norm = value_as_string(value)
+            let norm = text_input
+                .text()
                 .ok_or_else(|| {
                     plotting_error(
                         builtin,
@@ -4611,7 +4681,7 @@ fn apply_histogram_property(
             Ok(())
         }
         "displayname" => {
-            let display_name = value_as_string(value).map(|s| s.to_string());
+            let display_name = text_input.text();
             super::state::update_plot_element_for_property(
                 authority,
                 hist.figure,
@@ -4634,7 +4704,8 @@ fn apply_histogram_property(
             Ok(())
         }
         "displaystyle" => {
-            let display_style = value_as_string(value)
+            let display_style = text_input
+                .text()
                 .ok_or_else(|| {
                     plotting_error(builtin, format!("{builtin}: DisplayStyle must be a string"))
                 })?
@@ -4710,7 +4781,7 @@ fn apply_histogram_property(
             Ok(())
         }
         "facecolor" | "edgecolor" => {
-            let Some(color_text) = value_as_string(value) else {
+            let Some(color_text) = text_input.text() else {
                 return Err(plotting_error(
                     builtin,
                     format!("{builtin}: color property must be a string"),
@@ -4798,9 +4869,11 @@ fn apply_histogram2_property_to_state(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    let text_input = ValidatedStyleValue::new(value, builtin)?;
     match key {
         "normalization" => {
-            next.normalization = value_as_string(value)
+            next.normalization = text_input
+                .text()
                 .ok_or_else(|| {
                     plotting_error(
                         builtin,
@@ -4829,7 +4902,7 @@ fn apply_histogram2_property_to_state(
             next.face_alpha = alpha;
         }
         "displayname" => {
-            next.display_name = value_as_string(value).map(|s| s.to_string());
+            next.display_name = text_input.text();
         }
         other => Err(plotting_error(
             builtin,
@@ -4919,6 +4992,7 @@ fn apply_stem_property(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    let text_input = ValidatedStyleValue::new(value, builtin)?;
     super::state::update_stem_plot_for_property(
         authority,
         stem_handle.figure,
@@ -4940,7 +5014,7 @@ fn apply_stem_property(
                 }
             }
             "linestyle" => {
-                if let Some(s) = value_as_string(value) {
+                if let Some(s) = text_input.text() {
                     stem.line_style = parse_line_style_name_for_props(&s);
                 }
             }
@@ -4950,7 +5024,7 @@ fn apply_stem_property(
                 }
             }
             "marker" => {
-                if let Some(s) = value_as_string(value) {
+                if let Some(s) = text_input.text() {
                     stem.marker = marker_from_name(&s, stem.marker.clone());
                 }
             }
@@ -4997,6 +5071,7 @@ fn apply_errorbar_property(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    let text_input = ValidatedStyleValue::new(value, builtin)?;
     super::state::update_errorbar_plot_for_property(
         authority,
         error_handle.figure,
@@ -5008,7 +5083,7 @@ fn apply_errorbar_property(
                 }
             }
             "linestyle" => {
-                if let Some(s) = value_as_string(value) {
+                if let Some(s) = text_input.text() {
                     errorbar.line_style = parse_line_style_name_for_props(&s);
                 }
             }
@@ -5023,7 +5098,7 @@ fn apply_errorbar_property(
                 }
             }
             "marker" => {
-                if let Some(s) = value_as_string(value) {
+                if let Some(s) = text_input.text() {
                     errorbar.marker = marker_from_name(&s, errorbar.marker.clone());
                 }
             }
@@ -5167,6 +5242,7 @@ fn apply_image_property(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    let text_input = ValidatedStyleValue::new(value, builtin)?;
     if key == "colordata" {
         return Err(plotting_error(
             builtin,
@@ -5174,7 +5250,8 @@ fn apply_image_property(
         ));
     }
     if key == "cdatamapping" {
-        let mapping = value_as_string(value)
+        let mapping = text_input
+            .text()
             .map(|text| text.trim().to_ascii_lowercase())
             .ok_or_else(|| {
                 plotting_error(builtin, format!("{builtin}: CDataMapping must be text"))
@@ -5244,7 +5321,7 @@ fn apply_image_property(
                 }
             }
             "cdatamapping" => {
-                if let Some(text) = value_as_string(value) {
+                if let Some(text) = text_input.text() {
                     let normalized = text.trim().to_ascii_lowercase();
                     if normalized == "direct" {
                         surface.image_mode = true;
@@ -5549,7 +5626,8 @@ fn apply_line_properties_with_data(
         .style_indices
         .iter()
         .map(|&index| (pairs[index].0.as_str(), pairs[index].1))
-        .collect();
+        .map(|(key, value)| Ok((key, ValidatedStyleValue::new(value, builtin)?)))
+        .collect::<BuiltinResult<Vec<_>>>()?;
 
     let update_data = prepared.x.as_ref().is_some_and(|x| *x != current_x)
         || prepared.y.as_ref().is_some_and(|y| *y != current_y);
@@ -5573,7 +5651,7 @@ fn apply_line_properties_with_data(
                     let _ = line.update_numeric_data(next_x, next_y);
                 }
                 for (key, value) in &style_pairs {
-                    apply_line_plot_properties(line, key, value, builtin);
+                    apply_line_plot_properties(line, key, *value, builtin);
                 }
             }
         },
@@ -5589,6 +5667,7 @@ fn apply_line_style_only(
     builtin: &'static str,
     guard: Option<PlotUpdateGuard>,
 ) -> BuiltinResult<()> {
+    let prepared_pairs = ValidatedStylePairs::new(pairs, builtin)?;
     update_property_plot(
         authority,
         line_handle.figure,
@@ -5597,7 +5676,7 @@ fn apply_line_style_only(
         builtin,
         |plot| {
             if let runmat_plot::plots::figure::PlotElement::Line(line) = plot {
-                for (key, value) in pairs {
+                for (key, value) in prepared_pairs.iter() {
                     apply_line_plot_properties(line, key, value, builtin);
                 }
             }
@@ -5731,6 +5810,7 @@ fn apply_reference_line_property(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    let text_input = ValidatedStyleValue::new(value, builtin)?;
     super::state::update_plot_element_for_property(
         authority,
         line_handle.figure,
@@ -5760,25 +5840,25 @@ fn apply_reference_line_property(
                         }
                     }
                     "linestyle" => {
-                        if let Some(s) = value_as_string(value) {
+                        if let Some(s) = text_input.text() {
                             line.line_style = parse_line_style_name_for_props(&s);
                         }
                     }
                     "label" => {
-                        line.label = value_as_string(value).map(|s| s.to_string());
+                        line.label = text_input.text();
                     }
                     "labelorientation" => {
-                        if let Some(s) = value_as_string(value) {
+                        if let Some(s) = text_input.text() {
                             line.label_orientation = s.to_ascii_lowercase();
                         }
                     }
                     "displayname" => {
-                        line.display_name = value_as_string(value).map(|s| s.to_string());
+                        line.display_name = text_input.text();
                     }
                     "visible" => {
                         if let Some(v) = value_as_bool(value) {
                             line.visible = v;
-                        } else if let Some(s) = value_as_string(value) {
+                        } else if let Some(s) = text_input.text() {
                             line.visible =
                                 !matches!(s.trim().to_ascii_lowercase().as_str(), "off" | "false");
                         }
@@ -5800,6 +5880,7 @@ fn apply_stairs_property(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    let text_input = ValidatedStyleValue::new(value, builtin)?;
     super::state::update_plot_element_for_property(
         authority,
         stairs_handle.figure,
@@ -5820,7 +5901,7 @@ fn apply_stairs_property(
                         }
                     }
                     "displayname" => {
-                        stairs.label = value_as_string(value).map(|s| s.to_string());
+                        stairs.label = text_input.text();
                     }
                     _ => {}
                 }
@@ -5893,7 +5974,8 @@ fn apply_scatter_properties_with_data(
         .style_indices
         .iter()
         .map(|&index| (pairs[index].0.as_str(), pairs[index].1))
-        .collect();
+        .map(|(key, value)| Ok((key, ValidatedStyleValue::new(value, builtin)?)))
+        .collect::<BuiltinResult<Vec<_>>>()?;
 
     let polar_update = if prepared.theta.is_some() || prepared.r.is_some() {
         let current_x_render = current_x.materialize_f64();
@@ -5963,13 +6045,14 @@ fn apply_scatter_properties_with_data(
 
 fn apply_scatter_style_pairs(
     scatter: &mut runmat_plot::plots::ScatterPlot,
-    pairs: &[(&str, &Value)],
+    pairs: &[(&str, ValidatedStyleValue<'_>)],
     builtin: &'static str,
 ) {
-    for (key, value) in pairs {
+    for (key, text_input) in pairs {
+        let value = text_input.value();
         match *key {
             "marker" => {
-                if let Some(s) = value_as_string(value) {
+                if let Some(s) = text_input.text() {
                     scatter.marker_style = scatter_marker_from_name(&s, scatter.marker_style);
                 }
             }
@@ -5993,7 +6076,7 @@ fn apply_scatter_style_pairs(
                     scatter.set_edge_thickness(v as f32);
                 }
             }
-            "displayname" => scatter.label = value_as_string(value).map(|s| s.to_string()),
+            "displayname" => scatter.label = text_input.text(),
             _ => {}
         }
     }
@@ -6010,7 +6093,8 @@ fn apply_scatter_style_only(
     let style_pairs: Vec<_> = pairs
         .iter()
         .map(|(name, value)| (name.as_str(), *value))
-        .collect();
+        .map(|(key, value)| Ok((key, ValidatedStyleValue::new(value, builtin)?)))
+        .collect::<BuiltinResult<Vec<_>>>()?;
     update_property_plot(
         authority,
         scatter_handle.figure,
@@ -6118,6 +6202,7 @@ fn apply_bar_property(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    let text_input = ValidatedStyleValue::new(value, builtin)?;
     super::state::update_plot_element_for_property(
         authority,
         bar_handle.figure,
@@ -6138,7 +6223,7 @@ fn apply_bar_property(
                         }
                     }
                     "displayname" => {
-                        bar.label = value_as_string(value).map(|s| s.to_string());
+                        bar.label = text_input.text();
                     }
                     _ => {}
                 }
@@ -6415,7 +6500,15 @@ fn surface_property_update(
             ))
         }
         "displayname" | "label" => Ok(SurfacePropertyUpdate::DisplayName(
-            value_as_string(value).map(|s| s.to_string()),
+            value_as_string(value)
+                .map_err(|source| {
+                    crate::builtins::plotting::plotting_error_with_source(
+                        builtin,
+                        source.to_string(),
+                        source,
+                    )
+                })?
+                .map(|s| s.to_string()),
         )),
         "visible" => {
             let visible = value_as_bool(value).ok_or_else(|| {
@@ -6424,7 +6517,13 @@ fn surface_property_update(
             Ok(SurfacePropertyUpdate::Visible(visible))
         }
         "colormap" => {
-            if let Some(name) = value_as_string(value) {
+            if let Some(name) = value_as_string(value).map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    builtin,
+                    source.to_string(),
+                    source,
+                )
+            })? {
                 return Ok(SurfacePropertyUpdate::Colormap(parse_colormap_name(
                     &name, builtin,
                 )?));
@@ -6438,12 +6537,20 @@ fn surface_property_update(
             value, builtin,
         )?)),
         "edgecolor" => {
-            let text = value_as_string(value).ok_or_else(|| {
-                plotting_error(
-                    builtin,
-                    format!("{builtin}: EdgeColor must be 'auto', 'flat', 'interp', or 'none'"),
-                )
-            })?;
+            let text = value_as_string(value)
+                .map_err(|source| {
+                    crate::builtins::plotting::plotting_error_with_source(
+                        builtin,
+                        source.to_string(),
+                        source,
+                    )
+                })?
+                .ok_or_else(|| {
+                    plotting_error(
+                        builtin,
+                        format!("{builtin}: EdgeColor must be 'auto', 'flat', 'interp', or 'none'"),
+                    )
+                })?;
             match text.trim().to_ascii_lowercase().as_str() {
                 "none" => Ok(SurfacePropertyUpdate::Wireframe(false)),
                 "auto" | "flat" | "interp" => Ok(SurfacePropertyUpdate::Wireframe(true)),
@@ -6529,6 +6636,7 @@ fn apply_binscatter_property(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    let text_input = ValidatedStyleValue::new(value, builtin)?;
     let mut next = binscatter.clone();
     match key {
         "numbins" => {
@@ -6558,7 +6666,7 @@ fn apply_binscatter_property(
             next.face_alpha = alpha;
         }
         "displayname" => {
-            next.display_name = value_as_string(value).map(|s| s.to_string());
+            next.display_name = text_input.text();
         }
         other => Err(plotting_error(
             builtin,
@@ -6687,6 +6795,7 @@ fn apply_patch_property(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    let text_input = ValidatedStyleValue::new(value, builtin)?;
     if key == "cdatamapping" {
         let mapping = parse_color_data_mapping(value, builtin)?;
         return super::state::update_plot_element_for_property(
@@ -6725,7 +6834,9 @@ fn apply_patch_property(
         .map_err(|error| plotting_error(builtin, format!("{builtin}: {error}")));
     }
     if key == "facecolor"
-        && value_as_string(value).is_some_and(|text| text.trim().eq_ignore_ascii_case("interp"))
+        && text_input
+            .text()
+            .is_some_and(|text| text.trim().eq_ignore_ascii_case("interp"))
     {
         return super::state::try_update_plot_element_for_property(
             authority,
@@ -6792,7 +6903,7 @@ fn apply_patch_property(
             if let runmat_plot::plots::figure::PlotElement::Patch(patch) = plot {
                 match key {
                     "facecolor" | "color" => {
-                        if let Some(text) = value_as_string(value) {
+                        if let Some(text) = text_input.text() {
                             match text.trim().to_ascii_lowercase().as_str() {
                                 "none" => patch.set_face_color_mode(
                                     runmat_plot::plots::PatchFaceColorMode::None,
@@ -6821,7 +6932,7 @@ fn apply_patch_property(
                         }
                     }
                     "edgecolor" => {
-                        if let Some(text) = value_as_string(value) {
+                        if let Some(text) = text_input.text() {
                             if text.trim().eq_ignore_ascii_case("none") {
                                 patch.set_edge_color_mode(
                                     runmat_plot::plots::PatchEdgeColorMode::None,
@@ -6858,7 +6969,7 @@ fn apply_patch_property(
                         }
                     }
                     "displayname" => {
-                        patch.set_label(value_as_string(value).map(|s| s.to_string()));
+                        patch.set_label(text_input.text());
                     }
                     "visible" => {
                         if let Some(v) = value_as_bool(value) {
@@ -6875,7 +6986,9 @@ fn apply_patch_property(
 }
 
 fn validate_patch_visible(value: &Value, builtin: &'static str) -> BuiltinResult<()> {
-    if let Some(text) = value_as_string(value) {
+    if let Some(text) = value_as_string(value).map_err(|source| {
+        crate::builtins::plotting::plotting_error_with_source(builtin, source.to_string(), source)
+    })? {
         if matches!(text.trim().to_ascii_lowercase().as_str(), "on" | "off") {
             return Ok(());
         }
@@ -6954,7 +7067,8 @@ fn apply_line3_properties_with_data(
         .style_indices
         .iter()
         .map(|&index| (pairs[index].0.as_str(), pairs[index].1))
-        .collect();
+        .map(|(key, value)| Ok((key, ValidatedStyleValue::new(value, builtin)?)))
+        .collect::<BuiltinResult<Vec<_>>>()?;
 
     let update_data = prepared.x.as_ref().is_some_and(|x| *x != current_x)
         || prepared.y.as_ref().is_some_and(|y| *y != current_y)
@@ -6991,10 +7105,11 @@ fn apply_line3_properties_with_data(
 
 fn apply_line3_style_pairs(
     line: &mut runmat_plot::plots::Line3Plot,
-    pairs: &[(&str, &Value)],
+    pairs: &[(&str, ValidatedStyleValue<'_>)],
     builtin: &'static str,
 ) {
-    for (key, value) in pairs {
+    for (key, text_input) in pairs {
+        let value = text_input.value();
         match *key {
             "color" => {
                 if let Ok(c) = parse_color_value(&LineStyleParseOptions::generic(builtin), value) {
@@ -7007,15 +7122,15 @@ fn apply_line3_style_pairs(
                 }
             }
             "linestyle" => {
-                if let Some(s) = value_as_string(value) {
+                if let Some(s) = text_input.text() {
                     line.line_style = parse_line_style_name_for_props(&s);
                 }
             }
-            "displayname" => line.label = value_as_string(value).map(|s| s.to_string()),
+            "displayname" => line.label = text_input.text(),
             "visible" => {
                 if let Some(v) = value_as_bool(value) {
                     line.set_visible(v);
-                } else if let Some(s) = value_as_string(value) {
+                } else if let Some(s) = text_input.text() {
                     line.set_visible(!matches!(
                         s.trim().to_ascii_lowercase().as_str(),
                         "off" | "false"
@@ -7038,7 +7153,8 @@ fn apply_line3_style_only(
     let style_pairs: Vec<_> = pairs
         .iter()
         .map(|(name, value)| (name.as_str(), *value))
-        .collect();
+        .map(|(key, value)| Ok((key, ValidatedStyleValue::new(value, builtin)?)))
+        .collect::<BuiltinResult<Vec<_>>>()?;
     update_property_plot(
         authority,
         line_handle.figure,
@@ -7061,6 +7177,7 @@ fn apply_scatter3_property(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    let text_input = ValidatedStyleValue::new(value, builtin)?;
     super::state::update_plot_element_for_property(
         authority,
         scatter_handle.figure,
@@ -7074,7 +7191,7 @@ fn apply_scatter3_property(
                         }
                     }
                     "marker" => {
-                        if let Some(s) = value_as_string(value) {
+                        if let Some(s) = text_input.text() {
                             scatter.marker_style =
                                 scatter_marker_from_name(&s, scatter.marker_style);
                         }
@@ -7100,7 +7217,7 @@ fn apply_scatter3_property(
                         }
                     }
                     "displayname" => {
-                        scatter.label = value_as_string(value).map(|s| s.to_string());
+                        scatter.label = text_input.text();
                     }
                     _ => {}
                 }
@@ -7119,6 +7236,7 @@ fn apply_pie_property(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    let text_input = ValidatedStyleValue::new(value, builtin)?;
     super::state::update_plot_element_for_property(
         authority,
         pie_handle.figure,
@@ -7126,7 +7244,7 @@ fn apply_pie_property(
         |plot| {
             if let runmat_plot::plots::figure::PlotElement::Pie(pie) = plot {
                 if key == "displayname" {
-                    pie.label = value_as_string(value).map(|s| s.to_string());
+                    pie.label = text_input.text();
                 }
             }
         },
@@ -7143,6 +7261,7 @@ fn apply_contour_property(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    let text_input = ValidatedStyleValue::new(value, builtin)?;
     super::state::update_plot_element_for_property(
         authority,
         contour_handle.figure,
@@ -7150,7 +7269,7 @@ fn apply_contour_property(
         |plot| {
             if let runmat_plot::plots::figure::PlotElement::Contour(contour) = plot {
                 if key == "displayname" {
-                    contour.label = value_as_string(value).map(|s| s.to_string());
+                    contour.label = text_input.text();
                 } else if key == "linewidth" {
                     if let Some(width) = value_as_f64(value) {
                         contour.line_width = (width as f32).max(0.5);
@@ -7171,6 +7290,7 @@ fn apply_contour_fill_property(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    let text_input = ValidatedStyleValue::new(value, builtin)?;
     super::state::update_plot_element_for_property(
         authority,
         fill_handle.figure,
@@ -7178,7 +7298,7 @@ fn apply_contour_fill_property(
         |plot| {
             if let runmat_plot::plots::figure::PlotElement::ContourFill(fill) = plot {
                 if key == "displayname" {
-                    fill.label = value_as_string(value).map(|s| s.to_string());
+                    fill.label = text_input.text();
                 }
             }
         },
@@ -7190,9 +7310,10 @@ fn apply_contour_fill_property(
 fn apply_line_plot_properties(
     line: &mut runmat_plot::plots::LinePlot,
     key: &str,
-    value: &Value,
+    text_input: ValidatedStyleValue<'_>,
     builtin: &'static str,
 ) {
+    let value = text_input.value();
     match key {
         "color" => {
             if let Ok(c) = parse_color_value(&LineStyleParseOptions::generic(builtin), value) {
@@ -7205,12 +7326,12 @@ fn apply_line_plot_properties(
             }
         }
         "linestyle" => {
-            if let Some(s) = value_as_string(value) {
+            if let Some(s) = text_input.text() {
                 line.line_style = parse_line_style_name_for_props(&s);
             }
         }
         "displayname" => {
-            line.label = value_as_string(value).map(|s| s.to_string());
+            line.label = text_input.text();
         }
         "handlevisibility" => {
             if let Ok(visibility) =
@@ -7220,7 +7341,7 @@ fn apply_line_plot_properties(
             }
         }
         "marker" => {
-            if let Some(s) = value_as_string(value) {
+            if let Some(s) = text_input.text() {
                 line.marker = marker_from_name(&s, line.marker.clone());
             }
         }
@@ -7255,7 +7376,7 @@ fn apply_line_plot_properties(
         "visible" => {
             if let Some(v) = value_as_bool(value) {
                 line.set_visible(v);
-            } else if let Some(s) = value_as_string(value) {
+            } else if let Some(s) = text_input.text() {
                 line.set_visible(!matches!(
                     s.trim().to_ascii_lowercase().as_str(),
                     "off" | "false"
@@ -7331,7 +7452,9 @@ fn limits_from_optional_value(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<Option<(f64, f64)>> {
-    if let Some(text) = value_as_string(value) {
+    if let Some(text) = value_as_string(value).map_err(|source| {
+        crate::builtins::plotting::plotting_error_with_source(builtin, source.to_string(), source)
+    })? {
         let norm = text.trim().to_ascii_lowercase();
         if matches!(norm.as_str(), "auto" | "tight") {
             return Ok(None);
@@ -7372,9 +7495,17 @@ fn tick_mode_from_value(
     builtin: &'static str,
     property: &str,
 ) -> BuiltinResult<TickMode> {
-    let mode = value_as_string(value).ok_or_else(|| {
-        plotting_error(builtin, format!("{builtin}: {property} must be a string"))
-    })?;
+    let mode = value_as_string(value)
+        .map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                builtin,
+                source.to_string(),
+                source,
+            )
+        })?
+        .ok_or_else(|| {
+            plotting_error(builtin, format!("{builtin}: {property} must be a string"))
+        })?;
     match mode.trim().to_ascii_lowercase().as_str() {
         "auto" => Ok(TickMode::Auto),
         "manual" => Ok(TickMode::Manual),
@@ -7391,6 +7522,13 @@ fn tick_format_from_value(
     property: &'static str,
 ) -> BuiltinResult<String> {
     let format = value_as_string(value)
+        .map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                builtin,
+                source.to_string(),
+                source,
+            )
+        })?
         .ok_or_else(|| plotting_error(builtin, format!("{builtin}: {property} must be text")))?;
     Ok(runmat_plot::core::plot_renderer::plot_utils::canonical_tick_label_format(&format))
 }
@@ -7457,7 +7595,7 @@ fn tick_labels_from_value(value: &Value, builtin: &'static str) -> BuiltinResult
     match value {
         Value::String(s) => Ok(vec![s.as_str().to_owned()]),
         Value::StringArray(strings) => Ok(strings.data().iter().map(|s| s.as_str().to_owned()).collect()),
-        Value::CharArray(chars) => Ok(char_array_rows(chars)),
+        Value::CharArray(chars) => Ok(char_array_rows(chars).map_err(|source|crate::builtins::plotting::plotting_error_with_source(builtin,source.to_string(),source))?),
         Value::Cell(cell) => {
             let mut labels = Vec::with_capacity(cell.data().len());
             for entry in cell.data() {
@@ -7504,19 +7642,19 @@ fn tick_label_value(labels: Vec<String>) -> Value {
     Value::Cell(CellArray::new(values, 1, labels.len()).expect("valid tick-label cell array"))
 }
 
-fn char_array_rows(chars: &CharArray) -> Vec<String> {
+fn char_array_rows(chars: &CharArray) -> Result<Vec<String>, runmat_value::Utf16DecodeError> {
     if chars.rows == 0 || chars.cols == 0 {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     (0..chars.rows)
         .map(|row| {
             let start = row * chars.cols;
             let end = start + chars.cols;
-            chars.data()[start..end]
-                .iter()
-                .collect::<String>()
-                .trim_end()
-                .to_string()
+            Ok(
+                runmat_value::decode_utf16_code_units(&chars.data()[start..end])?
+                    .trim_end()
+                    .to_string(),
+            )
         })
         .collect()
 }
@@ -7542,7 +7680,8 @@ fn apply_axes_text_alias(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    if let Some(text) = value_as_string(value) {
+    let text_input = ValidatedStyleValue::new(value, builtin)?;
+    if let Some(text) = text_input.text() {
         super::state::set_text_properties_for_axes_for_property(
             authority,
             handle,
@@ -7597,7 +7736,16 @@ fn validate_axes_text_alias(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    if value_as_string(value).is_some() {
+    if value_as_string(value)
+        .map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                builtin,
+                source.to_string(),
+                source,
+            )
+        })?
+        .is_some()
+    {
         return Ok(());
     }
 
@@ -7630,15 +7778,38 @@ fn collect_label_strings(builtin: &'static str, args: &[Value]) -> BuiltinResult
                         let value = cell.get(row, col).map_err(|err| {
                             plotting_error(builtin, format!("legend: invalid label cell: {err}"))
                         })?;
-                        labels.push(value_as_string(&value).ok_or_else(|| {
-                            plotting_error(builtin, "legend: labels must be strings or char arrays")
-                        })?);
+                        labels.push(
+                            value_as_string(&value)
+                                .map_err(|source| {
+                                    crate::builtins::plotting::plotting_error_with_source(
+                                        builtin,
+                                        source.to_string(),
+                                        source,
+                                    )
+                                })?
+                                .ok_or_else(|| {
+                                    plotting_error(
+                                        builtin,
+                                        "legend: labels must be strings or char arrays",
+                                    )
+                                })?,
+                        );
                     }
                 }
             }
-            _ => labels.push(value_as_string(arg).ok_or_else(|| {
-                plotting_error(builtin, "legend: labels must be strings or char arrays")
-            })?),
+            _ => labels.push(
+                value_as_string(arg)
+                    .map_err(|source| {
+                        crate::builtins::plotting::plotting_error_with_source(
+                            builtin,
+                            source.to_string(),
+                            source,
+                        )
+                    })?
+                    .ok_or_else(|| {
+                        plotting_error(builtin, "legend: labels must be strings or char arrays")
+                    })?,
+            ),
         }
     }
     Ok(labels)
@@ -7707,15 +7878,32 @@ pub(crate) fn label_strings_from_value(
             .data()
             .iter()
             .map(|item| {
-                value_as_text_string(item).ok_or_else(|| {
-                    plotting_error(
-                        builtin,
-                        format!("{builtin}: {label_context} must contain text values"),
-                    )
-                })
+                value_as_text_string(item)
+                    .map_err(|source| {
+                        crate::builtins::plotting::plotting_error_with_source(
+                            builtin,
+                            source.to_string(),
+                            source,
+                        )
+                    })?
+                    .ok_or_else(|| {
+                        plotting_error(
+                            builtin,
+                            format!("{builtin}: {label_context} must contain text values"),
+                        )
+                    })
             })
             .collect(),
-        Value::CharArray(chars) if chars.rows == 1 => Ok(vec![chars.data().iter().collect()]),
+        Value::CharArray(chars) if chars.rows == 1 => {
+            Ok(vec![runmat_value::decode_utf16_code_units(chars.data())
+                .map_err(|source| {
+                    crate::builtins::plotting::plotting_error_with_source(
+                        builtin,
+                        source.to_string(),
+                        source,
+                    )
+                })?])
+        }
         Value::String(text) => Ok(vec![text.as_str().to_owned()]),
         Value::Tensor(tensor) => Ok((0..tensor.len())
             .map(|index| {
@@ -7754,8 +7942,29 @@ fn heatmap_on_off_value(value: &Value) -> Option<bool> {
     match value {
         Value::Bool(value) => Some(*value),
         Value::CharArray(chars) => {
-            let text: String = chars.data().iter().collect();
-            heatmap_on_off_text(&text)
+            let mut units = chars.data().iter().map(|u| u.raw());
+            while units
+                .clone()
+                .next()
+                .is_some_and(|u| char::from_u32(u32::from(u)).is_some_and(char::is_whitespace))
+            {
+                units.next();
+            }
+            while units
+                .clone()
+                .next_back()
+                .is_some_and(|u| char::from_u32(u32::from(u)).is_some_and(char::is_whitespace))
+            {
+                units.next_back();
+            }
+            let units = units.map(|u| if (65..=90).contains(&u) { u + 32 } else { u });
+            if units.clone().eq("on".encode_utf16()) {
+                Some(true)
+            } else if units.eq("off".encode_utf16()) {
+                Some(false)
+            } else {
+                None
+            }
         }
         Value::String(text) => heatmap_on_off_text(text),
         Value::Num(value) => numeric_on_off(*value),
@@ -7856,12 +8065,20 @@ pub(crate) fn parse_color_data_mapping(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<runmat_plot::plots::surface::SurfaceColorMapping> {
-    let value = value_as_string(value).ok_or_else(|| {
-        plotting_error(
-            builtin,
-            format!("{builtin}: CDataMapping must be 'scaled' or 'direct'"),
-        )
-    })?;
+    let value = value_as_string(value)
+        .map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                builtin,
+                source.to_string(),
+                source,
+            )
+        })?
+        .ok_or_else(|| {
+            plotting_error(
+                builtin,
+                format!("{builtin}: CDataMapping must be 'scaled' or 'direct'"),
+            )
+        })?;
     match value.trim().to_ascii_lowercase().as_str() {
         "scaled" => Ok(runmat_plot::plots::surface::SurfaceColorMapping::Scaled),
         "direct" => Ok(runmat_plot::plots::surface::SurfaceColorMapping::Direct),
@@ -8011,6 +8228,13 @@ fn surface_shading_name(shading: ShadingMode) -> &'static str {
 
 fn surface_shading_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<ShadingMode> {
     let text = value_as_string(value)
+        .map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                builtin,
+                source.to_string(),
+                source,
+            )
+        })?
         .ok_or_else(|| plotting_error(builtin, format!("{builtin}: Shading must be text")))?;
     match text.trim().to_ascii_lowercase().as_str() {
         "flat" => Ok(ShadingMode::Flat),
@@ -8033,7 +8257,9 @@ fn surface_lighting_name(enabled: bool) -> &'static str {
 }
 
 fn surface_lighting_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<bool> {
-    if let Some(text) = value_as_string(value) {
+    if let Some(text) = value_as_string(value).map_err(|source| {
+        crate::builtins::plotting::plotting_error_with_source(builtin, source.to_string(), source)
+    })? {
         return match text.trim().to_ascii_lowercase().as_str() {
             "none" | "off" => Ok(false),
             "flat" | "gouraud" | "phong" | "auto" | "on" => Ok(true),
@@ -8051,7 +8277,9 @@ fn surface_face_color_update(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<SurfacePropertyUpdate> {
-    if let Some(text) = value_as_string(value) {
+    if let Some(text) = value_as_string(value).map_err(|source| {
+        crate::builtins::plotting::plotting_error_with_source(builtin, source.to_string(), source)
+    })? {
         return match text.trim().to_ascii_lowercase().as_str() {
             "none" => Ok(SurfacePropertyUpdate::FaceNone),
             "flat" => Ok(SurfacePropertyUpdate::Shading(ShadingMode::Flat)),
@@ -8431,6 +8659,34 @@ mod tests {
         )
         .expect("labels");
         assert_eq!(labels, vec!["18446744073709551615"]);
+        let unicode = Value::CharArray(CharArray::new_row("🦀"));
+        assert_eq!(
+            ValidatedStyleValue::new(&unicode, "set")
+                .unwrap()
+                .text()
+                .as_deref(),
+            Some("🦀")
+        );
+        let malformed = Value::CharArray(
+            CharArray::from_code_units(vec![runmat_value::Utf16CodeUnit::from_raw(0xd800)], 1, 1)
+                .unwrap(),
+        );
+        let Err(error) = ValidatedStyleValue::new(&malformed, "set") else {
+            panic!("malformed text must fail before a mutation callback")
+        };
+        assert!(error
+            .source
+            .as_deref()
+            .unwrap()
+            .downcast_ref::<runmat_value::Utf16DecodeError>()
+            .is_some());
+        assert!(!super::super::style::value_text_equals_ascii(
+            &malformed, "on", true
+        ));
+        let padded = Value::CharArray(CharArray::new_row("\u{2003} On\t"));
+        assert!(super::super::style::value_text_equals_ascii(
+            &padded, "on", true
+        ));
     }
 
     #[test]

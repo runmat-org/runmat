@@ -143,6 +143,7 @@ fn durable_plain_object_property_error_precedes_dynamic_limit() {
             value: inline(InlineValue::Null),
         }],
         dynamic_properties,
+        decomposition: None,
     }));
     let error = payload
         .validate_for_durable_storage(ValueLimits {
@@ -158,4 +159,97 @@ fn durable_plain_object_property_error_precedes_dynamic_limit() {
         )
         .to_string()
     );
+}
+
+#[test]
+fn empty_factor_wire_geometry_is_portable_beyond_a_host_index_width() {
+    use crate::value::{
+        DurableDecompositionPayload, DurableEmptyFactorKind, DurableNumericFactor,
+        DurablePlainObject,
+    };
+
+    let payload = inline(InlineValue::DurablePlainObject(DurablePlainObject {
+        class_identity: runmat_types::standard::DECOMPOSITION.owned(),
+        properties: Vec::new(),
+        dynamic_properties: Vec::new(),
+        decomposition: Some(DurableDecompositionPayload::Data(Box::new(
+            DurableNumericFactor::Empty {
+                kind: DurableEmptyFactorKind::Qr,
+                rows: 0,
+                columns: u64::MAX,
+                class: ElementType::F64,
+            },
+        ))),
+    }));
+    payload
+        .validate_for_durable_storage(ValueLimits::default())
+        .expect("portable empty geometry requires no host-sized factor allocation");
+}
+
+#[test]
+fn factor_only_box_keeps_the_single_discriminant_and_original_wire_shape() {
+    use crate::value::{DurableDecompositionPayload, DurableEmptyFactorKind, DurableNumericFactor};
+
+    let factor = DurableNumericFactor::Empty {
+        kind: DurableEmptyFactorKind::Qr,
+        rows: 0,
+        columns: 7,
+        class: ElementType::F32,
+    };
+    let wire = serde_json::to_value(DurableDecompositionPayload::Data(Box::new(factor.clone())))
+        .expect("closed factor wire");
+    let object = wire.as_object().expect("single decomposition discriminant");
+    assert_eq!(object.len(), 1);
+    assert_eq!(
+        object.get("data"),
+        Some(&serde_json::to_value(factor).unwrap())
+    );
+    assert!(std::mem::size_of::<DurableDecompositionPayload>() <= 24);
+}
+
+#[test]
+fn packed_qr_wire_accepts_only_canonical_identity_reflector_infinity() {
+    use crate::value::{
+        DenseValue, DurableDecompositionPayload, DurableDenseOrthogonalFactor,
+        DurableFactorPermutation, DurableNumericFactor, DurablePlainObject,
+    };
+
+    let dense = |values: [f64; 4]| DenseValue {
+        element_type: ElementType::F64,
+        shape: vec![2, 2],
+        little_endian_data: values
+            .into_iter()
+            .flat_map(|value| value.to_bits().to_le_bytes())
+            .collect(),
+    };
+    let payload = |coefficients| {
+        inline(InlineValue::DurablePlainObject(DurablePlainObject {
+            class_identity: runmat_types::standard::DECOMPOSITION.owned(),
+            properties: Vec::new(),
+            dynamic_properties: Vec::new(),
+            decomposition: Some(DurableDecompositionPayload::Data(Box::new(
+                DurableNumericFactor::DenseQr(Box::new(DurableDenseOrthogonalFactor {
+                    packed: dense([2.0, 1.0, 3.0, 4.0]),
+                    coefficients: dense(coefficients),
+                    permutation: DurableFactorPermutation {
+                        forward: vec![0, 1],
+                        inverse: vec![0, 1],
+                    },
+                    rank: 2,
+                })),
+            ))),
+        }))
+    };
+    payload([f64::INFINITY, 0.0, 0.0, f64::INFINITY])
+        .validate_for_durable_storage(ValueLimits::default())
+        .expect("positive infinity is a canonical identity-reflector coefficient");
+    for invalid in [
+        [1.0, f64::INFINITY, 0.0, 1.0],
+        [f64::NEG_INFINITY, 0.0, 0.0, 1.0],
+        [f64::NAN, 0.0, 0.0, 1.0],
+    ] {
+        assert!(payload(invalid)
+            .validate_for_durable_storage(ValueLimits::default())
+            .is_err());
+    }
 }

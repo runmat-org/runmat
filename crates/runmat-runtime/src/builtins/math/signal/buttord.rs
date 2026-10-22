@@ -157,7 +157,14 @@ async fn evaluate_in_context(
     }
     ensure_input_extensions(&wp, &ws, &rp, &rs)?;
     let analog = if let Some(option) = rest.first() {
-        match option_text(option).as_deref() {
+        match option_text(option)
+            .map_err(|source| {
+                let mut error = buttord_error(&BUTTORD_ERROR_INVALID_OPTION);
+                error.source = Some(Box::new(source));
+                error
+            })?
+            .as_deref()
+        {
             Some("s") => true,
             Some(_) => return Err(buttord_error(&BUTTORD_ERROR_INVALID_OPTION)),
             None => return Err(buttord_error(&BUTTORD_ERROR_INVALID_OPTION)),
@@ -494,6 +501,7 @@ mod tests {
     ) -> BuiltinResult<Value> {
         let _guard = outputs
             .map(|count| crate::output_count::push_output_count(Some(count)))
+            .transpose()
             .expect("output-count scope");
         block_on(evaluate(wp, ws, rp, rs, rest))
     }

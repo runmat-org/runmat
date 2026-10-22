@@ -500,7 +500,8 @@ fn repelem_char_array(
     let (rows, cols, plan) = build_2d_plan(ca.rows, ca.cols, factors, single_arg)?;
     let (data, new_rows, new_cols) =
         repelem_row_major(ca.data(), ca.rows, ca.cols, rows, cols, &plan)?;
-    CharArray::new(data, new_rows, new_cols).map_err(|e| repelem_internal(format!("repelem: {e}")))
+    CharArray::from_code_units(data, new_rows, new_cols)
+        .map_err(|e| repelem_internal(format!("repelem: {e}")))
 }
 
 fn repelem_cell_array(
@@ -1504,7 +1505,7 @@ pub(crate) mod tests {
 
     #[test]
     fn char_array_replication_2d() {
-        let ca = CharArray::new("hi".chars().collect(), 1, 2).unwrap();
+        let ca = CharArray::from_unicode_scalars("hi".chars().collect(), 1, 2).unwrap();
         let result = repelem_builtin(
             Value::CharArray(ca),
             vec![Value::Int(IntValue::I32(1)), Value::Int(IntValue::I32(3))],
@@ -1514,7 +1515,8 @@ pub(crate) mod tests {
             Value::CharArray(out) => {
                 assert_eq!(out.rows, 1);
                 assert_eq!(out.cols, 6);
-                let s: String = out.data().iter().collect();
+                let s = runmat_value::decode_utf16_code_units(out.data())
+                    .expect("valid UTF-16 fixture text");
                 assert_eq!(s, "hhhiii");
             }
             other => panic!("expected char array, got {other:?}"),

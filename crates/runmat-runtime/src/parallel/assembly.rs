@@ -298,9 +298,13 @@ fn read_cell_with_plan(value: &CellArray, plan: &IndexPlan) -> Result<Value, Run
                 })
         })
         .collect::<Result<Vec<_>, _>>()?;
-    CellArray::from_column_major(values, plan.output_shape.clone())
-        .map(Value::Cell)
-        .map_err(|error| semantic_error("ParallelSliceShape", error))
+    let context = crate::context::legacy::active();
+    CellArray::from_column_major(
+        values,
+        plan.row_major_output_shape_in_context(context.as_ref())?,
+    )
+    .map(Value::Cell)
+    .map_err(|error| semantic_error("ParallelSliceShape", error))
 }
 
 fn assign_cell_with_plan(

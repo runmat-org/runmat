@@ -171,7 +171,7 @@ async fn parse_arguments(
     while idx < args.len() {
         let arg = &args[idx];
 
-        if let Some(keyword) = keyword_of(arg) {
+        if let Some(keyword) = keyword_of(arg)? {
             match MedianControl::from_public_option(&keyword) {
                 Some(MedianControl::Weights) => {
                     if weights.is_some() {
@@ -208,7 +208,7 @@ async fn parse_arguments(
                     ));
                 }
                 None => {
-                    if let Some(original) = value_as_str(arg) {
+                    if let Some(original) = value_as_str(arg)? {
                         return Err(median_invalid_argument(format!(
                             "median: unrecognised argument '{original}'"
                         )));
@@ -490,7 +490,7 @@ async fn parse_axes(
     value: &Value,
     admission: &mut resident::InputAdmission<'_>,
 ) -> BuiltinResult<Option<MedianAxes>> {
-    if let Some(text) = value_as_str(value) {
+    if let Some(text) = value_as_str(value)? {
         let trimmed = text.trim();
         if trimmed.is_empty() {
             return Err(median_invalid_argument(
@@ -598,13 +598,19 @@ fn tensor_len(tensor: &Tensor) -> usize {
     tensor.len()
 }
 
-fn value_as_str(value: &Value) -> Option<String> {
-    match value {
+fn value_as_str(value: &Value) -> BuiltinResult<Option<String>> {
+    Ok(match value {
         Value::String(s) => Some(s.as_str().to_owned()),
         Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].as_str().to_owned()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data().iter().collect()),
+        Value::CharArray(ca) if ca.rows == 1 => Some(
+            runmat_value::decode_utf16_code_units(ca.data()).map_err(|source| {
+                let mut error = median_invalid_argument(source.to_string());
+                error.source = Some(Box::new(source));
+                error
+            })?,
+        ),
         _ => None,
-    }
+    })
 }
 
 #[derive(Clone, Copy)]

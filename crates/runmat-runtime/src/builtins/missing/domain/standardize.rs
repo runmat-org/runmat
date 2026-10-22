@@ -41,7 +41,7 @@ pub(super) fn collect_indicators(value: &Value, set: &mut IndicatorSet) -> Built
         Value::StringArray(array) => set
             .text
             .extend(array.data().iter().map(|text| text.as_str().to_owned())),
-        Value::CharArray(array) => set.text.extend(char_rows(array)),
+        Value::CharArray(array) => set.text.extend(char_rows(array)?),
         Value::Tensor(tensor) => {
             if let Some(storage) = tensor.integer_storage() {
                 for index in 0..storage.len() {
@@ -130,7 +130,7 @@ pub(super) fn standardize_missing_value(
             Ok(Value::StringArray(output))
         }
         Value::CharArray(array) => {
-            let rows = char_rows(&array);
+            let rows = char_rows(&array)?;
             let data: Vec<String> = rows
                 .into_iter()
                 .map(|text| {

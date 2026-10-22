@@ -130,7 +130,13 @@ fn collect_clear_targets(arg: &Value, out: &mut Vec<String>) -> BuiltinResult<()
                     "clear: character array inputs must be a row vector or scalar text value",
                 ));
             }
-            out.push(chars.data().iter().collect::<String>().trim().to_string());
+            out.push(
+                super::text::decode_utf16_with_error(chars.data(), || {
+                    clear_error("clear: character input is not valid UTF-16 text")
+                })?
+                .trim()
+                .to_string(),
+            );
             Ok(())
         }
         Value::StringArray(array) => {

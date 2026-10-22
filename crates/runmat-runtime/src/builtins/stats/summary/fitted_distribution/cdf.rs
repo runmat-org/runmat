@@ -7,7 +7,9 @@ pub(in crate::builtins::stats::summary) async fn evaluate_cdf_entry(
 ) -> BuiltinResult<Value> {
     let tail = if rest
         .last()
-        .and_then(keyword_of)
+        .map(keyword_of)
+        .transpose()?
+        .flatten()
         .is_some_and(|value| value.eq_ignore_ascii_case("upper"))
     {
         CdfTail::Upper

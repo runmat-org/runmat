@@ -192,7 +192,7 @@ pub fn validate_builtin_catalog_with_aliases(
     errors
 }
 
-fn valid_builtin_identity(value: &str) -> bool {
+pub(crate) fn valid_builtin_identity(value: &str) -> bool {
     let mut segments = value.split('.');
     let Some(first) = segments.next() else {
         return false;

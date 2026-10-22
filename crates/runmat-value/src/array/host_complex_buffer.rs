@@ -17,6 +17,15 @@ pub struct HostComplexBuffer<T: Clone + Copy> {
 }
 
 impl<T: Clone + Copy> HostComplexBuffer<T> {
+    pub(crate) fn try_adopt_exact_fallible(
+        allocation: AdoptedHostAllocation,
+        len: usize,
+    ) -> Result<Self, super::ExactHostNumericAllocationError> {
+        use super::ExactHostNumericAllocationError as Error;
+        let storage = HostData::try_adopt(allocation, len).map_err(|_| Error::LayoutOverflow)?;
+        let storage = HostBuffer::try_new_exact(storage).map_err(|_| Error::AllocationFailed)?;
+        Ok(Self { storage })
+    }
     pub(crate) const fn exact_metadata_bytes() -> usize {
         HostBuffer::<HostData<ComplexElement<T>>>::exact_metadata_bytes()
     }

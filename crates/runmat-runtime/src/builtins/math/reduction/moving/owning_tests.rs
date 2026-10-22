@@ -71,7 +71,9 @@ fn moving_rejects_malformed_results_and_preserves_execution_failure_without_gath
             sample_points: None,
             normalization: VarianceNormalization::Sample,
         };
-        let error = futures::executor::block_on(moving_gpu(
+        let work = admission::MovingCall::new(None, "movsum").unwrap();
+        let error = futures::executor::block_on(provider::moving_gpu(
+            &work,
             "movsum",
             MovingOp::Sum,
             input.handle.clone(),

@@ -182,8 +182,8 @@ fn known_invalid_character_matrix_format_precedes_resident_data() {
         .owner
         .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
         .expect("resident data");
-    let matrix =
-        runmat_value::CharArray::new(vec!['%', 'd', '%', 'd'], 2, 2).expect("character matrix");
+    let matrix = runmat_value::CharArray::from_unicode_scalars(vec!['%', 'd', '%', 'd'], 2, 2)
+        .expect("character matrix");
     let args = [
         Value::CharArray(matrix),
         Value::GpuTensor(resident.handle.clone()),

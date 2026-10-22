@@ -81,7 +81,8 @@ async fn check_count(provider: &WgpuProvider, values: &[f64], expected: f64) {
         let output = provider
             .reduce_nnz(&input)
             .await
-            .expect("public CountNonZero");
+            .expect("public CountNonZero")
+            .expect("provider accepted numerical operation");
         assert_eq!(output.shape(), &[1, 1]);
         assert!(!output.shares_allocation_with(&input));
         let result = provider.download_numeric(&output).await.unwrap();
@@ -221,8 +222,22 @@ async fn qualify(provider: &'static WgpuProvider) {
                     .unwrap(),
                 len as f64,
             ),
-            (provider.reduce_prod(&input).await.unwrap(), 0.0),
-            (provider.reduce_nnz(&input).await.unwrap(), (len - 1) as f64),
+            (
+                provider
+                    .reduce_prod(&input)
+                    .await
+                    .unwrap()
+                    .expect("provider accepted numerical operation"),
+                0.0,
+            ),
+            (
+                provider
+                    .reduce_nnz(&input)
+                    .await
+                    .unwrap()
+                    .expect("provider accepted numerical operation"),
+                (len - 1) as f64,
+            ),
         ] {
             assert_eq!(output.shape(), &[1, 1]);
             let downloaded = provider.download_numeric(&output).await.unwrap();

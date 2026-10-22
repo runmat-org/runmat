@@ -233,7 +233,11 @@ async fn verify_logical_nan_mask_global_any_all_ranks(
     };
     let any = provider.reduce_any_dim(&input, 0, false).await.unwrap();
     let all = provider.reduce_all_dim(&input, 0, false).await.unwrap();
-    let product = provider.reduce_prod_dim(&input, 0).await.unwrap();
+    let product = provider
+        .reduce_prod_dim(&input, 0)
+        .await
+        .unwrap()
+        .expect("provider accepted numerical operation");
     assert_eq!(any.shape(), [1, 2]);
     assert_eq!(all.shape(), [1, 2]);
     assert!(any.view().is_logical());
@@ -275,13 +279,49 @@ async fn verify_reduction_and_scan_nan_policy(
     let include = ProviderNanMode::Include;
     let omit = ProviderNanMode::Omit;
 
-    let sum_include = provider.cumsum_scan(&input, 0, direction, include).unwrap();
+    if precision == ProviderPrecision::F32 {
+        // Native single values remain legal, but F32 storage cannot satisfy
+        // the public double-index demand. Decline before either scan executes.
+        assert!(provider
+            .cummin_scan(
+                &input,
+                0,
+                direction,
+                include,
+                runmat_accelerate_api::ProviderExtremaDemand::ValuesAndIndices
+            )
+            .await
+            .unwrap()
+            .is_none());
+        assert!(provider
+            .cummax_scan(
+                &input,
+                0,
+                direction,
+                include,
+                runmat_accelerate_api::ProviderExtremaDemand::ValuesAndIndices
+            )
+            .await
+            .unwrap()
+            .is_none());
+        input.allocation_lease().validate_live().unwrap();
+    }
+
+    let sum_include = provider
+        .cumsum_scan(&input, 0, direction, include)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(sum_include.shape(), input.shape());
     assert_series(
         &read_values(provider, &sum_include).await,
         &[2.0, f64::NAN, f64::NAN, f64::NAN, f64::NAN, f64::NAN],
     );
-    let sum_omit = provider.cumsum_scan(&input, 0, direction, omit).unwrap();
+    let sum_omit = provider
+        .cumsum_scan(&input, 0, direction, omit)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(sum_omit.shape(), input.shape());
     assert_series(
         &read_values(provider, &sum_omit).await,
@@ -289,13 +329,19 @@ async fn verify_reduction_and_scan_nan_policy(
     );
     let prod_include = provider
         .cumprod_scan(&input, 0, direction, include)
+        .await
+        .unwrap()
         .unwrap();
     assert_eq!(prod_include.shape(), input.shape());
     assert_series(
         &read_values(provider, &prod_include).await,
         &[2.0, f64::NAN, f64::NAN, f64::NAN, f64::NAN, f64::NAN],
     );
-    let prod_omit = provider.cumprod_scan(&input, 0, direction, omit).unwrap();
+    let prod_omit = provider
+        .cumprod_scan(&input, 0, direction, omit)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(prod_omit.shape(), input.shape());
     assert_series(
         &read_values(provider, &prod_omit).await,
@@ -303,6 +349,8 @@ async fn verify_reduction_and_scan_nan_policy(
     );
     let reverse_include = provider
         .cumsum_scan(&input, 0, ProviderScanDirection::Reverse, include)
+        .await
+        .unwrap()
         .unwrap();
     assert_series(
         &read_values(provider, &reverse_include).await,
@@ -310,6 +358,8 @@ async fn verify_reduction_and_scan_nan_policy(
     );
     let reverse_omit = provider
         .cumsum_scan(&input, 0, ProviderScanDirection::Reverse, omit)
+        .await
+        .unwrap()
         .unwrap();
     assert_series(
         &read_values(provider, &reverse_omit).await,
@@ -328,7 +378,17 @@ async fn verify_reduction_and_scan_nan_policy(
             [1.0, 1.0, 1.0, 1.0, 1.0, 6.0],
         ),
     ] {
-        let minimum = provider.cummin_scan(&input, 0, direction, mode).unwrap();
+        let minimum = provider
+            .cummin_scan(
+                &input,
+                0,
+                direction,
+                mode,
+                runmat_accelerate_api::ProviderExtremaDemand::ValuesOnly,
+            )
+            .await
+            .unwrap()
+            .unwrap();
         assert_series(
             &read_values(provider, &minimum.values).await,
             &expected_values,
@@ -352,7 +412,17 @@ async fn verify_reduction_and_scan_nan_policy(
             [1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
         ),
     ] {
-        let maximum = provider.cummax_scan(&input, 0, direction, mode).unwrap();
+        let maximum = provider
+            .cummax_scan(
+                &input,
+                0,
+                direction,
+                mode,
+                runmat_accelerate_api::ProviderExtremaDemand::ValuesOnly,
+            )
+            .await
+            .unwrap()
+            .unwrap();
         assert_series(
             &read_values(provider, &maximum.values).await,
             &expected_values,
@@ -378,7 +448,17 @@ async fn verify_reduction_and_scan_nan_policy(
             [6.0, 6.0, 6.0, 6.0, 6.0, 6.0],
         ),
     ] {
-        let minimum = provider.cummin_scan(&input, 0, reverse, mode).unwrap();
+        let minimum = provider
+            .cummin_scan(
+                &input,
+                0,
+                reverse,
+                mode,
+                runmat_accelerate_api::ProviderExtremaDemand::ValuesOnly,
+            )
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(minimum.values.shape(), input.shape());
         assert_eq!(minimum.indices.shape(), input.shape());
         assert_series(
@@ -404,7 +484,17 @@ async fn verify_reduction_and_scan_nan_policy(
             [1.0, 6.0, 6.0, 6.0, 6.0, 6.0],
         ),
     ] {
-        let maximum = provider.cummax_scan(&input, 0, reverse, mode).unwrap();
+        let maximum = provider
+            .cummax_scan(
+                &input,
+                0,
+                reverse,
+                mode,
+                runmat_accelerate_api::ProviderExtremaDemand::ValuesOnly,
+            )
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(maximum.values.shape(), input.shape());
         assert_eq!(maximum.indices.shape(), input.shape());
         assert_series(
@@ -442,8 +532,28 @@ async fn verify_reduction_and_scan_nan_policy(
             [1.0, 1.0, 1.0, 1.0, 1.0],
         ),
     ] {
-        let minimum = provider.cummin_scan(&ties, 0, direction, mode).unwrap();
-        let maximum = provider.cummax_scan(&ties, 0, direction, mode).unwrap();
+        let minimum = provider
+            .cummin_scan(
+                &ties,
+                0,
+                direction,
+                mode,
+                runmat_accelerate_api::ProviderExtremaDemand::ValuesOnly,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        let maximum = provider
+            .cummax_scan(
+                &ties,
+                0,
+                direction,
+                mode,
+                runmat_accelerate_api::ProviderExtremaDemand::ValuesOnly,
+            )
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(minimum.values.shape(), ties.shape());
         assert_eq!(maximum.values.shape(), ties.shape());
         assert_series(

@@ -5,7 +5,7 @@ pub(super) fn preflight_known_options(
     args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<()> {
     for (index, value) in args.iter().enumerate() {
-        let Some(token) = value_to_string_scalar(value) else {
+        let Some(token) = value_to_string_scalar(value)? else {
             continue;
         };
         if !token.starts_with('-') {
@@ -14,10 +14,10 @@ pub(super) fn preflight_known_options(
         match runmat_builtins::MatLoadOption::parse(&token) {
             Some(runmat_builtins::MatLoadOption::Regexp)
                 if index + 1 == args.len()
-                    || args
-                        .get(index + 1)
-                        .and_then(value_to_string_scalar)
-                        .is_some_and(|next| next.starts_with('-')) =>
+                    || value_to_string_scalar(
+                        args.get(index + 1).expect("validated following argument"),
+                    )?
+                    .is_some_and(|next| next.starts_with('-')) =>
             {
                 return Err(load_error_with(
                     &LOAD_ERROR_INVALID_OPTION,
@@ -121,7 +121,7 @@ pub(super) async fn parse_invocation(
 }
 
 pub(super) fn normalise_path(value: &Value) -> BuiltinResult<PathBuf> {
-    let raw = value_to_string_scalar(value).ok_or_else(|| {
+    let raw = value_to_string_scalar(value)?.ok_or_else(|| {
         load_error_with(
             &LOAD_ERROR_FILENAME,
             "load: filename must be a character vector or string scalar",
@@ -198,7 +198,7 @@ fn insert_or_replace(selected: &mut Vec<(String, Value)>, name: &str, value: Val
 }
 
 fn option_token(value: &Value) -> BuiltinResult<Option<String>> {
-    if let Some(token) = value_to_string_scalar(value) {
+    if let Some(token) = value_to_string_scalar(value)? {
         if token.starts_with('-') {
             return Ok(Some(token.to_ascii_lowercase()));
         }
@@ -210,7 +210,7 @@ fn option_token(value: &Value) -> BuiltinResult<Option<String>> {
 async fn extract_names(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
         Value::String(s) => Ok(vec![s.as_str().to_owned()]),
-        Value::CharArray(ca) => Ok(char_array_rows_as_strings(ca)),
+        Value::CharArray(ca) => char_array_rows_as_strings(ca),
         Value::StringArray(sa) => Ok(sa
             .data()
             .iter()
@@ -220,7 +220,7 @@ async fn extract_names(value: &Value) -> BuiltinResult<Vec<String>> {
             let mut names = Vec::with_capacity(ca.data().len());
             for handle in ca.data() {
                 let inner = handle;
-                let text = value_to_string_scalar(inner).ok_or_else(|| {
+                let text = value_to_string_scalar(inner)?.ok_or_else(|| {
                     load_error(
                         "load: cell arrays used for variable selection must contain string scalars",
                     )
@@ -236,25 +236,32 @@ async fn extract_names(value: &Value) -> BuiltinResult<Vec<String>> {
     }
 }
 
-fn value_to_string_scalar(value: &Value) -> Option<String> {
+fn value_to_string_scalar(value: &Value) -> BuiltinResult<Option<String>> {
     match value {
-        Value::String(s) => Some(s.as_str().to_owned()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data().iter().collect()),
-        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].as_str().to_owned()),
-        _ => None,
+        Value::String(s) => Ok(Some(s.as_str().to_owned())),
+        Value::CharArray(ca) if ca.rows == 1 => {
+            crate::builtins::io::utf16::decode_utf16_with_error(ca.data(), || {
+                load_error_with(&LOAD_ERROR_INVALID_ARGUMENT, "load: malformed UTF-16 text")
+            })
+            .map(Some)
+        }
+        Value::StringArray(sa) if sa.data().len() == 1 => {
+            Ok(Some(sa.data()[0].as_str().to_owned()))
+        }
+        _ => Ok(None),
     }
 }
 
-fn char_array_rows_as_strings(ca: &CharArray) -> Vec<String> {
+fn char_array_rows_as_strings(ca: &CharArray) -> BuiltinResult<Vec<String>> {
     let mut rows = Vec::with_capacity(ca.rows);
     for r in 0..ca.rows {
-        let mut row = String::with_capacity(ca.cols);
-        for c in 0..ca.cols {
-            let idx = r * ca.cols + c;
-            row.push(ca.data()[idx]);
-        }
+        let start = r * ca.cols;
+        let row = crate::builtins::io::utf16::decode_utf16_with_error(
+            &ca.data()[start..start + ca.cols],
+            || load_error_with(&LOAD_ERROR_INVALID_ARGUMENT, "load: malformed UTF-16 text"),
+        )?;
         let trimmed = row.trim_end_matches([' ', '\0']).to_string();
         rows.push(trimmed);
     }
-    rows
+    Ok(rows)
 }

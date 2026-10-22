@@ -250,7 +250,7 @@ impl SelectedImageRegionSet {
                         array
                             .data()
                             .len()
-                            .checked_mul(std::mem::size_of::<char>())
+                            .checked_mul(std::mem::size_of::<runmat_value::Utf16CodeUnit>())
                             .and_then(|data| shape.checked_add(data))
                     }),
                 Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::GpuTensor(_) => Some(0),

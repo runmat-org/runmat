@@ -113,7 +113,7 @@ pub(super) fn scalar_component(value: &Value) -> Option<(f64, f64)> {
         Value::CharArray(chars) if chars.data().len() == 1 => chars
             .data()
             .first()
-            .map(|character| (*character as u32 as f64, 0.0)),
+            .map(|character| (f64::from(character.raw()), 0.0)),
         Value::Complex(real, imaginary) => Some((*real, *imaginary)),
         _ => None,
     }
@@ -128,9 +128,8 @@ pub(super) fn integer_values_as_f64(storage: NumericStorage) -> BuiltinResult<Ve
 
 fn char_tensor(chars: CharArray) -> BuiltinResult<Tensor> {
     let values = chars
-        .data()
-        .iter()
-        .map(|character| *character as u32 as f64)
+        .iter_column_major()
+        .map(|character| f64::from(character.raw()))
         .collect();
     Tensor::new(values, vec![chars.rows, chars.cols]).map_err(errors::internal)
 }

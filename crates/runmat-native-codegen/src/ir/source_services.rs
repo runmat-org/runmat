@@ -8,6 +8,16 @@ use runmat_mir::{MirExpressionStep, MirRvalue, MirStmtKind};
 use std::collections::BTreeSet;
 
 impl NativeAssembly {
+    /// Complete selected deployment-service demand for this exact Native IR.
+    ///
+    /// `required_runtime_services` owns the non-effect supplement (currently
+    /// source evaluation). Effect-backed services remain derived by the
+    /// canonical deployment policy; callers must not reconstruct only one
+    /// half of that closure.
+    pub fn required_deployment_services(&self) -> BTreeSet<NativeDeploymentServiceKind> {
+        deployment_services(&self.required_effects(), self.required_runtime_services())
+    }
+
     pub fn required_runtime_services(&self) -> BTreeSet<NativeDeploymentServiceKind> {
         let mut services = BTreeSet::new();
         if self
@@ -26,6 +36,19 @@ impl NativeAssembly {
         }
         services
     }
+}
+
+fn deployment_services(
+    effects: &runmat_types::EffectSet,
+    supplemental: BTreeSet<NativeDeploymentServiceKind>,
+) -> BTreeSet<NativeDeploymentServiceKind> {
+    effects
+        .0
+        .iter()
+        .copied()
+        .filter_map(NativeDeploymentServiceKind::for_effect)
+        .chain(supplemental)
+        .collect()
 }
 
 fn dynamic_eval(effect: Option<BuiltinWorkspaceEffect>) -> bool {
@@ -79,7 +102,11 @@ fn statement_requires_source_evaluation(statement: &MirStmtKind) -> bool {
         return true;
     }
     let direct = match statement {
-        MirStmtKind::Assign { value, .. }
+        MirStmtKind::PrepareFixedAssignment(preparation) => {
+            steps_require_source_evaluation(preparation.steps())
+        }
+        MirStmtKind::PreparedAssign { value, .. }
+        | MirStmtKind::Assign { value, .. }
         | MirStmtKind::MultiAssign { value, .. }
         | MirStmtKind::SequenceAssign { value, .. }
         | MirStmtKind::Expr(value) => rvalue_requires_source_evaluation(value),
@@ -108,6 +135,27 @@ fn statement_requires_source_evaluation(statement: &MirStmtKind) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deployment_service_closure_uses_canonical_effect_policy() {
+        let effects = runmat_types::EffectSet(BTreeSet::from([
+            runmat_types::EffectKind::HostCallback,
+            runmat_types::EffectKind::Unknown,
+            runmat_types::EffectKind::MayThrow,
+        ]));
+        let services = deployment_services(
+            &effects,
+            BTreeSet::from([NativeDeploymentServiceKind::SourceEvaluation]),
+        );
+        assert_eq!(
+            services,
+            BTreeSet::from([
+                NativeDeploymentServiceKind::Effect(runmat_types::EffectKind::HostCallback,),
+                NativeDeploymentServiceKind::HostedDynamicDispatch,
+                NativeDeploymentServiceKind::SourceEvaluation,
+            ])
+        );
+    }
 
     #[test]
     fn only_typed_dynamic_workspace_effect_requires_source_service() {

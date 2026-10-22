@@ -70,8 +70,17 @@ pub(crate) async fn dispatch_call_method(
 pub async fn call_method_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     base: Value,
-    method: runmat_value::Utf8Text,
+    method: Value,
     rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<RootedValue> {
+    // A semantic method name must be scalar text. The shared formatting
+    // converter deliberately also accepts numbers and booleans elsewhere.
+    if !crate::builtins::common::validation::value_is_text_scalar(&method) {
+        return Err(crate::runtime_descriptor_error(
+            "call_method",
+            &CALL_METHOD_ERROR_NAME_INVALID,
+        ));
+    }
+    let method = crate::call::argument_text::convert(&method, runtime.as_ref())?;
     dispatch_call_method(runtime.as_ref(), base, method, rest).await
 }

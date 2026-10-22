@@ -241,9 +241,10 @@ impl HostSingleImageSource {
             ])?),
             peak_live: peak,
         };
-        if let Some(tail) = self.plan.provider.vm_region_queue_tail_resources() {
+        if let Some(tail) = self.plan.provider.region_queue_tail_resources() {
             demand.queue_slots = demand.queue_slots.max(tail.queue_slots);
             demand = demand.with_provider_observation_peak(tail.provider_scratch_bytes)?;
+            super::prepared::charge_region_tail_host_demand(&mut demand, tail)?;
         }
         Some(demand)
     }

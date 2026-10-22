@@ -1,6 +1,6 @@
 use super::*;
 use crate::builtins::common::tensor;
-use runmat_value::{CellArray, CharArray, Tensor};
+use runmat_value::{decode_utf16_code_units, CellArray, CharArray, Tensor, Utf16DecodeError};
 
 #[derive(Clone, Copy)]
 pub(in super::super) enum ResponseExactness {
@@ -326,17 +326,27 @@ async fn char_rows_cooperatively(
         .map_err(|_| invalid("mnrfit: text response rows exceed available host resources"))?;
     for row in 0..array.rows {
         let start = row * array.cols;
-        let mut text = String::new();
-        text.try_reserve(array.cols)
-            .map_err(|_| invalid("mnrfit: text response row exceeds available host resources"))?;
-        for (index, character) in array.data()[start..start + array.cols].iter().enumerate() {
-            text.push(*character);
+        for (index, _) in array.data()[start..start + array.cols].iter().enumerate() {
             if (index + 1).is_multiple_of(16_384) {
                 cooperation.completed(16_384).await?;
             }
         }
         cooperation.completed((array.cols % 16_384) as u64).await?;
+        let text = decode_utf16_code_units(&array.data()[start..start + array.cols])
+            .map_err(invalid_utf16_response)?;
         rows.push(text);
     }
     Ok(rows)
+}
+
+fn invalid_utf16_response(error: Utf16DecodeError) -> RuntimeError {
+    let mut builder = build_runtime_error(format!(
+        "mnrfit: response label is not valid UTF-16 text: {error}"
+    ))
+    .with_builtin(NAME)
+    .with_source(error);
+    if let Some(identifier) = ERROR_INVALID_ARGUMENT.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }

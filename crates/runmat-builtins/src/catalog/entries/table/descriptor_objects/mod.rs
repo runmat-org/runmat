@@ -1,5 +1,6 @@
 mod contract;
 mod facts;
+mod file_datastore;
 mod array_datastore;
 mod parquet_datastore;
 mod rowfilter;
@@ -10,6 +11,7 @@ mod vartype;
 mod tests;
 
 pub use array_datastore::*;
+pub use file_datastore::*;
 pub use parquet_datastore::*;
 pub use rowfilter::*;
 pub use timerange::*;
@@ -21,6 +23,7 @@ pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[
     &VARTYPE_ENTRY,
     &ROWFILTER_ENTRY,
     &ARRAY_DATASTORE_ENTRY,
+    &FILE_DATASTORE_ENTRY,
     &PARQUET_DATASTORE_ENTRY,
     &UITABLE_ENTRY,
 ];

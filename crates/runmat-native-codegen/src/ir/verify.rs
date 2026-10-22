@@ -3,10 +3,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::*;
 use crate::{NativeCodegenError, NativeCodegenResult, NATIVE_IR_SCHEMA_VERSION};
 
-#[path = "verify/super_constructor.rs"]
-mod super_constructor;
 #[path = "verify/capture_layout.rs"]
 mod capture_layout;
+#[path = "verify/super_constructor.rs"]
+mod super_constructor;
 
 impl NativeAssembly {
     pub fn verify(&self) -> NativeCodegenResult<()> {
@@ -222,6 +222,20 @@ fn verify_function(
     capabilities: &runmat_types::CapabilitySet,
 ) -> NativeCodegenResult<()> {
     let error = |code, message| NativeCodegenError::new(code, message).at_function(function.id);
+    if function
+        .operation_contracts
+        .windows(2)
+        .any(|pair| pair[0].site >= pair[1].site)
+        || function
+            .operation_contracts
+            .iter()
+            .any(|contract| contract.site.point.function != function.portable_id)
+    {
+        return Err(error(
+            "native.ir.operation_contracts",
+            "operation contracts must be sorted, unique, and owned by this function",
+        ));
+    }
     if function.blocks.is_empty() {
         return Err(error("native.ir.blocks", "function must contain a block"));
     }
@@ -584,7 +598,42 @@ fn verify_function(
                 "terminator frame state must name its exact site and current effect epoch",
             ));
         }
-        if block.terminator.class != block.terminator.site.construct.native_lowering_class() {
+        let terminator_contract = function
+            .operation_contracts
+            .binary_search_by(|contract| contract.site.cmp(&block.terminator.site))
+            .ok()
+            .map(|index| &function.operation_contracts[index])
+            .ok_or_else(|| {
+                error(
+                    "native.ir.operation_contract",
+                    "terminator has no bound analysis operation contract",
+                )
+            })?;
+        if block.terminator.effects != terminator_contract.effects
+            || block.terminator.capabilities != terminator_contract.capabilities
+        {
+            return Err(error(
+                "native.ir.operation_contract",
+                "terminator requirements differ from its bound analysis contract",
+            ));
+        }
+        if !block
+            .terminator
+            .capabilities
+            .0
+            .is_subset(&function.capabilities.0)
+        {
+            return Err(error(
+                "native.ir.capabilities",
+                "terminator requirement is absent from the function capability set",
+            ));
+        }
+        if block.terminator.class
+            != runmat_mir::effective_native_lowering_class(
+                block.terminator.site.construct,
+                &block.terminator.effects,
+            )
+        {
             return Err(error(
                 "native.ir.terminator_class",
                 "terminator class differs from canonical MIR classification",
@@ -617,29 +666,223 @@ fn verify_function(
         )?;
     }
     verify_sequence_capture_flow(function, &blocks)?;
+    verify_fixed_assignment_flow(function, &blocks)?;
 
-    let expected = function
-        .expected_sites
+    let contracted = function
+        .operation_contracts
         .iter()
-        .cloned()
+        .map(|contract| contract.site.clone())
         .collect::<BTreeSet<_>>();
-    if expected.len() != function.expected_sites.len() || expected != actual_sites {
+    if contracted.len() != function.operation_contracts.len() || contracted != actual_sites {
         return Err(error(
-            "native.ir.construct_coverage",
-            "Native IR sites do not exactly cover every canonical MIR construct",
+            "native.ir.operation_contract_coverage",
+            "operation contracts do not exactly cover lowered MIR sites",
         ));
     }
     if function
-        .expected_sites
-        .windows(2)
-        .any(|pair| pair[0] >= pair[1])
+        .operation_contracts
+        .iter()
+        .map(|contract| &contract.site)
+        .ne(function.expected_sites.iter())
     {
         return Err(error(
             "native.ir.expected_sites",
-            "expected MIR sites must be sorted and unique",
+            "resume-site projection differs from bound operation contracts",
         ));
     }
     verify_region_boundaries(function, regions)?;
+    Ok(())
+}
+
+fn verify_fixed_assignment_flow(
+    function: &NativeFunction,
+    blocks: &BTreeMap<NativeBlockId, &NativeBlock>,
+) -> NativeCodegenResult<()> {
+    let error = |message| {
+        NativeCodegenError::new("native.ir.prepared_assignment_owner", message)
+            .at_function(function.id)
+    };
+    let mut producers = BTreeMap::new();
+    let mut consumers = BTreeMap::new();
+    let mut phase_contracts = Vec::new();
+    let scalar_receipts = function
+        .blocks
+        .iter()
+        .flat_map(|block| &block.instructions)
+        .filter_map(|instruction| match &instruction.operation {
+            NativeOperation::Statement(runmat_mir::MirStmtKind::PrepareFixedAssignment(phase)) => {
+                match phase.output() {
+                    Some(runmat_mir::MirFixedSelectorDestination::Scalar(local)) => Some(local),
+                    _ => None,
+                }
+            }
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    for block in &function.blocks {
+        for instruction in &block.instructions {
+            if !matches!(
+                instruction.operation,
+                NativeOperation::Statement(runmat_mir::MirStmtKind::PrepareFixedAssignment(_))
+            ) && instruction
+                .outputs
+                .iter()
+                .filter_map(|output| output.local)
+                .any(|local| scalar_receipts.contains(&runmat_mir::MirLocalId(local.0 as usize)))
+            {
+                return Err(error(
+                    "ordinary Native work overwrites a reserved fixed selector receipt",
+                ));
+            }
+        }
+        if matches!(&block.terminator.kind, NativeTerminatorKind::Await { result: Some(runmat_mir::MirPlace::Local(local)), .. } if scalar_receipts.contains(local))
+        {
+            return Err(error(
+                "Native Await overwrites a reserved fixed selector receipt",
+            ));
+        }
+    }
+    for instruction in function.blocks.iter().flat_map(|block| &block.instructions) {
+        match &instruction.operation {
+            NativeOperation::Statement(runmat_mir::MirStmtKind::PrepareFixedAssignment(owner)) => {
+                owner
+                    .validate()
+                    .map_err(|message| error(message.as_str()))?;
+                if let Some(runmat_mir::MirFixedSelectorDestination::Scalar(local)) = owner.output()
+                {
+                    if !function.locals.iter().any(|metadata| {
+                        usize::try_from(local.0).ok() == usize::try_from(metadata.id.0).ok()
+                            && metadata.kind == super::NativeLocalKind::Temporary
+                            && metadata.binding.is_none()
+                    }) {
+                        return Err(error(
+                            "fixed selector output is not a private temporary frame local",
+                        ));
+                    }
+                }
+                phase_contracts.push((&owner.assignment, &instruction.source));
+                if matches!(
+                    owner.phase,
+                    runmat_mir::MirFixedPreparationPhase::CaptureReceiver
+                ) && producers
+                    .insert(
+                        owner.assignment.source_statement,
+                        (&owner.assignment, &instruction.source),
+                    )
+                    .is_some()
+                {
+                    return Err(error(
+                        "fixed source occurrence has multiple preparation instructions",
+                    ));
+                }
+            }
+            NativeOperation::Statement(runmat_mir::MirStmtKind::PreparedAssign {
+                preparation,
+                ..
+            }) => {
+                if consumers
+                    .insert(
+                        preparation.source_statement,
+                        (preparation, &instruction.source),
+                    )
+                    .is_some()
+                {
+                    return Err(error(
+                        "fixed source occurrence has multiple consumer instructions",
+                    ));
+                }
+            }
+            NativeOperation::Statement(runmat_mir::MirStmtKind::Assign { place, .. })
+                if place.has_expanding_selectors() =>
+            {
+                return Err(error(
+                    "expanding fixed assignment lacks its typed preparation/consumer roles",
+                ));
+            }
+            _ => {}
+        }
+    }
+    if producers != consumers
+        || phase_contracts.iter().any(|&(assignment, source)| {
+            consumers.get(&assignment.source_statement) != Some(&(assignment, source))
+        })
+    {
+        return Err(error(
+            "fixed preparation and consumer original source contracts disagree",
+        ));
+    }
+    let mut entries =
+        BTreeMap::<NativeBlockId, Option<runmat_mir::MirFixedPreparationState<'_>>>::new();
+    let mut pending = std::collections::VecDeque::from([(function.entry, None)]);
+    while let Some((id, mut live)) = pending.pop_front() {
+        if let Some(prior) = entries.get(&id) {
+            live = runmat_mir::MirFixedPreparationState::join(prior.clone(), live)
+                .map_err(|message| error(&message))?;
+            if *prior == live {
+                continue;
+            }
+        }
+        entries.insert(id, live.clone());
+        let block = blocks
+            .get(&id)
+            .ok_or_else(|| error("fixed destination lifetime reaches a missing Native block"))?;
+        for instruction in &block.instructions {
+            match &instruction.operation {
+                NativeOperation::Statement(runmat_mir::MirStmtKind::PrepareFixedAssignment(
+                    owner,
+                )) => {
+                    live = Some(
+                        runmat_mir::MirFixedPreparationState::advance(
+                            live.take(),
+                            owner,
+                            &scalar_receipts,
+                        )
+                        .map_err(|message| error(&message))?,
+                    );
+                }
+                NativeOperation::Statement(runmat_mir::MirStmtKind::PreparedAssign {
+                    preparation,
+                    ..
+                }) => {
+                    live.take()
+                        .ok_or_else(|| error("fixed consumer lacks a live source occurrence"))?
+                        .consume(preparation)
+                        .map_err(|message| error(&message))?;
+                }
+                NativeOperation::Statement(
+                    runmat_mir::MirStmtKind::MultiAssign { .. }
+                    | runmat_mir::MirStmtKind::SequenceAssign { .. },
+                ) if live.is_some() => {
+                    return Err(error(
+                        "another prepared output owner overlaps a live fixed destination",
+                    ));
+                }
+                _ if live.as_ref().is_some_and(|state| !state.is_ready()) => {
+                    return Err(error(
+                        "ordinary Native work executes before the fixed destination is ready",
+                    ));
+                }
+                _ => {}
+            }
+        }
+        if let NativeTerminatorKind::TryCatch {
+            try_edge,
+            catch_edge,
+            ..
+        } = &block.terminator.kind
+        {
+            pending.push_back((try_edge.target, live));
+            pending.push_back((catch_edge.target, None));
+        } else {
+            let edges = terminator_edges(&block.terminator.kind);
+            if edges.is_empty() && live.is_some() {
+                return Err(error(
+                    "fixed destination remains live at a Native function boundary",
+                ));
+            }
+            pending.extend(edges.into_iter().map(|edge| (edge.target, live.clone())));
+        }
+    }
     Ok(())
 }
 
@@ -681,6 +924,28 @@ fn verify_sequence_capture_flow(
                             "captured sequence local {} is overwritten at instruction {}",
                             destination.0, instruction.id.0
                         )));
+                    }
+                }
+                NativeOperation::Statement(runmat_mir::MirStmtKind::PrepareFixedAssignment(
+                    phase,
+                )) => {
+                    let mut consumed = BTreeSet::new();
+                    let mut result = Ok(());
+                    phase.visit_sequence_locals(|sequence| {
+                        if result.is_ok() {
+                            result = consume_sequence_local(*sequence, &mut live, &mut consumed);
+                        }
+                    });
+                    result.map_err(error)?;
+                    if let Some(runmat_mir::MirFixedSelectorDestination::Sequence(destination)) =
+                        phase.output()
+                    {
+                        if !live.insert(destination) {
+                            return Err(error(format!(
+                                "fixed selector overwrites captured sequence {}",
+                                destination.0
+                            )));
+                        }
                     }
                 }
                 NativeOperation::Rvalue { value, .. } => {
@@ -881,6 +1146,24 @@ fn verify_instruction(
             .at_point(instruction.site.point)
             .for_construct(instruction.site.construct)
     };
+    let contract = function
+        .operation_contracts
+        .binary_search_by(|contract| contract.site.cmp(&instruction.site))
+        .ok()
+        .map(|index| &function.operation_contracts[index])
+        .ok_or_else(|| {
+            error(
+                "native.ir.operation_contract",
+                "instruction has no bound analysis operation contract",
+            )
+        })?;
+    if instruction.effects != contract.effects || instruction.capabilities != contract.capabilities
+    {
+        return Err(error(
+            "native.ir.operation_contract",
+            "instruction requirements differ from its bound analysis contract",
+        ));
+    }
     if instruction.site.point.function != function.portable_id {
         return Err(error(
             "native.ir.site_function",
@@ -973,18 +1256,6 @@ fn verify_instruction(
                 ));
             }
         }
-        let (declared_effects, declared_capabilities) =
-            runmat_mir::rvalue_declared_requirements(value);
-        if !declared_effects.0.is_subset(&instruction.effects.0)
-            || !declared_capabilities
-                .0
-                .is_subset(&instruction.capabilities.0)
-        {
-            return Err(error(
-                "native.ir.declared_requirements",
-                "instruction omits effects or capabilities declared by canonical MIR",
-            ));
-        }
     } else if let NativeOperation::Statement(statement) = &instruction.operation {
         let expected_constructs = runmat_mir::statement_construct_inventory(statement)
             .into_iter()
@@ -1006,18 +1277,6 @@ fn verify_instruction(
             return Err(error(
                 "native.capability.distributed_core_pending",
                 "statement contains a construct requiring the R25 distributed core",
-            ));
-        }
-        let (declared_effects, declared_capabilities) =
-            runmat_mir::statement_declared_requirements(statement);
-        if !declared_effects.0.is_subset(&instruction.effects.0)
-            || !declared_capabilities
-                .0
-                .is_subset(&instruction.capabilities.0)
-        {
-            return Err(error(
-                "native.ir.declared_requirements",
-                "instruction omits effects or capabilities declared by canonical MIR",
             ));
         }
         if !statement_selector_arity_valid(statement) {
@@ -1158,9 +1417,15 @@ fn rvalue_selector_arity_valid_without_regions(value: &runmat_mir::MirRvalue) ->
         runmat_mir::MirRvalue::Index { indexing, .. } => {
             indexing.components.len() <= u32::BITS as usize
         }
-        runmat_mir::MirRvalue::ShortCircuit { right_temps, .. } => right_temps
-            .iter()
-            .all(|statement| statement_selector_arity_valid(&statement.kind)),
+        runmat_mir::MirRvalue::ShortCircuit { right_temps, .. } => {
+            right_temps.iter().all(|statement| {
+                !matches!(
+                    &statement.kind,
+                    runmat_mir::MirStmtKind::PrepareFixedAssignment(_)
+                        | runmat_mir::MirStmtKind::PreparedAssign { .. }
+                ) && statement_selector_arity_valid(&statement.kind)
+            })
+        }
         _ => true,
     }
 }
@@ -1246,6 +1511,29 @@ fn expansion_source_contains_legacy_binding_place_without_regions(
 
 fn statement_selector_arity_valid(statement: &runmat_mir::MirStmtKind) -> bool {
     match statement {
+        runmat_mir::MirStmtKind::PrepareFixedAssignment(owner) => {
+            owner.validate().is_ok()
+                && place_selector_arity_valid(&owner.assignment.mutation.place)
+                && owner
+                    .selector_region()
+                    .is_none_or(|region| match &region.argument {
+                        runmat_mir::MirCallArg::Expansion(source) => {
+                            expansion_source_selector_arity_valid(source)
+                        }
+                        _ => true,
+                    })
+                && owner.steps().iter().all(|step| match step {
+                    runmat_mir::MirExpressionStep::Let { value, .. } => {
+                        rvalue_selector_arity_valid(value)
+                    }
+                    runmat_mir::MirExpressionStep::CaptureSequence { source, .. } => {
+                        expansion_source_selector_arity_valid(source)
+                    }
+                })
+        }
+        runmat_mir::MirStmtKind::PreparedAssign { preparation, value } => {
+            preparation.validate_phased().is_ok() && rvalue_selector_arity_valid(value)
+        }
         runmat_mir::MirStmtKind::Assign { place, value } => {
             place_selector_arity_valid(place) && rvalue_selector_arity_valid(value)
         }
@@ -1284,6 +1572,21 @@ fn statement_selector_arity_valid(statement: &runmat_mir::MirStmtKind) -> bool {
 
 fn statement_contains_legacy_binding_place(statement: &runmat_mir::MirStmtKind) -> bool {
     match statement {
+        runmat_mir::MirStmtKind::PrepareFixedAssignment(owner) => {
+            place_contains_legacy_binding(&owner.assignment.mutation.place)
+                || owner.steps().iter().any(|step| match step {
+                    runmat_mir::MirExpressionStep::Let { value, .. } => {
+                        rvalue_contains_legacy_binding_place(value)
+                    }
+                    runmat_mir::MirExpressionStep::CaptureSequence { source, .. } => {
+                        expansion_source_contains_legacy_binding_place(source)
+                    }
+                })
+        }
+        runmat_mir::MirStmtKind::PreparedAssign { preparation, value } => {
+            place_contains_legacy_binding(&preparation.mutation.place)
+                || rvalue_contains_legacy_binding_place(value)
+        }
         runmat_mir::MirStmtKind::Assign { place, value } => {
             place_contains_legacy_binding(place) || rvalue_contains_legacy_binding_place(value)
         }
@@ -1380,7 +1683,15 @@ fn rvalue_output_locals(
 ) -> NativeCodegenResult<Vec<Option<NativeLocalId>>> {
     use runmat_mir::{MirOutputTarget, MirStmtKind};
     match statement {
-        MirStmtKind::Assign { place, .. } => root_local(place)
+        MirStmtKind::PreparedAssign {
+            preparation:
+                runmat_mir::MirPreparedAssignment {
+                    mutation: runmat_mir::MirPlaceMutation { place, .. },
+                    ..
+                },
+            ..
+        }
+        | MirStmtKind::Assign { place, .. } => root_local(place)
             .map(checked_native_local)
             .transpose()
             .map(|local| vec![local]),
@@ -1422,7 +1733,8 @@ fn rvalue_output_locals(
         .then_some(None)
         .into_iter()
         .collect()),
-        MirStmtKind::PlaceMutation(_)
+        MirStmtKind::PrepareFixedAssignment(_)
+        | MirStmtKind::PlaceMutation(_)
         | MirStmtKind::StatementOutput(_)
         | MirStmtKind::WorkspaceEffect { .. }
         | MirStmtKind::EnvironmentEffect(_) => Err(NativeCodegenError::new(
@@ -1437,7 +1749,15 @@ fn statement_output_locals(
 ) -> NativeCodegenResult<Vec<NativeLocalId>> {
     use runmat_mir::{MirOutputTarget, MirStmtKind};
     let roots = match statement {
-        MirStmtKind::Assign { place, .. } => root_local(place).into_iter().collect(),
+        MirStmtKind::PreparedAssign {
+            preparation:
+                runmat_mir::MirPreparedAssignment {
+                    mutation: runmat_mir::MirPlaceMutation { place, .. },
+                    ..
+                },
+            ..
+        }
+        | MirStmtKind::Assign { place, .. } => root_local(place).into_iter().collect(),
         MirStmtKind::MultiAssign { targets, .. } => targets
             .targets
             .iter()
@@ -1450,6 +1770,10 @@ fn statement_output_locals(
         MirStmtKind::SequenceAssign { target, .. } => {
             root_local(target.base()).into_iter().collect()
         }
+        MirStmtKind::PrepareFixedAssignment(preparation) => match preparation.output() {
+            Some(runmat_mir::MirFixedSelectorDestination::Scalar(local)) => vec![local],
+            Some(runmat_mir::MirFixedSelectorDestination::Sequence(_)) | None => Vec::new(),
+        },
         MirStmtKind::CaptureSequence { .. } => Vec::new(),
         MirStmtKind::PlaceMutation(mutation) => root_local(&mutation.place).into_iter().collect(),
         MirStmtKind::WorkspaceEffect { bindings, .. } => bindings.clone(),
@@ -1551,6 +1875,18 @@ fn expected_output_count(instruction: &NativeInstruction) -> NativeCodegenResult
                         if let Some(local) = place.and_then(root_local) {
                             roots.insert(local);
                         }
+                    }
+                }
+                runmat_mir::MirStmtKind::PrepareFixedAssignment(preparation) => {
+                    if let Some(runmat_mir::MirFixedSelectorDestination::Scalar(local)) =
+                        preparation.output()
+                    {
+                        roots.insert(local);
+                    }
+                }
+                runmat_mir::MirStmtKind::PreparedAssign { preparation, .. } => {
+                    if let Some(local) = root_local(&preparation.mutation.place) {
+                        roots.insert(local);
                     }
                 }
                 runmat_mir::MirStmtKind::CaptureSequence { .. } => {}

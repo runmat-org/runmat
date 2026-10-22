@@ -1,17 +1,19 @@
 use std::num::NonZeroUsize;
 
-pub(super) struct ShapeProgress {
+pub(in crate::array) struct ShapeProgress {
     cursor: usize,
-    pub(super) elements: usize,
+    pub(in crate::array) elements: usize,
     complete: bool,
+    overflowed: bool,
 }
 
 impl ShapeProgress {
-    pub(super) fn new() -> Self {
+    pub(in crate::array) fn new() -> Self {
         Self {
             cursor: 0,
             elements: 1,
             complete: false,
+            overflowed: false,
         }
     }
 
@@ -21,23 +23,54 @@ impl ShapeProgress {
         maximum_work: NonZeroUsize,
         overflow: impl Fn(&[usize]) -> String,
     ) -> Result<usize, String> {
+        self.advance_with_zero_policy(shape, maximum_work, overflow, false)
+    }
+
+    /// Character geometry permits a later zero extent to make a virtual
+    /// shape empty. Keep numeric admission's existing overflow policy intact.
+    pub(in crate::array) fn advance_zero_aware(
+        &mut self,
+        shape: &[usize],
+        maximum_work: NonZeroUsize,
+        overflow: impl Fn(&[usize]) -> String,
+    ) -> Result<usize, String> {
+        self.advance_with_zero_policy(shape, maximum_work, overflow, true)
+    }
+
+    fn advance_with_zero_policy(
+        &mut self,
+        shape: &[usize],
+        maximum_work: NonZeroUsize,
+        overflow: impl Fn(&[usize]) -> String,
+        zero_aware: bool,
+    ) -> Result<usize, String> {
         let mut completed = 0;
         while self.cursor < shape.len() && completed < maximum_work.get() {
-            self.elements = self
-                .elements
-                .checked_mul(shape[self.cursor])
-                .ok_or_else(|| overflow(shape))?;
+            let extent = shape[self.cursor];
+            if zero_aware && extent == 0 {
+                self.elements = 0;
+                self.overflowed = false;
+            } else if !self.overflowed {
+                match self.elements.checked_mul(extent) {
+                    Some(elements) => self.elements = elements,
+                    None if zero_aware => self.overflowed = true,
+                    None => return Err(overflow(shape)),
+                }
+            }
             self.cursor += 1;
             completed += 1;
         }
         if self.cursor == shape.len() && !self.complete && completed < maximum_work.get() {
+            if self.overflowed {
+                return Err(overflow(shape));
+            }
             self.complete = true;
             completed += 1;
         }
         Ok(completed)
     }
 
-    pub(super) fn is_complete(&self) -> bool {
+    pub(in crate::array) fn is_complete(&self) -> bool {
         self.complete
     }
 

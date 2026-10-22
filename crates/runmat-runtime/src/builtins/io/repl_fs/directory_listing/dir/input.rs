@@ -45,12 +45,10 @@ fn text(
             if chars.rows == 1
                 && crate::builtins::common::shape::effective_rank(&chars.shape) <= 2 =>
         {
-            Ok(chars
-                .data()
-                .iter()
-                .collect::<String>()
-                .trim_end()
-                .to_string())
+            crate::builtins::io::utf16::decode_utf16_with_error(chars.data(), || {
+                super::error::contract(error)
+            })
+            .map(|text| text.trim_end().to_string())
         }
         _ => Err(super::error::contract(error)),
     }
@@ -68,15 +66,17 @@ mod tests {
             (vec![2, 1], false),
         ] {
             let value = Value::CharArray(
-                runmat_value::CharArray::new_with_shape(vec!['a', 'b'], shape).unwrap(),
+                runmat_value::CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], shape)
+                    .unwrap(),
             );
             assert_eq!(
                 text(&value, &runmat_builtins::DIR_ERROR_NAME).is_ok(),
                 valid
             );
         }
-        let empty =
-            Value::CharArray(runmat_value::CharArray::new_with_shape(vec![], vec![0, 0]).unwrap());
+        let empty = Value::CharArray(
+            runmat_value::CharArray::from_unicode_scalars_with_shape(vec![], vec![0, 0]).unwrap(),
+        );
         assert!(text(&empty, &runmat_builtins::DIR_ERROR_NAME).is_err());
     }
 }

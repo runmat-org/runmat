@@ -227,7 +227,7 @@ pub(in crate::session) fn ordinary_native_route(
                         return installed.invoke(runtime, name, arguments, outputs).await;
                     }
                     Ok(None) => {}
-                    Err(error) => return std::ops::ControlFlow::Break(Err(selected_error(error))),
+                    Err(error) => return std::ops::ControlFlow::Break(Err(error)),
                 }
             }
             mex.load_ordinary_admitted_and_call(&name, arguments, outputs, runtime, &source_owner)

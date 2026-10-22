@@ -11,9 +11,9 @@ mod real_eigenvectors;
 mod real_reorder;
 mod reorder;
 pub(crate) mod riccati;
-mod work;
 #[cfg(test)]
 mod tests;
+mod work;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use faer::{c64, Mat};
@@ -60,7 +60,13 @@ fn parse_mode(option: Option<&Value>) -> BuiltinResult<Mode> {
     let text = match option {
         Value::String(text) => text.as_str().to_owned(),
         Value::StringArray(array) if array.data().len() == 1 => array.data()[0].as_str().to_owned(),
-        Value::CharArray(chars) if chars.rows <= 1 => chars.data().iter().collect(),
+        Value::CharArray(chars) if chars.rows <= 1 => {
+            runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
+                let mut error = invalid(source.to_string());
+                error.source = Some(Box::new(source));
+                error
+            })?
+        }
         _ => return Err(invalid("qz mode must be 'complex' or 'real'")),
     };
     match text.trim().to_ascii_lowercase().as_str() {

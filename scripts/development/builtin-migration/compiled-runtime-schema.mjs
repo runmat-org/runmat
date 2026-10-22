@@ -55,7 +55,7 @@ export function gpuSpec(value) {
   enumArray(value.supported_precisions, PRECISIONS, "GPU precisions"); enumValue(value.broadcast, ["matlab", "scalar_only", "none"], "GPU broadcast");
   array(value.provider_hooks, "provider hooks", { empty: true }).forEach(providerHook); uniqueBy(value.provider_hooks, (entry) => `${entry.kind}:${entry.name}`, "provider hooks");
   enumValue(value.constant_strategy, CONSTANT_STRATEGIES, "GPU constant strategy"); enumValue(value.residency, ["inherit_inputs", "new_handle", "gather_immediately"], "GPU residency"); enumValue(value.nan_mode, ["include", "omit"], "GPU NaN mode");
-  optionalInteger(value.two_pass_threshold, "two-pass threshold"); optionalInteger(value.workgroup_size, "workgroup size"); boolean(value.accepts_nan_mode, "accepts NaN mode"); string(value.notes, "GPU notes");
+  optionalInteger(value.two_pass_threshold, "two-pass threshold"); optionalInteger(value.workgroup_size, "workgroup size"); if (value.workgroup_size !== null && value.workgroup_size > 0xffff_ffff) throw new Error("workgroup size must fit u32"); boolean(value.accepts_nan_mode, "accepts NaN mode"); string(value.notes, "GPU notes");
 }
 
 export function fusionSpec(value) {

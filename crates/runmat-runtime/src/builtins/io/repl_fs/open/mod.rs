@@ -126,7 +126,12 @@ fn open_name(value: &Value) -> BuiltinResult<String> {
             if chars.rows == 1
                 && crate::builtins::common::shape::effective_rank(&chars.shape) <= 2 =>
         {
-            Ok(chars.data().iter().collect::<String>())
+            crate::builtins::io::utf16::decode_utf16_with_error(chars.data(), || {
+                open_error(
+                    &OPEN_ERROR_NAME,
+                    "open: name contains malformed UTF-16 text",
+                )
+            })
         }
         Value::StringArray(array) if array.data().len() == 1 => {
             Ok(array.data()[0].as_str().to_owned())

@@ -38,6 +38,13 @@ pub fn apply_color_limits(
     }
     if controls.len() == 1
         && crate::builtins::plotting::style::value_as_string(&controls[0])
+            .map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    builtin,
+                    source.to_string(),
+                    source,
+                )
+            })?
             .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("tight"))
     {
         return Err(crate::builtins::plotting::plotting_error(

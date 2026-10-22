@@ -20,7 +20,7 @@ pub(super) async fn dispatch(
         Instr::PrepareMemberSequenceOutputTarget { root_slot, member } => (
             *root_slot,
             Vec::new(),
-            SequenceEndpointSpec::Member(member.clone()),
+            SequenceEndpointSpec::Member(member.0.clone().into()),
         ),
         Instr::PrepareMemberDynamicSequenceOutputTarget { root_slot } => {
             let member = dynamic_member(stack)?;
@@ -33,7 +33,7 @@ pub(super) async fn dispatch(
         } => (
             *root_slot,
             vec![parentheses(pop_values(stack, *num_indices)?)],
-            SequenceEndpointSpec::Member(member.clone()),
+            SequenceEndpointSpec::Member(member.0.clone().into()),
         ),
         Instr::PrepareIndexedMemberDynamicSequenceOutputTarget {
             root_slot,
@@ -58,7 +58,9 @@ pub(super) async fn dispatch(
             (
                 *root_slot,
                 Vec::new(),
-                SequenceEndpointSpec::CellContents(components),
+                SequenceEndpointSpec::CellContents(
+                    runmat_value::ExactArrayStorage::shared_unbounded(components),
+                ),
             )
         }
         _ => return Ok(false),
@@ -74,20 +76,21 @@ pub(super) async fn dispatch(
         endpoint,
         absent_root: None,
         root_creation: runmat_mir::SequenceRootCreation::Existing,
-    });
+        prepared_root: None,
+    })?;
     Ok(true)
 }
 
 fn dynamic_member(
     stack: &mut crate::interpreter::stack::InterpreterStack,
-) -> Result<runmat_types::MemberName, RuntimeError> {
+) -> Result<runmat_value::Utf8Text, RuntimeError> {
     let value = stack.pop().ok_or_else(stack_underflow)?;
-    Ok(runmat_types::MemberName(String::try_from(&value)?))
+    Ok(String::try_from(&value)?.into())
 }
 
 fn parentheses(indices: impl IntoIterator<Item = Value>) -> AssignmentStepSpec {
     AssignmentStepSpec::Parentheses {
-        selectors: values(indices),
+        selectors: runmat_value::ExactArrayStorage::shared_unbounded(values(indices)),
     }
 }
 

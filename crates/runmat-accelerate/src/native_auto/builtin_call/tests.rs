@@ -28,9 +28,6 @@ use runmat_runtime::context::{RuntimeAccelerationService, RuntimeServiceFuture};
 
 struct Adapter(&'static dyn AccelProvider, u16);
 impl RuntimeAccelerationService for Adapter {
-    fn supports_operation(&self, _: &str) -> bool {
-        true
-    }
     fn prepare_admitted(
         &self,
         context: RuntimeContext,

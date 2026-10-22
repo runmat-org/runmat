@@ -40,7 +40,7 @@ pub async fn strjoin_builtin(
             Value::Int(integer) => Some(integer.decimal_string()),
             Value::Num(number) => Some(number.to_string()),
             Value::Bool(logical) => Some(logical.to_string()),
-            _ => text_scalar(&delimiter).map(Cow::into_owned),
+            _ => text_scalar(&delimiter, &STRJOIN_ERROR_INVALID_DELIMITER)?.map(Cow::into_owned),
         };
         if let Some(delimiter) = legacy_delimiter {
             crate::compatibility::ensure_builtin_extension_enabled(
@@ -65,7 +65,7 @@ pub async fn strjoin_builtin(
                 .data()
                 .iter()
                 .map(|item| match item {
-                    Value::CharArray(chars) => char_text(chars)
+                    Value::CharArray(chars) => char_text(chars, &STRJOIN_ERROR_INVALID_INPUT)?
                         .map(Cow::Owned)
                         .ok_or_else(|| error(&STRJOIN_ERROR_INVALID_INPUT)),
                     _ => Err(error(&STRJOIN_ERROR_INVALID_INPUT)),
@@ -104,21 +104,32 @@ fn vector(shape: &[usize]) -> bool {
     matrix(shape)
         && (shape.contains(&0) || shape.iter().filter(|dimension| **dimension > 1).count() <= 1)
 }
-fn char_text(chars: &CharArray) -> Option<String> {
-    (chars.rows <= 1 && matrix(&chars.shape)).then(|| chars.data().iter().copied().collect())
+fn char_text(
+    chars: &CharArray,
+    descriptor: &'static BuiltinErrorDescriptor,
+) -> BuiltinResult<Option<String>> {
+    if chars.rows > 1 || !matrix(&chars.shape) {
+        return Ok(None);
+    }
+    runmat_value::decode_utf16_code_units(chars.data())
+        .map(Some)
+        .map_err(|source| decode_error(descriptor, source))
 }
-fn text_scalar(value: &Value) -> Option<Cow<'_, str>> {
-    match value {
+fn text_scalar<'a>(
+    value: &'a Value,
+    descriptor: &'static BuiltinErrorDescriptor,
+) -> BuiltinResult<Option<Cow<'a, str>>> {
+    Ok(match value {
         Value::String(text) => Some(Cow::Borrowed(text.as_str())),
         Value::StringArray(array) if array.data().len() == 1 => {
             Some(Cow::Borrowed(array.data()[0].as_str()))
         }
-        Value::CharArray(chars) => char_text(chars).map(Cow::Owned),
+        Value::CharArray(chars) => char_text(chars, descriptor)?.map(Cow::Owned),
         _ => None,
-    }
+    })
 }
 fn delimiters(value: &Value, count: usize) -> BuiltinResult<Vec<Cow<'_, str>>> {
-    if let Some(text) = text_scalar(value) {
+    if let Some(text) = text_scalar(value, &STRJOIN_ERROR_INVALID_DELIMITER)? {
         return Ok(vec![text; count]);
     }
     let items = match value {
@@ -130,7 +141,10 @@ fn delimiters(value: &Value, count: usize) -> BuiltinResult<Vec<Cow<'_, str>>> {
         Value::Cell(cell) if vector(&cell.shape) => cell
             .data()
             .iter()
-            .map(|item| text_scalar(item).ok_or_else(|| error(&STRJOIN_ERROR_INVALID_DELIMITER)))
+            .map(|item| {
+                text_scalar(item, &STRJOIN_ERROR_INVALID_DELIMITER)?
+                    .ok_or_else(|| error(&STRJOIN_ERROR_INVALID_DELIMITER))
+            })
             .collect::<BuiltinResult<Vec<_>>>()?,
         _ => return Err(error(&STRJOIN_ERROR_INVALID_DELIMITER)),
     };
@@ -139,6 +153,17 @@ fn delimiters(value: &Value, count: usize) -> BuiltinResult<Vec<Cow<'_, str>>> {
     }
     Ok(items)
 }
+
+fn decode_error(
+    descriptor: &'static BuiltinErrorDescriptor,
+    source: runmat_value::Utf16DecodeError,
+) -> RuntimeError {
+    crate::build_runtime_error("strjoin: malformed UTF-16 character input")
+        .with_builtin("strjoin")
+        .with_identifier(descriptor.identifier.expect("strjoin error identifier"))
+        .with_source(source)
+        .build()
+}
 fn rowwise(value: Value, delimiter: &str) -> BuiltinResult<Value> {
     let array = match value {
         Value::String(text) => StringArray::from_texts_unbounded(vec![text], vec![1, 1]),
@@ -146,12 +171,12 @@ fn rowwise(value: Value, delimiter: &str) -> BuiltinResult<Value> {
         Value::CharArray(chars) if matrix(&chars.shape) => {
             let rows = (0..chars.rows)
                 .map(|row| {
-                    chars.data()[row * chars.cols..(row + 1) * chars.cols]
-                        .iter()
-                        .copied()
-                        .collect()
+                    runmat_value::decode_utf16_code_units(
+                        &chars.data()[row * chars.cols..(row + 1) * chars.cols],
+                    )
+                    .map_err(|source| decode_error(&STRJOIN_ERROR_INVALID_INPUT, source))
                 })
-                .collect();
+                .collect::<BuiltinResult<Vec<_>>>()?;
             StringArray::new(rows, vec![chars.rows, 1])
         }
         _ => return Err(error(&STRJOIN_ERROR_INVALID_INPUT)),

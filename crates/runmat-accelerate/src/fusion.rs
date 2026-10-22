@@ -3646,7 +3646,7 @@ fn match_mean_axes(graph: &AccelGraph, vid: ValueId) -> Option<(NodeId, ValueId,
         let control = match control_value {
             Value::String(text) => MeanControl::from_public_option(text),
             Value::CharArray(chars) if chars.rows == 1 => {
-                MeanControl::from_public_option(&chars.data().iter().collect::<String>())
+                MeanControl::from_public_code_units(chars.data().iter().map(|unit| unit.raw()))
             }
             _ => None,
         };

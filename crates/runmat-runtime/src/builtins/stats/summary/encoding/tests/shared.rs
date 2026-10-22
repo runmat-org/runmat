@@ -67,12 +67,14 @@ fn categorical_classes_preserve_unused_categories() {
         )
         .unwrap(),
     );
-    let group = crate::builtins::table::categorical_from_args(vec![
-        Value::StringArray(
-            StringArray::new(vec!["high".into(), "low".into()], vec![2, 1]).unwrap(),
-        ),
-        categories.clone(),
-    ])
+    let group = crate::builtins::table::categorical_from_args(
+        crate::call::FunctionArgumentView::from_slice(&[
+            Value::StringArray(
+                StringArray::new(vec!["high".into(), "low".into()], vec![2, 1]).unwrap(),
+            ),
+            categories.clone(),
+        ]),
+    )
     .unwrap();
     let Value::Tensor(dummy) = block_on(dummyvar_builtin(group.clone())).unwrap() else {
         panic!("dummy tensor");

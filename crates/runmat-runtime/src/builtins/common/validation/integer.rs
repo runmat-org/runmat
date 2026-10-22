@@ -128,17 +128,7 @@ pub fn value_has_logical_class(value: &Value) -> bool {
 /// aligned wide integer can be exact even when its magnitude exceeds
 /// `flintmax`.
 pub fn integer_is_exact_f64(value: &IntValue) -> bool {
-    let magnitude = match value {
-        IntValue::I8(value) => u64::from(value.unsigned_abs()),
-        IntValue::I16(value) => u64::from(value.unsigned_abs()),
-        IntValue::I32(value) => u64::from(value.unsigned_abs()),
-        IntValue::I64(value) => value.unsigned_abs(),
-        IntValue::U8(value) => u64::from(*value),
-        IntValue::U16(value) => u64::from(*value),
-        IntValue::U32(value) => u64::from(*value),
-        IntValue::U64(value) => *value,
-    };
-    runmat_types::integer_magnitude_is_exact_binary64(magnitude)
+    value.to_exact_f64().is_some()
 }
 
 pub fn native_integer_value_is_exact_f64(value: &Value) -> bool {

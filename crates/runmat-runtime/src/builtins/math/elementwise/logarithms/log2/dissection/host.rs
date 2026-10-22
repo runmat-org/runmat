@@ -8,7 +8,7 @@ pub(super) fn characters(chars: CharArray) -> BuiltinResult<(Value, Value)> {
     let values = chars
         .to_column_major()
         .iter()
-        .map(|character| *character as u32 as f64)
+        .map(|character| f64::from(character.raw()))
         .collect();
     let tensor =
         Tensor::new(values, chars.shape).map_err(|error| errors::internal(OPERATION, &error))?;

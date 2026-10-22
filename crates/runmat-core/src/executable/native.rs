@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use super::ExecutableUnit;
 
@@ -15,7 +16,7 @@ mod test_procedure;
 #[derive(Clone)]
 pub struct NativeCompilationInput {
     mir: runmat_mir::MirAssembly,
-    analysis: runmat_mir::analysis::AnalysisStore,
+    analysis: Arc<runmat_mir::analysis::AnalysisStore>,
     manifest: runmat_execution::ExecutableUnitManifest,
     source_map: runmat_execution::ExecutableSourceMapV2,
     binding_names: BTreeMap<runmat_types::BindingId, String>,
@@ -26,6 +27,8 @@ pub struct NativeCompilationInput {
 }
 
 pub struct AotObjectDataOptions {
+    pub clock_inputs: Option<runmat_execution::host::NativeClockInputs>,
+    pub local_service_inputs: Option<runmat_execution::host::NativeLocalServiceInputs>,
     pub runtime_binding_mode: runmat_native_codegen::aot::AotRuntimeBindingMode,
     pub builtin_bindings: Vec<runmat_native_codegen::aot::AotBuiltinBinding>,
     pub foreign_policy: Option<runmat_execution_artifact::LogicalObject>,
@@ -147,7 +150,7 @@ impl NativeCompilationInput {
                     .map(|facts| facts.function)
                     .ok_or_else(|| {
                         native_product_error(
-                            "retained local function has no portable identity".into(),
+                            "retained local function has no portable analysis identity".into(),
                         )
                     })
             })
@@ -161,20 +164,6 @@ impl NativeCompilationInput {
         self.mir
             .entrypoints
             .retain(|function| retained.contains(function));
-        self.analysis
-            .functions
-            .retain(|function| retained_portable.contains(&function.function));
-        self.analysis
-            .program_points
-            .retain(|point| retained_portable.contains(&point.point.function));
-        self.analysis
-            .regions
-            .retain(|region| retained_portable.contains(&region.contract.id.function));
-        for class in &mut self.analysis.classes {
-            class
-                .methods
-                .retain(|function| retained_portable.contains(function));
-        }
         self.interpreter_resume_points
             .retain(|point, _| retained_portable.contains(&point.function));
         self.coverage_sites
@@ -267,6 +256,7 @@ impl NativeCompilationInput {
                 "AOT embedded data does not belong to the selected native assembly",
             ));
         }
+        runmat_native_codegen::verify_against_analysis(assembly, &self.manifest, &self.analysis)?;
         runmat_native_codegen::verify_against_mir(assembly, &self.mir, Some(&self.binding_names))?;
         let native_ir = serde_json::to_vec(assembly).map_err(|error| {
             runmat_native_codegen::NativeCodegenError::new(
@@ -296,6 +286,8 @@ impl NativeCompilationInput {
             // absent-field fallback is allowed to infer this commitment.
             program.product = selected.product().clone();
         }
+        program.clock_inputs = options.clock_inputs;
+        program.local_service_inputs = options.local_service_inputs;
         let program = program.canonical_bytes()?;
         let ordered_resume_points = self
             .interpreter_resume_points
@@ -520,7 +512,7 @@ impl ExecutableUnit {
         }
         Ok(NativeCompilationInput {
             mir: self.mir().clone(),
-            analysis: self.analysis().clone(),
+            analysis: self.analysis_owner(),
             entrypoint,
             manifest: envelope.manifest,
             source_map: self
@@ -724,7 +716,7 @@ end
     }
 
     #[test]
-    fn native_retention_prunes_code_analysis_contracts_and_registry_together() {
+    fn native_retention_keeps_admitted_analysis_and_projects_native_contracts() {
         let mut session = RunMatSession::with_options(false, false).expect("session init");
         let unit = block_on(session.compile_executable_unit(
             ExecutableSource::new(
@@ -758,6 +750,10 @@ end
             .expect("prepare native input")
             .retain_functions(&retained)
             .expect("retain reachable functions");
+        assert!(std::sync::Arc::ptr_eq(
+            &input.analysis,
+            &unit.analysis_owner()
+        ));
 
         assert_eq!(input.mir.bodies.len(), 2);
         assert_eq!(input.mir.functions.len(), 2);
@@ -774,17 +770,7 @@ end
             .analysis
             .functions
             .iter()
-            .all(|function| retained_portable.contains(&function.function)));
-        assert!(input
-            .analysis
-            .program_points
-            .iter()
-            .all(|point| retained_portable.contains(&point.point.function)));
-        assert!(input
-            .analysis
-            .regions
-            .iter()
-            .all(|region| retained_portable.contains(&region.contract.id.function)));
+            .any(|function| !retained_portable.contains(&function.function)));
         assert!(input
             .manifest
             .regions
@@ -800,6 +786,8 @@ end
             .lower(runmat_native_codegen::NativeTarget::current())
             .expect("lower retained Native IR");
         assert_eq!(assembly.functions.len(), 2);
+        runmat_native_codegen::verify_against_analysis(&assembly, &input.manifest, &input.analysis)
+            .expect("retained Native projection binds to the full admitted analysis owner");
         assert!(assembly
             .requirements
             .regions
@@ -809,6 +797,8 @@ end
             .aot_object_data(
                 &assembly,
                 AotObjectDataOptions {
+                    clock_inputs: None,
+                    local_service_inputs: None,
                     runtime_binding_mode:
                         runmat_native_codegen::aot::AotRuntimeBindingMode::Dynamic,
                     builtin_bindings: Vec::new(),

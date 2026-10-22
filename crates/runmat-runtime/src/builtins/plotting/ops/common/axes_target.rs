@@ -14,17 +14,6 @@ pub(crate) use prepared::{
     prepare_axes_call, prepare_graphics_target, PreparedAxesTarget, PreparedGraphicsTarget,
 };
 
-pub fn split_leading_axes_handle(
-    mut args: Vec<Value>,
-    builtin: &'static str,
-) -> BuiltinResult<(AxesTarget, Vec<Value>)> {
-    let target = leading_axes_target(args.first(), args.len(), builtin)?;
-    if target.is_some() {
-        args.remove(0);
-    }
-    Ok((target, args))
-}
-
 pub fn split_leading_axes_arguments(
     args: crate::call::BuiltinArguments,
     builtin: &'static str,

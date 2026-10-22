@@ -60,27 +60,34 @@ pub(super) fn brace_selection_count(target: &Value, subs: &Value) -> crate::Buil
             "brace or parentheses subscripts must be stored in a cell array",
         ));
     };
-    if subscripts.data().is_empty() {
+    selection_count(subscripts.data().len(), |dim| {
+        single_subscript_count(
+            target,
+            &subscripts.data()[dim],
+            dim,
+            subscripts.data().len(),
+        )
+    })
+}
+
+fn selection_count(
+    width: usize,
+    count_at: impl Fn(usize) -> crate::BuiltinResult<usize>,
+) -> crate::BuiltinResult<usize> {
+    if width == 0 {
         return Ok(0);
     }
-    if subscripts.data().len() == 1 {
-        return single_subscript_count(target, &subscripts.data()[0], 0, 1);
+    if width == 1 {
+        return count_at(0);
     }
     let mut count = 1usize;
-    for (dim, subscript) in subscripts.data().iter().enumerate() {
-        count = count
-            .checked_mul(single_subscript_count(
-                target,
-                subscript,
-                dim,
-                subscripts.data().len(),
-            )?)
-            .ok_or_else(|| {
-                num_args_error(
-                    &NUM_ARGUMENTS_ERROR_SUBSTRUCT,
-                    "subscript selection count overflowed",
-                )
-            })?;
+    for dim in 0..width {
+        count = count.checked_mul(count_at(dim)?).ok_or_else(|| {
+            num_args_error(
+                &NUM_ARGUMENTS_ERROR_SUBSTRUCT,
+                "subscript selection count overflowed",
+            )
+        })?;
     }
     Ok(count)
 }
@@ -95,8 +102,40 @@ pub(super) fn single_subscript_count(
         Value::String(value) if value.trim() == ":" => {
             target_colon_extent(target, dim, selector_count)
         }
-        Value::CharArray(chars) if chars.data().iter().collect::<String>().trim() == ":" => {
-            target_colon_extent(target, dim, selector_count)
+        Value::CharArray(chars) => {
+            // Compare the same decoded/trimmed text without materializing it.
+            // Always decode the entire source: malformed UTF-16 has the same
+            // precedence even if an earlier character already rules out ':'.
+            let mut colons = 0usize;
+            let mut other = false;
+            let mut unit_index = 0usize;
+            for decoded in char::decode_utf16(chars.data().iter().map(|unit| unit.raw())) {
+                let character = decoded.map_err(|source| {
+                    let mut error = num_args_error(
+                        &NUM_ARGUMENTS_ERROR_SUBSTRUCT,
+                        "index selector is not valid UTF-16 text",
+                    );
+                    error.source = Some(Box::new(runmat_value::Utf16DecodeError {
+                        index: unit_index,
+                        unpaired_surrogate: source.unpaired_surrogate(),
+                    }));
+                    error
+                })?;
+                unit_index += character.len_utf16();
+                if character == ':' {
+                    colons = colons.saturating_add(1);
+                } else if !character.is_whitespace() {
+                    other = true;
+                }
+            }
+            if colons == 1 && !other {
+                target_colon_extent(target, dim, selector_count)
+            } else {
+                Err(num_args_error(
+                    &NUM_ARGUMENTS_ERROR_SUBSTRUCT,
+                    "index selector must be ':' or numeric",
+                ))
+            }
         }
         Value::StringArray(array) if array.data().len() == 1 && array.data()[0].trim() == ":" => {
             target_colon_extent(target, dim, selector_count)
@@ -198,24 +237,31 @@ pub(super) fn target_colon_extent(
     dim: usize,
     selector_count: usize,
 ) -> crate::BuiltinResult<usize> {
-    let shape = target_shape(target).unwrap_or_else(|| vec![1, 1]);
+    let shape = target_shape_borrowed(target).unwrap_or(
+        crate::builtins::common::shape::ValueDimensions::Inline([1, 1]),
+    );
     crate::indexing::shape::selector_extent(&shape, selector_count, dim)
         .map_err(|error| num_args_error(&NUM_ARGUMENTS_ERROR_SUBSTRUCT, error.message()))
 }
 
-pub(super) fn target_shape(target: &Value) -> Option<Vec<usize>> {
+pub(super) fn target_shape_borrowed(
+    target: &Value,
+) -> Option<crate::builtins::common::shape::ValueDimensions<'_>> {
     match target {
-        Value::Cell(cell) => Some(cell.shape().to_vec()),
-        Value::StructArray(array) => Some(array.shape().to_vec()),
-        Value::ObjectArray(array) => Some(array.shape().to_vec()),
-        Value::Tensor(tensor) => Some(tensor.shape().to_vec()),
-        Value::ComplexTensor(tensor) => Some(tensor.shape().to_vec()),
-        Value::LogicalArray(array) => Some(array.shape.to_vec()),
-        Value::StringArray(array) => Some(array.shape().to_vec()),
-        Value::SparseTensor(sparse) => Some(sparse.shape()),
-        Value::CharArray(chars) => Some(chars.shape().to_vec()),
-        Value::GpuTensor(handle) => Some(handle.shape().to_vec()),
-        Value::Object(_) | Value::HandleObject(_) => Some(vec![1, 1]),
+        Value::Cell(_)
+        | Value::StructArray(_)
+        | Value::ObjectArray(_)
+        | Value::Tensor(_)
+        | Value::ComplexTensor(_)
+        | Value::LogicalArray(_)
+        | Value::StringArray(_)
+        | Value::SparseTensor(_)
+        | Value::CharArray(_)
+        | Value::GpuTensor(_)
+        | Value::Object(_)
+        | Value::HandleObject(_) => Some(
+            crate::builtins::common::shape::stored_dimensions_borrowed(target),
+        ),
         _ => None,
     }
 }
@@ -231,10 +277,47 @@ pub(super) fn default_num_arguments(
             "substruct must include at least one indexing level",
         ));
     };
-    match first.kind {
-        crate::object::indexing::ObjectIndexKind::Brace => {
-            brace_selection_count(target, &first.subs)
+    default_level_cardinality(first.kind, || brace_selection_count(target, &first.subs))
+}
+
+pub(super) fn default_path_num_arguments(
+    target: &Value,
+    path: &crate::object::indexing::ObjectSubscriptPath,
+) -> crate::BuiltinResult<usize> {
+    use crate::object::indexing::{ObjectIndexComponent, ObjectIndexSelector};
+    let first = path.steps().first().ok_or_else(|| {
+        num_args_error(
+            &NUM_ARGUMENTS_ERROR_SUBSTRUCT,
+            "substruct must include at least one indexing level",
+        )
+    })?;
+    default_level_cardinality(first.kind(), || match first.selector() {
+        ObjectIndexSelector::ScalarIndices { indices } => selection_count(indices.len(), |dim| {
+            // This is the existing public protocol's exact usize -> Num
+            // projection, not a new integer selector policy.
+            single_subscript_count(target, &Value::Num(indices[dim] as f64), dim, indices.len())
+        }),
+        ObjectIndexSelector::IndexValues { components } => {
+            selection_count(components.len(), |dim| match &components[dim] {
+                ObjectIndexComponent::Colon => target_colon_extent(target, dim, components.len()),
+                ObjectIndexComponent::Value(value) => {
+                    single_subscript_count(target, value, dim, components.len())
+                }
+            })
         }
+        ObjectIndexSelector::Member(_) => Err(num_args_error(
+            &NUM_ARGUMENTS_ERROR_SUBSTRUCT,
+            "brace or parentheses subscripts must be stored in a cell array",
+        )),
+    })
+}
+
+fn default_level_cardinality(
+    kind: crate::object::indexing::ObjectIndexKind,
+    brace: impl FnOnce() -> crate::BuiltinResult<usize>,
+) -> crate::BuiltinResult<usize> {
+    match kind {
+        crate::object::indexing::ObjectIndexKind::Brace => brace(),
         crate::object::indexing::ObjectIndexKind::Paren
         | crate::object::indexing::ObjectIndexKind::Member => Ok(1),
     }

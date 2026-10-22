@@ -88,8 +88,7 @@ pub fn execute_assignin_effect_view(
                 .service_ports()
                 .require_base_workspace("assignin base workspace")
                 .map_err(super::RuntimeCapabilityError::into_runtime_error)?;
-            crate::workspace::assign_logical_base_value_ref_with_context(
-                &base.owner(),
+            base.assign_logical_ref_with_context(
                 &runtime.session_variable_authority(),
                 runtime,
                 name,

@@ -1,10 +1,9 @@
+use super::super::super::iterative::output::{initialize_list, retained_list_bytes};
 use super::{
-    invalid, map_operator_in_context, BuiltinResult, ExactHostAllocationPermit,
-    ExactHostNumericAllocationError, ExactHostTensorAllocation, HostAllocationError,
-    HostAllocationPlan, HostAllocationReceipt, NumericDType, PcgOutcome, PcgValue, RuntimeContext,
-    SparseOperatorError, Tensor, Value,
+    invalid, map_operator_in_context, BuiltinResult, HostAllocationError, HostAllocationPlan,
+    HostAllocationReceipt, NumericDType, PcgOutcome, PcgValue, RuntimeContext, SparseOperatorError,
+    Value,
 };
-use runmat_value::{OutputListInitializationError, OutputListStorage};
 
 fn admission(context: Option<&RuntimeContext>, error: HostAllocationError) -> super::RuntimeError {
     map_operator_in_context(SparseOperatorError::Admission(error), context)
@@ -39,44 +38,6 @@ fn response(
     }
 }
 
-fn unbounded_residual_output(dtype: NumericDType, values: &[f64]) -> BuiltinResult<Value> {
-    let result = match dtype {
-        NumericDType::F32 => Tensor::from_f32(
-            values.iter().map(|&value| value as f32).collect(),
-            vec![values.len(), 1],
-        ),
-        NumericDType::F64 => Tensor::new(values.to_vec(), vec![values.len(), 1]),
-        _ => return Err(invalid("unsupported residual history class")),
-    };
-    result
-        .map(Value::Tensor)
-        .map_err(|_| invalid("unable to retain residual history"))
-}
-
-fn admitted_residual_output(
-    dtype: NumericDType,
-    values: &[f64],
-    permit: &dyn ExactHostAllocationPermit,
-) -> Result<Value, ExactHostNumericAllocationError> {
-    let mut output = ExactHostTensorAllocation::new(dtype, &[values.len(), 1], permit)?;
-    match dtype {
-        NumericDType::F32 => {
-            let target = output
-                .as_f32_slice_mut()
-                .ok_or(ExactHostNumericAllocationError::UnsupportedClass)?;
-            for (destination, &value) in target.iter_mut().zip(values) {
-                *destination = value as f32;
-            }
-        }
-        NumericDType::F64 => output
-            .as_f64_slice_mut()
-            .ok_or(ExactHostNumericAllocationError::UnsupportedClass)?
-            .copy_from_slice(values),
-        _ => return Err(ExactHostNumericAllocationError::UnsupportedClass),
-    }
-    output.into_tensor().map(Value::Tensor)
-}
-
 pub(super) struct PcgQuote {
     pub(super) main_count: usize,
     pub(super) residual_count: usize,
@@ -90,13 +51,20 @@ pub(super) fn quote<T: PcgValue>(
     requested: Option<usize>,
     context: Option<&RuntimeContext>,
 ) -> BuiltinResult<PcgQuote> {
-    let main_count = n
-        .checked_mul(vector_count)
-        .and_then(|count| count.checked_mul(T::LANES))
+    if !matches!(vector_count, 5 | 6) {
+        return Err(invalid("invalid PCG workspace vector count"));
+    }
+    let geometry = runmat_sparse_solvers::krylov::pcg::PcgGeometry::checked(
+        n,
+        maximum_iterations,
+        vector_count == 6,
+    )
+    .ok_or_else(|| invalid("workspace dimensions overflow or are empty"))?;
+    let main_count = geometry
+        .native_elements
+        .checked_mul(T::LANES)
         .ok_or_else(|| invalid("workspace dimensions overflow"))?;
-    let residual_count = maximum_iterations
-        .checked_add(1)
-        .ok_or_else(|| invalid("residual history dimensions overflow"))?;
+    let residual_count = geometry.history_elements;
     let scratch = HostAllocationPlan::numeric_workspace_bytes(T::DTYPE, main_count)
         .and_then(|bytes| {
             bytes
@@ -121,17 +89,8 @@ pub(super) fn quote<T: PcgValue>(
             .ok_or_else(|| admission(context, HostAllocationError::Overflow))?;
     }
     if let Some(count @ 2..=5) = requested {
-        let raw = OutputListStorage::requested_bytes(count)
-            .map_err(|error| admission(context, HostAllocationError::Numeric(error)))?;
         output = output
-            .checked_add(
-                HostAllocationPlan::retained_exact_output_bytes(
-                    u64::try_from(raw)
-                        .map_err(|_| admission(context, HostAllocationError::Overflow))?,
-                    1,
-                )
-                .map_err(|error| admission(context, error))?,
-            )
+            .checked_add(retained_list_bytes(count).map_err(|error| admission(context, error))?)
             .ok_or_else(|| admission(context, HostAllocationError::Overflow))?;
     }
     Ok(PcgQuote {
@@ -142,7 +101,7 @@ pub(super) fn quote<T: PcgValue>(
     })
 }
 
-pub(super) fn publish_admitted<T: PcgValue>(
+pub(super) async fn publish_admitted<T: PcgValue>(
     receipt: &HostAllocationReceipt,
     context: &RuntimeContext,
     x: &[T],
@@ -153,38 +112,38 @@ pub(super) fn publish_admitted<T: PcgValue>(
     receipt
         .checkpoint(context)
         .map_err(|error| admission(Some(context), error))?;
+    if requested == Some(0) {
+        return Ok(Value::output_list(Vec::new()));
+    }
+    let x = super::super::super::iterative::copy::admitted::<T>(receipt, context, x, "pcg").await?;
+    let history = if requested.is_some_and(|count| count >= 5) {
+        Some(
+            super::super::super::iterative::output::admitted_history(
+                receipt,
+                context,
+                T::DTYPE,
+                &norms[..outcome.residual_count],
+                "pcg",
+            )
+            .await?,
+        )
+    } else {
+        None
+    };
     let result = receipt
         .with_output_allocation(context, |permit| {
-            let x = T::admitted_output(x, permit)?;
-            let history = if requested.is_some_and(|count| count >= 5) {
-                Some(admitted_residual_output(
-                    T::DTYPE,
-                    &norms[..outcome.residual_count],
-                    permit,
-                )?)
-            } else {
-                None
-            };
             if let Some(count @ 2..=5) = requested {
-                let mut x = Some(x);
-                let mut history = history;
-                let list = OutputListStorage::try_initialize(count, permit, |index| {
-                    Ok::<Value, ExactHostNumericAllocationError>(match index {
-                        0 => x.take().expect("solution initialized once"),
-                        1 => Value::Num(f64::from(outcome.flag)),
-                        2 => Value::Num(outcome.relres),
-                        3 => Value::Num(outcome.iterations as f64),
-                        4 => history
-                            .take()
-                            .expect("five outputs prepare residual history"),
-                        _ => unreachable!("pcg validates output count"),
-                    })
-                })
-                .map_err(|error| match error {
-                    OutputListInitializationError::Allocation(error)
-                    | OutputListInitializationError::Element(error) => error,
-                })?;
-                Ok(Value::OutputList(list))
+                initialize_list(
+                    count,
+                    [
+                        Some(x),
+                        Some(Value::Num(f64::from(outcome.flag))),
+                        Some(Value::Num(outcome.relres)),
+                        Some(Value::Num(outcome.iterations as f64)),
+                        history,
+                    ],
+                    permit,
+                )
             } else {
                 Ok(response(x, history, outcome, requested))
             }
@@ -193,22 +152,33 @@ pub(super) fn publish_admitted<T: PcgValue>(
     Ok(result)
 }
 
-pub(super) fn publish_unbounded<T: PcgValue>(
+pub(super) async fn publish_unbounded<T: PcgValue>(
+    context: Option<&RuntimeContext>,
     mut main: Vec<T>,
     n: usize,
     norms: &[f64],
     outcome: PcgOutcome,
     requested: Option<usize>,
 ) -> BuiltinResult<Value> {
+    super::super::super::iterative::copy::unbounded_checkpoint(context, "pcg")?;
+    if requested == Some(0) {
+        return Ok(Value::output_list(Vec::new()));
+    }
     main.truncate(n);
-    let x = T::unbounded_output(main)?;
+    let x = T::unbounded_output(main).map_err(invalid)?;
     let history = if requested.is_some_and(|count| count >= 5) {
-        Some(unbounded_residual_output(
-            T::DTYPE,
-            &norms[..outcome.residual_count],
-        )?)
+        Some(
+            super::super::super::iterative::output::unbounded_history(
+                context,
+                T::DTYPE,
+                &norms[..outcome.residual_count],
+                "pcg",
+            )
+            .await?,
+        )
     } else {
         None
     };
+    super::super::super::iterative::copy::unbounded_checkpoint(context, "pcg")?;
     Ok(response(x, history, outcome, requested))
 }

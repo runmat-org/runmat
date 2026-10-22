@@ -6,6 +6,7 @@ use super::*;
 
 pub(super) async fn read_or_create(
     service: NativePreferenceService,
+    runtime: &RuntimeContext,
     mut budget: CpuCooperationBudget,
     group: String,
     names: Vec<String>,
@@ -49,7 +50,10 @@ pub(super) async fn read_or_create(
         .map_err(|source| operational("preference default selection ended", source))?;
     let mut encoded = vec![None; names.len()];
     for index in needed {
-        encoded[index] = Some(encode_durable_value(&defaults[index])?);
+        encoded[index] = Some(
+            super::super::encode_selected_preference(&defaults[index], &mut budget, runtime)
+                .await?,
+        );
         checkpoint(&mut budget, 1).await?;
     }
     mutation_tx
@@ -64,9 +68,15 @@ pub(super) async fn read_or_create(
                 std::io::Error::new(std::io::ErrorKind::BrokenPipe, "preference worker ended"),
             )
         })?;
-    observe_mutation(&mut budget, prepared_rx, authorized_tx, finished_rx)
-        .await
-        .map(|(values, _)| values)
+    observe_mutation(
+        runtime,
+        &mut budget,
+        prepared_rx,
+        authorized_tx,
+        finished_rx,
+    )
+    .await
+    .map(|(values, _)| values)
 }
 
 struct SelectionWork {

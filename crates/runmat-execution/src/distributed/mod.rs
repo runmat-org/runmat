@@ -631,7 +631,7 @@ mod tests {
             logical_digest: Digest::sha256(rank.to_be_bytes()),
             encoded_length: 64,
             media_type: "application/vnd.runmat.value".into(),
-            value_schema: "runmat-value-v3".into(),
+            value_schema: "runmat-value-v4".into(),
             encryption_context: Digest::sha256(b"test-encryption-context"),
             kind: ValueRefKind::SlicedObject,
             authorization_scope: "test".into(),

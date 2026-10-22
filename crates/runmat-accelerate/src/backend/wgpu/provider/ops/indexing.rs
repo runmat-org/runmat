@@ -463,12 +463,14 @@ impl WgpuProvider {
                 )?;
 
                 let error_size = (std::mem::size_of::<u32>() * 4) as u64;
-                let staging = emission.device().create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("runmat-sub2ind-error-staging"),
-                    size: error_size,
-                    usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                });
+                let staging = runmat_accelerate_api::WgpuBufferOwner::new(
+                    emission.device().create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("runmat-sub2ind-error-staging"),
+                        size: error_size,
+                        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    }),
+                );
                 let mut encoder = pending.profiled_encoder(
                     emission,
                     &wgpu::CommandEncoderDescriptor {
@@ -751,12 +753,14 @@ impl WgpuProvider {
                 )?;
 
                 let error_size = (std::mem::size_of::<u32>() * 4) as u64;
-                let staging = emission.device().create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("runmat-ind2sub-error-staging"),
-                    size: error_size,
-                    usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                });
+                let staging = runmat_accelerate_api::WgpuBufferOwner::new(
+                    emission.device().create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("runmat-ind2sub-error-staging"),
+                        size: error_size,
+                        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    }),
+                );
                 let mut encoder = pending.profiled_encoder(
                     emission,
                     &wgpu::CommandEncoderDescriptor {
@@ -1387,12 +1391,14 @@ impl WgpuProvider {
                     mapped_at_creation: false,
                 });
                 emission.write_buffer(&count_storage, 0, bytemuck::cast_slice(&[0u32, 0u32]));
-                let count_staging = emission.device().create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("runmat-find-count-staging"),
-                    size: 8,
-                    usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                });
+                let count_staging = runmat_accelerate_api::WgpuBufferOwner::new(
+                    emission.device().create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("runmat-find-count-staging"),
+                        size: 8,
+                        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    }),
+                );
 
                 let params = crate::backend::wgpu::params::FindParams {
                     len: total as u32,

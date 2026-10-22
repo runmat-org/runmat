@@ -163,7 +163,7 @@ pub(crate) async fn isoutlier_builtin_registered(
     value: Value,
     rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    let decoded = DecodedOptions::new(OutlierOperation::Detect, rest.view());
+    let decoded = DecodedOptions::new(OutlierOperation::Detect, rest.view())?;
     ensure_isoutlier_extensions(&value, rest.view(), &decoded)?;
     preflight_host_options(OutlierOperation::Detect, rest.view(), &decoded).await?;
     ensure_isoutlier_exact_boundaries(&value, rest.view(), &decoded).await?;
@@ -248,7 +248,7 @@ fn ensure_isoutlier_extensions(
     let explicit_gpu = explicit_isoutlier_gpu(value) || rest.iter().any(explicit_isoutlier_gpu);
     let mut idx = 0;
     while idx < rest.len() {
-        if keyword_of(&rest[idx]).is_some() {
+        if keyword_of(&rest[idx])?.is_some() {
             match decoded.at(idx) {
                 Some(OutlierOption::MovingMedian | OutlierOption::MovingMean) => {
                     if decoded.at(idx) == Some(OutlierOption::MovingMedian) && explicit_gpu {
@@ -354,7 +354,7 @@ pub(crate) async fn filloutliers_builtin_registered(
     value: Value,
     rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    let decoded = DecodedOptions::new(OutlierOperation::Fill, rest.view());
+    let decoded = DecodedOptions::new(OutlierOperation::Fill, rest.view())?;
     ensure_filloutliers_extensions(&value, rest.view(), &decoded)?;
     preflight_host_options(OutlierOperation::Fill, rest.view(), &decoded).await?;
     let tensor = value_to_tensor(FILLOUTLIERS_NAME, value).await?;

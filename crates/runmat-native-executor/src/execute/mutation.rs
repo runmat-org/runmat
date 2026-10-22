@@ -9,13 +9,14 @@ use crate::{NativeExecutorError, NativeExecutorResult};
 
 use super::state::HostState;
 
-mod prepared_multi;
 mod continuation;
+mod prepared_multi;
 pub(super) use continuation::skip_completed_region as skip_prepared_sequence_region;
 pub(super) use continuation::PendingAssign;
 pub(super) use continuation::PendingPlacePrepare;
 pub(super) use continuation::PendingPlainMulti;
 pub(super) use continuation::PendingSequenceAssign;
+pub(super) use prepared_multi::{has_fixed_end_context, resolve_fixed_end};
 pub(super) use prepared_multi::{PendingMultiPreparation, PreparedMultiAssignment};
 
 #[derive(Clone)]
@@ -101,6 +102,78 @@ pub(super) fn execute(
     statement: &MirStmtKind,
 ) -> NativeExecutorResult<bool> {
     match statement {
+        MirStmtKind::PrepareFixedAssignment(owner) => {
+            owner.validate().map_err(NativeExecutorError::Host)?;
+            if state.prepared_multi_assignment.is_some() {
+                return Err(NativeExecutorError::Host(
+                    "fixed preparation would overwrite a live destination".into(),
+                ));
+            }
+            continuation::validate_creation_policy(
+                &owner.assignment.mutation.place,
+                owner.assignment.mutation.kind == runmat_types::PlaceMutationKind::Delete,
+                owner.assignment.mutation.creation_policy,
+            )?;
+            let prepared = PreparedMultiAssignment::prepare_fixed(state, owner)?;
+            state.prepared_multi_assignment = prepared;
+            if let runmat_mir::MirFixedPreparationPhase::EvaluateSelector {
+                destination: runmat_mir::MirFixedSelectorDestination::Scalar(local),
+                ..
+            } = &owner.phase
+            {
+                let [output] = instruction.outputs.as_slice() else {
+                    return Err(NativeExecutorError::Host(
+                        "fixed scalar phase has wrong output arity".into(),
+                    ));
+                };
+                let value = state.local_reference(local.0)?;
+                state.values.insert(output.value, value);
+            } else if !instruction.outputs.is_empty() {
+                return Err(NativeExecutorError::Host(
+                    "non-scalar fixed phase declares value outputs".into(),
+                ));
+            }
+            Ok(true)
+        }
+        MirStmtKind::PreparedAssign { preparation, .. } => {
+            let mut prepared = state.prepared_multi_assignment.take().ok_or_else(|| {
+                NativeExecutorError::Host("fixed assignment has no retained destination".into())
+            })?;
+            if !prepared.matches_fixed(preparation) {
+                return Err(NativeExecutorError::Host(
+                    "fixed assignment source occurrence or mutation authority changed".into(),
+                ));
+            }
+            if !prepared.fixed_values_bound() {
+                let source = instruction
+                    .inputs
+                    .first()
+                    .and_then(|value| state.values.get(value))
+                    .copied()
+                    .ok_or_else(|| {
+                        NativeExecutorError::Host(
+                            "fixed assignment RHS SSA value is unavailable".into(),
+                        )
+                    })?;
+                prepared.bind_fixed_value(source)?;
+            }
+            if let Err(error) = prepared.commit(state) {
+                state.prepared_multi_assignment = Some(prepared);
+                return Err(error);
+            }
+            prepared.release_fixed_original(&mut state.arena)?;
+            let root = preparation.mutation.place.root_local().ok_or_else(|| {
+                NativeExecutorError::Host("fixed publication has no source root".into())
+            })?;
+            let [output] = instruction.outputs.as_slice() else {
+                return Err(NativeExecutorError::Host(
+                    "fixed publication has wrong output arity".into(),
+                ));
+            };
+            let value = state.local_reference(root.0)?;
+            state.values.insert(output.value, value);
+            Ok(true)
+        }
         MirStmtKind::PlaceMutation(mutation) => {
             state.pending_assign = None;
             state.pending_plain_multi = None;
@@ -123,7 +196,13 @@ pub(super) fn execute(
             } else {
                 (false, place.assignment_creation_policy(false))
             };
-            continuation::assign(state, place, source, delete, creation)?;
+            if place.has_expanding_selectors() {
+                return Err(NativeExecutorError::Host(
+                    "expanded assignment requires its canonical prepared producer/consumer".into(),
+                ));
+            } else {
+                continuation::assign(state, place, source, delete, creation)?;
+            }
             state.pending_place_mutation = None;
             publish_roots(state, instruction, std::slice::from_ref(place))?;
             Ok(true)

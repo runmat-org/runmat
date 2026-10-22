@@ -194,12 +194,14 @@ impl WgpuProvider {
             }
 
             let staging_size = std::mem::size_of::<u32>() as u64;
-            let staging = emission.device().create_buffer(&wgpu::BufferDescriptor {
-                label: Some("runmat-issymmetric-staging"),
-                size: staging_size,
-                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
+            let staging = runmat_accelerate_api::WgpuBufferOwner::new(
+                emission.device().create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("runmat-issymmetric-staging"),
+                    size: staging_size,
+                    usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }),
+            );
             let mut encoder = pending.profiled_encoder(
                 emission,
                 &wgpu::CommandEncoderDescriptor {
@@ -331,12 +333,14 @@ impl WgpuProvider {
             )?;
 
             let staging_size = (std::mem::size_of::<u32>() * 2) as u64;
-            let staging = emission.device().create_buffer(&wgpu::BufferDescriptor {
-                label: Some("runmat-bandwidth-staging"),
-                size: staging_size,
-                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
+            let staging = runmat_accelerate_api::WgpuBufferOwner::new(
+                emission.device().create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("runmat-bandwidth-staging"),
+                    size: staging_size,
+                    usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }),
+            );
             let mut encoder = pending.profiled_encoder(
                 emission,
                 &wgpu::CommandEncoderDescriptor {

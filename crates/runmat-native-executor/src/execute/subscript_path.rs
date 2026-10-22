@@ -17,6 +17,20 @@ use access::frame_access;
 pub(super) use end::resolve_end;
 use selectors::materialize_selectors;
 
+/// Reuse the ordered read-selector region owner, but admit the target context
+/// independently. No fixed-width mask or new expansion evaluator is involved.
+pub(super) fn materialize_target_selectors(
+    state: &mut HostState,
+    base: &Value,
+    indexing: &runmat_mir::MirIndexing,
+) -> NativeExecutorResult<Vec<runmat_runtime::object::indexing::ObjectIndexComponent>> {
+    indexing.validate_target_selectors().map_err(|error| {
+        NativeExecutorError::Host(format!("invalid MIR target selectors: {error}"))
+    })?;
+    let access = frame_access(state)?;
+    Ok(materialize_selectors(state, 0, base, &[], indexing, &access, true)?.components)
+}
+
 pub(super) fn read(
     state: &mut HostState,
     chain: &MirSubscriptChain,
@@ -46,6 +60,7 @@ fn read_inner(
                 component,
                 runmat_mir::MirIndexComponent::ContextualExpr(_)
                     | runmat_mir::MirIndexComponent::PreparedExpr(_)
+                    | runmat_mir::MirIndexComponent::Expansion(_)
             )
         }),
         MirSubscriptStep::DottedInvoke { arguments, .. } => arguments
@@ -104,7 +119,7 @@ fn read_inner(
                     steps.clear();
                 }
                 let selector = ObjectIndexSelector::IndexValues {
-                    components: materialized.components,
+                    components: runmat_value::ExactArrayStorage::unbounded(materialized.components),
                 };
                 steps.push(match indexing.kind {
                     runmat_types::IndexKind::Paren => ObjectSubscript::parentheses(selector),
@@ -133,9 +148,9 @@ fn read_inner(
                 )?;
                 root = prepared.receiver().clone();
                 let components = arguments::materialize(state, arguments, &prepared)?;
-                steps.extend(ObjectSubscript::dotted_invoke_components_with_fallback(
-                    member.clone(),
-                    components,
+                steps.extend(ObjectSubscript::dotted_invoke_retained_with_fallback(
+                    runmat_runtime::call::argument_text::copy_str(&member.0, Some(&state.runtime))?,
+                    runmat_value::ExactArrayStorage::unbounded(components),
                     semantic_fallback.clone(),
                 ));
             }

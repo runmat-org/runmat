@@ -72,7 +72,11 @@ mod tests {
         let singleton =
             Value::StringArray(StringArray::new(vec!["sample.zip".into()], vec![1, 1, 1]).unwrap());
         let character = Value::CharArray(
-            CharArray::new_with_shape("sample.zip".chars().collect(), vec![1, 10, 1]).unwrap(),
+            CharArray::from_unicode_scalars_with_shape(
+                "sample.zip".chars().collect(),
+                vec![1, 10, 1],
+            )
+            .unwrap(),
         );
         for source in [string, singleton, character] {
             let request = parse_arguments(crate::call::FunctionArgumentView::from_slice(&[source]))
@@ -85,7 +89,8 @@ mod tests {
         let request = parse_arguments(crate::call::FunctionArgumentView::from_slice(&[
             Value::String("https://example.invalid/sample.zip".into()),
             Value::CharArray(
-                CharArray::new_with_shape("out".chars().collect(), vec![1, 3, 1]).unwrap(),
+                CharArray::from_unicode_scalars_with_shape("out".chars().collect(), vec![1, 3, 1])
+                    .unwrap(),
             ),
         ]))
         .expect("text scalar destination");
@@ -95,8 +100,9 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn paged_and_multiscalar_text_reject_with_owning_identifiers() {
-        let paged =
-            Value::CharArray(CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap());
+        let paged = Value::CharArray(
+            CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap(),
+        );
         let error = parse_arguments(crate::call::FunctionArgumentView::from_slice(
             std::slice::from_ref(&paged),
         ))

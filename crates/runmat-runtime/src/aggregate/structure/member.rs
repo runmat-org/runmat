@@ -37,7 +37,7 @@ pub fn assign_member_values<OnWrite>(
     array: StructArray,
     field: String,
     values: Vec<Value>,
-    mut on_write: OnWrite,
+    on_write: OnWrite,
 ) -> Result<RootedValue, RuntimeError>
 where
     OnWrite: FnMut(&Value, &Value),
@@ -52,11 +52,78 @@ where
         None => RootedValueLease::for_values(values.iter()).map_err(|e| e.into_runtime_error())?,
     };
     let column = adopt_column(runtime, values)?;
-    let existing = array.column_owner(&field);
+    assign_column(runtime, array, &field, column, on_write)
+}
+
+/// Retain the canonical RHS column, including shared exact backing, without
+/// materializing a second collection of member values.
+pub fn assign_member_sequence<OnWrite>(
+    runtime: Option<&RuntimeContext>,
+    array: StructArray,
+    field: runmat_value::Utf8Text,
+    values: ValueSequence,
+    on_write: OnWrite,
+) -> Result<RootedValue, RuntimeError>
+where
+    OnWrite: FnMut(&Value, &Value),
+{
+    if values.len() != array.len() {
+        return Err(format!("structure-array field assignment requires exactly one value per destination element (expected {}, received {})",array.len(),values.len()).into());
+    }
+    let original = Value::StructArray(array.clone());
+    let _base_roots = replacement::lease(&original, runtime)?;
+    let _value_roots = match runtime {
+        Some(runtime) => {
+            RootedValueLease::for_value_slices_in_context(&[values.as_slice()], runtime)?
+        }
+        None => RootedValueLease::for_values(values.iter()).map_err(|e| e.into_runtime_error())?,
+    };
+    let column = match values.into_legacy_value() {
+        Value::OutputList(column) if column.is_shallow_clone() => {
+            if let Some(runtime) = runtime {
+                promote_column(runtime, &column)?;
+            }
+            column
+        }
+        Value::OutputList(column) => {
+            let values = crate::sequence::into_unbounded_output_values(column)?;
+            adopt_column(runtime, values)?
+        }
+        value => {
+            // A structure column needs its own shared backing even when the
+            // source expression carries one inline value. Construct that final
+            // backing directly under the existing output allocation owner.
+            let values = match runtime {
+                Some(runtime) => {
+                    let mut value = Some(value);
+                    crate::execution::RootedValues::try_initialize_in_context(1, runtime, |_| {
+                        Ok::<_, RuntimeError>(value.take().expect("one column element"))
+                    })?
+                }
+                None => crate::execution::RootedValues::new(vec![value])
+                    .map_err(|error| error.into_runtime_error())?,
+            };
+            values.with_owned_output_storage(|values| values)
+        }
+    };
+    assign_column(runtime, array, field.as_str(), column, on_write)
+}
+
+fn assign_column<OnWrite>(
+    runtime: Option<&RuntimeContext>,
+    array: StructArray,
+    field: &str,
+    column: OutputListStorage,
+    mut on_write: OnWrite,
+) -> Result<RootedValue, RuntimeError>
+where
+    OnWrite: FnMut(&Value, &Value),
+{
+    let existing = array.column_owner(field);
     let columns = array
         .column_owners()
         .map(|(name, previous)| (name, if name == field { &column } else { previous }))
-        .chain(existing.is_none().then_some((field.as_str(), &column)));
+        .chain(existing.is_none().then_some((field, &column)));
     let output = if let Some(runtime) = runtime {
         crate::execution::construct_struct_array_from_columns_in_context(
             runtime,

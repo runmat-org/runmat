@@ -333,9 +333,18 @@ impl fmt::Display for CharArray {
         for r in 0..self.rows {
             writeln!(f)?;
             write!(f, "  ")?; // Indent
-            for c in 0..self.cols {
-                let ch = self.data[r * self.cols + c];
-                write!(f, "{ch}")?;
+            let row = &self.data()[r * self.cols..(r + 1) * self.cols];
+            match String::from_utf16(&row.iter().map(|unit| unit.raw()).collect::<Vec<_>>()) {
+                Ok(text) => write!(f, "{text}")?,
+                Err(_) => {
+                    for unit in row {
+                        if unit.is_surrogate() {
+                            write!(f, "\\u{:04X}", unit.raw())?;
+                        } else if let Some(value) = char::from_u32(unit.raw() as u32) {
+                            write!(f, "{value}")?;
+                        }
+                    }
+                }
             }
         }
         Ok(())

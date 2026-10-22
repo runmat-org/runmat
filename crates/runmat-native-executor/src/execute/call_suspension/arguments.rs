@@ -1,5 +1,4 @@
 use std::future::Future;
-use std::pin::Pin;
 
 use runmat_runtime::execution::RootedValues;
 use runmat_value::Value;
@@ -7,21 +6,53 @@ use runmat_value::Value;
 use crate::{NativeExecutorError, NativeExecutorResult};
 
 use super::super::state::{EmbeddedOperationIdentity, HostState};
-use super::{rooted::begin_arguments, CallCompletion, CompletedPayload};
+use super::{CallCompletion, CompletedPayload, PendingCall};
 
-pub(in crate::execute) fn begin_expanded_call_arguments(
+pub(in crate::execute) fn begin_expanded_call_arguments<F>(
     state: &mut HostState,
     embedded: Option<EmbeddedOperationIdentity>,
-    future: Pin<
-        Box<dyn Future<Output = Result<RootedValues, runmat_runtime::RuntimeError>> + 'static>,
-    >,
-) -> NativeExecutorResult<Vec<Value>> {
-    begin_arguments(
-        state,
+    make_future: impl FnOnce() -> F,
+) -> NativeExecutorResult<Vec<Value>>
+where
+    F: Future<Output = Result<RootedValues, runmat_runtime::RuntimeError>> + 'static,
+{
+    let request = state.current_request.ok_or_else(|| {
+        NativeExecutorError::Host("pending expanded arguments have no active site".into())
+    })?;
+    let runtime = state.runtime.clone();
+    let catch = state.active_catch_exception();
+    let future =
+        runmat_runtime::execution::admit_native_hostcall_with(&runtime, allocation_cause, || {
+            let future = make_future();
+            runtime.scope_active_catch_unboxed_shared(catch, async move {
+                future
+                    .await
+                    .map(CallCompletion::RootedExpandedCallArguments)
+                    .map_err(NativeExecutorError::from)
+            })
+        })?;
+    let (continuation, generation) = state.next_suspension_identity()?;
+    state.pending_call = Some(PendingCall {
+        request,
+        continuation,
+        generation,
         embedded,
-        future,
-        CallCompletion::RootedExpandedCallArguments,
+        retained_roots: Vec::new(),
+        future: super::PendingCompletionFuture::Admitted(future),
+    });
+    Err(NativeExecutorError::CallSuspended)
+}
+
+fn allocation_cause(
+    source: runmat_runtime::context::host_allocation::HostAllocationError,
+) -> NativeExecutorError {
+    runmat_runtime::context::host_allocation::host_allocation_runtime_error(
+        None,
+        "RunMat:Native:CallArguments",
+        "expanded argument continuation admission failed",
+        source,
     )
+    .into()
 }
 
 pub(in crate::execute) fn take_completed_expanded_call_arguments(

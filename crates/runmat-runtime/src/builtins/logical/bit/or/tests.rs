@@ -148,8 +148,8 @@ fn or_explicit_resident_integer_fallback_is_exact_and_stays_resident() {
 #[test]
 fn or_char_arrays() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-    let lhs = CharArray::new(vec!['R', 'u', '\0'], 1, 3).unwrap();
-    let rhs = CharArray::new(vec!['R', '\0', 'n'], 1, 3).unwrap();
+    let lhs = CharArray::from_unicode_scalars(vec!['R', 'u', '\0'], 1, 3).unwrap();
+    let rhs = CharArray::from_unicode_scalars(vec!['R', '\0', 'n'], 1, 3).unwrap();
     let result = run_or(Value::CharArray(lhs), Value::CharArray(rhs)).expect("or char arrays");
     match result {
         Value::LogicalArray(arr) => {

@@ -32,7 +32,10 @@ fn contains_logical(values: &[Value], shape: &[usize], expected: &[u8]) -> bool 
 fn contains_text(values: &[Value], expected: &str) -> bool {
     values.iter().any(|value| match value {
         Value::String(text) => text == expected,
-        Value::CharArray(chars) => chars.data().iter().collect::<String>() == expected,
+        Value::CharArray(chars) => {
+            runmat_value::decode_utf16_code_units(chars.data()).expect("valid UTF-16 text fixture")
+                == expected
+        }
         _ => false,
     })
 }

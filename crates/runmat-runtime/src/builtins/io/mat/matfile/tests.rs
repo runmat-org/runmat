@@ -125,7 +125,10 @@ fn finite_nested_matfile_assignment_rejects_before_read_or_rhs_gather() {
         crate::object::indexing::ObjectSubscript::member("A"),
         crate::object::indexing::ObjectSubscript::parentheses(
             crate::object::indexing::ObjectIndexSelector::IndexValues {
-                components: vec![Value::Num(1.0).into()],
+                components: runmat_value::ExactArrayStorage::shared_unbounded(vec![Value::Num(
+                    1.0,
+                )
+                .into()]),
             },
         ),
     ])

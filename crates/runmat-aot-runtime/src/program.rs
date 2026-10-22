@@ -36,16 +36,20 @@ pub async fn invoke(
     let runtime =
         super_constructor::bind_selected(&executor, function, runtime).map_err(|error| *error)?;
     let selected = runtime.clone();
-    let execution =
-        runmat_runtime::context::run_native_continuation(&runtime, placement, roots, async move {
+    let execution = runmat_runtime::context::run_native_continuation_with(
+        &runtime,
+        placement,
+        roots,
+        move || async move {
             let _active =
                 runmat_runtime::user_functions::push_active_semantic_function(function.0)?;
             executor
                 .invoke_async(function, arguments, requested_outputs, selected)
                 .await
                 .map_err(native_executor_error)
-        })
-        .await;
+        },
+    )
+    .await;
     drop(guards);
     execution
 }
@@ -68,16 +72,20 @@ pub async fn invoke_workspace(
     let runtime =
         super_constructor::bind_selected(&executor, function, runtime).map_err(|error| *error)?;
     let selected = runtime.clone();
-    let execution =
-        runmat_runtime::context::run_native_continuation(&runtime, placement, roots, async move {
+    let execution = runmat_runtime::context::run_native_continuation_with(
+        &runtime,
+        placement,
+        roots,
+        move || async move {
             let _active =
                 runmat_runtime::user_functions::push_active_semantic_function(function.0)?;
             executor
                 .invoke_workspace_async(function, workspace, requested_outputs, selected)
                 .await
                 .map_err(native_executor_error)
-        })
-        .await;
+        },
+    )
+    .await;
     drop(guards);
     execution
 }
@@ -389,11 +397,11 @@ impl ProgramInvocationGuards {
                     let (runtime, placement) = runtime.native_invocation_context();
                     let selected = runtime.clone();
                     let requested_outputs = call.requested_outputs;
-                    let execution = runmat_runtime::context::run_native_continuation(
+                    let execution = runmat_runtime::context::run_native_continuation_with(
                         &runtime,
                         placement,
                         roots,
-                        async move {
+                        move || async move {
                             let _active = runmat_runtime::user_functions::push_active_semantic_function(
                                 function.0,
                             )?;

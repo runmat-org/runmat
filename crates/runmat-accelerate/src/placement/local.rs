@@ -9,8 +9,8 @@ use runmat_execution::{
 use runmat_value::Value;
 
 use super::PlacementPolicy;
-mod multi;
 mod cpu;
+mod multi;
 pub(crate) use cpu::LocalCpuCandidate;
 pub(crate) use multi::{
     plan_local_multi, plan_local_multi_bounded, LocalCpuAdmission, LocalMultiPlacementRequest,
@@ -78,6 +78,7 @@ pub(crate) struct LocalPlacementRequest<'a> {
 pub(crate) enum TotalCandidateObservationContract {
     PreparationBodyCleanup,
     FullCall,
+    NativeFullCall,
 }
 
 fn observation_revision(
@@ -85,10 +86,22 @@ fn observation_revision(
     contract: TotalCandidateObservationContract,
     authority: Option<runmat_runtime::context::preparation::PreparedBindingAuthority>,
     vm_right: Option<&runmat_runtime::context::VmFusionCompletionRight>,
+    native_right: Option<
+        &runmat_runtime::numeric_region::service::NativeNumericRegionSelectionAuthority,
+    >,
     provider_digest: Digest,
     policy: PlacementPolicy,
 ) -> Option<PlacementRevision> {
     match (contract, authority) {
+        (TotalCandidateObservationContract::NativeFullCall, None)
+            if native_right.is_some_and(|right| right.is_current(runtime)) =>
+        {
+            Some(super::revision::local(
+                runtime.program_revision().cloned(),
+                provider_digest,
+                policy,
+            ))
+        }
         (TotalCandidateObservationContract::PreparationBodyCleanup, None) => Some(
             super::revision::local(runtime.program_revision().cloned(), provider_digest, policy),
         ),
@@ -138,7 +151,8 @@ fn observation_semantic_identity(
 ) -> Option<Digest> {
     match contract {
         TotalCandidateObservationContract::PreparationBodyCleanup => existing,
-        TotalCandidateObservationContract::FullCall => Some(
+        TotalCandidateObservationContract::FullCall
+        | TotalCandidateObservationContract::NativeFullCall => Some(
             Digest::sha256_serialized(&(provider, existing, b"prepared-provider-authority-v3"))
                 .expect("typed provider authority serializes"),
         ),
@@ -393,6 +407,12 @@ pub(crate) fn plan_local_vm_cpu_with_provider(
         compare_profitability,
         runtime,
     } = request;
+    let publication =
+        if cpu.route.kind == runmat_execution::ExecutionCandidateKind::OriginalNativeRegion {
+            multi::LocalPublicationSemantics::SourceOrderedNative
+        } else {
+            multi::LocalPublicationSemantics::Atomic
+        };
     let outcome = multi::plan_local_multi_with_provider(
         provider,
         multi::LocalMultiPlacementRequest {
@@ -406,7 +426,7 @@ pub(crate) fn plan_local_vm_cpu_with_provider(
             family,
             cpu,
             cpu_admission,
-            publication: multi::LocalPublicationSemantics::Atomic,
+            publication,
             physical: vec![multi::LocalPhysicalCandidate {
                 authority: compound.map(multi::PreparedPhysicalAuthority::Compound),
                 physical_identity: compound.map(|plan| plan.identity()),

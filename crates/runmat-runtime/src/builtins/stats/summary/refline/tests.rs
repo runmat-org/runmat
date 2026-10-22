@@ -45,11 +45,14 @@ fn y_data(handle: f64) -> Vec<f64> {
 #[test]
 fn refline_without_coefficients_adds_least_squares_line() {
     let _guard = setup();
-    block_on(scatter_builtin(
-        tensor(vec![1.0, 2.0, 3.0], 1, 3),
-        tensor(vec![2.0, 4.0, 6.0], 1, 3),
-        Vec::new(),
-    ))
+    block_on(scatter_builtin(None, {
+        let mut coordinates = vec![
+            tensor(vec![1.0, 2.0, 3.0], 1, 3),
+            tensor(vec![2.0, 4.0, 6.0], 1, 3),
+        ];
+        coordinates.extend(Vec::new());
+        crate::builtins::common::test_support::builtin_arguments(coordinates)
+    }))
     .unwrap();
     let handle = block_on(refline_builtin(
         None,

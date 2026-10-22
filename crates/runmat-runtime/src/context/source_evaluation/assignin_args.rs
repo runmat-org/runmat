@@ -47,7 +47,7 @@ pub(super) fn name<'a>(
                 if !character.is_ascii() {
                     return Err(invalid_name_error());
                 }
-                *byte = *character as u8;
+                *byte = character.raw() as u8;
             }
             std::str::from_utf8(&character_row[..chars.data().len()])
                 .map_err(|_| invalid_name_error())?
@@ -70,10 +70,10 @@ fn classify(text: &str) -> AssigninSelector {
     }
 }
 
-fn char_row_eq_ascii(row: &[char], expected: &[u8]) -> bool {
+fn char_row_eq_ascii(row: &[runmat_value::Utf16CodeUnit], expected: &[u8]) -> bool {
     row.len() == expected.len()
         && row.iter().zip(expected).all(|(character, byte)| {
-            character.is_ascii() && character.to_ascii_lowercase() == *byte as char
+            character.is_ascii() && (character.raw() as u8).to_ascii_lowercase() == *byte
         })
 }
 

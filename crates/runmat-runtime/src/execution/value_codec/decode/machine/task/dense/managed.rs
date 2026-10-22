@@ -248,7 +248,9 @@ impl<'a> ManagedDense<'a> {
     }
 }
 
-fn numeric_dtype(element: ElementType) -> NumericDType {
+pub(in crate::execution::value_codec::decode::machine) fn numeric_dtype(
+    element: ElementType,
+) -> NumericDType {
     match element {
         ElementType::Logical | ElementType::U8 | ElementType::ComplexU8 => NumericDType::U8,
         ElementType::F32 | ElementType::ComplexF32 => NumericDType::F32,
@@ -263,7 +265,10 @@ fn numeric_dtype(element: ElementType) -> NumericDType {
     }
 }
 
-fn scalar(dtype: NumericDType, bytes: &[u8]) -> NumericScalar {
+pub(in crate::execution::value_codec::decode::machine) fn scalar(
+    dtype: NumericDType,
+    bytes: &[u8],
+) -> NumericScalar {
     macro_rules! decode {
         ($ty:ty, $variant:ident) => {
             NumericScalar::$variant(<$ty>::from_le_bytes(

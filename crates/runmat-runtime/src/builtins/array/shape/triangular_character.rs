@@ -6,7 +6,7 @@ use crate::context::host_allocation::{
 };
 use crate::context::RuntimeContext;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-use runmat_value::CharArray;
+use runmat_value::{CharArray, Utf16CodeUnit};
 
 #[derive(Clone, Copy)]
 pub(super) enum Triangle {
@@ -52,7 +52,7 @@ pub(super) fn mask(
         for (index, value) in data.iter_mut().enumerate() {
             checkpoint(context, triangle, index)?;
             if !retained(index) {
-                *value = '\0';
+                *value = Utf16CodeUnit::from_raw(0);
             }
         }
         return Ok(source);
@@ -87,7 +87,11 @@ pub(super) fn mask(
                             .checkpoint(context)
                             .map_err(|cause| allocation_error(Some(context), triangle, cause))?;
                     }
-                    *output = if retained(index) { *input } else { '\0' };
+                    *output = if retained(index) {
+                        *input
+                    } else {
+                        Utf16CodeUnit::from_raw(0)
+                    };
                 }
                 Ok(())
             },
@@ -100,9 +104,13 @@ pub(super) fn mask(
     let mut data = Vec::with_capacity(source.data().len());
     for (index, value) in source.data().iter().copied().enumerate() {
         checkpoint(context, triangle, index)?;
-        data.push(if retained(index) { value } else { '\0' });
+        data.push(if retained(index) {
+            value
+        } else {
+            Utf16CodeUnit::from_raw(0)
+        });
     }
-    CharArray::new_with_shape(data, source.shape.to_vec())
+    CharArray::from_code_units_with_shape(data, source.shape.to_vec())
         .map_err(|detail| invalid(triangle, detail))
 }
 

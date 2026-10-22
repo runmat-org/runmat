@@ -147,6 +147,12 @@ impl AnalysisStore {
             facts.locals.sort_by_key(|local| local.value);
         }
         result
+            .operation_contracts
+            .retain(|contract| projection.contains(contract.site.point.function));
+        for contract in &mut result.operation_contracts {
+            projection.point(&mut contract.site.point)?;
+        }
+        result
             .fusion_stage_contracts
             .retain(|stage| projection.contains(stage.point.function));
         for stage in &mut result.fusion_stage_contracts {
@@ -187,6 +193,9 @@ impl AnalysisStore {
         projection.parallel(&mut result.parallel)?;
         result.functions.sort_by_key(|function| function.function);
         result.program_points.sort_by_key(|facts| facts.point);
+        result
+            .operation_contracts
+            .sort_by(|left, right| left.site.cmp(&right.site));
         result
             .fusion_stage_contracts
             .sort_by_key(|stage| stage.point);

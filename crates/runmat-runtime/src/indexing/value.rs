@@ -15,20 +15,37 @@ use scalar::{
 #[cfg(test)]
 mod tests;
 
+/// Ordinary owned-vector compatibility adapter for the canonical borrowed view.
 pub fn shape(value: &Value) -> Option<Vec<usize>> {
+    shape_borrowed(value).map(|shape| shape.as_slice().to_vec())
+}
+
+/// Preserve the indexed-value family's exact supported-class boundary while
+/// borrowing its stored dimensions. In particular Symbolic remains unsupported
+/// here and Object retains scalar stored geometry rather than declared payload.
+pub fn shape_borrowed(
+    value: &Value,
+) -> Option<crate::builtins::common::shape::ValueDimensions<'_>> {
     match value {
-        Value::Tensor(value) => Some(value.shape().to_vec()),
-        Value::ComplexTensor(value) => Some(value.shape().to_vec()),
-        Value::SparseTensor(value) => Some(value.shape()),
-        Value::GpuTensor(value) => Some(value.shape().to_vec()),
-        Value::StringArray(value) => Some(value.shape().to_vec()),
-        Value::LogicalArray(value) => Some(value.shape.to_vec()),
-        Value::CharArray(value) => Some(value.shape().to_vec()),
-        Value::Cell(value) => Some(value.shape().to_vec()),
-        Value::StructArray(value) => Some(value.shape().to_vec()),
-        Value::ObjectArray(value) => Some(value.shape().to_vec()),
-        Value::Struct(_) | Value::Object(_) | Value::HandleObject(_) => Some(vec![1, 1]),
-        Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(_) => Some(vec![1, 1]),
+        Value::Tensor(_)
+        | Value::ComplexTensor(_)
+        | Value::SparseTensor(_)
+        | Value::GpuTensor(_)
+        | Value::StringArray(_)
+        | Value::LogicalArray(_)
+        | Value::CharArray(_)
+        | Value::Cell(_)
+        | Value::StructArray(_)
+        | Value::ObjectArray(_)
+        | Value::Struct(_)
+        | Value::Object(_)
+        | Value::HandleObject(_)
+        | Value::Num(_)
+        | Value::Int(_)
+        | Value::Bool(_)
+        | Value::String(_) => Some(crate::builtins::common::shape::stored_dimensions_borrowed(
+            value,
+        )),
         _ => None,
     }
 }
@@ -126,6 +143,68 @@ pub async fn assign_with_plan(
             let rhs = super::write_slice::build_string_rhs_view(&rhs, &plan.selection_lengths)?;
             super::write_slice::scatter_string_with_plan(&mut value, plan, &rhs)?;
             Ok(Value::StringArray(value))
+        }
+        _ => Err(invalid_base()),
+    }
+}
+
+/// Execute one explicitly classified mutation over the canonical validated
+/// plan. Deletion is syntax/contract authority, never inferred from RHS shape.
+pub async fn mutate_with_plan(
+    context: Option<&crate::context::RuntimeContext>,
+    value: Value,
+    plan: &IndexPlan,
+    rhs: Value,
+    mutation: runmat_types::PlaceMutationKind,
+) -> Result<Value, RuntimeError> {
+    if mutation != runmat_types::PlaceMutationKind::Delete {
+        return assign_with_plan(value, plan, rhs).await;
+    }
+    match value {
+        value @ (Value::Num(_) | Value::Int(_)) => {
+            super::write_slice::delete_tensor_with_plan(numeric_scalar_tensor(value)?, plan, &rhs)
+        }
+        Value::Tensor(value) => super::write_slice::delete_tensor_with_plan(value, plan, &rhs),
+        Value::ComplexTensor(value) => {
+            super::write_slice::delete_complex_with_plan(value, plan, &rhs)
+        }
+        Value::SparseTensor(value) => {
+            super::write_slice::delete_sparse_with_plan(value, plan, &rhs)
+        }
+        Value::GpuTensor(value) => {
+            super::write_slice::delete_gpu_slice_with_plan(&value, plan, &rhs).await
+        }
+        Value::Cell(value) => {
+            let indices = plan
+                .indices
+                .iter()
+                .map(|index| {
+                    usize::try_from(*index)
+                        .ok()
+                        .and_then(|index| index.checked_add(1))
+                        .ok_or_else(|| {
+                            semantic_error(
+                                "IndexOutOfBounds",
+                                "cell index exceeds the supported range",
+                            )
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            crate::object::cell::assign_cell_paren_linear_indices_with_policy_in_context(
+                context, value, &indices, &rhs, true,
+            )
+        }
+        value @ (Value::Struct(_) | Value::StructArray(_)) => {
+            super::structure::assign_with_plan(value, plan, rhs, true)
+        }
+        value @ (Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_)) => {
+            super::object::assign_with_plan(value, plan, rhs, true)
+        }
+        Value::LogicalArray(value) => {
+            super::write_slice::delete_logical_with_plan(context, value, plan, &rhs).await
+        }
+        Value::Bool(value) => {
+            super::write_slice::delete_bool_with_plan(context, value, plan, &rhs).await
         }
         _ => Err(invalid_base()),
     }

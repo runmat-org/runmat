@@ -4,7 +4,7 @@ use std::sync::OnceLock;
 
 use super::{
     ContainersMapStorage, GraphicsReceiverRef, MemmapReceiverAuthority, MemmapReceiverState,
-    ObjectInstance,
+    NumericFactorData, ObjectInstance,
 };
 use crate::{ExactHostAllocationClaim, ExactHostAllocationPermit, ExactHostNumericAllocationError};
 use crate::{ForeignRef, Value};
@@ -96,9 +96,22 @@ pub(super) enum NativeObjectPayload {
     MemmapReceiver(SharedNativeState<MemmapReceiverState>),
     TcpAuthority(ForeignRef),
     GraphicsReceiver(GraphicsReceiverRef),
+    NumericFactor(SharedNativeState<NumericFactorData>),
 }
 
 impl NativeObjectPayload {
+    pub(super) fn numeric_factor_requested_bytes() -> usize {
+        ExactShared::<SharedNativePayload<NumericFactorData>>::requested_bytes()
+    }
+    pub(super) fn numeric_factor_exact(
+        value: NumericFactorData,
+        permit: &dyn ExactHostAllocationPermit,
+    ) -> Result<Self, ExactHostNumericAllocationError> {
+        SharedNativeState::try_new_exact(value, 0, permit).map(Self::NumericFactor)
+    }
+    pub(super) fn numeric_factor_unbounded(value: NumericFactorData) -> Self {
+        Self::NumericFactor(SharedNativeState::new(value))
+    }
     pub(super) fn memmap_receiver_unbounded(value: MemmapReceiverState) -> Self {
         Self::MemmapReceiver(SharedNativeState::new(value))
     }
@@ -147,6 +160,7 @@ impl NativeObjectPayload {
             Self::MatFileAuthority(value) => Self::MatFileAuthority(value.clone()),
             Self::TcpAuthority(value) => Self::TcpAuthority(value.clone()),
             Self::GraphicsReceiver(value) => Self::GraphicsReceiver(value.clone()),
+            Self::NumericFactor(value) => Self::NumericFactor(value.clone()),
         }
     }
 }
@@ -163,6 +177,7 @@ pub enum ObjectPersistencePayloadKind {
     MemmapReceiver,
     TcpAuthority,
     GraphicsReceiver,
+    NumericFactor,
 }
 
 impl Trace for NativeObjectPayload {
@@ -179,6 +194,7 @@ impl Trace for NativeObjectPayload {
             | Self::MatFileAuthority(_)
             | Self::TcpAuthority(_)
             | Self::GraphicsReceiver(_) => {}
+            Self::NumericFactor(_) => {}
         }
     }
 }
@@ -188,6 +204,7 @@ impl ObjectInstance {
         match self.generation().native_payload.as_ref() {
             Some(NativeObjectPayload::ContainersMap(storage)) => storage.has_retained_claim(),
             Some(NativeObjectPayload::MemmapReceiver(storage)) => storage.has_retained_claim(),
+            Some(NativeObjectPayload::NumericFactor(storage)) => storage.has_retained_claim(),
             _ => true,
         }
     }
@@ -199,6 +216,9 @@ impl ObjectInstance {
             return Ok((0, 0));
         };
         match native {
+            NativeObjectPayload::NumericFactor(storage) if !storage.has_retained_claim() => {
+                Ok((NativeObjectPayload::numeric_factor_requested_bytes(), 1))
+            }
             NativeObjectPayload::ContainersMap(storage) if !storage.has_retained_claim() => Ok((
                 NativeObjectPayload::containers_map_requested_bytes(storage.get())?,
                 1,
@@ -216,6 +236,7 @@ impl ObjectInstance {
         permit: &dyn ExactHostAllocationPermit,
     ) -> Result<(), ExactHostNumericAllocationError> {
         match self.generation().native_payload.as_ref() {
+            Some(NativeObjectPayload::NumericFactor(storage)) => storage.try_admit_exact(0, permit),
             Some(NativeObjectPayload::ContainersMap(storage)) => {
                 storage.try_admit_exact(storage.get().retained_physical_bytes()?, permit)
             }
@@ -257,6 +278,9 @@ impl ObjectInstance {
             Some(NativeObjectPayload::GraphicsReceiver(_)) => {
                 ObjectPersistencePayloadKind::GraphicsReceiver
             }
+            Some(NativeObjectPayload::NumericFactor(_)) => {
+                ObjectPersistencePayloadKind::NumericFactor
+            }
         }
     }
 
@@ -276,6 +300,15 @@ impl ObjectInstance {
         self.with_native(NativeObjectPayload::ContainersMap(SharedNativeState::new(
             storage,
         )))
+    }
+    pub fn with_numeric_factor_data(self, data: NumericFactorData) -> Self {
+        self.with_native(NativeObjectPayload::numeric_factor_unbounded(data))
+    }
+    pub fn numeric_factor_data(&self) -> Option<&NumericFactorData> {
+        match self.generation().native_payload.as_ref() {
+            Some(NativeObjectPayload::NumericFactor(value)) => Some(value.get()),
+            _ => None,
+        }
     }
     pub fn with_foreign_host_control(self, reference: ForeignRef) -> Self {
         self.with_native(NativeObjectPayload::ForeignHostControl(reference))

@@ -54,6 +54,28 @@ Then run the source artifact producer with the exported requirements and builtin
 metadata. Optional `--evidence-manifest` supplies actual assessment records;
 without it, linked requirements are not described as passed.
 
+Builtin references are packed from the complete canonical documentation export,
+not the remaining `docs/builtins/reference` files. Each exported record is written
+unchanged as JSON under `builtins/reference/<module_stem>.json`, preserving the
+published filename's case, examples, assertions, links, evidence, and catalog
+fields. The aggregate wrapper is not substituted for the existing per-builtin
+artifact layout. Missing, duplicate, preview, or unsafe-filename products fail
+before the staged artifact replaces the published output.
+
+Optionally pass `--builtin-documentation PATH` to either docs producer to check
+a staged aggregate export against the complete strict canonical export from
+this source checkout. The shared adapter also accepts
+`RUNMAT_BUILTIN_DOCUMENTATION_EXPORT` (file) or
+`RUNMAT_BUILTIN_DOCUMENTATION_BINARY` (prebuilt exporter), exclusively. Otherwise
+it runs the canonical exporter through Cargo in the source checkout. Supplied
+products must match that source and include the full catalog, not a scoped
+identity export. Public docs production always requires strict mode: no legacy
+documents or missing catalog documentation are accepted. Transition exports
+remain available to migration tooling but cannot be packed as public docs.
+Duplicate ownership remains an exporter error, and preview products never
+qualify for packing. Removing
+legacy sidecars does not remove canonical builtin references from the artifact.
+
 ```sh
 node scripts/docs/build.mjs \
   --native-executable target/release/runmat \

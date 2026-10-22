@@ -52,12 +52,14 @@ fn onehotdecode_returns_categorical_for_categorical_classes() {
     let categories = Value::StringArray(
         StringArray::new(vec!["low".into(), "high".into()], vec![1, 2]).unwrap(),
     );
-    let classes = crate::builtins::table::categorical_from_args(vec![
-        Value::StringArray(
-            StringArray::new(vec!["low".into(), "high".into()], vec![2, 1]).unwrap(),
-        ),
-        categories,
-    ])
+    let classes = crate::builtins::table::categorical_from_args(
+        crate::call::FunctionArgumentView::from_slice(&[
+            Value::StringArray(
+                StringArray::new(vec!["low".into(), "high".into()], vec![2, 1]).unwrap(),
+            ),
+            categories,
+        ]),
+    )
     .unwrap();
     let encoded = Value::Tensor(Tensor::new(vec![0.0, 1.0, 1.0, 0.0], vec![2, 2]).unwrap());
     let Value::Object(out) = block_on(onehotdecode_builtin(

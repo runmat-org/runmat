@@ -8,10 +8,10 @@ use crate::{ContractError, Digest};
 #[path = "native_probe_codec.rs"]
 mod codec;
 
-pub const NATIVE_ABI_PROBE_SCHEMA_VERSION: u16 = 1;
-pub const NATIVE_ABI_PROBE_SYMBOL: &str = "RUNMAT_NATIVE_ABI_PROBE_V1";
+pub const NATIVE_ABI_PROBE_SCHEMA_VERSION: u16 = 2;
+pub const NATIVE_ABI_PROBE_SYMBOL: &str = "RUNMAT_NATIVE_ABI_PROBE_V2";
 pub const NATIVE_ABI_CONTRACT_CAPACITY: usize = 512;
-const MAGIC: [u8; 8] = *b"RMABIPR1";
+const MAGIC: [u8; 8] = *b"RMABIPR2";
 
 macro_rules! layout_types {
     ($($name:ident),+ $(,)?) => {
@@ -43,7 +43,9 @@ layout_types!(
     SitePhase,
     SiteRequest,
     SiteOutcomeKind,
-    SiteOutcome
+    SiteOutcome,
+    RuntimeBuiltinBinding,
+    BuiltinBindingIdentity
 );
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -65,6 +67,10 @@ pub enum NativeAbiField {
     OutcomeEdge,
     OutcomeFlags,
     OutcomeReserved,
+    BindingIdentity,
+    BindingImplementation,
+    BindingContinuationLayout,
+    BindingProvenance,
 }
 impl NativeAbiField {
     pub const ALL: &'static [Self] = &[
@@ -84,10 +90,18 @@ impl NativeAbiField {
         Self::OutcomeEdge,
         Self::OutcomeFlags,
         Self::OutcomeReserved,
+        Self::BindingIdentity,
+        Self::BindingImplementation,
+        Self::BindingContinuationLayout,
+        Self::BindingProvenance,
     ];
-    fn storage(self, pointer_bytes: u32) -> (NativeAbiType, u32) {
+    fn storage(
+        self,
+        pointer_bytes: u32,
+        layouts: &[NativeProbeTypeLayout; NativeAbiType::ALL.len()],
+    ) -> (NativeAbiType, NativeProbeTypeLayout) {
         use NativeAbiField::*;
-        match self {
+        let (owner, width) = match self {
             CallHost | CallFrame => (NativeAbiType::Call, pointer_bytes),
             FrameResume => (NativeAbiType::Frame, pointer_bytes),
             ResumeBlock => (NativeAbiType::Resume, 4),
@@ -97,7 +111,23 @@ impl NativeAbiField {
             OutcomeKind | OutcomeEdge | OutcomeFlags | OutcomeReserved => {
                 (NativeAbiType::SiteOutcome, 4)
             }
-        }
+            BindingIdentity => {
+                return (
+                    NativeAbiType::RuntimeBuiltinBinding,
+                    layouts[NativeAbiType::BuiltinBindingIdentity as usize],
+                )
+            }
+            BindingImplementation | BindingContinuationLayout | BindingProvenance => {
+                (NativeAbiType::RuntimeBuiltinBinding, pointer_bytes)
+            }
+        };
+        (
+            owner,
+            NativeProbeTypeLayout {
+                size: width,
+                alignment: width,
+            },
+        )
     }
 }
 
@@ -217,10 +247,11 @@ impl NativeAbiProbe {
             }
         }
         for field in NativeAbiField::ALL {
-            let (owner, width) = field.storage(u32::from(self.pointer_width / 8));
+            let (owner, storage) = field.storage(u32::from(self.pointer_width / 8), &self.layouts);
+            let width = storage.size;
             let offset = self.offset(*field);
-            if !offset.is_multiple_of(width)
-                || self.layout(owner).alignment < width
+            if !offset.is_multiple_of(storage.alignment)
+                || self.layout(owner).alignment < storage.alignment
                 || offset
                     .checked_add(width)
                     .is_none_or(|end| end > self.layout(owner).size)
@@ -228,8 +259,9 @@ impl NativeAbiProbe {
                 return Err(invalid());
             }
             for previous in NativeAbiField::ALL.iter().take(*field as usize) {
-                let (previous_owner, previous_width) =
-                    previous.storage(u32::from(self.pointer_width / 8));
+                let (previous_owner, previous_storage) =
+                    previous.storage(u32::from(self.pointer_width / 8), &self.layouts);
+                let previous_width = previous_storage.size;
                 let previous_offset = self.offset(*previous);
                 if owner == previous_owner
                     && offset < previous_offset + previous_width

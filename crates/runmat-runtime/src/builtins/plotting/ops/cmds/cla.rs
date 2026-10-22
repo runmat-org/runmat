@@ -80,7 +80,19 @@ fn cla_builtin_with_runtime(
     };
     let reset = match (rest.len(), rest.first()) {
         (0, _) => false,
-        (1, Some(value)) if as_lower_str(value).is_some_and(|text| text.trim() == "reset") => true,
+        (1, Some(value))
+            if as_lower_str(value)
+                .map_err(|source| {
+                    crate::builtins::plotting::plotting_error_with_source(
+                        "cmds",
+                        source.to_string(),
+                        source,
+                    )
+                })?
+                .is_some_and(|text| text.trim() == "reset") =>
+        {
+            true
+        }
         _ => return Err(invalid()),
     };
     let selected = target.and(original);

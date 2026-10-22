@@ -1,58 +1,49 @@
-use super::nanmax_contract::{nanmax_type, NANMAX_INTEGER_EXTENSION};
+//! Legacy omit-NaN maximum, sharing the admitted extrema parser and engine.
 use super::*;
-use runmat_macros::runtime_builtin;
-use runmat_value::Tensor;
-
+use runmat_builtins::{NANMAX_DESCRIPTOR, NANMAX_ERROR_TOO_MANY_OUTPUTS, NANMAX_INTEGER_EXTENSION};
 #[runtime_builtin(
     name = "nanmax",
-    category = "stats/summary",
-    summary = "Return maximum values while omitting NaNs.",
-    keywords = "nanmax,max,maximum,omitnan,statistics",
-    type_resolver(nanmax_type),
-    descriptor(crate::builtins::math::reduction::max::NANMAX_DESCRIPTOR),
-    extensions(crate::builtins::math::reduction::max::NANMAX_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::reduction::max::NANMAX_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::reduction::max"
 )]
-pub(super) async fn nanmax_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn nanmax_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_bounded_outputs(
+        &NANMAX_DESCRIPTOR,
+        &NANMAX_ERROR_TOO_MANY_OUTPUTS,
+        "nanmax",
+    )
+    .map_err(super::super::numerical_execution::terminal)?;
+    reject_pairwise_multiple_outputs(rest.view())?;
     if is_real_typed_integer_value(&value) || rest.iter().any(is_real_typed_integer_value) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &NANMAX_INTEGER_EXTENSION,
             "nanmax",
         )?;
     }
-    let adjusted = nanmax_rest(rest);
-    reject_pairwise_multiple_outputs(crate::call::FunctionArgumentView::from_slice(&adjusted))?;
-    let eval = evaluate_for_demand(
-        None,
+    let call = super::super::numerical_execution::NumericalCall::new(
+        runmat_builtins::NumericalReductionKind::NonNanMaximum,
+        runtime.as_ref(),
+    )?;
+    // nanmax deliberately publishes a host result; this is not a provider-failure
+    // fallback or permission for other resident-result APIs to gather explicitly.
+    call.host()?;
+    let evaluated = evaluate_for_missing(
+        runtime.as_ref(),
         value,
-        crate::call::FunctionArgumentView::from_slice(&adjusted),
+        rest.view(),
         builtin_demand(),
+        Some(ReductionNaN::Omit),
     )
     .await?;
-    evaluation_to_value(eval)
+    call.finish_value(evaluation_to_value(evaluated))
 }
-
 fn is_real_typed_integer_value(value: &Value) -> bool {
     matches!(value, Value::Int(_))
-        || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
-        || matches!(
-            value,
-            Value::GpuTensor(handle)
-                if runmat_accelerate_api::handle_integer_type(handle).is_some()
-        )
-}
-
-fn nanmax_rest(rest: Vec<Value>) -> Vec<Value> {
-    let mut args = Vec::with_capacity(rest.len() + 2);
-    if rest.is_empty() {
-        args.push(empty_placeholder());
-    }
-    args.extend(rest);
-    args.push(Value::from("omitnan"));
-    args
-}
-
-fn empty_placeholder() -> Value {
-    Value::Tensor(Tensor::new(Vec::<f64>::new(), vec![0, 0]).expect("empty placeholder shape"))
+        || matches!(value,Value::Tensor(t) if t.integer_storage().is_some())
+        || matches!(value,Value::GpuTensor(h) if runmat_accelerate_api::handle_integer_type(h).is_some())
 }

@@ -52,10 +52,10 @@ fn compiled_mat2cell_mat2str_and_native2unicode_keep_exact_integer_boundaries() 
         matches!(value, Value::Cell(cell) if cell.data().iter().any(|entry| matches!(entry, Value::Int(integer) if integer.decimal_string() == "18446744073709551615")))
     }));
     assert!(values.iter().any(|value| {
-        matches!(value, Value::CharArray(array) if array.data().iter().collect::<String>() == "uint16([256 512])")
+        matches!(value, Value::CharArray(array) if runmat_value::decode_utf16_code_units(array.data()).expect("valid UTF-16 text fixture") == "uint16([256 512])")
     }));
     assert!(values.iter().any(|value| {
-        matches!(value, Value::CharArray(array) if array.shape == vec![1, 2] && array.data().iter().collect::<String>() == "hi")
+        matches!(value, Value::CharArray(array) if array.shape == vec![1, 2] && runmat_value::decode_utf16_code_units(array.data()).expect("valid UTF-16 text fixture") == "hi")
     }));
 }
 

@@ -165,6 +165,7 @@ impl MirExpansionSource {
             Self::SubscriptChain(chain) => chain.contains_contextual_end(),
             Self::CellContents { indexing, .. } => indexing.components.iter().any(|component| {
                 matches!(component, crate::MirIndexComponent::ContextualExpr(region) if region.contains_contextual_end())
+                    || matches!(component, crate::MirIndexComponent::Expansion(region) if region.contains_contextual_end())
             }),
             Self::ReturnedOutputs(_) | Self::Member { .. } | Self::DynamicMember { .. } => false,
         }

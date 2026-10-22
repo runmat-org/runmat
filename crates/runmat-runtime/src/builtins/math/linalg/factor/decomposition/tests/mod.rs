@@ -91,8 +91,10 @@ pub(super) fn approx_vec_rooted(value: crate::execution::RootedValue) -> Vec<f64
 }
 
 mod compatibility;
-mod integer_storage;
-mod solves;
-mod properties;
 mod construction;
 mod cutover;
+mod integer_storage;
+mod properties;
+#[path = "scale_range.rs"]
+mod scale_range;
+mod solves;

@@ -422,6 +422,7 @@ mod tests {
     fn call(b: Value, a: Value, rest: &[Value], outputs: Option<usize>) -> BuiltinResult<Value> {
         let _guard = outputs
             .map(|count| crate::output_count::push_output_count(Some(count)))
+            .transpose()
             .expect("output-count scope");
         block_on(evaluate(b, a, rest))
     }

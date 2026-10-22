@@ -2,6 +2,8 @@
 
 pub(crate) mod cross;
 pub(crate) mod callable_linear_operator;
+pub(crate) mod dense_factor;
+pub(crate) mod iterative_preconditioner;
 pub(crate) mod ctranspose;
 pub(crate) mod dot;
 /// Borrowed typed dense/CSC operator shared by host iterative solvers.

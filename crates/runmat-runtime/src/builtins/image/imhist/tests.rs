@@ -8,6 +8,7 @@ use std::rc::Rc;
 fn call(image: Value, rest: Vec<Value>, outputs: Option<usize>) -> Value {
     let _guard = outputs
         .map(|count| crate::output_count::push_output_count(Some(count)))
+        .transpose()
         .expect("output-count scope");
     block_on(imhist_builtin(
         None,

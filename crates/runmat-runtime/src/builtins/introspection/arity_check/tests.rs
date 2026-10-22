@@ -318,7 +318,7 @@ fn arity_checks_accept_every_documented_integer_class() {
         ])
         .expect("legacy text nargoutchk");
         assert!(
-            matches!(text, Value::CharArray(array) if array.data().iter().collect::<String>().contains("Too many"))
+            matches!(text, Value::CharArray(array) if runmat_value::decode_utf16_code_units(array.data()).expect("valid UTF-16 fixture").contains("Too many"))
         );
 
         let structured = dispatch_nargoutchk(vec![

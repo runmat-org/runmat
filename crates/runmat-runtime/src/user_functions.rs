@@ -122,7 +122,7 @@ pub type SemanticNameCandidates = dyn Fn(&str) -> Vec<SemanticNameCandidate> + S
 /// A read-only view of the native loader's selected name. The executable
 /// loader remains the owner of installed-module and platform-suffix policy.
 pub type NativeNameObserverFuture =
-    Pin<Box<dyn Future<Output = Result<Option<NativeNameFact>, String>>>>;
+    Pin<Box<dyn Future<Output = Result<Option<NativeNameFact>, crate::RuntimeError>>>>;
 pub type NativeNameObserver = dyn Fn(String) -> NativeNameObserverFuture;
 
 /// Trusted selected-host resolution and invocation. An absent target follows

@@ -100,7 +100,7 @@ impl Drop for InstalledState {
 }
 
 fn produce(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
-    Box::pin(async {
+    runmat_runtime::builtin::admitted_builtin_future(None, "fixture", async {
         let state = STATE.with(|slot| slot.borrow().as_ref().expect("fixture installed").clone());
         let provider = state.borrow().provider;
         let allocation = provider

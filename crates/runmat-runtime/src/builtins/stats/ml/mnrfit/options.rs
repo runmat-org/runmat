@@ -28,17 +28,19 @@ use crate::BuiltinResult;
 pub(super) use runmat_builtins::MnrfitOption as OptionName;
 
 pub(super) struct OptionSlot {
-    spelling: Option<runmat_value::Utf8Text>,
+    spelling: Option<String>,
     identity: Option<OptionName>,
 }
 
-pub(super) fn inspect(values: crate::call::FunctionArgumentView<'_>) -> Vec<OptionSlot> {
+pub(super) fn inspect(
+    values: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Vec<OptionSlot>> {
     values
         .chunks_exact(2)
         .map(|pair| {
-            let spelling = scalar_text(&pair[0]);
+            let spelling = scalar_text(&pair[0])?.map(std::borrow::Cow::into_owned);
             let identity = spelling.as_deref().and_then(OptionName::from_public);
-            OptionSlot { spelling, identity }
+            Ok(OptionSlot { spelling, identity })
         })
         .collect()
 }

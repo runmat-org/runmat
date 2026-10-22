@@ -307,7 +307,10 @@ fn atanh_char_array(ca: CharArray) -> BuiltinResult<Value> {
             .map_err(|e| atanh_error_with_detail(&ATANH_ERROR_INTERNAL, e))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
-    let data: Vec<f64> = ca.data().iter().map(|&ch| ch as u32 as f64).collect();
+    let data: Vec<f64> = ca
+        .iter_column_major()
+        .map(|ch| f64::from(ch.raw()))
+        .collect();
     let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
         .map_err(|e| atanh_error_with_detail(&ATANH_ERROR_INTERNAL, e))?;
     atanh_tensor_real(tensor)
@@ -354,7 +357,7 @@ pub(crate) mod tests {
             logical.identifier(),
             ATANH_LOGICAL_INPUT_EXTENSION.error_identifier
         );
-        let chars = CharArray::new("A".chars().collect(), 1, 1).unwrap();
+        let chars = CharArray::from_unicode_scalars("A".chars().collect(), 1, 1).unwrap();
         let character = block_on(super::atanh_builtin(None, Value::CharArray(chars)))
             .expect_err("character input must be gated");
         assert_eq!(
@@ -622,7 +625,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atanh_char_array_promotes_to_complex() {
-        let chars = CharArray::new(vec!['A'], 1, 1).expect("char array");
+        let chars = CharArray::from_unicode_scalars(vec!['A'], 1, 1).expect("char array");
         let result = atanh_builtin(Value::CharArray(chars)).expect("atanh");
         match result {
             Value::Complex(re, im) => {
@@ -646,7 +649,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn atanh_char_arrays() {
-        let chars = CharArray::new("AB".chars().collect(), 1, 2).expect("chars");
+        let chars = CharArray::from_unicode_scalars("AB".chars().collect(), 1, 2).expect("chars");
         let result = atanh_builtin(Value::CharArray(chars)).expect("atanh");
         match result {
             Value::ComplexTensor(t) => {

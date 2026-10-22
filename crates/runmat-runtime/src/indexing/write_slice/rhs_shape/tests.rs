@@ -1,7 +1,7 @@
 use super::super::{
     assign_tensor_with_plan, build_complex_rhs_view, build_string_rhs_view,
     integer_gpu_rhs_indices_for_plan, materialize_rhs_nd_real, validate_string_rhs_for_plan,
-    ComplexRhsView, StringRhsView,
+    StringRhsView,
 };
 use super::validated_assignment_rhs_shape;
 use crate::indexing::plan::IndexPlan;
@@ -9,6 +9,16 @@ use futures::executor::block_on;
 use runmat_value::{
     CellArray, CharArray, ComplexTensor, IntegerStorage, LogicalArray, StringArray, Tensor, Value,
 };
+
+#[test]
+fn externally_constructed_complex_plan_cannot_overrun_borrowed_rhs_ordinals() {
+    let plan = IndexPlan::new(vec![0, 1], vec![1, 2], vec![1], 1, vec![1, 2]);
+    let rhs = Value::ComplexTensor(ComplexTensor::new(vec![(2.0, 3.0)], vec![1, 1]).unwrap());
+    let view = build_complex_rhs_view(&rhs, &plan.selection_lengths).unwrap();
+    let error = super::super::materialize_complex_rhs_view_for_plan(&view, &plan)
+        .expect_err("mismatched public plan must not reach a second source ordinal");
+    assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
+}
 
 #[test]
 fn empty_string_selection_validates_text_and_cellstr_without_copying_payloads() {
@@ -87,17 +97,9 @@ fn numeric_logical_complex_and_string_views_share_singleton_alignment() {
     let complex = Value::ComplexTensor(
         ComplexTensor::new(vec![(11.0, 1.0), (12.0, 2.0)], vec![1, 2]).unwrap(),
     );
-    let ComplexRhsView::Tensor {
-        data,
-        shape,
-        strides,
-    } = build_complex_rhs_view(&complex, &[2, 1]).unwrap()
-    else {
-        panic!("complex array view");
-    };
-    assert_eq!(data, vec![(11.0, 1.0), (12.0, 2.0)]);
-    assert_eq!(shape, vec![2, 1]);
-    assert_eq!(strides, vec![1, 2]);
+    let view = build_complex_rhs_view(&complex, &[2, 1]).unwrap();
+    assert_eq!(view.tensor_value(0), (11.0, 1.0));
+    assert_eq!(view.tensor_value(1), (12.0, 2.0));
     let strings = Value::StringArray(
         StringArray::new(vec!["first".into(), "second".into()], vec![1, 2]).unwrap(),
     );

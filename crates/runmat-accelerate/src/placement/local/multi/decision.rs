@@ -41,8 +41,10 @@ pub(super) struct DecisionRequest<'a> {
 pub(super) fn select_decision(
     request: DecisionRequest<'_>,
 ) -> Result<LocalPlacementOutcome, Box<runmat_runtime::RuntimeError>> {
-    if request.publication == LocalPublicationSemantics::SourceOrderedVm
-        || request.cpu.route.cost.estimate().is_none()
+    if matches!(
+        request.publication,
+        LocalPublicationSemantics::SourceOrderedVm | LocalPublicationSemantics::SourceOrderedNative
+    ) || request.cpu.route.cost.estimate().is_none()
         || request
             .admitted
             .iter()
@@ -59,7 +61,7 @@ pub(super) fn select_decision(
         prepared_authority,
         vm_right,
         vm_decline: _,
-        cpu,
+        mut cpu,
         cpu_resources,
         cpu_cost,
         mut admitted,
@@ -73,9 +75,32 @@ pub(super) fn select_decision(
         policy,
         bounded_host: _,
     } = request;
+    let native_origin = cpu.native_origin.take();
+    let legal_native = |candidate: &runmat_execution::PlacementGraphCandidate| match constraint {
+        runmat_execution::WholeWorkConstraint::AnyLegal => true,
+        runmat_execution::WholeWorkConstraint::ProviderRequired { device_id } => matches!(
+            candidate.descriptor.execution_location,
+            CandidateExecutionLocation::Provider { device_id: selected }
+                | CandidateExecutionLocation::VmRegion { device_id: selected }
+                | CandidateExecutionLocation::NativeRegion { device_id: selected }
+                if selected == device_id
+        ),
+    };
+    let native_alternative = cpu.native_alternative.take().filter(legal_native);
+    let native_host_alternative = cpu.native_host_alternative.take().filter(legal_native);
     let cpu = cpu
         .into_priced()
         .expect("numeric branch requires an estimated host carrier");
+    let native_set_identity = (native_alternative.is_some() || native_host_alternative.is_some())
+        .then(|| {
+            Digest::sha256_serialized(&(
+                "native-numeric-cpu-set-v2",
+                &cpu,
+                &native_alternative,
+                &native_host_alternative,
+            ))
+            .expect("typed native candidates serialize")
+        });
     let (resources, digest, host_epoch, _) = physical_facts;
     resources.validate().map_err(|message| {
         plan_error(crate::placement::PlacementPlanError {
@@ -97,7 +122,12 @@ pub(super) fn select_decision(
                 .build(),
         ));
     }
-    let mut graph_candidates = Vec::with_capacity(admitted.len() + 1);
+    let mut graph_candidates = Vec::with_capacity(
+        admitted.len()
+            + 1
+            + usize::from(native_alternative.is_some())
+            + usize::from(native_host_alternative.is_some()),
+    );
     if let Some(resources) = cpu_resources.filter(|_| compare_profitability) {
         graph_candidates.push(PlacementGraphCandidate {
             resources,
@@ -105,6 +135,14 @@ pub(super) fn select_decision(
             output_facts: None,
             transactional_results: true,
         });
+    }
+    if compare_profitability {
+        for alternative in [native_alternative, native_host_alternative]
+            .into_iter()
+            .flatten()
+        {
+            graph_candidates.push(alternative);
+        }
     }
     for entry in &admitted {
         graph_candidates.push(PlacementGraphCandidate {
@@ -178,6 +216,7 @@ pub(super) fn select_decision(
                 observation_contract,
                 prepared_authority,
                 vm_right,
+                native_origin.as_ref(),
                 digest,
                 policy,
             );
@@ -216,6 +255,9 @@ pub(super) fn select_decision(
                         host_epoch,
                     )
                 };
+                let facts = native_set_identity.map_or(facts, |identity| {
+                    signature::with_semantic_identity(facts, Some(identity))
+                });
                 let signature = PlacementSignature {
                     region: cpu.region,
                     operation: operation.into(),
@@ -324,7 +366,11 @@ pub(super) fn select_decision(
         } else {
             runmat_execution::WholeWorkDecisionKind::Uncompared
         },
-        cpu_cost,
+        cpu_cost: if selected.kind.is_provider() {
+            cpu_cost
+        } else {
+            runmat_execution::CandidateCostEvidence::Estimated(selected.cost)
+        },
         provider_cost: Some(receipt.priced().cost),
         provider_rejection: None,
         feedback,

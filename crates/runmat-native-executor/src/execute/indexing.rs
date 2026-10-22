@@ -117,7 +117,9 @@ fn object_selector(selectors: &MaterializedSelectors) -> NativeExecutorResult<Ob
             "object selector contains excess components".into(),
         ));
     }
-    Ok(ObjectIndexSelector::IndexValues { components })
+    Ok(ObjectIndexSelector::IndexValues {
+        components: runmat_value::ExactArrayStorage::unbounded(components),
+    })
 }
 
 pub(super) fn read(
@@ -419,6 +421,15 @@ fn materialize_selectors(
     indexing: &MirIndexing,
     retains_inputs: bool,
 ) -> NativeExecutorResult<MaterializedSelectors> {
+    if indexing
+        .components
+        .iter()
+        .any(|component| matches!(component, MirIndexComponent::Expansion(_)))
+    {
+        return Err(NativeExecutorError::UnsupportedSite(
+            "expanded parentheses require the ordered subscript-path executor".into(),
+        ));
+    }
     if indexing.components.len() > u32::BITS as usize {
         return Err(NativeExecutorError::Host(
             "verified Native IR exceeds the shared 32-dimension selector mask".into(),
@@ -456,6 +467,11 @@ fn materialize_selectors(
                 numeric.push(value.clone());
                 positional.push(value);
             }
+            MirIndexComponent::Expansion(_) => {
+                return Err(NativeExecutorError::UnsupportedSite(
+                    "expanded parentheses require the ordered subscript-path executor".into(),
+                ));
+            }
         }
     }
     Ok(MaterializedSelectors {
@@ -471,7 +487,9 @@ pub(super) fn indexing_requires_retention(indexing: &MirIndexing) -> bool {
     indexing.components.iter().any(|component| {
         matches!(
             component,
-            MirIndexComponent::ContextualExpr(_) | MirIndexComponent::PreparedExpr(_)
+            MirIndexComponent::ContextualExpr(_)
+                | MirIndexComponent::PreparedExpr(_)
+                | MirIndexComponent::Expansion(_)
         )
     })
 }
@@ -481,6 +499,13 @@ pub(super) fn materialize_index_components(
     base: &Value,
     indexing: &MirIndexing,
 ) -> NativeExecutorResult<Vec<ObjectIndexComponent>> {
+    if indexing
+        .components
+        .iter()
+        .any(|component| matches!(component, MirIndexComponent::Expansion(_)))
+    {
+        return super::subscript_path::materialize_target_selectors(state, base, indexing);
+    }
     let selectors =
         materialize_selectors(state, base, indexing, indexing_requires_retention(indexing))?;
     let mut values = selectors.positional.into_iter();
@@ -502,6 +527,9 @@ pub(super) fn materialize_index_components(
                         "materialized index component is missing its value".into(),
                     )
                 }),
+            MirIndexComponent::Expansion(_) => Err(NativeExecutorError::UnsupportedSite(
+                "expanded parentheses require the ordered subscript-path executor".into(),
+            )),
         })
         .collect()
 }
@@ -516,11 +544,11 @@ pub(super) fn materialize_cell_expansion_source(
     Ok(
         runmat_runtime::call::arguments::MaterializedExpansionSource::CellContents {
             base,
-            indices: if indexing.cell_expand_all {
+            indices: runmat_value::OutputListStorage::unbounded(if indexing.cell_expand_all {
                 Vec::new()
             } else {
                 selectors.positional
-            },
+            }),
             expand_all: indexing.cell_expand_all,
         },
     )
@@ -858,21 +886,8 @@ fn normalize_output_values(
     }
 }
 
-fn value_shape(value: &Value) -> Vec<usize> {
-    match value {
-        Value::Tensor(value) => value.shape().to_vec(),
-        Value::ComplexTensor(value) => value.shape().to_vec(),
-        Value::SparseTensor(value) => value.shape(),
-        Value::GpuTensor(value) => value.shape().to_vec(),
-        Value::StringArray(value) => value.shape.to_vec(),
-        Value::LogicalArray(value) => value.shape.to_vec(),
-        Value::CharArray(value) => value.shape().to_vec(),
-        Value::Cell(value) => value.shape.to_vec(),
-        Value::StructArray(value) => value.shape().to_vec(),
-        Value::ObjectArray(value) => value.shape().to_vec(),
-        Value::SymbolicArray(value) => value.shape.to_vec(),
-        _ => vec![1, 1],
-    }
+fn value_shape(value: &Value) -> runmat_runtime::builtins::common::shape::ValueDimensions<'_> {
+    runmat_runtime::builtins::common::shape::stored_dimensions_borrowed(value)
 }
 
 fn is_function_value(value: &Value) -> bool {
@@ -971,7 +986,8 @@ mod tests {
 
     #[test]
     fn native_character_slices_use_shared_column_major_index_plan() {
-        let chars = CharArray::new("abcdwxyz".chars().collect(), 2, 4).expect("character array");
+        let chars = CharArray::from_unicode_scalars("abcdwxyz".chars().collect(), 2, 4)
+            .expect("character array");
         let row = IndexPlan::new(vec![1, 3, 5, 7], vec![1, 4], vec![1, 4], 2, vec![2, 4]);
         let column = IndexPlan::new(vec![4, 5], vec![2, 1], vec![2, 1], 2, vec![2, 4]);
         let Value::CharArray(row) =
@@ -988,6 +1004,6 @@ mod tests {
             panic!("expected character column");
         };
         assert_eq!(column.shape(), &[2, 1]);
-        assert_eq!(column.data(), vec!['c', 'y']);
+        assert_eq!(column.data(), runmat_value::encode_utf16_code_units("cy"));
     }
 }

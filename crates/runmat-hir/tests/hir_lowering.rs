@@ -1642,7 +1642,7 @@ fn brace_index_expression_records_comma_list_read_context() {
 }
 
 #[test]
-fn binding_call_with_expansion_lowers_to_dynamic_call_dispatch() {
+fn binding_call_with_expansion_retains_receiver_selected_subscript() {
     let assembly = lower_semantic("h = @sin; C = {0}; y = h(C{:});");
     let entry = assembly.modules[0].synthetic_entry_function.unwrap();
     let function = assembly
@@ -1653,42 +1653,112 @@ fn binding_call_with_expansion_lowers_to_dynamic_call_dispatch() {
     let HirStmtKind::Assign(_, expr, _) = &function.body.statements[2].kind else {
         panic!("expected assignment");
     };
-    let HirExprKind::Call(call) = &expr.kind else {
-        panic!("expected dynamic call expression");
+    let HirExprKind::SubscriptChain(chain) = &expr.kind else {
+        panic!("expected receiver-selected subscript expression");
     };
-    assert!(matches!(call.callee, HirCallableRef::DynamicExpr(_)));
-    assert_eq!(call.args.len(), 1);
-    let HirExprKind::Index(_, indexing) = &call.args[0].kind else {
+    assert!(matches!(&chain.root.kind, HirExprKind::Binding(_)));
+    assert_eq!(chain.steps.len(), 1);
+    let runmat_hir::HirSubscriptStep::Index(indexing) = &chain.steps[0] else {
+        panic!("expected parentheses application");
+    };
+    assert!(matches!(indexing.kind, IndexKind::Paren));
+    let IndexComponent::Expr(argument) = &indexing.components[0] else {
         panic!("expected brace-index expansion argument");
     };
-    assert!(matches!(indexing.kind, IndexKind::Brace));
+    let HirExprKind::Index(_, expansion) = &argument.kind else {
+        panic!("expected brace-index expansion argument");
+    };
+    assert!(matches!(expansion.kind, IndexKind::Brace));
     assert!(matches!(
-        indexing.result_context,
+        expansion.result_context,
         IndexResultContext::FunctionArgumentExpansion
     ));
+    for (source, form) in [
+        ("A=1; S=1; y=A(S.idx);", "member"),
+        ("A=1; S=1; y=(A+0)(S.idx);", "member"),
+        ("A=1; S=1; name='idx'; y=A(S.(name));", "dynamic"),
+        ("A=1; S=1; y=A(S(1:2).idx);", "chain"),
+    ] {
+        let assembly = lower_semantic(source);
+        let entry = assembly.modules[0].synthetic_entry_function.unwrap();
+        let function = assembly
+            .functions
+            .iter()
+            .find(|function| function.id == entry)
+            .unwrap();
+        let HirStmtKind::Assign(_, expression, _) = &function.body.statements.last().unwrap().kind
+        else {
+            panic!("expected assignment")
+        };
+        let HirExprKind::SubscriptChain(chain) = &expression.kind else {
+            panic!("expected receiver-selected parentheses for {form}")
+        };
+        let [runmat_hir::HirSubscriptStep::Index(indexing)] = chain.steps.as_slice() else {
+            panic!("expected one parentheses step")
+        };
+        let [IndexComponent::Expr(argument)] = indexing.components.as_slice() else {
+            panic!("expected one expanding argument")
+        };
+        assert!(argument.expands_call_argument_sequence());
+        assert!(matches!(
+            (form, &argument.kind),
+            ("member", HirExprKind::Member { .. })
+                | ("dynamic", HirExprKind::MemberDynamic { .. })
+                | ("chain", HirExprKind::SubscriptChain(_))
+        ));
+        let mut scalar = argument.clone();
+        match &mut scalar.kind {
+            HirExprKind::Member { sequence_use, .. }
+            | HirExprKind::MemberDynamic { sequence_use, .. } => {
+                *sequence_use = runmat_types::SequenceUse::RequireSingle
+            }
+            HirExprKind::SubscriptChain(chain) => {
+                chain.sequence_use = runmat_types::SequenceUse::RequireSingle
+            }
+            _ => unreachable!("fixture is a member CSL form"),
+        }
+        assert!(
+            !scalar.expands_call_argument_sequence(),
+            "ordinary value context is not a CSL expansion"
+        );
+    }
 }
 
 #[test]
-fn binding_call_with_multi_output_lowers_to_dynamic_call_dispatch() {
-    let assembly = lower_semantic("h = @sin; [a, b] = h(1);");
+fn binding_parens_with_multi_output_keep_receiver_selected_index_or_call() {
+    let assembly = lower_semantic("h = @sin; [a, b] = h(1); A = [29, 30]; [c, d] = A(2);");
     let entry = assembly.modules[0].synthetic_entry_function.unwrap();
     let function = assembly
         .functions
         .iter()
         .find(|function| function.id == entry)
         .unwrap();
-    let HirStmtKind::MultiAssign(targets, expr, _) = &function.body.statements[1].kind else {
-        panic!("expected multi-assign");
-    };
-    let HirExprKind::Call(call) = &expr.kind else {
-        panic!("expected dynamic call expression");
-    };
-    assert!(matches!(call.callee, HirCallableRef::DynamicExpr(_)));
-    assert_eq!(targets.targets.len(), 2);
-    assert!(matches!(
-        call.requested_outputs,
-        RequestedOutputCount::Exactly(2)
-    ));
+    for statement in [&function.body.statements[1], &function.body.statements[3]] {
+        let HirStmtKind::MultiAssign(targets, expr, _) = &statement.kind else {
+            panic!("expected multi-assign");
+        };
+        let HirExprKind::SubscriptChain(chain) = &expr.kind else {
+            panic!("bound parentheses must retain receiver-selected indexing or invocation");
+        };
+        assert_eq!(targets.targets.len(), 2);
+        assert!(matches!(&chain.root.kind, HirExprKind::Binding(_)));
+        assert_eq!(
+            chain.sequence_use,
+            runmat_types::SequenceUse::SelectPrefix { count: 2 }
+        );
+        assert_eq!(
+            chain.context,
+            runmat_types::ObjectIndexingContext::Expression
+        );
+        assert!(matches!(
+            chain.steps.as_slice(),
+            [runmat_hir::HirSubscriptStep::Index(IndexingSemantics {
+                kind: IndexKind::Paren,
+                result_context: IndexResultContext::ReadSingle,
+                ..
+            })]
+        ));
+    }
 }
 
 #[test]
@@ -1716,11 +1786,15 @@ fn expr_stmt_output_policy_controls_binding_call_lowering_shape() {
     let HirStmtKind::ExprStmt(expr_suppressed, true) = &function.body.statements[2].kind else {
         panic!("expected semicolon-suppressed expression statement");
     };
-    let HirExprKind::Call(call) = &expr_suppressed.kind else {
-        panic!("suppressed expression statement should lower as dynamic call dispatch");
+    let HirExprKind::SubscriptChain(chain) = &expr_suppressed.kind else {
+        panic!("suppressed bound parentheses must retain the actual receiver route");
     };
-    assert!(matches!(call.callee, HirCallableRef::DynamicExpr(_)));
-    assert!(matches!(call.requested_outputs, RequestedOutputCount::Zero));
+    assert!(matches!(&chain.root.kind, HirExprKind::Binding(_)));
+    assert_eq!(chain.sequence_use, runmat_types::SequenceUse::Discard);
+    assert_eq!(
+        chain.context,
+        runmat_types::ObjectIndexingContext::Statement
+    );
 }
 
 #[test]

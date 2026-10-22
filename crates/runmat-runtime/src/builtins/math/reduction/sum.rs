@@ -408,7 +408,7 @@ async fn parse_arguments(
     let mut idx = 0;
     while idx < args.len() {
         let arg = &args[idx];
-        if let Some(keyword) = keyword_of(arg) {
+        if let Some(keyword) = keyword_of(arg)? {
             match SumControl::from_public_option(&keyword) {
                 Some(SumControl::Missing(mode)) => {
                     nan_mode = mode;

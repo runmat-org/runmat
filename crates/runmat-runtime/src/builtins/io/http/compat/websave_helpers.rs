@@ -149,7 +149,13 @@ pub(super) fn numeric_seconds(value: &Value, label: &str) -> BuiltinResult<f64> 
         }
         Value::String(text) => parse_positive_seconds(text),
         Value::CharArray(array) if array.rows == 1 => {
-            parse_positive_seconds(&array.data().iter().collect::<String>())
+            let text = crate::builtins::io::utf16::decode_utf16_with_error(array.data(), || {
+                compat_error(
+                    "websave",
+                    format!("websave: {label} contains malformed UTF-16 text"),
+                )
+            })?;
+            parse_positive_seconds(&text)
         }
         _ => Err(compat_error(
             "websave",

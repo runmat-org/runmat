@@ -29,7 +29,7 @@ pub(super) fn parse_options(
     let mut idx = 0usize;
 
     if let Some(first) = args.first() {
-        if let Some(text) = keyword_of(first) {
+        if let Some(text) = keyword_of(first)? {
             if LinkageOption::from_keyword(&text).is_none() {
                 method = LinkageMethod::from_keyword(&text).ok_or_else(|| {
                     invalid(format!("linkage: unsupported linkage method '{text}'"))
@@ -42,7 +42,7 @@ pub(super) fn parse_options(
     }
 
     while idx < args.len() {
-        if let Some(keyword) = keyword_of(&args[idx]) {
+        if let Some(keyword) = keyword_of(&args[idx])? {
             if LinkageOption::from_keyword(&keyword) == Some(LinkageOption::SaveMemory) {
                 if idx + 1 >= args.len() {
                     return Err(invalid("linkage: SaveMemory must be paired with a value"));
@@ -72,7 +72,7 @@ pub(super) fn parse_options(
     let metric = if metric_args.is_empty() {
         None
     } else {
-        let keyword = keyword_of(&metric_args[0])
+        let keyword = keyword_of(&metric_args[0])?
             .ok_or_else(|| invalid("linkage: distance metric must be text"))?;
         let kind = DistanceMetricKind::from_keyword(&keyword)
             .ok_or_else(|| invalid(format!("linkage: unsupported distance metric '{keyword}'")))?;
@@ -89,7 +89,7 @@ pub(super) fn parse_options(
 }
 
 fn parse_savememory(value: &Value) -> BuiltinResult<bool> {
-    if let Some(text) = keyword_of(value) {
+    if let Some(text) = keyword_of(value)? {
         match SaveMemorySetting::from_keyword(&text) {
             Some(SaveMemorySetting::On) => return Ok(true),
             Some(SaveMemorySetting::Off) => return Ok(false),

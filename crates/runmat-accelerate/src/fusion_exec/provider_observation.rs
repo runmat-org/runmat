@@ -154,6 +154,63 @@ impl FusionPlacementSelection {
         FusionProviderCompletion::new(receipt?, feedback?, right, self.command_contribution.take())
     }
 
+    pub(super) fn into_native_publication(
+        mut self,
+        identity: (
+            runmat_types::RegionId,
+            runmat_runtime::native::NativeSiteRequest,
+        ),
+    ) -> ExecutionResult<
+        Option<runmat_runtime::numeric_region::service::NativeNumericRegionPublicationOwner>,
+    > {
+        use super::observation::NativeFusionPublication;
+        use runmat_runtime::context::host_allocation::{HostAllocationPlan, HostAllocationReceipt};
+        self.drop_reports_failure = false;
+        let (Some(receipt), Some(feedback)) = (self.receipt.take(), self.feedback.take()) else {
+            return Ok(None);
+        };
+        let bytes = u64::try_from(std::mem::size_of::<NativeFusionPublication>())
+            .map_err(|_| anyhow!("native completion carrier size overflow"))?;
+        let retained = HostAllocationPlan::retained_exact_output_bytes(bytes, 1)
+            .map_err(anyhow::Error::from)?;
+        let admission = HostAllocationReceipt::admit(
+            Some(&feedback.runtime),
+            HostAllocationPlan::new(0, retained).map_err(anyhow::Error::from)?,
+        )
+        .map_err(anyhow::Error::from)?;
+        let claim = admission
+            .as_ref()
+            .map(|admission| {
+                admission
+                    .with_output_construction(&feedback.runtime, |permit| {
+                        permit
+                            .reserve_exact_claim(
+                                usize::try_from(bytes)
+                                    .map_err(|_| anyhow!("native completion size overflow"))?,
+                            )
+                            .map_err(anyhow::Error::from)
+                    })
+                    .map_err(anyhow::Error::from)?
+            })
+            .transpose()?;
+        if let Some(admission) = &admission {
+            admission
+                .checkpoint(&feedback.runtime)
+                .map_err(anyhow::Error::from)?;
+        }
+        Ok(Some(
+            runmat_runtime::numeric_region::service::NativeNumericRegionPublicationOwner::new(
+                Box::new(NativeFusionPublication {
+                    receipt,
+                    feedback,
+                    command_contribution: self.command_contribution.take(),
+                    identity,
+                }),
+                claim,
+            ),
+        ))
+    }
+
     pub(super) fn submitted(mut self) {
         let Some(receipt) = self.receipt.take() else {
             self.feedback = None; // Explicit unsupported observation, not success.

@@ -15,7 +15,11 @@ pub(super) fn parse(value: Value) -> crate::BuiltinResult<Query> {
     match value {
         Value::String(name) => Ok(Query::Scalar(name)),
         Value::CharArray(array) if array.rows == 1 => {
-            Ok(Query::Scalar(Utf8Text::new(array.data().iter().collect())))
+            crate::builtins::common::text::decode_utf16_with_error(
+                array.data(),
+                super::error::field_name_type,
+            )
+            .map(|name| Query::Scalar(Utf8Text::new(name)))
         }
         Value::CharArray(_) => Err(super::error::field_name_type()),
         Value::StringArray(array) => Ok(Query::Strings(array)),
@@ -42,8 +46,12 @@ fn cell_names(array: &CellArray) -> crate::BuiltinResult<Vec<String>> {
 fn cell_name(value: &Value) -> crate::BuiltinResult<String> {
     match field_name::decode(value) {
         Ok(name) => Ok(name),
-        Err(_) if matches!(value, Value::CharArray(_) | Value::StringArray(_)) => {
-            Err(super::error::field_name_type())
+        Err(source) if matches!(value, Value::CharArray(_) | Value::StringArray(_)) => {
+            let mut error = super::error::field_name_type();
+            if let field_name::ExpectedScalarFieldName::Encoding(source) = source {
+                error.source = Some(Box::new(source));
+            }
+            Err(error)
         }
         Err(_) => Err(super::error::cell_element(value)),
     }

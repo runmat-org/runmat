@@ -198,7 +198,7 @@ mod tests {
         let error = set_builtin(vec![
             root,
             Value::CharArray(
-                runmat_value::CharArray::new(vec!['G', 'r', 'i', 'd'], 2, 2)
+                runmat_value::CharArray::from_unicode_scalars(vec!['G', 'r', 'i', 'd'], 2, 2)
                     .expect("two character rows"),
             ),
             Value::Bool(true),
@@ -256,7 +256,7 @@ mod tests {
                         .expect("two strings"),
                 ),
                 Value::CharArray(
-                    runmat_value::CharArray::new(vec!['E', 'n', 'a', 'b'], 2, 2)
+                    runmat_value::CharArray::from_unicode_scalars(vec!['E', 'n', 'a', 'b'], 2, 2)
                         .expect("two character rows"),
                 ),
             ] {
@@ -451,8 +451,11 @@ mod tests {
     #[test]
     fn set_updates_figure_current_axes() {
         let _guard = setup();
-        let fig =
-            crate::builtins::plotting::figure::figure_builtin(vec![Value::Num(4321.0)]).unwrap();
+        let fig = crate::builtins::plotting::figure::figure_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(4321.0)]),
+        )
+        .unwrap();
         let ax = crate::builtins::plotting::subplot::subplot_builtin(
             Value::Num(1.0),
             Value::Num(2.0),
@@ -473,8 +476,11 @@ mod tests {
     #[test]
     fn set_updates_figure_sgtitle() {
         let _guard = setup();
-        let fig =
-            crate::builtins::plotting::figure::figure_builtin(vec![Value::Num(7777.0)]).unwrap();
+        let fig = crate::builtins::plotting::figure::figure_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(7777.0)]),
+        )
+        .unwrap();
         set_builtin(vec![
             Value::Num(fig),
             Value::String("SGTitle".into()),
@@ -489,8 +495,11 @@ mod tests {
     #[test]
     fn set_updates_figure_window_properties() {
         let _guard = setup();
-        let fig =
-            crate::builtins::plotting::figure::figure_builtin(vec![Value::Num(8888.0)]).unwrap();
+        let fig = crate::builtins::plotting::figure::figure_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(8888.0)]),
+        )
+        .unwrap();
         set_builtin(vec![
             Value::Num(fig),
             Value::String("Name".into()),
@@ -519,8 +528,11 @@ mod tests {
     #[test]
     fn set_figure_prevalidates_all_pairs_before_mutating() {
         let _guard = setup();
-        let fig =
-            crate::builtins::plotting::figure::figure_builtin(vec![Value::Num(8898.0)]).unwrap();
+        let fig = crate::builtins::plotting::figure::figure_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(8898.0)]),
+        )
+        .unwrap();
         let handle = crate::builtins::plotting::state::FigureHandle::from(8898);
         let before = clone_figure(handle).expect("figure should exist before failed set");
 
@@ -543,8 +555,11 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     fn set_visible_figure_display_properties_request_presentation() {
         let _guard = setup();
-        let fig =
-            crate::builtins::plotting::figure::figure_builtin(vec![Value::Num(8899.0)]).unwrap();
+        let fig = crate::builtins::plotting::figure::figure_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(8899.0)]),
+        )
+        .unwrap();
         let ax = crate::builtins::plotting::subplot::subplot_builtin(
             Value::Num(1.0),
             Value::Num(2.0),
@@ -596,13 +611,13 @@ mod tests {
     #[test]
     fn set_updates_stem_properties() {
         let _guard = setup();
-        let handle =
-            futures::executor::block_on(crate::builtins::plotting::stem::stem_builtin(vec![
-                Value::Tensor(
-                    runmat_value::Tensor::new(vec![1.0, 2.0], vec![2]).expect("stem values"),
-                ),
-            ]))
-            .unwrap();
+        let handle = futures::executor::block_on(crate::builtins::plotting::stem::stem_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Tensor(
+                runmat_value::Tensor::new(vec![1.0, 2.0], vec![2]).expect("stem values"),
+            )]),
+        ))
+        .unwrap();
         set_builtin(vec![
             Value::Num(handle),
             Value::String("BaseValue".into()),

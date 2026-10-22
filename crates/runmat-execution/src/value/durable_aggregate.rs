@@ -2,14 +2,23 @@
 //! V2 execution transport does not admit these tags.
 
 use super::{StructField, ValuePayload};
+mod numeric_factor;
+pub use numeric_factor::{
+    DurableDecompositionPayload, DurableDenseOrthogonalFactor, DurableEmptyFactorKind,
+    DurableFactorPermutation, DurableNumericFactor, DurableOrthogonalFactor,
+    DurableStructuralDecomposition,
+};
 use runmat_types::{ClassIdentity, MemberAccess};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DurablePlainObject {
     pub class_identity: ClassIdentity,
     pub properties: Vec<StructField>,
     pub dynamic_properties: Vec<DurableDynamicProperty>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decomposition: Option<DurableDecompositionPayload>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

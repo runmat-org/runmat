@@ -292,16 +292,8 @@ pub(crate) fn checked_constructor_integer_dimension(
 
 /// Extract a lowercased keyword from runtime values such as strings or
 /// single-row char arrays.
-pub(crate) fn keyword_of(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => Some(s.to_ascii_lowercase()),
-        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].to_ascii_lowercase()),
-        Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data().iter().collect();
-            Some(text.to_ascii_lowercase())
-        }
-        _ => None,
-    }
+pub(crate) fn keyword_of(value: &Value) -> crate::BuiltinResult<Option<String>> {
+    crate::builtins::common::arg_tokens::scalar_keyword_of(value, "arrayCreation")
 }
 
 /// Attempt to parse a dimension argument. Returns `Ok(Some(Vec))` when the

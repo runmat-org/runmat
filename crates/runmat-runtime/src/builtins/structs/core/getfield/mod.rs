@@ -58,5 +58,13 @@ pub(crate) async fn getfield_internal_with_context(
         None => crate::execution::RootedValues::new(rest)
             .map_err(crate::execution::ExecutionServiceError::into_runtime_error)?,
     };
-    execution::getfield(runtime, base, rest.into(), false).await
+    getfield_internal_retained_with_context(runtime, base, rest.into()).await
+}
+
+pub(crate) async fn getfield_internal_retained_with_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    base: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
+    execution::getfield(runtime, base, rest, false).await
 }

@@ -5,8 +5,16 @@ use runmat_execution::cancellation::CancellationToken;
 
 use runmat_value::{Tensor, Value};
 
-const MAX_NODES: usize = 256;
-const MAX_OUTPUTS: usize = 64;
+mod execution;
+pub mod service;
+pub use execution::{
+    execute_in_context, output_retained_bytes, NumericRegionOwnedExecution,
+    NUMERIC_REGION_EVALUATOR_ARRAY_BYTES,
+};
+
+/// Authoritative validated program limits, also bounding native metadata slots.
+pub const MAX_NODES: usize = 256;
+pub const MAX_OUTPUTS: usize = 64;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NumericUnaryOperation {
@@ -55,10 +63,11 @@ pub enum NumericRegionExecution {
 pub struct NumericRegionWorkload {
     pub elements: usize,
     pub output_bytes_per_value: u64,
+    pub output_rank: Option<usize>,
 }
 
 pub fn workload(inputs: &[&Value]) -> Option<NumericRegionWorkload> {
-    let (_, shape) = analyze_inputs(inputs)?;
+    let shape = analyze_inputs(inputs)?;
     let elements = shape
         .as_ref()
         .map(|shape| shape.iter().try_fold(1_usize, |n, dim| n.checked_mul(*dim)))
@@ -66,6 +75,7 @@ pub fn workload(inputs: &[&Value]) -> Option<NumericRegionWorkload> {
     Some(NumericRegionWorkload {
         elements,
         output_bytes_per_value: u64::try_from(elements).ok()?.checked_mul(8)?,
+        output_rank: shape.map(<[usize]>::len),
     })
 }
 
@@ -108,116 +118,54 @@ impl NumericRegionProgram {
 /// Evaluate a supported scalar/dense-double expression DAG in one element
 /// pass. Equal-shape dense arrays and scalar expansion are admitted; every
 /// other representation or broadcast shape fails closed before publication.
+/// Unbounded compatibility entrypoint; Runtime-owned execution must use
+/// `execute_in_context` so finite physical claims survive publication.
 pub fn execute(
     program: &NumericRegionProgram,
     inputs: &[&Value],
     cancellation: &CancellationToken,
 ) -> Result<NumericRegionExecution, &'static str> {
     program.validate(inputs.len())?;
-    let Some((input_views, output_shape)) = analyze_inputs(inputs) else {
-        return Ok(NumericRegionExecution::Ineligible);
-    };
-    let element_count = output_shape
-        .as_ref()
-        .map(|shape| shape.iter().try_fold(1_usize, |n, dim| n.checked_mul(*dim)))
-        .unwrap_or(Some(1))
-        .ok_or("numeric region output shape overflows this host")?;
-    let total_output_elements = element_count
-        .checked_mul(program.outputs.len())
-        .ok_or("numeric region output allocation overflows this host")?;
-    let mut output_values = vec![Vec::with_capacity(element_count); program.outputs.len()];
-    let mut values = vec![0.0; program.nodes.len()];
-    for element in 0..element_count {
-        if element % 1_024 == 0 && cancellation.is_cancelled() {
-            return Ok(NumericRegionExecution::Cancelled);
-        }
-        for (index, node) in program.nodes.iter().enumerate() {
-            values[index] = match *node {
-                NumericRegionNode::Input(input) => input_views[input].at(element),
-                NumericRegionNode::Constant(value) => value,
-                NumericRegionNode::Unary { operation, input } => match operation {
-                    NumericUnaryOperation::Plus => values[input],
-                    NumericUnaryOperation::Minus => -values[input],
-                },
-                NumericRegionNode::Binary {
-                    operation,
-                    left,
-                    right,
-                } => match operation {
-                    NumericBinaryOperation::Add => values[left] + values[right],
-                    NumericBinaryOperation::Subtract => values[left] - values[right],
-                    NumericBinaryOperation::Multiply => values[left] * values[right],
-                    NumericBinaryOperation::Divide => values[left] / values[right],
-                    NumericBinaryOperation::LeftDivide => values[right] / values[left],
-                },
-            };
-        }
-        for (output, node) in output_values.iter_mut().zip(&program.outputs) {
-            output.push(values[*node]);
+    match execution::run(program, inputs, cancellation, None)
+        .map_err(|_| "numeric region execution failed")?
+    {
+        execution::StorageExecution::Ineligible => Ok(NumericRegionExecution::Ineligible),
+        execution::StorageExecution::Cancelled => Ok(NumericRegionExecution::Cancelled),
+        execution::StorageExecution::Completed(values) => {
+            let values = values
+                .try_into_owned()
+                .map_err(|_| "numeric output storage is shared")?
+                .try_into_unbounded_vec()
+                .map_err(|_| "numeric compatibility output carries a finite claim")?;
+            Ok(NumericRegionExecution::Completed(values))
         }
     }
-    debug_assert_eq!(
-        output_values.iter().map(Vec::len).sum::<usize>(),
-        total_output_elements
-    );
-    let outputs = if let Some(shape) = output_shape {
-        output_values
-            .into_iter()
-            .map(|values| Tensor::new(values, shape.clone()).map(Value::Tensor))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| "numeric region produced an invalid dense tensor")?
-    } else {
-        output_values
-            .into_iter()
-            .map(|values| Value::Num(values[0]))
-            .collect()
-    };
-    Ok(NumericRegionExecution::Completed(outputs))
 }
 
-fn analyze_inputs<'a>(inputs: &[&'a Value]) -> Option<(Vec<NumericInput<'a>>, Option<Vec<usize>>)> {
-    let mut output_shape: Option<Vec<usize>> = None;
-    let mut tensor_shape: Option<Vec<usize>> = None;
-    let mut input_views = Vec::with_capacity(inputs.len());
+/// Borrow shape metadata from the original physical owner. Validation neither
+/// collects input views nor clones a shape before admission.
+fn analyze_inputs<'a>(inputs: &[&'a Value]) -> Option<Option<&'a [usize]>> {
+    let mut output_shape: Option<&'a [usize]> = None;
+    let mut tensor_shape: Option<&'a [usize]> = None;
     for &input in inputs {
         match input {
-            Value::Num(value) => input_views.push(NumericInput::Scalar(*value)),
+            Value::Num(_) => {}
             Value::Tensor(tensor) => {
-                let values = tensor.as_f64_slice()?;
+                tensor.as_f64_slice()?;
                 if tensor.len() == 1 {
-                    output_shape.get_or_insert_with(|| tensor.shape().to_vec());
-                    input_views.push(NumericInput::Scalar(values[0]));
+                    output_shape.get_or_insert(tensor.shape());
                 } else {
-                    if tensor_shape
-                        .as_ref()
-                        .is_some_and(|shape| shape != tensor.shape())
-                    {
+                    if tensor_shape.is_some_and(|shape| shape != tensor.shape()) {
                         return None;
                     }
-                    tensor_shape = Some(tensor.shape().to_vec());
-                    output_shape = Some(tensor.shape().to_vec());
-                    input_views.push(NumericInput::Dense(values));
+                    tensor_shape = Some(tensor.shape());
+                    output_shape = Some(tensor.shape());
                 }
             }
             _ => return None,
         }
     }
-    Some((input_views, output_shape))
-}
-
-#[derive(Clone, Copy)]
-enum NumericInput<'a> {
-    Scalar(f64),
-    Dense(&'a [f64]),
-}
-
-impl NumericInput<'_> {
-    fn at(self, index: usize) -> f64 {
-        match self {
-            Self::Scalar(value) => value,
-            Self::Dense(values) => values[index],
-        }
-    }
+    Some(output_shape)
 }
 
 #[cfg(test)]
@@ -342,6 +290,7 @@ mod tests {
                 Some(NumericRegionWorkload {
                     elements: 1,
                     output_bytes_per_value: 8,
+                    output_rank: Some(shape.len()),
                 }),
             );
             let result = execute_values(

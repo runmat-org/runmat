@@ -598,7 +598,7 @@ pub(crate) fn dense_capability_snapshot(
 
 /// Numeric upload stores the host payload's float class verbatim, even when
 /// the provider's compute precision differs. Advertise that extra class only
-/// for an exact or bounded real-float upload query: widening the general snapshot would
+/// for an exact or bounded floating upload query: widening the general snapshot would
 /// incorrectly admit F32 operands to F64-only compute hooks (or vice versa).
 fn exact_float_upload_snapshot(
     mut snapshot: ProviderCapabilitySnapshot,
@@ -612,12 +612,8 @@ fn exact_float_upload_snapshot(
             .zip(&query.outputs)
             .all(|(input, output)| {
                 input.element_type == output.element_type
-                    && matches!(
-                        input.element_type,
-                        ProviderElementType::F32 | ProviderElementType::F64
-                    )
-                    && input.storage == ProviderStorage::DenseReal
-                    && output.storage == ProviderStorage::DenseReal
+                    && floating_upload_storage(input.element_type) == Some(input.storage)
+                    && input.storage == output.storage
                     && input.layout == ProviderLayout::ColumnMajorContiguous
                     && output.layout == ProviderLayout::ColumnMajorContiguous
                     && input.shape == output.shape
@@ -633,10 +629,7 @@ fn exact_float_upload_snapshot(
             .is_some_and(|bounds| {
                 !bounds.is_empty()
                     && bounds.iter().all(|bound| {
-                        matches!(
-                            bound.element_type,
-                            ProviderElementType::F32 | ProviderElementType::F64
-                        ) && bound.storage == ProviderStorage::DenseReal
+                        floating_upload_storage(bound.element_type) == Some(bound.storage)
                             && bound.layout == ProviderLayout::ColumnMajorContiguous
                             && bound.residency == ProviderResidency::Device
                     })
@@ -645,13 +638,28 @@ fn exact_float_upload_snapshot(
         && query.family == ProviderOperationFamily::Upload
         && (exact || bounded)
     {
-        for class in [ProviderElementType::F32, ProviderElementType::F64] {
+        for class in [
+            ProviderElementType::F32,
+            ProviderElementType::F64,
+            ProviderElementType::ComplexF32,
+            ProviderElementType::ComplexF64,
+        ] {
             if !snapshot.element_types.contains(&class) {
                 snapshot.element_types.push(class);
             }
         }
     }
     snapshot
+}
+
+fn floating_upload_storage(element: ProviderElementType) -> Option<ProviderStorage> {
+    match element {
+        ProviderElementType::F32 | ProviderElementType::F64 => Some(ProviderStorage::DenseReal),
+        ProviderElementType::ComplexF32 | ProviderElementType::ComplexF64 => {
+            Some(ProviderStorage::DenseComplexInterleaved)
+        }
+        _ => None,
+    }
 }
 
 pub(crate) fn dense_feasibility(
@@ -981,6 +989,25 @@ mod tests {
         native.inputs[0].element_type = ProviderElementType::F64;
         native.outputs[0].element_type = ProviderElementType::F64;
         assert!(provider.query_feasibility(&native).is_supported());
+        for element_type in [
+            ProviderElementType::ComplexF32,
+            ProviderElementType::ComplexF64,
+        ] {
+            let mut complex = native.clone();
+            for representation in complex.inputs.iter_mut().chain(&mut complex.outputs) {
+                representation.element_type = element_type;
+                representation.storage = ProviderStorage::DenseComplexInterleaved;
+            }
+            let ProviderFeasibility::Supported { estimate } = provider.query_feasibility(&complex)
+            else {
+                panic!("native complex upload must preserve its class: {element_type:?}");
+            };
+            assert_eq!(estimate.output_bytes, complex.outputs[0].checked_byte_len());
+            assert!(provider.upload_physical_evidence(&complex).is_some());
+            complex.outputs[0].storage = ProviderStorage::DenseReal;
+            assert!(!provider.query_feasibility(&complex).is_supported());
+            assert!(provider.upload_physical_evidence(&complex).is_none());
+        }
         let mut malformed = Vec::new();
         let mut shape = native.clone();
         shape.outputs[0].shape = vec![2, 8];

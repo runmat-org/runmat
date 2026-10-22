@@ -8,11 +8,8 @@ use runmat_runtime::execution::RootedValue;
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 
-use std::future::Future;
-use std::pin::Pin;
-
 pub(super) type ArithmeticDispatchFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<(), RuntimeError>> + 'a>>;
+    runmat_runtime::execution::RuntimeContinuationFuture<'a, ()>;
 
 async fn call_operator_method_in_context(
     runtime: &runmat_runtime::context::RuntimeContext,

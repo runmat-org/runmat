@@ -780,18 +780,17 @@ pub fn value_to_string(value: &Value) -> Option<String> {
     String::try_from(value).ok()
 }
 
-/// Return a canonical 2-D shape for a tensor given its shape slice and element count.
+/// Preserve the tensor's shape, including explicit empty dimensions.
 ///
-/// * Empty data (`len == 0`) → `[0, 1]` (MATLAB convention for empty arrays).
-/// * No shape info (`shape.is_empty()`) → `[1, 1]` (scalar).
-/// * Otherwise → the tensor's own shape.
+/// Only absent shape metadata receives a default: `[0, 1]` for empty data,
+/// or `[1, 1]` otherwise.
 pub fn default_shape_for(shape: &[usize], len: usize) -> Vec<usize> {
-    if len == 0 {
-        vec![0, 1]
-    } else if shape.is_empty() {
-        vec![1, 1]
-    } else {
+    if !shape.is_empty() {
         shape.to_vec()
+    } else if len == 0 {
+        vec![0, 1]
+    } else {
+        vec![1, 1]
     }
 }
 
@@ -1027,13 +1026,27 @@ mod dtype_tests {
 #[cfg(test)]
 mod dimension_tests {
     use super::{
-        dimension_from_value_async, dims_from_value_async, dims_from_value_async_typed,
-        integer_tensor_to_f64, parse_dimension, scalar_dimension_from_value_typed,
-        scalar_f64_from_value_async, tensor_into_value, tensor_into_values_f64, tensor_values_f64,
-        tensor_values_f64_cow, DimensionDecodeError,
+        default_shape_for, dimension_from_value_async, dims_from_value_async,
+        dims_from_value_async_typed, integer_tensor_to_f64, parse_dimension,
+        scalar_dimension_from_value_typed, scalar_f64_from_value_async, tensor_into_value,
+        tensor_into_values_f64, tensor_values_f64, tensor_values_f64_cow, DimensionDecodeError,
     };
     use futures::executor::block_on;
     use runmat_value::{IntValue, IntegerStorage, LogicalArray, NumericStorage, Tensor, Value};
+
+    #[test]
+    fn shape_defaults_preserve_explicit_empty_geometry() {
+        for (shape, len, expected) in [
+            (vec![0, 3], 0, vec![0, 3]),
+            (vec![3, 0], 0, vec![3, 0]),
+            (vec![2, 0, 4], 0, vec![2, 0, 4]),
+            (vec![2, 3], 6, vec![2, 3]),
+            (vec![], 0, vec![0, 1]),
+            (vec![], 1, vec![1, 1]),
+        ] {
+            assert_eq!(default_shape_for(&shape, len), expected);
+        }
+    }
 
     #[test]
     fn typed_dimension_decoder_retains_semantic_error_identity() {

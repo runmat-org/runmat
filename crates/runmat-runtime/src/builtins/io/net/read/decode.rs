@@ -1,6 +1,6 @@
 use super::super::transport::NetCooperation;
 use super::{read_flow, BuiltinResult, DataType, Value, READ_ERROR_INTERNAL};
-use runmat_value::{CharArray, IntegerStorage, NumericStorage, Tensor};
+use runmat_value::{CharArray, IntegerStorage, NumericStorage, Tensor, Utf16CodeUnit};
 
 #[derive(Clone, Copy)]
 pub(super) enum ByteOrder {
@@ -72,9 +72,12 @@ async fn decode_elements<T>(
 }
 
 async fn char_row(bytes: &[u8], work: &mut NetCooperation) -> BuiltinResult<Value> {
-    let chars = decode_elements(bytes, 1, work, |byte| char::from(byte[0])).await?;
+    let chars = decode_elements(bytes, 1, work, |byte| {
+        Utf16CodeUnit::from_raw(u16::from(byte[0]))
+    })
+    .await?;
     let len = chars.len();
-    CharArray::new(chars, 1, len)
+    CharArray::from_code_units(chars, 1, len)
         .map(Value::CharArray)
         .map_err(|source| read_flow(&READ_ERROR_INTERNAL, format!("read: {source}")))
 }

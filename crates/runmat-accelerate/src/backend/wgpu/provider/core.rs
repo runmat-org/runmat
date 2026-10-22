@@ -72,11 +72,22 @@ impl WgpuProvider {
     #[cfg(any(not(target_arch = "wasm32"), test))]
     pub(super) fn map_readback_bytes<'a>(
         &'a self,
-        staging: wgpu::Buffer,
+        staging: runmat_accelerate_api::WgpuBufferOwner,
         size_bytes: u64,
         context: &'a str,
     ) -> impl std::future::Future<Output = Result<Vec<u8>>> + 'a {
-        readback::read(self.access.clone(), staging, size_bytes, context)
+        let staging = readback::track(&self.allocations, staging, None);
+        async move {
+            readback::read(
+                self.access.clone(),
+                staging?,
+                size_bytes,
+                context,
+                #[cfg(not(target_arch = "wasm32"))]
+                self.observation_progress.clone(),
+            )
+            .await
+        }
     }
 
     pub(super) fn map_readback_with<'a, T: 'a>(
@@ -85,7 +96,18 @@ impl WgpuProvider {
         context: &'a str,
         decode: impl FnOnce(&[u8]) -> Result<T> + 'a,
     ) -> impl std::future::Future<Output = Result<T>> + 'a {
-        readback::read_with(self.access.clone(), staging, context, decode)
+        let staging = readback::track(&self.allocations, staging, None);
+        async move {
+            readback::read_with(
+                self.access.clone(),
+                staging?,
+                context,
+                decode,
+                #[cfg(not(target_arch = "wasm32"))]
+                self.observation_progress.clone(),
+            )
+            .await
+        }
     }
 
     pub(super) fn map_readback_with_admitted<'a, T: 'a>(
@@ -95,7 +117,19 @@ impl WgpuProvider {
         decode: impl FnOnce(&[u8]) -> Result<T> + 'a,
         claim: std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>,
     ) -> impl std::future::Future<Output = Result<T>> + 'a {
-        readback::read_with_admitted(self.access.clone(), staging, context, decode, claim)
+        let staging = readback::track(&self.allocations, staging, Some(claim.clone()));
+        async move {
+            readback::read_with_admitted(
+                self.access.clone(),
+                staging?,
+                context,
+                decode,
+                claim,
+                #[cfg(not(target_arch = "wasm32"))]
+                self.observation_progress.clone(),
+            )
+            .await
+        }
     }
 
     pub(super) fn map_readback_with_admitted_stage<'a, T: 'a>(
@@ -106,19 +140,25 @@ impl WgpuProvider {
         claim: std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>,
         callback_stage: runmat_accelerate_api::PreparedNumericDownloadStage,
     ) -> impl std::future::Future<Output = Result<T>> + 'a {
-        readback::read_with_admitted_stage(
-            self.access.clone(),
-            staging,
-            context,
-            decode,
-            claim,
-            callback_stage,
-        )
+        let staging = readback::track(&self.allocations, staging, Some(claim.clone()));
+        async move {
+            readback::read_with_admitted_stage(
+                self.access.clone(),
+                staging?,
+                context,
+                decode,
+                claim,
+                callback_stage,
+                #[cfg(not(target_arch = "wasm32"))]
+                self.observation_progress.clone(),
+            )
+            .await
+        }
     }
 
     pub(super) fn map_readback_bytes_sync(
         &self,
-        staging: wgpu::Buffer,
+        staging: runmat_accelerate_api::WgpuBufferOwner,
         size_bytes: u64,
         context: &str,
     ) -> Result<Vec<u8>> {

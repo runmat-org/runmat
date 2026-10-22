@@ -1,74 +1,77 @@
 use crate::*;
 #[cfg(not(target_arch = "wasm32"))]
-#[path = "tests/runtime_contract_transfers.rs"]
-mod runtime_contract_transfers;
-#[cfg(not(target_arch = "wasm32"))]
 #[path = "tests/executable_roots.rs"]
 mod executable_roots;
-#[path = "tests/portable_entrypoint.rs"]
-mod portable_entrypoint;
-#[cfg(not(target_arch = "wasm32"))]
-#[path = "tests/project_test_services.rs"]
-mod project_test_services;
-#[path = "tests/timers.rs"]
-mod timers;
-#[cfg(not(target_arch = "wasm32"))]
-#[path = "tests/native_resolution_events.rs"]
-mod native_resolution_events;
-#[cfg(not(target_arch = "wasm32"))]
-#[path = "tests/native_workspace_reconciliation.rs"]
-mod native_workspace_reconciliation;
-#[cfg(not(target_arch = "wasm32"))]
-#[path = "tests/native_optional_profile.rs"]
-mod native_optional_profile;
-#[cfg(not(target_arch = "wasm32"))]
-#[path = "tests/native_definition_identity.rs"]
-mod native_definition_identity;
-#[cfg(not(target_arch = "wasm32"))]
-#[path = "tests/native_deep_learning.rs"]
-mod native_deep_learning;
-#[cfg(not(target_arch = "wasm32"))]
-#[path = "tests/native_object_indexing.rs"]
-mod native_object_indexing;
-#[cfg(not(target_arch = "wasm32"))]
-#[path = "tests/native_semantic_suspension.rs"]
-mod native_semantic_suspension;
-#[cfg(not(target_arch = "wasm32"))]
-#[path = "tests/native_method_expansion.rs"]
-mod native_method_expansion;
-#[cfg(not(target_arch = "wasm32"))]
-#[path = "tests/native_audio.rs"]
-mod native_audio;
-#[cfg(not(target_arch = "wasm32"))]
-#[path = "tests/native_memmap.rs"]
-mod native_memmap;
-#[cfg(not(target_arch = "wasm32"))]
-#[path = "tests/native_data_session.rs"]
-mod native_data_session;
-#[cfg(not(target_arch = "wasm32"))]
-#[path = "tests/native_diary.rs"]
-mod native_diary;
-#[cfg(not(target_arch = "wasm32"))]
-#[path = "tests/native_debug_frames.rs"]
-mod native_debug_frames;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "tests/native_arity.rs"]
 mod native_arity;
 #[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_audio.rs"]
+mod native_audio;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_data_session.rs"]
+mod native_data_session;
+#[cfg(not(target_arch = "wasm32"))]
 #[path = "tests/native_deal.rs"]
 mod native_deal;
 #[cfg(not(target_arch = "wasm32"))]
-#[path = "tests/parfor_placement.rs"]
-mod parfor_placement;
+#[path = "tests/native_debug_frames.rs"]
+mod native_debug_frames;
 #[cfg(not(target_arch = "wasm32"))]
-#[path = "tests/native_max.rs"]
-mod native_max;
+#[path = "tests/native_deep_learning.rs"]
+mod native_deep_learning;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_definition_identity.rs"]
+mod native_definition_identity;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_diary.rs"]
+mod native_diary;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "tests/native_matrix_solve.rs"]
 mod native_matrix_solve;
 #[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_max.rs"]
+mod native_max;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_memmap.rs"]
+mod native_memmap;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_method_expansion.rs"]
+mod native_method_expansion;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_object_indexing.rs"]
+mod native_object_indexing;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_optional_profile.rs"]
+mod native_optional_profile;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_resolution_events.rs"]
+mod native_resolution_events;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_semantic_suspension.rs"]
+mod native_semantic_suspension;
+#[cfg(not(target_arch = "wasm32"))]
 #[path = "tests/native_textlines.rs"]
 mod native_textlines;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_workspace_reconciliation.rs"]
+mod native_workspace_reconciliation;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/parfor_placement.rs"]
+mod parfor_placement;
+#[path = "tests/portable_entrypoint.rs"]
+mod portable_entrypoint;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/private_product_attachment.rs"]
+mod private_product_attachment;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/project_test_services.rs"]
+mod project_test_services;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/runtime_contract_transfers.rs"]
+mod runtime_contract_transfers;
+#[path = "tests/timers.rs"]
+mod timers;
 
 use futures::executor::block_on;
 use std::path::{Path, PathBuf};
@@ -303,7 +306,8 @@ impl Drop for CwdGuard {
 
 impl Drop for PathStateGuard {
     fn drop(&mut self) {
-        runmat_runtime::builtins::common::path_state::set_path_string(&self.previous);
+        runmat_runtime::builtins::common::path_state::set_path_string(&self.previous)
+            .expect("test search path update");
     }
 }
 
@@ -315,7 +319,8 @@ pub(crate) fn push_cwd(path: &Path) -> CwdGuard {
 
 fn push_path_state(path: &str) -> PathStateGuard {
     let previous = runmat_runtime::builtins::common::path_state::current_path_string();
-    runmat_runtime::builtins::common::path_state::set_path_string(path);
+    runmat_runtime::builtins::common::path_state::set_path_string(path)
+        .expect("test search path update");
     PathStateGuard { previous }
 }
 
@@ -591,12 +596,16 @@ fn execute_text_request_enforces_function_arguments_size_and_class() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "sid",
-        &runmat_value::Value::String("RunMat:ArgumentValidationSize".to_string().into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationSize"
+        ))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "tid",
-        &runmat_value::Value::String("RunMat:ArgumentValidationClass".to_string().into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationClass"
+        ))
     ));
 }
 
@@ -644,7 +653,9 @@ fn execute_text_request_enforces_arguments_must_be_finite_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "fid",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
 }
 
@@ -664,7 +675,9 @@ fn execute_text_request_treats_single_token_arguments_constraint_as_class_name()
     assert!(outcome_has_named_upsert(
         &outcome,
         "cid",
-        &runmat_value::Value::String("RunMat:ArgumentValidationClass".to_string().into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationClass"
+        ))
     ));
 }
 
@@ -696,7 +709,9 @@ fn execute_text_request_must_be_finite_accepts_char_and_logical() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "zid",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
 }
 
@@ -734,7 +749,9 @@ fn execute_text_request_enforces_arguments_must_be_text_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "tid",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
 }
 
@@ -767,12 +784,16 @@ fn execute_text_request_enforces_arguments_must_be_nonempty_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid1",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid2",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
 }
 
@@ -804,7 +825,9 @@ fn execute_text_request_enforces_arguments_must_be_scalar_or_empty_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
 }
 
@@ -836,7 +859,9 @@ fn execute_text_request_enforces_arguments_must_be_real_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
 }
 
@@ -868,7 +893,9 @@ fn execute_text_request_enforces_arguments_must_be_integer_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
 }
 
@@ -895,12 +922,16 @@ fn execute_text_request_enforces_arguments_must_be_positive_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid0",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "eidn",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
 }
 
@@ -932,7 +963,9 @@ fn execute_text_request_enforces_arguments_must_be_nonnegative_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "eidn",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
 }
 
@@ -958,7 +991,9 @@ fn execute_text_request_enforces_arguments_must_be_nonzero_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid0",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
 }
 
@@ -990,7 +1025,9 @@ fn execute_text_request_enforces_arguments_must_be_nonpositive_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "eidp",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
 }
 
@@ -1017,12 +1054,16 @@ fn execute_text_request_enforces_arguments_must_be_negative_validator() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid0",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "eidp",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
 }
 
@@ -1054,7 +1095,9 @@ fn execute_text_request_enforces_arguments_must_be_greater_than_or_equal_validat
     assert!(outcome_has_named_upsert(
         &outcome,
         "eidn",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
 }
 
@@ -1080,7 +1123,9 @@ fn execute_text_request_enforces_arguments_must_be_less_than_or_equal_validator(
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
 }
 
@@ -1106,7 +1151,9 @@ fn execute_text_request_arguments_validator_threshold_supports_unary_minus_liter
     assert!(outcome_has_named_upsert(
         &outcome,
         "eid",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
 }
 
@@ -1145,12 +1192,16 @@ fn execute_text_request_enforces_arguments_must_be_greater_than_and_less_than_va
     assert!(outcome_has_named_upsert(
         &outcome,
         "e1",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "e2",
-        &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:ArgumentValidationFunction"
+        ))
     ));
 }
 
@@ -1642,17 +1693,19 @@ fn execute_text_request_supports_arity_check_helpers() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "id_in",
-        &runmat_value::Value::String("RunMat:TooManyInputs".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:TooManyInputs"))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "id_out_low",
-        &runmat_value::Value::String("RunMat:NotEnoughOutputs".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:NotEnoughOutputs"
+        ))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "id_out_high",
-        &runmat_value::Value::String("RunMat:TooManyOutputs".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:TooManyOutputs"))
     ));
 }
 
@@ -1702,12 +1755,12 @@ fn execute_text_request_supports_dynamic_arity_check_helpers() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "in_eid",
-        &runmat_value::Value::String("RunMat:TooManyInputs".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:TooManyInputs"))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "out_eid",
-        &runmat_value::Value::String("RunMat:TooManyOutputs".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:TooManyOutputs"))
     ));
 }
 
@@ -1972,7 +2025,9 @@ fn execute_text_request_supports_inputname_builtin() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "f2",
-        &runmat_value::Value::CharArray(runmat_value::CharArray::new(Vec::new(), 0, 0).unwrap())
+        &runmat_value::Value::CharArray(
+            runmat_value::CharArray::from_code_units(Vec::new(), 0, 0).unwrap()
+        )
     ));
 }
 
@@ -2073,12 +2128,16 @@ fn execute_text_request_inputname_handles_nested_and_expanded_arguments() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "expanded_name",
-        &runmat_value::Value::CharArray(runmat_value::CharArray::new(Vec::new(), 0, 0).unwrap())
+        &runmat_value::Value::CharArray(
+            runmat_value::CharArray::from_code_units(Vec::new(), 0, 0).unwrap()
+        )
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "expanded_feval_name",
-        &runmat_value::Value::CharArray(runmat_value::CharArray::new(Vec::new(), 0, 0).unwrap())
+        &runmat_value::Value::CharArray(
+            runmat_value::CharArray::from_code_units(Vec::new(), 0, 0).unwrap()
+        )
     ));
 }
 
@@ -3429,7 +3488,9 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_value::Value::String("RunMat:getfield:InvalidHandle".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:getfield:InvalidHandle"
+        ))
     ));
 }
 
@@ -4221,7 +4282,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_value::Value::String("RunMat:MethodPrivate".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:MethodPrivate"))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
@@ -4274,7 +4335,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_value::Value::String("RunMat:MethodPrivate".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:MethodPrivate"))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
@@ -4316,7 +4377,9 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_value::Value::String("RunMat:PropertyReadOnly".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:PropertyReadOnly"
+        ))
     ));
     assert!(outcome_has_named_upsert(&outcome, "b", &empty));
 }
@@ -4501,7 +4564,9 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_value::Value::String("RunMat:PropertyPrivateAccess".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:PropertyPrivateAccess"
+        ))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
@@ -4987,7 +5052,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_value::Value::String("RunMat:MethodPrivate".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:MethodPrivate"))
     ));
 }
 
@@ -5032,7 +5097,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_value::Value::String("RunMat:MethodPrivate".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:MethodPrivate"))
     ));
 }
 
@@ -5105,7 +5170,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_value::Value::String("RunMat:MethodPrivate".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:MethodPrivate"))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
@@ -5244,7 +5309,9 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_value::Value::String("RunMat:UndefinedFunction".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:UndefinedFunction"
+        ))
     ));
 }
 
@@ -5590,7 +5657,9 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_value::Value::String("RunMat:PropertyPrivateAccess".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:PropertyPrivateAccess"
+        ))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
@@ -5635,7 +5704,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_value::Value::String("RunMat:MethodPrivate".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:MethodPrivate"))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
@@ -5702,12 +5771,14 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "p",
-        &runmat_value::Value::String("RunMat:PropertyPrivateAccess".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:PropertyPrivateAccess"
+        ))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "m",
-        &runmat_value::Value::String("RunMat:MethodPrivate".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:MethodPrivate"))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
@@ -6966,7 +7037,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_value::Value::String("RunMat:MethodPrivate".to_string().into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:MethodPrivate"))
     ));
 }
 
@@ -7026,7 +7097,7 @@ end
             assert!(outcome_has_named_upsert(
                 &outcome,
                 "id",
-                &runmat_value::Value::String("RunMat:MethodPrivate".to_string().into())
+                &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:MethodPrivate"))
             ));
         })
         .expect("spawn protected-getmethod-subclass test thread")
@@ -7149,7 +7220,7 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_value::Value::String("RunMat:MethodPrivate".to_string().into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:MethodPrivate"))
     ));
 }
 
@@ -7439,12 +7510,16 @@ end
     assert!(outcome_has_named_upsert(
         &outcome,
         "id",
-        &runmat_value::Value::String("RunMat:PropertyStaticAccess".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:PropertyStaticAccess"
+        ))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "id2",
-        &runmat_value::Value::String("RunMat:PropertyStaticAccess".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:PropertyStaticAccess"
+        ))
     ));
     let empty = runmat_value::Value::Tensor(
         runmat_value::Tensor::new(vec![], vec![0, 0]).expect("empty tensor"),
@@ -7741,7 +7816,7 @@ roots = ["."]
         outcome_has_named_upsert(
             &outcome,
             "direct_eid",
-            &runmat_value::Value::String("RunMat:UndefinedFunction".to_string().into())
+            &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:UndefinedFunction"))
         ),
         "sibling source should not resolve parent private helper directly; upserts={:?}, diagnostics={:?}",
         outcome.workspace_delta.upserts,
@@ -7751,7 +7826,7 @@ roots = ["."]
         outcome_has_named_upsert(
             &outcome,
             "dyn_eid",
-            &runmat_value::Value::String("RunMat:UndefinedFunction".to_string().into())
+            &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:UndefinedFunction"))
         ),
         "sibling source should not resolve parent private helper through str2func/feval; upserts={:?}, diagnostics={:?}",
         outcome.workspace_delta.upserts,
@@ -7803,7 +7878,7 @@ roots = ["."]
         outcome_has_named_upsert(
             &sibling_outcome,
             "eid",
-            &runmat_value::Value::String("RunMat:UndefinedFunction".to_string().into())
+            &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:UndefinedFunction"))
         ),
         "sibling source should not resolve private helper through session registry; upserts={:?}, diagnostics={:?}",
         sibling_outcome.workspace_delta.upserts,
@@ -8274,7 +8349,7 @@ roots = ["."]
             outcome_has_named_upsert(
                 &outcome,
                 "leak_eid",
-                &runmat_value::Value::String("RunMat:UndefinedFunction".to_string().into())
+                &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:UndefinedFunction"))
             ),
             "root caller should not resolve package private helper directly; upserts={:?}, diagnostics={:?}",
             outcome.workspace_delta.upserts,
@@ -8696,7 +8771,9 @@ fn execute_path_request_resolves_sibling_function_with_arguments_block_validatio
         outcome_has_named_upsert(
             &outcome,
             "eid",
-            &runmat_value::Value::String("RunMat:ArgumentValidationClass".to_string().into())
+            &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+                "RunMat:ArgumentValidationClass"
+            ))
         ),
         "typed sibling function should enforce arguments class validation; upserts={:?}",
         outcome.workspace_delta.upserts
@@ -8743,7 +8820,9 @@ roots = ["."]
         outcome_has_named_upsert(
             &outcome,
             "sid",
-            &runmat_value::Value::String("RunMat:ArgumentValidationSize".to_string().into())
+            &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+                "RunMat:ArgumentValidationSize"
+            ))
         ),
         "package typed function should enforce size validation; upserts={:?}",
         outcome.workspace_delta.upserts
@@ -8752,7 +8831,9 @@ roots = ["."]
         outcome_has_named_upsert(
             &outcome,
             "fid",
-            &runmat_value::Value::String("RunMat:ArgumentValidationFunction".to_string().into())
+            &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+                "RunMat:ArgumentValidationFunction"
+            ))
         ),
         "package typed function should enforce mustBeFinite validation; upserts={:?}",
         outcome.workspace_delta.upserts
@@ -10576,7 +10657,7 @@ fn dynamic_workspace_eval_error_does_not_commit_partial_mutations() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "err",
-        &runmat_value::Value::String("RunMat:eval:boom".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:eval:boom"))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
@@ -10917,7 +10998,9 @@ fn dynamic_workspace_eval_does_not_discover_files_outside_active_registry() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "err",
-        &runmat_value::Value::String("RunMat:UndefinedFunction".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:UndefinedFunction"
+        ))
     ));
     assert!(
         !outcome_has_upsert_name(&outcome, "hidden_value"),
@@ -10992,7 +11075,9 @@ fn dynamic_workspace_evalin_invalid_selector_is_catchable() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "err",
-        &runmat_value::Value::String("RunMat:DynamicWorkspaceSelector".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:DynamicWorkspaceSelector"
+        ))
     ));
 }
 
@@ -11766,7 +11851,7 @@ fn run_error_commits_script_mutations_before_the_error() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "run_err",
-        &runmat_value::Value::String("RunMat:run:testBoom".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:run:testBoom"))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
@@ -11865,17 +11950,23 @@ fn run_missing_file_and_output_errors_are_catchable() {
     assert!(outcome_has_named_upsert(
         &outcome,
         "missing_err",
-        &runmat_value::Value::String("RunMat:run:FileNotFound".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:run:FileNotFound"
+        ))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "output_err",
-        &runmat_value::Value::String("RunMat:run:TooManyOutputs".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:run:TooManyOutputs"
+        ))
     ));
     assert!(outcome_has_named_upsert(
         &outcome,
         "missing_after_run_err",
-        &runmat_value::Value::String("RunMat:UndefinedVariable".into())
+        &runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            "RunMat:UndefinedVariable"
+        ))
     ));
     assert!(
         !outcome_has_upsert_name(&outcome, "ok_value"),
@@ -12248,7 +12339,7 @@ fn local_function_call_uses_semantic_vm() {
     );
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
+        matches!(&upsert.key, abi::WorkspaceBindingKey::SourceBinding { binding, .. } if binding.0 == "y")
             && upsert.value.to_string() == "3"
     }));
 }
@@ -12895,7 +12986,7 @@ fn try_catch_binding_uses_semantic_vm() {
         .upserts
         .iter()
         .find_map(|upsert| match &upsert.key {
-            abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y" => {
+            abi::WorkspaceBindingKey::SourceBinding { binding, .. } if binding.0 == "y" => {
                 Some(upsert.value.to_string())
             }
             _ => None,
@@ -12960,7 +13051,7 @@ fn dotted_member_index_call_uses_semantic_vm() {
 
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
+        matches!(&upsert.key, abi::WorkspaceBindingKey::SourceBinding { binding, .. } if binding.0 == "y")
             && upsert.value.to_string() == "2"
     }));
 }
@@ -12987,7 +13078,7 @@ fn dotted_member_index_expansion_uses_semantic_vm() {
 
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
+        matches!(&upsert.key, abi::WorkspaceBindingKey::SourceBinding { binding, .. } if binding.0 == "y")
             && upsert.value.to_string() == "20"
     }));
 }
@@ -13066,7 +13157,7 @@ fn local_function_with_cell_expansion_uses_semantic_vm() {
     );
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
+        matches!(&upsert.key, abi::WorkspaceBindingKey::SourceBinding { binding, .. } if binding.0 == "y")
             && upsert.value.to_string() == "3"
     }));
 }
@@ -13100,7 +13191,7 @@ fn cellfun_named_local_function_uses_semantic_callback() {
     );
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
+        matches!(&upsert.key, abi::WorkspaceBindingKey::SourceBinding { binding, .. } if binding.0 == "y")
             && upsert.value.to_string() == "3"
     }));
 }
@@ -13198,7 +13289,7 @@ fn arrayfun_named_local_function_uses_semantic_callback() {
     );
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
+        matches!(&upsert.key, abi::WorkspaceBindingKey::SourceBinding { binding, .. } if binding.0 == "y")
             && upsert.value.to_string() == "4"
     }));
 }
@@ -13225,7 +13316,7 @@ fn arrayfun_session_function_uses_semantic_registry() {
     );
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
+        matches!(&upsert.key, abi::WorkspaceBindingKey::SourceBinding { binding, .. } if binding.0 == "y")
             && upsert.value.to_string() == "4"
     }));
 }
@@ -13965,11 +14056,11 @@ fn session_feval_string_multi_output_uses_semantic_registry() {
     let outcome =
         execute_text_request(&mut session, "[a, b] = feval('pair', 2);").expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
+        matches!(&upsert.key, abi::WorkspaceBindingKey::SourceBinding { binding, .. } if binding.0 == "a")
             && upsert.value.to_string() == "2"
     }));
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "b")
+        matches!(&upsert.key, abi::WorkspaceBindingKey::SourceBinding { binding, .. } if binding.0 == "b")
             && upsert.value.to_string() == "3"
     }));
 }
@@ -14032,7 +14123,7 @@ fn session_feval_string_expansion_uses_semantic_registry() {
     let outcome = execute_text_request(&mut session, "C = {2, 3}; y = feval('add2', C{:});")
         .expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
+        matches!(&upsert.key, abi::WorkspaceBindingKey::SourceBinding { binding, .. } if binding.0 == "y")
             && upsert.value.to_string() == "5"
     }));
 }
@@ -14100,11 +14191,11 @@ fn session_feval_string_expansion_multi_output_uses_semantic_registry() {
     let outcome = execute_text_request(&mut session, "C = {2}; [a, b] = feval('pair', C{:});")
         .expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "a")
+        matches!(&upsert.key, abi::WorkspaceBindingKey::SourceBinding { binding, .. } if binding.0 == "a")
             && upsert.value.to_string() == "2"
     }));
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "b")
+        matches!(&upsert.key, abi::WorkspaceBindingKey::SourceBinding { binding, .. } if binding.0 == "b")
             && upsert.value.to_string() == "3"
     }));
 }
@@ -14293,7 +14384,7 @@ fn cell_member_access_uses_semantic_vm() {
 
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
+        matches!(&upsert.key, abi::WorkspaceBindingKey::SourceBinding { binding, .. } if binding.0 == "y")
             && upsert.value.to_string() == "6"
     }));
 }
@@ -14312,7 +14403,7 @@ fn cell_member_assignment_uses_semantic_vm() {
 
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
+        matches!(&upsert.key, abi::WorkspaceBindingKey::SourceBinding { binding, .. } if binding.0 == "y")
             && upsert.value.to_string() == "9"
     }));
 }
@@ -14350,7 +14441,7 @@ fn scalar_struct_paren_member_assignment_uses_semantic_vm() {
 
     let outcome = execute_text_request(&mut session, source).expect("exec succeeds");
     assert!(outcome.workspace_delta.upserts.iter().any(|upsert| {
-        matches!(&upsert.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
+        matches!(&upsert.key, abi::WorkspaceBindingKey::SourceBinding { binding, .. } if binding.0 == "y")
             && upsert.value.to_string() == "5"
     }));
 }
@@ -16737,15 +16828,15 @@ fn forced_native_caller_preserves_inputname_variable_and_expression_facts() {
         &[
             runmat_value::Value::CharArray(runmat_value::CharArray::new_row("alpha")),
             runmat_value::Value::CharArray(
-                runmat_value::CharArray::new(Vec::new(), 0, 0).expect("empty char"),
+                runmat_value::CharArray::from_code_units(Vec::new(), 0, 0).expect("empty char"),
             ),
             runmat_value::Value::CharArray(runmat_value::CharArray::new_row("alpha")),
             runmat_value::Value::CharArray(
-                runmat_value::CharArray::new(Vec::new(), 0, 0).expect("empty char"),
+                runmat_value::CharArray::from_code_units(Vec::new(), 0, 0).expect("empty char"),
             ),
             runmat_value::Value::CharArray(runmat_value::CharArray::new_row("alpha")),
             runmat_value::Value::CharArray(
-                runmat_value::CharArray::new(Vec::new(), 0, 0).expect("empty char"),
+                runmat_value::CharArray::from_code_units(Vec::new(), 0, 0).expect("empty char"),
             ),
         ],
     );
@@ -16778,7 +16869,7 @@ fn forced_native_caller_preserves_inputname_through_cold_and_warm_file_load() {
     let expected = [
         runmat_value::Value::CharArray(runmat_value::CharArray::new_row("alpha")),
         runmat_value::Value::CharArray(
-            runmat_value::CharArray::new(Vec::new(), 0, 0).expect("empty char"),
+            runmat_value::CharArray::from_code_units(Vec::new(), 0, 0).expect("empty char"),
         ),
     ];
     for _ in 0..2 {
@@ -17207,7 +17298,9 @@ fn forced_generic_native_executable_lane_matches_structured_try_catch_transfer()
         &native,
         &[
             runmat_value::Value::Num(-1.0),
-            runmat_value::Value::String("RunMat:IndexOutOfBounds".into()),
+            runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+                "RunMat:IndexOutOfBounds",
+            )),
         ],
     );
 
@@ -17230,7 +17323,9 @@ fn forced_generic_native_executable_lane_matches_structured_try_catch_transfer()
         &native_nested,
         &[
             runmat_value::Value::Num(7.0),
-            runmat_value::Value::String("RunMat:IndexOutOfBounds".into()),
+            runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+                "RunMat:IndexOutOfBounds",
+            )),
         ],
     );
 
@@ -17239,7 +17334,9 @@ fn forced_generic_native_executable_lane_matches_structured_try_catch_transfer()
             -1.0,
             vec![
                 runmat_value::Value::Num(0.0),
-                runmat_value::Value::String("RunMat:IndexOutOfBounds".into()),
+                runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+                    "RunMat:IndexOutOfBounds",
+                )),
             ],
         ),
         (

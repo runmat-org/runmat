@@ -102,6 +102,13 @@ fn fixture() -> (
 ) {
     // Synthetic portable metadata only: this is not an actual target-built
     // runtime probe, provider qualification, or executable admission.
+    let mut layouts = [NativeProbeTypeLayout {
+        size: 64,
+        alignment: 8,
+    }; NativeAbiType::ALL.len()];
+    // This synthetic aggregate leaves three disjoint pointer fields in the
+    // synthetic 64-byte binding owner; it is not a target-layout assertion.
+    layouts[NativeAbiType::BuiltinBindingIdentity as usize].size = 32;
     let probe = NativeAbiProbe::from_target_layout(
         NativeProbeTarget {
             architecture: NativeArchitecture::Aarch64,
@@ -115,11 +122,10 @@ fn fixture() -> (
             encoded_version: 1,
             preimage: b"fixture contract",
         },
-        [NativeProbeTypeLayout {
-            size: 64,
-            alignment: 8,
-        }; NativeAbiType::ALL.len()],
-        [0, 8, 0, 0, 0, 8, 0, 4, 8, 12, 16, 20, 0, 4, 8, 12],
+        layouts,
+        [
+            0, 8, 0, 0, 0, 8, 0, 4, 8, 12, 16, 20, 0, 4, 8, 12, 0, 32, 40, 48,
+        ],
     );
     let abi = probe.binding().unwrap();
     let target = SelectedNativeTarget {

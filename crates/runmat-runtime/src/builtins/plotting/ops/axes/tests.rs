@@ -150,8 +150,11 @@ fn axes_parent_figure_selects_target_figure() {
     ensure_plot_test_env();
     reset_plot_state();
 
-    let fig =
-        crate::builtins::plotting::figure::figure_builtin(vec![Value::Num(9.0)]).expect("figure");
+    let fig = crate::builtins::plotting::figure::figure_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(9.0)]),
+    )
+    .expect("figure");
     let ax =
         axes_builtin(vec![Value::String("Parent".into()), Value::Num(fig)]).expect("axes parent");
     assert!(ax > fig);

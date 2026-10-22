@@ -48,6 +48,18 @@ impl Walker<'_> {
                 MirIndexComponent::PreparedExpr(region) => {
                     self.region(from, crate::MirExpressionRegionRef::Prepared(region))
                 }
+                MirIndexComponent::Expansion(region) => {
+                    for step in &region.steps {
+                        match step {
+                            crate::MirExpressionStep::Let { value, .. } => self.rvalue(from, value),
+                            crate::MirExpressionStep::CaptureSequence { source, .. } => source
+                                .visit_operands(|operand| {
+                                    self.operand(from, operand, Reason::FunctionHandle)
+                                }),
+                        }
+                    }
+                    self.call_arg(from, &region.argument);
+                }
                 MirIndexComponent::Colon => {}
             }
         }
@@ -206,7 +218,7 @@ impl Walker<'_> {
                             ..
                         } => {
                             if let Some(identity) = semantic_fallback {
-                                match identity {
+                                match identity.as_ref() {
                                     CallableIdentity::BoundFunction(function)
                                     | CallableIdentity::AnonymousFunction(function)
                                     | CallableIdentity::ExternalFunction { function, .. } => {
@@ -326,6 +338,21 @@ impl Walker<'_> {
 
     pub(super) fn statement(&mut self, from: &str, statement: &MirStmt) {
         match &statement.kind {
+            MirStmtKind::PrepareFixedAssignment(owner) => {
+                for step in owner.steps() {
+                    match step {
+                        crate::MirExpressionStep::Let { value, .. } => self.rvalue(from, value),
+                        crate::MirExpressionStep::CaptureSequence { source, .. } => source
+                            .visit_operands(|operand| {
+                                self.operand(from, operand, Reason::FunctionHandle)
+                            }),
+                    }
+                }
+                owner.visit_external_operands(|operand| {
+                    self.operand(from, operand, Reason::FunctionHandle)
+                });
+            }
+            MirStmtKind::PreparedAssign { value, .. } => self.rvalue(from, value),
             MirStmtKind::Assign { place, value } => {
                 self.place(from, place);
                 self.rvalue(from, value);

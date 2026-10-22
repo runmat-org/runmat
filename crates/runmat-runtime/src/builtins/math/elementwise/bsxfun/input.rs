@@ -156,7 +156,7 @@ fn complex_value((real, imaginary): (NumericScalar, NumericScalar)) -> crate::Bu
 
 fn character_value(array: &CharArray, index: usize) -> crate::BuiltinResult<Value> {
     if array.rows == 0 || array.cols == 0 {
-        return CharArray::new(Vec::new(), 0, 0)
+        return CharArray::from_code_units(Vec::new(), 0, 0)
             .map(Value::CharArray)
             .map_err(super::error::internal);
     }
@@ -168,7 +168,7 @@ fn character_value(array: &CharArray, index: usize) -> crate::BuiltinResult<Valu
         .get(source)
         .copied()
         .ok_or_else(|| super::error::internal("character input index is out of bounds"))?;
-    CharArray::new(vec![character], 1, 1)
+    CharArray::from_code_units(vec![character], 1, 1)
         .map(Value::CharArray)
         .map_err(super::error::internal)
 }

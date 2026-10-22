@@ -7,8 +7,8 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection {
         heading: "Sparse systems",
         paragraphs: &[
-            "On the host, nonsingular square CSC systems use direct triangular substitution when applicable and sparse LU otherwise. Tall, full-column-rank CSC systems use sparse QR least squares. These routes borrow the coefficient matrix instead of converting it to dense storage. A dense right-hand side with the same real or complex single/double class preserves that class in the result; multiple right-hand sides share one factorization. A solve that produces a nonfinite value returns an error.",
-            "Wide, rank-deficient, zero-order, and mixed-class sparse systems do not yet have a supported solution contract. The sparse QR backend is not rank-revealing, so it does not guarantee minimum-norm results for rank-deficient input. The sparse routes require unrestricted host allocation; finite-memory execution rejects them before allocating a factor or output. Dense rectangular and rank-deficient inputs retain the minimum-norm SVD route.",
+            "On the host, nonsingular square CSC systems use direct triangular substitution when applicable and sparse LU otherwise. Rectangular and numerically singular CSC systems use column-pivoted Householder QR, followed by a complete orthogonal decomposition when needed, to return a minimum-norm least-squares solution. Zero-order systems preserve the solution shape. These routes borrow the coefficient matrix instead of converting it to dense storage. A dense right-hand side with the same real or complex single/double class preserves that class in the result; multiple right-hand sides share one factorization. Mixed-class sparse systems remain unsupported. Nonfinite input or a nonfinite numerical result returns an error.",
+            "Sparse factor fill, solve scratch, and final results support finite managed host allocation. Fill is admitted as it grows; a sparse input can still require substantial fill and may exceed the available budget. Triangular solves write directly into admitted result storage. QR uses native-precision factors and results, with scaled double-precision norm reductions. Numerical rank uses native machine epsilon times the larger matrix dimension times the initial largest column norm; an exactly zero matrix has rank zero. A second decomposition retains that selected rank rather than applying another tolerance. This is RunMat's minimum-norm and numerical-rank policy, not a promise of identical mixed-edge or rank decisions to MATLAB. Dense rectangular and rank-deficient inputs retain the minimum-norm SVD route.",
         ],
     },
     BuiltinDocumentationSection { heading: "Acceleration", paragraphs: &["A resident solve is offered to the exact provider that owns its inputs. Mixed-residency operands are uploaded only when their class and precision can be represented by that owner.", "A typed unsupported-operation response permits host fallback. Provider failures, aliased outputs, wrong shapes, wrong types, and wrong owners are reported rather than treated as an unsupported optimization."] },
@@ -63,6 +63,22 @@ const EXAMPLES: &[BuiltinExample] = &[
         BuiltinExampleHarness::Portable,
     ),
     example(
+        "wide-sparse-minimum-norm",
+        "Solve a wide sparse system with minimum norm",
+        "A = sparse([1 0 1; 0 1 1]);\nb = [1; 1];\nx = A \\ b",
+        "x = [1/3; 1/3; 2/3]",
+        "assert(isequal(size(x), [3 1])); assert(max(abs(A*x-b)) < 1e-12); assert(abs([-1 -1 1]*x) < 1e-12); assert(max(abs(x-[1/3; 1/3; 2/3])) < 1e-12);",
+        BuiltinExampleHarness::Portable,
+    ),
+    example(
+        "singular-sparse-minimum-norm",
+        "Solve a rank-deficient sparse system",
+        "A = sparse([1 2; 2 4]);\nb = [5; 10];\nx = A \\ b",
+        "x = [1; 2]",
+        "assert(max(abs(A*x-b)) < 1e-12); assert(abs([-2 1]*x) < 1e-12); assert(max(abs(x-[1; 2])) < 1e-12);",
+        BuiltinExampleHarness::Portable,
+    ),
+    example(
         "complex",
         "Solve a complex system",
         "A = [2+i 1; -1 3-2i];\nB = [1; 4+i];\nX = A \\ B;\nR = A * X",
@@ -73,7 +89,7 @@ const EXAMPLES: &[BuiltinExample] = &[
 ];
 const FAQS: &[BuiltinDocumentationFaq] = &[
     faq("Why must A and B have the same number of rows?", "The equation `A * X = B` requires each right-hand side to have one entry for every row of `A`."),
-    faq("What happens for singular or rectangular A?", "For dense A, RunMat computes a minimum-norm least-squares solution with singular-value decomposition. The host sparse routes support nonsingular square systems and tall full-column-rank least squares; wide and rank-deficient sparse forms lack a rank-revealing, minimum-norm solver."),
+    faq("What happens for singular or rectangular A?", "Dense inputs use a minimum-norm singular-value decomposition solve. Same-class host sparse inputs use rank-revealing QR and a complete orthogonal decomposition for minimum-norm least squares. Numerical rank follows the documented native-precision tolerance. MATLAB backslash does not generally promise the same minimum-norm choice for rectangular systems."),
     faq("Are higher-dimensional arrays supported?", "Inputs must be effective matrices. Trailing singleton dimensions are allowed; reshape other arrays before solving."),
     faq("How are logical and integer arrays treated?", "Logical matrices become double. Integer values are accepted only for scalar-left division and preserve the integer class."),
     faq("Is backslash a callable alias?", "No. Use `mldivide(A, B)` or the `A \\ B` operator."),

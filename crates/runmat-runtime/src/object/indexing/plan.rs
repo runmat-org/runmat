@@ -1,7 +1,6 @@
 //! Shared object subscript planning over an already known array shape.
-
 use super::{ObjectIndexComponent, ObjectIndexSelector, ObjectSubscript};
-use crate::RuntimeError;
+use crate::{context::RuntimeContext, RuntimeError};
 
 #[derive(Clone, Copy)]
 enum PlanMode {
@@ -10,64 +9,144 @@ enum PlanMode {
     FixedAssignment,
 }
 
-/// Assignment selection for a fixed-size backing. Index admission uses the
-/// existing read bounds; result adaptation retains assignment shape rules.
 pub async fn plan_for_fixed_assignment(
     shape: &[usize],
     step: &ObjectSubscript,
 ) -> Result<crate::indexing::plan::IndexPlan, RuntimeError> {
-    let ObjectIndexSelector::IndexValues { components } = step.selector() else {
-        return Err(crate::runtime_error::semantic_error(
-            "InvalidObjectIndex",
-            "index selector must contain ordinary indexing values",
-        ));
-    };
-    plan_for_mode(shape, components, PlanMode::FixedAssignment).await
+    let context = crate::context::legacy::active();
+    plan_for_step(context.as_ref(), shape, step, PlanMode::FixedAssignment).await
 }
-
+pub async fn plan_for_fixed_assignment_in_context(
+    context: &RuntimeContext,
+    shape: &[usize],
+    step: &ObjectSubscript,
+) -> Result<crate::indexing::plan::IndexPlan, RuntimeError> {
+    plan_for_step(Some(context), shape, step, PlanMode::FixedAssignment).await
+}
 pub async fn plan_for_shape(
     shape: &[usize],
     step: &ObjectSubscript,
     assignment: bool,
 ) -> Result<crate::indexing::plan::IndexPlan, RuntimeError> {
+    let context = crate::context::legacy::active();
+    plan_for_step(
+        context.as_ref(),
+        shape,
+        step,
+        if assignment {
+            PlanMode::Assignment
+        } else {
+            PlanMode::Read
+        },
+    )
+    .await
+}
+pub async fn plan_for_shape_in_context(
+    context: &RuntimeContext,
+    shape: &[usize],
+    step: &ObjectSubscript,
+    assignment: bool,
+) -> Result<crate::indexing::plan::IndexPlan, RuntimeError> {
+    plan_for_step(
+        Some(context),
+        shape,
+        step,
+        if assignment {
+            PlanMode::Assignment
+        } else {
+            PlanMode::Read
+        },
+    )
+    .await
+}
+async fn plan_for_step(
+    context: Option<&RuntimeContext>,
+    shape: &[usize],
+    step: &ObjectSubscript,
+    mode: PlanMode,
+) -> Result<crate::indexing::plan::IndexPlan, RuntimeError> {
     let ObjectIndexSelector::IndexValues { components } = step.selector() else {
         return Err(crate::runtime_error::semantic_error(
             "InvalidObjectIndex",
             "index selector must contain ordinary indexing values",
         ));
     };
-    plan_for_components(shape, components, assignment).await
+    plan_for_mode(context, shape, components, mode).await
 }
-
 pub async fn plan_for_components(
     shape: &[usize],
     components: &[ObjectIndexComponent],
     assignment: bool,
 ) -> Result<crate::indexing::plan::IndexPlan, RuntimeError> {
-    let mode = if assignment {
-        PlanMode::Assignment
-    } else {
-        PlanMode::Read
-    };
-    plan_for_mode(shape, components, mode).await
+    let context = crate::context::legacy::active();
+    plan_for_components_with_context(context.as_ref(), shape, components, assignment).await
 }
-
+pub async fn plan_for_components_in_context(
+    context: &RuntimeContext,
+    shape: &[usize],
+    components: &[ObjectIndexComponent],
+    assignment: bool,
+) -> Result<crate::indexing::plan::IndexPlan, RuntimeError> {
+    plan_for_components_with_context(Some(context), shape, components, assignment).await
+}
+pub(crate) async fn plan_for_components_with_context(
+    context: Option<&RuntimeContext>,
+    shape: &[usize],
+    components: &[ObjectIndexComponent],
+    assignment: bool,
+) -> Result<crate::indexing::plan::IndexPlan, RuntimeError> {
+    plan_for_mode(
+        context,
+        shape,
+        components,
+        if assignment {
+            PlanMode::Assignment
+        } else {
+            PlanMode::Read
+        },
+    )
+    .await
+}
 async fn plan_for_mode(
+    context: Option<&RuntimeContext>,
     shape: &[usize],
     components: &[ObjectIndexComponent],
     mode: PlanMode,
 ) -> Result<crate::indexing::plan::IndexPlan, RuntimeError> {
-    let selectors = crate::indexing::selectors::build_component_selectors(
-        components,
-        shape,
-        matches!(mode, PlanMode::Assignment),
-    )
-    .await?;
-    if matches!(mode, PlanMode::Assignment | PlanMode::FixedAssignment) {
-        crate::indexing::plan::build_assignment_plan(&selectors, components.len(), shape)
-    } else {
-        crate::indexing::plan::build_index_plan(&selectors, components.len(), shape)
-    }
+    let owner = crate::indexing::plan::admission::Owner::new(context)?;
+    let selectors = owner
+        .await_stage(
+            crate::indexing::selectors::build_component_selectors_with_context(
+                context,
+                components,
+                shape,
+                matches!(mode, PlanMode::Assignment),
+            ),
+        )
+        .await??;
+    let assignment = matches!(mode, PlanMode::Assignment | PlanMode::FixedAssignment);
+    let plan = match (context, assignment) {
+        (Some(context), true) => crate::indexing::plan::build_assignment_plan_in_context(
+            context,
+            &selectors,
+            components.len(),
+            shape,
+        )?,
+        (Some(context), false) => crate::indexing::plan::build_index_plan_in_context(
+            context,
+            &selectors,
+            components.len(),
+            shape,
+        )?,
+        (None, true) => {
+            crate::indexing::plan::build_assignment_plan(&selectors, components.len(), shape)?
+        }
+        (None, false) => {
+            crate::indexing::plan::build_index_plan(&selectors, components.len(), shape)?
+        }
+    };
+    owner.check()?;
+    Ok(plan)
 }
 
 #[cfg(test)]
@@ -78,10 +157,12 @@ mod tests {
 
     fn index(values: &[f64]) -> ObjectSubscript {
         ObjectSubscript::parentheses(ObjectIndexSelector::IndexValues {
-            components: values
-                .iter()
-                .map(|value| ObjectIndexComponent::Value(Value::Num(*value)))
-                .collect(),
+            components: runmat_value::ExactArrayStorage::shared_unbounded(
+                values
+                    .iter()
+                    .map(|value| ObjectIndexComponent::Value(Value::Num(*value)))
+                    .collect::<Vec<_>>(),
+            ),
         })
     }
 

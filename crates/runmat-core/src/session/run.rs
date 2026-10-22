@@ -1,12 +1,12 @@
 use super::*;
 use std::rc::Rc;
 
+mod preparation;
+mod request_scope;
 #[path = "run/selected_class_product.rs"]
 mod selected_class_product;
 #[path = "run/selected_source_owner.rs"]
 mod selected_source_owner;
-mod request_scope;
-mod preparation;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn entrypoint_target_function(
@@ -217,6 +217,8 @@ impl RunMatSession {
                 self.project_handoff.clone(),
                 #[cfg(not(target_arch = "wasm32"))]
                 self.local_tasks.child_scope_factory(),
+                #[cfg(not(target_arch = "wasm32"))]
+                Some(self.mex_runtime.native_lane_child_factory()),
             ),
         );
         self.configure_dynamic_function_services();
@@ -241,6 +243,8 @@ impl RunMatSession {
         .map_err(|error| {
             RunError::Runtime(
                 build_runtime_error(format!("project composition failed: {error}"))
+                    .with_source(error)
+                    .with_gpu_gather_retry(runmat_runtime::GpuGatherRetry::Never)
                     .with_identifier("RunMat:ProjectComposition")
                     .build(),
             )
@@ -765,11 +769,17 @@ impl RunMatSession {
         #[cfg(not(target_arch = "wasm32"))]
         let mut native_loop_backedges = std::collections::BTreeMap::new();
 
+        let observed_base = std::rc::Rc::new(
+            runmat_runtime::workspace::BaseWorkspaceService::new(self.base_workspace.clone())
+                .with_invocation_projection(workspace_projection.clone())
+                .map_err(RunError::Runtime)?,
+        );
         let execution_runtime = execution_runtime.clone().with_service_ports(
             execution_runtime
                 .service_ports()
                 .clone()
-                .with_workspace(workspace_projection.clone()),
+                .with_workspace(workspace_projection.clone())
+                .with_base_workspace(observed_base),
         );
 
         // Check if this is an expression statement (ends with Pop)
@@ -1728,6 +1738,8 @@ async fn source_input_text(
                             source_path.display()
                         ))
                         .with_identifier("RunMat:SourceReadFailed")
+                        .with_source(err)
+                        .with_gpu_gather_retry(runmat_runtime::GpuGatherRetry::Never)
                         .build(),
                     ));
                 }
@@ -1775,6 +1787,8 @@ async fn resolve_path_source_input(
                     "failed to resolve current working directory while resolving source path '{path}': {err}"
                 ))
                 .with_identifier("RunMat:SourceResolveFailed")
+                .with_source(err)
+                .with_gpu_gather_retry(runmat_runtime::GpuGatherRetry::Never)
                 .build(),
             )
         })?;
@@ -1782,29 +1796,33 @@ async fn resolve_path_source_input(
         let source_path = std::path::PathBuf::from(path);
         let candidate = crate::diagnostic_path::resolve_against_base(path, &cwd);
 
-        if let Ok(metadata) = runmat_filesystem::metadata_async(&candidate).await {
-            if metadata.is_file() {
-                return Ok(
-                    runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(
-                        &candidate,
-                    )
-                    .await,
-                );
-            }
+        if runmat_runtime::builtins::common::path_search::path_is_file(&candidate)
+            .await
+            .map_err(|error| RunError::Runtime(error.into_runtime_error("source resolution")))?
+        {
+            return runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(
+                &candidate,
+            )
+            .await
+            .map_err(|error| RunError::Runtime(error.into_runtime_error("source resolution")));
         }
 
         if source_path.extension().is_none() {
             for extension in ["p", "m"] {
                 let with_ext = candidate.with_extension(extension);
-                if let Ok(metadata) = runmat_filesystem::metadata_async(&with_ext).await {
-                    if metadata.is_file() {
-                        return Ok(
-                            runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(
-                                &with_ext,
-                            )
-                            .await,
-                        );
-                    }
+                if runmat_runtime::builtins::common::path_search::path_is_file(&with_ext)
+                    .await
+                    .map_err(|error| {
+                        RunError::Runtime(error.into_runtime_error("source resolution"))
+                    })?
+                {
+                    return runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(
+                        &with_ext,
+                    )
+                    .await
+                    .map_err(|error| {
+                        RunError::Runtime(error.into_runtime_error("source resolution"))
+                    });
                 }
             }
         }
@@ -1826,7 +1844,9 @@ async fn resolve_path_source_input(
         } else {
             cwd.join(resolved)
         };
-        Ok(runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(&resolved).await)
+        runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(&resolved)
+            .await
+            .map_err(|error| RunError::Runtime(error.into_runtime_error("source resolution")))
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -1839,35 +1859,45 @@ async fn resolve_path_source_input(
                     "failed to resolve current working directory while resolving source path '{path}': {err}"
                 ))
                 .with_identifier("RunMat:SourceResolveFailed")
+                .with_source(err)
+                .with_gpu_gather_retry(runmat_runtime::GpuGatherRetry::Never)
                 .build(),
             )
         })?;
         let source_path = PathBuf::from(path);
         let candidate = crate::diagnostic_path::resolve_against_base(path, &cwd);
 
-        if let Ok(metadata) = runmat_filesystem::metadata_async(&candidate).await {
-            if metadata.is_file() {
-                return Ok(
-                    runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(
-                        &candidate,
-                    )
-                    .await,
-                );
-            }
+        if runmat_runtime::builtins::common::path_search::path_is_file(&candidate)
+            .await
+            .map_err(|error| RunError::Runtime(error.into_runtime_error("source resolution")))?
+        {
+            return Ok(
+                runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(&candidate)
+                    .await
+                    .map_err(|error| {
+                        RunError::Runtime(error.into_runtime_error("source resolution"))
+                    })?,
+            );
         }
 
         if source_path.extension().is_none() {
             for extension in ["p", "m"] {
                 let with_ext = candidate.with_extension(extension);
-                if let Ok(metadata) = runmat_filesystem::metadata_async(&with_ext).await {
-                    if metadata.is_file() {
-                        return Ok(
-                            runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(
-                                &with_ext,
-                            )
-                            .await,
-                        );
-                    }
+                if runmat_runtime::builtins::common::path_search::path_is_file(&with_ext)
+                    .await
+                    .map_err(|error| {
+                        RunError::Runtime(error.into_runtime_error("source resolution"))
+                    })?
+                {
+                    return Ok(
+                        runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(
+                            &with_ext,
+                        )
+                        .await
+                        .map_err(|error| {
+                            RunError::Runtime(error.into_runtime_error("source resolution"))
+                        })?,
+                    );
                 }
             }
         }

@@ -72,7 +72,7 @@ fn visit_components(components: &[ObjectIndexComponent], visitor: &mut impl FnMu
 fn visit_prepared_steps(steps: &[PreparedAssignmentStep], visitor: &mut impl FnMut(&Value)) {
     for step in steps {
         match step {
-            PreparedAssignmentStep::Member(_) => {}
+            PreparedAssignmentStep::Member(_) | PreparedAssignmentStep::InitializingMember(_) => {}
             PreparedAssignmentStep::Parentheses {
                 selector_values, ..
             } => visit_components(selector_values, visitor),
@@ -126,10 +126,13 @@ mod tests {
             );
             let builder = SequenceDestinationBuilder::new(&source).expect("root source");
             initial.unroot().expect("transfer source to builder");
-            let destination = futures::executor::block_on(builder.finish(
-                SequenceEndpointSpec::CellContents(vec![ObjectIndexComponent::Colon]),
-            ))
-            .expect("prepare cell destination");
+            let destination =
+                futures::executor::block_on(builder.finish(SequenceEndpointSpec::CellContents(
+                    runmat_value::ExactArrayStorage::shared_unbounded(vec![
+                        ObjectIndexComponent::Colon,
+                    ]),
+                )))
+                .expect("prepare cell destination");
             runmat_gc::gc_collect_major().expect("collect with prepared destination");
             assert_eq!(
                 runmat_gc::gc_clone_value(&handle).expect("source remains rooted"),
@@ -162,29 +165,44 @@ mod tests {
                 "SelectorReceiver",
             )))
             .expect("root destination");
-            futures::executor::block_on(
-                builder.push_step(AssignmentStepSpec::Braces(vec![selector.clone()]), None),
-            )
+            futures::executor::block_on(builder.push_step(
+                AssignmentStepSpec::Braces(runmat_value::ExactArrayStorage::shared_unbounded(
+                    vec![selector.clone()],
+                )),
+                None,
+            ))
             .expect("retain selector before preparing destination");
             initial.unroot().expect("transfer selector to builder");
 
             let path = ObjectSubscriptPath::single(ObjectSubscript::braces(
                 ObjectIndexSelector::IndexValues {
-                    components: vec![selector.clone()],
+                    components: runmat_value::ExactArrayStorage::shared_unbounded(vec![
+                        selector.clone()
+                    ]),
                 },
             ));
             let prepared = PreparedSequenceDestination::rooted(
-                PreparedDestinationKind::ObjectProtocol(Box::new(
-                    PreparedObjectProtocolDestination {
-                        prefix: Vec::new(),
-                        expected_class: "SelectorReceiver".into(),
-                        cardinality_method: None,
-                        suffix_steps: Vec::new(),
-                        endpoint: SequenceEndpointSpec::CellContents(vec![selector]),
-                        path,
-                        cardinality: 1,
-                    },
-                )),
+                PreparedDestinationKind::ObjectProtocol(
+                    builder
+                        .control
+                        .boxed(
+                            None,
+                            PreparedObjectProtocolDestination {
+                                prefix: builder.control.vector(),
+                                expected_class: "SelectorReceiver".into(),
+                                cardinality_method: None,
+                                suffix_steps: builder.control.vector(),
+                                endpoint: SequenceEndpointSpec::CellContents(
+                                    runmat_value::ExactArrayStorage::shared_unbounded(vec![
+                                        selector,
+                                    ]),
+                                ),
+                                path,
+                                cardinality: 1,
+                            },
+                        )
+                        .expect("ordinary protocol control"),
+                ),
                 builder.source_roots.clone(),
             )
             .expect("root prepared selector before builder retires");
@@ -251,10 +269,12 @@ mod tests {
     fn builder_retains_current_and_prepared_selector_values() {
         let mut builder = SequenceDestinationBuilder::new(&Value::String("root".into()))
             .expect("root destination");
-        builder.steps.push(PreparedAssignmentStep::Braces(vec![
-            ObjectIndexComponent::Colon,
-            ObjectIndexComponent::Value(Value::String("selector".into())),
-        ]));
+        builder.steps.push(PreparedAssignmentStep::Braces(
+            runmat_value::ExactArrayStorage::shared_unbounded(vec![
+                ObjectIndexComponent::Colon,
+                ObjectIndexComponent::Value(Value::String("selector".into())),
+            ]),
+        ));
         let mut values = Vec::new();
         builder.visit_retained_values(&mut |value| values.push(value.clone()));
         assert_eq!(
@@ -268,10 +288,12 @@ mod tests {
 
     #[test]
     fn endpoint_retains_value_selectors_but_not_colons_or_names() {
-        let endpoint = SequenceEndpointSpec::CellContents(vec![
-            ObjectIndexComponent::Value(Value::Num(2.0)),
-            ObjectIndexComponent::Colon,
-        ]);
+        let endpoint = SequenceEndpointSpec::CellContents(
+            runmat_value::ExactArrayStorage::shared_unbounded(vec![
+                ObjectIndexComponent::Value(Value::Num(2.0)),
+                ObjectIndexComponent::Colon,
+            ]),
+        );
         let mut values = Vec::new();
         endpoint.visit_retained_values(&mut |value| values.push(value.clone()));
         SequenceEndpointSpec::Member("field".into())

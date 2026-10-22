@@ -30,7 +30,9 @@ fn getfield_exception_fields() {
         .expect("empty exception property");
         assert_eq!(
             value.value(),
-            &Value::CharArray(CharArray::new(Vec::new(), 0, 0).expect("empty character array"))
+            &Value::CharArray(
+                CharArray::from_code_units(Vec::new(), 0, 0).expect("empty character array")
+            )
         );
     }
 }

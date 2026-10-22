@@ -427,10 +427,23 @@ fn cold_constructorless_superclass_with_other_methods_has_exact_no_body_target()
             .expect("Derived admitted product");
         assert_eq!(derived.super_constructors.len(), 1);
         assert_eq!(derived.super_dependency_origins.len(), 1);
-        let derived_body = derived
-            .admitted
-            .entrypoint_function()
-            .and_then(|id| derived.admitted.registry().get(id))
+        // The wire artifact has no live class-product authority. Inspect the
+        // exact execution view issued for this cached constructor binding.
+        let selected_view = session
+            .source_evaluator
+            .selected_binding_view(&derived.binding)
+            .expect("selected Derived binding view")
+            .expect("live Derived binding view");
+        let selected_lease = derived
+            .binding
+            .authority
+            .local_lease(derived.binding.function)
+            .expect("selected Derived definition lease");
+        let derived_body = selected_view
+            .get_owned(
+                runmat_hir::FunctionId(derived.binding.function),
+                selected_lease,
+            )
             .expect("selected Derived constructor body");
         let selected_class = derived_body
             .selected_class_product

@@ -76,7 +76,7 @@ impl RuntimeBuiltinService for PendingBuiltin {
                 variant: "default",
             },
             |_| {
-                Box::pin(async {
+                runmat_runtime::builtin::admitted_builtin_future(None, "fixture", async {
                     CALLS.fetch_add(1, Ordering::SeqCst);
                     let _drop = PendingDrop;
                     futures::future::pending().await

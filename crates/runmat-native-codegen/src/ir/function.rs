@@ -187,6 +187,11 @@ pub struct NativeFunction {
     pub entry: NativeBlockId,
     pub blocks: Vec<NativeBlock>,
     pub expression_continuation_geometry: NativeExpressionContinuationGeometry,
+    /// Exact analysis-certified requirements for every lowered MIR site.
+    pub operation_contracts: Vec<runmat_mir::analysis::MirOperationContract>,
+    /// Ordered execution projection of `operation_contracts`, retained by the
+    /// resume engine. Verification requires byte-for-byte site equality; this
+    /// is not an independent semantic registry.
     pub expected_sites: Vec<NativeMirSite>,
 }
 

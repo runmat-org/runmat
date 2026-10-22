@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn not_character_pages_preserve_shape_and_column_major_truth() {
     let shape = vec![2, 2, 2];
-    let chars = CharArray::new_with_shape(
+    let chars = CharArray::from_unicode_scalars_with_shape(
         vec!['A', '\0', 'B', 'C', '\0', 'D', '\0', 'E'],
         shape.clone(),
     )

@@ -9,11 +9,11 @@ mod isolation_input;
 mod java;
 mod manifest;
 #[cfg(not(target_arch = "wasm32"))]
-mod native_lane_profiling;
-#[cfg(not(target_arch = "wasm32"))]
 mod mex;
 #[cfg(not(target_arch = "wasm32"))]
 mod native_ffi;
+#[cfg(not(target_arch = "wasm32"))]
+mod native_lane_profiling;
 mod policy;
 #[cfg(not(target_arch = "wasm32"))]
 mod project_retirement;
@@ -77,15 +77,26 @@ pub async fn load_foreign_member(
     reference: runmat_value::ForeignRef,
     member: String,
 ) -> Result<crate::execution::RootedValue, crate::RuntimeError> {
-    invoke_foreign_member(
-        reference.clone(),
-        "get_member",
-        vec![
-            runmat_value::Value::Foreign(reference),
-            runmat_value::Value::String(member.into()),
+    load_foreign_member_text(reference, member.into()).await
+}
+
+pub(crate) async fn load_foreign_member_text(
+    reference: runmat_value::ForeignRef,
+    member: runmat_value::Utf8Text,
+) -> Result<crate::execution::RootedValue, crate::RuntimeError> {
+    let context = selected_foreign_context(None)?;
+    let arguments = crate::call::BuiltinArguments::from_borrowed(
+        &[
+            runmat_value::Value::Foreign(reference.clone()),
+            runmat_value::Value::String(member),
         ],
+        Some(&context),
+    )?
+    .into_supplied_function_arguments(Some(&context))?;
+    require_foreign_single(
+        invoke_foreign_rooted_in_context(Some(&context), reference, "get_member", arguments, 1)
+            .await?,
     )
-    .await
 }
 
 /// Write a member on a foreign resource through the adapter that owns its
@@ -96,16 +107,28 @@ pub async fn store_foreign_member(
     member: String,
     value: runmat_value::Value,
 ) -> Result<crate::execution::RootedValue, crate::RuntimeError> {
-    invoke_foreign_member(
-        reference.clone(),
-        "set_member",
-        vec![
-            runmat_value::Value::Foreign(reference),
-            runmat_value::Value::String(member.into()),
+    store_foreign_member_text(reference, member.into(), value).await
+}
+
+pub(crate) async fn store_foreign_member_text(
+    reference: runmat_value::ForeignRef,
+    member: runmat_value::Utf8Text,
+    value: runmat_value::Value,
+) -> Result<crate::execution::RootedValue, crate::RuntimeError> {
+    let context = selected_foreign_context(None)?;
+    let arguments = crate::call::BuiltinArguments::from_borrowed(
+        &[
+            runmat_value::Value::Foreign(reference.clone()),
+            runmat_value::Value::String(member),
             value,
         ],
+        Some(&context),
+    )?
+    .into_supplied_function_arguments(Some(&context))?;
+    require_foreign_single(
+        invoke_foreign_rooted_in_context(Some(&context), reference, "set_member", arguments, 1)
+            .await?,
     )
-    .await
 }
 
 /// Read one Python-style item through the resource's owning adapter. Source
@@ -144,16 +167,73 @@ pub async fn invoke_foreign_method(
     arguments: crate::execution::RootedValues,
     requested_outputs: usize,
 ) -> Result<crate::execution::RootedValueSequence, crate::RuntimeError> {
-    let context = crate::context::legacy::active().ok_or_else(|| {
-        foreign_error(
-            ForeignErrorKind::HostUnavailable,
-            "foreign member access has no active runtime context",
-        )
-    })?;
-    let arguments = crate::call::RootedFunctionArguments::ordinary(arguments)
-        .prepend_routing_in_context(runmat_value::Value::String(method.into()), &context)?
+    invoke_foreign_method_text(reference, method.into(), arguments, requested_outputs).await
+}
+
+pub(crate) async fn invoke_foreign_method_text(
+    reference: runmat_value::ForeignRef,
+    method: runmat_value::Utf8Text,
+    arguments: crate::execution::RootedValues,
+    requested_outputs: usize,
+) -> Result<crate::execution::RootedValueSequence, crate::RuntimeError> {
+    invoke_foreign_method_retained_text(
+        None,
+        reference,
+        method,
+        arguments.into(),
+        requested_outputs,
+    )
+    .await
+}
+
+pub(crate) async fn invoke_foreign_method_retained_text(
+    runtime: Option<&crate::context::RuntimeContext>,
+    reference: runmat_value::ForeignRef,
+    method: runmat_value::Utf8Text,
+    arguments: crate::call::BuiltinArguments,
+    requested_outputs: usize,
+) -> Result<crate::execution::RootedValueSequence, crate::RuntimeError> {
+    let context = selected_foreign_context(runtime)?;
+    let arguments = arguments
+        .into_supplied_function_arguments(Some(&context))?
+        .prepend_routing_in_context(runmat_value::Value::String(method), &context)?
         .prepend_routing_in_context(runmat_value::Value::Foreign(reference.clone()), &context)?;
-    invoke_foreign_rooted(reference, "invoke_member", arguments, requested_outputs).await
+    invoke_foreign_rooted_in_context(
+        Some(&context),
+        reference,
+        "invoke_member",
+        arguments,
+        requested_outputs,
+    )
+    .await
+}
+
+pub(crate) async fn index_foreign_resource_retained(
+    runtime: Option<&crate::context::RuntimeContext>,
+    reference: runmat_value::ForeignRef,
+    indices: crate::call::BuiltinArguments,
+) -> Result<crate::execution::RootedValue, crate::RuntimeError> {
+    let context = selected_foreign_context(runtime)?;
+    let arguments = indices
+        .into_supplied_function_arguments(Some(&context))?
+        .prepend_routing_in_context(runmat_value::Value::Foreign(reference.clone()), &context)?;
+    require_foreign_single(
+        invoke_foreign_rooted_in_context(Some(&context), reference, "get_item", arguments, 1)
+            .await?,
+    )
+}
+fn selected_foreign_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> Result<crate::context::RuntimeContext, crate::RuntimeError> {
+    runtime
+        .cloned()
+        .or_else(crate::context::legacy::active)
+        .ok_or_else(|| {
+            foreign_error(
+                ForeignErrorKind::HostUnavailable,
+                "foreign member access has no active runtime context",
+            )
+        })
 }
 
 async fn invoke_foreign_member(
@@ -189,12 +269,16 @@ async fn invoke_foreign_rooted(
     arguments: crate::call::RootedFunctionArguments,
     requested_outputs: usize,
 ) -> Result<crate::execution::RootedValueSequence, crate::RuntimeError> {
-    let context = crate::context::legacy::active().ok_or_else(|| {
-        foreign_error(
-            ForeignErrorKind::HostUnavailable,
-            "foreign member access has no active runtime context",
-        )
-    })?;
+    invoke_foreign_rooted_in_context(None, reference, operation, arguments, requested_outputs).await
+}
+async fn invoke_foreign_rooted_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    reference: runmat_value::ForeignRef,
+    operation: &str,
+    arguments: crate::call::RootedFunctionArguments,
+    requested_outputs: usize,
+) -> Result<crate::execution::RootedValueSequence, crate::RuntimeError> {
+    let context = selected_foreign_context(runtime)?;
     let service = context
         .service_ports()
         .require_foreign(operation)
@@ -217,18 +301,7 @@ async fn invoke_foreign_rooted(
 fn require_foreign_single(
     sequence: crate::execution::RootedValueSequence,
 ) -> Result<crate::execution::RootedValue, crate::RuntimeError> {
-    use crate::sequence::ResolveValueSequence;
-    sequence.try_map_owned(
-        |sequence| {
-            let values = sequence.resolve(
-                runmat_types::SequenceUse::RequireSingle,
-                crate::sequence::SequenceResolutionContext::default(),
-            )?;
-            Ok(crate::sequence::into_first_output(values)?
-                .expect("RequireSingle returned one foreign value"))
-        },
-        |error| error.into_runtime_error(),
-    )
+    sequence.try_into_single()
 }
 
 /// Resolve the modern `clib.<interface>.<function>` namespace through the same

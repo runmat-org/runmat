@@ -175,7 +175,7 @@ fn install_semantic_operation<T>(
         request,
         embedded,
         retained_roots,
-        future,
+        future: crate::execute::call_suspension::PendingCompletionFuture::Ordinary(future),
     });
     Err(NativeExecutorError::CallSuspended)
 }

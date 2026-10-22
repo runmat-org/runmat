@@ -195,7 +195,7 @@ mod tests {
                     .expect("two strings"),
             ),
             Value::CharArray(
-                runmat_value::CharArray::new(vec!['T', 'y', 'p', 'e'], 2, 2)
+                runmat_value::CharArray::from_unicode_scalars(vec!['T', 'y', 'p', 'e'], 2, 2)
                     .expect("two character rows"),
             ),
         ];
@@ -428,17 +428,20 @@ mod tests {
     #[test]
     fn get_reads_figure_properties() {
         let _guard = setup();
-        let fig = crate::builtins::plotting::figure::figure_builtin(vec![
-            Value::Num(1234.0),
-            Value::String("Name".into()),
-            Value::String("demo".into()),
-            Value::String("NumberTitle".into()),
-            Value::String("off".into()),
-            Value::String("Visible".into()),
-            Value::String("off".into()),
-            Value::String("Color".into()),
-            Value::String("k".into()),
-        ])
+        let fig = crate::builtins::plotting::figure::figure_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(1234.0),
+                Value::String("Name".into()),
+                Value::String("demo".into()),
+                Value::String("NumberTitle".into()),
+                Value::String("off".into()),
+                Value::String("Visible".into()),
+                Value::String("off".into()),
+                Value::String("Color".into()),
+                Value::String("k".into()),
+            ]),
+        )
         .unwrap();
         let ax = crate::builtins::plotting::subplot::subplot_builtin(
             Value::Num(1.0),
@@ -477,8 +480,11 @@ mod tests {
     #[test]
     fn hierarchy_and_query_semantics_exist() {
         let _guard = setup();
-        let fig =
-            crate::builtins::plotting::figure::figure_builtin(vec![Value::Num(5555.0)]).unwrap();
+        let fig = crate::builtins::plotting::figure::figure_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(5555.0)]),
+        )
+        .unwrap();
         let ax = crate::builtins::plotting::subplot::subplot_builtin(
             Value::Num(1.0),
             Value::Num(1.0),
@@ -517,15 +523,27 @@ mod tests {
         assert_eq!(text_struct.fields.get("Parent"), Some(&Value::Num(ax)));
 
         assert!(matches!(
-            ishandle_builtin(vec![Value::Num(fig)]).unwrap(),
+            ishandle_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(fig)])
+            )
+            .unwrap(),
             Value::Bool(true)
         ));
         assert!(matches!(
-            isgraphics_builtin(vec![Value::Num(ax)]).unwrap(),
+            isgraphics_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(ax)])
+            )
+            .unwrap(),
             Value::Bool(true)
         ));
         assert!(matches!(
-            ishandle_builtin(vec![Value::Num(-1.0)]).unwrap(),
+            ishandle_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(-1.0)])
+            )
+            .unwrap(),
             Value::Bool(false)
         ));
     }
@@ -533,8 +551,9 @@ mod tests {
     #[test]
     fn stem_handle_exposes_runtime_properties() {
         let _guard = setup();
-        let handle =
-            futures::executor::block_on(crate::builtins::plotting::stem::stem_builtin(vec![
+        let handle = futures::executor::block_on(crate::builtins::plotting::stem::stem_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::Tensor(
                     runmat_value::Tensor::new(vec![1.0, 2.0], vec![2]).expect("stem values"),
                 ),
@@ -543,8 +562,9 @@ mod tests {
                 Value::String("BaseValue".into()),
                 Value::Num(-1.0),
                 Value::String("filled".into()),
-            ]))
-            .unwrap();
+            ]),
+        ))
+        .unwrap();
         let props = get_builtin(vec![Value::Num(handle)]).unwrap();
         let Value::Struct(st) = props else {
             panic!("expected struct");

@@ -9,15 +9,17 @@ use crate::context::RuntimeContext;
 use crate::execution::RootedValue;
 use crate::BuiltinResult;
 
-pub(crate) fn decode(value: &Value) -> Option<ImageIndexMode> {
-    match value {
+pub(crate) fn decode(
+    value: &Value,
+) -> Result<Option<ImageIndexMode>, runmat_value::Utf16DecodeError> {
+    Ok(match value {
         Value::String(text) => ImageIndexMode::from_option_text(text),
         Value::CharArray(chars) => {
-            let text: String = chars.data().iter().collect();
+            let text: String = runmat_value::decode_utf16_code_units(chars.data())?;
             ImageIndexMode::from_option_text(&text)
         }
         _ => None,
-    }
+    })
 }
 
 /// Preserve domain-owned admission. A sink only materializes the image; it

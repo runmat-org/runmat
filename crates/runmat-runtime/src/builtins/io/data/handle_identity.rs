@@ -96,9 +96,9 @@ fn hash_value(
             tag(hash, ValueTag::Character);
             shape(hash, budget, &chars.shape)?;
             budget.nodes = budget.nodes.checked_sub(chars.data().len())?;
-            budget.bytes(chars.data().len().checked_mul(4)?)?;
+            budget.bytes(chars.data().len().checked_mul(2)?)?;
             for character in chars.data() {
-                hash.update(u32::from(*character).to_le_bytes());
+                hash.update(character.raw().to_le_bytes());
             }
         }
         Value::Bool(boolean) => {

@@ -43,19 +43,22 @@ fn run_error_with_detail(
     builder.build()
 }
 
-fn value_to_string_scalar(value: &Value) -> Option<String> {
+fn value_to_string_scalar(value: &Value) -> BuiltinResult<Option<String>> {
     match value {
-        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::String(text) => Ok(Some(text.as_str().to_owned())),
         Value::CharArray(array)
             if array.rows == 1
                 && crate::builtins::common::shape::effective_rank(&array.shape) <= 2 =>
         {
-            Some(array.data().iter().collect())
+            crate::builtins::io::utf16::decode_utf16_with_error(array.data(), || {
+                run_error(&RUN_ERROR_ARG_TYPE)
+            })
+            .map(Some)
         }
         Value::StringArray(array) if array.data().len() == 1 => {
-            Some(array.data()[0].as_str().to_owned())
+            Ok(Some(array.data()[0].as_str().to_owned()))
         }
-        _ => None,
+        _ => Ok(None),
     }
 }
 
@@ -83,11 +86,13 @@ fn bare_run_file_stem(script: &str) -> Option<&str> {
     path.file_stem()?.to_str().filter(|stem| !stem.is_empty())
 }
 
-async fn find_run_script(script: &str) -> Result<Option<PathBuf>, String> {
+async fn find_run_script(
+    script: &str,
+) -> Result<Option<PathBuf>, crate::builtins::common::path_search::PathSearchError> {
     if let Some(path) =
         find_file_with_extensions(script, RUN_SCRIPT_EXTENSIONS, RUN_BUILTIN_NAME).await?
     {
-        let path = crate::builtins::io::repl_fs::pcode::prefer_pcode_source_path(&path).await;
+        let path = crate::builtins::io::repl_fs::pcode::prefer_pcode_source_path(&path).await?;
         return Ok(Some(path));
     }
 
@@ -101,10 +106,10 @@ async fn find_run_script(script: &str) -> Result<Option<PathBuf>, String> {
             .is_some_and(|extension| {
                 extension.eq_ignore_ascii_case("p") || extension.eq_ignore_ascii_case("m")
             })
-            && path_is_file(&candidate).await
+            && path_is_file(&candidate).await?
         {
             let candidate =
-                crate::builtins::io::repl_fs::pcode::prefer_pcode_source_path(&candidate).await;
+                crate::builtins::io::repl_fs::pcode::prefer_pcode_source_path(&candidate).await?;
             return Ok(Some(candidate));
         }
     }
@@ -112,14 +117,14 @@ async fn find_run_script(script: &str) -> Result<Option<PathBuf>, String> {
 }
 
 pub async fn resolve_run_source(value: &Value) -> BuiltinResult<RunScriptSource> {
-    let script = value_to_string_scalar(value).ok_or_else(|| run_error(&RUN_ERROR_ARG_TYPE))?;
+    let script = value_to_string_scalar(value)?.ok_or_else(|| run_error(&RUN_ERROR_ARG_TYPE))?;
     if script.is_empty() {
         return Err(run_error(&RUN_ERROR_EMPTY_SCRIPT));
     }
 
     let path = find_run_script(&script)
         .await
-        .map_err(|err| run_error_with_detail(&RUN_ERROR_PATH_RESOLVE, err))?
+        .map_err(|error| error.into_builtin_error(RUN_BUILTIN_NAME, &RUN_ERROR_PATH_RESOLVE))?
         .ok_or_else(|| run_error_with_detail(&RUN_ERROR_FILE_NOT_FOUND, format!("'{script}'")))?;
 
     let text = match crate::builtins::io::repl_fs::pcode::read_source_text_async(&path).await {
@@ -133,10 +138,11 @@ pub async fn resolve_run_source(value: &Value) -> BuiltinResult<RunScriptSource>
             );
         }
         Err(crate::builtins::io::repl_fs::pcode::PcodeSourceReadError::Io(err)) => {
-            return Err(run_error_with_detail(
-                &RUN_ERROR_FILE_READ,
-                format!("{} ({err})", path.display()),
-            ));
+            let mut error =
+                run_error_with_detail(&RUN_ERROR_FILE_READ, format!("{} ({err})", path.display()));
+            error.source = Some(Box::new(err));
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            return Err(error);
         }
     };
 

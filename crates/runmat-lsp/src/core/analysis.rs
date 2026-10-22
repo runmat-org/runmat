@@ -1678,6 +1678,31 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    // The catalog owns spellings and overloads; this consumer checks that each
+    // source call projects the complete descriptor for the correct identity.
+    fn assert_catalog_signature_projection(text: &str, identity: &str) {
+        let entry = runmat_builtins::public_builtin_catalog_entry_by_name(identity)
+            .unwrap_or_else(|| panic!("missing canonical identity {identity}"));
+        let expected: Vec<&str> = entry
+            .descriptor
+            .signatures
+            .iter()
+            .map(|signature| signature.label)
+            .collect();
+        assert!(!expected.is_empty(), "missing descriptor for {identity}");
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
+        let position = lsp_types::Position::new(0, 0);
+        let actual = signature_help_at(text, &analysis, &position)
+            .unwrap_or_else(|| panic!("missing signature projection for {text}"));
+        let labels: Vec<&str> = actual
+            .signatures
+            .iter()
+            .map(|signature| signature.label.as_str())
+            .collect();
+        assert_eq!(labels, expected, "wrong canonical descriptor for {text}");
+        assert_eq!(actual.active_signature, Some(0));
+    }
+
     #[test]
     fn hover_returns_builtin_docs() {
         let text = "plot(1, 2);";
@@ -1695,17 +1720,7 @@ mod tests {
             !analysis.tokens.is_empty(),
             "expected tokenize_detailed to produce tokens"
         );
-        let builtin_names: Vec<&str> = runmat_builtins::builtin_functions()
-            .iter()
-            .map(|f| f.name)
-            .collect();
-        assert!(
-            builtin_names
-                .iter()
-                .any(|name| name.eq_ignore_ascii_case("plot")),
-            "plot builtin should be registered for hover tests (registered: {:?})",
-            builtin_names
-        );
+        assert!(runmat_builtins::public_builtin_catalog_entry_by_name("plot").is_some());
         let position = lsp_types::Position::new(0, 0);
         let offset = position_to_offset(text, &position);
         let token = token_at_offset(&analysis.tokens, offset)
@@ -1953,23 +1968,14 @@ mod tests {
     #[test]
     fn signature_help_uses_plotting_limit_descriptors() {
         let cases = [
-            ("xlim([0 1]);", "limits = xlim([xmin xmax])"),
-            ("ylim([0 1]);", "limits = ylim([ymin ymax])"),
-            ("zlim([0 1]);", "limits = zlim([zmin zmax])"),
-            ("clim([0 1]);", "limits = clim([cmin cmax])"),
-            ("caxis([0 1]);", "limits = caxis([cmin cmax])"),
+            ("xlim([0 1]);", "xlim"),
+            ("ylim([0 1]);", "ylim"),
+            ("zlim([0 1]);", "zlim"),
+            ("clim([0 1]);", "clim"),
+            ("caxis([0 1]);", "caxis"),
         ];
-
-        for (text, expected_label) in cases {
-            let analysis = analyze_document_with_compat(text, CompatMode::default());
-            let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
-            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
-            assert!(
-                labels.contains(&expected_label),
-                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
-                labels
-            );
+        for (text, identity) in cases {
+            assert_catalog_signature_projection(text, identity);
         }
     }
 
@@ -2023,21 +2029,9 @@ mod tests {
 
     #[test]
     fn signature_help_uses_plotting_control_descriptors() {
-        let cases = [
-            ("drawnow();", "ok = drawnow()"),
-            ("hold('on');", "hold(mode)"),
-        ];
-
-        for (text, expected_label) in cases {
-            let analysis = analyze_document_with_compat(text, CompatMode::default());
-            let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
-            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
-            assert!(
-                labels.contains(&expected_label),
-                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
-                labels
-            );
+        let cases = [("drawnow();", "drawnow"), ("hold('on');", "hold")];
+        for (text, identity) in cases {
+            assert_catalog_signature_projection(text, identity);
         }
     }
 
@@ -2139,22 +2133,9 @@ mod tests {
 
     #[test]
     fn signature_help_uses_empty_and_magic_descriptors() {
-        let cases = [
-            ("empty(0, 3);", "A = ClassName.empty(sz1, ..., szN)"),
-            ("magic(5);", "A = magic(n)"),
-        ];
-
-        for (text, expected_label) in cases {
-            let analysis = analyze_document_with_compat(text, CompatMode::default());
-            let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position)
-                .unwrap_or_else(|| panic!("expected signature help for strings-core case: {text}"));
-            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
-            assert!(
-                labels.contains(&expected_label),
-                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
-                labels
-            );
+        let cases = [("empty(0, 3);", "empty"), ("magic(5);", "magic")];
+        for (text, identity) in cases {
+            assert_catalog_signature_projection(text, identity);
         }
     }
 
@@ -2367,21 +2348,12 @@ mod tests {
     #[test]
     fn signature_help_uses_array_indexing_descriptors() {
         let cases = [
-            ("find([1 0 2]);", "idx = find(X)"),
-            ("ind2sub([3 4], 7);", "subs = ind2sub(sz, ind)"),
-            ("sub2ind([3 4], 2, 3);", "ind = sub2ind(sz, I1, In...)"),
+            ("find([1 0 2]);", "find"),
+            ("ind2sub([3 4], 7);", "ind2sub"),
+            ("sub2ind([3 4], 2, 3);", "sub2ind"),
         ];
-
-        for (text, expected_label) in cases {
-            let analysis = analyze_document_with_compat(text, CompatMode::default());
-            let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
-            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
-            assert!(
-                labels.contains(&expected_label),
-                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
-                labels
-            );
+        for (text, identity) in cases {
+            assert_catalog_signature_projection(text, identity);
         }
     }
 
@@ -2752,93 +2724,48 @@ mod tests {
     #[test]
     fn signature_help_uses_io_repl_fs_descriptors() {
         let cases = [
-            ("addpath(\"toolbox\");", "oldpath = addpath(folder1)"),
-            (
-                "addpath(\"toolbox\", \"utils\", \"-end\");",
-                "oldpath = addpath(folder1, ..., position)",
-            ),
-            (
-                "addpath(\"toolbox\", \"-frozen\");",
-                "oldpath = addpath(folder1, ..., \"-frozen\")",
-            ),
-            ("pwd();", "folder = pwd()"),
-            ("cd();", "folder = cd()"),
-            ("cd(\"tmp\");", "folder = cd(folder)"),
-            ("rmpath(\"toolbox\");", "oldpath = rmpath(folder1)"),
-            (
-                "rmpath(\"toolbox\", \"utils\");",
-                "oldpath = rmpath(folder1, folder2, ...)",
-            ),
-            ("genpath();", "pathstr = genpath()"),
-            ("genpath(\"toolbox\");", "pathstr = genpath(folder)"),
-            (
-                "genpath(\"toolbox\", \"private\");",
-                "pathstr = genpath(folder, excludes)",
-            ),
-            ("path();", "oldpath = path()"),
-            ("path(\"a\");", "oldpath = path(path1)"),
-            ("path(\"a\", \"b\");", "oldpath = path(path1, path2)"),
-            ("savepath();", "status = savepath()"),
-            ("savepath(\"pathdef.m\");", "status = savepath(filename)"),
-            ("tempdir();", "folder = tempdir()"),
-            ("tempname();", "filename = tempname()"),
-            ("tempname(\"tmp\");", "filename = tempname(folder)"),
-            ("getenv();", "env = getenv()"),
-            ("getenv(\"PATH\");", "value = getenv(NAME)"),
-            ("setenv(\"A\", \"B\");", "status = setenv(NAME, VALUE)"),
-            (
-                "fullfile(\"a\", \"b\");",
-                "file = fullfile(part1, part2, ...)",
-            ),
-            ("exist(\"sin\");", "typeID = exist(name)"),
-            (
-                "exist(\"sin\", \"builtin\");",
-                "typeID = exist(name, searchType)",
-            ),
-            ("dir();", "listing = dir()"),
-            ("dir(\".\");", "listing = dir(name)"),
-            ("ls();", "listing = ls()"),
-            ("ls(\".\");", "listing = ls(name)"),
-            ("mkdir(\"tmp\");", "status = mkdir(folderName)"),
-            (
-                "mkdir(\"parent\", \"child\");",
-                "status = mkdir(parentFolder, folderName)",
-            ),
-            ("rmdir(\"tmp\");", "status = rmdir(folderName)"),
-            ("rmdir(\"tmp\", \"s\");", "status = rmdir(folderName, flag)"),
-            (
-                "copyfile(\"a\", \"b\");",
-                "status = copyfile(source, destination)",
-            ),
-            (
-                "copyfile(\"a\", \"b\", \"f\");",
-                "status = copyfile(source, destination, flag)",
-            ),
-            (
-                "movefile(\"a\", \"b\");",
-                "status = movefile(source, destination)",
-            ),
-            (
-                "movefile(\"a\", \"b\", \"f\");",
-                "status = movefile(source, destination, flag)",
-            ),
-            ("delete(\"a.txt\");", "delete(filename)"),
-            (
-                "delete(\"a.txt\", \"b.txt\");",
-                "delete(filename1, filename2, ...)",
-            ),
+            ("addpath(\"toolbox\");", "addpath"),
+            ("addpath(\"toolbox\", \"utils\", \"-end\");", "addpath"),
+            ("addpath(\"toolbox\", \"-frozen\");", "addpath"),
+            ("pwd();", "pwd"),
+            ("cd();", "cd"),
+            ("cd(\"tmp\");", "cd"),
+            ("rmpath(\"toolbox\");", "rmpath"),
+            ("rmpath(\"toolbox\", \"utils\");", "rmpath"),
+            ("genpath();", "genpath"),
+            ("genpath(\"toolbox\");", "genpath"),
+            ("genpath(\"toolbox\", \"private\");", "genpath"),
+            ("path();", "path"),
+            ("path(\"a\");", "path"),
+            ("path(\"a\", \"b\");", "path"),
+            ("savepath();", "savepath"),
+            ("savepath(\"pathdef.m\");", "savepath"),
+            ("tempdir();", "tempdir"),
+            ("tempname();", "tempname"),
+            ("tempname(\"tmp\");", "tempname"),
+            ("getenv();", "getenv"),
+            ("getenv(\"PATH\");", "getenv"),
+            ("setenv(\"A\", \"B\");", "setenv"),
+            ("fullfile(\"a\", \"b\");", "fullfile"),
+            ("exist(\"sin\");", "exist"),
+            ("exist(\"sin\", \"builtin\");", "exist"),
+            ("dir();", "dir"),
+            ("dir(\".\");", "dir"),
+            ("ls();", "ls"),
+            ("ls(\".\");", "ls"),
+            ("mkdir(\"tmp\");", "mkdir"),
+            ("mkdir(\"parent\", \"child\");", "mkdir"),
+            ("rmdir(\"tmp\");", "rmdir"),
+            ("rmdir(\"tmp\", \"s\");", "rmdir"),
+            ("copyfile(\"a\", \"b\");", "copyfile"),
+            ("copyfile(\"a\", \"b\", \"f\");", "copyfile"),
+            ("movefile(\"a\", \"b\");", "movefile"),
+            ("movefile(\"a\", \"b\", \"f\");", "movefile"),
+            ("delete(\"a.txt\");", "delete"),
+            ("delete(\"a.txt\", \"b.txt\");", "delete"),
         ];
-
-        for (text, expected_label) in cases {
-            let analysis = analyze_document_with_compat(text, CompatMode::default());
-            let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
-            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
-            assert!(
-                labels.contains(&expected_label),
-                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
-                labels
-            );
+        for (text, identity) in cases {
+            assert_catalog_signature_projection(text, identity);
         }
     }
 
@@ -2938,23 +2865,14 @@ mod tests {
     #[test]
     fn signature_help_uses_io_console_descriptors() {
         let cases = [
-            ("disp(42);", "disp(X)"),
-            ("clc();", "clc()"),
-            ("format('long');", "format(mode)"),
-            ("input('Value: ');", "value = input(prompt)"),
-            ("input('s', 'Name: ');", "value = input(stringFlag, prompt)"),
+            ("disp(42);", "disp"),
+            ("clc();", "clc"),
+            ("format('long');", "format"),
+            ("input('Value: ');", "input"),
+            ("input('s', 'Name: ');", "input"),
         ];
-
-        for (text, expected_label) in cases {
-            let analysis = analyze_document_with_compat(text, CompatMode::default());
-            let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
-            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
-            assert!(
-                labels.contains(&expected_label),
-                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
-                labels
-            );
+        for (text, identity) in cases {
+            assert_catalog_signature_projection(text, identity);
         }
     }
 
@@ -3190,38 +3108,20 @@ mod tests {
     #[test]
     fn signature_help_uses_io_mat_descriptors() {
         let cases = [
-            ("load();", "S = load()"),
-            ("load(\"vars.mat\");", "S = load(filename)"),
-            (
-                "load(\"vars.mat\", \"A\", \"B\");",
-                "S = load(filename, varName1, varName2, ...)",
-            ),
-            (
-                "load(\"vars.mat\", \"-regexp\", \"^A\");",
-                "S = load(filename, \"-regexp\", pattern1, ...)",
-            ),
-            ("save();", "status = save()"),
-            ("save(\"vars.mat\");", "status = save(filename)"),
-            (
-                "save(\"vars.mat\", \"A\", \"B\");",
-                "status = save(filename, varName1, varName2, ...)",
-            ),
+            ("load();", "load"),
+            ("load(\"vars.mat\");", "load"),
+            ("load(\"vars.mat\", \"A\", \"B\");", "load"),
+            ("load(\"vars.mat\", \"-regexp\", \"^A\");", "load"),
+            ("save();", "save"),
+            ("save(\"vars.mat\");", "save"),
+            ("save(\"vars.mat\", \"A\", \"B\");", "save"),
             (
                 "save(\"vars.mat\", \"-struct\", \"opts\", \"alpha\");",
-                "status = save(filename, \"-struct\", structVar, field1, ...)",
+                "save",
             ),
         ];
-
-        for (text, expected_label) in cases {
-            let analysis = analyze_document_with_compat(text, CompatMode::default());
-            let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
-            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
-            assert!(
-                labels.contains(&expected_label),
-                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
-                labels
-            );
+        for (text, identity) in cases {
+            assert_catalog_signature_projection(text, identity);
         }
     }
 
@@ -3374,29 +3274,20 @@ mod tests {
     #[test]
     fn signature_help_uses_math_linalg_ops_descriptors() {
         let cases = [
-            ("transpose([1,2;3,4]);", "B = transpose(A)"),
-            ("ctranspose([1,2;3,4]);", "B = ctranspose(A)"),
-            ("trace([1,2;3,4]);", "t = trace(A)"),
-            ("dot([1,2], [3,4]);", "C = dot(A, B)"),
-            ("dot([1,2], [3,4], 2);", "C = dot(A, B, dim)"),
-            ("cross([1,0,0], [0,1,0]);", "C = cross(A, B)"),
-            ("cross([1,0,0], [0,1,0], 2);", "C = cross(A, B, dim)"),
-            ("mldivide([1,2;3,4], [5;6]);", "X = mldivide(A, B)"),
-            ("mrdivide([1,2], [1,2;3,4]);", "X = mrdivide(A, B)"),
-            ("mtimes([1,2;3,4], [5;6]);", "C = mtimes(A, B)"),
-            ("mpower([1,2;3,4], 2);", "B = mpower(A, p)"),
+            ("transpose([1,2;3,4]);", "transpose"),
+            ("ctranspose([1,2;3,4]);", "ctranspose"),
+            ("trace([1,2;3,4]);", "trace"),
+            ("dot([1,2], [3,4]);", "dot"),
+            ("dot([1,2], [3,4], 2);", "dot"),
+            ("cross([1,0,0], [0,1,0]);", "cross"),
+            ("cross([1,0,0], [0,1,0], 2);", "cross"),
+            ("mldivide([1,2;3,4], [5;6]);", "mldivide"),
+            ("mrdivide([1,2], [1,2;3,4]);", "mrdivide"),
+            ("mtimes([1,2;3,4], [5;6]);", "mtimes"),
+            ("mpower([1,2;3,4], 2);", "mpower"),
         ];
-
-        for (text, expected_label) in cases {
-            let analysis = analyze_document_with_compat(text, CompatMode::default());
-            let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
-            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
-            assert!(
-                labels.contains(&expected_label),
-                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
-                labels
-            );
+        for (text, identity) in cases {
+            assert_catalog_signature_projection(text, identity);
         }
     }
 
@@ -4460,72 +4351,51 @@ mod tests {
     #[test]
     fn signature_help_uses_math_elementwise_special_descriptors() {
         let cases = [
-            ("complex(1);", "Z = complex(A)"),
-            ("complex(1, 2);", "Z = complex(A, B)"),
-            ("factorial(5);", "Y = factorial(X)"),
-            (
-                "factorial(5, \"like\", 1);",
-                "Y = factorial(X, \"like\", prototype)",
-            ),
-            ("gamma(5);", "Y = gamma(X)"),
-            ("gammaln(5);", "Y = gammaln(A)"),
-            ("hypot(3, 4);", "C = hypot(A, B)"),
-            ("nextpow2(9);", "p = nextpow2(X)"),
-            ("pow2(3);", "Y = pow2(X)"),
-            ("pow2(1.5, 2);", "Y = pow2(F, E)"),
-            ("sign(-7);", "Y = sign(X)"),
+            ("complex(1);", "complex"),
+            ("complex(1, 2);", "complex"),
+            ("factorial(5);", "factorial"),
+            ("factorial(5, \"like\", 1);", "factorial"),
+            ("gamma(5);", "gamma"),
+            ("gammaln(5);", "gammaln"),
+            ("hypot(3, 4);", "hypot"),
+            ("nextpow2(9);", "nextpow2"),
+            ("pow2(3);", "pow2"),
+            ("pow2(1.5, 2);", "pow2"),
+            ("sign(-7);", "sign"),
         ];
-
-        for (text, expected_label) in cases {
-            let analysis = analyze_document_with_compat(text, CompatMode::default());
-            let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
-            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
-            assert!(
-                labels.contains(&expected_label),
-                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
-                labels
-            );
+        for (text, identity) in cases {
+            assert_catalog_signature_projection(text, identity);
         }
     }
 
     #[test]
     fn signature_help_uses_math_trigonometry_descriptors() {
         let cases = [
-            ("asin(0.5);", "Y = asin(X)"),
-            ("acos(0.5);", "Y = acos(X)"),
-            ("atan(1);", "Y = atan(X)"),
-            ("atan(1, \"like\", 1);", "Y = atan(X, \"like\", P)"),
-            ("sinh(1);", "Y = sinh(X)"),
-            ("cosh(1);", "Y = cosh(X)"),
-            ("tanh(1);", "Y = tanh(X)"),
-            ("asinh(1);", "Y = asinh(X)"),
-            ("acosh(2);", "Y = acosh(X)"),
-            ("atanh(0.5);", "Y = atanh(X)"),
-            ("sind(90);", "Y = sind(X)"),
-            ("cosd(90);", "Y = cosd(X)"),
-            ("tand(45);", "Y = tand(X)"),
-            ("deg2rad(180);", "Y = deg2rad(X)"),
-            ("rad2deg(pi);", "Y = rad2deg(X)"),
-            ("sin(1);", "Y = sin(X)"),
-            ("sin(1, \"like\", 1);", "Y = sin(X, \"like\", P)"),
-            ("cos(1);", "Y = cos(X)"),
-            ("cos(1, \"like\", 1);", "Y = cos(X, \"like\", P)"),
-            ("tan(1);", "Y = tan(X)"),
-            ("tan(1, \"like\", 1);", "Y = tan(X, \"like\", P)"),
-            ("atan2(1, 1);", "Z = atan2(Y, X)"),
+            ("asin(0.5);", "asin"),
+            ("acos(0.5);", "acos"),
+            ("atan(1);", "atan"),
+            ("atan(1, \"like\", 1);", "atan"),
+            ("sinh(1);", "sinh"),
+            ("cosh(1);", "cosh"),
+            ("tanh(1);", "tanh"),
+            ("asinh(1);", "asinh"),
+            ("acosh(2);", "acosh"),
+            ("atanh(0.5);", "atanh"),
+            ("sind(90);", "sind"),
+            ("cosd(90);", "cosd"),
+            ("tand(45);", "tand"),
+            ("deg2rad(180);", "deg2rad"),
+            ("rad2deg(pi);", "rad2deg"),
+            ("sin(1);", "sin"),
+            ("sin(1, \"like\", 1);", "sin"),
+            ("cos(1);", "cos"),
+            ("cos(1, \"like\", 1);", "cos"),
+            ("tan(1);", "tan"),
+            ("tan(1, \"like\", 1);", "tan"),
+            ("atan2(1, 1);", "atan2"),
         ];
-
-        for (text, expected_label) in cases {
-            let analysis = analyze_document_with_compat(text, CompatMode::default());
-            let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
-            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
-            assert!(
-                labels.contains(&expected_label),
-                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
-                labels
-            );
+        for (text, identity) in cases {
+            assert_catalog_signature_projection(text, identity);
         }
     }
 
@@ -4692,100 +4562,54 @@ mod tests {
     #[test]
     fn signature_help_uses_structs_core_descriptors() {
         let cases = [
-            ("fieldnames(struct());", "names = fieldnames(S)"),
-            (
-                "getfield(struct('a', 1), 'a');",
-                "value = getfield(S, field)",
-            ),
-            ("isfield(struct('a', 1), 'a');", "tf = isfield(S, name)"),
-            ("orderfields(struct('a', 1));", "S = orderfields(S)"),
-            (
-                "setfield(struct(), 'a', 1);",
-                "S = setfield(S, field, value)",
-            ),
-            ("struct('a', 1);", "S = struct(field, value, ...)"),
-            ("rmfield(struct('a', 1), 'a');", "S = rmfield(S, field)"),
+            ("fieldnames(struct());", "fieldnames"),
+            ("getfield(struct('a', 1), 'a');", "getfield"),
+            ("isfield(struct('a', 1), 'a');", "isfield"),
+            ("orderfields(struct('a', 1));", "orderfields"),
+            ("setfield(struct(), 'a', 1);", "setfield"),
+            ("struct('a', 1);", "struct"),
+            ("rmfield(struct('a', 1), 'a');", "rmfield"),
         ];
-
-        for (text, expected_label) in cases {
-            let analysis = analyze_document_with_compat(text, CompatMode::default());
-            let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
-            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
-            assert!(
-                labels.contains(&expected_label),
-                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
-                labels
-            );
+        for (text, identity) in cases {
+            assert_catalog_signature_projection(text, identity);
         }
     }
 
     #[test]
     fn signature_help_uses_cells_core_descriptors() {
         let cases = [
-            ("cell();", "C = cell()"),
-            ("cell(2, 3);", "C = cell(m, n, ...)"),
-            (
-                "cell([2, 3], \"like\", zeros(1));",
-                "C = cell(sz, \"like\", prototype)",
-            ),
-            ("cell2mat(cell(1, 1));", "A = cell2mat(C)"),
-            ("cellfun(@length, cell(1, 1));", "Y = cellfun(func, C)"),
-            ("cellstr(\"RunMat\");", "C = cellstr(str)"),
+            ("cell();", "cell"),
+            ("cell(2, 3);", "cell"),
+            ("cell([2, 3], \"like\", zeros(1));", "cell"),
+            ("cell2mat(cell(1, 1));", "cell2mat"),
+            ("cellfun(@length, cell(1, 1));", "cellfun"),
+            ("cellstr(\"RunMat\");", "cellstr"),
         ];
-
-        for (text, expected_label) in cases {
-            let analysis = analyze_document_with_compat(text, CompatMode::default());
-            let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position)
-                .unwrap_or_else(|| panic!("expected signature help for cells-core case: {text}"));
-            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
-            assert!(
-                labels.contains(&expected_label),
-                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
-                labels
-            );
+        for (text, identity) in cases {
+            assert_catalog_signature_projection(text, identity);
         }
     }
 
     #[test]
     fn signature_help_uses_containers_map_descriptors() {
         let cases = [
-            ("containers.Map();", "M = containers.Map()"),
-            ("containers.Map.keys(m);", "K = containers.Map.keys(M)"),
-            ("containers.Map.values(m);", "V = containers.Map.values(M)"),
-            (
-                "containers.Map.values(m, {'a'});",
-                "V = containers.Map.values(M, keySet)",
-            ),
-            (
-                "containers.Map.isKey(m, \"a\");",
-                "tf = containers.Map.isKey(M, keySet)",
-            ),
-            (
-                "containers.Map.remove(m, \"a\");",
-                "containers.Map.remove(M, keySet)",
-            ),
+            ("containers.Map();", "containers.Map"),
+            ("containers.Map.keys(m);", "containers.Map.keys"),
+            ("containers.Map.values(m);", "containers.Map.values"),
+            ("containers.Map.values(m, {'a'});", "containers.Map.values"),
+            ("containers.Map.isKey(m, \"a\");", "containers.Map.isKey"),
+            ("containers.Map.remove(m, \"a\");", "containers.Map.remove"),
             (
                 "containers.Map.subsref(m, \"()\", {\"a\"});",
-                "value = containers.Map.subsref(M, kind, payload)",
+                "containers.Map.subsref",
             ),
             (
                 "containers.Map.subsasgn(m, \"()\", {\"a\"}, 1);",
-                "M = containers.Map.subsasgn(M, kind, payload, rhs)",
+                "containers.Map.subsasgn",
             ),
         ];
-
-        for (text, expected_label) in cases {
-            let analysis = analyze_document_with_compat(text, CompatMode::default());
-            let position = lsp_types::Position::new(0, 0);
-            let sig = signature_help_at(text, &analysis, &position).expect("signature help");
-            let labels: Vec<&str> = sig.signatures.iter().map(|s| s.label.as_str()).collect();
-            assert!(
-                labels.contains(&expected_label),
-                "expected descriptor-backed signature '{expected_label}' for {text}, got {:?}",
-                labels
-            );
+        for (text, identity) in cases {
+            assert_catalog_signature_projection(text, identity);
         }
     }
 

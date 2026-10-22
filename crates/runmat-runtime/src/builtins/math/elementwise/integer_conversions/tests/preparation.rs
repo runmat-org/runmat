@@ -158,11 +158,12 @@ fn characters_preserve_column_major_order_and_full_nd_shape() {
         (vec!['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'], vec![2, 2, 2]),
         (vec![], vec![0, 2, 3]),
     ] {
-        let chars = runmat_value::CharArray::new_with_shape(data, shape.clone()).unwrap();
+        let chars =
+            runmat_value::CharArray::from_unicode_scalars_with_shape(data, shape.clone()).unwrap();
         let expected: Vec<u16> = chars
             .to_column_major()
             .iter()
-            .map(|value| *value as u16)
+            .map(|value| value.raw())
             .collect();
         let result = block_on(crate::dispatcher::call_builtin_async(
             "uint16",

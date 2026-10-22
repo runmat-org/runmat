@@ -35,6 +35,8 @@ fn empty_wgpu_upload_admission_counts_physical_storage_without_copy_volume() {
     for (precision, class, width) in [
         (ProviderPrecision::F32, ProviderElementType::F32, 4),
         (ProviderPrecision::F64, ProviderElementType::F64, 8),
+        (ProviderPrecision::F64, ProviderElementType::F32, 8),
+        (ProviderPrecision::F32, ProviderElementType::F64, 4),
     ] {
         let output = ProviderRepresentation {
             element_type: class,
@@ -72,33 +74,49 @@ fn empty_wgpu_upload_admission_counts_physical_storage_without_copy_volume() {
             ProviderFeasibility::Rejected { .. }
         ));
 
-        let bound = ProviderTransferOutputBound {
-            element_type: class,
-            storage: ProviderStorage::DenseReal,
-            layout: ProviderLayout::ColumnMajorContiguous,
-            residency: ProviderResidency::Device,
-            max_elements: 0,
-        };
-        let bounded = ProviderFeasibilityQuery {
-            inputs: vec![],
-            outputs: vec![],
-            workload: ProviderWorkload {
-                requested_outputs: Some(2),
-                transfer_output_bounds: Some(vec![bound.clone(), bound]),
-                ..ProviderWorkload::default()
-            },
-            ..exact.clone()
-        };
-        let ProviderFeasibility::Supported { estimate } =
-            wgpu_dense_feasibility(&snapshot(class, width), &bounded, precision)
-        else {
-            panic!("bounded empty buffers fit the same physical floor")
-        };
-        assert_eq!(estimate.output_bytes, Some(2 * width));
-        assert!(matches!(
-            wgpu_dense_feasibility(&snapshot(class, width - 1), &bounded, precision),
-            ProviderFeasibility::Rejected { .. }
-        ));
+        for max_elements in [0, 1] {
+            let bound = ProviderTransferOutputBound {
+                element_type: class,
+                storage: ProviderStorage::DenseReal,
+                layout: ProviderLayout::ColumnMajorContiguous,
+                residency: ProviderResidency::Device,
+                max_elements,
+            };
+            let bounded = ProviderFeasibilityQuery {
+                inputs: vec![],
+                outputs: vec![],
+                workload: ProviderWorkload {
+                    requested_outputs: Some(2),
+                    transfer_output_bounds: Some(vec![bound.clone(), bound]),
+                    ..ProviderWorkload::default()
+                },
+                ..exact.clone()
+            };
+            let maximum = (max_elements * class.byte_width()).max(width);
+            let ProviderFeasibility::Supported { estimate } =
+                wgpu_dense_feasibility(&snapshot(class, maximum), &bounded, precision)
+            else {
+                panic!("bounded empty buffers fit the same physical floor")
+            };
+            assert_eq!(estimate.output_bytes, Some(2 * maximum));
+            assert!(matches!(
+                wgpu_dense_feasibility(&snapshot(class, maximum - 1), &bounded, precision),
+                ProviderFeasibility::Rejected { .. }
+            ));
+            let mut overflow = bounded.clone();
+            overflow.workload.transfer_output_bounds.as_mut().unwrap()[0].max_elements = u64::MAX;
+            assert!(
+                !wgpu_dense_feasibility(&snapshot(class, u64::MAX), &overflow, precision)
+                    .is_supported()
+            );
+            let mut malformed = bounded.clone();
+            malformed.workload.transfer_output_bounds.as_mut().unwrap()[0].storage =
+                ProviderStorage::DenseComplexInterleaved;
+            assert!(
+                !wgpu_dense_feasibility(&snapshot(class, u64::MAX), &malformed, precision)
+                    .is_supported()
+            );
+        }
     }
 }
 
@@ -182,6 +200,57 @@ fn exact_wgpu_upload_uses_physical_width_for_every_numeric_class() {
             };
             assert_eq!(estimate.output_bytes, Some(2 * bytes_per_output));
             assert_eq!(estimate.transient_bytes, Some(4 * bytes_per_output));
+            if matches!(
+                class,
+                ProviderElementType::F32
+                    | ProviderElementType::F64
+                    | ProviderElementType::ComplexF32
+                    | ProviderElementType::ComplexF64
+            ) {
+                let mut bound = ProviderTransferOutputBound {
+                    element_type: class,
+                    storage,
+                    layout: ProviderLayout::ColumnMajorContiguous,
+                    residency: ProviderResidency::Device,
+                    max_elements: elements,
+                };
+                assert_eq!(
+                    crate::backend::wgpu_storage::checked_upload_bound_allocation_bytes(
+                        &bound,
+                        ProviderPrecision::F64
+                    ),
+                    Some(bytes_per_output)
+                );
+                bound.max_elements = u64::MAX;
+                assert_eq!(
+                    crate::backend::wgpu_storage::checked_upload_bound_allocation_bytes(
+                        &bound,
+                        ProviderPrecision::F64
+                    ),
+                    None
+                );
+                if storage == ProviderStorage::DenseComplexInterleaved {
+                    // Exact native complex uploads are supported, but the
+                    // existing public late-shaped bound contract stays real.
+                    bound.max_elements = elements;
+                    let bounded = ProviderFeasibilityQuery {
+                        inputs: vec![],
+                        outputs: vec![],
+                        workload: ProviderWorkload {
+                            requested_outputs: Some(1),
+                            transfer_output_bounds: Some(vec![bound]),
+                            ..ProviderWorkload::default()
+                        },
+                        ..query.clone()
+                    };
+                    assert!(!wgpu_dense_feasibility(
+                        &snapshot(u64::MAX),
+                        &bounded,
+                        ProviderPrecision::F64
+                    )
+                    .is_supported());
+                }
+            }
             assert!(matches!(
                 wgpu_dense_feasibility(
                     &snapshot(bytes_per_output - 1),

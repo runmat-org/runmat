@@ -9,7 +9,7 @@ use crate::context::{
     RuntimeContext,
 };
 use crate::RuntimeError;
-use runmat_value::{IntValue, Utf8Text, Value};
+use runmat_value::{IntValue, Utf16CodeUnit, Utf16TextCopyError, Utf8Text, Value};
 use std::fmt::Write;
 
 pub fn convert(value: &Value, runtime: Option<&RuntimeContext>) -> Result<Utf8Text, RuntimeError> {
@@ -23,7 +23,7 @@ pub fn convert(value: &Value, runtime: Option<&RuntimeContext>) -> Result<Utf8Te
             }
         }
         Value::CharArray(array) => {
-            if array.shape.len() > 2 || array.rows != 1 {
+            if crate::builtins::common::shape::effective_rank(&array.shape) > 2 || array.rows != 1 {
                 return Err(invalid(
                     "cannot convert multi-row char array to scalar string",
                 ));
@@ -49,7 +49,7 @@ pub fn convert(value: &Value, runtime: Option<&RuntimeContext>) -> Result<Utf8Te
 /// Encode an already-validated domain character sequence directly in its
 /// final UTF-8 owner. Shape policy remains with the owning domain.
 pub(crate) fn copy_chars(
-    characters: &[char],
+    characters: &[Utf16CodeUnit],
     runtime: Option<&RuntimeContext>,
 ) -> Result<Utf8Text, RuntimeError> {
     let owner =
@@ -60,23 +60,31 @@ pub(crate) fn copy_chars(
         }
         Ok::<_, HostAllocationError>(())
     };
-    let (length, bytes) = Utf8Text::requested_bytes_for_chars_with(characters, check)
-        .map_err(|e| copy_error(runtime, e))?;
+    let (length, bytes) = Utf8Text::requested_bytes_for_utf16_with(characters, check)
+        .map_err(|e| utf16_copy_error(runtime, e))?;
     let receipt = admit(runtime, bytes, usize::from(length != 0))?;
     if let Some(receipt) = &receipt {
         let context = runtime.expect("selected managed context");
         let permit = receipt
             .output_permit(context)
             .map_err(|e| allocation(runtime, e))?;
-        let text = Utf8Text::try_copy_chars_exact_with(characters, &permit, |_| {
+        let text = Utf8Text::try_copy_utf16_exact_with(characters, &permit, |_| {
             receipt.checkpoint(context)
         });
         receipt
             .checkpoint(context)
             .map_err(|e| allocation(runtime, e))?;
-        text.map_err(|e| copy_error(runtime, e))
+        text.map_err(|e| utf16_copy_error(runtime, e))
     } else {
-        Ok(Utf8Text::new(characters.iter().collect()))
+        runmat_value::decode_utf16_code_units(characters)
+            .map(Utf8Text::new)
+            .map_err(|source| {
+                crate::runtime_error::semantic_error_with_source(
+                    "ArgumentConversion",
+                    "argument text contains malformed UTF-16",
+                    source,
+                )
+            })
     }
 }
 fn retain(text: &Utf8Text, runtime: Option<&RuntimeContext>) -> Result<Utf8Text, RuntimeError> {
@@ -120,6 +128,30 @@ pub fn copy_str(text: &str, runtime: Option<&RuntimeContext>) -> Result<Utf8Text
         Ok(text.into())
     }
 }
+
+/// Adopt a caller-owned argument's original bytes. Managed execution reserves
+/// the actual capacity and shared header before constructing the text owner.
+pub fn adopt_string(
+    text: String,
+    runtime: Option<&RuntimeContext>,
+) -> Result<Utf8Text, RuntimeError> {
+    let bytes = Utf8Text::requested_bytes_for_capacity(text.capacity())
+        .map_err(|source| allocation(runtime, source.into()))?;
+    let receipt = admit(runtime, bytes, usize::from(text.capacity() != 0))?;
+    let Some(receipt) = receipt else {
+        return Ok(Utf8Text::new(text));
+    };
+    let context = runtime.expect("managed argument text requires its context");
+    let permit = receipt
+        .output_permit(context)
+        .map_err(|source| allocation(runtime, source))?;
+    let text = Utf8Text::try_adopt_string_exact(text, &permit);
+    receipt
+        .checkpoint(context)
+        .map_err(|source| allocation(runtime, source))?;
+    text.map_err(|source| allocation(runtime, (*source.source()).into()))
+}
+
 pub fn copy_parts(
     parts: &[&str],
     runtime: Option<&RuntimeContext>,
@@ -214,6 +246,26 @@ fn copy_error(
         runmat_value::ExactArrayInitializationError::Element(e) => allocation(runtime, e),
     }
 }
+fn utf16_copy_error(
+    runtime: Option<&RuntimeContext>,
+    source: runmat_value::ExactArrayInitializationError<Utf16TextCopyError<HostAllocationError>>,
+) -> RuntimeError {
+    match source {
+        runmat_value::ExactArrayInitializationError::Allocation(error) => {
+            allocation(runtime, error.into())
+        }
+        runmat_value::ExactArrayInitializationError::Element(Utf16TextCopyError::Checkpoint(
+            error,
+        )) => allocation(runtime, error),
+        runmat_value::ExactArrayInitializationError::Element(Utf16TextCopyError::Decode(
+            source,
+        )) => crate::runtime_error::semantic_error_with_source(
+            "ArgumentConversion",
+            "argument text contains malformed UTF-16",
+            source,
+        ),
+    }
+}
 fn invalid(message: impl Into<String>) -> RuntimeError {
     crate::runtime_error::semantic_error("ArgumentConversion", message)
 }
@@ -250,22 +302,41 @@ mod tests {
 
     #[test]
     fn original_text_is_retained_and_unicode_characters_are_encoded() {
+        let mut original = String::with_capacity(43);
+        original.push_str("member");
+        let pointer = original.as_ptr();
+        let adopted = adopt_string(original, None).unwrap();
+        assert_eq!(adopted.as_str(), "member");
+        assert_eq!(adopted.as_str().as_ptr(), pointer);
         let text = Utf8Text::new("a🙂é".to_owned());
         let pointer = text.as_str().as_ptr();
         let retained = convert(&Value::String(text), None).unwrap();
         assert_eq!(retained.as_str().as_ptr(), pointer);
-        let characters = runmat_value::CharArray::new(vec!['a', '🙂', 'é'], 1, 3).unwrap();
+        let characters =
+            runmat_value::CharArray::from_unicode_scalars(vec!['a', '🙂', 'é'], 1, 4).unwrap();
+        assert_eq!(characters.shape(), &[1, 4]);
         assert_eq!(
             convert(&Value::CharArray(characters), None)
                 .unwrap()
                 .as_str(),
             "a🙂é"
         );
-        let column = runmat_value::CharArray::new(vec!['a', 'b'], 2, 1).unwrap();
+        let column = runmat_value::CharArray::from_unicode_scalars(vec!['a', 'b'], 2, 1).unwrap();
         assert!(convert(&Value::CharArray(column), None).is_err());
         assert_eq!(
             copy_parts(&["a🙂", "", "é"], None).unwrap().as_str(),
             "a🙂é"
         );
+        let malformed = runmat_value::CharArray::from_code_units(
+            vec![runmat_value::Utf16CodeUnit::from_raw(0xD83D)],
+            1,
+            1,
+        )
+        .unwrap();
+        let error = convert(&Value::CharArray(malformed), None).unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:ArgumentConversion"));
+        assert!(std::error::Error::source(&error)
+            .and_then(|source| source.downcast_ref::<runmat_value::Utf16DecodeError>())
+            .is_some());
     }
 }

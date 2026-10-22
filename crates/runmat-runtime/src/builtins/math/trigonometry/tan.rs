@@ -335,7 +335,7 @@ fn tan_char_array(array: CharArray) -> BuiltinResult<Value> {
     let data = array
         .data()
         .iter()
-        .map(|&ch| (ch as u32 as f64).tan())
+        .map(|&ch| (u32::from(ch.raw()) as f64).tan())
         .collect::<Vec<_>>();
     let tensor = Tensor::new(data, vec![array.rows, array.cols])
         .map_err(|e| tan_error_with_detail(&TAN_ERROR_INTERNAL, e))?;
@@ -606,7 +606,7 @@ pub(crate) mod tests {
     #[test]
     fn tan_char_array_roundtrip() {
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let chars = CharArray::new("AB".chars().collect(), 1, 2).unwrap();
+        let chars = CharArray::from_unicode_scalars("AB".chars().collect(), 1, 2).unwrap();
         let result = tan_builtin(Value::CharArray(chars), Vec::new()).expect("tan");
         match result {
             Value::Tensor(t) => {

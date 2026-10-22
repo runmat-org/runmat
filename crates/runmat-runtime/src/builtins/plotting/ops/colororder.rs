@@ -135,7 +135,13 @@ fn resolve_colororder_target(
 }
 
 fn parse_color_order(value: &Value) -> BuiltinResult<Vec<Vec4>> {
-    if let Some(text) = value_as_string(value) {
+    if let Some(text) = value_as_string(value).map_err(|source| {
+        crate::builtins::plotting::plotting_error_with_source(
+            "colororder",
+            source.to_string(),
+            source,
+        )
+    })? {
         return parse_color_text_or_palette(&text);
     }
     match value {
@@ -197,6 +203,13 @@ fn colors_from_cell(cell: &CellArray) -> BuiltinResult<Vec<Vec4>> {
     let mut strings = Vec::with_capacity(cell.data().len());
     for value in cell.data() {
         let text = value_as_string(value)
+            .map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    "colororder",
+                    source.to_string(),
+                    source,
+                )
+            })?
             .ok_or_else(|| colororder_err("cell color arrays must contain strings"))?;
         strings.push(text);
     }

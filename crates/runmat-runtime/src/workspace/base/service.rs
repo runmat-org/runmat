@@ -20,11 +20,37 @@ use crate::workspace::{DetachedWorkspaceValues, WorkspaceDetachSelection};
 #[derive(Clone, Debug)]
 pub struct BaseWorkspaceService {
     owner: BaseWorkspaceOwner,
+    invocation_projection: Option<std::rc::Rc<super::BaseWorkspaceProjectionService>>,
 }
 
 impl BaseWorkspaceService {
     pub fn new(owner: BaseWorkspaceOwner) -> Self {
-        Self { owner }
+        Self {
+            owner,
+            invocation_projection: None,
+        }
+    }
+
+    /// Bind base effects to this invocation's already-observed canonical
+    /// projection, never to an unrelated source or a second workspace owner.
+    pub fn with_invocation_projection(
+        mut self,
+        projection: std::rc::Rc<super::BaseWorkspaceProjectionService>,
+    ) -> Result<Self, RuntimeError> {
+        if !projection.canonical_owner()?.same_owner(&self.owner) {
+            return Err(semantic_error(
+                "RunMat:Workspace:ForeignProjection",
+                "base projection belongs to a different canonical owner",
+            ));
+        }
+        self.invocation_projection = Some(projection);
+        Ok(self)
+    }
+
+    pub fn invocation_projection(
+        &self,
+    ) -> Option<std::rc::Rc<super::BaseWorkspaceProjectionService>> {
+        self.invocation_projection.clone()
     }
 
     pub fn owner(&self) -> BaseWorkspaceOwner {
@@ -49,6 +75,46 @@ impl BaseWorkspaceService {
 impl RuntimeBaseWorkspaceService for BaseWorkspaceService {
     fn owner(&self) -> BaseWorkspaceOwner {
         BaseWorkspaceService::owner(self)
+    }
+
+    fn invocation_projection(&self) -> Option<std::rc::Rc<super::BaseWorkspaceProjectionService>> {
+        BaseWorkspaceService::invocation_projection(self)
+    }
+
+    fn assign_logical_ref_with_context(
+        &self,
+        variables: &crate::workspace::session::SessionVariableAuthority,
+        context: &crate::context::RuntimeContext,
+        name: &str,
+        value: &Value,
+    ) -> Result<(), RuntimeError> {
+        let Some(projection) = self.invocation_projection.as_ref() else {
+            return super::assign_logical_base_value_ref_with_context(
+                &self.owner,
+                variables,
+                context,
+                name,
+                value,
+            );
+        };
+        crate::execution::validate_storable_value(value)?;
+        if let Some(target) = projection.global_target(name)? {
+            return match target {
+                crate::workspace::GlobalBindingTarget::Named(target_name) => {
+                    variables.store_global_ref_with_context(context, target_name.as_str(), value)
+                }
+                crate::workspace::GlobalBindingTarget::LegacySlot(slot) => {
+                    variables.store_global_slot_ref_with_context(context, slot, value)
+                }
+            };
+        }
+        crate::context::RuntimeWorkspaceService::assign_ref_with_context(
+            projection.as_ref(),
+            context,
+            name,
+            value,
+        )?;
+        projection.publish_with_context(context).map(|_| ())
     }
 }
 

@@ -98,6 +98,8 @@ export const MODULE_COMPOSITION_SUFFIXES = Object.freeze(
 const PRODUCTS = deepImmutable([
   fixedProduct("catalog-aliases", "catalog", "catalog/aliases", ["aliases"]),
   fixedProduct("catalog-root", "catalog", "catalog/entries", ["entries", "constants"]),
+  fixedProduct("catalog-io-tabular", "catalog", "catalog/entries/io/tabular", ["entries"]),
+  fixedProduct("catalog-plotting-line", "catalog", "catalog/entries/plotting/line", ["entries"]),
   fixedProduct("runtime-root", "runtime", "builtins", []),
   ...PAIRED_PRODUCT_CONFIGURATIONS.flatMap(pairedProducts),
   fixedProduct("runtime-logical-rel", "runtime", "builtins/logical/rel", []),

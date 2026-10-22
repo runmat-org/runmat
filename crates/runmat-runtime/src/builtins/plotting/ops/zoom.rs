@@ -96,7 +96,13 @@ pub fn zoom_builtin(
             }
         }
         (1, Some(single), _) => {
-            if let Some(option) = super::style::value_as_string(single) {
+            if let Some(option) = super::style::value_as_string(single).map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    "zoom",
+                    source.to_string(),
+                    source,
+                )
+            })? {
                 apply_option_to_figure(ensure_current_zoom_figure(), &option)?;
                 return Ok(status());
             }
@@ -117,7 +123,13 @@ pub fn zoom_builtin(
         }
         (2, Some(target), Some(command)) => {
             let target = resolve_zoom_target(target)?;
-            if let Some(option) = super::style::value_as_string(command) {
+            if let Some(option) = super::style::value_as_string(command).map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    "zoom",
+                    source.to_string(),
+                    source,
+                )
+            })? {
                 apply_option_to_target(target, &option)?;
                 return Ok(status());
             }
@@ -653,6 +665,13 @@ fn parse_on_off(value: &Value, property: &str) -> BuiltinResult<bool> {
 
 fn parse_motion(value: &Value) -> BuiltinResult<ZoomMotion> {
     let text = super::style::value_as_string(value)
+        .map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                "zoom",
+                source.to_string(),
+                source,
+            )
+        })?
         .ok_or_else(|| invalid("Motion must be 'both', 'horizontal', or 'vertical'"))?;
     match text.trim().to_ascii_lowercase().as_str() {
         "both" => Ok(ZoomMotion::Both),
@@ -666,6 +685,13 @@ fn parse_motion(value: &Value) -> BuiltinResult<ZoomMotion> {
 
 fn parse_direction(value: &Value) -> BuiltinResult<ZoomDirection> {
     let text = super::style::value_as_string(value)
+        .map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                "zoom",
+                source.to_string(),
+                source,
+            )
+        })?
         .ok_or_else(|| invalid("Direction must be 'in' or 'out'"))?;
     match text.trim().to_ascii_lowercase().as_str() {
         "in" => Ok(ZoomDirection::In),
@@ -676,6 +702,13 @@ fn parse_direction(value: &Value) -> BuiltinResult<ZoomDirection> {
 
 fn parse_right_click_action(value: &Value) -> BuiltinResult<ZoomRightClickAction> {
     let text = super::style::value_as_string(value)
+        .map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                "zoom",
+                source.to_string(),
+                source,
+            )
+        })?
         .ok_or_else(|| invalid("RightClickAction must be 'PostContextMenu' or 'InverseZoom'"))?;
     match text.trim().to_ascii_lowercase().as_str() {
         "postcontextmenu" => Ok(ZoomRightClickAction::PostContextMenu),

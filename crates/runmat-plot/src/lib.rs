@@ -129,15 +129,13 @@ pub fn show_plot_unified(
 
 /// Render figure to file using the same GPU pipeline as interactive mode
 #[cfg(not(target_arch = "wasm32"))]
-fn render_figure_to_file(figure: plots::Figure, path: &str) -> Result<String, String> {
+fn render_figure_to_file(mut figure: plots::Figure, path: &str) -> Result<String, String> {
     use crate::export::ImageExporter;
-    // Use the headless GPU exporter that shares the same render pipeline
-    let rt =
-        tokio::runtime::Runtime::new().map_err(|e| format!("Failed to create runtime: {e}"))?;
-    rt.block_on(async move {
-        let mut fig = figure.clone();
+    // This synchronous API polls WGPU completion futures directly. It does
+    // not own a Tokio reactor and may be called from an existing runtime.
+    pollster::block_on(async move {
         let exporter = ImageExporter::new().await?;
-        exporter.export_png(&mut fig, path).await?;
+        exporter.export_png(&mut figure, path).await?;
         Ok::<_, String>(format!("Saved plot to {path}"))
     })
 }

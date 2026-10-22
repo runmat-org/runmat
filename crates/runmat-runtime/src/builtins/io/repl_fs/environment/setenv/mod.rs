@@ -13,5 +13,6 @@ use runmat_value::Value;
     builtin_path = "crate::builtins::io::repl_fs::environment::setenv"
 )]
 async fn setenv_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Value> {
+    crate::builtins::common::env::require_write()?;
     execute::run(args)
 }

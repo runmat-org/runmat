@@ -89,7 +89,7 @@ fn parse_options(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<U
     let mut end = args.len();
     let mut multiselect = false;
     while end >= 2 {
-        let option_name = match try_scalar_text(&args[end - 2]) {
+        let option_name = match try_scalar_text(&args[end - 2], "option name", invalid_argument)? {
             Some(name) => name,
             None => break,
         };

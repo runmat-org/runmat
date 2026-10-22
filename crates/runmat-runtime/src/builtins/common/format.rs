@@ -4,7 +4,7 @@ use std::char;
 use std::iter::Peekable;
 use std::str::Chars;
 
-use runmat_value::{IntValue, IntegerStorage, LogicalArray, Value};
+use runmat_value::{decode_utf16_code_units, IntValue, IntegerStorage, LogicalArray, Value};
 
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
@@ -54,6 +54,12 @@ impl<'a> ArgCursor<'a> {
 
 fn format_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).build()
+}
+
+fn format_utf16_error(context: &str, error: runmat_value::Utf16DecodeError) -> RuntimeError {
+    build_runtime_error(format!("{context}: {error}"))
+        .with_source(error)
+        .build()
 }
 
 fn format_error_with_identifier(
@@ -805,13 +811,9 @@ pub(crate) fn complex_to_string(re: f64, im: f64) -> String {
 fn value_to_string(value: &Value) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.as_str().to_owned()),
-        Value::CharArray(ca) => {
-            let mut s = String::with_capacity(ca.data().len());
-            for ch in ca.data() {
-                s.push(*ch);
-            }
-            Ok(s)
-        }
+        Value::CharArray(ca) => decode_utf16_code_units(ca.data()).map_err(|error| {
+            format_utf16_error("sprintf: character value is not valid UTF-16 text", error)
+        }),
         Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].as_str().to_owned()),
         Value::Num(n) => Ok(number_to_string(*n)),
         Value::Int(i) => Ok(int_value_to_decimal(i)),
@@ -828,11 +830,20 @@ fn value_to_char(value: &Value) -> BuiltinResult<char> {
         Value::String(s) => s.chars().next().ok_or_else(|| {
             format_error("sprintf: %c conversion requires non-empty character input")
         }),
-        Value::CharArray(ca) => ca
-            .data()
-            .first()
-            .copied()
-            .ok_or_else(|| format_error("sprintf: %c conversion requires non-empty char input")),
+        Value::CharArray(ca) => {
+            let mut decoded = char::decode_utf16(ca.data().iter().map(|unit| unit.raw()));
+            match decoded.next() {
+                Some(Ok(character)) => Ok(character),
+                Some(Err(source)) => Err(build_runtime_error(format!(
+                    "sprintf: %c character is not valid UTF-16 text: {source}"
+                ))
+                .with_source(source)
+                .build()),
+                None => Err(format_error(
+                    "sprintf: %c conversion requires non-empty char input",
+                )),
+            }
+        }
         Value::Num(n) => {
             if !n.is_finite() {
                 return Err(format_error(
@@ -926,7 +937,13 @@ pub fn extract_format_string(value: &Value, context: &str) -> BuiltinResult<Stri
                     "{context}: formatSpec must be a character row vector or string scalar"
                 )));
             }
-            Ok(ca.data().iter().collect())
+            ca.try_row_string()
+                .map_err(|error| format_utf16_error(context, error))?
+                .ok_or_else(|| {
+                    format_error(format!(
+                        "{context}: formatSpec must be a character row vector or string scalar"
+                    ))
+                })
         }
         Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].as_str().to_owned()),
         _ => Err(format_error(format!(
@@ -1087,13 +1104,17 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
         },
         Value::CharArray(ca) => {
             if ca.rows == 1 {
-                output.push(Value::string(ca.data().iter().collect::<String>()));
+                let text = decode_utf16_code_units(ca.data()).map_err(|error| {
+                    format_utf16_error("character value is not valid UTF-16 text", error)
+                })?;
+                output.push(Value::string(text));
             } else {
                 for row in 0..ca.rows {
-                    let mut line = String::with_capacity(ca.cols);
-                    for col in 0..ca.cols {
-                        line.push(ca.data()[row * ca.cols + col]);
-                    }
+                    let start = row * ca.cols;
+                    let line = decode_utf16_code_units(&ca.data()[start..start + ca.cols])
+                        .map_err(|error| {
+                            format_utf16_error("character row is not valid UTF-16 text", error)
+                        })?;
                     output.push(Value::string(line));
                 }
             }

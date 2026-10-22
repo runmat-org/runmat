@@ -25,11 +25,24 @@ pub(super) fn execute(
     if state.region_observation.is_some() && !request_matches_function(state, request) {
         state.region_observation = None;
     } else {
-        super::region::observation::before_site(state, request);
+        match super::region::observation::before_site(state, request) {
+            Ok(()) => {}
+            Err(NativeExecutorError::CallSuspended) => {
+                return super::call_suspension::publish(state, call, request, exit)
+            }
+            Err(error) => return Err(error),
+        }
     }
     let result = execute_inner(state, call, request, exit);
-    super::region::observation::after_site(state, request, &result);
-    result
+    let observed = super::region::observation::after_site(state, request, &result);
+    runmat_runtime::numeric_region::service::set_native_region_for_current_poll(
+        super::region::observation::active_audit(state),
+    );
+    match (result, observed) {
+        (Err(first), _) => Err(first),
+        (Ok(_), Err(error)) => Err(error),
+        (Ok(outcome), Ok(())) => Ok(outcome),
+    }
 }
 
 fn request_matches_function(state: &HostState, request: NativeSiteRequest) -> bool {
@@ -397,7 +410,9 @@ fn execute_statement(
             destination,
             source,
         } => super::call::capture_sequence(state, *destination, source)?,
-        MirStmtKind::Assign { .. }
+        MirStmtKind::PrepareFixedAssignment(_)
+        | MirStmtKind::PreparedAssign { .. }
+        | MirStmtKind::Assign { .. }
         | MirStmtKind::MultiAssign { .. }
         | MirStmtKind::SequenceAssign { .. }
         | MirStmtKind::PlaceMutation(_) => {

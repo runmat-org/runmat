@@ -253,6 +253,7 @@ pub enum RuntimeFailureOrigin {
     #[default]
     Unclassified,
     LanguageEvaluation,
+    ExecutionControlCancellation,
 }
 
 /// Whether dispatcher-level legacy GPU gather-and-retry may transform this error.

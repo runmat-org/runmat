@@ -119,10 +119,6 @@ struct ManagedReplacementService {
 }
 
 impl RuntimeAccelerationService for ManagedReplacementService {
-    fn supports_operation(&self, _: &str) -> bool {
-        true
-    }
-
     fn prepare_admitted(
         &self,
         _: RuntimeContext,
@@ -308,10 +304,6 @@ struct OutputCountService {
 }
 
 impl RuntimeAccelerationService for OutputCountService {
-    fn supports_operation(&self, _: &str) -> bool {
-        true
-    }
-
     fn prepare_admitted(
         &self,
         _: RuntimeContext,
@@ -558,9 +550,6 @@ fn unwind_aborts_once() {
 
 struct MalformedService(Events);
 impl RuntimeAccelerationService for MalformedService {
-    fn supports_operation(&self, _: &str) -> bool {
-        true
-    }
     fn prepare_admitted(
         &self,
         _: RuntimeContext,
@@ -587,11 +576,7 @@ fn malformed_service_response_aborts_without_executing() {
 }
 
 struct DefaultService;
-impl RuntimeAccelerationService for DefaultService {
-    fn supports_operation(&self, _: &str) -> bool {
-        false
-    }
-}
+impl RuntimeAccelerationService for DefaultService {}
 
 #[test]
 fn absent_or_default_service_preserves_runtime_owned_execution() {

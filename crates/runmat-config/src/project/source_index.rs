@@ -73,6 +73,18 @@ pub fn build_project_source_index(
     project_root: &Path,
     manifest: &ProjectManifest,
 ) -> Result<ProjectSourceIndex, ProjectSourceIndexError> {
+    build_project_source_index_excluding(project_root, manifest, &[])
+}
+
+/// Index this package without entering roots owned by other admitted packages.
+/// Exclusions are canonical roots supplied by the resolved graph owner; this
+/// walker does not infer ownership from nested manifests. Resolve explicit
+/// source-root aliases before testing ownership, without changing descriptors.
+pub fn build_project_source_index_excluding(
+    project_root: &Path,
+    manifest: &ProjectManifest,
+    excluded_roots: &[PathBuf],
+) -> Result<ProjectSourceIndex, ProjectSourceIndexError> {
     let mut index = ProjectSourceIndex::default();
     for source_root in &manifest.sources.roots {
         let absolute_root = project_root.join(source_root);
@@ -81,6 +93,16 @@ pub fn build_project_source_index(
                 root: source_root.clone(),
             });
         }
+        let absolute_root = if excluded_roots.is_empty() {
+            absolute_root
+        } else {
+            fs::canonicalize(&absolute_root).map_err(|source| {
+                ProjectSourceIndexError::ReadEntry {
+                    path: absolute_root.clone(),
+                    source,
+                }
+            })?
+        };
         scan_source_dir(
             &absolute_root,
             &absolute_root,
@@ -88,6 +110,7 @@ pub fn build_project_source_index(
             &ScanState::default(),
             &mut index,
             project_root,
+            excluded_roots,
         )?;
     }
     normalize_source_index(&mut index);
@@ -98,6 +121,15 @@ pub async fn build_project_source_index_async(
     project_root: &Path,
     manifest: &ProjectManifest,
 ) -> Result<ProjectSourceIndex, ProjectSourceIndexError> {
+    build_project_source_index_excluding_async(project_root, manifest, &[]).await
+}
+
+/// Virtual-filesystem equivalent of build_project_source_index_excluding.
+pub async fn build_project_source_index_excluding_async(
+    project_root: &Path,
+    manifest: &ProjectManifest,
+    excluded_roots: &[PathBuf],
+) -> Result<ProjectSourceIndex, ProjectSourceIndexError> {
     let mut index = ProjectSourceIndex::default();
     for source_root in &manifest.sources.roots {
         let absolute_root = project_root.join(source_root);
@@ -106,6 +138,16 @@ pub async fn build_project_source_index_async(
                 root: source_root.clone(),
             });
         }
+        let absolute_root = if excluded_roots.is_empty() {
+            absolute_root
+        } else {
+            runmat_filesystem::canonicalize_async(&absolute_root)
+                .await
+                .map_err(|source| ProjectSourceIndexError::ReadEntry {
+                    path: absolute_root.clone(),
+                    source,
+                })?
+        };
         scan_source_dir_async(
             &absolute_root,
             &absolute_root,
@@ -113,6 +155,7 @@ pub async fn build_project_source_index_async(
             &ScanState::default(),
             &mut index,
             project_root,
+            excluded_roots,
         )
         .await?;
     }
@@ -158,6 +201,7 @@ pub fn build_loose_source_index(
                     &ScanState::default(),
                     &mut index,
                     root,
+                    &[],
                 )?;
             }
             continue;
@@ -194,6 +238,7 @@ pub async fn build_loose_source_index_async(
                     &ScanState::default(),
                     &mut index,
                     root,
+                    &[],
                 )
                 .await?;
             }
@@ -300,7 +345,11 @@ fn scan_source_dir(
     state: &ScanState,
     index: &mut ProjectSourceIndex,
     project_root: &Path,
+    excluded_roots: &[PathBuf],
 ) -> Result<(), ProjectSourceIndexError> {
+    if excluded_roots.iter().any(|root| dir.starts_with(root)) {
+        return Ok(());
+    }
     let mut entries = fs::read_dir(dir).map_err(|source| ProjectSourceIndexError::ReadDir {
         path: dir.to_path_buf(),
         source,
@@ -316,6 +365,9 @@ fn scan_source_dir(
 
     for entry in sorted {
         let path = entry.path();
+        if excluded_roots.iter().any(|root| path.starts_with(root)) {
+            continue;
+        }
         let file_type = entry
             .file_type()
             .map_err(|source| ProjectSourceIndexError::ReadEntry {
@@ -355,6 +407,7 @@ fn scan_source_dir(
                 &next,
                 index,
                 project_root,
+                excluded_roots,
             )?;
             continue;
         }
@@ -372,9 +425,16 @@ async fn scan_source_dir_async(
     state: &ScanState,
     index: &mut ProjectSourceIndex,
     project_root: &Path,
+    excluded_roots: &[PathBuf],
 ) -> Result<(), ProjectSourceIndexError> {
     let mut stack = vec![(dir.to_path_buf(), state.clone())];
     while let Some((current_dir, current_state)) = stack.pop() {
+        if excluded_roots
+            .iter()
+            .any(|root| current_dir.starts_with(root))
+        {
+            continue;
+        }
         let mut sorted = runmat_filesystem::read_dir_async(&current_dir)
             .await
             .map_err(|source| ProjectSourceIndexError::ReadDir {
@@ -385,6 +445,9 @@ async fn scan_source_dir_async(
 
         for entry in sorted {
             let path = entry.path().to_path_buf();
+            if excluded_roots.iter().any(|root| path.starts_with(root)) {
+                continue;
+            }
             let name = entry.file_name().to_string_lossy().to_string();
             if entry.is_dir() {
                 let mut next = current_state.clone();

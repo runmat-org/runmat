@@ -1,16 +1,14 @@
 mod contract;
 pub use contract::*;
 mod inference;
+mod documentation;
 use crate::*;
 pub const PAN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     audience: BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "pan" },
     category: "plotting",
-    documentation: BuiltinDocumentation {
-        summary: "Control interactive axes panning.",
-        ..BuiltinDocumentation::EMPTY
-    },
+    documentation: documentation::DOCUMENTATION,
     descriptor: &PAN_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Incomplete,

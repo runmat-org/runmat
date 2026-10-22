@@ -20,6 +20,18 @@ fn analyze_capture_facts(body: &MirBody) -> CaptureFacts {
     for block in &body.blocks {
         for stmt in &block.statements {
             match &stmt.kind {
+                MirStmtKind::PrepareFixedAssignment(owner) => {
+                    owner.visit_external_operands(|operand| {
+                        scan_operand(body, operand, &mut reads_captures)
+                    });
+                    owner.visit_preparation_steps_dyn(&mut |steps| {
+                        scan_preparation_steps(body, steps, &mut reads_captures)
+                    });
+                }
+                MirStmtKind::PreparedAssign { preparation, value } => {
+                    scan_rvalue(body, value, &mut reads_captures);
+                    scan_place_write(body, &preparation.mutation.place, &mut writes_captures);
+                }
                 MirStmtKind::Assign { place, value } => {
                     scan_rvalue(body, value, &mut reads_captures);
                     scan_place_write(body, place, &mut writes_captures);
@@ -173,15 +185,30 @@ fn scan_rvalue(body: &MirBody, value: &MirRvalue, reads_captures: &mut BTreeSet<
             scan_operand(body, left, reads_captures);
             for stmt in right_temps {
                 match &stmt.kind {
-                    crate::MirStmtKind::Assign { value, .. }
+                    crate::MirStmtKind::PreparedAssign { value, .. }
+                    | crate::MirStmtKind::Assign { value, .. }
                     | crate::MirStmtKind::Expr(value)
                     | crate::MirStmtKind::MultiAssign { value, .. }
                     | crate::MirStmtKind::SequenceAssign { value, .. } => {
                         scan_rvalue(body, value, reads_captures);
                     }
+                    crate::MirStmtKind::PrepareFixedAssignment(owner) => {
+                        owner.visit_external_operands(|operand| {
+                            scan_operand(body, operand, reads_captures)
+                        });
+                        owner.visit_preparation_steps_dyn(&mut |steps| {
+                            scan_preparation_steps(body, steps, reads_captures)
+                        });
+                    }
+                    crate::MirStmtKind::CaptureSequence { source, .. } => {
+                        source
+                            .visit_operands(|operand| scan_operand(body, operand, reads_captures));
+                        source.visit_direct_expression_steps_dyn(&mut |steps| {
+                            scan_preparation_steps(body, steps, reads_captures)
+                        });
+                    }
                     crate::MirStmtKind::PlaceMutation(_)
                     | crate::MirStmtKind::StatementOutput(_)
-                    | crate::MirStmtKind::CaptureSequence { .. }
                     | crate::MirStmtKind::WorkspaceEffect { .. }
                     | crate::MirStmtKind::EnvironmentEffect(_) => {}
                 }
@@ -324,6 +351,23 @@ fn scan_indexing(body: &MirBody, indexing: &MirIndexing, reads_captures: &mut BT
                 crate::MirExpressionRegionRef::Prepared(region),
                 reads_captures,
             ),
+            MirIndexComponent::Expansion(region) => {
+                for step in &region.steps {
+                    match step {
+                        crate::MirExpressionStep::Let { value, .. } => {
+                            scan_rvalue(body, value, reads_captures)
+                        }
+                        crate::MirExpressionStep::CaptureSequence { source, .. } => {
+                            source.visit_operands(|operand| {
+                                scan_operand(body, operand, reads_captures)
+                            });
+                        }
+                    }
+                }
+                region
+                    .argument
+                    .visit_operands(|operand| scan_operand(body, operand, reads_captures));
+            }
             MirIndexComponent::Colon => {}
         }
     }
@@ -346,6 +390,24 @@ fn scan_expression_region(
         }
     }
     scan_operand(body, region.result(), reads_captures);
+}
+
+fn scan_preparation_steps(
+    body: &MirBody,
+    steps: &[crate::MirExpressionStep],
+    reads: &mut BTreeSet<BindingId>,
+) {
+    for step in steps {
+        match step {
+            crate::MirExpressionStep::Let { value, .. } => scan_rvalue(body, value, reads),
+            crate::MirExpressionStep::CaptureSequence { source, .. } => {
+                source.visit_operands(|operand| scan_operand(body, operand, reads));
+                source.visit_direct_expression_steps_dyn(&mut |steps| {
+                    scan_preparation_steps(body, steps, reads)
+                });
+            }
+        }
+    }
 }
 
 fn place_root(place: &MirPlace) -> Option<MirLocalId> {
@@ -429,39 +491,9 @@ fn analyze_spawn_boundaries_with_capture_facts(
             .cloned()
             .unwrap_or_else(|| vec![BTreeSet::new(); body.locals.len()]);
         for stmt in &block.statements {
-            match &stmt.kind {
-                MirStmtKind::Assign { place, value } => {
-                    collect_classified_spawn_rvalue(
-                        value,
-                        stmt.span,
-                        capture_facts,
-                        &state,
-                        &mut boundaries,
-                    );
-                    if let MirPlace::Local(local) = place {
-                        state[local.0].clear();
-                        if let Some(target) = future_target(value) {
-                            state[local.0].insert(target);
-                        }
-                    }
-                }
-                MirStmtKind::MultiAssign { value, .. }
-                | MirStmtKind::SequenceAssign { value, .. }
-                | MirStmtKind::Expr(value) => {
-                    collect_classified_spawn_rvalue(
-                        value,
-                        stmt.span,
-                        capture_facts,
-                        &state,
-                        &mut boundaries,
-                    );
-                }
-                MirStmtKind::CaptureSequence { .. } => {}
-                MirStmtKind::PlaceMutation(_)
-                | MirStmtKind::StatementOutput(_)
-                | MirStmtKind::WorkspaceEffect { .. }
-                | MirStmtKind::EnvironmentEffect(_) => {}
-            }
+            walk_spawn_statement(body, stmt, &mut state, &mut |value, span, state| {
+                collect_classified_spawn_rvalue(value, span, capture_facts, state, &mut boundaries);
+            });
         }
     }
     boundaries
@@ -475,46 +507,283 @@ fn future_target_in_states(body: &MirBody) -> Vec<Vec<BTreeSet<FunctionId>>> {
         .enumerate()
         .map(|(idx, block)| (block.id, idx))
         .collect();
-    let mut in_states = vec![vec![BTreeSet::new(); local_count]; body.blocks.len()];
+    // Unreachable is distinct from a reachable unknown target. Unknown is an
+    // absorbing join member, not an empty list of known incoming possibilities.
+    let mut predecessors = vec![Vec::new(); body.blocks.len()];
+    for (index, block) in body.blocks.iter().enumerate() {
+        for successor in successors(&block.terminator.kind) {
+            if let Some(&target) = block_index.get(&successor) {
+                predecessors[target].push(index);
+            }
+        }
+    }
+    let unknown = || vec![BTreeSet::new(); local_count];
+    let mut in_states: Vec<Option<Vec<BTreeSet<FunctionId>>>> = vec![None; body.blocks.len()];
     let mut out_states = in_states.clone();
     let mut changed = true;
     while changed {
         changed = false;
-        for (idx, block) in body.blocks.iter().enumerate() {
-            let mut state = in_states[idx].clone();
-            transfer_future_targets(block, &mut state);
-            if state != out_states[idx] {
-                out_states[idx] = state.clone();
-                changed = true;
-            }
-            for successor in successors(&block.terminator.kind) {
-                let Some(&successor_idx) = block_index.get(&successor) else {
-                    continue;
-                };
-                for (target, incoming) in in_states[successor_idx].iter_mut().zip(&state) {
-                    let before = target.len();
-                    target.extend(incoming.iter().copied());
-                    if target.len() != before {
-                        changed = true;
+        for (index, block) in body.blocks.iter().enumerate() {
+            let mut incoming = (index == 0).then(unknown);
+            for &predecessor in &predecessors[index] {
+                if let Some(state) = &out_states[predecessor] {
+                    match &mut incoming {
+                        Some(joined) => join_future_targets(joined, state),
+                        None => incoming = Some(state.clone()),
                     }
                 }
+            }
+            in_states[index] = incoming.clone();
+            let output = incoming.map(|mut state| {
+                transfer_future_targets(body, block, &mut state);
+                state
+            });
+            if output != out_states[index] {
+                out_states[index] = output;
+                changed = true;
             }
         }
     }
     in_states
+        .into_iter()
+        .map(|state| state.unwrap_or_else(unknown))
+        .collect()
 }
 
-fn transfer_future_targets(block: &crate::BasicBlock, state: &mut [BTreeSet<FunctionId>]) {
+fn join_future_targets(joined: &mut [BTreeSet<FunctionId>], incoming: &[BTreeSet<FunctionId>]) {
+    for (target, source) in joined.iter_mut().zip(incoming) {
+        if target.is_empty() || source.is_empty() {
+            target.clear();
+        } else {
+            target.extend(source.iter().copied());
+        }
+    }
+}
+
+fn transfer_future_targets(
+    body: &MirBody,
+    block: &crate::BasicBlock,
+    state: &mut [BTreeSet<FunctionId>],
+) {
     for stmt in &block.statements {
-        let MirStmtKind::Assign { place, value } = &stmt.kind else {
-            continue;
-        };
-        if let MirPlace::Local(local) = place {
-            state[local.0].clear();
-            if let Some(target) = future_target(value) {
-                state[local.0].insert(target);
+        walk_spawn_statement(body, stmt, state, &mut |_, _, _| {});
+    }
+    if let MirTerminatorKind::Await {
+        result: Some(place),
+        ..
+    } = &block.terminator.kind
+    {
+        invalidate_place(body, place, state);
+    }
+}
+
+/// Execute the SAME ordered static transfer for both classification and the
+/// predecessor fixed point. Descriptor-only phases do not replay selectors.
+fn walk_spawn_statement(
+    body: &MirBody,
+    statement: &crate::MirStmt,
+    state: &mut [BTreeSet<FunctionId>],
+    classify: &mut dyn FnMut(&MirRvalue, Span, &[BTreeSet<FunctionId>]),
+) {
+    match &statement.kind {
+        MirStmtKind::PrepareFixedAssignment(owner) => {
+            walk_statement_preparation(body, statement, state, classify);
+            if let crate::MirFixedPreparationPhase::EvaluateSelector {
+                region,
+                destination: crate::MirFixedSelectorDestination::Scalar(local),
+                ..
+            } = &owner.phase
+            {
+                state[local.0] = match &region.argument {
+                    crate::MirCallArg::Single(operand) => operand_future_targets(operand, state),
+                    _ => BTreeSet::new(),
+                };
             }
         }
+        MirStmtKind::PreparedAssign { preparation, value } => {
+            walk_spawn_rvalue(body, value, statement.span, state, classify);
+            assign_future_targets(body, &preparation.mutation.place, value, state);
+        }
+        MirStmtKind::Assign { place, value } => {
+            walk_spawn_rvalue(body, value, statement.span, state, classify);
+            walk_statement_preparation(body, statement, state, classify);
+            assign_future_targets(body, place, value, state);
+        }
+        MirStmtKind::MultiAssign { targets, value } => {
+            walk_spawn_rvalue(body, value, statement.span, state, classify);
+            walk_statement_preparation(body, statement, state, classify);
+            for target in &targets.targets {
+                match target {
+                    crate::MirOutputTarget::Place(place) => invalidate_place(body, place, state),
+                    crate::MirOutputTarget::Sequence(target) => {
+                        invalidate_place(body, target.base(), state)
+                    }
+                    crate::MirOutputTarget::Discard => {}
+                }
+            }
+        }
+        MirStmtKind::SequenceAssign { target, value } => {
+            walk_spawn_rvalue(body, value, statement.span, state, classify);
+            walk_statement_preparation(body, statement, state, classify);
+            invalidate_place(body, target.base(), state);
+        }
+        MirStmtKind::Expr(value) => walk_spawn_rvalue(body, value, statement.span, state, classify),
+        // CaptureSequence's directly executed source preparation was visited
+        // above. It defines a sequence receipt, never a scalar future local.
+        MirStmtKind::CaptureSequence { .. } => {
+            walk_statement_preparation(body, statement, state, classify)
+        }
+        MirStmtKind::WorkspaceEffect { effect, bindings } => {
+            use runmat_types::WorkspaceEffect;
+            match effect {
+                WorkspaceEffect::CreatesBinding
+                | WorkspaceEffect::ClearsBinding
+                | WorkspaceEffect::MutatesGlobal
+                | WorkspaceEffect::MutatesPersistent
+                | WorkspaceEffect::LoadsExternalBindings => {
+                    // Empty builtin annotations precede the executing call.
+                    // Its typed effect is applied after its arguments below;
+                    // declarations instead identify their exact binding slots.
+                    for local in bindings {
+                        state[local.0].clear();
+                    }
+                }
+                // DynamicEval annotations also represent foreign-workspace eval.
+                // The executing call's typed effect below identifies current eval.
+                WorkspaceEffect::None
+                | WorkspaceEffect::DynamicEval
+                | WorkspaceEffect::ReadsWorkspace
+                | WorkspaceEffect::ClearsFunctionCache => {}
+            }
+        }
+        // PlaceMutation describes the following store, not an earlier write:
+        // its RHS must still see the original future target.
+        MirStmtKind::PlaceMutation(_)
+        | MirStmtKind::StatementOutput(_)
+        | MirStmtKind::EnvironmentEffect(_) => {}
+    }
+}
+
+fn walk_statement_preparation(
+    body: &MirBody,
+    statement: &crate::MirStmt,
+    state: &mut [BTreeSet<FunctionId>],
+    classify: &mut dyn FnMut(&MirRvalue, Span, &[BTreeSet<FunctionId>]),
+) {
+    statement
+        .kind
+        .visit_statement_expression_steps_dyn(&mut |steps| {
+            walk_spawn_steps(body, steps, state, classify)
+        });
+}
+
+fn walk_spawn_steps(
+    body: &MirBody,
+    steps: &[crate::MirExpressionStep],
+    state: &mut [BTreeSet<FunctionId>],
+    classify: &mut dyn FnMut(&MirRvalue, Span, &[BTreeSet<FunctionId>]),
+) {
+    for step in steps {
+        match step {
+            crate::MirExpressionStep::Let { local, value, span } => {
+                walk_spawn_rvalue(body, value, *span, state, classify);
+                state[local.0] = rvalue_future_targets(value, state);
+            }
+            crate::MirExpressionStep::CaptureSequence { source, .. } => {
+                source.visit_direct_expression_steps_dyn(&mut |steps| {
+                    walk_spawn_steps(body, steps, state, classify)
+                });
+            }
+        }
+    }
+}
+
+fn walk_spawn_rvalue(
+    body: &MirBody,
+    value: &MirRvalue,
+    span: Span,
+    state: &mut [BTreeSet<FunctionId>],
+    classify: &mut dyn FnMut(&MirRvalue, Span, &[BTreeSet<FunctionId>]),
+) {
+    if let MirRvalue::ShortCircuit { right_temps, .. } = value {
+        let mut executed = state.to_vec();
+        for statement in right_temps {
+            walk_spawn_statement(body, statement, &mut executed, classify);
+        }
+        // Either the complete RHS ran or it was skipped. Empty means unknown,
+        // not evidence that a known safe target survived the other branch.
+        join_future_targets(state, &executed);
+    } else {
+        value.visit_direct_expression_steps(&mut |steps| {
+            walk_spawn_steps(body, steps, state, classify)
+        });
+    }
+    classify(value, span, state);
+    if matches!(value, MirRvalue::Call(call) if matches!(call.workspace_effect,
+        Some(runmat_builtins::BuiltinWorkspaceEffect::CreatesBinding
+            | runmat_builtins::BuiltinWorkspaceEffect::ClearsBinding
+            | runmat_builtins::BuiltinWorkspaceEffect::LoadsExternalBindings
+            | runmat_builtins::BuiltinWorkspaceEffect::DynamicEvalCurrentWorkspace)))
+    {
+        invalidate_workspace(body, state);
+    }
+}
+
+fn operand_future_targets(
+    operand: &MirOperand,
+    state: &[BTreeSet<FunctionId>],
+) -> BTreeSet<FunctionId> {
+    match operand {
+        MirOperand::Local(local) => state[local.0].clone(),
+        MirOperand::Constant(_) | MirOperand::FunctionHandle(_) => BTreeSet::new(),
+    }
+}
+fn rvalue_future_targets(
+    value: &MirRvalue,
+    state: &[BTreeSet<FunctionId>],
+) -> BTreeSet<FunctionId> {
+    match value {
+        MirRvalue::Future { function, .. } => BTreeSet::from([*function]),
+        MirRvalue::Use(operand) => operand_future_targets(operand, state),
+        _ => BTreeSet::new(),
+    }
+}
+fn assign_future_targets(
+    body: &MirBody,
+    place: &MirPlace,
+    value: &MirRvalue,
+    state: &mut [BTreeSet<FunctionId>],
+) {
+    if let MirPlace::Local(local) = place {
+        state[local.0] = rvalue_future_targets(value, state);
+    } else {
+        invalidate_place(body, place, state);
+    }
+}
+
+fn invalidate_place(body: &MirBody, place: &MirPlace, state: &mut [BTreeSet<FunctionId>]) {
+    if let Some(local) = place.root_local() {
+        state[local.0].clear();
+        return;
+    }
+    match place {
+        MirPlace::Binding(binding) => {
+            for local in &body.locals {
+                if local.binding == Some(*binding) {
+                    state[local.id.0].clear();
+                }
+            }
+        }
+        MirPlace::Member(base, _) | MirPlace::DynamicMember(base, _) | MirPlace::Index(base, _) => {
+            invalidate_place(body, base, state)
+        }
+        MirPlace::Local(_) => unreachable!("local root handled above"),
+    }
+}
+
+fn invalidate_workspace(body: &MirBody, state: &mut [BTreeSet<FunctionId>]) {
+    for local in super::workspace_effect::current_scope_bindings(body) {
+        state[local.0].clear();
     }
 }
 
@@ -547,13 +816,6 @@ fn collect_classified_spawn_rvalue(
     };
     boundary.safety = classify_spawn_boundary(&boundary, capture_facts, future_targets);
     boundaries.push(boundary);
-}
-
-fn future_target(value: &MirRvalue) -> Option<FunctionId> {
-    match value {
-        MirRvalue::Future { function, .. } => Some(*function),
-        _ => None,
-    }
 }
 
 fn classify_spawn_boundary(
@@ -657,4 +919,270 @@ fn spawn_safety_diagnostic(reason: SpawnSafetyReason, span: Span) -> MirDiagnost
         .with_primary_label("this spawn crosses an unsafe task boundary")
         .with_help("avoid mutating parent-frame lexical captures from spawned futures")
         .with_category("spawn-safety")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn lower(source: &str) -> MirAssembly {
+        let parsed = runmat_parser::parse(source).unwrap();
+        let hir = runmat_hir::lower(&parsed, &runmat_hir::LoweringContext::empty()).unwrap();
+        crate::lowering::lower_assembly(&hir.assembly).unwrap()
+    }
+
+    #[test]
+    fn phased_selector_and_prepared_rhs_classify_original_future_targets() {
+        for tail in [
+            "a(c{:}, spawn(work())) = 1;",
+            "fut = work(); a(c{:}) = spawn(fut);",
+            "fut = work(); a(c{:}, flag && spawn(fut)) = 1;",
+        ] {
+            let source = format!("function y = outer(c,flag); cap=1; async function z=work(); z=cap; end; {tail} y=cap; end");
+            let assembly = lower(&source);
+            assert!(assembly
+                .bodies
+                .values()
+                .flat_map(|body| &body.blocks)
+                .flat_map(|block| &block.statements)
+                .any(|statement| matches!(statement.kind, MirStmtKind::PrepareFixedAssignment(_))));
+            let boundaries = analyze_assembly_spawn_boundaries(&assembly);
+            let boundaries: Vec<_> = boundaries.values().flatten().collect();
+            assert_eq!(
+                boundaries.len(),
+                1,
+                "one actual spawn, no descriptor replay: {tail}"
+            );
+            assert_eq!(
+                boundaries[0].safety,
+                SpawnSafetyFact::NotSpawnSafe {
+                    reason: SpawnSafetyReason::MutableLexicalCapture,
+                },
+                "original target must not degrade to unknown or disappear: {tail}"
+            );
+        }
+    }
+
+    #[test]
+    fn phased_region_transfer_and_scalar_publication_share_one_ordered_walker() {
+        let assembly = lower(
+            "function y=outer(c); async function z=work(); z=1; end; a(c{:},work())=1; y=1; end",
+        );
+        let body = assembly
+            .bodies
+            .values()
+            .find(|body| {
+                body.blocks.iter().any(|block| {
+                    block.statements.iter().any(|statement| {
+                        matches!(statement.kind, MirStmtKind::PrepareFixedAssignment(_))
+                    })
+                })
+            })
+            .unwrap();
+        let mut state = vec![BTreeSet::new(); body.locals.len()];
+        let mut observed = false;
+        for block in &body.blocks {
+            let before = state.clone();
+            for statement in &block.statements {
+                walk_spawn_statement(body, statement, &mut state, &mut |_, _, _| {});
+                if let MirStmtKind::PrepareFixedAssignment(owner) = &statement.kind {
+                    if let crate::MirFixedPreparationPhase::EvaluateSelector {
+                        region,
+                        destination: crate::MirFixedSelectorDestination::Scalar(local),
+                        ..
+                    } = &owner.phase
+                    {
+                        if region.steps.iter().any(|step| {
+                            matches!(
+                                step,
+                                crate::MirExpressionStep::Let {
+                                    value: MirRvalue::Future { .. },
+                                    ..
+                                }
+                            )
+                        }) {
+                            assert_eq!(
+                                state[local.0].len(),
+                                1,
+                                "final scalar receipt retains its region future target"
+                            );
+                            observed = true;
+                        }
+                    }
+                }
+            }
+            let mut transferred = before;
+            transfer_future_targets(body, block, &mut transferred);
+            assert_eq!(
+                transferred, state,
+                "classification and CFG transfer must agree"
+            );
+        }
+        assert!(observed);
+    }
+
+    #[test]
+    fn conditional_overwrite_does_not_promote_unknown_to_known_safe() {
+        let assembly = lower("a=1;");
+        let body = assembly.bodies.values().next().unwrap();
+        let mut state = vec![BTreeSet::from([FunctionId(7)])];
+        let value = MirRvalue::ShortCircuit {
+            left: MirOperand::Local(MirLocalId(0)),
+            op: crate::MirShortCircuitOp::And,
+            right_temps: vec![crate::MirStmt {
+                kind: MirStmtKind::Assign {
+                    place: MirPlace::Local(MirLocalId(0)),
+                    value: MirRvalue::Colon,
+                },
+                span: Span::default(),
+            }],
+            right: MirOperand::Local(MirLocalId(0)),
+        };
+        walk_spawn_rvalue(body, &value, Span::default(), &mut state, &mut |_, _, _| {});
+        assert!(
+            state[0].is_empty(),
+            "the executed branch erased known provenance"
+        );
+    }
+
+    #[test]
+    fn cfg_unknown_predecessor_is_not_an_absent_known_target() {
+        let assembly = lower("function y=outer(flag); async function z=work(); z=1; end; if flag; fut=work(); else; fut=1; end; y=spawn(fut); end");
+        let boundaries = analyze_assembly_spawn_boundaries(&assembly);
+        let boundaries: Vec<_> = boundaries.values().flatten().collect();
+        assert_eq!(boundaries.len(), 1);
+        assert_eq!(
+            boundaries[0].safety,
+            SpawnSafetyFact::NotSpawnSafe {
+                reason: SpawnSafetyReason::UnknownDynamicCapture
+            }
+        );
+    }
+
+    #[test]
+    fn multi_assignment_overwrite_does_not_reuse_old_safe_future() {
+        for store in ["[fut,other]=deal(1,2);", "fut{:}=1;", "fut(1)=1;"] {
+            let assembly = lower(&format!("function y=outer(); async function z=work(); z=1; end; fut=work(); {store} y=spawn(fut); end"));
+            let boundaries = analyze_assembly_spawn_boundaries(&assembly);
+            let boundaries: Vec<_> = boundaries.values().flatten().collect();
+            assert_eq!(boundaries.len(), 1, "{store}");
+            assert_eq!(
+                boundaries[0].safety,
+                SpawnSafetyFact::NotSpawnSafe {
+                    reason: SpawnSafetyReason::UnknownDynamicCapture
+                },
+                "{store}"
+            );
+        }
+    }
+
+    #[test]
+    fn mutation_annotation_does_not_erase_rhs_future_before_actual_store() {
+        let assembly = lower("function y=outer(); async function z=work(); z=1; end; fut=work(); fut(1)=spawn(fut); y=spawn(fut); end");
+        let boundaries = analyze_assembly_spawn_boundaries(&assembly);
+        let boundaries: Vec<_> = boundaries.values().flatten().collect();
+        assert_eq!(boundaries.len(), 2);
+        assert_eq!(boundaries[0].safety, SpawnSafetyFact::SpawnSafe);
+        assert_eq!(
+            boundaries[1].safety,
+            SpawnSafetyFact::NotSpawnSafe {
+                reason: SpawnSafetyReason::UnknownDynamicCapture
+            }
+        );
+    }
+
+    #[test]
+    fn writes_invalidate_only_their_roots_after_rhs_classification() {
+        let assembly = lower("a=1; b=2;");
+        let body = assembly.bodies.values().next().unwrap();
+        let binding = super::super::workspace_effect::current_scope_bindings(body)[0];
+        let mut state = vec![BTreeSet::from([FunctionId(7)]); body.locals.len()];
+        let statement = crate::MirStmt {
+            kind: MirStmtKind::WorkspaceEffect {
+                effect: runmat_types::WorkspaceEffect::ClearsBinding,
+                bindings: vec![binding],
+            },
+            span: Span::default(),
+        };
+        walk_spawn_statement(body, &statement, &mut state, &mut |_, _, _| {});
+        for (index, fact) in state.iter().enumerate() {
+            assert_eq!(fact.is_empty(), index == binding.0);
+        }
+
+        // Even a nested write changes its root's future provenance, but does
+        // not alter the independent value retained in another scalar local.
+        state[binding.0] = BTreeSet::from([FunctionId(7)]);
+        let place = MirPlace::DynamicMember(
+            Box::new(MirPlace::Local(binding)),
+            MirOperand::Local(binding),
+        );
+        invalidate_place(body, &place, &mut state);
+        assert!(state[binding.0].is_empty());
+        assert!(state
+            .iter()
+            .enumerate()
+            .all(|(index, fact)| index == binding.0 || fact.len() == 1));
+    }
+
+    #[test]
+    fn current_workspace_effect_preserves_private_receipts_and_foreign_eval_facts() {
+        let assembly = lower("a=sin(1); b=2;");
+        let body = assembly.bodies.values().next().unwrap();
+        let mut body = body.clone();
+        let mut receipt = body.locals[0].clone();
+        receipt.id = MirLocalId(body.locals.len());
+        receipt.kind = MirLocalKind::Temporary;
+        receipt.binding = None;
+        body.locals.push(receipt);
+        let body = &body;
+        let mut state = vec![BTreeSet::from([FunctionId(7)]); body.locals.len()];
+        let annotation = crate::MirStmt {
+            kind: MirStmtKind::WorkspaceEffect {
+                effect: runmat_types::WorkspaceEffect::DynamicEval,
+                bindings: vec![],
+            },
+            span: Span::default(),
+        };
+        walk_spawn_statement(body, &annotation, &mut state, &mut |_, _, _| {});
+        assert!(state.iter().all(|fact| fact.len() == 1));
+        let mut call = body
+            .blocks
+            .iter()
+            .flat_map(|block| &block.statements)
+            .find_map(|statement| match &statement.kind {
+                MirStmtKind::Assign {
+                    value: MirRvalue::Call(call),
+                    ..
+                }
+                | MirStmtKind::Expr(MirRvalue::Call(call)) => Some(call.clone()),
+                _ => None,
+            })
+            .expect("ordinary call fixture");
+        call.workspace_effect = Some(runmat_builtins::BuiltinWorkspaceEffect::DynamicEval);
+        walk_spawn_rvalue(
+            body,
+            &MirRvalue::Call(call.clone()),
+            Span::default(),
+            &mut state,
+            &mut |_, _, _| {},
+        );
+        assert!(
+            state.iter().all(|fact| fact.len() == 1),
+            "foreign evaluation does not rebind current values"
+        );
+        call.workspace_effect =
+            Some(runmat_builtins::BuiltinWorkspaceEffect::DynamicEvalCurrentWorkspace);
+        walk_spawn_rvalue(
+            body,
+            &MirRvalue::Call(call),
+            Span::default(),
+            &mut state,
+            &mut |_, _, _| {},
+        );
+        let bindings = super::super::workspace_effect::current_scope_bindings(body);
+        assert!(!bindings.is_empty());
+        for local in &body.locals {
+            assert_eq!(state[local.id.0].is_empty(), bindings.contains(&local.id));
+        }
+    }
 }

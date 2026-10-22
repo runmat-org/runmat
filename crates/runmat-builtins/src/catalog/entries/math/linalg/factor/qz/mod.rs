@@ -16,3 +16,5 @@ pub const QZ_CATALOG_ENTRY: crate::BuiltinCatalogEntry =
         residency: crate::BuiltinResidencyPolicy::Host,
         maturity: crate::BuiltinContractMaturity::Incomplete,
     });
+
+pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[&QZ_CATALOG_ENTRY];

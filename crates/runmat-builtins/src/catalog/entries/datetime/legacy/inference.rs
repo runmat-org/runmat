@@ -264,17 +264,37 @@ pub(super) fn datestr(request: &CallRequest, entry: &BuiltinCatalogEntry) -> Cal
         &mut diagnostics,
     );
     check_date(request, 1, &mut diagnostics);
-    if request.arguments.get(1).is_some_and(|value| {
-        !matches!(
+    if let Some(value) = request.arguments.get(1) {
+        let numeric = matches!(value.kind, ValueKindFact::Numeric(_));
+        let valid_kind = matches!(
             value.kind,
-            ValueKindFact::String | ValueKindFact::Character | ValueKindFact::Unknown
-        )
-    }) {
-        diagnostics.push(argument_error(
-            "RM-DATESTR-FORMAT",
-            "format must be text",
-            1,
-        ));
+            ValueKindFact::String
+                | ValueKindFact::Character
+                | ValueKindFact::Unknown
+                | ValueKindFact::Numeric(NumericFact {
+                    class: NumericClass::Double,
+                    domain: NumericDomain::Real,
+                })
+        );
+        let invalid_code = numeric
+            && (value.shape.element_count().is_some_and(|count| count != 1)
+                || matches!(value.storage, StorageFact::Sparse | StorageFact::Opaque)
+                || request.literals.numeric_at(1).is_some_and(|code| {
+                    !code.is_finite() || code.fract() != 0.0 || !(-1.0..=31.0).contains(&code)
+                }));
+        if !valid_kind
+            || invalid_code
+            || matches!(
+                value.residency,
+                ResidencyFact::Device { .. } | ResidencyFact::Remote { .. }
+            )
+        {
+            diagnostics.push(argument_error(
+                "RM-DATESTR-FORMAT",
+                "format must be host text or a real double scalar integer from -1 through 31",
+                1,
+            ));
+        }
     }
     let rows = request
         .arguments

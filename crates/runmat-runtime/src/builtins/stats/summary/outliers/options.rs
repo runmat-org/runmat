@@ -9,19 +9,16 @@ impl DecodedOptions {
     pub(super) fn new(
         operation: OutlierOperation,
         rest: crate::call::FunctionArgumentView<'_>,
-    ) -> Self {
-        let tokens = rest
-            .iter()
-            .enumerate()
-            .map(|(index, value)| {
-                if operation == OutlierOperation::Fill && index == 0 {
-                    None
-                } else {
-                    keyword_of(value).and_then(|keyword| OutlierOption::parse(&keyword))
-                }
-            })
-            .collect();
-        Self { tokens }
+    ) -> BuiltinResult<Self> {
+        let mut tokens = Vec::with_capacity(rest.len());
+        for (index, value) in rest.iter().enumerate() {
+            tokens.push(if operation == OutlierOperation::Fill && index == 0 {
+                None
+            } else {
+                keyword_of(value)?.and_then(|keyword| OutlierOption::parse(&keyword))
+            });
+        }
+        Ok(Self { tokens })
     }
 
     pub(super) fn at(&self, index: usize) -> Option<OutlierOption> {
@@ -50,7 +47,7 @@ pub(super) async fn preflight_host_options(
                 "filloutliers: fill method is required",
             ));
         };
-        if let Some(keyword) = keyword_of(fill) {
+        if let Some(keyword) = keyword_of(fill)? {
             parse_fill_keyword(&keyword)?;
         } else if !matches!(fill, Value::GpuTensor(_)) && scalar_number(fill).is_none() {
             return Err(invalid_argument(
@@ -68,7 +65,7 @@ pub(super) async fn preflight_host_options(
     let mut threshold_factor = false;
     let mut index = start;
     while index < rest.len() {
-        let Some(keyword) = keyword_of(&rest[index]) else {
+        let Some(keyword) = keyword_of(&rest[index])? else {
             if !matches!(&rest[index], Value::GpuTensor(_)) {
                 parse_dim(builtin, &rest[index])?;
             }
@@ -224,7 +221,7 @@ pub(super) fn parse_gathered_detection_options(
     let mut idx = 0usize;
     while idx < rest.len() {
         let arg = &rest[idx];
-        if let Some(keyword) = keyword_of(arg) {
+        if let Some(keyword) = keyword_of(arg)? {
             let option = decoded.get(idx).copied().flatten();
             match option {
                 Some(OutlierOption::Median) => {
@@ -349,7 +346,7 @@ pub(super) fn parse_fill_method(value: &Value) -> BuiltinResult<FillMethod> {
     if let Some(number) = scalar_number(value) {
         return Ok(FillMethod::Constant(number));
     }
-    let Some(keyword) = keyword_of(value) else {
+    let Some(keyword) = keyword_of(value)? else {
         return Err(invalid_argument(
             FILLOUTLIERS_NAME,
             "filloutliers: fill method must be text or numeric scalar",

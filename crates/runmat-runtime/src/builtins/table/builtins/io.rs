@@ -1,10 +1,5 @@
 use super::*;
-use runmat_builtins::{
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
+use runmat_builtins::BuiltinExtensionDescriptor;
 use runmat_macros::runtime_builtin;
 
 pub use runmat_builtins::DETECT_IMPORT_OPTIONS_INTEGER_NUM_HEADER_LINES_EXTENSION;
@@ -21,81 +16,14 @@ pub use runmat_builtins::READTABLE_TYPED_INTEGER_CONTROL_EXTENSION;
 pub use runmat_builtins::SPREADSHEET_IMPORT_OPTIONS_EXTENSIONS;
 pub use runmat_builtins::SPREADSHEET_OPTIONS_TYPED_INTEGER_CONTROL_EXTENSION;
 
-const WRITETABLE_BYTES_OUTPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "writetable-bytes-written-output",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "Request a bytes-written output from writetable",
-    error_identifier: Some("RunMat:compatibility:WritetableBytesOutputExtension"),
-};
-const WRITETABLE_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "writetable-explicit-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "Pass explicit gpuArray input to writetable",
-    error_identifier: Some("RunMat:compatibility:WritetableExplicitGpuInputExtension"),
-};
-const WRITETABLE_INTEGER_LOGICAL_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "writetable-integer-logical-option",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "Use a typed-integer WriteVariableNames value with writetable",
-        error_identifier: Some("RunMat:compatibility:WritetableIntegerLogicalOptionExtension"),
-    };
-pub const WRITETABLE_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    WRITETABLE_BYTES_OUTPUT_EXTENSION,
-    WRITETABLE_EXPLICIT_GPU_EXTENSION,
-    WRITETABLE_INTEGER_LOGICAL_EXTENSION,
-];
-const WRITETIMETABLE_BYTES_OUTPUT_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "writetimetable-bytes-written-output",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "Request a bytes-written output from writetimetable",
-        error_identifier: Some("RunMat:compatibility:WritetimetableBytesOutputExtension"),
-    };
-const WRITETIMETABLE_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "writetimetable-explicit-gpu-input",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "Pass explicit gpuArray input to writetimetable",
-        error_identifier: Some("RunMat:compatibility:WritetimetableExplicitGpuInputExtension"),
-    };
-const WRITETIMETABLE_INTEGER_LOGICAL_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "writetimetable-integer-logical-option",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "Use a typed-integer WriteVariableNames value with writetimetable",
-        error_identifier: Some("RunMat:compatibility:WritetimetableIntegerLogicalOptionExtension"),
-    };
-pub const WRITETIMETABLE_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
+mod writers;
+#[cfg(test)]
+use runmat_builtins::{
+    WRITETABLE_BYTES_OUTPUT_EXTENSION, WRITETABLE_INTEGER_LOGICAL_EXTENSION,
     WRITETIMETABLE_BYTES_OUTPUT_EXTENSION,
-    WRITETIMETABLE_EXPLICIT_GPU_EXTENSION,
-    WRITETIMETABLE_INTEGER_LOGICAL_EXTENSION,
-];
-
-const TABLE_WRITE_INTEGER_VARIABLE_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "integer table variables",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Numeric table variables from all eight integer classes serialize from authoritative integer storage.",
-    }];
-const TABLE_WRITE_INTEGER_LOGICAL_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "WriteVariableNames",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "RunMat mode accepts exact integer zero and one as logical aliases for WriteVariableNames.",
-    }];
-pub const WRITETABLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor { form: "writetable(T_with_integer_variables, filename, ___)", inputs: &TABLE_WRITE_INTEGER_VARIABLE_INPUT, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "Integer cells retain their exact decimal value through delimited-text serialization. Automatically resident values gather transparently; explicit device input is separately gated." },
-    BuiltinIntegerCapabilityDescriptor { form: "writetable(T, filename, 'WriteVariableNames', typed_integer)", inputs: &TABLE_WRITE_INTEGER_LOGICAL_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Strict mode rejects the typed-integer alias before file access; RunMat mode classifies exact zero or one." },
-];
-pub const WRITETIMETABLE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor { form: "writetimetable(TT_with_integer_variables, filename, ___)", inputs: &TABLE_WRITE_INTEGER_VARIABLE_INPUT, computation_domain: BuiltinIntegerComputationDomain::ExactInteger, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::FunctionSpecific, notes: "Integer cells retain their exact decimal value through delimited-text serialization. Automatically resident values gather transparently; explicit device input is separately gated." },
-    BuiltinIntegerCapabilityDescriptor { form: "writetimetable(TT, filename, 'WriteVariableNames', typed_integer)", inputs: &TABLE_WRITE_INTEGER_LOGICAL_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::NotApplicable, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "Strict mode rejects the typed-integer alias before file access; RunMat mode classifies exact zero or one." },
-];
+};
+#[cfg(any(test, target_arch = "wasm32"))]
+pub(crate) use writers::*;
 
 #[cfg(test)]
 pub use runmat_builtins::SPREADSHEET_IMPORT_OPTIONS_INTEGER_CAPABILITIES;
@@ -396,96 +324,6 @@ fn is_typed_integer(value: &Value) -> bool {
 }
 
 #[runtime_builtin(
-    name = "writetable",
-    category = "io/tabular",
-    summary = "Write a table to a delimited text file.",
-    keywords = "writetable,table,csv,delimited text,VariableNames",
-    accel = "cpu",
-    descriptor(crate::builtins::table::TABLE_WRITE_DESCRIPTOR),
-    extensions(crate::builtins::table::builtins::io::WRITETABLE_EXTENSIONS),
-    integer_capabilities(crate::builtins::table::builtins::io::WRITETABLE_INTEGER_CAPABILITIES),
-    builtin_path = "crate::builtins::table::builtins"
-)]
-pub(crate) async fn writetable_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    enforce_table_write_extensions(
-        &value,
-        &rest,
-        "writetable",
-        &WRITETABLE_BYTES_OUTPUT_EXTENSION,
-        &WRITETABLE_EXPLICIT_GPU_EXTENSION,
-        &WRITETABLE_INTEGER_LOGICAL_EXTENSION,
-    )?;
-    let value = gather_if_needed_async(&value)
-        .await
-        .map_err(map_control_flow)?;
-    let rest = gather_values(&rest).await?;
-    write_tabular_file(value, rest, false).await
-}
-
-#[runtime_builtin(
-    name = "writetimetable",
-    category = "io/tabular",
-    summary = "Write a timetable to a delimited text file.",
-    keywords = "writetimetable,timetable,csv,delimited text,RowTimes",
-    accel = "cpu",
-    descriptor(crate::builtins::table::TABLE_WRITE_DESCRIPTOR),
-    extensions(crate::builtins::table::builtins::io::WRITETIMETABLE_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::table::builtins::io::WRITETIMETABLE_INTEGER_CAPABILITIES
-    ),
-    builtin_path = "crate::builtins::table::builtins"
-)]
-pub(crate) async fn writetimetable_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    enforce_table_write_extensions(
-        &value,
-        &rest,
-        "writetimetable",
-        &WRITETIMETABLE_BYTES_OUTPUT_EXTENSION,
-        &WRITETIMETABLE_EXPLICIT_GPU_EXTENSION,
-        &WRITETIMETABLE_INTEGER_LOGICAL_EXTENSION,
-    )?;
-    let value = gather_if_needed_async(&value)
-        .await
-        .map_err(map_control_flow)?;
-    let rest = gather_values(&rest).await?;
-    write_tabular_file(value, rest, true).await
-}
-
-fn enforce_table_write_extensions(
-    value: &Value,
-    rest: &[Value],
-    builtin: &'static str,
-    bytes_output: &'static BuiltinExtensionDescriptor,
-    explicit_gpu: &'static BuiltinExtensionDescriptor,
-    integer_logical: &'static BuiltinExtensionDescriptor,
-) -> BuiltinResult<()> {
-    let requested_outputs = crate::output_count::current_output_count();
-    if requested_outputs.is_some_and(|count| count > 1) {
-        return Err(invalid_argument(format!(
-            "{builtin}: too many output arguments"
-        )));
-    }
-    if requested_outputs.is_some_and(|count| count > 0) {
-        crate::compatibility::ensure_builtin_extension_enabled(bytes_output, builtin)?;
-    }
-    if crate::builtins::common::validation::value_contains_explicit_gpu(value)
-        || rest
-            .iter()
-            .any(crate::builtins::common::validation::value_contains_explicit_gpu)
-    {
-        crate::compatibility::ensure_builtin_extension_enabled(explicit_gpu, builtin)?;
-    }
-    if rest.windows(2).any(|pair| {
-        scalar_text(&pair[0], "table write option")
-            .is_ok_and(|name| name.eq_ignore_ascii_case("WriteVariableNames"))
-            && value_contains_typed_integer(&pair[1])
-    }) {
-        crate::compatibility::ensure_builtin_extension_enabled(integer_logical, builtin)?;
-    }
-    Ok(())
-}
-
-#[runtime_builtin(
     name = "readcell",
     context = true,
     binding_variant = "default",
@@ -554,12 +392,13 @@ mod write_extension_tests {
     fn writetable_gates_integer_logical_option_before_file_access() {
         let strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = futures::executor::block_on(writetable_builtin(
+            None,
             Value::Num(1.0),
-            vec![
+            crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::from("definitely/missing/out.csv"),
                 Value::from("WriteVariableNames"),
                 Value::Int(runmat_value::IntValue::U8(1)),
-            ],
+            ]),
         ))
         .expect_err("strict mode rejects typed integer logical aliases");
         assert_eq!(
@@ -574,8 +413,11 @@ mod write_extension_tests {
         let strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         let table_error = futures::executor::block_on(writetable_builtin(
+            None,
             Value::Num(1.0),
-            vec![Value::from("definitely/missing/table.csv")],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from(
+                "definitely/missing/table.csv",
+            )]),
         ))
         .expect_err("strict mode rejects writetable bytes output");
         assert_eq!(
@@ -583,8 +425,11 @@ mod write_extension_tests {
             WRITETABLE_BYTES_OUTPUT_EXTENSION.error_identifier
         );
         let timetable_error = futures::executor::block_on(writetimetable_builtin(
+            None,
             Value::Num(1.0),
-            vec![Value::from("definitely/missing/timetable.csv")],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::from(
+                "definitely/missing/timetable.csv",
+            )]),
         ))
         .expect_err("strict mode rejects writetimetable bytes output");
         assert_eq!(

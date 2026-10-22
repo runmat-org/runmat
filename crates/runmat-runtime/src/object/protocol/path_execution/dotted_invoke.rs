@@ -1,6 +1,4 @@
-use std::collections::VecDeque;
-
-use runmat_value::Value;
+use runmat_value::{ExactArrayIntoIter, ExactArrayStorage, Value};
 
 use super::{resolve_single, SubscriptReadRequest};
 use crate::execution::RootedValueSequence;
@@ -9,20 +7,19 @@ use crate::object::indexing::{
     ObjectSubscriptOrigin,
 };
 use crate::runtime_error::semantic_error;
-use crate::sequence::ValueSequence;
 use crate::RuntimeError;
 
 pub(super) async fn try_execute(
     runtime: Option<&crate::context::RuntimeContext>,
     base: Value,
-    steps: &mut VecDeque<ObjectSubscript>,
+    steps: &mut ExactArrayIntoIter<ObjectSubscript>,
     request: &SubscriptReadRequest,
     caller_function_name: Option<&str>,
 ) -> Result<Option<RootedValueSequence>, RuntimeError> {
     if !is_prefix(steps) {
         return Ok(None);
     }
-    let member_step = steps.pop_front().ok_or_else(|| {
+    let member_step = steps.next().ok_or_else(|| {
         semantic_error(
             "InvalidObjectSubscriptPath",
             "dotted invocation has no member",
@@ -31,7 +28,7 @@ pub(super) async fn try_execute(
     let (ObjectIndexSelector::Member(member), semantic_fallback) = member_step.into_parts() else {
         unreachable!("validated dotted invocation has a member selector")
     };
-    let paren_step = steps.pop_front().ok_or_else(|| {
+    let paren_step = steps.next().ok_or_else(|| {
         semantic_error(
             "InvalidObjectSubscriptPath",
             "dotted invocation has no arguments",
@@ -40,7 +37,7 @@ pub(super) async fn try_execute(
     let (ObjectIndexSelector::IndexValues { components }, _) = paren_step.into_parts() else {
         unreachable!("validated dotted invocation has index-value arguments")
     };
-    let requested_outputs = if steps.is_empty() {
+    let requested_outputs = if steps.len() == 0 {
         request.known_requested_outputs()?.ok_or_else(|| {
             semantic_error(
                 "SequenceOutputContextUnavailable",
@@ -52,33 +49,23 @@ pub(super) async fn try_execute(
     };
     let result = if let Some(method) = crate::object::protocol::resolve_declared_object_method(
         &base,
-        &runmat_types::MethodName::from(member.0.as_str()),
+        &runmat_types::MethodName::from(member.as_str()),
         &request.access,
     )? {
-        let arguments = call_arguments(components)?;
-        let mut call_arguments = Vec::with_capacity(arguments.len() + 1);
-        call_arguments.push(base);
-        call_arguments.extend(arguments);
-        match runtime {
-            Some(runtime) => {
-                crate::object::protocol::invoke_resolved_object_method_in_context(
-                    runtime,
-                    &method,
-                    call_arguments,
-                    requested_outputs,
-                )
-                .await?
-            }
-            None => {
-                crate::object::protocol::invoke_resolved_object_method(
-                    &method,
-                    call_arguments,
-                    requested_outputs,
-                )
-                .await?
-            }
-        }
-    } else if crate::object::resolve::has_stored_member(&base, &member)?
+        let arguments: crate::call::BuiltinArguments = call_arguments(runtime, components)?.into();
+        let arguments = arguments.try_insert(
+            0,
+            crate::execution::RootedValue::in_optional_context(base, runtime)?,
+            runtime,
+        )?;
+        crate::object::protocol::invoke_resolved_object_method_retained(
+            runtime,
+            &method,
+            arguments,
+            requested_outputs,
+        )
+        .await?
+    } else if crate::object::resolve::has_stored_member(&base, &member.as_str().into())?
         == crate::object::resolve::MemberPresence::Absent
         && (matches!(
             &base,
@@ -93,48 +80,33 @@ pub(super) async fn try_execute(
         }
         // This is a structural decision, not an exception-driven retry: a
         // missing member may use the established method-style callable route.
-        let arguments = call_arguments(components)?;
-        match runtime {
-            Some(runtime) => {
-                crate::object::dispatch::call_method_or_member_index_with_fallback_in_context(
-                    runtime,
-                    base,
-                    member.0,
-                    arguments,
-                    requested_outputs,
-                    caller_function_name,
-                    semantic_fallback,
-                )
-                .await?
-            }
-            None => {
-                crate::object::dispatch::call_method_or_member_index_with_fallback(
-                    base,
-                    member.0,
-                    arguments,
-                    requested_outputs,
-                    caller_function_name,
-                    semantic_fallback,
-                )
-                .await?
-            }
-        }
-    } else {
-        let member_sequence = crate::object::resolve::read_member_sequence_with_context(
+        let arguments = call_arguments(runtime, components)?;
+        crate::object::dispatch::call_method_or_member_index_retained_with_context(
             runtime,
             base,
-            member.0,
+            member,
+            arguments.into(),
+            requested_outputs,
+            caller_function_name,
+            semantic_fallback,
+        )
+        .await?
+    } else {
+        let member_sequence = crate::object::resolve::read_member_sequence_text_with_context(
+            runtime,
+            base,
+            member,
             false,
             caller_function_name,
         )
         .await?;
         let member_value = resolve_single(member_sequence)?;
         if super::callable::is_callable_value(&member_value) {
-            let arguments = call_arguments(components)?;
+            let arguments = call_arguments(runtime, components)?;
             super::callable::invoke(
                 runtime,
                 member_value.value().clone(),
-                arguments,
+                arguments.into(),
                 requested_outputs,
             )
             .await?
@@ -148,19 +120,15 @@ pub(super) async fn try_execute(
                 caller_function_name,
             )
             .await?
-            .try_map_owned(
-                |value| {
-                    ValueSequence::single(value).map_err(crate::sequence::sequence_error_to_runtime)
-                },
-                |error| error.into_runtime_error(),
-            )?
+            .try_into_sequence()?
         }
     };
     Ok(Some(result))
 }
 
-fn is_prefix(steps: &VecDeque<ObjectSubscript>) -> bool {
-    let (Some(member_step), Some(paren_step)) = (steps.front(), steps.get(1)) else {
+fn is_prefix(steps: &ExactArrayIntoIter<ObjectSubscript>) -> bool {
+    let (Some(member_step), Some(paren_step)) = (steps.as_slice().first(), steps.as_slice().get(1))
+    else {
         return false;
     };
     let (ObjectIndexSelector::Member(_), ObjectIndexSelector::IndexValues { .. }) =
@@ -176,15 +144,18 @@ fn is_prefix(steps: &VecDeque<ObjectSubscript>) -> bool {
 
 // The syntax is ambiguous until member resolution: `obj.data(:)` indexes a
 // stored array, whereas a resolved method/function requires value arguments.
-fn call_arguments(components: Vec<ObjectIndexComponent>) -> Result<Vec<Value>, RuntimeError> {
-    components
-        .into_iter()
-        .map(|component| match component {
-            ObjectIndexComponent::Value(value) => Ok(value),
-            ObjectIndexComponent::Colon => Err(semantic_error(
-                "InvalidDottedInvokeArgument",
-                "colon is not a standalone dotted-invocation argument",
-            )),
-        })
-        .collect()
+fn call_arguments(
+    runtime: Option<&crate::context::RuntimeContext>,
+    components: ExactArrayStorage<ObjectIndexComponent>,
+) -> Result<crate::execution::RootedValues, RuntimeError> {
+    if components
+        .iter()
+        .any(|component| matches!(component, ObjectIndexComponent::Colon))
+    {
+        return Err(semantic_error(
+            "InvalidDottedInvokeArgument",
+            "colon is not a standalone dotted-invocation argument",
+        ));
+    }
+    super::callable::component_arguments(runtime, components)
 }

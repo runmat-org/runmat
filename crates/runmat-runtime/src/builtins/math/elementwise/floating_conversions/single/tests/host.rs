@@ -17,9 +17,11 @@ fn character_conversion_preserves_column_major_order_and_full_nd_shape() {
         ),
         ("", vec![1, 0, 3], vec![]),
     ] {
-        let chars =
-            runmat_value::CharArray::new_with_shape(source.chars().collect(), shape.clone())
-                .unwrap();
+        let chars = runmat_value::CharArray::from_unicode_scalars_with_shape(
+            source.chars().collect(),
+            shape.clone(),
+        )
+        .unwrap();
         let Value::Tensor(output) = single_builtin(Value::CharArray(chars), vec![]).unwrap() else {
             panic!("dense character conversion");
         };
@@ -161,12 +163,22 @@ fn single_complex_tensor_reads_typed_integer_storage_exactly() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn single_char_array_produces_codes() {
-    let chars = CharArray::new_row("AZ");
+    let chars = CharArray::from_code_units(
+        [0x0041, 0xD83D, 0xDE00, 0xD800, 0x0042, 0xDC00, 0, 0xFFFF]
+            .map(runmat_value::Utf16CodeUnit::from_raw)
+            .to_vec(),
+        2,
+        4,
+    )
+    .unwrap();
     let result = single_builtin(Value::CharArray(chars), Vec::new()).expect("single");
     match result {
         Value::Tensor(t) => {
-            assert_eq!(t.shape(), &[1, 2]);
-            assert_eq!(t.materialize_f64(), vec![65.0, 90.0]);
+            assert_eq!(t.shape(), &[2, 4]);
+            assert_eq!(
+                t.as_f32_slice(),
+                Some(&[65.0, 66.0, 55357.0, 56320.0, 56832.0, 0.0, 55296.0, 65535.0][..])
+            );
         }
         other => panic!("expected tensor, got {other:?}"),
     }

@@ -1,11 +1,9 @@
 use std::future::Future;
 
-use runmat_mir::{MirCall, MirCallArg, MirCallee, MirExpansionSource, MirSequenceLocalId};
+use runmat_mir::{MirCall, MirCallArg, MirExpansionSource, MirSequenceLocalId};
 use runmat_runtime::call::arguments::{MaterializedArgument, MaterializedExpansionSource};
-use runmat_runtime::call::descriptor::{CallableCallKind, CallableDescriptor};
 use runmat_runtime::callsite::CallsiteInfo;
 use runmat_runtime::execution::RootedValueLease;
-use runmat_runtime::sequence::ResolveValueSequence;
 use runmat_value::{OutputListStorage, Value};
 
 use crate::{NativeExecutorError, NativeExecutorResult};
@@ -13,6 +11,8 @@ use crate::{NativeExecutorError, NativeExecutorResult};
 use super::operand::materialize_operand;
 use super::state::HostState;
 
+#[path = "call/dispatch.rs"]
+mod dispatch;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "call/poll_scope_tests.rs"]
 mod poll_scope_tests;
@@ -39,7 +39,7 @@ fn evaluate_inner(
     if let Some(outputs) = super::call_suspension::take_completed(state, embedded)? {
         return Ok(OutputListStorage::unbounded(outputs));
     }
-    let mut arguments = materialize_arguments(state, &call.args)?;
+    let arguments = materialize_arguments(state, &call.args)?;
     let source_id = state
         .runtime
         .program_source_id(state.function.source)
@@ -48,200 +48,14 @@ fn evaluate_inner(
         })?;
     let input_callsite =
         CallsiteInfo::from_borrowed_in_context(Some(source_id), &call.arg_spans, &state.runtime)?;
-    if matches!(
-        call.syntax,
-        runmat_types::CallSyntax::Method | runmat_types::CallSyntax::DottedInvoke
-    ) {
-        if let MirCallee::Static(identity) = &call.callee {
-            if !matches!(
-                identity,
-                runmat_types::CallableIdentity::BoundFunction(_)
-                    | runmat_types::CallableIdentity::ExternalFunction { .. }
-            ) {
-                if arguments.is_empty() {
-                    return Err(NativeExecutorError::Host(
-                        "method/member-index call requires a base receiver".into(),
-                    ));
-                }
-                let base = arguments.remove(0);
-                let caller = state.function.name.clone();
-                let class_context =
-                    runmat_runtime::class_registry::class_context_for_function(&caller);
-                let runtime = state.runtime.clone();
-                let value = complete_rooted_call(
-                    state,
-                    embedded.cloned(),
-                    {
-                        let identity = identity.clone();
-                        let fallback_policy = call.fallback_policy;
-                        with_output_count(
-                            requested_outputs,
-                            with_class_access_context(class_context, async move {
-                                runmat_runtime::object::dispatch::call_method_or_member_index_with_outputs_in_context(
-                                &runtime,
-                                base,
-                                identity,
-                                arguments,
-                                requested_outputs,
-                                (!caller.is_empty()).then_some(caller.as_str()),
-                                fallback_policy,
-                            )
-                            .await
-                            }),
-                        )
-                    },
-                    requested_outputs,
-                )?;
-                return Ok(value);
-            }
-        }
-    }
-    match &call.callee {
-        MirCallee::Static(identity) => {
-            if let Some(function) = local_program_function(identity)? {
-                if let Some(captures) = state.lexical_captures(function)? {
-                    let invoker =
-                        runmat_runtime::user_functions::current_lexical_function_invoker()
-                            .ok_or_else(|| {
-                                NativeExecutorError::Host(
-                                    "native nested call has no lexical function invoker".into(),
-                                )
-                            })?;
-                    let runtime = state.runtime.clone();
-                    let lexical_call = runmat_runtime::call::lexical::LexicalCall {
-                        function: function.0,
-                        captures,
-                        environment: state.lexical_environment.clone(),
-                        arguments,
-                        requested_outputs,
-                    };
-                    let _call_roots =
-                        runmat_runtime::execution::RootedValueLease::for_traced(&lexical_call)
-                            .map_err(|error| error.into_runtime_error())?;
-                    let future = runmat_runtime::callsite::with_function_input_callsite(
-                        Some(input_callsite.clone()),
-                        invoker(Some(runtime), lexical_call),
-                    );
-                    let future = Box::pin(async move {
-                        let _call_roots = _call_roots;
-                        future.await?
-                    });
-                    return super::call_suspension::begin_lexical_call(
-                        state,
-                        embedded.cloned(),
-                        future,
-                        requested_outputs,
-                    )
-                    .map(OutputListStorage::unbounded);
-                }
-            }
-            let descriptor = CallableDescriptor::resolved(
-                identity.clone(),
-                arguments,
-                requested_outputs,
-                call.fallback_policy,
-                CallableCallKind::Direct,
-            )
-            .with_function_input_callsite(input_callsite);
-            let runtime = state.runtime.clone();
-            complete_rooted_call(
-                state,
-                embedded.cloned(),
-                async move {
-                    runmat_runtime::call::descriptor::execute_callable_descriptor_in_context(
-                        &runtime, descriptor,
-                    )
-                    .await
-                },
-                requested_outputs,
-            )
-        }
-        MirCallee::Dynamic(operand) => {
-            let target = materialize_operand(state, operand)?;
-            let runtime = state.runtime.clone();
-            complete_rooted_call(
-                state,
-                embedded.cloned(),
-                async move {
-                    runmat_runtime::call_feval_sequence_async_with_outputs_and_callsite_in_context(
-                        &runtime,
-                        target,
-                        &arguments,
-                        requested_outputs,
-                        Some(input_callsite),
-                    )
-                    .await
-                },
-                requested_outputs,
-            )
-        }
-        MirCallee::SuperConstructor {
-            current_class,
-            super_class,
-        } => {
-            let current_class = current_class.clone();
-            let super_class = super_class.clone();
-            let runtime = state.runtime.clone();
-            complete_rooted_call(
-                state,
-                embedded.cloned(),
-                with_output_count(requested_outputs, async move {
-                    runmat_runtime::call_super_constructor(
-                        &runtime,
-                        current_class,
-                        super_class,
-                        arguments,
-                    )
-                    .await?
-                    .try_map_owned(
-                        runmat_runtime::call::arguments::adapt_legacy_builtin_result,
-                        |error| error.into_runtime_error(),
-                    )
-                }),
-                requested_outputs,
-            )
-        }
-        MirCallee::SuperMethod {
-            current_class,
-            super_class,
-            method,
-        } => {
-            let current_class = current_class.clone();
-            let super_class = super_class.clone();
-            let method = method.clone();
-            let runtime = state.runtime.clone();
-            complete_rooted_call(
-                state,
-                embedded.cloned(),
-                with_output_count(requested_outputs, async move {
-                    runmat_runtime::call_super_method_in_context(
-                        &runtime,
-                        current_class,
-                        super_class,
-                        method,
-                        arguments,
-                    )
-                    .await?
-                    .try_map_owned(
-                        runmat_runtime::call::arguments::adapt_legacy_builtin_result,
-                        |error| error.into_runtime_error(),
-                    )
-                }),
-                requested_outputs,
-            )
-        }
-    }
-}
-
-fn local_program_function(
-    identity: &runmat_types::CallableIdentity,
-) -> NativeExecutorResult<Option<runmat_types::FunctionId>> {
-    let function = match identity {
-        runmat_types::CallableIdentity::BoundFunction(function)
-        | runmat_types::CallableIdentity::AnonymousFunction(function) => function.0,
-        _ => return Ok(None),
-    };
-    Ok(Some(runmat_types::FunctionId(function)))
+    dispatch::prepared(
+        state,
+        call,
+        requested_outputs,
+        embedded,
+        arguments,
+        input_callsite,
+    )
 }
 
 pub(super) fn materialize_arguments(
@@ -279,23 +93,40 @@ fn materialize_arguments_inner(
         state.reconcile_external_workspace()?;
         return Ok(values);
     }
-    let materialized = arguments
-        .iter()
-        .map(|argument| materialize_argument(state, argument))
-        .collect::<NativeExecutorResult<Vec<_>>>()?;
+    let mut materialized =
+        runmat_runtime::call::arguments::prepare_materialized_arguments_in_context(
+            &state.runtime,
+            arguments.len(),
+        )?;
+    for argument in arguments {
+        materialized
+            .try_push(materialize_argument(state, argument)?)
+            .map_err(|_| {
+                NativeExecutorError::Host("native arguments exceeded admitted source width".into())
+            })?;
+    }
+    let materialized = materialized.try_finish().map_err(|_| {
+        NativeExecutorError::Host(
+            "native arguments did not fill their admitted source width".into(),
+        )
+    })?;
+    let roots = runmat_runtime::call::arguments::retain_materialized_arguments_in_context(
+        &state.runtime,
+        materialized.as_slice(),
+    )?;
+    let materialized = materialized.try_into_owned().map_err(|_| {
+        NativeExecutorError::Host("native prepared arguments lost unique source ownership".into())
+    })?;
     let runtime = state.runtime.clone();
-    super::call_suspension::begin_expanded_call_arguments(
-        state,
-        embedded.cloned(),
-        Box::pin(async move {
-            runtime
-                .scope(runmat_runtime::call::arguments::expand_arguments(
-                    &runtime,
-                    materialized,
-                ))
-                .await
-        }),
-    )
+    super::call_suspension::begin_expanded_call_arguments(state, embedded.cloned(), || async move {
+        let _roots = roots;
+        runtime
+            .scope(runmat_runtime::call::arguments::expand_arguments(
+                &runtime,
+                materialized,
+            ))
+            .await
+    })
 }
 
 fn materialize_argument(
@@ -309,13 +140,9 @@ fn materialize_argument(
         MirCallArg::Expansion(source) => Ok(MaterializedArgument::Expansion(
             materialize_expansion_source(state, source)?,
         )),
-        MirCallArg::CapturedSequence(sequence) => {
-            let values = take_captured_sequence(state, *sequence)?;
-            Ok(MaterializedArgument::Sequence(
-                runmat_runtime::sequence::ValueSequence::comma_separated(values)
-                    .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?,
-            ))
-        }
+        MirCallArg::CapturedSequence(sequence) => Ok(MaterializedArgument::Sequence(
+            state.take_captured_sequence_owner(*sequence)?,
+        )),
     }
 }
 
@@ -324,15 +151,22 @@ pub(super) fn capture_sequence(
     destination: MirSequenceLocalId,
     source: &MirExpansionSource,
 ) -> NativeExecutorResult<()> {
-    if state.captured_sequences.contains_key(&destination) {
-        return Err(NativeExecutorError::Host(format!(
-            "native sequence local {} was overwritten before consumption",
-            destination.0
-        )));
-    }
-    let values = if let MirExpansionSource::SubscriptChain(chain) = source {
-        runmat_runtime::execution::RootedValues::new(super::subscript_path::read(state, chain, 1)?)
-            .map_err(|error| NativeExecutorError::from(error.into_runtime_error()))?
+    // Table growth is admitted before expansion callbacks/effects. The actual
+    // output's own backing/roots travel intact; there is no ref Vec mirror.
+    state.prepare_captured_sequence_slot(destination)?;
+    let sequence = if let MirExpansionSource::SubscriptChain(chain) = source {
+        // The legacy subscript ABI returns a Vec. Its separate rooting adapter
+        // is unchanged here; ordinary sequence callbacks already own roots.
+        let values = runmat_runtime::execution::RootedValues::new(super::subscript_path::read(
+            state, chain, 1,
+        )?)
+        .map_err(|error| NativeExecutorError::from(error.into_runtime_error()))?;
+        values.with_owned_output_storage(|values| {
+            let sequence = runmat_runtime::sequence::ValueSequence::from_output_storage(values)
+                .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?;
+            runmat_runtime::execution::RootedValueSequence::in_context(sequence, &state.runtime)
+                .map_err(NativeExecutorError::from)
+        })?
     } else {
         let stage = super::call_suspension::SequenceReadStage::Capture { destination };
         let sequence = if let Some(sequence) =
@@ -341,96 +175,58 @@ pub(super) fn capture_sequence(
             sequence
         } else {
             let source = materialize_expansion_source(state, source)?;
-            let roots = root_expansion_source(&source)?;
+            let roots = root_expansion_source(&source, &state.runtime)?;
             let runtime = state.runtime.clone();
-            super::call_suspension::begin_sequence_read(
-                state,
-                stage,
-                Box::pin(async move {
-                    let sequence = runtime
-                        .scope(runmat_runtime::call::arguments::materialize_expansion(
-                            &runtime, source,
-                        ))
-                        .await?;
-                    drop(roots);
-                    Ok(sequence)
-                }),
-            )?
+            super::call_suspension::begin_sequence_read(state, stage, || async move {
+                let sequence = runtime
+                    .scope(runmat_runtime::call::arguments::materialize_expansion(
+                        &runtime, source,
+                    ))
+                    .await?;
+                drop(roots);
+                Ok(sequence)
+            })?
         };
-        sequence.with_owned_sequence(|sequence| {
-            let values = sequence.resolve(
-                runmat_types::SequenceUse::ExpandAll,
-                runmat_runtime::sequence::SequenceResolutionContext::default(),
-            )?;
-            runmat_runtime::execution::RootedValues::from_output_storage(values)
-                .map_err(|error| error.into_runtime_error())
-        })?
+        // ExpandAll is already the materializer's canonical sequence result:
+        // retain its inline/shared/unique backing and original registration.
+        sequence
     };
-    let existing_roots = state
-        .roots
-        .len()
-        .checked_add(
-            state
-                .captured_sequences
-                .values()
-                .try_fold(0usize, |total, values| total.checked_add(values.len()))
-                .ok_or_else(|| {
-                    NativeExecutorError::Host("native sequence root cardinality overflow".into())
-                })?,
-        )
-        .and_then(|total| total.checked_add(values.len()))
-        .ok_or_else(|| {
-            NativeExecutorError::Host("native sequence root cardinality overflow".into())
-        })?;
-    u32::try_from(existing_roots).map_err(|_| {
-        NativeExecutorError::Host("native sequence root cardinality exceeds the ABI".into())
-    })?;
-    let references = values.with_owned_output_storage(|values| {
-        Ok::<_, NativeExecutorError>(
-            super::call_suspension::own_output_storage(values)?
-                .into_iter()
-                .map(|value| state.arena.insert(value))
-                .collect(),
-        )
-    })?;
-    state.captured_sequences.insert(destination, references);
-    Ok(())
+    state.publish_captured_sequence(destination, sequence)
 }
 
 fn root_expansion_source(
     source: &MaterializedExpansionSource,
+    runtime: &runmat_runtime::context::RuntimeContext,
 ) -> NativeExecutorResult<RootedValueLease> {
     let roots = match source {
         MaterializedExpansionSource::CellContents { base, indices, .. } => {
-            RootedValueLease::for_values(std::iter::once(base).chain(indices.iter()))
+            RootedValueLease::for_values_iterator_in_context(
+                std::iter::once(base).chain(indices.iter()),
+                runtime,
+            )
         }
-        MaterializedExpansionSource::ReturnedOutputs(sequence) => {
-            RootedValueLease::for_sequence(sequence)
+        MaterializedExpansionSource::ReturnedOutputs(_) => {
+            // This canonical source already owns its direct roots.
+            RootedValueLease::for_values_iterator_in_context(std::iter::empty::<&Value>(), runtime)
         }
         MaterializedExpansionSource::Member { base, .. } => {
-            RootedValueLease::for_values(std::iter::once(base))
+            RootedValueLease::for_values_iterator_in_context(std::iter::once(base), runtime)
         }
         MaterializedExpansionSource::DynamicMember { base, member } => {
-            RootedValueLease::for_values([base, member].into_iter())
+            RootedValueLease::for_values_iterator_in_context([base, member].into_iter(), runtime)
         }
     };
-    roots.map_err(|error| NativeExecutorError::from(error.into_runtime_error()))
+    roots.map_err(NativeExecutorError::from)
 }
 
 pub(super) fn take_captured_sequence(
     state: &mut HostState,
     sequence: MirSequenceLocalId,
-) -> NativeExecutorResult<Vec<Value>> {
-    let references = state.captured_sequences.remove(&sequence).ok_or_else(|| {
-        NativeExecutorError::Host(format!(
-            "native sequence local {} was read before capture or after consumption",
-            sequence.0
-        ))
-    })?;
-    references
-        .into_iter()
-        .map(|reference| state.arena.get(reference).cloned())
-        .collect()
+) -> NativeExecutorResult<runmat_runtime::execution::RootedValuesIntoIter> {
+    state
+        .take_captured_sequence_owner(sequence)?
+        .try_into_values()
+        .map_err(Into::into)
 }
 
 fn materialize_expansion_source(
@@ -452,16 +248,23 @@ fn materialize_expansion_source(
             super::indexing::materialize_cell_expansion_source(state, base, indexing)?
         }
         runmat_mir::MirExpansionSource::ReturnedOutputs(base) => {
+            let sequence = runmat_runtime::call::arguments::adapt_legacy_builtin_result(
+                materialize_operand(state, base)?,
+            )?;
             MaterializedExpansionSource::ReturnedOutputs(
-                runmat_runtime::call::arguments::adapt_legacy_builtin_result(materialize_operand(
-                    state, base,
-                )?)?,
+                runmat_runtime::execution::RootedValueSequence::in_context(
+                    sequence,
+                    &state.runtime,
+                )?,
             )
         }
         runmat_mir::MirExpansionSource::Member { base, member } => {
             MaterializedExpansionSource::Member {
                 base: materialize_operand(state, base)?,
-                member: member.clone(),
+                member: runmat_runtime::call::argument_text::copy_str(
+                    &member.0,
+                    Some(&state.runtime),
+                )?,
             }
         }
         runmat_mir::MirExpansionSource::DynamicMember { base, member } => {

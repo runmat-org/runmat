@@ -51,8 +51,10 @@ fn which_runtime_error(message: impl Into<String>) -> RuntimeError {
 
 fn which_flow(err: RuntimeError) -> RuntimeError {
     let identifier = err.identifier().map(|id| id.to_string());
+    let retry = err.gpu_gather_retry;
     let mut builder = build_runtime_error(err.message().to_string())
         .with_builtin("which")
+        .with_gpu_gather_retry(retry)
         .with_source(err);
     if let Some(identifier) = identifier {
         builder = builder.with_identifier(identifier);
@@ -77,7 +79,14 @@ async fn which_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinRes
         // GPU handles carry only numeric element/storage descriptors, never a
         // character or string representation. Decode the source-language
         // argument role before touching an acceleration provider.
-        let text = value_to_string_scalar(&arg).ok_or_else(|| {
+        let text = value_to_string_scalar(&arg, || {
+            if name.is_none() {
+                which_error(&WHICH_ERROR_NAME_ARG_TYPE)
+            } else {
+                which_error(&WHICH_ERROR_OPTION_ARG_TYPE)
+            }
+        })?
+        .ok_or_else(|| {
             if name.is_none() {
                 which_error(&WHICH_ERROR_NAME_ARG_TYPE)
             } else {
@@ -209,13 +218,14 @@ async fn search_matches(name: &str, options: &WhichOptions) -> BuiltinResult<Vec
     )
     .await
     .map_err(|error| match error {
-        RuntimeNameResolutionError::Workspace(error) => which_flow(*error),
+        RuntimeNameResolutionError::Workspace(error)
+        | RuntimeNameResolutionError::Control(error) => which_flow(*error),
         RuntimeNameResolutionError::WasmRegistryNotReady
         | RuntimeNameResolutionError::SearchPathChanged
         | RuntimeNameResolutionError::ClassRegistryChanged => {
             which_runtime_error(error.to_string())
         }
-        RuntimeNameResolutionError::Search(error) => which_runtime_error(error),
+        RuntimeNameResolutionError::Search(error) => error.into_runtime_error("which"),
     })?;
     let mut results = Vec::new();
     let mut seen = HashSet::new();
@@ -325,14 +335,19 @@ async fn canonical_path(path: &Path) -> String {
         .unwrap_or_else(|_| path_to_string(path))
 }
 
-fn value_to_string_scalar(value: &Value) -> Option<String> {
+fn value_to_string_scalar<F>(value: &Value, error: F) -> crate::BuiltinResult<Option<String>>
+where
+    F: FnOnce() -> crate::RuntimeError,
+{
     match value {
-        Value::String(text) => Some(text.as_str().to_owned()),
-        Value::CharArray(array) if array.rows == 1 => Some(array.data().iter().collect()),
-        Value::StringArray(array) if array.data().len() == 1 => {
-            Some(array.data()[0].as_str().to_owned())
+        Value::String(text) => Ok(Some(text.as_str().to_owned())),
+        Value::CharArray(array) if array.rows == 1 => {
+            super::text::decode_utf16_with_error(array.data(), error).map(Some)
         }
-        _ => None,
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(Some(array.data()[0].as_str().to_owned()))
+        }
+        _ => Ok(None),
     }
 }
 

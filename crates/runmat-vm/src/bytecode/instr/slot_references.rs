@@ -19,6 +19,13 @@ impl Instr {
         match self {
             Instr::StoreVar(index) => visit(*index, VmSlotAccess::StoreVar),
             Instr::LoadVar(index) => visit(*index, VmSlotAccess::LoadVar),
+            Instr::MoveCapturedSequence {
+                source_slot,
+                destination_slot,
+            } => {
+                visit(*source_slot, VmSlotAccess::Other);
+                visit(*destination_slot, VmSlotAccess::Other);
+            }
             Instr::StochasticEvolution {
                 iteration_slot,
                 noise_slot,
@@ -101,6 +108,12 @@ impl Instr {
             }
             | Instr::BeginSequenceOutputTarget {
                 root_slot: index, ..
+            }
+            | Instr::BeginFixedAssignment {
+                root_slot: index, ..
+            }
+            | Instr::CommitFixedAssignment {
+                root_slot: index, ..
             } => {
                 visit(*index, VmSlotAccess::Other);
             }
@@ -155,6 +168,16 @@ impl Instr {
             Instr::ReadSubscriptPath { steps, .. }
             | Instr::BeginSubscriptEndReceiver { prefix: steps } => {
                 visit_steps(steps, &mut visit);
+            }
+            Instr::FinishFixedAssignmentTarget { endpoint, .. } => {
+                visit_steps(std::slice::from_ref(endpoint), &mut visit)
+            }
+            Instr::PrepareParenthesesPathStep { selectors, .. } => {
+                for selector in selectors {
+                    if let BytecodeSubscriptSelector::Expansion(spec) = selector {
+                        visit_specs(std::slice::from_ref(spec), &mut visit);
+                    }
+                }
             }
             Instr::CaptureSubscriptPath {
                 steps,
@@ -274,7 +297,6 @@ impl Instr {
             | Instr::BeginContextualIndexSelectors { .. }
             | Instr::LoadContextualIndexEnd { .. }
             | Instr::FinishContextualIndexSelectors { .. }
-            | Instr::PrepareParenthesesPathStep { .. }
             | Instr::PrepareBracesPathStep { .. }
             | Instr::FinishMemberSequenceOutputTarget(..)
             | Instr::FinishDynamicMemberSequenceOutputTarget
@@ -372,6 +394,9 @@ fn visit_steps(steps: &[BytecodeSubscriptStep], visit: &mut impl FnMut(usize, Vm
                 for selector in selectors {
                     match selector {
                         BytecodeSubscriptSelector::Value | BytecodeSubscriptSelector::Colon => {}
+                        BytecodeSubscriptSelector::Expansion(spec) => {
+                            visit_specs(std::slice::from_ref(spec), visit);
+                        }
                     }
                 }
             }

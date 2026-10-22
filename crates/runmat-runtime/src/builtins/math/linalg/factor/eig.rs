@@ -638,7 +638,13 @@ fn option_text(value: &Value) -> BuiltinResult<Option<String>> {
         Value::StringArray(_) => Err(eig_invalid_argument(
             "eig: option arguments must be character vectors or string scalars",
         )),
-        Value::CharArray(chars) if chars.rows <= 1 => Ok(Some(chars.data().iter().collect())),
+        Value::CharArray(chars) if chars.rows <= 1 => Ok(Some(
+            runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
+                let mut error = eig_invalid_argument(source.to_string());
+                error.source = Some(Box::new(source));
+                error
+            })?,
+        )),
         Value::CharArray(_) => Err(eig_invalid_argument(
             "eig: option arguments must be character vectors or string scalars",
         )),

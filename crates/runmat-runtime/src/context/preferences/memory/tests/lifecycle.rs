@@ -55,7 +55,7 @@ impl RuntimeExecutionServices for StagedTurnService {
     fn cooperate_cpu(&self) -> RuntimeServiceFuture<Result<(), ExecutionServiceError>> {
         let call = self.calls.get() + 1;
         self.calls.set(call);
-        if call == 2 {
+        if call == 3 {
             Box::pin(PendingTurn(self.pending_turn_dropped.clone()))
         } else {
             Box::pin(async { Ok(()) })
@@ -213,7 +213,7 @@ fn cancelled_mutex_waiter_does_not_release_or_publish_the_first_transaction() {
     assert!(poll_once(first.as_mut()).is_pending());
     assert_eq!(
         execution.calls.get(),
-        2,
+        3,
         "first call reached staged checkpoint"
     );
 
@@ -228,8 +228,8 @@ fn cancelled_mutex_waiter_does_not_release_or_publish_the_first_transaction() {
     assert!(poll_once(waiter.as_mut()).is_pending());
     assert_eq!(
         execution.calls.get(),
-        3,
-        "waiter passed its charged preparation turn"
+        5,
+        "waiter passed its charged preparation turns"
     );
     waiter_cancel.cancel(CancellationReason::User);
     assert!(matches!(
@@ -280,7 +280,7 @@ fn dropped_mutex_waiter_and_staged_owner_leave_same_service_usable() {
         vec![("first".into(), Value::Num(1.0))],
     ));
     assert!(poll_once(first.as_mut()).is_pending());
-    assert_eq!(execution.calls.get(), 2);
+    assert_eq!(execution.calls.get(), 3);
 
     let mut waiter = Box::pin(service.set_many(
         RuntimeContext::new(execution.clone()),
@@ -290,7 +290,7 @@ fn dropped_mutex_waiter_and_staged_owner_leave_same_service_usable() {
     assert!(poll_once(waiter.as_mut()).is_pending());
     assert_eq!(
         execution.calls.get(),
-        3,
+        5,
         "waiter is pending on the owned document"
     );
     drop(waiter);

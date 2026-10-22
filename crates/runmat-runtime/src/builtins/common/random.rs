@@ -3,17 +3,16 @@ use std::sync::{Mutex, OnceLock};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
-mod mt19937;
 mod distributions;
-mod normal;
-mod parallel;
 pub(crate) mod gpu;
-pub(crate) mod gpu_like;
+pub(crate) mod gpu_effect;
 pub(crate) mod gpu_execution;
 pub(crate) mod gpu_integer;
 pub(crate) mod gpu_integer_batch;
-mod gpu_query;
-pub(crate) mod gpu_upload;
+pub(crate) mod gpu_like;
+mod mt19937;
+mod normal;
+mod parallel;
 mod reservation;
 mod state;
 mod turn;

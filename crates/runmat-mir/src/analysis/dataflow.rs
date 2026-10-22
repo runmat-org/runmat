@@ -429,7 +429,9 @@ pub(crate) fn index_selectors(
         .map(|component| match component {
             MirIndexComponent::Colon => IndexSelectorFact::Colon,
             MirIndexComponent::Expr(operand) => index_selector_for_operand(operand, facts),
-            MirIndexComponent::ContextualExpr(_) | MirIndexComponent::PreparedExpr(_) => {
+            MirIndexComponent::ContextualExpr(_)
+            | MirIndexComponent::PreparedExpr(_)
+            | MirIndexComponent::Expansion(_) => {
                 IndexSelectorFact::Numeric(ValueFact::unknown(DynamicReason::Unspecified))
             }
         })
@@ -547,7 +549,15 @@ pub(super) fn diagnose_semantic_misuse(body: &MirBody) -> Vec<MirDiagnostic> {
     for block in &body.blocks {
         for stmt in &block.statements {
             match &stmt.kind {
-                MirStmtKind::Assign { value, .. }
+                MirStmtKind::PrepareFixedAssignment(owner) => {
+                    for step in owner.steps() {
+                        if let crate::MirExpressionStep::Let { value, span, .. } = step {
+                            diagnose_rvalue_semantics(value, *span, &mut diagnostics);
+                        }
+                    }
+                }
+                MirStmtKind::PreparedAssign { value, .. }
+                | MirStmtKind::Assign { value, .. }
                 | MirStmtKind::MultiAssign { value, .. }
                 | MirStmtKind::SequenceAssign { value, .. }
                 | MirStmtKind::Expr(value) => {
@@ -794,6 +804,39 @@ fn diagnose_stmt(
     diagnostics: &mut Vec<MirDiagnostic>,
 ) {
     match &stmt.kind {
+        MirStmtKind::PrepareFixedAssignment(owner) => {
+            if let Some(region) = owner.selector_region() {
+                let mut nested_state = state.to_vec();
+                diagnose_expression_steps(
+                    &region.steps,
+                    &mut nested_state,
+                    current_bindings,
+                    diagnostics,
+                );
+                diagnose_call_argument_reads(
+                    &region.argument,
+                    &mut nested_state,
+                    current_bindings,
+                    region.span,
+                    diagnostics,
+                );
+                transfer_region_workspace_lookup(state, &nested_state, current_bindings);
+            } else if matches!(
+                owner.phase,
+                crate::MirFixedPreparationPhase::FinishStep { .. }
+            ) {
+                owner.visit_external_operands(|operand| {
+                    diagnose_operand_read(operand, state, stmt.span, diagnostics);
+                });
+            }
+            if let Some(crate::MirFixedSelectorDestination::Scalar(local)) = owner.output() {
+                mark_place_assigned(&crate::MirPlace::Local(local), state);
+            }
+        }
+        MirStmtKind::PreparedAssign { preparation, value } => {
+            diagnose_rvalue_reads(value, state, current_bindings, stmt.span, diagnostics);
+            mark_place_assigned(&preparation.mutation.place, state);
+        }
         MirStmtKind::Assign { place, value } => {
             diagnose_rvalue_reads(value, state, current_bindings, stmt.span, diagnostics);
             diagnose_place_reads(place, state, current_bindings, stmt.span, diagnostics);
@@ -1077,6 +1120,23 @@ fn diagnose_indexing_reads(
                     diagnostics,
                 );
                 diagnose_operand_read(region.result(), &nested_state, span, diagnostics);
+                transfer_region_workspace_lookup(state, &nested_state, current_bindings);
+            }
+            MirIndexComponent::Expansion(region) => {
+                let mut nested_state = state.to_vec();
+                diagnose_expression_steps(
+                    &region.steps,
+                    &mut nested_state,
+                    current_bindings,
+                    diagnostics,
+                );
+                diagnose_call_argument_reads(
+                    &region.argument,
+                    &mut nested_state,
+                    current_bindings,
+                    region.span,
+                    diagnostics,
+                );
                 transfer_region_workspace_lookup(state, &nested_state, current_bindings);
             }
             MirIndexComponent::Colon => {}

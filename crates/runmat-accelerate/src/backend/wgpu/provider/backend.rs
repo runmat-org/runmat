@@ -191,6 +191,8 @@ pub(crate) mod backend_types;
 mod health;
 #[path = "trait_impl.rs"]
 mod trait_impl;
+#[path = "device_control.rs"]
+mod device_control;
 
 pub(super) use backend_shared::*;
 pub(super) use backend_types::*;

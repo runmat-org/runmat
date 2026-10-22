@@ -169,14 +169,12 @@ fn sequence_and_preparation_futures_are_not_polled_under_native_entry() {
                 }
                 _ => {
                     let polls = Rc::clone(&polls);
-                    begin_sequence_stage(
-                        &mut state,
-                        None,
-                        Box::pin(futures::future::poll_fn(move |_| {
+                    begin_sequence_stage(&mut state, None, move || {
+                        futures::future::poll_fn(move |_| {
                             polls.set(polls.get() + 1);
                             Poll::<NativeExecutorResult<SequenceStage>>::Pending
-                        })),
-                    )
+                        })
+                    })
                     .map(|_| ())
                 }
             };

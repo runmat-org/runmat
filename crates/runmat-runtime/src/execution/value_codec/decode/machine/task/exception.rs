@@ -389,6 +389,9 @@ impl<'a> OrdinaryExceptionTask<'a> {
                 ExceptionFailureOrigin::LanguageEvaluation => {
                     runmat_async::RuntimeFailureOrigin::LanguageEvaluation
                 }
+                ExceptionFailureOrigin::ExecutionControlCancellation => {
+                    runmat_async::RuntimeFailureOrigin::ExecutionControlCancellation
+                }
             };
             MException::from_runtime_error(
                 identifier,

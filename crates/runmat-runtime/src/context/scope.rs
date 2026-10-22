@@ -58,7 +58,39 @@ pub(super) fn execution_provider_authorization(
         }
     }
 
+    let control = matches!(&admission, ExecutionProviderAdmission::DeviceControl(_));
     match admission {
+        ExecutionProviderAdmission::DeviceAccess(access) => {
+            let Some(context) = context else {
+                return Authorization::Unrestricted;
+            };
+            use super::gpu_device::GpuDeviceSelection;
+            let selected = match context.gpu_device_selection() {
+                GpuDeviceSelection::Inherit => {
+                    context.execution_assignment().is_none()
+                        || context.command_device_provider().is_some_and(|provider| {
+                            runmat_accelerate_api::device_control_provider_is_authorized(provider)
+                                && provider
+                                    .wgpu_device_access()
+                                    .is_some_and(|expected| expected.same_device(access))
+                        })
+                }
+                GpuDeviceSelection::Selected(provider) => {
+                    runmat_accelerate_api::device_control_provider_is_authorized(provider)
+                        && provider
+                            .wgpu_device_access()
+                            .is_some_and(|expected| expected.same_device(access))
+                }
+                GpuDeviceSelection::Deselected
+                | GpuDeviceSelection::Resetting(_)
+                | GpuDeviceSelection::ResetFailed(_) => false,
+            };
+            if selected {
+                Authorization::Allowed
+            } else {
+                Authorization::Denied
+            }
+        }
         ExecutionProviderAdmission::CanonicalWgpuSubmit(access) => {
             let matching = context
                 .as_ref()
@@ -92,8 +124,9 @@ pub(super) fn execution_provider_authorization(
             }
             Authorization::Unrestricted
         }
-        ExecutionProviderAdmission::Provider(provider) => {
-            let authorization = context
+        ExecutionProviderAdmission::Provider(provider)
+        | ExecutionProviderAdmission::DeviceControl(provider) => {
+            let mut authorization = context
                 .as_ref()
                 .and_then(RuntimeContext::execution_assignment)
                 .map_or(Authorization::Unrestricted, |assignment| {
@@ -105,6 +138,22 @@ pub(super) fn execution_provider_authorization(
                         Authorization::Denied
                     }
                 });
+            if !control && authorization != Authorization::Denied {
+                if let Some(context) = &context {
+                    use super::gpu_device::GpuDeviceSelection;
+                    authorization = match context.gpu_device_selection() {
+                        GpuDeviceSelection::Inherit => authorization,
+                        GpuDeviceSelection::Selected(selected)
+                            if runmat_accelerate_api::same_provider_instance(
+                                selected, provider,
+                            ) =>
+                        {
+                            Authorization::Allowed
+                        }
+                        _ => Authorization::Denied,
+                    };
+                }
+            }
             if authorization != Authorization::Denied {
                 if let Some(owner) = selected {
                     let canonical = context

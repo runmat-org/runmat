@@ -43,6 +43,7 @@ pub(in crate::execute) fn observed_state(probe: &Rc<Probe>) -> HostState {
                 region_capacity: 16,
                 retained_input_capacity: 16,
             },
+        operation_contracts: vec![],
         expected_sites: vec![],
     };
     let (mut state, _) = HostState::new(HostStateInput {
@@ -67,7 +68,10 @@ pub(in crate::execute) fn observed_state(probe: &Rc<Probe>) -> HostState {
     else {
         panic!("generic")
     };
-    state.region_observation = Some(GenericRegionObservation::new(&plan, ticket));
+    state.region_observation = Some(GenericRegionObservation::new(
+        crate::region::OptimizedRegionPlanLease::from_test_plan(plan),
+        ticket,
+    ));
     state
 }
 
@@ -97,6 +101,8 @@ fn entry_block() -> NativeBlock {
             },
             source: source.clone(),
             class: runmat_mir::NativeLoweringClass::NativeOperation,
+            effects: Default::default(),
+            capabilities: Default::default(),
             safepoint: None,
             kind: NativeTerminatorKind::Return { values: vec![] },
             frame_state: NativeFrameState {

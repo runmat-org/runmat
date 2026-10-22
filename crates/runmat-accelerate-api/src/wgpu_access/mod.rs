@@ -31,6 +31,7 @@ pub enum WgpuAccessError {
     /// Browser reentrancy is rejected, never blocked on its own event loop.
     Busy,
     WrongDevice,
+    ProviderNotSelected,
     Allocation(crate::allocation::AllocationAcquisitionError),
 }
 impl fmt::Display for WgpuAccessError {
@@ -39,6 +40,7 @@ impl fmt::Display for WgpuAccessError {
             Self::Poisoned => "WGPU emission gate is poisoned",
             Self::Busy => "WGPU emission gate is already exclusively borrowed",
             Self::WrongDevice => "WGPU permit belongs to another device authority",
+            Self::ProviderNotSelected => "WGPU device is not selected by the active session",
             Self::Allocation(_) => "WGPU exported allocation is unavailable",
         })
     }
@@ -172,6 +174,7 @@ impl WgpuDeviceAccess {
         &self,
         operation: impl for<'p> FnOnce(&WgpuEmission<'p>) -> T,
     ) -> Result<T, WgpuAccessError> {
+        self.check_session_selection()?;
         self.inner.gate.shared(|| {
             operation(&WgpuEmission {
                 access: self,
@@ -188,6 +191,7 @@ impl WgpuDeviceAccess {
         authority: &CanonicalWgpuEmissionAuthority,
         operation: impl for<'p> FnOnce(&WgpuEmission<'p>) -> T,
     ) -> Result<T, WgpuAccessError> {
+        self.check_session_selection()?;
         if !same_authority(&self.inner, &authority.inner) {
             return Err(WgpuAccessError::WrongDevice);
         }
@@ -209,6 +213,7 @@ impl WgpuDeviceAccess {
         &self,
         operation: impl for<'p> FnOnce(&WgpuEmission<'p>) -> T,
     ) -> Result<WgpuScopeReceipt<T>, WgpuAccessError> {
+        self.check_session_selection()?;
         let detached = self.inner.gate.exclusive(|| {
             let scopes = ActiveScopes::push(self.inner.as_ref());
             let value = operation(&WgpuEmission {
@@ -229,6 +234,7 @@ impl WgpuDeviceAccess {
         authority: &CanonicalWgpuEmissionAuthority,
         operation: impl for<'p> FnOnce(&WgpuEmission<'p>) -> T,
     ) -> Result<WgpuScopeReceipt<T>, WgpuAccessError> {
+        self.check_session_selection()?;
         if !same_authority(&self.inner, &authority.inner) {
             return Err(WgpuAccessError::WrongDevice);
         }
@@ -253,6 +259,23 @@ impl WgpuDeviceAccess {
     /// until that emission returns, rather than recursively acquiring a permit.
     pub fn poll(&self, maintain: wgpu::Maintain) -> wgpu::MaintainResult {
         self.inner.device.poll(maintain)
+    }
+    /// Completion registration emits no new device work. It remains available
+    /// while ordinary session emission is fenced for reset or cancellation.
+    pub fn on_submitted_work_done(
+        &self,
+        callback: impl FnOnce() + Send + 'static,
+    ) -> Result<(), WgpuAccessError> {
+        self.inner
+            .gate
+            .cleanup(|| self.inner.queue.on_submitted_work_done(callback))
+    }
+    fn check_session_selection(&self) -> Result<(), WgpuAccessError> {
+        if crate::device_control::device_access_is_authorized(self) {
+            Ok(())
+        } else {
+            Err(WgpuAccessError::ProviderNotSelected)
+        }
     }
 }
 
@@ -279,6 +302,9 @@ pub struct WgpuCleanup<'a> {
 impl WgpuCleanup<'_> {
     pub fn unmap_buffer(&self, buffer: &wgpu::Buffer) {
         buffer.unmap();
+    }
+    pub fn destroy_buffer(&self, buffer: &wgpu::Buffer) {
+        buffer.destroy();
     }
 }
 impl WgpuEmission<'_> {

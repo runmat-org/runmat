@@ -146,12 +146,12 @@ pub(super) fn parse_header(rest: crate::call::BuiltinArguments) -> BuiltinResult
     let second = arguments.next();
     let (weighting, algorithm) = match (first, second) {
         (None, None) => (None, Algorithm::Chol),
-        (Some(value), None) => match keyword_of(&value) {
+        (Some(value), None) => match keyword_of(&value)? {
             Some(keyword) => (None, parse_algorithm(&keyword)?),
             None => (Some(value), Algorithm::Chol),
         },
         (Some(weighting), Some(alg)) => {
-            let keyword = keyword_of(&alg).ok_or_else(|| {
+            let keyword = keyword_of(&alg)?.ok_or_else(|| {
                 invalid("lscov: algorithm must be a string scalar or character row")
             })?;
             (Some(weighting), parse_algorithm(&keyword)?)

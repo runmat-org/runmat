@@ -38,7 +38,7 @@ fn invalid_text_and_selection_precede_resident_download() {
     assert_eq!(resident.handle.wire_descriptor(), original);
 
     let paged_filename = Value::CharArray(
-        runmat_value::CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2])
+        runmat_value::CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 1, 2])
             .expect("paged character array"),
     );
     let paged = block_on(h5read_builtin(
@@ -56,7 +56,7 @@ fn invalid_text_and_selection_precede_resident_download() {
 #[test]
 fn singleton_trailing_character_pages_remain_scalar_text() {
     let row = Value::CharArray(
-        runmat_value::CharArray::new_with_shape(vec!['a', 'b'], vec![1, 2, 1])
+        runmat_value::CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 2, 1])
             .expect("singleton trailing page"),
     );
     assert_eq!(string_scalar(&row, H5READ_NAME, "filename").unwrap(), "ab");

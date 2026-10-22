@@ -7,11 +7,12 @@ use crate::RuntimeError;
 use runmat_value::Value;
 
 mod structural;
-use structural::{prepare_step, read_step};
+use structural::read_step;
 mod assignment;
 mod conversion;
 mod object_assignment;
 mod retained;
+use super::control::{ControlBox, ControlVec, DestinationControl};
 use conversion::{object_subscript_from_endpoint, object_subscript_from_step};
 
 #[cfg(test)]
@@ -19,99 +20,159 @@ mod tests;
 
 #[derive(Debug, Clone)]
 pub enum AssignmentStepSpec {
-    Member(runmat_types::MemberName),
+    Member(runmat_value::Utf8Text),
     Parentheses {
-        selectors: Vec<crate::object::indexing::ObjectIndexComponent>,
+        selectors: runmat_value::ExactArrayStorage<crate::object::indexing::ObjectIndexComponent>,
     },
-    Braces(Vec<crate::object::indexing::ObjectIndexComponent>),
+    Braces(runmat_value::ExactArrayStorage<crate::object::indexing::ObjectIndexComponent>),
 }
 
 #[derive(Debug, Clone)]
 pub(super) enum PreparedAssignmentStep {
-    Member(runmat_types::MemberName),
+    Member(runmat_value::Utf8Text),
+    InitializingMember(runmat_value::Utf8Text),
     Parentheses {
         plan: IndexPlan,
-        selector_values: Vec<crate::object::indexing::ObjectIndexComponent>,
+        selector_values:
+            runmat_value::ExactArrayStorage<crate::object::indexing::ObjectIndexComponent>,
     },
-    Braces(Vec<crate::object::indexing::ObjectIndexComponent>),
+    Braces(runmat_value::ExactArrayStorage<crate::object::indexing::ObjectIndexComponent>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct PreparedSequenceDestination {
     kind: PreparedDestinationKind,
-    _retained_roots: RootedValueLease,
+    _retained_roots: ControlVec<RootedValueLease>,
     _source_roots: RootedValueLease,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 enum PreparedDestinationKind {
     Structural {
-        steps: Vec<PreparedAssignmentStep>,
+        steps: ControlVec<PreparedAssignmentStep>,
         endpoint: PreparedSequenceEndpoint,
     },
-    ObjectProtocol(Box<PreparedObjectProtocolDestination>),
+    ObjectProtocol(ControlBox<PreparedObjectProtocolDestination>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct PreparedObjectProtocolDestination {
-    prefix: Vec<PreparedAssignmentStep>,
-    expected_class: runmat_types::ClassIdentity,
+    prefix: ControlVec<PreparedAssignmentStep>,
+    expected_class: runmat_value::SharedClassIdentity,
     cardinality_method: Option<crate::object::protocol::ResolvedObjectMethod>,
-    suffix_steps: Vec<AssignmentStepSpec>,
+    suffix_steps: ControlVec<AssignmentStepSpec>,
     endpoint: SequenceEndpointSpec,
     path: ObjectSubscriptPath,
     cardinality: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct ObjectSuffixBuilder {
     target: Value,
-    expected_class: runmat_types::ClassIdentity,
-    structural_steps: Vec<AssignmentStepSpec>,
-    steps: Vec<ObjectSubscript>,
+    expected_class: runmat_value::SharedClassIdentity,
+    structural_steps: ControlVec<AssignmentStepSpec>,
+    steps: ControlVec<ObjectSubscript>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct SequenceDestinationBuilder {
     current: RootedValue,
     source_roots: RootedValueLease,
-    steps: Vec<PreparedAssignmentStep>,
+    steps: ControlVec<PreparedAssignmentStep>,
     object_suffix: Option<ObjectSuffixBuilder>,
-    selector_roots: Vec<RootedValueLease>,
+    selector_roots: ControlVec<RootedValueLease>,
+    control: DestinationControl,
+    initialize_members: bool,
 }
 
 impl SequenceDestinationBuilder {
     pub fn new(root: &Value) -> Result<Self, RuntimeError> {
-        let source_roots = RootedValueLease::for_values(std::iter::once(root))
-            .map_err(|error| error.into_runtime_error())?;
-        Ok(Self {
-            current: RootedValue::new(root.clone()).map_err(|error| error.into_runtime_error())?,
-            source_roots,
-            steps: Vec::new(),
-            object_suffix: None,
-            selector_roots: Vec::new(),
-        })
+        Self::from_owned_with_context(None, root.clone())
     }
-
-    /// Take ownership of a root that was detached from a guarded source.
-    ///
-    /// This is the same preparation owner as [`Self::new`], but avoids
-    /// retaining the source guard across object-protocol callbacks and avoids
-    /// cloning the root a second time after the caller has detached it.
+    pub fn new_in_context(
+        context: &crate::context::RuntimeContext,
+        root: &Value,
+    ) -> Result<Self, RuntimeError> {
+        Self::from_owned_with_context(Some(context), root.clone())
+    }
     pub fn from_owned(root: Value) -> Result<Self, RuntimeError> {
-        let source_roots = RootedValueLease::for_values(std::iter::once(&root))
-            .map_err(|error| error.into_runtime_error())?;
+        Self::from_owned_with_context(None, root)
+    }
+    pub fn from_owned_in_context(
+        context: &crate::context::RuntimeContext,
+        root: Value,
+    ) -> Result<Self, RuntimeError> {
+        Self::from_owned_with_context(Some(context), root)
+    }
+    fn from_owned_with_context(
+        context: Option<&crate::context::RuntimeContext>,
+        root: Value,
+    ) -> Result<Self, RuntimeError> {
+        let control = DestinationControl::new(context)?;
+        let source_roots = match context {
+            Some(runtime) => {
+                RootedValueLease::for_values_iterator_in_context(std::iter::once(&root), runtime)?
+            }
+            None => RootedValueLease::for_values(std::iter::once(&root))
+                .map_err(|e| e.into_runtime_error())?,
+        };
+        let current = RootedValue::in_optional_context(root, context)?;
         Ok(Self {
-            current: RootedValue::new(root).map_err(|error| error.into_runtime_error())?,
+            current,
             source_roots,
-            steps: Vec::new(),
+            steps: control.vector(),
             object_suffix: None,
-            selector_roots: Vec::new(),
+            selector_roots: control.vector(),
+            control,
+            initialize_members: false,
         })
     }
 
     pub fn current(&self) -> &Value {
         &self.current
+    }
+
+    /// Resolve only the prefix preceding the current indexed step, and only
+    /// when the canonical selector actually evaluates its outer `end`.
+    /// The eventual assignment still owns its complete unsplit suffix.
+    pub async fn prepare_current_receiver_for_end_in_context(
+        &self,
+        context: &crate::context::RuntimeContext,
+        caller: Option<&str>,
+    ) -> Result<crate::object::protocol::PreparedSubscriptReceiver, RuntimeError> {
+        self.control.check_owner(Some(context))?;
+        let (root, prefix) = if let Some(suffix) = &self.object_suffix {
+            let prefix = if suffix.steps.is_empty() {
+                None
+            } else {
+                let steps = crate::object::indexing::array_in_context(
+                    Some(context),
+                    suffix.steps.len(),
+                    |index| Ok(suffix.steps[index].clone()),
+                )?;
+                Some(ObjectSubscriptPath::from_storage(steps)?)
+            };
+            (suffix.target.clone(), prefix)
+        } else {
+            (self.current.value().clone(), None)
+        };
+        crate::object::protocol::prepare_subscript_receiver_in_context(
+            context,
+            root,
+            prefix,
+            crate::object::protocol::ObjectAccessContext::from_legacy_function_name(caller),
+        )
+        .await
+    }
+
+    /// Ordinary fixed assignments retain their original creation authority;
+    /// legacy multi-output destinations keep their existing read-only prefix.
+    pub fn with_assignment_creation(
+        mut self,
+        creation: runmat_types::AssignmentCreationPolicy,
+    ) -> Self {
+        self.initialize_members = creation != runmat_types::AssignmentCreationPolicy::ExistingOnly;
+        self
     }
 
     pub fn selector_extent(
@@ -147,27 +208,50 @@ impl SequenceDestinationBuilder {
         step: AssignmentStepSpec,
         caller_function_name: Option<&str>,
     ) -> Result<(), RuntimeError> {
-        let step_roots =
-            RootedValueLease::for_traced(&step).map_err(|error| error.into_runtime_error())?;
+        self.control.reserve(context, &mut self.selector_roots, 1)?;
+        let step_roots = match context {
+            Some(runtime) => {
+                RootedValueLease::for_values_iterator_in_context(step.retained_values(), runtime)?
+            }
+            None => {
+                RootedValueLease::for_traced(&step).map_err(|error| error.into_runtime_error())?
+            }
+        };
         if let Some(suffix) = &mut self.object_suffix {
+            self.control
+                .reserve(context, &mut suffix.structural_steps, 1)?;
+            self.control.reserve(context, &mut suffix.steps, 1)?;
             suffix.structural_steps.push(step.clone());
             suffix.steps.push(object_subscript_from_step(step));
             self.selector_roots.push(step_roots);
             return Ok(());
         }
         if let Some(expected_class) =
-            crate::object::indexing::class_name_from_base(&self.current).cloned()
+            crate::object::indexing::class_name_owner_from_base(&self.current).cloned()
         {
+            let mut structural_steps = self.control.vector();
+            let mut steps = self.control.vector();
+            self.control
+                .push(context, &mut structural_steps, step.clone())?;
+            self.control
+                .push(context, &mut steps, object_subscript_from_step(step))?;
             self.object_suffix = Some(ObjectSuffixBuilder {
                 target: self.current.value().clone(),
                 expected_class,
-                structural_steps: vec![step.clone()],
-                steps: vec![object_subscript_from_step(step)],
+                structural_steps,
+                steps,
             });
             self.selector_roots.push(step_roots);
             return Ok(());
         }
-        let step = prepare_step(&self.current, step).await?;
+        self.control.reserve(context, &mut self.steps, 1)?;
+        let step = structural::prepare_step_with_initialization(
+            context,
+            &self.current,
+            step,
+            self.initialize_members,
+        )
+        .await?;
         self.current = read_step(
             context,
             self.current.value().clone(),
@@ -175,6 +259,7 @@ impl SequenceDestinationBuilder {
             caller_function_name,
         )
         .await?;
+        self.control.reserve(context, &mut self.steps, 0)?;
         self.steps.push(step);
         self.selector_roots.push(step_roots);
         Ok(())
@@ -200,8 +285,17 @@ impl SequenceDestinationBuilder {
         context: Option<&crate::context::RuntimeContext>,
         endpoint: SequenceEndpointSpec,
     ) -> Result<PreparedSequenceDestination, RuntimeError> {
-        let _endpoint_roots =
-            RootedValueLease::for_traced(&endpoint).map_err(|error| error.into_runtime_error())?;
+        endpoint.validate_fixed_mutation()?;
+        let _endpoint_roots = match context {
+            Some(runtime) => RootedValueLease::for_values_iterator_in_context(
+                endpoint.retained_values(),
+                runtime,
+            )?,
+            None => RootedValueLease::for_traced(&endpoint)
+                .map_err(|error| error.into_runtime_error())?,
+        };
+        self.control
+            .push(context, &mut self.selector_roots, _endpoint_roots)?;
         if matches!(&endpoint, SequenceEndpointSpec::Member(_))
             && crate::object::indexing::class_name_from_base(&self.current).is_none()
             && !matches!(
@@ -226,73 +320,132 @@ impl SequenceDestinationBuilder {
         }
         if self.object_suffix.is_none() {
             if let Some(expected_class) =
-                crate::object::indexing::class_name_from_base(&self.current).cloned()
+                crate::object::indexing::class_name_owner_from_base(&self.current).cloned()
             {
                 self.object_suffix = Some(ObjectSuffixBuilder {
                     target: self.current.value().clone(),
                     expected_class,
-                    structural_steps: Vec::new(),
-                    steps: Vec::new(),
+                    structural_steps: self.control.vector(),
+                    steps: self.control.vector(),
                 });
             }
         }
         if let Some(mut suffix) = self.object_suffix {
-            suffix
-                .steps
-                .push(object_subscript_from_endpoint(endpoint.clone()));
-            let path = ObjectSubscriptPath::new(suffix.steps)?;
-            let cardinality = match context {
+            self.control.push(
+                context,
+                &mut suffix.steps,
+                object_subscript_from_endpoint(endpoint.clone()),
+            )?;
+            let path_steps =
+                crate::object::indexing::array_in_context(context, suffix.steps.len(), |index| {
+                    Ok(suffix.steps[index].clone())
+                })?;
+            let path = ObjectSubscriptPath::from_storage(path_steps)?;
+            let mut destination = self.control.boxed(
+                context,
+                PreparedObjectProtocolDestination {
+                    prefix: self.steps,
+                    expected_class: suffix.expected_class,
+                    cardinality_method: None,
+                    suffix_steps: suffix.structural_steps,
+                    endpoint: endpoint.clone(),
+                    path,
+                    cardinality: 0,
+                },
+            )?;
+            let cardinality = if matches!(&endpoint, SequenceEndpointSpec::Fixed { .. }) {
+                // Ordinary assignment has already requested exactly one RHS.
+                // Do not turn its variable-width selectors into dynamic output
+                // cardinality or invoke numArgumentsFromSubscript for nargout.
+                crate::builtins::introspection::object_indexing::PreparedObjectAssignmentCardinality {
+                    count: 1, method: None,
+                }
+            } else {
+                match context {
                 Some(context) => {
-                    crate::builtins::introspection::object_indexing::object_path_cardinality_in_context(
+                    crate::builtins::introspection::object_indexing::object_path_assignment_cardinality_in_context(
                         context,
                         &suffix.target,
-                        &path,
-                        runmat_types::ObjectIndexingContext::Assignment,
-                        &crate::object::protocol::ObjectAccessContext::default(),
+                        &destination.path,
                     )
                     .await?
                 }
                 None => {
                     crate::builtins::introspection::object_indexing::object_path_assignment_cardinality(
                         &suffix.target,
-                        &path,
+                        &destination.path,
                     )
                     .await?
                 }
+            }
             };
-            return PreparedSequenceDestination::rooted(
-                PreparedDestinationKind::ObjectProtocol(Box::new(
-                    PreparedObjectProtocolDestination {
-                        prefix: self.steps,
-                        expected_class: suffix.expected_class,
-                        cardinality_method: cardinality.method,
-                        suffix_steps: suffix.structural_steps,
-                        endpoint,
-                        path,
-                        cardinality: cardinality.count,
-                    },
-                )),
-                self.source_roots,
-            );
+            destination.cardinality = cardinality.count;
+            destination.cardinality_method = cardinality.method;
+            self.control.reserve(context, &mut self.selector_roots, 0)?;
+            return Ok(PreparedSequenceDestination {
+                kind: PreparedDestinationKind::ObjectProtocol(destination),
+                _retained_roots: self.selector_roots,
+                _source_roots: self.source_roots,
+            });
         }
-        let endpoint = PreparedSequenceEndpoint::prepare(&self.current, endpoint).await?;
-        PreparedSequenceDestination::rooted(
-            PreparedDestinationKind::Structural {
+        let endpoint =
+            PreparedSequenceEndpoint::prepare_with_context(context, &self.current, endpoint)
+                .await?;
+        self.control.reserve(context, &mut self.selector_roots, 0)?;
+        Ok(PreparedSequenceDestination {
+            kind: PreparedDestinationKind::Structural {
                 steps: self.steps,
                 endpoint,
             },
-            self.source_roots,
-        )
+            _retained_roots: self.selector_roots,
+            _source_roots: self.source_roots,
+        })
+    }
+}
+
+impl AssignmentStepSpec {
+    pub(super) fn components(&self) -> &[crate::object::indexing::ObjectIndexComponent] {
+        match self {
+            Self::Member(_) => &[],
+            Self::Parentheses { selectors } | Self::Braces(selectors) => selectors,
+        }
+    }
+    fn retained_values(&self) -> impl Iterator<Item = &Value> + Clone {
+        self.components()
+            .iter()
+            .filter_map(|component| match component {
+                crate::object::indexing::ObjectIndexComponent::Value(value) => Some(value),
+                crate::object::indexing::ObjectIndexComponent::Colon => None,
+            })
+    }
+    pub fn member_in_context(
+        context: &crate::context::RuntimeContext,
+        name: &str,
+    ) -> Result<Self, RuntimeError> {
+        crate::call::argument_text::copy_str(name, Some(context)).map(Self::Member)
+    }
+
+    pub fn dynamic_member_in_context(
+        context: &crate::context::RuntimeContext,
+        name: &Value,
+    ) -> Result<Self, RuntimeError> {
+        crate::call::argument_text::convert(name, Some(context)).map(Self::Member)
     }
 }
 
 impl PreparedSequenceDestination {
+    #[cfg(test)]
     fn rooted(
         kind: PreparedDestinationKind,
         source_roots: RootedValueLease,
     ) -> Result<Self, RuntimeError> {
-        let retained_roots =
-            RootedValueLease::for_traced(&kind).map_err(|error| error.into_runtime_error())?;
+        let control = DestinationControl::new(None)?;
+        let mut retained_roots = control.vector();
+        control.push(
+            None,
+            &mut retained_roots,
+            RootedValueLease::for_traced(&kind).map_err(|error| error.into_runtime_error())?,
+        )?;
         Ok(Self {
             kind,
             _retained_roots: retained_roots,

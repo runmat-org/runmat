@@ -15,9 +15,9 @@ use std::sync::{
     Arc,
 };
 
+mod background_callback;
 #[path = "runtime/source_selection.rs"]
 mod source_selection;
-mod background_callback;
 #[cfg(feature = "plot-core")]
 pub(crate) use background_callback::BackgroundCallbackAuthority;
 use source_selection::InvocationSourceSelection;
@@ -141,7 +141,9 @@ pub struct RuntimeContext {
     selected_static_caller: Option<FunctionBindingOrigin>,
     native_resolution_scope: crate::user_functions::NativeResolutionScope,
     pub(super) environment: Rc<std::cell::RefCell<super::environment::EnvironmentState>>,
-    program_revision: Option<runmat_execution::ProgramRevision>,
+    // Immutable program selection is retained across invocation projections;
+    // cloning a context must not copy its domain-contribution vector.
+    program_revision: Option<Arc<runmat_execution::ProgramRevision>>,
     program_sources: Option<Rc<crate::source_context::ProgramSourceBinding>>,
     source_current: Option<
         super::poll_projection::PollProjection<crate::source_context::SourceCurrentProjection>,
@@ -215,6 +217,7 @@ pub struct RuntimeContext {
     // VM-owned, poll-local execution evidence. Clones may carry it only within
     // the selected instruction; nested invocations explicitly clear it.
     vm_fusion_host_route: Option<super::VmFusionHostRoute>,
+    native_region_host_route: Option<super::NativeRegionHostRoute>,
     prepared_host_execution: Option<super::preparation::PreparedHostExecution>,
     vm_fusion_selected_binding: Option<runmat_builtins::BuiltinBindingIdentity>,
     // Invocation-scoped, unlike shared session language state. Scoped guards
@@ -268,9 +271,28 @@ impl RuntimeContext {
         cancellation: CancellationToken,
         environment: super::environment::EnvironmentState,
     ) -> Self {
+        Self::with_environment_and_services(
+            execution,
+            cancellation,
+            environment,
+            RuntimeServicePorts::default(),
+        )
+    }
+
+    pub(super) fn with_environment_and_services(
+        execution: Rc<dyn RuntimeExecutionServices>,
+        cancellation: CancellationToken,
+        environment: super::environment::EnvironmentState,
+        services: RuntimeServicePorts,
+    ) -> Self {
         runmat_accelerate_api::register_execution_provider_authorizer(
             super::scope::execution_provider_authorization,
         );
+        runmat_accelerate_api::register_device_allocation_scope_resolver(
+            super::gpu_device::current_device_allocation_scope,
+        );
+        runmat_filesystem::register_invocation_filesystem_resolver(selected_invocation_filesystem)
+            .expect("Runtime filesystem selection callback must be unique");
         let state = Rc::new(RuntimeContextState::new(RuntimeContextLocalId::next()));
         crate::class_registry::register_context_state(&state);
         let context = Self {
@@ -301,7 +323,7 @@ impl RuntimeContext {
             command_device_access: None,
             tape_poll_authority: None,
             search_path: None,
-            services: RuntimeServicePorts::default(),
+            services,
             state,
             parallel_random_scope: None,
             invocation_language_policy: None,
@@ -321,6 +343,7 @@ impl RuntimeContext {
             #[cfg(not(target_arch = "wasm32"))]
             java_reentry: None,
             vm_fusion_host_route: None,
+            native_region_host_route: None,
             prepared_host_execution: None,
             vm_fusion_selected_binding: None,
             cancellation: Rc::new(RefCell::new(cancellation)),
@@ -819,6 +842,9 @@ impl RuntimeContext {
     pub fn local_identity(&self) -> RuntimeContextLocalId {
         self.state.local_identity
     }
+    pub(crate) fn gpu_device_session_key(&self) -> u64 {
+        self.state.local_identity.0
+    }
 
     pub(in crate::context) fn capture_host_allocation_context(
         &self,
@@ -912,7 +938,8 @@ impl RuntimeContext {
         let root = callbacks.get(&slot)?;
         match &root.value {
             runmat_value::Value::String(text) => Some(text.as_str().to_owned()),
-            runmat_value::Value::CharArray(chars) => Some(chars.data().iter().collect()),
+            // Optional diagnostic source is not executable authority.
+            runmat_value::Value::CharArray(chars) => chars.try_row_string().unwrap_or_default(),
             _ => None,
         }
     }
@@ -1085,6 +1112,7 @@ impl RuntimeContext {
         self.invocation_arity = None;
         self.prepared_host_execution = None;
         self.vm_fusion_host_route = None;
+        self.native_region_host_route = None;
         self.vm_fusion_selected_binding = None;
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -1121,6 +1149,7 @@ impl RuntimeContext {
         self.cancellation = Rc::new(RefCell::new(cancellation));
         self.prepared_host_execution = None;
         self.vm_fusion_host_route = None;
+        self.native_region_host_route = None;
         self.vm_fusion_selected_binding = None;
         self
     }
@@ -1130,6 +1159,7 @@ impl RuntimeContext {
     pub fn with_vm_fusion_host_route(mut self, route: Option<super::VmFusionHostRoute>) -> Self {
         self.prepared_host_execution = None;
         self.vm_fusion_host_route = route;
+        self.native_region_host_route = None;
         self.vm_fusion_selected_binding = None;
         self
     }
@@ -1137,12 +1167,26 @@ impl RuntimeContext {
     pub fn without_vm_fusion_host_route(mut self) -> Self {
         self.prepared_host_execution = None;
         self.vm_fusion_host_route = None;
+        self.native_region_host_route = None;
         self.vm_fusion_selected_binding = None;
         self
     }
 
     pub fn vm_fusion_host_route(&self) -> Option<&super::VmFusionHostRoute> {
         self.vm_fusion_host_route.as_ref()
+    }
+
+    /// Scope one selected native occurrence, never an ambient host policy.
+    pub fn with_native_region_host_route(mut self, route: super::NativeRegionHostRoute) -> Self {
+        self.prepared_host_execution = None;
+        self.vm_fusion_host_route = None;
+        self.vm_fusion_selected_binding = None;
+        self.native_region_host_route = Some(route);
+        self
+    }
+
+    pub fn native_region_host_route(&self) -> Option<&super::NativeRegionHostRoute> {
+        self.native_region_host_route.as_ref()
     }
 
     pub(crate) fn with_prepared_host_execution(
@@ -1170,6 +1214,7 @@ impl RuntimeContext {
             // An inner canonical invocation may select the same binding, but
             // it cannot certify the enclosing VM instruction's host branch.
             self.vm_fusion_host_route = None;
+            self.native_region_host_route = None;
         }
         self.vm_fusion_selected_binding = binding;
         self
@@ -1189,6 +1234,12 @@ impl RuntimeContext {
     }
 
     pub fn program_revision(&self) -> Option<&runmat_execution::ProgramRevision> {
+        self.program_revision.as_deref()
+    }
+
+    pub(in crate::context) fn program_revision_owner(
+        &self,
+    ) -> Option<&Arc<runmat_execution::ProgramRevision>> {
         self.program_revision.as_ref()
     }
 
@@ -1539,16 +1590,17 @@ impl RuntimeContext {
         mut self,
         revision: Option<runmat_execution::ProgramRevision>,
     ) -> Self {
-        if self.program_revision != revision {
-            if let (Some(service), Some(previous)) =
-                (self.services.placement(), self.program_revision.clone())
-            {
-                service.invalidate(runmat_execution::PlacementInvalidation::Program {
-                    revision: previous,
-                });
-            }
+        if self.program_revision() == revision.as_ref() {
+            return self;
         }
-        self.program_revision = revision;
+        if let (Some(service), Some(previous)) =
+            (self.services.placement(), self.program_revision.take())
+        {
+            service.invalidate(runmat_execution::PlacementInvalidation::Program {
+                revision: Arc::unwrap_or_clone(previous),
+            });
+        }
+        self.program_revision = revision.map(Arc::new);
         self
     }
 
@@ -1781,9 +1833,9 @@ impl RuntimeContext {
             .without_base_workspace()
             .without_graphics_presentation()
             .without_callable_artifacts();
-        let child = Self::with_cancellation(self.execution.clone(), self.cancellation())
-            .with_program_revision(self.program_revision.clone())
+        let mut child = Self::with_cancellation(self.execution.clone(), self.cancellation())
             .with_service_ports(services);
+        child.program_revision = self.program_revision.clone();
         let child = if let Some(search_path) = &self.search_path {
             child.with_search_path(Arc::clone(search_path))
         } else {
@@ -1951,4 +2003,11 @@ impl RuntimeContext {
         context.output_projection = self.selected_output_projection();
         RuntimeContextGuard::enter(context)
     }
+}
+
+fn selected_invocation_filesystem() -> Option<runmat_filesystem::InvocationFilesystemSelection> {
+    let active = super::scope::active_runtime_context()?;
+    active
+        .service_ports()
+        .selected_filesystem_for_active_context()
 }

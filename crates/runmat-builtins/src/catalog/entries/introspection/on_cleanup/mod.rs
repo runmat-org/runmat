@@ -2,6 +2,9 @@ use crate::*;
 mod contract;
 mod documentation;
 mod inference;
+mod operations;
+mod documentation_cancel;
+pub use operations::*;
 #[cfg(test)]
 mod tests;
 pub use contract::*;
@@ -54,4 +57,8 @@ pub const ON_CLEANUP_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     suppress_auto_output: false,
 };
 
-pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&ON_CLEANUP_CATALOG_ENTRY];
+pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[
+    &ON_CLEANUP_CATALOG_ENTRY,
+    &CANCEL_CATALOG_ENTRY,
+    &ON_CLEANUP_DELETE_CATALOG_ENTRY,
+];

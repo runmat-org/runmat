@@ -2,15 +2,19 @@
 mod borrowed_output;
 mod case_output;
 mod text_input;
+mod text_layout;
+pub(crate) use text_layout::has_unsupported_character_pages;
 
 pub(crate) use borrowed_output::{
     transform_scalar_borrowed, transform_string_array_borrowed,
     transform_string_array_borrowed_indexed,
 };
-pub(crate) use case_output::{transform_scalar_case, transform_string_array_case, TextCase};
+pub(crate) use case_output::{
+    transform_character_case, transform_scalar_case, transform_string_array_case, TextCase,
+};
 pub(crate) use text_input::{scalar_text_input, text_input_admission, TextInput};
 
-use runmat_value::CharArray;
+use runmat_value::{decode_utf16_code_units, CharArray, Utf16CodeUnit, Utf16DecodeError};
 
 use runmat_value::Value;
 
@@ -78,16 +82,23 @@ pub(crate) fn uppercase_preserving_missing(text: String) -> String {
 
 /// Collect a row from a [`CharArray`] into a `String`.
 #[inline]
-pub(crate) fn char_row_to_string(array: &CharArray, row: usize) -> String {
+pub(crate) fn char_row_to_string(
+    array: &CharArray,
+    row: usize,
+) -> Result<String, Utf16DecodeError> {
     char_row_to_string_slice(array.data(), array.cols, row)
 }
 
 /// Collect a row from a character slice laid out in row-major order.
 #[inline]
-pub(crate) fn char_row_to_string_slice(data: &[char], cols: usize, row: usize) -> String {
+pub(crate) fn char_row_to_string_slice(
+    data: &[Utf16CodeUnit],
+    cols: usize,
+    row: usize,
+) -> Result<String, Utf16DecodeError> {
     let start = row * cols;
     let end = start + cols;
-    data[start..end].iter().collect()
+    decode_utf16_code_units(&data[start..end])
 }
 
 /// MATLAB treats these four Unicode whitespace characters as significant at
@@ -177,9 +188,26 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_row_collection_supports_row_major_storage() {
-        let chars: Vec<char> = vec!['A', 'B', 'C', 'D', 'E', 'F'];
-        assert_eq!(char_row_to_string_slice(&chars, 3, 0), "ABC");
-        assert_eq!(char_row_to_string_slice(&chars, 3, 1), "DEF");
+        let chars = runmat_value::encode_utf16_code_units("ABCDEF");
+        assert_eq!(char_row_to_string_slice(&chars, 3, 0).unwrap(), "ABC");
+        assert_eq!(char_row_to_string_slice(&chars, 3, 1).unwrap(), "DEF");
+    }
+
+    #[test]
+    fn char_row_collection_uses_code_unit_offsets_and_refuses_malformed_utf16() {
+        let chars = vec![
+            Utf16CodeUnit::from_raw(0xD83D),
+            Utf16CodeUnit::from_raw(0xDE42),
+            Utf16CodeUnit::from_raw(0xD800),
+        ];
+        assert_eq!(char_row_to_string_slice(&chars, 2, 0).unwrap(), "\u{1F642}");
+        assert_eq!(
+            char_row_to_string_slice(&chars, 1, 2),
+            Err(Utf16DecodeError {
+                index: 0,
+                unpaired_surrogate: 0xD800,
+            })
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

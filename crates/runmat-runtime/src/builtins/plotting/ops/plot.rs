@@ -8,7 +8,9 @@ use runmat_plot::plots::NumericPlotData;
 use runmat_plot::plots::{LinePlot, LineStyle};
 use runmat_value::{Tensor, Value};
 
-use crate::builtins::common::tensor as tensor_utils;
+#[path = "plot/matrix_series.rs"]
+mod matrix_series;
+use matrix_series::split_matrix_series;
 
 use super::common::numeric_plot_data_pair;
 use super::op_common::line_inputs::NumericInput;
@@ -19,7 +21,6 @@ use super::style::{
     value_as_string, LineAppearance, LineStyleParseOptions, MarkerAppearance, MarkerColor,
     MarkerKind, DEFAULT_LINE_MARKER_SIZE,
 };
-use std::convert::TryFrom;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -74,7 +75,7 @@ pub async fn plot_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     plot_builtin_with_runtime(None, args).await
 }
 
-async fn plot_builtin_with_runtime(
+pub(super) async fn plot_builtin_with_runtime(
     runtime: Option<&crate::context::RuntimeContext>,
     args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<f64> {
@@ -98,7 +99,7 @@ async fn plot_builtin_with_runtime(
         ));
     }
     let (mut series_plans, line_style_order) =
-        parse_series_specs(args).map_err(map_plot_invalid_argument)?;
+        parse_series_specs(args, runtime).map_err(map_plot_invalid_argument)?;
     let target = PreparedPlotTarget::prepare(prepared.resolve(BUILTIN_NAME)?, explicit)
         .map_err(|source| super::properties::map_figure_error(BUILTIN_NAME, source))?;
     let hold_enabled = target
@@ -306,6 +307,7 @@ pub(super) fn build_line_plot_from_numeric_data_for_builtin(
 
 fn parse_series_specs(
     args: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
 ) -> BuiltinResult<(Vec<SeriesRenderPlan>, Option<Vec<LineStyle>>)> {
     if args.is_empty() {
         return Err(plot_err("expected at least one data series"));
@@ -333,7 +335,7 @@ fn parse_series_specs(
 
         let (x_val, y_val, y_arg_index) = if shorthand_plot_y {
             let y_val = first_val;
-            let x_val = infer_plot_x_from_y(&y_val)?;
+            let x_val = infer_plot_x_from_y(&y_val, runtime)?;
             (x_val, y_val, idx.saturating_sub(1))
         } else {
             let y_arg_index = idx;
@@ -345,7 +347,7 @@ fn parse_series_specs(
             (first_val, y_val, y_arg_index)
         };
 
-        let pairs = split_matrix_series(x_val, y_val, shorthand_plot_y)?;
+        let pairs = split_matrix_series(x_val, y_val, shorthand_plot_y, runtime)?;
 
         let mut style_tokens = Vec::new();
         loop {
@@ -357,6 +359,13 @@ fn parse_series_specs(
             let token = args[idx].clone();
             idx += 1;
             let token_text = value_as_string(&token)
+                .map_err(|source| {
+                    crate::builtins::plotting::plotting_error_with_source(
+                        "plot",
+                        source.to_string(),
+                        source,
+                    )
+                })?
                 .ok_or_else(|| plot_err("style tokens must be char arrays or strings"))?;
             let lower = token_text.trim().to_ascii_lowercase();
             style_tokens.push(token);
@@ -395,95 +404,6 @@ fn parse_series_specs(
     Ok((plans, line_style_order))
 }
 
-/// Splits matrix data into the series MATLAB draws: `plot(Y)` and `plot(x, Y)` give one line per
-/// column of Y, or per row when it is the rows whose length matches x; `plot(X, Y)` with two
-/// matrices of one size pairs their columns. Vectors, and gpuArray data, pass through as one series.
-fn split_matrix_series(x: Value, y: Value, implicit_x: bool) -> BuiltinResult<Vec<(Value, Value)>> {
-    let host = |v: &Value| match v {
-        Value::Tensor(t) => Some(t.clone()),
-        _ => None,
-    };
-    let (Some(xt), Some(yt)) = (host(&x), host(&y)) else {
-        return Ok(vec![(x, y)]);
-    };
-    let dims = |t: &Tensor| {
-        (
-            t.shape().first().copied().unwrap_or(1),
-            t.shape().get(1).copied().unwrap_or(1),
-        )
-    };
-    let is_matrix = |t: &Tensor| {
-        let (r, c) = dims(t);
-        r > 1 && c > 1 && t.shape().len() <= 2
-    };
-    if !is_matrix(&yt) && !is_matrix(&xt) {
-        return Ok(vec![(x, y)]);
-    }
-    let values = |t: &Tensor| tensor_utils::tensor_values_f64(t);
-    let column = |t: &Tensor, j: usize| -> Vec<f64> {
-        let (r, _) = dims(t);
-        values(t)[j * r..(j + 1) * r].to_vec()
-    };
-    let row = |t: &Tensor, i: usize| -> Vec<f64> {
-        let (r, c) = dims(t);
-        let data = values(t);
-        (0..c).map(|j| data[j * r + i]).collect()
-    };
-    let vector = |data: Vec<f64>| -> BuiltinResult<Value> {
-        let n = data.len();
-        Tensor::new(data, vec![n, 1])
-            .map(Value::Tensor)
-            .map_err(plot_err)
-    };
-    let mismatch = || plot_err("X and Y inputs must have the same number of elements");
-    let mut pairs = Vec::new();
-    if is_matrix(&yt) {
-        let (r, c) = dims(&yt);
-        if implicit_x {
-            let xs: Vec<f64> = (1..=r).map(|i| i as f64).collect();
-            for j in 0..c {
-                pairs.push((vector(xs.clone())?, vector(column(&yt, j))?));
-            }
-        } else if is_matrix(&xt) {
-            if dims(&xt) != (r, c) {
-                return Err(mismatch());
-            }
-            for j in 0..c {
-                pairs.push((vector(column(&xt, j))?, vector(column(&yt, j))?));
-            }
-        } else {
-            let xs = values(&xt);
-            if xs.len() == r {
-                for j in 0..c {
-                    pairs.push((vector(xs.clone())?, vector(column(&yt, j))?));
-                }
-            } else if xs.len() == c {
-                for i in 0..r {
-                    pairs.push((vector(xs.clone())?, vector(row(&yt, i))?));
-                }
-            } else {
-                return Err(mismatch());
-            }
-        }
-    } else {
-        // X a matrix, Y a vector: one line per column (or row) of X against Y.
-        let (r, c) = dims(&xt);
-        let ys = values(&yt);
-        if ys.len() == r {
-            for j in 0..c {
-                pairs.push((vector(column(&xt, j))?, vector(ys.clone())?));
-            }
-        } else if ys.len() == c {
-            for i in 0..r {
-                pairs.push((vector(row(&xt, i))?, vector(ys.clone())?));
-            }
-        } else {
-            return Err(mismatch());
-        }
-    }
-    Ok(pairs)
-}
-
 fn is_numeric_value(value: &Value) -> bool {
     matches!(
         value,
@@ -491,19 +411,12 @@ fn is_numeric_value(value: &Value) -> bool {
     )
 }
 
-fn infer_plot_x_from_y(y: &Value) -> BuiltinResult<Value> {
-    let len = match y {
-        Value::GpuTensor(handle) => handle.shape().iter().copied().product::<usize>().max(1),
-        other => {
-            let tensor = Tensor::try_from(other)
-                .map_err(|e| plotting_error(BUILTIN_NAME, format!("plot: {e}")))?;
-            tensor_utils::tensor_element_len(&tensor).max(1)
-        }
-    };
-    let data = (1..=len).map(|i| i as f64).collect::<Vec<_>>();
-    Ok(Value::Tensor(
-        Tensor::new(data, vec![len]).expect("implicit plot axis"),
-    ))
+fn infer_plot_x_from_y(
+    y: &Value,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<Value> {
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime, BUILTIN_NAME)?;
+    work.finish(NumericInput::implicit_x(y, BUILTIN_NAME, 0))
 }
 
 fn plot_err(msg: impl Into<String>) -> RuntimeError {
@@ -609,6 +522,14 @@ impl PlotSeriesInput {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    fn parse_series_specs(
+        args: crate::call::BuiltinArguments,
+    ) -> BuiltinResult<(Vec<SeriesRenderPlan>, Option<Vec<LineStyle>>)> {
+        super::parse_series_specs(args, None)
+    }
+    fn infer_plot_x_from_y(y: &Value) -> BuiltinResult<Value> {
+        super::infer_plot_x_from_y(y, None)
+    }
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::set::set_builtin;
     use crate::builtins::plotting::state::PlotTestLockGuard;
@@ -646,6 +567,22 @@ pub(crate) mod tests {
 
     #[test]
     fn infer_plot_x_reads_typed_integer_length_without_mirror() {
+        for y in [
+            Value::Num(4.0),
+            Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_993)),
+            Value::Tensor(Tensor::from_f32(vec![4.0], vec![1, 1]).unwrap()),
+        ] {
+            let Value::Tensor(x) = infer_plot_x_from_y(&y).expect("scalar implicit axis") else {
+                panic!("tensor axis")
+            };
+            assert_eq!(x.materialize_f64(), vec![1.0]);
+            let (plans, _) = parse_series_specs(
+                crate::builtins::common::test_support::builtin_arguments(vec![y]),
+            )
+            .expect("scalar series");
+            assert_eq!(plans.len(), 1);
+            assert_eq!(plans[0].data.y.len(), 1);
+        }
         let x = infer_plot_x_from_y(&cleared_int_value(
             IntegerStorage::U16(vec![7, 8, 9]),
             vec![3, 1],
@@ -1020,6 +957,58 @@ pub(crate) mod tests {
 
     #[test]
     fn parse_series_specs_splits_matrix_y_into_one_series_per_column_or_row() {
+        let wide = 9_007_199_254_740_993_u64;
+        for source in [
+            Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![3, 2]).unwrap(),
+            Tensor::new_integer(
+                IntegerStorage::U64(vec![
+                    wide,
+                    wide + 2,
+                    wide + 4,
+                    wide + 6,
+                    wide + 8,
+                    wide + 10,
+                ]),
+                vec![3, 2],
+            )
+            .unwrap(),
+        ] {
+            let original = source.clone();
+            let (plans, _) =
+                parse_series_specs(crate::builtins::common::test_support::builtin_arguments(
+                    vec![Value::Tensor(source.clone())],
+                ))
+                .expect("native matrix series");
+            assert_eq!(plans.len(), 2);
+            for (column, plan) in plans.into_iter().enumerate() {
+                let NumericInput::Host(y) = plan.data.y else {
+                    panic!("host series")
+                };
+                assert_eq!(y.numeric_dtype(), source.numeric_dtype());
+                if source.as_f32_slice().is_some() {
+                    assert_eq!(
+                        y.as_f32_slice().unwrap(),
+                        if column == 0 {
+                            &[1.0, 2.0, 3.0]
+                        } else {
+                            &[4.0, 5.0, 6.0]
+                        }
+                    );
+                } else {
+                    assert_eq!(
+                        y.integer_storage(),
+                        Some(&IntegerStorage::U64(if column == 0 {
+                            vec![wide, wide + 2, wide + 4]
+                        } else {
+                            vec![wide + 6, wide + 8, wide + 10]
+                        }))
+                    );
+                }
+            }
+            assert_eq!(source.shape(), original.shape());
+            assert_eq!(source.as_f32_slice(), original.as_f32_slice());
+            assert_eq!(source.integer_storage(), original.integer_storage());
+        }
         let x = Value::Tensor(tensor_with_shape(&[1.0, 2.0, 3.0], vec![1, 3]));
         // 3x2: columns match x
         let cols = Value::Tensor(tensor_with_shape(
@@ -1060,6 +1049,32 @@ pub(crate) mod tests {
     #[test]
     fn parse_series_specs_supports_plot_y_shorthand() {
         let _guard = setup_plot_tests();
+        let empty = Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap());
+        let (empty_plans, _) = parse_series_specs(
+            crate::builtins::common::test_support::builtin_arguments(vec![empty]),
+        )
+        .expect("empty plot-y input");
+        assert_eq!(empty_plans.len(), 1);
+        let (empty_x, empty_y) = futures::executor::block_on(
+            empty_plans
+                .into_iter()
+                .next()
+                .unwrap()
+                .data
+                .into_tensors_async("plot"),
+        )
+        .unwrap();
+        assert!(empty_x.is_empty());
+        assert!(empty_y.is_empty());
+        let (empty_x, empty_y) = numeric_plot_data_pair(empty_x, empty_y, "plot").unwrap();
+        assert!(build_line_plot_from_numeric_data(
+            empty_x,
+            empty_y,
+            "empty",
+            &LineAppearance::default()
+        )
+        .unwrap()
+        .is_empty());
         let args = vec![Value::Tensor(tensor_from(&[10.0, 20.0, 30.0]))];
         let (plans, order) = parse_series_specs(
             crate::builtins::common::test_support::builtin_arguments(args),

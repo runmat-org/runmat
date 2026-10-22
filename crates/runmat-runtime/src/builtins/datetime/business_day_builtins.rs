@@ -174,9 +174,10 @@ pub(super) async fn isbusday_builtin(
         .await
         .map_err(|err| datetime_error(format!("isbusday: {}", err.message())))?;
     let rest = gather_retained_args(rest, runtime.as_ref()).await?;
-    let serials = numeric_or_datetime_serial_tensor(value, "isbusday")?;
+    let serials = numeric_or_datetime_serial_tensor(runtime.as_ref(), value, "isbusday")?;
     let (start_key, end_key) = date_key_range(&[&serials])?;
     let holidays = holiday_set_from_optional_or_default(
+        runtime.as_ref(),
         rest.first().cloned(),
         "isbusday",
         start_key,
@@ -245,7 +246,7 @@ pub(super) async fn holidays_builtin(
     let args = gather_retained_args(args, runtime.as_ref()).await?;
     let keys = match args.len() {
         0 => {
-            let year = current_naive_local().year();
+            let year = current_naive_local(runtime.as_ref())?.year();
             let start = key_from_date(NaiveDate::from_ymd_opt(year, 1, 1).unwrap());
             let end = key_from_date(NaiveDate::from_ymd_opt(year, 12, 31).unwrap());
             holiday_keys_between(start, end)?
@@ -267,8 +268,10 @@ pub(super) async fn holidays_builtin(
             holiday_keys_between(start, end)?
         }
         2 | 3 => {
-            let start = numeric_or_datetime_serial_tensor(args[0].clone(), "holidays")?;
-            let end = numeric_or_datetime_serial_tensor(args[1].clone(), "holidays")?;
+            let start =
+                numeric_or_datetime_serial_tensor(runtime.as_ref(), args[0].clone(), "holidays")?;
+            let end =
+                numeric_or_datetime_serial_tensor(runtime.as_ref(), args[1].clone(), "holidays")?;
             if tensor::tensor_element_len(&start) != 1 || tensor::tensor_element_len(&end) != 1 {
                 return Err(datetime_error(
                     "holidays: start and end dates must be scalar",
@@ -277,7 +280,11 @@ pub(super) async fn holidays_builtin(
             let start_key = serial_date_key(tensor::tensor_value_f64(&start, 0))?;
             let end_key = serial_date_key(tensor::tensor_value_f64(&end, 0))?;
             if let Some(alternate) = args.get(2) {
-                let alternate = numeric_or_datetime_serial_tensor(alternate.clone(), "holidays")?;
+                let alternate = numeric_or_datetime_serial_tensor(
+                    runtime.as_ref(),
+                    alternate.clone(),
+                    "holidays",
+                )?;
                 let mut keys = tensor::tensor_values_f64_cow(&alternate)
                     .iter()
                     .map(|serial| serial_date_key(*serial))
@@ -350,8 +357,8 @@ pub(super) async fn busdays_builtin(
     let output_datetime = is_datetime_object(&start)
         || is_datetime_object(&end)
         || rest.get(1).is_some_and(is_datetime_object);
-    let start = numeric_or_datetime_serial_tensor(start, "busdays")?;
-    let end = numeric_or_datetime_serial_tensor(end, "busdays")?;
+    let start = numeric_or_datetime_serial_tensor(runtime.as_ref(), start, "busdays")?;
+    let end = numeric_or_datetime_serial_tensor(runtime.as_ref(), end, "busdays")?;
     if tensor::tensor_element_len(&start) != 1 || tensor::tensor_element_len(&end) != 1 {
         return Err(datetime_error(
             "busdays: start and end dates must be scalar",
@@ -380,6 +387,7 @@ pub(super) async fn busdays_builtin(
         key_from_date(period.period_end(date_from_key(key.max(end_key))?)?)
     };
     let holidays = holiday_set_from_optional_or_default(
+        runtime.as_ref(),
         rest.get(1).cloned(),
         "busdays",
         calendar_start,
@@ -476,10 +484,11 @@ pub(super) async fn days252bus_builtin(
         .await
         .map_err(|err| datetime_error(format!("days252bus: {}", err.message())))?;
     let rest = gather_retained_args(rest, runtime.as_ref()).await?;
-    let starts = numeric_or_datetime_serial_tensor(start, "days252bus")?;
-    let ends = numeric_or_datetime_serial_tensor(end, "days252bus")?;
+    let starts = numeric_or_datetime_serial_tensor(runtime.as_ref(), start, "days252bus")?;
+    let ends = numeric_or_datetime_serial_tensor(runtime.as_ref(), end, "days252bus")?;
     let (start_key, end_key) = date_key_range(&[&starts, &ends])?;
     let holidays = holiday_set_from_optional_or_default(
+        runtime.as_ref(),
         rest.first().cloned(),
         "days252bus",
         start_key,
@@ -552,8 +561,8 @@ pub(super) async fn daysdif_builtin(
             value as i64
         }
     };
-    let starts = numeric_or_datetime_serial_tensor(start, "daysdif")?;
-    let ends = numeric_or_datetime_serial_tensor(end, "daysdif")?;
+    let starts = numeric_or_datetime_serial_tensor(runtime.as_ref(), start, "daysdif")?;
+    let ends = numeric_or_datetime_serial_tensor(runtime.as_ref(), end, "daysdif")?;
     let (start_data, end_data, shape) =
         tensor::binary_numeric_tensors(&starts, &ends, "daysdif", BUILTIN_NAME)?;
     let out = start_data
@@ -710,7 +719,8 @@ async fn month_business_date_builtin(
         });
     }
     let (min, max) = bounds.unwrap_or((0, 0));
-    let holidays = holiday_set_from_optional_or_default(rest.first().cloned(), name, min, max)?;
+    let holidays =
+        holiday_set_from_optional_or_default(runtime, rest.first().cloned(), name, min, max)?;
     let out = year_data
         .iter()
         .zip(month_data.iter())

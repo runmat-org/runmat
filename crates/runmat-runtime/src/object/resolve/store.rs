@@ -59,15 +59,84 @@ pub(super) async fn store_member_with_context<OnWrite>(
 where
     OnWrite: FnMut(&Value, &Value),
 {
-    let work = store_member_in_scope(
+    let roots = member_store_roots(context, &base, &rhs)?;
+    let field = crate::call::argument_text::adopt_string(field, context)?;
+    store_member_scoped(
         context,
-        base,
-        field,
-        rhs,
-        allow_init,
+        MemberStore {
+            base,
+            field,
+            rhs,
+            allow_init,
+            _roots: roots,
+        },
         caller_function_name,
         on_write,
-    );
+    )
+    .await
+}
+
+pub(crate) async fn store_member_text_with_context<OnWrite>(
+    context: Option<&crate::context::RuntimeContext>,
+    base: Value,
+    field: runmat_value::Utf8Text,
+    rhs: Value,
+    allow_init: bool,
+    caller_function_name: Option<&str>,
+    on_write: OnWrite,
+) -> Result<RootedValue, RuntimeError>
+where
+    OnWrite: FnMut(&Value, &Value),
+{
+    let roots = member_store_roots(context, &base, &rhs)?;
+    store_member_scoped(
+        context,
+        MemberStore {
+            base,
+            field,
+            rhs,
+            allow_init,
+            _roots: roots,
+        },
+        caller_function_name,
+        on_write,
+    )
+    .await
+}
+
+struct MemberStore {
+    base: Value,
+    field: runmat_value::Utf8Text,
+    rhs: Value,
+    allow_init: bool,
+    _roots: RootedValueLease,
+}
+
+fn member_store_roots(
+    context: Option<&crate::context::RuntimeContext>,
+    base: &Value,
+    rhs: &Value,
+) -> Result<RootedValueLease, RuntimeError> {
+    match context {
+        Some(context) => RootedValueLease::for_value_slices_in_context(
+            &[std::slice::from_ref(base), std::slice::from_ref(rhs)],
+            context,
+        ),
+        None => RootedValueLease::for_values([base, rhs].into_iter())
+            .map_err(|error| error.into_runtime_error()),
+    }
+}
+
+async fn store_member_scoped<OnWrite>(
+    context: Option<&crate::context::RuntimeContext>,
+    request: MemberStore,
+    caller_function_name: Option<&str>,
+    on_write: OnWrite,
+) -> Result<RootedValue, RuntimeError>
+where
+    OnWrite: FnMut(&Value, &Value),
+{
+    let work = store_member_in_scope(context, request, caller_function_name, on_write);
     match context {
         Some(context) => context.scope(work).await,
         None => work.await,
@@ -76,24 +145,20 @@ where
 
 async fn store_member_in_scope<OnWrite>(
     context: Option<&crate::context::RuntimeContext>,
-    base: Value,
-    field: String,
-    rhs: Value,
-    allow_init: bool,
+    request: MemberStore,
     caller_function_name: Option<&str>,
     mut on_write: OnWrite,
 ) -> Result<RootedValue, RuntimeError>
 where
     OnWrite: FnMut(&Value, &Value),
 {
-    let _inputs_root = match context {
-        Some(context) => RootedValueLease::for_value_slices_in_context(
-            &[std::slice::from_ref(&base), std::slice::from_ref(&rhs)],
-            context,
-        )?,
-        None => RootedValueLease::for_values([&base, &rhs].into_iter())
-            .map_err(|error| error.into_runtime_error())?,
-    };
+    let MemberStore {
+        base,
+        field,
+        rhs,
+        allow_init,
+        _roots,
+    } = request;
     match base {
         Value::Object(obj) => {
             let base = Value::Object(obj.clone());
@@ -108,7 +173,7 @@ where
                 )?
             {
                 let path = crate::object::indexing::ObjectSubscriptPath::single(
-                    crate::object::indexing::ObjectSubscript::member(field),
+                    crate::object::indexing::ObjectSubscript::member_retained(field),
                 );
                 return match context {
                     Some(context) => {
@@ -173,7 +238,7 @@ where
                 )?
             {
                 let path = crate::object::indexing::ObjectSubscriptPath::single(
-                    crate::object::indexing::ObjectSubscript::member(field),
+                    crate::object::indexing::ObjectSubscript::member_retained(field),
                 );
                 return match context {
                     Some(context) => {
@@ -198,7 +263,7 @@ where
         .with_identifier("RunMat:setfield:NonStructAssignment")
         .build()),
         Value::Foreign(reference) => {
-            crate::foreign::store_foreign_member(reference, field, rhs).await
+            crate::foreign::store_foreign_member_text(reference, field, rhs).await
         }
         Value::Num(0.0) if allow_init => {
             crate::execution::structure::construct_struct_from_fields_in_optional_context(
@@ -220,14 +285,14 @@ where
                 })
         }
         Value::Struct(st) => {
-            if let Some(oldv) = st.fields.get(&field) {
+            if let Some(oldv) = st.fields.get(field.as_str()) {
                 on_write(oldv, &rhs);
             }
-            let existing = st.fields.contains_key(&field);
+            let existing = st.fields.contains_key(field.as_str());
             crate::execution::structure::construct_struct_from_fields_in_optional_context(
                 context,
                 st.fields.iter()
-                    .map(|(name, value)| (name, if name == field { &rhs } else { value }))
+                    .map(|(name, value)| (name, if name == field.as_str() { &rhs } else { value }))
                     .chain((!existing).then_some((field.as_str(), &rhs))),
             )
         }

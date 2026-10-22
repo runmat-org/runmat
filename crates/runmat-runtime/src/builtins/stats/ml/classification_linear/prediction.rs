@@ -107,12 +107,12 @@ fn parse_predict_options(
     };
     let mut index = 0usize;
     while index < values.len() {
-        let name = scalar_text(&values[index])
+        let name = predict_scalar_text(&values[index])?
             .ok_or_else(|| predict_invalid("predict: option name must be text"))?;
         let value = &values[index + 1];
         match name.to_ascii_lowercase().as_str() {
             "observationsin" => {
-                let text = scalar_text(value)
+                let text = predict_scalar_text(value)?
                     .ok_or_else(|| predict_invalid("predict: ObservationsIn must be text"))?;
                 options.observations_in = match text.to_ascii_lowercase().as_str() {
                     "rows" => ObservationsIn::Rows,

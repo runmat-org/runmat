@@ -1,0 +1,106 @@
+use crate::*;
+
+pub(super) const IMAGESC_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "h",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Handle to the rendered scaled image object.",
+}];
+
+pub(super) const IMAGESC_INPUTS_C: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+    name: "C",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Indexed image matrix.",
+}];
+
+pub(super) const IMAGESC_INPUTS_X_Y_C: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X coordinates or extent vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y coordinates or extent vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "C",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Indexed image matrix.",
+    },
+];
+
+pub(super) const IMAGESC_INPUTS_C_PROPS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "C",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Indexed image matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name/value surface style options.",
+    },
+];
+
+pub(super) const IMAGESC_INPUTS_X_Y_C_PROPS: [BuiltinParamDescriptor; 4] = [
+    BuiltinParamDescriptor {
+        name: "X",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "X coordinates or extent vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "Y",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Y coordinates or extent vector.",
+    },
+    BuiltinParamDescriptor {
+        name: "C",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Indexed image matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "props",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Name/value surface style options.",
+    },
+];
+
+pub(super) const IMAGESC_INPUTS_C_CLIMS: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "C",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Indexed image matrix.",
+    },
+    BuiltinParamDescriptor {
+        name: "clims",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Two-element color limits.",
+    },
+];

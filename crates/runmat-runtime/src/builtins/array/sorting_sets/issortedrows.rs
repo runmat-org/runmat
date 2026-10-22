@@ -1,15 +1,15 @@
 //! MATLAB-compatible `issortedrows` builtin.
 
+use crate::call::{BuiltinArguments, FunctionArgumentView};
+pub use runmat_builtins::{
+    ISSORTEDROWS_DESCRIPTOR, ISSORTEDROWS_ERROR_INVALID_ARGUMENT as ERROR_INVALID_ARGUMENT,
+    ISSORTEDROWS_ERROR_INVALID_INPUT as ERROR_INVALID_INPUT, ISSORTEDROWS_EXTENSIONS as EXTENSIONS,
+    ISSORTEDROWS_INTEGER_CAPABILITIES as INTEGER_CAPABILITIES,
+};
 use std::cmp::Ordering;
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
+use runmat_builtins::ISSORTEDROWS_GPU_INPUT_EXTENSION as GPU_INPUT_EXTENSION;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CharArray, ComplexStorage, ComplexTensor, IntegerStorage, LogicalArray, NumericScalar,
@@ -19,7 +19,6 @@ use runmat_value::{
 use super::{
     float_order::{ComplexSequence, SetFloat},
     integer_order,
-    type_resolvers::bool_output_type,
 };
 use crate::build_runtime_error;
 use crate::builtins::common::gpu_helpers;
@@ -62,105 +61,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "issortedrows";
 
-const OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tf",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "True when rows are sorted according to the requested row order.",
-}];
-
-const INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input column vector, matrix, or table.",
-    },
-    BuiltinParamDescriptor {
-        name: "args",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Column selectors, direction modes, ComparisonMethod, and MissingPlacement.",
-    },
-];
-
-const SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "tf = issortedrows(A)",
-        inputs: &INPUTS,
-        outputs: &OUTPUTS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "tf = issortedrows(A, column, direction, options)",
-        inputs: &INPUTS,
-        outputs: &OUTPUTS,
-    },
-];
-
-const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISSORTEDROWS.INVALID_INPUT",
-    identifier: Some("RunMat:issortedrows:InvalidInput"),
-    when: "Input or row-sorting arguments are invalid.",
-    message: "issortedrows: invalid input",
-};
-
-const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISSORTEDROWS.INVALID_ARGUMENT",
-    identifier: Some("RunMat:issortedrows:InvalidArgument"),
-    when: "A column, direction, comparison, missing-placement, or output argument is invalid.",
-    message: "issortedrows: invalid argument",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_INVALID_INPUT, ERROR_INVALID_ARGUMENT];
-
-const GPU_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "issortedrows-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "issortedrows with an interactive resident GPU input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:IssortedrowsGpuInputExtension"),
-};
-
-const EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [GPU_INPUT_EXTENSION];
-
-const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented matrix domain includes all eight real integer classes.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "column",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The documented nonzero integer column scalar or vector accepts every integer class and integer-valued double.",
-    },
-];
-
-const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "tf = issortedrows(integer_A, integer_columns, direction, options)",
-        inputs: &INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Predicate,
-        output_class: BuiltinIntegerOutputClassRule::Logical,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Integer rows and column selectors are compared exactly across ascending, descending, monotonic, strict, and per-column direction forms. tf is scalar logical. Interactive GPU input is a mode-gated RunMat extension that gathers exact typed storage.",
-    }];
-
-pub const ISSORTEDROWS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
 fn error(
     descriptor: &'static BuiltinErrorDescriptor,
     message: impl Into<String>,
@@ -182,18 +82,10 @@ fn invalid_input(message: impl Into<String>) -> crate::RuntimeError {
 
 #[runtime_builtin(
     name = "issortedrows",
-    category = "array/sorting_sets",
-    summary = "Determine whether matrix or table rows are sorted.",
-    keywords = "issortedrows,sortrows,rows,sorted,monotonic,strict,table",
-    accel = "sink",
-    sink = true,
-    type_resolver(bool_output_type),
-    descriptor(crate::builtins::array::sorting_sets::issortedrows::ISSORTEDROWS_DESCRIPTOR),
-    extensions(EXTENSIONS),
-    integer_capabilities(INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::sorting_sets::issortedrows"
 )]
-async fn issortedrows_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn issortedrows_builtin(value: Value, rest: BuiltinArguments) -> crate::BuiltinResult<Value> {
     if matches!(crate::output_count::current_output_count(), Some(n) if n > 1) {
         return Err(invalid_argument(
             "issortedrows: too many output arguments; maximum is 1",
@@ -212,7 +104,8 @@ async fn issortedrows_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinR
     if matches!(&value, Value::Object(object) if object.is_class(crate::builtins::table::TABLE_CLASS))
     {
         let evaluation =
-            crate::builtins::array::sorting_sets::sortrows::evaluate(value, &rest).await?;
+            crate::builtins::array::sorting_sets::sortrows::evaluate_view(value, rest.view())
+                .await?;
         return Ok(Value::Bool(indices_are_identity(
             evaluation.indices_value(),
         )));
@@ -221,7 +114,7 @@ async fn issortedrows_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinR
     ensure_matrix(&shape)?;
     let rows = rows(&shape);
     let cols = cols(&shape);
-    let args = Args::parse(&rest, cols)?;
+    let args = Args::parse(rest.view(), cols)?;
     let sorted = match value {
         Value::Tensor(tensor) => {
             let storage = tensor
@@ -346,7 +239,7 @@ struct Args {
 }
 
 impl Args {
-    fn parse(rest: &[Value], num_cols: usize) -> crate::BuiltinResult<Self> {
+    fn parse(rest: FunctionArgumentView<'_>, num_cols: usize) -> crate::BuiltinResult<Self> {
         let mut columns: Option<Vec<ColumnCheck>> = None;
         let mut directions: Option<Vec<Direction>> = None;
         let mut comparison = ComparisonMethod::Auto;
@@ -913,7 +806,10 @@ mod tests {
     use runmat_value::{CellArray, IntValue, StringArray, Tensor};
 
     fn builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-        block_on(issortedrows_builtin(value, rest))
+        block_on(issortedrows_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     fn directions(values: &[&str]) -> Value {

@@ -80,7 +80,8 @@ fn failed_validation_leaves_the_path_unchanged() {
     let _guard = PathGuard::new();
     let valid = tempdir().expect("valid");
     let original = canonical(valid.path());
-    crate::builtins::common::path_state::set_path_string(&original);
+    crate::builtins::common::path_state::set_path_string(&original)
+        .expect("test search path update");
     let error = super::run(vec![
         Value::String(valid.path().to_string_lossy().into_owned().into()),
         Value::String("missing/path/for/addpath".into()),
@@ -100,7 +101,8 @@ fn failed_validation_leaves_the_path_unchanged() {
 fn rejects_character_arrays_with_more_than_two_dimensions() {
     let _guard = PathGuard::new();
     let original = crate::builtins::common::path_state::current_path_string();
-    let chars = CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).expect("3-D chars");
+    let chars = CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 1, 2])
+        .expect("3-D chars");
     let error = super::run(vec![Value::CharArray(chars)]).expect_err("invalid characters");
     assert_eq!(
         error.identifier(),

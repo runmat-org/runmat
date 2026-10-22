@@ -18,10 +18,10 @@ fn active_runtime_context_owns_path_and_generation() {
     .with_search_path(Arc::clone(&first));
     let _first_context = crate::context::RuntimeContextGuard::enter(first_context);
     assert_eq!(current_path_string(), "first");
-    set_path_string("first");
+    set_path_string("first").expect("test search path update");
     assert_eq!(first.generation(), 0, "no-op replacement is not a mutation");
     let updated = format!("first{PATH_LIST_SEPARATOR}added");
-    set_path_string(&updated);
+    set_path_string(&updated).expect("test search path update");
     assert_eq!(current_path_string(), updated);
     assert_eq!(first.generation(), 1);
 
@@ -197,9 +197,17 @@ fn stale_user_authority_rejects_source_search_before_touching_filesystem() {
     assert!(source_authority_current());
     path.mark_user_authority_stale();
     assert!(!source_authority_current());
-    assert!(
-        crate::builtins::common::path_search::search_directories("lookup")
-            .expect_err("stale user path must stop source lookup")
-            .contains("requires rehydration")
-    );
+    let error = crate::builtins::common::path_search::search_directories("lookup")
+        .expect_err("stale user path must stop source lookup");
+    assert!(error.to_string().contains("requires rehydration"));
+    let error = error.into_runtime_error("lookup");
+    assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+    assert!(matches!(
+        error
+            .source
+            .as_ref()
+            .unwrap()
+            .downcast_ref::<crate::execution::ExecutionServiceError>(),
+        Some(crate::execution::ExecutionServiceError::Infrastructure(_))
+    ));
 }

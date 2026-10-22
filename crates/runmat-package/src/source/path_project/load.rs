@@ -4,7 +4,7 @@ use super::model::{
 };
 use super::FrozenProjectError;
 use runmat_config::project::{
-    build_project_source_index_async, load_project_manifest_async, ProjectManifest,
+    build_project_source_index_excluding_async, load_project_manifest_async, ProjectManifest,
     PROJECT_MANIFEST_FILENAME, PROJECT_MANIFEST_FILENAMES,
 };
 use std::collections::BTreeMap;
@@ -24,6 +24,46 @@ pub(super) async fn load_path_project(
     loader
         .load_package(&root_manifest, None, true, &mut Vec::new())
         .await?;
+    // Resolve the whole package graph before source capture: a root's broad
+    // source directory or explicit source-root alias must not admit another
+    // loaded package's files. Ancestors do not exclude this package's own
+    // subtree; descendants and unrelated package roots remain boundaries.
+    let package_roots = loader
+        .packages
+        .values()
+        .map(|package| package.project_root.clone())
+        .collect::<Vec<_>>();
+    for package in loader.packages.values_mut() {
+        let excluded = package_roots
+            .iter()
+            .filter(|root| !package.project_root.starts_with(root))
+            .cloned()
+            .collect::<Vec<_>>();
+        let source_index = build_project_source_index_excluding_async(
+            &package.project_root,
+            &package.manifest,
+            &excluded,
+        )
+        .await
+        .map_err(|source| FrozenProjectError::SourceIndex {
+            package: package.manifest.package.name.clone(),
+            source: Box::new(source),
+        })?;
+        package.sources.reserve(source_index.files.len());
+        for descriptor in source_index.files {
+            let path = package
+                .project_root
+                .join(&descriptor.source_root)
+                .join(&descriptor.relative_path);
+            let bytes = runmat_filesystem::read_async(&path)
+                .await
+                .map_err(|error| super::PathProjectError::ReadSource {
+                    path: path.clone(),
+                    reason: error.to_string(),
+                })?;
+            package.sources.push(LoadedSource { descriptor, bytes });
+        }
+    }
     Ok(LoadedPathProject {
         root_manifest,
         workspace_root,
@@ -74,25 +114,6 @@ impl PathProjectLoader {
                 .parent()
                 .unwrap_or_else(|| Path::new("."))
                 .to_path_buf();
-            let source_index = build_project_source_index_async(&project_root, &manifest)
-                .await
-                .map_err(|source| FrozenProjectError::SourceIndex {
-                    package: package_name.clone(),
-                    source: Box::new(source),
-                })?;
-            let mut sources = Vec::with_capacity(source_index.files.len());
-            for descriptor in source_index.files {
-                let path = project_root
-                    .join(&descriptor.source_root)
-                    .join(&descriptor.relative_path);
-                let bytes = runmat_filesystem::read_async(&path)
-                    .await
-                    .map_err(|error| super::PathProjectError::ReadSource {
-                        path: path.clone(),
-                        reason: error.to_string(),
-                    })?;
-                sources.push(LoadedSource { descriptor, bytes });
-            }
             let mut native_interfaces = Vec::with_capacity(manifest.native_interfaces.len());
             for (name, interface) in &manifest.native_interfaces {
                 let manifest_path = project_root.join(&interface.manifest);
@@ -181,7 +202,7 @@ impl PathProjectLoader {
                     manifest_path: manifest_path.clone(),
                     project_root,
                     manifest,
-                    sources,
+                    sources: Vec::new(),
                     native_interfaces,
                     mex_artifacts,
                     java_artifacts,

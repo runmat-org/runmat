@@ -120,7 +120,7 @@ async fn decode(
     match name {
         OptionName::Model => {
             let model =
-                scalar_text(&value).ok_or_else(|| invalid("mnrfit: Model option must be text"))?;
+                scalar_text(&value)?.ok_or_else(|| invalid("mnrfit: Model option must be text"))?;
             match model.to_ascii_lowercase().as_str() {
                 "nominal" => Ok(OptionValue::Accepted),
                 other => Err(invalid(format!(
@@ -130,7 +130,7 @@ async fn decode(
         }
         OptionName::Link => {
             let link =
-                scalar_text(&value).ok_or_else(|| invalid("mnrfit: Link option must be text"))?;
+                scalar_text(&value)?.ok_or_else(|| invalid("mnrfit: Link option must be text"))?;
             match link.to_ascii_lowercase().as_str() {
                 "logit" => Ok(OptionValue::Accepted),
                 other => Err(invalid(format!(
@@ -153,7 +153,7 @@ async fn decode(
             Ok(OptionValue::Constant(constant))
         }
         OptionName::Interactions => {
-            let text = scalar_text(&value)
+            let text = scalar_text(&value)?
                 .ok_or_else(|| invalid("mnrfit: Interactions option must be text"))?;
             if !text.eq_ignore_ascii_case("off") {
                 return Err(invalid(
@@ -174,12 +174,12 @@ async fn decode(
         )?)),
         OptionName::Options => Err(invalid("mnrfit: Options must be a struct")),
         OptionName::Display => {
-            let _ = scalar_text(&value)
+            let _ = scalar_text(&value)?
                 .ok_or_else(|| invalid("mnrfit: Display option must be text"))?;
             Ok(OptionValue::Accepted)
         }
         OptionName::EstDisp => {
-            let text = scalar_text(&value)
+            let text = scalar_text(&value)?
                 .ok_or_else(|| invalid("mnrfit: EstDisp option must be text"))?;
             if !text.eq_ignore_ascii_case("off") {
                 return Err(invalid(
@@ -209,12 +209,12 @@ fn decode_statset(field: MnrfitStatsetField, value: Value) -> BuiltinResult<Opti
 
 enum BoolOrText {
     Bool(bool),
-    Text(runmat_value::Utf8Text),
+    Text(String),
 }
 
 fn text_or_logical(value: &Value, label: &str) -> BuiltinResult<BoolOrText> {
-    if let Some(text) = scalar_text(value) {
-        return Ok(BoolOrText::Text(text));
+    if let Some(text) = scalar_text(value)? {
+        return Ok(BoolOrText::Text(text.into_owned()));
     }
     match value {
         Value::Bool(flag) => Ok(BoolOrText::Bool(*flag)),

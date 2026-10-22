@@ -6,5 +6,6 @@ include!("declarations.rs");
 pub use self::exports::*;
 pub use self::filesystem::*;
 pub(super) use self::inference::infer;
+pub use self::winqueryreg::*;
 
 pub(super) use self::registry::extend_entries;

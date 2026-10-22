@@ -27,11 +27,11 @@ pub(super) fn admit_before_gather(
     if args.len() < 3 {
         return Ok(None);
     }
-    let explicit = args.len() >= 5 && !is_option_arg(&args[3]);
+    let explicit = args.len() >= 5 && !is_option_arg(&args[3])?;
     let option_start = if explicit { 5 } else { 3 };
     let mut method = InterpMethod::Linear;
     for option in args.iter().skip(option_start) {
-        if crate::builtins::common::random_args::keyword_of(option).as_deref() == Some("extrap") {
+        if crate::builtins::common::random_args::keyword_of(option)?.as_deref() == Some("extrap") {
             continue;
         }
         if let Some(parsed) = parse_method(option, NAME)? {

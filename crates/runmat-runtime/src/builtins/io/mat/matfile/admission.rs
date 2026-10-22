@@ -73,8 +73,8 @@ pub(super) fn suffix_digest(path: &ObjectSubscriptPath) -> Option<Digest> {
         };
         let selector = match step.selector() {
             ObjectIndexSelector::Member(name) => {
-                charge_text(&mut text_bytes, &name.0)?;
-                Selector::Member(&name.0)
+                charge_text(&mut text_bytes, name.as_str())?;
+                Selector::Member(name.as_str())
             }
             ObjectIndexSelector::ScalarIndices { indices } => {
                 charge_count(&mut components, indices.len())?;

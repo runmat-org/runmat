@@ -1,4 +1,11 @@
 //! MATLAB-compatible `memoize` and `MemoizedFunction` support.
+pub use runmat_builtins::{
+    CLEAR_ALL_MEMOIZED_CACHES_DESCRIPTOR, CLEAR_ALL_MEMOIZED_CACHES_ERROR_TOO_MANY_OUTPUTS,
+    CLEAR_CACHE_DESCRIPTOR, CLEAR_CACHE_ERROR_TOO_MANY_OUTPUTS, MEMOIZE_DESCRIPTOR,
+    MEMOIZE_ERROR_GC, MEMOIZE_ERROR_INVALID_CACHE_SIZE, MEMOIZE_ERROR_INVALID_FUNCTION,
+    MEMOIZE_ERROR_INVALID_INDEX, MEMOIZE_ERROR_INVALID_OBJECT, MEMOIZE_ERROR_TOO_MANY_OUTPUTS,
+    MEMOIZE_INTEGER_AUDIT, STATS_DESCRIPTOR, STATS_ERROR_TOO_MANY_OUTPUTS,
+};
 use runmat_types::MemberAccess;
 
 use std::cell::RefCell;
@@ -9,11 +16,9 @@ use once_cell::sync::Lazy;
 #[cfg(test)]
 use std::sync::Mutex;
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
+#[cfg(test)]
+use runmat_builtins::BuiltinIntegerAuditKind;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CellArray, ComplexTensor, HandleRef, IntValue, LogicalArray, NumericScalar, ObjectInstance,
@@ -25,13 +30,8 @@ use crate::{
     OBJECT_SUBSREF_METHOD,
 };
 
-pub(crate) const MEMOIZED_FUNCTION_CLASS: runmat_types::StaticClassIdentity =
-    runmat_types::StaticClassIdentity::new("MemoizedFunction");
-pub const MEMOIZE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "memoize accepts only a function handle and returns a MemoizedFunction object. Integer values used later as arguments to that object belong to callable cache-key semantics, not to the memoize constructor's public integer surface.",
-};
+pub(crate) use runmat_builtins::MEMOIZED_FUNCTION_CLASS;
+
 const FUNCTION_PROPERTY: &str = "Function";
 const ENABLED_PROPERTY: &str = "Enabled";
 const CACHE_SIZE_PROPERTY: &str = "CacheSize";
@@ -55,163 +55,25 @@ thread_local! {
     static MEMOIZE_REGISTRY: RefCell<HashMap<String, runmat_gc::GcHandle>> = RefCell::new(HashMap::new());
 }
 
-const MEMOIZE_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "fh",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Function handle to memoize.",
-}];
-const MEMOIZE_OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "memoizedFcn",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "MemoizedFunction handle object.",
-}];
-const MEMOIZE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "memoizedFcn = memoize(fh)",
-    inputs: &MEMOIZE_INPUTS,
-    outputs: &MEMOIZE_OUTPUTS,
-}];
-
-const MEMOIZED_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "memoizedFcn",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "MemoizedFunction object.",
-}];
-const STATUS_OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "status",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Zero when the operation completes.",
-}];
-const STATS_OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "stats",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Structure with cache entries and hit/miss counters.",
-}];
-const CLEAR_CACHE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "clearCache(memoizedFcn)",
-    inputs: &MEMOIZED_INPUTS,
-    outputs: &[],
-}];
-
-pub const CLEAR_CACHE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "clearCache accepts only a MemoizedFunction handle and has no public output; integer values may exist inside cached results but are opaque to cache clearing.",
-    };
-pub const STATS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "stats accepts only a MemoizedFunction object. Cached integer inputs and outputs are opaque payloads preserved by the cache; the counters produced by stats are metadata, not integer input roles.",
-};
-const STATS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "S = stats(memoizedFcn)",
-    inputs: &MEMOIZED_INPUTS,
-    outputs: &STATS_OUTPUTS,
-}];
-const CLEAR_ALL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "clearAllMemoizedCaches",
-    inputs: &[],
-    outputs: &STATUS_OUTPUTS,
-}];
-
-const MEMOIZE_ERROR_INVALID_FUNCTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.MEMOIZE.INVALID_FUNCTION",
-    identifier: Some("RunMat:memoize:InvalidFunction"),
-    when: "The input is not a function handle or closure.",
-    message: "memoize: input must be a function handle",
-};
-const MEMOIZE_ERROR_INVALID_OBJECT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.MEMOIZE.INVALID_OBJECT",
-    identifier: Some("RunMat:memoize:InvalidObject"),
-    when: "A memoized-function method receives a non-MemoizedFunction object.",
-    message: "memoize: expected MemoizedFunction object",
-};
-const MEMOIZE_ERROR_INVALID_CACHE_SIZE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.MEMOIZE.INVALID_CACHE_SIZE",
-    identifier: Some("RunMat:memoize:InvalidCacheSize"),
-    when: "CacheSize is not a positive finite integer scalar.",
-    message: "memoize: CacheSize must be a positive integer scalar",
-};
-const MEMOIZE_ERROR_INVALID_INDEX: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.MEMOIZE.INVALID_INDEX",
-    identifier: Some("RunMat:memoize:InvalidIndex"),
-    when: "The MemoizedFunction object is indexed with an unsupported indexing form.",
-    message: "memoize: unsupported MemoizedFunction indexing",
-};
-const MEMOIZE_ERROR_GC: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.MEMOIZE.GC",
-    identifier: Some("RunMat:memoize:GcFailure"),
-    when: "The memoized object target cannot be allocated or accessed.",
-    message: "memoize: internal object storage failed",
-};
-const CLEAR_CACHE_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CLEAR_CACHE.TOO_MANY_OUTPUTS",
-    identifier: Some("RunMat:clearCache:TooManyOutputs"),
-    when: "An output is requested from clearCache.",
-    message: "clearCache does not return output arguments",
-};
-const MEMOIZE_CREATE_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [MEMOIZE_ERROR_INVALID_FUNCTION, MEMOIZE_ERROR_GC];
-const CLEAR_CACHE_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    MEMOIZE_ERROR_INVALID_OBJECT,
-    MEMOIZE_ERROR_GC,
-    CLEAR_CACHE_ERROR_TOO_MANY_OUTPUTS,
-];
-const STATS_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    MEMOIZE_ERROR_INVALID_OBJECT,
-    MEMOIZE_ERROR_INVALID_CACHE_SIZE,
-    MEMOIZE_ERROR_GC,
-];
-const NO_MEMOIZE_ERRORS: [BuiltinErrorDescriptor; 0] = [];
-
-pub const MEMOIZE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &MEMOIZE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &MEMOIZE_CREATE_ERRORS,
-};
 pub use runmat_builtins::MEMOIZED_SUBSREF_DESCRIPTOR;
-pub const CLEAR_CACHE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &CLEAR_CACHE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &CLEAR_CACHE_ERRORS,
-};
-pub const STATS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &STATS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &STATS_ERRORS,
-};
-pub const CLEAR_ALL_MEMOIZED_CACHES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &CLEAR_ALL_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &NO_MEMOIZE_ERRORS,
-};
 
 #[runtime_builtin(
     name = "memoize",
-    category = "introspection",
-    summary = "Create a memoized wrapper around a function handle.",
-    keywords = "memoize,MemoizedFunction,function handle,cache",
-    descriptor(crate::builtins::introspection::memoize::MEMOIZE_DESCRIPTOR),
-    integer_audit(crate::builtins::introspection::memoize::MEMOIZE_INTEGER_AUDIT),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::introspection::memoize"
 )]
-pub(crate) async fn memoize_builtin(function: Value) -> BuiltinResult<Value> {
+pub(crate) async fn memoize_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    function: Value,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_bounded_outputs(
+        &MEMOIZE_DESCRIPTOR,
+        &MEMOIZE_ERROR_TOO_MANY_OUTPUTS,
+        "memoize",
+    )?;
+    let function = canonicalize_memoized_function(function, runtime.as_ref())?;
     ensure_memoized_function_class_registered();
-    let function = canonicalize_memoized_function(function)?;
     let key = function_key(&function);
 
     MEMOIZE_REGISTRY.with(|registry| {
@@ -310,67 +172,142 @@ async fn memoized_read_step(
 
 #[runtime_builtin(
     name = "clearCache",
-    category = "introspection",
-    summary = "Clear the cache for a MemoizedFunction object.",
-    keywords = "memoize,MemoizedFunction,clearCache,cache",
-    sink = true,
-    suppress_auto_output = true,
-    descriptor(crate::builtins::introspection::memoize::CLEAR_CACHE_DESCRIPTOR),
-    integer_audit(crate::builtins::introspection::memoize::CLEAR_CACHE_INTEGER_AUDIT),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::introspection::memoize"
 )]
-pub(crate) async fn clear_cache_builtin(receiver: Value) -> BuiltinResult<Value> {
-    if matches!(crate::output_count::current_output_count(), Some(n) if n > 0) {
-        return Err(memoize_error(
-            &CLEAR_CACHE_ERROR_TOO_MANY_OUTPUTS,
-            CLEAR_CACHE_ERROR_TOO_MANY_OUTPUTS.message,
-        ));
-    }
+pub(crate) async fn clear_cache_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    receiver: Value,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_bounded_outputs(
+        &CLEAR_CACHE_DESCRIPTOR,
+        &CLEAR_CACHE_ERROR_TOO_MANY_OUTPUTS,
+        "clearCache",
+    )?;
     let handle = memoized_handle(&receiver)?;
+    preflight_cache_owner(runtime.as_ref(), "clearCache")?;
     clear_cache_for_handle(handle)?;
     Ok(Value::Num(0.0))
 }
 
 #[runtime_builtin(
     name = "stats",
-    category = "introspection",
-    summary = "Return cache statistics for a MemoizedFunction object.",
-    keywords = "memoize,MemoizedFunction,stats,cache",
-    descriptor(crate::builtins::introspection::memoize::STATS_DESCRIPTOR),
-    integer_audit(crate::builtins::introspection::memoize::STATS_INTEGER_AUDIT),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::introspection::memoize"
 )]
-pub(crate) async fn stats_builtin(receiver: Value) -> BuiltinResult<Value> {
+pub(crate) async fn stats_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    receiver: Value,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_bounded_outputs(
+        &STATS_DESCRIPTOR,
+        &STATS_ERROR_TOO_MANY_OUTPUTS,
+        "stats",
+    )?;
     let handle = memoized_handle(&receiver)?;
+    preflight_cache_owner(runtime.as_ref(), "stats")?;
     stats_for_handle(handle)
 }
 
 #[runtime_builtin(
     name = "clearAllMemoizedCaches",
-    category = "introspection",
-    summary = "Clear every MemoizedFunction cache.",
-    keywords = "memoize,MemoizedFunction,clearAllMemoizedCaches,cache",
-    sink = true,
-    suppress_auto_output = true,
-    descriptor(crate::builtins::introspection::memoize::CLEAR_ALL_MEMOIZED_CACHES_DESCRIPTOR),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::introspection::memoize"
 )]
-pub(crate) async fn clear_all_memoized_caches_builtin() -> BuiltinResult<Value> {
-    MEMOIZE_REGISTRY.with(|registry| {
-        registry.borrow_mut().retain(|_, target| {
-            runmat_gc::gc_with_value_mut(target, |target_value| {
+pub(crate) async fn clear_all_memoized_caches_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_bounded_outputs(
+        &CLEAR_ALL_MEMOIZED_CACHES_DESCRIPTOR,
+        &CLEAR_ALL_MEMOIZED_CACHES_ERROR_TOO_MANY_OUTPUTS,
+        "clearAllMemoizedCaches",
+    )?;
+    preflight_cache_owner(runtime.as_ref(), "clearAllMemoizedCaches")?;
+    MEMOIZE_REGISTRY.with(|registry| -> BuiltinResult<()> {
+        let mut registry = registry.borrow_mut();
+        let mut failure = None;
+        registry.retain(|_, target| {
+            if failure.is_some() {
+                return true;
+            }
+            match runmat_gc::gc_with_value_mut(target, |target_value| -> BuiltinResult<bool> {
                 let Value::Object(object) = target_value else {
-                    return false;
+                    return Ok(false);
                 };
                 if !object.class_name().is(MEMOIZED_FUNCTION_CLASS) {
-                    return false;
+                    return Ok(false);
                 }
-                edit_memoized_object(target_value, reset_object_cache).is_ok()
-            })
-            .unwrap_or(false)
+                edit_memoized_object(target_value, reset_object_cache)?;
+                Ok(true)
+            }) {
+                Ok(Ok(retain)) => retain,
+                Ok(Err(error)) => {
+                    failure = Some(error);
+                    true
+                }
+                Err(runmat_gc::GcError::InvalidPointer(_)) => false,
+                Err(source) => {
+                    failure = Some(
+                        crate::build_runtime_error(format!(
+                            "{}: {source}",
+                            MEMOIZE_ERROR_GC.message
+                        ))
+                        .with_builtin("clearAllMemoizedCaches")
+                        .with_identifier(
+                            MEMOIZE_ERROR_GC
+                                .identifier
+                                .expect("canonical GC identifier"),
+                        )
+                        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                        .with_source(source)
+                        .build(),
+                    );
+                    true
+                }
+            }
         });
-    });
+        match failure {
+            Some(mut error) => {
+                error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                Err(error)
+            }
+            None => Ok(()),
+        }
+    })?;
     Ok(Value::Num(0.0))
+}
+
+/// No finite cache/snapshot owner exists yet. Refuse before callable
+/// canonicalization, registry lookup or mutation rather than borrow ambient
+/// allocation authority or publish an uncharged cache object.
+fn preflight_cache_owner(
+    runtime: Option<&crate::context::RuntimeContext>,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    use crate::context::host_allocation::{
+        host_allocation_runtime_error, HostAllocationError, HostAllocationPolicy,
+        HostAllocationReceipt,
+    };
+    let error = |source| {
+        let mut error = host_allocation_runtime_error(
+            runtime,
+            "RunMat:memoize:HostAllocation",
+            "memoized cache requires complete finite ownership",
+            source,
+        );
+        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        crate::builtins::common::map_control_flow_with_builtin(error, builtin)
+    };
+    if HostAllocationReceipt::policy(runtime).map_err(error)? == HostAllocationPolicy::Managed {
+        return Err(error(HostAllocationError::MissingManagedOwner));
+    }
+    if runtime.is_some_and(crate::context::RuntimeContext::is_cancelled) {
+        return Err(error(HostAllocationError::Cancelled));
+    }
+    Ok(())
 }
 
 fn ensure_memoized_function_class_registered() {
@@ -442,13 +379,17 @@ fn ensure_memoized_function_class_registered() {
     );
 }
 
-fn canonicalize_memoized_function(function: Value) -> BuiltinResult<Value> {
+fn canonicalize_memoized_function(
+    function: Value,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<Value> {
     match function {
         Value::FunctionHandle(_)
         | Value::ExternalFunctionHandle(_)
         | Value::MethodFunctionHandle(_)
         | Value::BoundFunctionHandle(_)
         | Value::Closure(_) => {
+            preflight_cache_owner(runtime, "memoize")?;
             crate::canonicalize_callback_handle_for_semantic_resolution(function)
         }
         _ => Err(memoize_error(
@@ -730,7 +671,12 @@ fn memoized_member(handle: &HandleRef, payload: Value) -> BuiltinResult<Value> {
 fn member_name(value: Value) -> BuiltinResult<String> {
     match value {
         Value::String(name) => Ok(name.as_str().to_owned()),
-        Value::CharArray(chars) => Ok(chars.data().iter().collect()),
+        Value::CharArray(chars) => super::text::decode_utf16_with_error(chars.data(), || {
+            memoize_error(
+                &MEMOIZE_ERROR_INVALID_INDEX,
+                "memoize: member selector is not valid UTF-16 text",
+            )
+        }),
         other => Err(memoize_error(
             &MEMOIZE_ERROR_INVALID_INDEX,
             format!("memoize: invalid member selector {other:?}"),
@@ -1330,6 +1276,90 @@ pub(crate) fn reset_memoize_registry_for_test() {
 mod tests {
     use super::*;
 
+    #[test]
+    fn finite_public_cache_entries_refuse_before_mutation_and_keep_control_category() {
+        use crate::context::host_effect::ManagedHostEffectLedger;
+        use crate::context::{
+            ParallelCapability, RuntimeContext, RuntimeParallelResources, RuntimeParallelService,
+            RuntimeServicePorts,
+        };
+        use crate::execution::ExecutionServiceError;
+        use std::{error::Error, rc::Rc};
+        struct Managed(ManagedHostEffectLedger);
+        impl RuntimeParallelService for Managed {
+            fn supports(&self, _: ParallelCapability) -> bool {
+                false
+            }
+            fn placement_resources(&self) -> RuntimeParallelResources {
+                let snapshot = self.0.snapshot();
+                RuntimeParallelResources {
+                    memory_available_bytes: Some(snapshot.free_bytes()),
+                    epoch: snapshot.epoch,
+                    ..Default::default()
+                }
+            }
+            fn managed_host_effect_ledger(&self) -> Option<ManagedHostEffectLedger> {
+                Some(self.0.clone())
+            }
+        }
+        let ledger = ManagedHostEffectLedger::new(1 << 20);
+        let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
+        let (receiver, _binding) = memoized();
+        let context =
+            RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+                .with_service_ports(
+                    RuntimeServicePorts::default().with_parallel(Rc::new(Managed(ledger.clone()))),
+                );
+        for error in [
+            futures::executor::block_on(memoize_builtin(
+                Some(context.clone()),
+                Value::function_handle("not_resolved_before_admission".into()),
+            ))
+            .unwrap_err(),
+            futures::executor::block_on(clear_cache_builtin(
+                Some(context.clone()),
+                receiver.clone(),
+            ))
+            .unwrap_err(),
+            futures::executor::block_on(stats_builtin(Some(context.clone()), receiver))
+                .unwrap_err(),
+            futures::executor::block_on(clear_all_memoized_caches_builtin(Some(context.clone())))
+                .unwrap_err(),
+        ] {
+            assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+            assert!(matches!(
+                error
+                    .source()
+                    .and_then(|source| source.downcast_ref::<ExecutionServiceError>()),
+                Some(ExecutionServiceError::Infrastructure(_))
+            ));
+        }
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+        let error = futures::executor::block_on(memoize_builtin(Some(context), Value::Num(0.0)))
+            .unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:memoize:InvalidFunction"));
+        let cancellation = runmat_execution::cancellation::CancellationSource::new();
+        let cancelled =
+            RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+                .with_cancellation_token(cancellation.token());
+        cancelled.set_error_namespace("CacheScope");
+        cancellation.cancel(runmat_execution::CancellationReason::User);
+        let error = futures::executor::block_on(memoize_builtin(
+            Some(cancelled),
+            Value::function_handle("not_resolved_before_admission".into()),
+        ))
+        .unwrap_err();
+        assert_eq!(error.identifier(), Some("CacheScope:Cancelled"));
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        assert!(matches!(
+            error
+                .source()
+                .and_then(|source| source.downcast_ref::<ExecutionServiceError>()),
+            Some(ExecutionServiceError::Cancelled)
+        ));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn cache_keys_distinguish_scalar_vector_and_matrix_shapes() {
@@ -1414,7 +1444,7 @@ mod tests {
             IntValue::U32(1),
             IntValue::U64(u64::MAX),
         ] {
-            assert!(block_on(clear_cache_builtin(Value::Int(value))).is_err());
+            assert!(block_on(clear_cache_builtin(None, Value::Int(value))).is_err());
         }
     }
 
@@ -1443,15 +1473,18 @@ mod tests {
             },
         ))
         .expect("call-port scope");
-        let value = block_on(memoize_builtin(Value::BoundFunctionHandle(
-            runmat_value::BoundFunctionHandle::from_data(runmat_value::BoundFunctionHandleData {
-                name: "step".into(),
-                function: 42,
-                authority: binding.authority,
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-            }),
-        )))
+        let value = block_on(memoize_builtin(
+            None,
+            Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
+                runmat_value::BoundFunctionHandleData {
+                    name: "step".into(),
+                    function: 42,
+                    authority: binding.authority,
+                    source_role: runmat_types::FunctionSourceRole::Unknown,
+                    source_file: None,
+                },
+            )),
+        ))
         .expect("memoized function");
         (value, guard)
     }
@@ -1867,6 +1900,7 @@ mod tests {
         )))
         .expect("call-port scope");
         let f = block_on(memoize_builtin(
+            None,
             crate::user_functions::test_support::exact_local_value("step", binding),
         ))
         .expect("memoized function");
@@ -1922,7 +1956,7 @@ mod tests {
         let _ = call_feval_fixture(&runtime, f.clone(), &[Value::Num(4.0)], 1).expect("first call");
         let _ =
             call_feval_fixture(&runtime, f.clone(), &[Value::Num(4.0)], 1).expect("second call");
-        let stats = block_on(stats_builtin(f)).expect("stats");
+        let stats = block_on(stats_builtin(None, f)).expect("stats");
         let cache = cache_entries(&stats);
 
         assert_eq!(*counter.lock().unwrap(), 2);
@@ -1954,7 +1988,7 @@ mod tests {
         }
         let _ =
             call_feval_fixture(&runtime, f.clone(), &[Value::Num(1.0)], 1).expect("evicted call");
-        let stats = block_on(stats_builtin(f)).expect("stats");
+        let stats = block_on(stats_builtin(None, f)).expect("stats");
         let cache = cache_entries(&stats);
 
         let Some(Value::Cell(inputs)) = cache.fields.get("Inputs") else {
@@ -1982,23 +2016,23 @@ mod tests {
         {
             let _outputs =
                 crate::output_count::push_output_count(Some(1)).expect("output-count scope");
-            let err = block_on(clear_cache_builtin(f.clone())).unwrap_err();
+            let err = block_on(clear_cache_builtin(None, f.clone())).unwrap_err();
             assert_eq!(err.identifier(), Some("RunMat:clearCache:TooManyOutputs"));
         }
 
         let _ = call_feval_fixture(&runtime, f.clone(), &[Value::Num(8.0)], 1).expect("first call");
         let _ =
             call_feval_fixture(&runtime, f.clone(), &[Value::Num(8.0)], 1).expect("second call");
-        block_on(clear_cache_builtin(f.clone())).expect("clear cache");
-        let stats = block_on(stats_builtin(f.clone())).expect("stats");
+        block_on(clear_cache_builtin(None, f.clone())).expect("clear cache");
+        let stats = block_on(stats_builtin(None, f.clone())).expect("stats");
         let cache = cache_entries(&stats);
         assert_eq!(cache.fields.get("TotalHits"), Some(&Value::Num(0.0)));
         assert_eq!(cache.fields.get("TotalMisses"), Some(&Value::Num(0.0)));
 
         let _ =
             call_feval_fixture(&runtime, f.clone(), &[Value::Num(8.0)], 1).expect("after clear");
-        block_on(clear_all_memoized_caches_builtin()).expect("clear all");
-        let stats = block_on(stats_builtin(f)).expect("stats after all");
+        block_on(clear_all_memoized_caches_builtin(None)).expect("clear all");
+        let stats = block_on(stats_builtin(None, f)).expect("stats after all");
         let cache = cache_entries(&stats);
         assert_eq!(cache.fields.get("TotalMisses"), Some(&Value::Num(0.0)));
     }
@@ -2009,7 +2043,7 @@ mod tests {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
         reset_memoize_registry_for_test();
-        let err = block_on(memoize_builtin(Value::Num(1.0))).expect_err("expected error");
+        let err = block_on(memoize_builtin(None, Value::Num(1.0))).expect_err("expected error");
         assert_eq!(err.identifier(), Some("RunMat:memoize:InvalidFunction"));
     }
 
@@ -2101,7 +2135,7 @@ mod tests {
         };
         assert!(crate::set_handle_valid(handle, false));
 
-        let err = block_on(stats_builtin(f)).expect_err("invalid handle should fail");
+        let err = block_on(stats_builtin(None, f)).expect_err("invalid handle should fail");
 
         assert_eq!(err.identifier(), Some("RunMat:memoize:InvalidObject"));
     }
@@ -2130,7 +2164,7 @@ mod tests {
 
         let result = call_feval_fixture(&runtime, f.clone(), std::slice::from_ref(&payload), 1)
             .expect("memoized handle output");
-        let stats = block_on(stats_builtin(f)).expect("stats");
+        let stats = block_on(stats_builtin(None, f)).expect("stats");
         let cache = cache_entries(&stats);
         let Some(Value::Cell(outputs)) = cache.fields.get("Outputs") else {
             panic!("expected Outputs cell")

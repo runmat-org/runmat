@@ -179,6 +179,7 @@ fn uncertain_commit_invalidates_source_search_until_rehydration() {
     assert!(
         crate::builtins::common::path_search::search_directories("lookup")
             .expect_err("stale setting must block source lookup")
+            .to_string()
             .contains("requires rehydration")
     );
 }

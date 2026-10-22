@@ -1072,7 +1072,12 @@ pub fn parse_symflag(value: &Value, builtin: &str) -> BuiltinResult<Option<bool>
     let text: Option<Cow<'_, str>> = match value {
         Value::String(s) => Some(Cow::Borrowed(s.as_str())),
         Value::CharArray(ca) if ca.rows == 1 => {
-            let collected: String = ca.data().iter().collect();
+            let collected: String =
+                runmat_value::decode_utf16_code_units(ca.data()).map_err(|source| {
+                    let mut error = builtin_error(builtin, source.to_string());
+                    error.source = Some(Box::new(source));
+                    error
+                })?;
             Some(Cow::Owned(collected))
         }
         Value::StringArray(sa) if sa.data().len() == 1 => {

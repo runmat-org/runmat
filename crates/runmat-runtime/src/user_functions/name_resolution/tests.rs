@@ -390,7 +390,8 @@ fn changed_path_revision_never_publishes_stale_native_selection() {
     ))
     .with_search_path(Arc::clone(&path));
     runtime.set_native_name_observer(Some(Rc::new(move |_| {
-        crate::builtins::common::path_state::set_path_string("changed");
+        crate::builtins::common::path_state::set_path_string("changed")
+            .expect("test search path update");
         Box::pin(async {
             Ok(Some(NativeNameFact {
                 path: PathBuf::from("fixture.mexa64"),

@@ -21,39 +21,57 @@ impl RunMatSession {
         invocation: ReadyInvocation<'_>,
         published: Option<PublishedEntry>,
         eligible: bool,
+        initial: runmat_jit::entry::EntryPublications,
         admission: Option<crate::generic_native::placement::ReadyRouteAdmission>,
     ) -> Result<SelectedReadyRoute, RuntimeError> {
-        let Some((ready, admission)) = published.as_ref().filter(|_| eligible).zip(admission)
-        else {
+        let Some(admission) = admission.filter(|_| eligible) else {
             return Ok(SelectedReadyRoute {
                 published,
                 receipt: None,
             });
         };
-        let receipt = crate::generic_native::placement::select_ready_route(
-            admission, runtime, invocation, ready,
+        let ready = self.generic_native_cache.ready_routes(
+            invocation.unit,
+            invocation.preferred_function,
+            invocation.profile,
+            initial,
         )?;
-        if receipt
-            .as_ref()
-            .is_some_and(|selection| !selection.native())
-        {
+        if ready.iter().all(Option::is_none) {
+            return Ok(SelectedReadyRoute {
+                published,
+                receipt: None,
+            });
+        }
+        let receipt = crate::generic_native::placement::select_ready_route(
+            admission, runtime, invocation, &ready,
+        )?;
+        let Some(selection) = receipt.as_ref() else {
+            return Ok(SelectedReadyRoute { published, receipt });
+        };
+        let Some(index) = selection.native() else {
             return Ok(SelectedReadyRoute {
                 published: None,
                 receipt,
             });
-        }
-        if receipt.is_some()
-            && !self.generic_native_cache.ready_entry_is_current(
-                invocation.unit,
-                invocation.preferred_function,
-                ready,
-            )?
-        {
+        };
+        let selected = ready
+            .into_iter()
+            .nth(index)
+            .flatten()
+            .expect("selection authenticated an admitted ready publication");
+        if !self.generic_native_cache.ready_entry_is_current(
+            invocation.unit,
+            invocation.preferred_function,
+            &selected,
+        )? {
             return Ok(SelectedReadyRoute {
                 published: None,
                 receipt: None,
             });
         }
-        Ok(SelectedReadyRoute { published, receipt })
+        Ok(SelectedReadyRoute {
+            published: Some(selected),
+            receipt,
+        })
     }
 }

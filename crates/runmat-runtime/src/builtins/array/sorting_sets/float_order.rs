@@ -16,6 +16,33 @@ pub(super) trait ComplexSequence<T: Copy> {
     }
 }
 
+/// A double operand converted to the selected single result domain on read.
+/// Owns the canonical backing and avoids allocating a second complex payload.
+pub(super) struct ComplexSingleView(pub HostComplexBuffer<f64>);
+
+/// Widen a single comparison operand without changing the authoritative double
+/// A operand selected by set difference.
+pub(super) struct ComplexDoubleView(pub HostComplexBuffer<f32>);
+impl ComplexSequence<f64> for ComplexDoubleView {
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+    fn pair_at(&self, index: usize) -> (f64, f64) {
+        let value = self.0[index];
+        (value.0 as f64, value.1 as f64)
+    }
+}
+
+impl ComplexSequence<f32> for ComplexSingleView {
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+    fn pair_at(&self, index: usize) -> (f32, f32) {
+        let value = self.0[index];
+        (value.0 as f32, value.1 as f32)
+    }
+}
+
 impl<T: Copy> ComplexSequence<T> for HostComplexBuffer<T> {
     fn len(&self) -> usize {
         HostComplexBuffer::len(self)

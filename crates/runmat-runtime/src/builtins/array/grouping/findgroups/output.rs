@@ -16,7 +16,8 @@ pub(super) fn build(input: &FindGroupsInput, index: &GroupIndex) -> BuiltinResul
     let g = Tensor::new(index.ids.clone(), output_shape)
         .map(Value::Tensor)
         .map_err(error::internal)?;
-    let labels = label_columns(input.columns(), index).map_err(error::internal)?;
+    let labels = label_columns(input.columns(), index)
+        .map_err(|source| source.attach(error::internal("group label publication failed")))?;
     let mut outputs = vec![g];
     match input {
         FindGroupsInput::Vectors { .. } => outputs.extend(labels),

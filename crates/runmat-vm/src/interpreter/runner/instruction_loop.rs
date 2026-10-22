@@ -78,7 +78,7 @@ pin_project_lite::pin_project! {
     struct AuditedInstructionLoop<F> {
         #[pin]
         inner: F,
-        slot: Option<runmat_accelerate_api::observation::VmRegionRouteAuditSlot>,
+        slot: Option<runmat_accelerate_api::observation::SourceRegionRouteAuditSlot>,
     }
 }
 
@@ -91,7 +91,7 @@ impl<F: Future> Future for AuditedInstructionLoop<F> {
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
         let this = self.project();
-        runmat_accelerate_api::observation::with_vm_region_poll(this.slot.as_ref(), || {
+        runmat_accelerate_api::observation::with_source_region_poll(this.slot.as_ref(), || {
             this.inner.poll(cx)
         })
     }
@@ -945,6 +945,7 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
             | Instr::CaptureMemberDynamicSequence { .. }
             | Instr::CaptureCellContentsSequence { .. }
             | Instr::CaptureReturnedOutputsSequence { .. }
+            | Instr::MoveCapturedSequence { .. }
             | Instr::ReadSubscriptPath { .. }
             | Instr::CaptureSubscriptPath { .. }
             | Instr::BeginSubscriptEndReceiver { .. }
@@ -952,6 +953,8 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
             | Instr::FinishSubscriptEndReceiver { .. }
             | Instr::FinishDottedInvokeReceiver { .. }
             | Instr::BeginOutputAssignment { .. }
+            | Instr::BeginFixedAssignment { .. }
+            | Instr::CommitFixedAssignment { .. }
             | Instr::PrepareFixedOutputTarget
             | Instr::PrepareDiscardOutputTarget
             | Instr::PrepareMemberSequenceOutputTarget { .. }
@@ -972,6 +975,7 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
             | Instr::FinishMemberSequenceOutputTarget(_)
             | Instr::FinishDynamicMemberSequenceOutputTarget
             | Instr::FinishCellContentsSequenceOutputTarget { .. }
+            | Instr::FinishFixedAssignmentTarget { .. }
             | Instr::LoadPreparedOutputCardinality
             | Instr::CommitPreparedOutputTargets { .. }
             | Instr::StoreMember(_)

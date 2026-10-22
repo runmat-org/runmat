@@ -48,6 +48,7 @@ mod execution;
 mod provider;
 mod residency;
 mod storage;
+pub(crate) use storage::numeric_scalar_to_f32;
 mod template;
 
 use provider::*;

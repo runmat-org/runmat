@@ -214,19 +214,25 @@ fn char_from_int_value(value: &IntValue) -> Option<char> {
         .and_then(char::from_u32)
 }
 
-pub(super) fn coerce_to_format_string(value: &Value) -> Result<Option<Value>, String> {
+pub(super) fn coerce_to_format_string(value: &Value) -> BuiltinResult<Option<Value>> {
     match value {
         Value::String(s) => Ok(Some(Value::String(s.clone()))),
         Value::StringArray(sa) if sa.data().len() == 1 => {
             Ok(Some(Value::String(sa.data()[0].clone())))
         }
         Value::CharArray(ca) if char_format_row_shape(ca) => {
-            let s: String = ca.data().iter().collect();
+            let s = crate::builtins::io::utf16::decode_utf16_with_error(ca.data(), || {
+                fprintf_error_with_detail(
+                    &FPRINTF_ERROR_FORMAT,
+                    "fprintf: formatSpec contains malformed UTF-16 text",
+                )
+            })?;
             Ok(Some(Value::string(s)))
         }
-        Value::CharArray(_) => {
-            Err("fprintf: formatSpec must be a character row vector or string scalar".to_string())
-        }
+        Value::CharArray(_) => Err(fprintf_error_with_detail(
+            &FPRINTF_ERROR_FORMAT,
+            "fprintf: formatSpec must be a character row vector or string scalar",
+        )),
         Value::Tensor(t) => {
             // Only accept numeric codepoint vectors of length >= 2 as formatSpec.
             // This avoids misinterpreting stray 1x1 numerics (e.g., accidental stack values)
@@ -234,7 +240,7 @@ pub(super) fn coerce_to_format_string(value: &Value) -> Result<Option<Value>, St
             if tensor::tensor_element_len(t) >= 2 {
                 match try_tensor_char_row_as_string(value) {
                     Some(Ok(s)) => Ok(Some(Value::string(s))),
-                    Some(Err(e)) => Err(e),
+                    Some(Err(e)) => Err(fprintf_error_with_detail(&FPRINTF_ERROR_FORMAT, e)),
                     None => Ok(None),
                 }
             } else {

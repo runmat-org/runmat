@@ -168,7 +168,25 @@ fn remap_steps(context: &mut SiteRemapContext<'_>, steps: &mut [BytecodeSubscrip
             ..
         } = step
         {
-            remap_identity(context, identity);
+            match identity.as_ref() {
+                CallableIdentity::BoundFunction(function)
+                | CallableIdentity::AnonymousFunction(function)
+                | CallableIdentity::ExternalFunction { function, .. } => {
+                    let mut next = *function;
+                    context.replace(&mut next);
+                    if next != *function {
+                        match std::sync::Arc::make_mut(identity) {
+                            CallableIdentity::BoundFunction(function)
+                            | CallableIdentity::AnonymousFunction(function)
+                            | CallableIdentity::ExternalFunction { function, .. } => {
+                                *function = next
+                            }
+                            _ => unreachable!("retained identity keeps its typed variant"),
+                        }
+                    }
+                }
+                _ => {}
+            }
         }
     }
 }

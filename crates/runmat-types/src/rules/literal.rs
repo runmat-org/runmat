@@ -13,7 +13,7 @@ pub fn infer_literal(literal: &LiteralValue) -> FactInference {
         LiteralValue::Bool(_) => ValueFact::scalar(ValueKindFact::Logical),
         LiteralValue::Character(value) => ValueFact::proven(
             ValueKindFact::Character,
-            ShapeFact::from(vec![Some(1), Some(value.chars().count())]),
+            ShapeFact::from(vec![Some(1), Some(value.encode_utf16().count())]),
             StorageFact::Dense,
         ),
         LiteralValue::String(_) | LiteralValue::Keyword(_) => {

@@ -25,7 +25,7 @@ pub(super) async fn parse_constructor_args(
     let mut keys_input: Option<Value> = None;
     let mut values_input: Option<Value> = None;
 
-    if index < args.len() && keyword_of(&args[index]).is_none() {
+    if index < args.len() && keyword_of(&args[index])?.is_none() {
         if args.len() < 2 {
             return Err(map_error(
                 "containers.Map: constructor requires both keys and values when either is provided.",
@@ -44,7 +44,7 @@ pub(super) async fn parse_constructor_args(
     let mut key_type_explicit = false;
     let mut value_type_explicit = false;
     while index < args.len() {
-        let keyword = keyword_of(&args[index]).ok_or_else(|| {
+        let keyword = keyword_of(&args[index])?.ok_or_else(|| {
             map_error(
                 "containers.Map: expected option name (e.g. 'KeyType')",
                 builtin,

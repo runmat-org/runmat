@@ -17,7 +17,9 @@ use crate::{
 };
 
 mod staged_copy;
+mod utf16_copy;
 pub use staged_copy::Utf8TextExactCopy;
+pub use utf16_copy::Utf16TextCopyError;
 
 #[derive(Debug, Clone)]
 pub struct Utf8Text(ExactArrayStorage<u8>);
@@ -49,6 +51,16 @@ impl Utf8TextAdmissionError {
 }
 
 impl Utf8Text {
+    /// Move an existing String's bytes into the canonical exact text owner.
+    /// Both the original byte capacity and new shared header are reserved
+    /// before the header allocation; no intermediate text copy is made.
+    pub fn try_adopt_string_exact(
+        text: String,
+        permit: &dyn ExactHostAllocationPermit,
+    ) -> Result<Self, crate::ExactArrayAdoptionError<u8>> {
+        ExactArrayStorage::try_adopt_exact(text.into_bytes(), permit).map(Self)
+    }
+
     pub fn new(text: String) -> Self {
         let bytes = text.into_bytes();
         Self(if bytes.capacity() == 0 {

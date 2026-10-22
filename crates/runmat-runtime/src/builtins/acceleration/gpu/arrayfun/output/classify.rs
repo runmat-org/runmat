@@ -1,7 +1,7 @@
 use crate::builtins::common::tensor;
 use crate::BuiltinResult;
 use runmat_builtins::ARRAYFUN_ERROR_UNIFORM_OUTPUT_TYPE;
-use runmat_value::{IntValue, NumericScalar, Value};
+use runmat_value::{IntValue, NumericScalar, Utf16CodeUnit, Value};
 
 use super::super::error::{arrayfun_error_with_detail, arrayfun_internal};
 
@@ -13,7 +13,7 @@ pub(in crate::builtins::acceleration::gpu::arrayfun) enum ClassifiedValue {
     ComplexF64((f64, f64)),
     ComplexF32((f32, f32)),
     IntegerComplex(IntValue, IntValue),
-    Char(char),
+    Char(Utf16CodeUnit),
 }
 
 pub(in crate::builtins::acceleration::gpu::arrayfun) fn classify_value(
@@ -64,7 +64,11 @@ pub(in crate::builtins::acceleration::gpu::arrayfun) fn classify_value(
             }
         }
         Value::CharArray(ca) if ca.rows * ca.cols == 1 => {
-            let ch = ca.data().first().copied().unwrap_or('\0');
+            let ch = ca
+                .data()
+                .first()
+                .copied()
+                .unwrap_or(Utf16CodeUnit::from_raw(0));
             Ok(ClassifiedValue::Char(ch))
         }
         other => Err(arrayfun_error_with_detail(

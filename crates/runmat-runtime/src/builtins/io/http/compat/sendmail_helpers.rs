@@ -175,7 +175,7 @@ pub(super) struct SelectedSendmailCommand {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) fn selected_sendmail_command() -> BuiltinResult<Option<SelectedSendmailCommand>> {
-    let configured = std::env::var("RUNMAT_SENDMAIL_COMMAND").ok();
+    let configured = crate::builtins::common::env::optional_var("RUNMAT_SENDMAIL_COMMAND")?;
     if let Some(executable) = configured
         .as_deref()
         .filter(|value| !value.trim().is_empty())

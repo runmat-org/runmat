@@ -96,7 +96,7 @@ fn invocation(source: &CancellationSource, work: PendingProbe) -> NativeInvocati
         },
         embedded: None,
         retained_roots: Vec::new(),
-        future,
+        future: crate::execute::call_suspension::PendingCompletionFuture::Ordinary(future),
     });
     NativeInvocation::new(
         state,
@@ -269,17 +269,19 @@ fn observed_cancellation_releases_captured_arena_roots_before_invocation_drop() 
         }));
         let mut invocation = invocation(&source, work);
         let state = &mut invocation.active.as_mut().unwrap().state;
-        let value =
-            state
-                .arena
-                .insert(runmat_value::Value::HandleObject(runmat_value::HandleRef {
-                    class_name: "CancelledCapture".into(),
-                    target: handle,
-                    valid: true,
-                }));
-        state
-            .captured_sequences
-            .insert(runmat_mir::MirSequenceLocalId(0), vec![value]);
+        let value = runmat_value::Value::HandleObject(runmat_value::HandleRef {
+            class_name: "CancelledCapture".into(),
+            target: handle,
+            valid: true,
+        });
+        let id = runmat_mir::MirSequenceLocalId(0);
+        state.prepare_captured_sequence_slot(id).unwrap();
+        let sequence =
+            runmat_runtime::sequence::ValueSequence::comma_separated(vec![value]).unwrap();
+        let rooted =
+            runmat_runtime::execution::RootedValueSequence::in_context(sequence, &state.runtime)
+                .unwrap();
+        state.publish_captured_sequence(id, rooted).unwrap();
         allocation.unroot().unwrap();
         runmat_gc::gc_collect_major().unwrap();
         assert!(runmat_gc::gc_clone_value(&handle).is_ok());

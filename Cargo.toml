@@ -27,6 +27,7 @@ members = [
     "crates/runmat-types",
     "crates/runmat-fea-source",
     "crates/runmat-runtime",
+    "crates/runmat-sparse-solvers",
     "crates/runmat-runtime-integration-tests",
     "crates/runmat-gc-api",
     "crates/runmat-gc",
@@ -150,6 +151,7 @@ runmat-value = { version = "=0.6.2", path = "crates/runmat-value" }
 runmat-types = { version = "=0.6.2", path = "crates/runmat-types" }
 runmat-fea-source = { version = "=0.6.2", path = "crates/runmat-fea-source" }
 runmat-runtime = { version = "=0.6.2", path = "crates/runmat-runtime", default-features = false }
+runmat-sparse-solvers = { version = "=0.6.2", path = "crates/runmat-sparse-solvers" }
 runmat-time = { path = "crates/runmat-time", version = "=0.6.2" }
 runmat-gc = { version = "=0.6.2", path = "crates/runmat-gc" }
 runmat-workspace-contracts = { version = "=0.6.2", path = "crates/runmat-workspace-contracts" }

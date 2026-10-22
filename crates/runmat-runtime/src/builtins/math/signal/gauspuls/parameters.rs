@@ -63,13 +63,22 @@ pub(super) async fn scalar_parameter(value: &Value, label: &str) -> BuiltinResul
         })
 }
 
-pub(super) fn text_scalar(value: &Value) -> Option<String> {
-    match value {
+pub(super) fn text_scalar(value: &Value) -> crate::BuiltinResult<Option<String>> {
+    Ok(match value {
         Value::String(text) => Some(text.as_str().to_owned()),
         Value::StringArray(array) if array.data().len() == 1 => {
             Some(array.data()[0].as_str().to_owned())
         }
-        Value::CharArray(array) if array.rows == 1 => Some(array.data().iter().collect()),
+        Value::CharArray(array) if array.rows == 1 => Some(
+            runmat_value::decode_utf16_code_units(array.data()).map_err(|source| {
+                let mut error = gauspuls_error_with_detail(
+                    &GAUSPULS_ERROR_INVALID_PARAMETER,
+                    source.to_string(),
+                );
+                error.source = Some(Box::new(source));
+                error
+            })?,
+        ),
         _ => None,
-    }
+    })
 }

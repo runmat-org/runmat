@@ -55,46 +55,61 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "scatterplot",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::scatterplot"
 )]
 pub async fn scatterplot_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     x: Value,
     rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<f64> {
-    crate::builtins::common::validation::reject_typed_complex_integer(&x, BUILTIN_NAME)?;
-    crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
-        &x,
-        &SCATTERPLOT_INTEGER_DATA_EXTENSION,
-        BUILTIN_NAME,
-        "sample",
-    )
-    .await?;
-    for control in rest.iter().take(2) {
-        if crate::builtins::common::validation::value_has_native_integer_class(control) {
-            crate::compatibility::ensure_builtin_extension_enabled(
-                &SCATTERPLOT_INTEGER_CONTROL_EXTENSION,
-                BUILTIN_NAME,
-            )?;
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), BUILTIN_NAME)?;
+    let _arguments = rest.fork();
+    let result = async {
+        crate::builtins::common::validation::reject_typed_complex_integer(&x, BUILTIN_NAME)?;
+        crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
+            &x,
+            &SCATTERPLOT_INTEGER_DATA_EXTENSION,
+            BUILTIN_NAME,
+            "sample",
+        )
+        .await?;
+        for control in rest.iter().take(2) {
+            if crate::builtins::common::validation::value_has_native_integer_class(control) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &SCATTERPLOT_INTEGER_CONTROL_EXTENSION,
+                    BUILTIN_NAME,
+                )?;
+            }
         }
-    }
-    let options = ScatterplotOptions::parse(rest)?;
-    let (x_value, y_value, limits) = extract_scatter_values(x, options.n, options.offset).await?;
-    let marker = options
-        .marker
-        .unwrap_or_else(|| Value::string(DEFAULT_MARKER.to_string()));
+        let options = ScatterplotOptions::parse(rest)?;
+        let (x_value, y_value, limits) =
+            extract_scatter_values(x, options.n, options.offset).await?;
+        let marker = options
+            .marker
+            .unwrap_or_else(|| Value::string(DEFAULT_MARKER.to_string()));
 
-    if let Some(figure) = options.figure {
-        select_figure(figure);
+        work.check()?;
+        if let Some(figure) = options.figure {
+            select_figure(figure);
+        }
+        work.check()?;
+        let coordinates = [x_value, y_value, marker];
+        let arguments =
+            crate::call::BuiltinArguments::from_borrowed(&coordinates, runtime.as_ref())?;
+        let handle = scatter_builtin(runtime.clone(), arguments)
+            .await
+            .map_err(scatterplot_map_plot_error)?;
+        work.check()?;
+        set_axis_equal(true);
+        set_grid_enabled(true);
+        if let Some(limit) = limits {
+            set_axis_limits(Some(limit), Some(limit));
+        }
+        work.finish(Ok(handle))
     }
-    let handle = scatter_builtin(x_value, y_value, vec![marker])
-        .await
-        .map_err(scatterplot_map_plot_error)?;
-    set_axis_equal(true);
-    set_grid_enabled(true);
-    if let Some(limit) = limits {
-        set_axis_limits(Some(limit), Some(limit));
-    }
-    Ok(handle)
+    .await;
+    work.finish(result)
 }
 
 #[derive(Clone, Debug)]

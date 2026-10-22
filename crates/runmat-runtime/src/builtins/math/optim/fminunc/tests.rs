@@ -344,7 +344,24 @@ fn documented_logical_option_flag_is_not_extension_gated() {
     let mut opts = runmat_value::UnboundedStructValueBuilder::new();
     opts.insert("SpecifyObjectiveGradient", Value::Bool(true));
     let opts = opts.finish();
-    let parsed = FminuncOptions::from_struct(Some(&opts), 1).expect("logical option");
+    let mut cooperation = crate::builtins::math::optim::common::ScalarCooperation::new(
+        runmat_builtins::OptimSolver::Fminunc,
+        None,
+    );
+    let admitted = block_on(
+        crate::builtins::math::optim::common::prepare_solver_options(
+            runmat_builtins::OptimSolver::Fminunc,
+            Some(opts.clone()),
+            Some(&FMINUNC_OPTION_EXTENSION),
+            Some(&FMINUNC_RESIDENT_EXTENSION),
+            None,
+            &mut cooperation,
+        ),
+    )
+    .expect("documented logical option is admitted without extensions")
+    .expect("present options");
+    let parsed =
+        FminuncOptions::from_struct(Some(admitted.structure()), 1).expect("logical option");
     assert!(parsed.specify_objective_gradient);
 
     let mut opts = runmat_value::UnboundedStructValueBuilder::from_structure(opts);
@@ -353,8 +370,14 @@ fn documented_logical_option_flag_is_not_extension_gated() {
         Value::Tensor(Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap()),
     );
     let opts = opts.finish();
-    let error = FminuncOptions::from_struct(Some(&opts), 1)
-        .expect_err("typed-integer spelling is independently gated");
+    // from_struct consumes already-admitted options. Exercise the actual
+    // preparation/compatibility owner rather than bypassing its gate.
+    let error = block_on(fminunc_builtin(
+        bound(109),
+        Value::Num(0.0),
+        vec![Value::Struct(opts)],
+    ))
+    .expect_err("typed-integer spelling is independently gated before the objective");
     assert_eq!(
         error.identifier(),
         Some("RunMat:compatibility:FminuncOptionExtension")

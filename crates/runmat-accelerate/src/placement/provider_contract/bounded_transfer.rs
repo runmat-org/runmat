@@ -3,7 +3,7 @@
 use runmat_accelerate_api::{
     ProviderCapabilitySnapshot, ProviderElementType, ProviderFeasibility, ProviderFeasibilityQuery,
     ProviderLayout, ProviderOperationFamily, ProviderRejectionCode, ProviderResidency,
-    ProviderResourceEstimate, ProviderStorage,
+    ProviderResourceEstimate, ProviderStorage, ProviderTransferOutputBound,
 };
 
 #[cfg(all(test, feature = "wgpu"))]
@@ -18,6 +18,13 @@ pub(super) fn wgpu_dense_feasibility(
 ) -> ProviderFeasibility {
     // An empty WGPU numeric upload still owns one storage element. This is a
     // physical estimate; logical transfer volume remains zero.
+    if snapshot.supports_operation(&query.operation, query.family) {
+        if let Some(result) = feasibility_with_bytes(snapshot, query, |bound| {
+            crate::backend::wgpu_storage::checked_upload_bound_allocation_bytes(bound, precision)
+        }) {
+            return result;
+        }
+    }
     super::dense_feasibility_with_bytes(snapshot, query, |representation| {
         if query.operation.0 == "transfer.upload" {
             crate::backend::wgpu_storage::checked_upload_allocation_bytes(representation, precision)
@@ -30,6 +37,14 @@ pub(super) fn wgpu_dense_feasibility(
 pub(super) fn feasibility(
     snapshot: &ProviderCapabilitySnapshot,
     query: &ProviderFeasibilityQuery,
+) -> Option<ProviderFeasibility> {
+    feasibility_with_bytes(snapshot, query, ProviderTransferOutputBound::max_bytes)
+}
+
+fn feasibility_with_bytes(
+    snapshot: &ProviderCapabilitySnapshot,
+    query: &ProviderFeasibilityQuery,
+    allocation_bytes: impl Fn(&ProviderTransferOutputBound) -> Option<u64>,
 ) -> Option<ProviderFeasibility> {
     let bounds = query.workload.transfer_output_bounds.as_ref()?;
     if query.operation.0 != "transfer.upload"
@@ -61,7 +76,7 @@ pub(super) fn feasibility(
                 "provider.transfer.bound_class",
             ));
         }
-        let Some(bytes) = bound.max_bytes() else {
+        let Some(bytes) = allocation_bytes(bound) else {
             return Some(ProviderFeasibility::rejected(
                 ProviderRejectionCode::ResourceLimit,
                 "provider.transfer.bound_overflow",

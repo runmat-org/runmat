@@ -170,11 +170,19 @@ fn set_format(
 }
 
 fn format_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<String> {
-    let format = value_as_string(value).ok_or_else(|| {
-        plotting_error(
-            builtin,
-            format!("{builtin}: tick format must be a string scalar"),
-        )
-    })?;
+    let format = value_as_string(value)
+        .map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                builtin,
+                source.to_string(),
+                source,
+            )
+        })?
+        .ok_or_else(|| {
+            plotting_error(
+                builtin,
+                format!("{builtin}: tick format must be a string scalar"),
+            )
+        })?;
     Ok(runmat_plot::core::plot_renderer::plot_utils::canonical_tick_label_format(&format))
 }

@@ -140,10 +140,6 @@ pub(super) struct HostState {
     pub pending_sequence_assign: Option<super::mutation::PendingSequenceAssign>,
     pub prepared_multi_assignment: Option<super::mutation::PreparedMultiAssignment>,
     pub pending_multi_preparation: Option<super::mutation::PendingMultiPreparation>,
-    /// First-class comma-separated sequences captured in source evaluation
-    /// order and consumed by a later call or aggregate construction.
-    pub captured_sequences:
-        BTreeMap<runmat_mir::MirSequenceLocalId, Vec<runmat_runtime::native::NativeValueRef>>,
     pub contextual_index_extents: Vec<usize>,
     pub subscript_end_receivers: Vec<(
         runmat_runtime::object::protocol::PreparedSubscriptReceiver,
@@ -181,7 +177,8 @@ pub(super) struct HostState {
     supplied_inputs: usize,
     requested_outputs: usize,
     missing_input_locals: Vec<runmat_native_codegen::NativeLocalId>,
-    optimized_regions: BTreeMap<crate::region::SiteIdentity, crate::region::OptimizedRegionPlan>,
+    optimized_regions:
+        BTreeMap<crate::region::SiteIdentity, crate::region::OptimizedRegionPlanLease>,
     pub(super) region_observation: Option<super::region::observation::GenericRegionObservation>,
     skipped_optimized_sites: BTreeSet<crate::region::SiteIdentity>,
     vectorized_regions: u64,
@@ -208,10 +205,10 @@ impl HostState {
 mod captures;
 mod construction;
 pub(super) use construction::function_input_specs;
-#[path = "contextual_regions.rs"]
-mod expression_regions;
 mod continuation;
 mod control;
+#[path = "contextual_regions.rs"]
+mod expression_regions;
 mod workspace;
 
 pub(crate) use expression_regions::EmbeddedOperationIdentity;

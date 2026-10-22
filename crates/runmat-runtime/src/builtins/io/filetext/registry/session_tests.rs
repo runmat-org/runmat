@@ -166,7 +166,10 @@ fn fopen_and_fgetl_share_only_the_issuing_session() {
     let Value::CharArray(line) = first_line.first_output() else {
         panic!("expected character row")
     };
-    assert_eq!(line.data().iter().collect::<String>(), "first");
+    assert_eq!(
+        runmat_value::decode_utf16_code_units(line.data()).expect("valid UTF-16 fixture"),
+        "first"
+    );
     assert!(block_on(close_async_in(fid, Some(&first)))
         .expect("issuer close")
         .is_some());

@@ -924,7 +924,7 @@ pub(crate) mod tests {
     #[test]
     fn null_row_reduction_option_returns_pivot_basis() {
         let tensor = Tensor::new(vec![1.0, 2.0, 2.0, 4.0, 3.0, 6.0], vec![2, 3]).unwrap();
-        let chars = CharArray::new("r".chars().collect(), 1, 1).unwrap();
+        let chars = CharArray::from_unicode_scalars("r".chars().collect(), 1, 1).unwrap();
         let result = null_builtin(Value::Tensor(tensor), vec![Value::CharArray(chars)])
             .expect("null rref basis");
         match result {
@@ -946,7 +946,7 @@ pub(crate) mod tests {
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![1, 2, 2, 4]), vec![2, 2]).unwrap();
-        let chars = CharArray::new("r".chars().collect(), 1, 1).unwrap();
+        let chars = CharArray::from_unicode_scalars("r".chars().collect(), 1, 1).unwrap();
 
         let result = null_builtin(Value::Tensor(tensor), vec![Value::CharArray(chars)])
             .expect("null rref basis");
@@ -1070,7 +1070,7 @@ pub(crate) mod tests {
             vec![2, 2],
         )
         .unwrap();
-        let chars = CharArray::new("r".chars().collect(), 1, 1).unwrap();
+        let chars = CharArray::from_unicode_scalars("r".chars().collect(), 1, 1).unwrap();
         let result = null_builtin(Value::ComplexTensor(tensor), vec![Value::CharArray(chars)])
             .expect("null rref basis");
         match result {
@@ -1154,7 +1154,7 @@ pub(crate) mod tests {
     #[test]
     fn null_rejects_invalid_option() {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
-        let chars = CharArray::new("q".chars().collect(), 1, 1).unwrap();
+        let chars = CharArray::from_unicode_scalars("q".chars().collect(), 1, 1).unwrap();
         let err = unwrap_error(
             null_builtin(Value::Tensor(tensor), vec![Value::CharArray(chars)]).unwrap_err(),
         );

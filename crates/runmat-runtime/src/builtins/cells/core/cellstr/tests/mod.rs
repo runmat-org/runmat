@@ -15,7 +15,9 @@ fn strings(cell: &CellArray) -> Vec<String> {
 
 fn text(value: &Value) -> String {
     match value {
-        Value::CharArray(array) => array.data().iter().collect(),
+        Value::CharArray(array) => {
+            runmat_value::decode_utf16_code_units(array.data()).expect("valid UTF-16 fixture")
+        }
         other => panic!("expected character array, found {other:?}"),
     }
 }

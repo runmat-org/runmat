@@ -1,4 +1,5 @@
 mod inference;
+mod documentation;
 use crate::*;
 pub const SPREADSHEET_IMPORT_OPTIONS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     audience: BuiltinCatalogAudience::Public,
@@ -7,10 +8,7 @@ pub const SPREADSHEET_IMPORT_OPTIONS_CATALOG_ENTRY: BuiltinCatalogEntry = Builti
         name: "spreadsheetImportOptions",
     },
     category: "io/tabular",
-    documentation: BuiltinDocumentation {
-        summary: "Create spreadsheet import options for readtable.",
-        ..BuiltinDocumentation::EMPTY
-    },
+    documentation: documentation::DOCUMENTATION,
     descriptor: &SPREADSHEET_IMPORT_OPTIONS_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Incomplete,

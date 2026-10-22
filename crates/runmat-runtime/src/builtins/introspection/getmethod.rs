@@ -1,92 +1,13 @@
+#[cfg(test)]
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
+    BuiltinExtensionMode, BuiltinIntegerAuditKind, GETMETHOD_EXTENSIONS, GETMETHOD_INTEGER_AUDIT,
+};
+use runmat_builtins::{
+    GETMETHOD_DESCRIPTOR, GETMETHOD_ERROR_METHOD_PRIVATE, GETMETHOD_ERROR_NAME_INVALID,
+    GETMETHOD_ERROR_RECEIVER_UNSUPPORTED, GETMETHOD_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
-
-const GETMETHOD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "fh",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Bound method closure/handle.",
-}];
-
-const GETMETHOD_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "obj_or_class",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Object receiver or class reference.",
-    },
-    BuiltinParamDescriptor {
-        name: "name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Method name.",
-    },
-];
-
-const GETMETHOD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "fh = getmethod(obj_or_class, name)",
-    inputs: &GETMETHOD_INPUTS,
-    outputs: &GETMETHOD_OUTPUT,
-}];
-
-const GETMETHOD_ERROR_NAME_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GETMETHOD.NAME_INVALID",
-    identifier: Some("RunMat:GetMethodNameInvalid"),
-    when: "Method name is empty.",
-    message: "getmethod: method name must not be empty",
-};
-
-const GETMETHOD_ERROR_RECEIVER_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GETMETHOD.RECEIVER_UNSUPPORTED",
-    identifier: Some("RunMat:GetMethodReceiverUnsupported"),
-    when: "Receiver is neither object nor class reference.",
-    message: "getmethod: unsupported receiver",
-};
-
-const GETMETHOD_ERROR_METHOD_PRIVATE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GETMETHOD.METHOD_PRIVATE",
-    identifier: Some("RunMat:MethodPrivate"),
-    when: "Resolved method exists but is inaccessible from the current class scope.",
-    message: "getmethod: method is not accessible from current scope",
-};
-
-const GETMETHOD_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    GETMETHOD_ERROR_NAME_INVALID,
-    GETMETHOD_ERROR_RECEIVER_UNSUPPORTED,
-    GETMETHOD_ERROR_METHOD_PRIVATE,
-];
-
-pub const GETMETHOD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &GETMETHOD_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &GETMETHOD_ERRORS,
-};
-
-pub const GETMETHOD_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "getmethod-bound-method-handle",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "getmethod bound method-handle creation is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:GetmethodExtension"),
-};
-
-pub const GETMETHOD_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [GETMETHOD_EXTENSION];
-
-pub const GETMETHOD_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "RunMat getmethod accepts an object or class reference and a host text method name only. All eight integer classes and provider-resident numeric values reject without conversion, gather, or provider access; this audit does not imply compatibility with MATLAB methods or ismethod.",
-};
-
 pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResult<Value> {
     crate::compatibility::ensure_builtin_extension_enabled(&GETMETHOD_EXTENSION, "getmethod")?;
 
@@ -266,21 +187,19 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
     }
 }
 
-#[runtime_builtin(
-    name = "getmethod",
-    category = "introspection",
-    summary = "Create a method-bound function handle from object/class and method name.",
-    keywords = "method,function_handle,classdef,dispatch",
-    extensions(crate::builtins::introspection::getmethod::GETMETHOD_EXTENSIONS),
-    integer_audit(crate::builtins::introspection::getmethod::GETMETHOD_INTEGER_AUDIT),
-    descriptor(crate::builtins::introspection::getmethod::GETMETHOD_DESCRIPTOR),
-    builtin_path = "crate::builtins::introspection::getmethod"
-)]
 pub async fn getmethod_builtin(obj: Value, name: Value) -> crate::BuiltinResult<Value> {
     crate::compatibility::ensure_builtin_extension_enabled(&GETMETHOD_EXTENSION, "getmethod")?;
     let name = match name {
         Value::String(name) => name.as_str().to_owned(),
-        Value::CharArray(chars) if chars.rows == 1 => chars.data().iter().collect(),
+        Value::CharArray(chars) if chars.rows == 1 => {
+            super::text::decode_utf16_with_error(chars.data(), || {
+                crate::runtime_descriptor_error_with_detail(
+                    "getmethod",
+                    &GETMETHOD_ERROR_NAME_INVALID,
+                    "method name is not valid UTF-16 text",
+                )
+            })?
+        }
         Value::StringArray(array) if array.data().len() == 1 => array.data()[0].as_str().to_owned(),
         other => {
             return Err(crate::runtime_descriptor_error_with_detail(
@@ -291,6 +210,52 @@ pub async fn getmethod_builtin(obj: Value, name: Value) -> crate::BuiltinResult<
         }
     };
     dispatch_getmethod(obj, name)
+}
+
+#[runtime_builtin(
+    name = "getmethod",
+    binding_variant = "default",
+    context = true,
+    builtin_path = "crate::builtins::introspection::getmethod"
+)]
+pub async fn getmethod_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &GETMETHOD_DESCRIPTOR,
+        &runmat_builtins::GETMETHOD_ERROR_OUTPUTS,
+        "getmethod",
+    )?;
+    if args.len() != 2 {
+        return Err(crate::runtime_descriptor_error(
+            "getmethod",
+            &runmat_builtins::GETMETHOD_ERROR_ARITY,
+        ));
+    }
+    use crate::context::host_allocation::{
+        host_allocation_runtime_error, HostAllocationPolicy, HostAllocationReceipt,
+    };
+    let policy = HostAllocationReceipt::policy(runtime.as_ref()).map_err(|cause| {
+        host_allocation_runtime_error(
+            runtime.as_ref(),
+            "RunMat:Placement:ResourceLimit",
+            "getmethod: allocation authority unavailable",
+            cause,
+        )
+    })?;
+    if policy == HostAllocationPolicy::Managed {
+        return Err(crate::build_runtime_error("getmethod: closure captures and dispatch metadata have no certified finite-resource bound").with_builtin("getmethod").with_identifier("RunMat:Placement:InsufficientResourceEvidence").build());
+    }
+    let future = async {
+        let result = getmethod_builtin(args[0].clone(), args[1].clone()).await;
+        drop(args);
+        result
+    };
+    match runtime.as_ref() {
+        Some(context) => context.scope(future).await,
+        None => future.await,
+    }
 }
 
 #[cfg(test)]

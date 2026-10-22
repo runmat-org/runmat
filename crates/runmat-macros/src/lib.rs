@@ -557,13 +557,13 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                 let input = match input {
                     Ok(input) => input,
                     Err(error) => {
-                        return Box::pin(std::future::ready(Err(error)));
+                        return crate::builtin::rejected_builtin_future(error);
                     }
                 };
                 let args = &input.args;
                 #arity_check
                 if let Some(message) = arity_error {
-                    return Box::pin(std::future::ready(Err(std::convert::From::from(message))));
+                    return crate::builtin::rejected_builtin_future(std::convert::From::from(message));
                 }
                 // Keep the target-sized async state out of this wrapper's
                 // caller stack. The factory boundary admits the exact named
@@ -809,7 +809,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                     variant: #variant,
                 },
                 #wrapper_ident,
-            ).with_continuation_layout(#layout_ident)
+            ).with_continuation_layout(#layout_ident).with_provenance(&#provenance_expr)
         };
         (
             quote! {

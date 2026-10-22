@@ -190,7 +190,7 @@ fn install(
         generation: identity.2,
         embedded: None,
         retained_roots: Vec::new(),
-        future,
+        future: crate::execute::call_suspension::PendingCompletionFuture::Ordinary(future),
     });
     Err(NativeExecutorError::CallSuspended)
 }

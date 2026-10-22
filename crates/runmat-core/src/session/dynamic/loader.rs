@@ -96,9 +96,10 @@ pub(in crate::session) async fn load_dynamic_function(
         Ok(Some(selected)) => selected,
         Ok(None) => return ControlFlow::Continue(args),
         Err(error) => {
-            return ControlFlow::Break(Err(build_runtime_error(error)
-                .with_identifier("RunMat:FunctionResolution")
-                .build()))
+            return ControlFlow::Break(Err(error.into_identified_runtime_error(
+                "function resolution",
+                "RunMat:FunctionResolution",
+            )))
         }
     };
     let path = selected.path().to_path_buf();
@@ -114,6 +115,8 @@ pub(in crate::session) async fn load_dynamic_function(
                             path.display()
                         ))
                         .with_identifier("RunMat:FunctionSourceRead")
+                        .with_source(error)
+                        .with_gpu_gather_retry(runmat_runtime::GpuGatherRetry::Never)
                         .build()
                     })?;
             let path_name = path.to_string_lossy();
@@ -137,6 +140,8 @@ pub(in crate::session) async fn load_dynamic_function(
                     path.display()
                 ))
                 .with_identifier("RunMat:ProjectComposition")
+                .with_source(error)
+                .with_gpu_gather_retry(runmat_runtime::GpuGatherRetry::Never)
                 .build()
             })?;
             let inventory_revision = project_context

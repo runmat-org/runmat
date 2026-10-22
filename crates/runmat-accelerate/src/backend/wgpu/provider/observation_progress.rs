@@ -3,6 +3,7 @@
 use runmat_accelerate_api::observation::{
     WgpuObservationProgress, WgpuObservationProgressError, WgpuObservationProgressReservation,
 };
+use runmat_execution::resource::RetainedHostAllocationClaim;
 use std::num::NonZeroU32;
 use std::sync::{
     atomic::{AtomicBool, AtomicU32, Ordering},
@@ -23,12 +24,38 @@ impl Drop for Slot {
 }
 
 type CompletionCallback = Box<dyn FnOnce(Result<(), WgpuObservationProgressError>) + Send>;
-struct Completion(Option<CompletionCallback>);
+pub(super) struct Completion {
+    callback: Option<CompletionCallback>,
+    // The consuming callback deallocates its Box before this external claim
+    // retires. This field is inline in the existing preallocated queue Job.
+    claim: Option<Arc<dyn RetainedHostAllocationClaim>>,
+}
 impl Completion {
-    fn finish(&mut self, status: Result<(), WgpuObservationProgressError>) {
-        if let Some(completion) = self.0.take() {
-            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| completion(status)));
+    fn ordinary(callback: CompletionCallback) -> Self {
+        Self::funded(callback, None)
+    }
+
+    pub(super) fn funded(
+        callback: CompletionCallback,
+        claim: Option<Arc<dyn RetainedHostAllocationClaim>>,
+    ) -> Self {
+        Self {
+            callback: Some(callback),
+            claim,
         }
+    }
+
+    pub(super) fn finish(&mut self, status: Result<(), WgpuObservationProgressError>) {
+        let completion = self.callback.take();
+        let claim = self.claim.take();
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            if let Some(completion) = completion {
+                completion(status);
+            }
+            // This unboxed outer guard retires only after the callback Box's
+            // consuming call (or its unwind). Claim-drop panics stay contained.
+            drop(claim);
+        }));
     }
 }
 impl Drop for Completion {
@@ -36,7 +63,7 @@ impl Drop for Completion {
         self.finish(Err(WgpuObservationProgressError::Stopped));
     }
 }
-struct Job<I = wgpu::SubmissionIndex> {
+struct Job<I = Option<wgpu::SubmissionIndex>> {
     submission: I,
     completion: Completion,
     _slot: Slot,
@@ -89,18 +116,28 @@ impl NativeObservationProgress {
                     // Poll drives callbacks and may wait: never hold an emission
                     // permit here. A native poll fatal is caught by `drive`,
                     // separately from the device-lost callback's state.
-                    access.poll(wgpu::Maintain::WaitForSubmissionIndex(submission.clone()));
+                    access.poll(match submission {
+                        Some(index) => wgpu::Maintain::WaitForSubmissionIndex(index.clone()),
+                        // Device control synchronizes existing queue work; it
+                        // does not manufacture an ordinary submission while
+                        // the session's emission admission is fenced. This
+                        // wait runs only on this existing device worker.
+                        None => wgpu::Maintain::Wait,
+                    });
                 });
             })?;
         drop(worker);
         Ok(Arc::new(Self { sender, state }))
     }
-}
 
-impl WgpuObservationProgress for NativeObservationProgress {
-    fn reserve(
+    pub(super) fn complete_queue_tail(
         &self,
-    ) -> Result<Box<dyn WgpuObservationProgressReservation>, WgpuObservationProgressError> {
+        completion: CompletionCallback,
+    ) -> Result<(), WgpuObservationProgressError> {
+        self.reserve_slot()?.complete_queue_tail(completion)
+    }
+
+    pub(super) fn reserve_slot(&self) -> Result<Reservation, WgpuObservationProgressError> {
         if self.state.stopped.load(Ordering::Acquire) {
             return Err(WgpuObservationProgressError::Stopped);
         }
@@ -114,16 +151,50 @@ impl WgpuObservationProgress for NativeObservationProgress {
         if self.state.stopped.load(Ordering::Acquire) {
             return Err(WgpuObservationProgressError::Stopped);
         }
-        Ok(Box::new(Reservation {
+        Ok(Reservation {
             sender: self.sender.clone(),
             slot,
-        }))
+        })
     }
 }
 
-struct Reservation {
+impl WgpuObservationProgress for NativeObservationProgress {
+    fn reserve(
+        &self,
+    ) -> Result<Box<dyn WgpuObservationProgressReservation>, WgpuObservationProgressError> {
+        Ok(Box::new(self.reserve_slot()?))
+    }
+}
+
+pub(super) struct Reservation {
     sender: SyncSender<Job>,
     slot: Slot,
+}
+
+impl Reservation {
+    /// Commit already-reserved capacity after map registration, outside the
+    /// emission gate. Rejection drops the job and completes its owner once.
+    pub(super) fn complete_queue_tail(
+        self,
+        completion: CompletionCallback,
+    ) -> Result<(), WgpuObservationProgressError> {
+        self.complete_queue_tail_owner(Completion::ordinary(completion))
+    }
+
+    pub(super) fn complete_queue_tail_owner(
+        self,
+        completion: Completion,
+    ) -> Result<(), WgpuObservationProgressError> {
+        let Self { sender, slot } = self;
+        commit_job(
+            &sender,
+            Job {
+                submission: None,
+                completion,
+                _slot: slot,
+            },
+        )
+    }
 }
 
 pub(super) fn reservation_host_upper_bytes() -> Option<u64> {
@@ -154,8 +225,8 @@ impl WgpuObservationProgressReservation for Reservation {
     ) -> Result<(), WgpuObservationProgressError> {
         let Self { sender, slot } = *self;
         let job = Job {
-            submission,
-            completion: Completion(Some(completion)),
+            submission: Some(submission),
+            completion: Completion::ordinary(completion),
             _slot: slot,
         };
         // Reservation accounts for queued AND active jobs. Disconnect drops Job,

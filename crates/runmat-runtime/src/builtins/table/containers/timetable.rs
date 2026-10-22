@@ -384,7 +384,9 @@ fn fixed_step_row_times(
             }
             (
                 crate::builtins::common::tensor::tensor_value_f64(&tensor, 0),
-                TimeKind::Duration(crate::builtins::duration::duration_format_from_value(value)),
+                TimeKind::Duration(crate::builtins::duration::duration_format_from_value(
+                    value,
+                )?),
             )
         }
         Some(value) if crate::builtins::datetime::is_datetime_object(value) => {
@@ -396,7 +398,9 @@ fn fixed_step_row_times(
             }
             (
                 crate::builtins::common::tensor::tensor_value_f64(&tensor, 0),
-                TimeKind::Datetime(crate::builtins::datetime::datetime_format_from_value(value)),
+                TimeKind::Datetime(crate::builtins::datetime::datetime_format_from_value(
+                    value,
+                )?),
             )
         }
         Some(_) => {
@@ -469,9 +473,22 @@ pub(in crate::builtins::table) fn set_timetable_row_times(
 }
 
 pub(crate) fn timetable_row_times(object: &ObjectInstance) -> BuiltinResult<Option<Value>> {
+    timetable_row_times_ref(object).map(|value| value.cloned())
+}
+
+pub(in crate::builtins::table) fn timetable_row_times_ref(
+    object: &ObjectInstance,
+) -> BuiltinResult<Option<&Value>> {
     if !object.is_class(TIMETABLE_CLASS) {
         return Ok(None);
     }
-    let props = table_public_properties(object)?;
-    Ok(props.fields.get(ROW_TIMES).cloned())
+    match object
+        .properties()
+        .get(TABLE_PROPERTIES_FIELD)
+        .or_else(|| object.properties().get(PROPERTIES_MEMBER))
+    {
+        Some(Value::Struct(props)) => Ok(props.fields.get(ROW_TIMES)),
+        Some(_) => Err(invalid_variable("timetable: invalid Properties storage")),
+        None => Ok(None),
+    }
 }

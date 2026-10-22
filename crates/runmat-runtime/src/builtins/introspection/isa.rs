@@ -30,9 +30,10 @@ fn parse_type_name(value: &Value) -> BuiltinResult<Option<IsaTypeDesignator>> {
         }
         Value::CharArray(ca) => {
             if ca.rows == 1 {
-                Ok(IsaTypeDesignator::parse(
-                    &ca.data().iter().collect::<String>(),
-                ))
+                let text = super::text::decode_utf16_with_error(ca.data(), || {
+                    isa_error(&ISA_ERROR_TYPE_NAME_INVALID).into()
+                })?;
+                Ok(IsaTypeDesignator::parse(&text))
             } else {
                 Err(isa_error(&ISA_ERROR_TYPE_NAME_INVALID).into())
             }

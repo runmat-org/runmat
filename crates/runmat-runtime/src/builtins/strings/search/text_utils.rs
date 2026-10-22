@@ -42,7 +42,7 @@ impl TextCollection {
         let collection = match value {
             Value::StringArray(array) => Ok(Self::from_string_array(array)),
             Value::String(text) => Ok(Self::from_string_scalar(text)),
-            Value::CharArray(array) => Ok(Self::from_char_array(array)),
+            Value::CharArray(array) => Self::from_char_array(fn_name, array),
             Value::Cell(cell) => Self::from_cell_array(fn_name, cell),
             _ => Err(text_error(
                 fn_name,
@@ -87,31 +87,34 @@ impl TextCollection {
         }
     }
 
-    fn from_char_array(array: CharArray) -> Self {
+    fn from_char_array(fn_name: &str, array: CharArray) -> BuiltinResult<Self> {
         if array.rows == 0 {
-            return Self {
+            return Ok(Self {
                 elements: Vec::new(),
                 shape: vec![0, 1],
                 is_cell: false,
-            };
+            });
         }
         if array.rows == 1 {
-            let text = char_row_to_string(&array, 0);
-            return Self {
+            let text = char_row_to_string(&array, 0)
+                .map_err(|source| text_decode_error(fn_name, source))?;
+            return Ok(Self {
                 elements: vec![TextElement::Text(text.into())],
                 shape: vec![1, 1],
                 is_cell: false,
-            };
+            });
         }
         let mut elements = Vec::with_capacity(array.rows);
         for row in 0..array.rows {
-            elements.push(TextElement::Text(char_row_to_string(&array, row).into()));
+            let text = char_row_to_string(&array, row)
+                .map_err(|source| text_decode_error(fn_name, source))?;
+            elements.push(TextElement::Text(text.into()));
         }
-        Self {
+        Ok(Self {
             elements,
             shape: vec![array.rows, 1],
             is_cell: false,
-        }
+        })
     }
 
     fn from_cell_array(fn_name: &str, cell: CellArray) -> BuiltinResult<Self> {
@@ -152,7 +155,7 @@ pub(crate) fn parse_ignore_case(
     }
 
     if rest.len() == 1 {
-        if let Some(name) = value_to_owned_string(&rest[0]) {
+        if let Some(name) = value_to_owned_string(&rest[0], fn_name)? {
             if name.eq_ignore_ascii_case("ignorecase") {
                 return Err(text_error(
                     fn_name,
@@ -177,7 +180,7 @@ pub(crate) fn parse_ignore_case(
 
     let mut ignore_case = None;
     for pair in rest.chunks_exact(2) {
-        let name = value_to_owned_string(&pair[0]).ok_or_else(|| {
+        let name = value_to_owned_string(&pair[0], fn_name)?.ok_or_else(|| {
             text_error(
                 fn_name,
                 format!("{fn_name}: option names must be text scalars"),
@@ -257,7 +260,7 @@ fn parse_logical_value(fn_name: &str, value: &Value) -> BuiltinResult<bool> {
             Ok(value != 0.0)
         }
         _ => {
-            let text = value_to_owned_string(value).ok_or_else(|| {
+            let text = value_to_owned_string(value, fn_name)?.ok_or_else(|| {
                 text_error(
                     fn_name,
                     format!("{fn_name}: option values must be logical scalars"),
@@ -277,8 +280,22 @@ fn parse_logical_value(fn_name: &str, value: &Value) -> BuiltinResult<bool> {
     }
 }
 
-pub(crate) fn value_to_owned_string(value: &Value) -> Option<String> {
-    String::try_from(value).ok()
+pub(crate) fn value_to_owned_string(value: &Value, fn_name: &str) -> BuiltinResult<Option<String>> {
+    match value {
+        Value::CharArray(array) if array.shape.len() <= 2 && array.rows == 1 => array
+            .try_row_string()
+            .map_err(|source| text_decode_error(fn_name, source)),
+        // Other scalar carriers cannot contain malformed UTF-16. This is a
+        // shape/type probe; actual CharArray decoding must preserve its error.
+        _ => Ok(String::try_from(value).ok()),
+    }
+}
+
+fn text_decode_error(fn_name: &str, source: runmat_value::Utf16DecodeError) -> RuntimeError {
+    build_runtime_error(format!("{fn_name}: malformed UTF-16 character input"))
+        .with_builtin(fn_name)
+        .with_source(source)
+        .build()
 }
 
 fn text_error(fn_name: &str, message: impl Into<String>) -> RuntimeError {
@@ -315,7 +332,9 @@ fn cell_value_to_text(fn_name: &str, value: &Value) -> BuiltinResult<TextElement
         }
         Value::CharArray(array) if array.rows == 0 => Ok(TextElement::Text(String::new().into())),
         Value::CharArray(array) if array.rows == 1 => {
-            Ok(TextElement::Text(char_row_to_string(array, 0).into()))
+            let text = char_row_to_string(array, 0)
+                .map_err(|source| text_decode_error(fn_name, source))?;
+            Ok(TextElement::Text(text.into()))
         }
         _ => Err(text_error(
             fn_name,

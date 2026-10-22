@@ -80,7 +80,9 @@ pub(in crate::execute) fn begin_statement_output(
         generation,
         embedded: None,
         retained_roots: Vec::new(),
-        future: super::scope_completion(state, future),
+        future: crate::execute::call_suspension::PendingCompletionFuture::Ordinary(
+            super::scope_completion(state, future),
+        ),
     });
     Err(NativeExecutorError::CallSuspended)
 }

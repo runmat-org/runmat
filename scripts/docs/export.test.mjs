@@ -21,12 +21,16 @@ function fixture() {
     const register = { schema_version: 1, posture: "discovery_only", requirements: manual.topics[0].requirements.map(id => ({ id, obligations: [], witnesses: [] })) };
     writeFileSync(join(root, "requirements.json"), JSON.stringify(register));
     writeFileSync(join(root, "builtins.json"), '{"builtins":[]}');
+    writeFileSync(join(root, "builtin-documentation.json"), JSON.stringify({ schema_version: 2, inventory: { documents: 2, catalog_identities: 2, legacy_sidecars: 0, missing_catalog_documentation: [] }, builtins: [
+        { key: "abs", module_stem: "abs", authority: "catalog", title: "abs", examples: [{ input: "assert(abs(-1) == 1)", verification: "Succeeds" }] },
+        { key: "plot", module_stem: "plot", authority: "catalog", title: "plot", sections: [{ heading: "Behavior", paragraphs: ["Canonical graphics documentation"] }] }
+    ] }));
     const catalogPath = join(root, "docs/simulation/examples/catalog.json");
     const catalog = JSON.parse(readFileSync(catalogPath)); catalog.examples = [catalog.examples.find(example => example.id === "two-body-static")]; catalog.examples[0].snapshot = false;
     manual.topics[0].examples = ["two-body-static"];
     writeFileSync(join(root, "docs/simulation/manual.json"), JSON.stringify(manual));
     writeFileSync(catalogPath, JSON.stringify(catalog));
-    const options = { source: root, output: join(root, "target/docs/source"), requirementsPath: join(root, "requirements.json"), builtinDescriptorsPath: join(root, "builtins.json") };
+    const options = { source: root, output: join(root, "target/docs/source"), requirementsPath: join(root, "requirements.json"), builtinDescriptorsPath: join(root, "builtins.json"), builtinDocumentationPath: join(root, "builtin-documentation.json") };
     return { root, options };
 }
 test("repeat exports preserve exact manifests and complete deterministic example archives", () => {
@@ -36,6 +40,10 @@ test("repeat exports preserve exact manifests and complete deterministic example
         const second = buildSourceDocs(options);
         assert.equal(first.content_hash, second.content_hash);
         verifyArtifact(options.output);
+        const references = first.files.filter(file => file.path.startsWith("builtins/reference/"));
+        assert.deepEqual(references.map(file => file.path), ["builtins/reference/abs.json", "builtins/reference/plot.json"]);
+        const canonical = JSON.parse(readFileSync(options.builtinDocumentationPath)).builtins;
+        assert.deepEqual(references.map(file => JSON.parse(readFileSync(join(options.output, file.path)))), canonical);
         const catalog = JSON.parse(readFileSync(join(options.output, "examples/catalog.json")));
         assert.deepEqual(catalog.examples[0].files.map(file => file.path), ["structural-static-experimental.fea", "geometry/two-box-assembly.step"]);
         const example = catalog.examples[0];
@@ -62,6 +70,18 @@ test("unknown contract references reject without replacing a valid export", () =
     finally {
         rmSync(root, { recursive: true, force: true });
     }
+});
+test("invalid canonical documentation never replaces a published complete artifact", () => {
+    const { root, options } = fixture();
+    try {
+        const first = buildSourceDocs(options);
+        const payload = JSON.parse(readFileSync(options.builtinDocumentationPath));
+        payload.preview = { kind: "catalog", final_acceptance: false };
+        writeFileSync(options.builtinDocumentationPath, JSON.stringify(payload));
+        assert.throws(() => buildSourceDocs(options), /aggregate builtin documentation export/);
+        assert.equal(verifyArtifact(options.output).content_hash, first.content_hash);
+        assert.deepEqual(first.files.filter(file => file.path.startsWith("builtins/reference/")).map(file => file.path), ["builtins/reference/abs.json", "builtins/reference/plot.json"]);
+    } finally { rmSync(root, { recursive: true, force: true }); }
 });
 test("omitting the referenced STEP geometry rejects the package", () => {
     const { root, options } = fixture();

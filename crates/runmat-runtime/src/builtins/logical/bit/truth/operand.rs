@@ -146,7 +146,7 @@ fn from_char_array(array: CharArray) -> LogicalBuffer {
     LogicalBuffer {
         data: data
             .into_iter()
-            .map(|value| u8::from(value != '\0'))
+            .map(|value| u8::from(value.raw() != 0))
             .collect(),
         shape,
     }

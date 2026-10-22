@@ -105,7 +105,7 @@ fn logical_character_sparse_and_table_contracts_are_distinct() {
     };
     assert_eq!(output.numeric_dtype(), NumericDType::F64);
 
-    let chars = CharArray::new(vec!['A'], 1, 1).expect("character input");
+    let chars = CharArray::from_unicode_scalars(vec!['A'], 1, 1).expect("character input");
     assert!(matches!(
         call(Value::CharArray(chars)),
         Ok(Value::Num(_)) | Ok(Value::Tensor(_))

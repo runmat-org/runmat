@@ -18,17 +18,7 @@ pub async fn load_member_with_context(
 ) -> Result<RootedValue, RuntimeError> {
     read_member_sequence_with_context(context, base, field, allow_init, caller_function_name)
         .await?
-        .try_map_owned(
-            |sequence| {
-                let values = sequence.resolve(
-                    runmat_types::SequenceUse::RequireSingle,
-                    crate::sequence::SequenceResolutionContext::default(),
-                )?;
-                crate::sequence::into_first_output(values)?
-                    .ok_or_else(|| RuntimeError::from("member read did not produce one value"))
-            },
-            |error| error.into_runtime_error(),
-        )
+        .try_into_single()
 }
 
 pub async fn read_member_sequence_with_context(
@@ -38,8 +28,62 @@ pub async fn read_member_sequence_with_context(
     allow_init: bool,
     caller_function_name: Option<&str>,
 ) -> Result<RootedValueSequence, RuntimeError> {
-    let work =
-        read_member_sequence_in_scope(context, base, field, allow_init, caller_function_name);
+    let roots = member_read_roots(context, &base)?;
+    let field = crate::call::argument_text::adopt_string(field, context)?;
+    read_member_sequence_scoped(
+        context,
+        MemberRead {
+            base,
+            field,
+            allow_init,
+            _roots: roots,
+        },
+        caller_function_name,
+    )
+    .await
+}
+
+pub async fn read_member_sequence_text_with_context(
+    context: Option<&crate::context::RuntimeContext>,
+    base: Value,
+    field: runmat_value::Utf8Text,
+    allow_init: bool,
+    caller_function_name: Option<&str>,
+) -> Result<RootedValueSequence, RuntimeError> {
+    let roots = member_read_roots(context, &base)?;
+    read_member_sequence_scoped(
+        context,
+        MemberRead {
+            base,
+            field,
+            allow_init,
+            _roots: roots,
+        },
+        caller_function_name,
+    )
+    .await
+}
+
+struct MemberRead {
+    base: Value,
+    field: runmat_value::Utf8Text,
+    allow_init: bool,
+    _roots: RootedValueLease,
+}
+
+fn member_read_roots(
+    context: Option<&crate::context::RuntimeContext>,
+    base: &Value,
+) -> Result<RootedValueLease, RuntimeError> {
+    crate::execution::structure::replacement::lease(base, context)
+}
+
+async fn read_member_sequence_scoped(
+    context: Option<&crate::context::RuntimeContext>,
+    request: MemberRead,
+    caller_function_name: Option<&str>,
+) -> Result<RootedValueSequence, RuntimeError> {
+    let work = read_member_sequence_in_scope(context, request, caller_function_name);
     match context {
         Some(context) => context.scope(work).await,
         None => work.await,
@@ -48,71 +92,33 @@ pub async fn read_member_sequence_with_context(
 
 async fn read_member_sequence_in_scope(
     context: Option<&crate::context::RuntimeContext>,
-    base: Value,
-    field: String,
-    allow_init: bool,
+    request: MemberRead,
     caller_function_name: Option<&str>,
 ) -> Result<RootedValueSequence, RuntimeError> {
-    let _source_root = match context {
-        Some(runtime) => {
-            RootedValueLease::for_value_slices_in_context(&[std::slice::from_ref(&base)], runtime)?
-        }
-        None => RootedValueLease::for_values(std::iter::once(&base))
-            .map_err(|error| error.into_runtime_error())?,
-    };
+    let MemberRead {
+        base,
+        field,
+        allow_init,
+        _roots,
+    } = request;
     match base {
         Value::StructArray(array) => {
             crate::aggregate::structure::gather_member(context, array, &field)
         }
         Value::ObjectArray(array) => {
-            let roots = crate::call::arguments::roots::ExpansionRoots::new()?;
-            roots.retain_values(array.data());
-            let mut values = Vec::with_capacity(array.len());
-            for value in array.data().iter().cloned() {
-                let selected = Box::pin(read_member_sequence_with_context(
-                    context,
-                    value,
-                    field.clone(),
-                    allow_init,
-                    caller_function_name,
-                ))
-                .await?
-                .try_map_owned(
-                    |sequence| {
-                        let selected = sequence.resolve(
-                            runmat_types::SequenceUse::RequireSingle,
-                            crate::sequence::SequenceResolutionContext::default(),
-                        )?;
-                        Ok::<_, RuntimeError>(
-                            crate::sequence::into_first_output(selected)?
-                                .expect("single sequence resolution"),
-                        )
-                    },
-                    |error| error.into_runtime_error(),
-                )?;
-                selected.with_owned(|selected| {
-                    roots.retain_values(std::slice::from_ref(&selected));
-                    values.push(selected);
-                });
-            }
-            RootedValueSequence::new(
-                crate::sequence::ValueSequence::comma_separated(values)
-                    .map_err(crate::sequence::sequence_error_to_runtime)?,
+            super::read_array::gather_object_members(
+                context,
+                array,
+                field,
+                allow_init,
+                caller_function_name,
             )
-            .map_err(|error| error.into_runtime_error())
+            .await
         }
         base => {
             load_scalar_member_with_context(context, base, field, allow_init, caller_function_name)
                 .await
-                .and_then(|value| {
-                    value.try_map_owned(
-                        |value| {
-                            crate::sequence::ValueSequence::single(value)
-                                .map_err(crate::sequence::sequence_error_to_runtime)
-                        },
-                        |error| error.into_runtime_error(),
-                    )
-                })
+                .and_then(RootedValue::try_into_sequence)
         }
     }
 }
@@ -120,14 +126,14 @@ async fn read_member_sequence_in_scope(
 async fn load_scalar_member_with_context(
     context: Option<&crate::context::RuntimeContext>,
     base: Value,
-    field: String,
+    field: runmat_value::Utf8Text,
     allow_init: bool,
     caller_function_name: Option<&str>,
 ) -> Result<RootedValue, RuntimeError> {
     if let Some(result) = context
         .and_then(|context| crate::parallel::introspection::load_member(context, &base, &field))
     {
-        return RootedValue::new(result?).map_err(|error| error.into_runtime_error());
+        return RootedValue::in_optional_context(result?, context);
     }
     match base {
         Value::Object(obj) => {
@@ -161,7 +167,7 @@ async fn load_scalar_member_with_context(
                 &access,
             )? {
                 let path = crate::object::indexing::ObjectSubscriptPath::single(
-                    crate::object::indexing::ObjectSubscript::member(field),
+                    crate::object::indexing::ObjectSubscript::member_retained(field),
                 );
                 let resolution = Some(method);
                 let outputs = match context {
@@ -263,8 +269,7 @@ async fn load_scalar_member_with_context(
                 if p2.is_dependent {
                     let backing = format!("{field}_backing");
                     if let Some(vb) = obj.property(&backing) {
-                        return RootedValue::new(vb.clone())
-                            .map_err(|error| error.into_runtime_error());
+                        return RootedValue::in_optional_context(vb.clone(), context);
                     }
                 }
                 Err(format!(
@@ -285,7 +290,7 @@ async fn load_scalar_member_with_context(
             } else {
                 Err(format!("Unknown class {}", obj.class_name()).into())
             }?;
-            RootedValue::new(value).map_err(|error| error.into_runtime_error())
+            RootedValue::in_optional_context(value, context)
         }
         Value::HandleObject(handle) => {
             let base = Value::HandleObject(handle.clone());
@@ -301,7 +306,7 @@ async fn load_scalar_member_with_context(
                 &access,
             )? {
                 let path = crate::object::indexing::ObjectSubscriptPath::single(
-                    crate::object::indexing::ObjectSubscript::member(field),
+                    crate::object::indexing::ObjectSubscript::member_retained(field),
                 );
                 let resolution = Some(method);
                 let outputs = match context {
@@ -342,11 +347,13 @@ async fn load_scalar_member_with_context(
             )
             .await
         }
-        Value::Foreign(reference) => crate::foreign::load_foreign_member(reference, field).await,
-        Value::ClassRef(cls) => {
-            RootedValue::new(load_static_member(&cls, &field, caller_function_name)?)
-                .map_err(|error| error.into_runtime_error())
+        Value::Foreign(reference) => {
+            crate::foreign::load_foreign_member_text(reference, field).await
         }
+        Value::ClassRef(cls) => RootedValue::in_optional_context(
+            load_static_member(&cls, &field, caller_function_name)?,
+            context,
+        ),
         base @ (Value::Num(_) | Value::Int(_)) => {
             if !is_possible_graphics_handle_value(&base) {
                 return Err(mex("LoadMember", "LoadMember on non-object"));
@@ -362,11 +369,10 @@ async fn load_scalar_member_with_context(
                 })
         }
         Value::Struct(st) => {
-            if let Some(v) = st.fields.get(&field) {
-                RootedValue::new(v.clone()).map_err(|error| error.into_runtime_error())
+            if let Some(v) = st.fields.get(field.as_str()) {
+                RootedValue::in_optional_context(v.clone(), context)
             } else if allow_init {
-                RootedValue::new(Value::Struct(StructValue::new()))
-                    .map_err(|error| error.into_runtime_error())
+                RootedValue::in_optional_context(Value::Struct(StructValue::new()), context)
             } else {
                 Err(format!("Undefined field '{}'", field).into())
             }
@@ -397,7 +403,7 @@ async fn load_scalar_member_with_context(
                 }
                 None => return Err(format!("Reference to non-existent field '{}'.", field).into()),
             };
-            RootedValue::new(value).map_err(|error| error.into_runtime_error())
+            RootedValue::in_optional_context(value, context)
         }
         _ => Err(mex("LoadMember", "LoadMember on non-object")),
     }

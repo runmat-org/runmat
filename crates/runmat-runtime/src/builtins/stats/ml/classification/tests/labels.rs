@@ -94,7 +94,8 @@ fn classify_empirical_prior_and_missing_labels() {
 fn classify_preserves_char_matrix_labels() {
     with_outputs(1, || {
         let groups = Value::CharArray(
-            CharArray::new(vec!['a', 'a', 'a', 'a', 'b', 'b', 'b', 'b'], 4, 2).unwrap(),
+            CharArray::from_unicode_scalars(vec!['a', 'a', 'a', 'a', 'b', 'b', 'b', 'b'], 4, 2)
+                .unwrap(),
         );
         let values = classify(
             tensor(vec![0.1, 3.2], vec![2, 1]),
@@ -107,7 +108,7 @@ fn classify_preserves_char_matrix_labels() {
         };
         assert_eq!(labels.rows, 2);
         assert_eq!(labels.cols, 2);
-        assert_eq!(labels.data(), vec!['a', 'a', 'b', 'b']);
+        assert_eq!(labels.data(), runmat_value::encode_utf16_code_units("aabb"));
     });
 }
 

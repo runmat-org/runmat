@@ -13,7 +13,24 @@ use super::{ExecutionServiceError, RuntimeExecutionServices};
 #[path = "cooperation/cancellable_await.rs"]
 mod cancellable_await;
 
+#[cfg(test)]
 type CpuTurn = dyn Fn() -> RuntimeServiceFuture<Result<(), ExecutionServiceError>>;
+
+enum CpuTurnOwner {
+    Service(Rc<dyn RuntimeExecutionServices>),
+    #[cfg(test)]
+    Callback(Rc<CpuTurn>),
+}
+
+impl CpuTurnOwner {
+    fn start(&self) -> RuntimeServiceFuture<Result<(), ExecutionServiceError>> {
+        match self {
+            Self::Service(service) => service.cooperate_cpu(),
+            #[cfg(test)]
+            Self::Callback(turn) => turn(),
+        }
+    }
+}
 
 /// The execution adapter, not an individual builtin, chooses whether CPU work
 /// must periodically give other tasks a turn.
@@ -24,7 +41,7 @@ pub enum CpuCooperationPolicy {
 }
 
 pub struct CpuCooperationBudget {
-    turn: Option<Rc<CpuTurn>>,
+    turn: Option<CpuTurnOwner>,
     cancellation: CancellationToken,
     policy: CpuCooperationPolicy,
     pending_work: u64,
@@ -107,9 +124,9 @@ impl CpuCooperationBudget {
         let policy = service.cpu_cooperation_policy();
         let turn = match policy {
             CpuCooperationPolicy::NeverYield => None,
-            CpuCooperationPolicy::WorkQuantum(_) => {
-                Some(Rc::new(move || service.cooperate_cpu()) as Rc<CpuTurn>)
-            }
+            // Retain the already-owned adapter directly; a budget needs no
+            // separately allocated closure to call this same service.
+            CpuCooperationPolicy::WorkQuantum(_) => Some(CpuTurnOwner::Service(service)),
         };
         Self {
             turn,
@@ -135,7 +152,7 @@ impl CpuCooperationBudget {
         }
         self.pending_work = (total % u128::from(quantum.get())) as u64;
         let turn = self.turn.as_ref().expect("a work quantum owns a turn hook");
-        let result = match select(turn(), self.cancellation.cancelled()).await {
+        let result = match select(turn.start(), self.cancellation.cancelled()).await {
             Either::Left((result, _listener)) => result,
             Either::Right((_reason, _turn)) => return Err(ExecutionServiceError::Cancelled),
         };
@@ -153,7 +170,7 @@ impl CpuCooperationBudget {
         turn: impl Fn() -> RuntimeServiceFuture<Result<(), ExecutionServiceError>> + 'static,
     ) -> Self {
         Self {
-            turn: Some(Rc::new(turn)),
+            turn: Some(CpuTurnOwner::Callback(Rc::new(turn))),
             cancellation,
             policy,
             pending_work: 0,

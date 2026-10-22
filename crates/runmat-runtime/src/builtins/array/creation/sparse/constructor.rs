@@ -93,7 +93,7 @@ pub(super) fn prepare(args: crate::call::BuiltinArguments) -> BuiltinResult<Prep
 }
 fn prepare_form(args: crate::call::BuiltinArguments) -> BuiltinResult<Construction> {
     let count = args.len();
-    let typename = count == 3 && keyword_of(&args[2]).is_some();
+    let typename = count == 3 && keyword_of(&args[2])?.is_some();
     let form = SparseConstructionForm::for_arguments(count, typename);
     if form == Some(SparseConstructionForm::Triplets) {
         validate_triplet_subscript_classes(&args[0], &args[1])?;

@@ -13,9 +13,13 @@ pub(super) fn geometry_path_from_value(
         Value::StringArray(array) if array.data().len() == 1 => {
             Ok(array.data()[0].as_str().to_owned())
         }
-        Value::CharArray(array) if array.rows == 1 && array.shape.len() <= 2 => {
-            Ok(array.data().iter().collect())
-        }
+        Value::CharArray(array) if array.rows == 1 && array.shape.len() <= 2 => Ok(
+            runmat_value::decode_utf16_code_units(array.data()).map_err(|source| {
+                let mut error = builtin_error(builtin, error, source.to_string());
+                error.source = Some(Box::new(source));
+                error
+            })?,
+        ),
         _ => Err(builtin_error(
             builtin,
             error,

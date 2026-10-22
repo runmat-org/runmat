@@ -15,6 +15,7 @@ pub(super) async fn dispatch(
     let invocation_arity = context.invocation_arity;
     match instr {
         crate::bytecode::Instr::BeginSubscriptEndReceiver { prefix } => {
+            sequence_register.prepare_subscript_receiver()?;
             let operand_count = prefix
                 .iter()
                 .map(crate::bytecode::BytecodeSubscriptStep::operand_count)
@@ -22,8 +23,20 @@ pub(super) async fn dispatch(
             let start = stack.len().checked_sub(operand_count + 1).ok_or_else(|| {
                 crate::interpreter::errors::mex("StackUnderflow", "subscript path stack underflow")
             })?;
-            let (root, path) =
-                materialize_subscript_path(stack.as_slice()[start..].to_vec(), prefix)?;
+            let operands = runmat_runtime::execution::RootedValues::try_initialize_in_context(
+                stack.len() - start,
+                runtime,
+                |index| Ok::<_, RuntimeError>(stack.as_slice()[start + index].clone()),
+            )?;
+            let (root, path) = operands.with_owned_output_storage(|storage| {
+                let values = storage.try_into_owned().map_err(|_| {
+                    crate::interpreter::errors::mex(
+                        "RunMat:SubscriptPathState",
+                        "fresh subscript snapshot is unexpectedly shared",
+                    )
+                })?;
+                materialize_subscript_path(runtime, values, prefix)
+            })?;
             let prepared = runmat_runtime::object::protocol::prepare_subscript_receiver_in_context(
                 runtime,
                 root,
@@ -33,7 +46,7 @@ pub(super) async fn dispatch(
             .await?;
             let stack_index = stack.len();
             stack.try_push(prepared.receiver().clone())?;
-            sequence_register.push_subscript_receiver(prepared, start, stack_index);
+            sequence_register.push_subscript_receiver(prepared, start, stack_index)?;
             Ok(true)
         }
         crate::bytecode::Instr::LoadSubscriptEnd {
@@ -140,9 +153,7 @@ pub(super) async fn dispatch(
                 sequence_register,
             )
             .await?;
-            values.with_unbounded_values(|values| {
-                sequence_register.capture(*sequence_slot, stack, values)
-            })??;
+            sequence_register.capture_rooted_values(*sequence_slot, stack, values)?;
             Ok(true)
         }
         _ => Ok(false),

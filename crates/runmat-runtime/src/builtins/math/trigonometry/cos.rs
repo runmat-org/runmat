@@ -334,7 +334,7 @@ fn cos_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let data = ca
         .data()
         .iter()
-        .map(|&ch| (ch as u32 as f64).cos())
+        .map(|&ch| (u32::from(ch.raw()) as f64).cos())
         .collect::<Vec<_>>();
     let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
         .map_err(|e| cos_error_with_detail(&COS_ERROR_INTERNAL, e))?;
@@ -717,7 +717,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cos_char_array_roundtrip() {
-        let chars = CharArray::new("abc".chars().collect(), 1, 3).unwrap();
+        let chars = CharArray::from_unicode_scalars("abc".chars().collect(), 1, 3).unwrap();
         let result = cos_builtin(Value::CharArray(chars), Vec::new()).expect("cos");
         match result {
             Value::Tensor(t) => {

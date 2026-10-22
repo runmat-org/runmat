@@ -22,6 +22,7 @@ use runmat_runtime::{
     RuntimeError,
 };
 use runmat_value::{CellArray, Value};
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::Once;
@@ -725,13 +726,11 @@ async fn invoke_semantic_function_with_owned_inputs(
         }
     }
     let result_vars = {
-        #[cfg(not(target_arch = "wasm32"))]
-        let execution_runtime = runtime.clone();
         #[cfg(target_arch = "wasm32")]
         let future = interpret_function_with_counts_in_context_with_driver(
             FunctionExecutionInvocation {
-                bytecode: &bytecode,
-                name: &func.display_name,
+                bytecode: Cow::Borrowed(&bytecode),
+                name: FunctionExecutionName::Borrowed(&func.display_name),
                 arity: RuntimeInvocationArity::function(prepared.nargin, requested_outputs),
                 missing_input_slots,
                 runtime: runtime.clone(),
@@ -755,32 +754,45 @@ async fn invoke_semantic_function_with_owned_inputs(
             // the native OS stack, which those runtimes may register or inspect.
             const SEMANTIC_CALL_STACK_BYTES: usize = 16 * 1024 * 1024;
             let execution_stack = function_registry.execution_stack(function_id);
-            // Construct the large interpreter future on the temporary stack,
-            // then return only its pinned heap owner to the caller. Constructing
-            // it before boxing would still consume the caller's native stack.
-            // No interpreter polling or foreign execution occurs here.
-            let mut future = stacker::grow(SEMANTIC_CALL_STACK_BYTES, || {
-                Box::pin(interpret_function_with_counts_in_context_with_driver(
-                    FunctionExecutionInvocation {
-                        bytecode: &bytecode,
-                        name: &func.display_name,
-                        arity: RuntimeInvocationArity::function(prepared.nargin, requested_outputs),
-                        missing_input_slots,
-                        runtime: runtime.clone(),
-                        driver: Some(driver.clone()),
-                        lexical_environment: lexical_environment.clone(),
-                        lexical_binding_slots: func.lexical_binding_slots.clone(),
-                        inherited_storage_slots: func.inherited_storage_slots.clone(),
-                    },
-                    vars,
-                ))
-            });
+            // Move the already-built per-call bytecode into the queued owner;
+            // do not clone the program, registry, or instruction stream merely
+            // to cross the process-driver boundary.
+            let invocation: FunctionExecutionInvocation<'static> = FunctionExecutionInvocation {
+                bytecode: Cow::Owned(bytecode),
+                name: FunctionExecutionName::ActiveFunction,
+                arity: RuntimeInvocationArity::function(prepared.nargin, requested_outputs),
+                missing_input_slots,
+                runtime: runtime.clone(),
+                driver: Some(driver.clone()),
+                lexical_environment: lexical_environment.clone(),
+                lexical_binding_slots: func.lexical_binding_slots.clone(),
+                inherited_storage_slots: func.inherited_storage_slots.clone(),
+            };
             if execution_stack == runmat_types::ExecutionStackRequirement::Process {
-                // The async interpreter state is substantially larger than a
-                // call frame. Heap-allocate it so nested dispatch does not
-                // consume the native stack needed by the foreign runtime.
-                future.await?
+                // Process-stack callees are siblings in the invocation-owned
+                // driver. Polling the owned interpreter future directly here
+                // would retain this interpreter's large poll frame while
+                // entering the next one. The queue already admits and boxes
+                // the exact concrete future, so it is also the canonical
+                // stack-segmentation boundary for process-stack calls.
+                let queue_runtime = runtime.clone();
+                let queued_scope = queue_runtime.prepare_poll_scope()?;
+                driver
+                    .enqueue_owned_scoped_in_context(&queue_runtime, queued_scope, move || {
+                        interpret_function_with_counts_in_context_with_driver(invocation, vars)
+                    })?
+                    .await?
             } else {
+                let execution_runtime = runtime.clone();
+                // Construct the large interpreter future on the temporary stack,
+                // then return only its pinned heap owner to the caller. Constructing
+                // it before boxing would still consume the caller's native stack.
+                // No interpreter polling or foreign execution occurs here.
+                let mut future = stacker::grow(SEMANTIC_CALL_STACK_BYTES, || {
+                    Box::pin(interpret_function_with_counts_in_context_with_driver(
+                        invocation, vars,
+                    ))
+                });
                 futures::future::poll_fn(move |context| {
                     stacker::grow(SEMANTIC_CALL_STACK_BYTES, || {
                         let _stack = execution_runtime.enter_execution_stack(
@@ -2079,7 +2091,7 @@ async fn run_interpreter_inner(
     )
     .map_err(|error| mex("LexicalEnvironment", &error))?;
     let thread_roots: Vec<Value> = runtime_globals::collect_thread_roots();
-    let mut sequence_register = interp_dispatch::SequenceState::default();
+    let mut sequence_register = interp_dispatch::SequenceState::new_in_context(&context.runtime)?;
     // All owner objects stay at these frame addresses through the inner
     // instruction future. Register them together before admitting mutations;
     // the residency guard drops first, then these registrations, then owners.
@@ -2517,8 +2529,8 @@ async fn interpret_function_with_counts_in_context(
 ) -> Result<runmat_runtime::execution::RootedValues, RuntimeError> {
     interpret_function_with_counts_in_context_with_driver(
         FunctionExecutionInvocation {
-            bytecode,
-            name,
+            bytecode: Cow::Borrowed(bytecode),
+            name: FunctionExecutionName::Borrowed(name),
             arity: RuntimeInvocationArity::function(in_count, out_count),
             missing_input_slots,
             runtime,
@@ -2535,8 +2547,8 @@ async fn interpret_function_with_counts_in_context(
 /// Exact selected function frame, including its invocation-local arity and
 /// continuation owner. The session runtime service remains shared.
 struct FunctionExecutionInvocation<'a> {
-    bytecode: &'a Bytecode,
-    name: &'a str,
+    bytecode: Cow<'a, Bytecode>,
+    name: FunctionExecutionName<'a>,
     arity: RuntimeInvocationArity,
     missing_input_slots: HashSet<usize>,
     runtime: runmat_runtime::context::RuntimeContext,
@@ -2544,6 +2556,31 @@ struct FunctionExecutionInvocation<'a> {
     lexical_environment: Option<runmat_value::LexicalEnvironment>,
     lexical_binding_slots: Vec<crate::bytecode::program::LexicalBindingSlot>,
     inherited_storage_slots: Vec<crate::bytecode::program::InheritedStorageSlot>,
+}
+
+#[derive(Clone, Copy)]
+enum FunctionExecutionName<'a> {
+    Borrowed(&'a str),
+    ActiveFunction,
+}
+
+fn function_execution_name<'a>(
+    bytecode: &'a Bytecode,
+    name: FunctionExecutionName<'a>,
+) -> Result<&'a str, RuntimeError> {
+    match name {
+        FunctionExecutionName::Borrowed(name) => Ok(name),
+        FunctionExecutionName::ActiveFunction => bytecode
+            .active_function
+            .and_then(|function| bytecode.function_registry.get(function))
+            .map(|function| function.display_name.as_str())
+            .ok_or_else(|| {
+                mex(
+                    "SemanticFunctionIdentity",
+                    "owned function frame has no active registry definition",
+                )
+            }),
+    }
 }
 
 async fn interpret_function_with_counts_in_context_with_driver(
@@ -2555,7 +2592,8 @@ async fn interpret_function_with_counts_in_context_with_driver(
         crate::runtime::workspace_service::VmWorkspaceService::install(runtime, None);
     let frame = workspace_activation.frame();
     let runtime = with_default_acceleration_service(runtime);
-    let runtime = runtime_with_bytecode_debug_frame(runtime, invocation.bytecode, invocation.name);
+    let name = function_execution_name(invocation.bytecode.as_ref(), invocation.name)?;
+    let runtime = runtime_with_bytecode_debug_frame(runtime, invocation.bytecode.as_ref(), name);
     invocation.runtime = runtime.clone();
     let result = workspace_activation
         .scope(runtime.scope(scope_vm_pc(
@@ -2581,6 +2619,8 @@ async fn interpret_function_with_counts_in_context_inner(
         lexical_binding_slots,
         inherited_storage_slots,
     } = invocation;
+    let bytecode = bytecode.as_ref();
+    let name = function_execution_name(bytecode, name)?;
     let source_id = bytecode
         .source_id
         .and_then(|source| source.resolve_in(&runtime));
@@ -3210,7 +3250,8 @@ mod tests {
         assert!(value_is_numeric_or_logical(&Value::Tensor(tensor)));
         assert!(!value_is_numeric_or_logical(&Value::String("x".into())));
         assert!(!value_is_numeric_or_logical(&Value::CharArray(
-            runmat_value::CharArray::new("x".chars().collect(), 1, 1).expect("char")
+            runmat_value::CharArray::from_unicode_scalars("x".chars().collect(), 1, 1)
+                .expect("char")
         )));
     }
 
@@ -3218,13 +3259,15 @@ mod tests {
     fn text_validator_accepts_string_char_vector_and_cellstr() {
         assert!(value_is_text(&Value::String("x".into())));
         assert!(value_is_text(&Value::CharArray(
-            runmat_value::CharArray::new("abc".chars().collect(), 1, 3).expect("char")
+            runmat_value::CharArray::from_unicode_scalars("abc".chars().collect(), 1, 3)
+                .expect("char")
         )));
         assert!(value_is_text(&Value::Cell(
             CellArray::new(
                 vec![
                     Value::CharArray(
-                        runmat_value::CharArray::new("a".chars().collect(), 1, 1).expect("char"),
+                        runmat_value::CharArray::from_unicode_scalars("a".chars().collect(), 1, 1)
+                            .expect("char"),
                     ),
                     Value::String("b".into()),
                 ],
@@ -3240,7 +3283,8 @@ mod tests {
     fn nonempty_validator_rejects_empty_arrays_and_cells() {
         let empty_num = Tensor::new(Vec::new(), vec![0, 0]).expect("empty tensor");
         assert!(value_is_empty(&Value::Tensor(empty_num)));
-        let empty_char = runmat_value::CharArray::new(Vec::new(), 1, 0).expect("empty char array");
+        let empty_char =
+            runmat_value::CharArray::from_code_units(Vec::new(), 1, 0).expect("empty char array");
         assert!(value_is_empty(&Value::CharArray(empty_char)));
         let empty_cell = CellArray::new(Vec::new(), 0, 0).expect("empty cell");
         assert!(value_is_empty(&Value::Cell(empty_cell)));

@@ -121,8 +121,9 @@ fn sparse_input_densifies_implicit_zeros_without_losing_single_class() {
 
 #[test]
 fn table_and_character_inputs_map_elementwise() {
-    let chars = CharArray::new_with_shape("abcdefgh".chars().collect(), vec![2, 2, 2])
-        .expect("character input");
+    let chars =
+        CharArray::from_unicode_scalars_with_shape("abcdefgh".chars().collect(), vec![2, 2, 2])
+            .expect("character input");
     let Value::Tensor(output) = call(Value::CharArray(chars)).expect("character exp") else {
         panic!("expected tensor");
     };
@@ -162,7 +163,7 @@ fn logical_character_and_symbolic_contracts_remain_distinct() {
     assert_eq!(output.materialize_f64(), &[std::f64::consts::E, 1.0]);
 
     let character_error = call_matlab(Value::CharArray(
-        CharArray::new(vec!['A'], 1, 1).expect("character input"),
+        CharArray::from_unicode_scalars(vec!['A'], 1, 1).expect("character input"),
     ))
     .expect_err("character compatibility gate");
     assert_eq!(

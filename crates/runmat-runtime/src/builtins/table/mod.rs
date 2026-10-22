@@ -30,6 +30,7 @@ pub(crate) use self::display::categorical_label_at;
 pub use self::display::{table_display_text, table_summary_text};
 use self::facade::*;
 pub use self::metadata::*;
+pub(crate) use self::object::sortrows_table_view;
 pub(crate) use self::object::table_replace_variables_like_owned;
 #[cfg(feature = "plot-core")]
 pub(crate) use self::object::{aggregate_heatmap_table, HeatmapAggregation};
@@ -45,3 +46,11 @@ pub use self::prelude::{TABLE_CLASS, TIMETABLE_CLASS};
 pub use self::registry::ensure_table_class_registered;
 #[cfg(test)]
 use self::test_support::*;
+
+fn with_utf16_source(
+    mut error: crate::RuntimeError,
+    source: runmat_value::Utf16DecodeError,
+) -> crate::RuntimeError {
+    error.source = Some(Box::new(source));
+    error
+}

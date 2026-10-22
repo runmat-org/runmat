@@ -1,14 +1,17 @@
+use super::allocation_state::AllocationState;
 use super::*;
 
 enum NumericReadbackStaging {
-    Ordinary(wgpu::Buffer),
+    Ordinary(super::allocation_state::NumericDownloadStageHandle),
     Selected(runmat_accelerate_api::PreparedNumericDownloadStage),
 }
 
 impl std::borrow::Borrow<wgpu::Buffer> for NumericReadbackStaging {
     fn borrow(&self) -> &wgpu::Buffer {
         match self {
-            Self::Ordinary(buffer) => buffer,
+            Self::Ordinary(owner) => owner
+                .staging_buffer()
+                .expect("ordinary numeric staging owns its buffer"),
             Self::Selected(stage) => stage
                 .lease_as_any()
                 .downcast_ref::<super::allocation_state::NumericDownloadStageHandle>()
@@ -18,7 +21,27 @@ impl std::borrow::Borrow<wgpu::Buffer> for NumericReadbackStaging {
     }
 }
 
-impl super::core::ReadbackResourceOwner for NumericReadbackStaging {}
+impl NumericReadbackStaging {
+    fn owner(&self) -> &super::allocation_state::NumericDownloadStageHandle {
+        match self {
+            Self::Ordinary(owner) => owner,
+            Self::Selected(stage) => stage
+                .lease_as_any()
+                .downcast_ref()
+                .expect("selected numeric staging owns its authenticated owner"),
+        }
+    }
+}
+impl super::core::ReadbackResourceOwner for NumericReadbackStaging {
+    fn validate_scope(&self) -> Result<()> {
+        self.owner().validate_scope()
+    }
+    fn numeric_callback_owner(
+        &self,
+    ) -> Option<super::allocation_state::NumericDownloadStageHandle> {
+        Some(self.owner().callback_owner())
+    }
+}
 #[path = "io/power_probe.rs"]
 mod power_probe;
 use power_probe::ProbeStaging;
@@ -365,12 +388,14 @@ impl WgpuProvider {
             ));
         }
         let staging = self.with_emission(|emission, pending| -> Result<_> {
-            let staging = emission.device().create_buffer(&wgpu::BufferDescriptor {
-                label: Some("runmat-read-scalar-staging"),
-                size: elem_size,
-                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
+            let staging = runmat_accelerate_api::WgpuBufferOwner::new(
+                emission.device().create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("runmat-read-scalar-staging"),
+                    size: elem_size,
+                    usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }),
+            );
             let mut encoder = pending.profiled_encoder(
                 emission,
                 &wgpu::CommandEncoderDescriptor {
@@ -758,14 +783,25 @@ impl WgpuProvider {
             let staging = self.with_emission(|emission, pending| -> Result<_> {
                 let staging = match stage.take() {
                     Some(stage) => NumericReadbackStaging::Selected(stage),
-                    None => NumericReadbackStaging::Ordinary(emission.device().create_buffer(
-                        &wgpu::BufferDescriptor {
-                            label: Some("runmat-numeric-download-staging"),
-                            size: entry.allocated_bytes,
-                            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                            mapped_at_creation: false,
-                        },
-                    )),
+                    None => NumericReadbackStaging::Ordinary(
+                        AllocationState::own_numeric_download_stage(
+                            &self.allocations,
+                            Some(runmat_accelerate_api::WgpuBufferOwner::new(
+                                emission.device().create_buffer(&wgpu::BufferDescriptor {
+                                    label: Some("runmat-numeric-download-staging"),
+                                    size: entry.allocated_bytes,
+                                    usage: wgpu::BufferUsages::MAP_READ
+                                        | wgpu::BufferUsages::COPY_DST,
+                                    mapped_at_creation: false,
+                                }),
+                            )),
+                            entry.allocated_bytes,
+                            1,
+                            claim.clone(),
+                            None,
+                            None,
+                        )?,
+                    ),
                 };
                 let mut encoder = pending.profiled_encoder(
                     emission,
@@ -989,12 +1025,14 @@ impl WgpuProvider {
         );
         let (staging, copy_submission_id, copy_fence_requested_bytes, copy_ticket) = self
             .with_emission(|emission, pending| -> Result<_> {
-                let buffer = emission.device().create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("runmat-download-staging"),
-                    size: size_bytes,
-                    usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                });
+                let buffer = runmat_accelerate_api::WgpuBufferOwner::new(
+                    emission.device().create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("runmat-download-staging"),
+                        size: size_bytes,
+                        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    }),
+                );
                 let resource_ticket = if probe_observed.is_some() {
                     runmat_accelerate_api::observation::current_provider_resource_scope()
                         .map(|scope| scope.issue_resource_ticket(buffer.size()))
@@ -1067,16 +1105,13 @@ impl WgpuProvider {
 
     pub(crate) fn device_info_struct_exec(&self) -> ApiDeviceInfo {
         let backend = format!("{:?}", self.adapter_info.backend).to_ascii_lowercase();
-        let memory_bytes = if self.adapter_limits.max_buffer_size > 0 {
-            Some(self.adapter_limits.max_buffer_size)
-        } else {
-            None
-        };
         ApiDeviceInfo {
             device_id: self.runtime_device_id,
             name: self.adapter_info.name.clone(),
             vendor: canonical_vendor_name(&self.adapter_info),
-            memory_bytes,
+            // This is a per-buffer allocation limit, not adapter total/free
+            // memory. WGPU exposes no authoritative VRAM byte count here.
+            memory_bytes: None,
             backend: Some(backend),
         }
     }
@@ -1291,12 +1326,14 @@ mod tests {
                 .expect("source remains live");
             provider
                 .with_emission(|emission, pending| -> Result<_> {
-                    let buffer = emission.device().create_buffer(&wgpu::BufferDescriptor {
-                        label: Some("readback-cleanup-regression"),
-                        size: entry.allocated_bytes,
-                        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                        mapped_at_creation: false,
-                    });
+                    let buffer = runmat_accelerate_api::WgpuBufferOwner::new(
+                        emission.device().create_buffer(&wgpu::BufferDescriptor {
+                            label: Some("readback-cleanup-regression"),
+                            size: entry.allocated_bytes,
+                            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                            mapped_at_creation: false,
+                        }),
+                    );
                     let mut encoder = pending.profiled_encoder(
                         emission,
                         &wgpu::CommandEncoderDescriptor { label: None },

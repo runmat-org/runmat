@@ -123,7 +123,7 @@ fn build_table_fit_spec(
     let mut formula: Option<String> = None;
     let mut response_arg: Option<String> = None;
     if arguments.option_start == 1 {
-        if let Some(text) = scalar_text(&rest[0]) {
+        if let Some(text) = scalar_text(&rest[0])? {
             if text.contains('~') {
                 formula = Some(text.into_owned());
             } else if is_known_model_spec(&text) {

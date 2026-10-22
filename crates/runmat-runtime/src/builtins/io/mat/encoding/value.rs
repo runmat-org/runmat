@@ -130,6 +130,12 @@ pub(in crate::builtins::io::mat) fn convert_value_with_cooperation<'a, 'b>(
                 },
             }),
             Value::SparseTensor(sparse) => {
+                if sparse.is_complex() {
+                    return Err(owner.error(
+                        MatEncodingFailure::Unsupported,
+                        "complex sparse MAT arrays are not supported",
+                    ));
+                }
                 let logical = sparse.is_logical();
                 let values = if logical {
                     NumericStorage::U8(vec![1; sparse.nnz()])

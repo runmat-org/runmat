@@ -39,5 +39,5 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: None,
     reduction: None,
     emits_nan: false,
-    notes: "Fusion relies on the provider matmul hook; when unavailable the runtime executes the CPU fallback.",
+    notes: "Matrix power is a Runtime fusion boundary. Its standalone execution may use provider matmul; no matrix-power fusion lowering is admitted.",
 };

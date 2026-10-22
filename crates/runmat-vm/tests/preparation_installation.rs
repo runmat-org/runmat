@@ -11,11 +11,7 @@ use runmat_value::Value;
 use std::{cell::Cell, collections::HashSet, rc::Rc};
 
 struct InjectedAcceleration;
-impl RuntimeAccelerationService for InjectedAcceleration {
-    fn supports_operation(&self, _: &str) -> bool {
-        false
-    }
-}
+impl RuntimeAccelerationService for InjectedAcceleration {}
 
 /// Dispatch runs inside the actual function frame, so this observes the context
 /// installed by the entry API rather than the embedding context before entry.
@@ -47,7 +43,7 @@ impl RuntimeBuiltinService for ObserveFunctionContext {
             |invocation| {
                 assert_eq!(invocation.args.len(), 1);
                 assert_eq!(invocation.args.get(0), Some(&Value::Bool(true)));
-                Box::pin(async {
+                runmat_runtime::builtin::admitted_builtin_future(None, "fixture", async {
                     runmat_runtime::execution::RootedValueSequence::new(
                         runmat_value::ValueSequence::single(Value::Bool(true))
                             .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?,

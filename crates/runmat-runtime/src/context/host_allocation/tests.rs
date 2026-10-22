@@ -194,6 +194,824 @@ fn settled_scratch_handoff_respects_cancellation_and_retained_lifetime() {
 }
 
 #[test]
+fn index_planner_retains_exact_owners_and_rejects_denial_or_cancel_before_callbacks() {
+    use crate::indexing::plan::{
+        build_expr_index_plan_in_context, build_index_plan_in_context, ExprPlanSpec,
+    };
+    use crate::indexing::selectors::SliceSelector;
+    use crate::indexing::EndExpr;
+    use std::cell::Cell;
+
+    let ledger = ManagedHostEffectLedger::new(65_536);
+    let context = runtime(
+        RuntimeServicePorts::default().with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
+    );
+    let plan = build_index_plan_in_context(
+        &context,
+        &[SliceSelector::Colon, SliceSelector::Scalar(2)],
+        2,
+        &[3, 4],
+    )
+    .unwrap();
+    assert_eq!(plan.indices, vec![3, 4, 5]);
+    assert_eq!(plan.output_shape, vec![3, 1]);
+    assert!(plan.indices.is_exact());
+    assert!(
+        plan.output_shape.is_admitted()
+            && plan.selection_lengths.is_admitted()
+            && plan.base_shape.is_admitted()
+    );
+    let charged = ledger.snapshot().live_claimed_bytes;
+    assert!(charged > 0);
+    let retained = plan.clone();
+    assert_eq!(plan.indices.as_ptr(), retained.indices.as_ptr());
+    assert_eq!(plan.output_shape.as_ptr(), retained.output_shape.as_ptr());
+    assert_eq!(
+        plan.selection_lengths.as_ptr(),
+        retained.selection_lengths.as_ptr()
+    );
+    assert_eq!(plan.base_shape.as_ptr(), retained.base_shape.as_ptr());
+    assert_eq!(ledger.snapshot().live_claimed_bytes, charged);
+    drop(plan);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, charged);
+    drop(retained);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+
+    let calls = Cell::new(0usize);
+    for reason in [
+        None,
+        Some(CancellationReason::User),
+        Some(CancellationReason::Deadline),
+    ] {
+        let capacity = if reason.is_none() { 0 } else { 65_536 };
+        let ledger = ManagedHostEffectLedger::new(capacity);
+        let cancellation = CancellationSource::new();
+        if let Some(reason) = reason {
+            cancellation.cancel(reason);
+        }
+        let context = runtime(
+            RuntimeServicePorts::default().with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
+        )
+        .with_cancellation_token(cancellation.token());
+        let result = futures::executor::block_on(build_expr_index_plan_in_context(
+            &context,
+            ExprPlanSpec {
+                dims: 1,
+                colon_mask: 0,
+                end_mask: 0,
+                range_dims: &[0],
+                range_params: &[(1.0, 1.0)],
+                range_start_exprs: &[None],
+                range_step_exprs: &[None],
+                range_end_exprs: &[EndExpr::End],
+                numeric: &[],
+                shape: &[1, 4],
+            },
+            |_, _| {
+                calls.set(calls.get() + 1);
+                std::future::ready(Ok(4.0))
+            },
+        ));
+        assert!(result.is_err());
+        assert_eq!(calls.get(), 0);
+        if reason.is_some() {
+            let expected = crate::execution::ExecutionServiceError::Cancelled
+                .into_runtime_error_in_context(Some(&context));
+            assert_eq!(result.unwrap_err().identifier(), expected.identifier());
+        }
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    }
+
+    let failed = futures::executor::block_on(build_expr_index_plan_in_context(
+        &context,
+        ExprPlanSpec {
+            dims: 1,
+            colon_mask: 0,
+            end_mask: 0,
+            range_dims: &[0],
+            range_params: &[(1.0, 1.0)],
+            range_start_exprs: &[None],
+            range_step_exprs: &[None],
+            range_end_exprs: &[EndExpr::End],
+            numeric: &[],
+            shape: &[1, 4],
+        },
+        |_, _| {
+            std::future::ready(Err(crate::runtime_error::semantic_error(
+                "PlannerOriginal",
+                "original end callback failure",
+            )))
+        },
+    ));
+    assert_eq!(
+        failed.unwrap_err().identifier(),
+        Some("RunMat:PlannerOriginal")
+    );
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+
+    // The downstream gather keeps only its final payload, not a mirror of
+    // the full input; its own explicit owner survives the planner's return.
+    use crate::indexing::read_slice::{
+        read_complex_slice_from_plan_in_context, read_tensor_slice_from_plan_in_context,
+    };
+    use runmat_value::{ComplexElement, ComplexStorage, ComplexTensor, Tensor};
+    let selection =
+        crate::indexing::plan::IndexPlan::new(vec![2, 0], vec![1, 2], vec![2], 1, vec![1, 3]);
+    let tensor = Tensor::from_numeric_storage(
+        runmat_value::NumericStorage::U64(vec![1, 2, u64::MAX]),
+        vec![1, 3],
+    )
+    .unwrap();
+    let complex = ComplexTensor::from_complex_storage(
+        ComplexStorage::F32(
+            vec![
+                ComplexElement(f32::from_bits(0x7fc01234), -0.0),
+                ComplexElement(2.0, 3.0),
+                ComplexElement(4.0, 5.0),
+            ]
+            .into(),
+        ),
+        vec![1, 3],
+    )
+    .unwrap();
+    let Value::Tensor(output) =
+        read_tensor_slice_from_plan_in_context(Some(&context), &tensor, &selection).unwrap()
+    else {
+        panic!("typed tensor")
+    };
+    assert_eq!(
+        output.numeric_value_at(0),
+        Some(NumericScalar::U64(u64::MAX))
+    );
+    assert!(ledger.snapshot().live_claimed_bytes > 0);
+    let retained = output.clone();
+    drop(output);
+    assert!(ledger.snapshot().live_claimed_bytes > 0);
+    drop(retained);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    let Value::ComplexTensor(output) =
+        read_complex_slice_from_plan_in_context(Some(&context), &complex, &selection).unwrap()
+    else {
+        panic!("complex tensor")
+    };
+    assert_eq!(output.numeric_dtype(), NumericDType::F32);
+    let (NumericScalar::F32(real), NumericScalar::F32(imag)) = output.numeric_value_at(1).unwrap()
+    else {
+        panic!("single components")
+    };
+    assert_eq!(real.to_bits(), 0x7fc01234);
+    assert_eq!(imag.to_bits(), (-0.0f32).to_bits());
+    drop(output);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    for reason in [
+        None,
+        Some(CancellationReason::User),
+        Some(CancellationReason::Deadline),
+    ] {
+        let ledger = ManagedHostEffectLedger::new(if reason.is_none() { 0 } else { 65_536 });
+        let cancellation = CancellationSource::new();
+        if let Some(reason) = reason {
+            cancellation.cancel(reason);
+        }
+        let context = runtime(
+            RuntimeServicePorts::default().with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
+        )
+        .with_cancellation_token(cancellation.token());
+        for result in [
+            read_tensor_slice_from_plan_in_context(Some(&context), &tensor, &selection),
+            read_complex_slice_from_plan_in_context(Some(&context), &complex, &selection),
+        ] {
+            let error = result.expect_err("deny or cancel before output publication");
+            if reason.is_some() {
+                assert_eq!(
+                    error.identifier(),
+                    crate::execution::ExecutionServiceError::Cancelled
+                        .into_runtime_error_in_context(Some(&context))
+                        .identifier()
+                );
+            }
+        }
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    }
+}
+
+#[test]
+fn indexed_deletion_retains_only_native_survivors_and_rejects_denial_or_cancel() {
+    use crate::indexing::plan::IndexPlan;
+    use crate::indexing::write_slice::{
+        delete_complex_with_plan_in_context, delete_tensor_with_plan_in_context,
+    };
+    use runmat_value::{
+        ComplexElement, ComplexStorage, ComplexTensor, IntegerComplexStorage, IntegerStorage,
+        Tensor,
+    };
+    let tensor =
+        Tensor::new_integer(IntegerStorage::U64(vec![1, 2, u64::MAX]), vec![1, 3]).unwrap();
+    let complex = ComplexTensor::from_complex_storage(
+        ComplexStorage::F32(
+            vec![
+                ComplexElement(f32::from_bits(0x7fc01234), -0.0),
+                ComplexElement(2.0, 3.0),
+                ComplexElement(4.0, 5.0),
+            ]
+            .into(),
+        ),
+        vec![1, 3],
+    )
+    .unwrap();
+    let paired = ComplexTensor::new_integer(
+        IntegerComplexStorage::new(
+            IntegerStorage::U64(vec![1, 2, u64::MAX]),
+            IntegerStorage::U64(vec![3, 4, u64::MAX]),
+        )
+        .unwrap(),
+        vec![1, 3],
+    )
+    .unwrap();
+    let delete = IndexPlan::new(vec![0, 1, 1], vec![1, 3], vec![3], 1, vec![1, 3]);
+    let keep_first = IndexPlan::new(vec![1, 2, 2], vec![1, 3], vec![3], 1, vec![1, 3]);
+    let empty = Value::Tensor(Tensor::zeros(vec![0, 0]));
+    let ledger = ManagedHostEffectLedger::new(65_536);
+    let context = runtime(
+        RuntimeServicePorts::default().with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
+    );
+    let Value::Tensor(output) =
+        delete_tensor_with_plan_in_context(Some(&context), tensor.clone(), &delete, &empty)
+            .unwrap()
+    else {
+        panic!("deletion must not scalarize singleton")
+    };
+    assert_eq!(output.shape(), [1, 1]);
+    assert_eq!(
+        output.numeric_value_at(0),
+        Some(NumericScalar::U64(u64::MAX))
+    );
+    assert_eq!(tensor.numeric_value_at(0), Some(NumericScalar::U64(1)));
+    let retained = output.clone();
+    drop(output);
+    assert!(ledger.snapshot().live_claimed_bytes > 0);
+    drop(retained);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    let Value::ComplexTensor(output) =
+        delete_complex_with_plan_in_context(Some(&context), complex.clone(), &keep_first, &empty)
+            .unwrap()
+    else {
+        panic!("complex tensor")
+    };
+    assert_eq!(output.numeric_dtype(), NumericDType::F32);
+    let (NumericScalar::F32(real), NumericScalar::F32(imag)) = output.numeric_value_at(0).unwrap()
+    else {
+        panic!("single complex")
+    };
+    assert_eq!(real.to_bits(), 0x7fc01234);
+    assert_eq!(imag.to_bits(), (-0.0f32).to_bits());
+    drop(output);
+    let Value::ComplexTensor(output) =
+        delete_complex_with_plan_in_context(Some(&context), paired, &delete, &empty).unwrap()
+    else {
+        panic!("integer complex tensor")
+    };
+    assert_eq!(
+        output.numeric_value_at(0),
+        Some((NumericScalar::U64(u64::MAX), NumericScalar::U64(u64::MAX)))
+    );
+    drop(output);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    {
+        let _guard = context.enter();
+        let Value::Tensor(output) = futures::executor::block_on(
+            crate::indexing::write_linear::assign_tensor_scalar(tensor.clone(), &[2], &empty, true),
+        )
+        .unwrap() else {
+            panic!("scalar deletion must retain tensor class")
+        };
+        assert_eq!(output.shape(), [1, 2]);
+        assert_eq!(
+            output.numeric_value_at(1),
+            Some(NumericScalar::U64(u64::MAX))
+        );
+        drop(output);
+        let Value::ComplexTensor(output) =
+            futures::executor::block_on(crate::indexing::write_linear::assign_complex_scalar(
+                complex.clone(),
+                &[2],
+                &empty,
+                true,
+            ))
+            .unwrap()
+        else {
+            panic!("complex scalar deletion must retain tensor class")
+        };
+        let (NumericScalar::F32(real), NumericScalar::F32(imag)) =
+            output.numeric_value_at(0).unwrap()
+        else {
+            panic!("single complex components")
+        };
+        assert_eq!(real.to_bits(), 0x7fc01234);
+        assert_eq!(imag.to_bits(), (-0.0f32).to_bits());
+        drop(output);
+    }
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    for reason in [
+        None,
+        Some(CancellationReason::User),
+        Some(CancellationReason::Deadline),
+    ] {
+        let ledger = ManagedHostEffectLedger::new(if reason.is_none() { 0 } else { 65_536 });
+        let cancellation = CancellationSource::new();
+        if let Some(reason) = reason {
+            cancellation.cancel(reason);
+        }
+        let context = runtime(
+            RuntimeServicePorts::default().with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
+        )
+        .with_cancellation_token(cancellation.token());
+        if reason.is_none() {
+            let noop = IndexPlan::new(vec![], vec![1, 0], vec![0], 1, vec![1, 3]);
+            let Value::Tensor(output) =
+                delete_tensor_with_plan_in_context(Some(&context), tensor.clone(), &noop, &empty)
+                    .unwrap()
+            else {
+                panic!("no-op tensor")
+            };
+            assert!(output
+                .host_buffer()
+                .shares_allocation_with(tensor.host_buffer()));
+        }
+        for result in [
+            delete_tensor_with_plan_in_context(Some(&context), tensor.clone(), &delete, &empty),
+            delete_complex_with_plan_in_context(
+                Some(&context),
+                complex.clone(),
+                &keep_first,
+                &empty,
+            ),
+        ] {
+            let error = result.expect_err("deny or cancel before deletion publication");
+            if reason.is_some() {
+                assert_eq!(
+                    error.identifier(),
+                    crate::execution::ExecutionServiceError::Cancelled
+                        .into_runtime_error_in_context(Some(&context))
+                        .identifier()
+                );
+            }
+        }
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    }
+}
+
+#[test]
+fn dense_planned_assignment_reuses_unique_owners_and_funds_only_required_copies() {
+    use crate::indexing::plan::IndexPlan;
+    use crate::indexing::write_slice::{
+        assign_complex_with_plan_host_in_context, assign_tensor_with_plan_host_in_context,
+    };
+    use runmat_value::{
+        ComplexElement, ComplexStorage, ComplexTensor, IntegerComplexStorage, IntegerStorage,
+        Tensor,
+    };
+    let ledger = ManagedHostEffectLedger::new(65_536);
+    let context = runtime(
+        RuntimeServicePorts::default().with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
+    );
+    let source =
+        Tensor::from_f32(vec![f32::from_bits(0x7fc01234), -0.0, 3.0, 4.0], vec![2, 2]).unwrap();
+    let alias = source.clone();
+    let rhs =
+        Value::Tensor(Tensor::from_f32(vec![f32::from_bits(0x7fc05678)], vec![1, 1]).unwrap());
+    let growth = IndexPlan::new(vec![2, 5], vec![1, 2], vec![1, 2], 2, vec![3, 2]);
+    let Value::Tensor(grown) =
+        assign_tensor_with_plan_host_in_context(Some(&context), source, &growth, &rhs).unwrap()
+    else {
+        panic!("single tensor")
+    };
+    let values = grown.as_f32_slice().unwrap();
+    assert_eq!(grown.shape(), [3, 2]);
+    assert_eq!(values[0].to_bits(), 0x7fc01234);
+    assert_eq!(values[1].to_bits(), (-0.0f32).to_bits());
+    assert_eq!(values[2].to_bits(), 0x7fc05678);
+    assert_eq!(&values[3..5], &[3.0, 4.0]);
+    assert_eq!(values[5].to_bits(), 0x7fc05678);
+    assert_eq!(alias.shape(), [2, 2]);
+    let pointer = grown.as_f32_slice().unwrap().as_ptr();
+    let charged = ledger.snapshot().live_claimed_bytes;
+    let repeated = IndexPlan::new(vec![1, 1], vec![1, 2], vec![2], 1, vec![3, 2]);
+    let rhs =
+        Value::Tensor(Tensor::from_f32(vec![2.0, f32::from_bits(0x7fc07890)], vec![1, 2]).unwrap());
+    let Value::Tensor(updated) =
+        assign_tensor_with_plan_host_in_context(Some(&context), grown, &repeated, &rhs).unwrap()
+    else {
+        panic!("unique tensor")
+    };
+    assert_eq!(updated.as_f32_slice().unwrap().as_ptr(), pointer);
+    assert_eq!(updated.as_f32_slice().unwrap()[1].to_bits(), 0x7fc07890);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, charged);
+    drop(updated);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+
+    let complex = ComplexTensor::from_complex_storage(
+        ComplexStorage::F32(vec![ComplexElement(1.0, 2.0)].into()),
+        vec![1, 1],
+    )
+    .unwrap();
+    let complex_alias = complex.clone();
+    let pointer = complex.as_f32_slice().unwrap().as_ptr();
+    let singleton = IndexPlan::new(vec![0], vec![1, 1], vec![1], 1, vec![1, 1]);
+    let rhs = Value::ComplexTensor(
+        ComplexTensor::from_complex_storage(
+            ComplexStorage::F32(vec![ComplexElement(f32::from_bits(0x7fc01234), -0.0)].into()),
+            vec![1, 1],
+        )
+        .unwrap(),
+    );
+    let Value::ComplexTensor(updated) =
+        assign_complex_with_plan_host_in_context(Some(&context), complex, &singleton, &rhs)
+            .unwrap()
+    else {
+        panic!("unique complex")
+    };
+    assert_ne!(updated.as_f32_slice().unwrap().as_ptr(), pointer);
+    assert_eq!(updated.as_f32_slice().unwrap()[0].0.to_bits(), 0x7fc01234);
+    assert_eq!(
+        updated.as_f32_slice().unwrap()[0].1.to_bits(),
+        (-0.0f32).to_bits()
+    );
+    assert_eq!(
+        complex_alias.as_f32_slice().unwrap()[0],
+        ComplexElement(1.0, 2.0)
+    );
+    let pointer = updated.as_f32_slice().unwrap().as_ptr();
+    let charged = ledger.snapshot().live_claimed_bytes;
+    let Value::ComplexTensor(updated) =
+        assign_complex_with_plan_host_in_context(Some(&context), updated, &singleton, &rhs)
+            .unwrap()
+    else {
+        panic!("unique retained complex")
+    };
+    assert_eq!(updated.as_f32_slice().unwrap().as_ptr(), pointer);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, charged);
+    drop(updated);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+
+    let source = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap();
+    let promotion = IndexPlan::new(vec![1], vec![1, 1], vec![1], 1, vec![1, 2]);
+    let rhs = Value::ComplexTensor(
+        ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![9_007_199_254_740_993]),
+                IntegerStorage::U64(vec![u64::MAX]),
+            )
+            .unwrap(),
+            vec![1, 1],
+        )
+        .unwrap(),
+    );
+    let Value::ComplexTensor(output) =
+        assign_tensor_with_plan_host_in_context(Some(&context), source, &promotion, &rhs).unwrap()
+    else {
+        panic!("promoted exact complex")
+    };
+    assert_eq!(
+        output.numeric_value_at(0),
+        Some((NumericScalar::U64(u64::MAX), NumericScalar::U64(0)))
+    );
+    assert_eq!(
+        output.numeric_value_at(1),
+        Some((
+            NumericScalar::U64(9_007_199_254_740_993),
+            NumericScalar::U64(u64::MAX)
+        ))
+    );
+    let pointer = match output.integer_storage().unwrap().real() {
+        IntegerStorage::U64(values) => values.as_ptr(),
+        _ => unreachable!("uint64 target"),
+    };
+    let charged = ledger.snapshot().live_claimed_bytes;
+    let update = IndexPlan::new(vec![0], vec![1, 1], vec![1], 1, vec![1, 2]);
+    let Value::ComplexTensor(output) = assign_complex_with_plan_host_in_context(
+        Some(&context),
+        output,
+        &update,
+        &Value::Complex(2.6, -2.6),
+    )
+    .unwrap() else {
+        panic!("unique exact integer complex")
+    };
+    let retained_pointer = match output.integer_storage().unwrap().real() {
+        IntegerStorage::U64(values) => values.as_ptr(),
+        _ => unreachable!("uint64 target"),
+    };
+    assert_eq!(retained_pointer, pointer);
+    assert_eq!(
+        output.numeric_value_at(0),
+        Some((NumericScalar::U64(3), NumericScalar::U64(0)))
+    );
+    assert_eq!(ledger.snapshot().live_claimed_bytes, charged);
+    drop(output);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+
+    for reason in [
+        None,
+        Some(CancellationReason::User),
+        Some(CancellationReason::Deadline),
+    ] {
+        let ledger = ManagedHostEffectLedger::new(if reason.is_none() { 0 } else { 65_536 });
+        let cancellation = CancellationSource::new();
+        if let Some(reason) = reason {
+            cancellation.cancel(reason);
+        }
+        let context = runtime(
+            RuntimeServicePorts::default().with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
+        )
+        .with_cancellation_token(cancellation.token());
+        let source = Tensor::from_f32(vec![1.0], vec![1, 1]).unwrap();
+        let alias = source.clone();
+        let error = assign_tensor_with_plan_host_in_context(
+            Some(&context),
+            source,
+            &singleton,
+            &Value::Num(2.0),
+        )
+        .expect_err("shared output requires funding or cancellation");
+        if reason.is_some() {
+            assert_eq!(
+                error.identifier(),
+                crate::execution::ExecutionServiceError::Cancelled
+                    .into_runtime_error_in_context(Some(&context))
+                    .identifier()
+            );
+        }
+        assert_eq!(alias.as_f32_slice().unwrap(), &[1.0]);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+        if reason.is_none() {
+            let unique = Tensor::from_f32(vec![1.0], vec![1, 1]).unwrap();
+            let pointer = unique.as_f32_slice().unwrap().as_ptr();
+            let Value::Tensor(output) = assign_tensor_with_plan_host_in_context(
+                Some(&context),
+                unique,
+                &singleton,
+                &Value::Num(2.0),
+            )
+            .unwrap() else {
+                panic!("unique zero-budget update")
+            };
+            assert_eq!(output.as_f32_slice().unwrap().as_ptr(), pointer);
+            assert_eq!(output.as_f32_slice().unwrap(), &[2.0]);
+        }
+    }
+}
+
+#[test]
+fn dense_scalar_assignment_retains_unique_and_funds_growth_or_promotion() {
+    use crate::indexing::write_linear::{
+        assign_complex_scalar_in_context, assign_tensor_scalar_in_context,
+    };
+    use futures::executor::block_on;
+    use runmat_value::{ComplexTensor, IntegerComplexStorage, IntegerStorage, Tensor};
+    let ledger = ManagedHostEffectLedger::new(65_536);
+    let context = runtime(
+        RuntimeServicePorts::default().with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
+    );
+    let source = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap();
+    let alias = source.clone();
+    let Value::Tensor(grown) = block_on(assign_tensor_scalar_in_context(
+        Some(&context),
+        source,
+        &[3],
+        &Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_993)),
+        false,
+    ))
+    .unwrap() else {
+        panic!("integer growth")
+    };
+    assert_eq!(grown.shape(), [1, 3]);
+    assert_eq!(
+        grown.numeric_value_at(0),
+        Some(NumericScalar::U64(u64::MAX))
+    );
+    assert_eq!(grown.numeric_value_at(1), Some(NumericScalar::U64(0)));
+    assert_eq!(
+        grown.numeric_value_at(2),
+        Some(NumericScalar::U64(9_007_199_254_740_993))
+    );
+    assert_eq!(
+        alias.numeric_value_at(0),
+        Some(NumericScalar::U64(u64::MAX))
+    );
+    drop(grown);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    let rhs = Value::ComplexTensor(
+        ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![9_007_199_254_740_993]),
+                IntegerStorage::U64(vec![u64::MAX]),
+            )
+            .unwrap(),
+            vec![1, 1],
+        )
+        .unwrap(),
+    );
+    let Value::ComplexTensor(promoted) = block_on(assign_tensor_scalar_in_context(
+        Some(&context),
+        alias,
+        &[3],
+        &rhs,
+        false,
+    ))
+    .unwrap() else {
+        panic!("direct promoted final owner")
+    };
+    assert_eq!(promoted.shape(), [1, 3]);
+    assert_eq!(
+        promoted.numeric_value_at(0),
+        Some((NumericScalar::U64(u64::MAX), NumericScalar::U64(0)))
+    );
+    assert_eq!(
+        promoted.numeric_value_at(1),
+        Some((NumericScalar::U64(0), NumericScalar::U64(0)))
+    );
+    assert_eq!(
+        promoted.numeric_value_at(2),
+        Some((
+            NumericScalar::U64(9_007_199_254_740_993),
+            NumericScalar::U64(u64::MAX)
+        ))
+    );
+    let pointer = match promoted.integer_storage().unwrap().real() {
+        IntegerStorage::U64(values) => values.as_ptr(),
+        _ => unreachable!("uint64 class"),
+    };
+    let charged = ledger.snapshot().live_claimed_bytes;
+    let Value::ComplexTensor(updated) = block_on(assign_complex_scalar_in_context(
+        Some(&context),
+        promoted,
+        &[1],
+        &Value::Complex(2.6, -2.6),
+        false,
+    ))
+    .unwrap() else {
+        panic!("unique retained scalar complex")
+    };
+    assert_eq!(
+        updated.numeric_value_at(0),
+        Some((NumericScalar::U64(3), NumericScalar::U64(0)))
+    );
+    assert_eq!(
+        match updated.integer_storage().unwrap().real() {
+            IntegerStorage::U64(values) => values.as_ptr(),
+            _ => unreachable!("uint64 class"),
+        },
+        pointer
+    );
+    assert_eq!(ledger.snapshot().live_claimed_bytes, charged);
+    drop(updated);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+
+    for reason in [
+        None,
+        Some(CancellationReason::User),
+        Some(CancellationReason::Deadline),
+    ] {
+        let ledger = ManagedHostEffectLedger::new(if reason.is_none() { 0 } else { 65_536 });
+        let cancellation = CancellationSource::new();
+        if let Some(reason) = reason {
+            cancellation.cancel(reason);
+        }
+        let context = runtime(
+            RuntimeServicePorts::default().with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
+        )
+        .with_cancellation_token(cancellation.token());
+        let source = Tensor::from_f32(vec![1.0], vec![1, 1]).unwrap();
+        let alias = source.clone();
+        let error = block_on(assign_tensor_scalar_in_context(
+            Some(&context),
+            source,
+            &[1],
+            &Value::Num(2.0),
+            false,
+        ))
+        .expect_err("copy denied or cancelled");
+        if reason.is_some() {
+            assert_eq!(
+                error.identifier(),
+                crate::execution::ExecutionServiceError::Cancelled
+                    .into_runtime_error_in_context(Some(&context))
+                    .identifier()
+            );
+        }
+        assert_eq!(alias.as_f32_slice().unwrap(), &[1.0]);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+        if reason.is_none() {
+            let source = Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+            let pointer = source.as_f32_slice().unwrap().as_ptr();
+            let rhs = Value::Tensor(
+                Tensor::from_f32(vec![f32::from_bits(0x7fc01234)], vec![1, 1]).unwrap(),
+            );
+            let Value::Tensor(output) = block_on(assign_tensor_scalar_in_context(
+                Some(&context),
+                source,
+                &[1, 99],
+                &rhs,
+                false,
+            ))
+            .unwrap() else {
+                panic!("unique clamped subscript")
+            };
+            assert_eq!(output.shape(), [2, 2]);
+            assert_eq!(output.as_f32_slice().unwrap().as_ptr(), pointer);
+            assert_eq!(output.as_f32_slice().unwrap()[2].to_bits(), 0x7fc01234);
+            assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+        }
+    }
+}
+
+#[test]
+fn single_assignment_uses_canonical_direct_wide_integer_cast_on_every_owner() {
+    use crate::indexing::plan::IndexPlan;
+    use crate::indexing::write_linear::{
+        assign_complex_scalar_in_context, assign_tensor_scalar_in_context,
+    };
+    use crate::indexing::write_slice::{
+        assign_complex_with_plan_host_in_context, assign_tensor_with_plan_host_in_context,
+    };
+    use runmat_value::{ComplexElement, ComplexStorage, ComplexTensor, IntValue, Tensor};
+    let witness = (1u64 << 63) + (1u64 << 39) + 1;
+    let rhs = Value::Int(IntValue::U64(witness));
+    let plan = IndexPlan::new(vec![0], vec![1, 1], vec![1], 1, vec![1, 1]);
+    let ledger = ManagedHostEffectLedger::new(65_536);
+    let context = runtime(
+        RuntimeServicePorts::default().with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
+    );
+    for shared in [false, true] {
+        for scalar in [false, true] {
+            let tensor = Tensor::from_f32(vec![0.0], vec![1, 1]).unwrap();
+            let alias = shared.then(|| tensor.clone());
+            let result = if scalar {
+                futures::executor::block_on(assign_tensor_scalar_in_context(
+                    Some(&context),
+                    tensor,
+                    &[1],
+                    &rhs,
+                    false,
+                ))
+            } else {
+                assign_tensor_with_plan_host_in_context(Some(&context), tensor, &plan, &rhs)
+            };
+            let Value::Tensor(output) = result.unwrap() else {
+                panic!("native single result")
+            };
+            assert_eq!(output.numeric_dtype(), NumericDType::F32);
+            assert_eq!(output.as_f32_slice().unwrap()[0].to_bits(), 0x5f000001);
+            if let Some(alias) = alias {
+                assert_eq!(alias.as_f32_slice().unwrap(), &[0.0]);
+            }
+            drop(output);
+            let complex = ComplexTensor::from_complex_storage(
+                ComplexStorage::F32(vec![ComplexElement(0.0, 0.0)].into()),
+                vec![1, 1],
+            )
+            .unwrap();
+            let alias = shared.then(|| complex.clone());
+            let result = if scalar {
+                futures::executor::block_on(assign_complex_scalar_in_context(
+                    Some(&context),
+                    complex,
+                    &[1],
+                    &rhs,
+                    false,
+                ))
+            } else {
+                assign_complex_with_plan_host_in_context(Some(&context), complex, &plan, &rhs)
+            };
+            let Value::ComplexTensor(output) = result.unwrap() else {
+                panic!("native single complex result")
+            };
+            assert_eq!(output.numeric_dtype(), NumericDType::F32);
+            assert_eq!(output.as_f32_slice().unwrap()[0].0.to_bits(), 0x5f000001);
+            if let Some(alias) = alias {
+                assert_eq!(alias.as_f32_slice().unwrap()[0], ComplexElement(0.0, 0.0));
+            }
+            drop(output);
+            assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+        }
+        let mut tensor = Tensor::from_f32(vec![0.0], vec![1, 1]).unwrap();
+        let alias = shared.then(|| tensor.clone());
+        tensor
+            .set_numeric_assignment_at(0, NumericScalar::U64(witness))
+            .unwrap();
+        assert_eq!(tensor.as_f32_slice().unwrap()[0].to_bits(), 0x5f000001);
+        if let Some(alias) = alias {
+            assert_eq!(alias.as_f32_slice().unwrap(), &[0.0]);
+        }
+    }
+    assert_eq!(rhs, Value::Int(IntValue::U64(witness)));
+}
+
+#[test]
 fn trace_scratch_growth_claims_exact_live_bytes_and_revokes_new_growth() {
     let ledger = ManagedHostEffectLedger::new_with_epoch(4_096, 7);
     let cancellation = CancellationSource::new();
@@ -779,4 +1597,32 @@ fn finite_requires_its_managed_owner_and_cancellation_or_rebind_revokes_new_clai
         owner.check(&fresh),
         Err(HostAllocationError::StaleAuthority)
     ));
+}
+
+#[test]
+fn destination_end_rejects_rotated_owner_before_preparing_receiver() {
+    use crate::sequence::SequenceDestinationBuilder;
+    use futures::executor::block_on;
+
+    let ledger = ManagedHostEffectLedger::new(65_536);
+    let context = runtime(
+        RuntimeServicePorts::default().with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
+    );
+    let builder = SequenceDestinationBuilder::new_in_context(&context, &Value::Num(3.0))
+        .expect("destination with original owner");
+    let before = ledger.snapshot().live_reserved_bytes;
+    {
+        let rotated = CancellationSource::new();
+        let _scope = context.scoped_cancellation_token(rotated.token());
+        block_on(builder.prepare_current_receiver_for_end_in_context(&context, None))
+            .expect_err("end must validate the original owner before receiver preparation");
+        assert_eq!(ledger.snapshot().live_reserved_bytes, before);
+    }
+    block_on(builder.prepare_current_receiver_for_end_in_context(&context, None))
+        .expect("original owner remains usable after the temporary scope");
+    context.invalidate_host_effect_session_authority();
+    block_on(builder.prepare_current_receiver_for_end_in_context(&context, None))
+        .expect_err("session invalidation revokes the original builder");
+    drop(builder);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
 }

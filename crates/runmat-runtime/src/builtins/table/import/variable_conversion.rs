@@ -101,7 +101,15 @@ fn fill_cell(value: &Value) -> BuiltinResult<ImportCell> {
         Value::Bool(value) => Ok(ImportCell::Logical(*value)),
         Value::String(value) => Ok(ImportCell::Text(value.to_string())),
         Value::CharArray(value) if value.rows == 1 => {
-            Ok(ImportCell::Text(value.data().iter().collect()))
+            runmat_value::decode_utf16_code_units(value.data())
+                .map(ImportCell::Text)
+                .map_err(|error| {
+                    table_error_with_source(
+                        &TABLE_ERROR_INVALID_VARIABLE,
+                        format!("readtable: FillValue is not valid UTF-16 text: {error}"),
+                        error,
+                    )
+                })
         }
         _ => Err(invalid_variable(
             "readtable: unsupported variable FillValue class",

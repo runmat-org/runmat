@@ -247,14 +247,14 @@ impl ParsedOptions {
         let mut idx = 0;
 
         if let Some(first) = args.first() {
-            if !is_name_value_key(first) {
+            if !is_name_value_key(first)? {
                 mapping = parse_symbol_mapping(first, order)?;
                 idx = 1;
             }
         }
 
         while idx < args.len() {
-            let key = value_as_string(&args[idx])
+            let key = value_as_string(&args[idx])?
                 .ok_or_else(|| qammod_error("qammod: expected name-value option name"))?;
             let Some(value) = args.get(idx + 1) else {
                 return Err(qammod_error(format!(
@@ -273,7 +273,7 @@ impl ParsedOptions {
                     }
                 }
                 "outputdatatype" => {
-                    let dtype = value_as_string(value).ok_or_else(|| {
+                    let dtype = value_as_string(value)?.ok_or_else(|| {
                         qammod_error("qammod: OutputDataType must be 'double' or 'single'")
                     })?;
                     output_dtype = match dtype.trim().to_ascii_lowercase().as_str() {
@@ -287,7 +287,7 @@ impl ParsedOptions {
                     };
                 }
                 "inputtype" => {
-                    let text = value_as_string(value)
+                    let text = value_as_string(value)?
                         .ok_or_else(|| qammod_error("qammod: InputType must be a string"))?;
                     input_type = match text.trim().to_ascii_lowercase().as_str() {
                         "integer" => InputType::Integer,
@@ -634,7 +634,7 @@ fn parse_modulation_order(value: &Value) -> BuiltinResult<usize> {
 }
 
 fn parse_symbol_mapping(value: &Value, order: usize) -> BuiltinResult<SymbolMapping> {
-    if let Some(text) = value_as_string(value) {
+    if let Some(text) = value_as_string(value)? {
         return match text.trim().to_ascii_lowercase().as_str() {
             "gray" => Ok(SymbolMapping::Gray),
             "bin" | "binary" => Ok(SymbolMapping::Binary),
@@ -829,13 +829,21 @@ fn value_as_bool(value: &Value, name: &str) -> BuiltinResult<bool> {
     }
 }
 
-fn value_as_string(value: &Value) -> Option<runmat_value::Utf8Text> {
-    match value {
+fn value_as_string(value: &Value) -> BuiltinResult<Option<runmat_value::Utf8Text>> {
+    Ok(match value {
         Value::String(s) => Some(s.clone()),
         Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data().iter().collect::<String>().into()),
+        Value::CharArray(ca) if ca.rows == 1 => Some(
+            runmat_value::decode_utf16_code_units(ca.data())
+                .map_err(|source| {
+                    let mut error = qammod_error(source.to_string());
+                    error.source = Some(Box::new(source));
+                    error
+                })?
+                .into(),
+        ),
         _ => None,
-    }
+    })
 }
 
 fn normalize_key(key: &str) -> String {
@@ -845,14 +853,14 @@ fn normalize_key(key: &str) -> String {
         .collect()
 }
 
-fn is_name_value_key(value: &Value) -> bool {
-    let Some(text) = value_as_string(value) else {
-        return false;
+fn is_name_value_key(value: &Value) -> BuiltinResult<bool> {
+    let Some(text) = value_as_string(value)? else {
+        return Ok(false);
     };
-    matches!(
+    Ok(matches!(
         normalize_key(&text).as_str(),
         "unitaveragepower" | "plotconstellation" | "outputdatatype" | "inputtype"
-    )
+    ))
 }
 
 #[cfg(test)]

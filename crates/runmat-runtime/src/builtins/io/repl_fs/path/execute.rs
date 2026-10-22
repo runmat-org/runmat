@@ -48,7 +48,7 @@ async fn replace_two(left: Value, right: Value) -> BuiltinResult<Value> {
 
 fn replace(replacement: String) -> BuiltinResult<Value> {
     let previous = current_path_string();
-    set_path_string(&replacement);
+    set_path_string(&replacement)?;
     Ok(Value::CharArray(CharArray::new_row(&previous)))
 }
 

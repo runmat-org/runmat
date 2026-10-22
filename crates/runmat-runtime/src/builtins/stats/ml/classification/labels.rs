@@ -30,7 +30,7 @@ pub(super) fn labels_from_value(value: Value, name: &str) -> BuiltinResult<Label
             kind: LabelKind::String,
         }),
         Value::CharArray(array) => Ok(LabelVector {
-            labels: char_rows(&array)
+            labels: char_rows(&array)?
                 .into_iter()
                 .map(|text| ClassLabel::Text(text.into()))
                 .collect(),
@@ -320,35 +320,40 @@ pub(super) fn labels_from_indices(
     }
 }
 
-pub(super) fn char_rows(array: &CharArray) -> Vec<String> {
+pub(super) fn char_rows(array: &CharArray) -> BuiltinResult<Vec<String>> {
     let mut rows = Vec::with_capacity(array.rows);
     for row in 0..array.rows {
         let start = row * array.cols;
-        rows.push(array.data()[start..start + array.cols].iter().collect());
+        rows.push(
+            runmat_value::decode_utf16_code_units(&array.data()[start..start + array.cols])
+                .map_err(|source| internal_error(format!("classify: {source}")))?,
+        );
     }
-    rows
+    Ok(rows)
 }
 
 pub(super) fn char_array_from_rows(rows: &[impl AsRef<str>]) -> BuiltinResult<CharArray> {
     let width = rows
         .iter()
-        .map(|row| row.as_ref().chars().count())
+        .map(|row| row.as_ref().encode_utf16().count())
         .max()
         .unwrap_or(0);
     let mut data = Vec::with_capacity(rows.len() * width);
     for row in rows {
-        let mut chars = row.as_ref().chars().collect::<Vec<_>>();
-        chars.resize(width, ' ');
-        data.extend(chars);
+        let units = row.as_ref().encode_utf16().count();
+        data.extend(row.as_ref().chars());
+        data.extend(std::iter::repeat_n(' ', width - units));
     }
-    CharArray::new(data, rows.len(), width)
+    CharArray::from_unicode_scalars(data, rows.len(), width)
         .map_err(|err| internal_error(format!("classify: {err}")))
 }
 
 pub(super) fn scalar_text(value: &Value, name: &str) -> BuiltinResult<runmat_value::Utf8Text> {
     match value {
         Value::String(text) => Ok(text.clone()),
-        Value::CharArray(chars) => Ok(chars.data().iter().collect::<String>().into()),
+        Value::CharArray(chars) => runmat_value::decode_utf16_code_units(chars.data())
+            .map(Into::into)
+            .map_err(|source| invalid_argument(format!("classify: {source}"))),
         Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].clone()),
         other => Err(invalid_argument(format!(
             "classify: {name} must be a string scalar, got {other:?}"

@@ -26,13 +26,13 @@ fn class_text_accepts_trailing_singletons_but_not_pages() {
         (intmax, "uint64"),
         (intmin, "int64"),
     ] {
-        let row = runmat_value::CharArray::new_with_shape(
+        let row = runmat_value::CharArray::from_unicode_scalars_with_shape(
             class.chars().collect(),
             vec![1, class.len(), 1],
         )
         .unwrap();
         assert!(builtin(vec![Value::CharArray(row)]).is_ok());
-        let pages = runmat_value::CharArray::new_with_shape(
+        let pages = runmat_value::CharArray::from_unicode_scalars_with_shape(
             class.chars().collect(),
             vec![1, 1, class.len()],
         )

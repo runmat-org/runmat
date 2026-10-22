@@ -494,9 +494,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
-    use crate::builtins::plotting::type_resolvers::handle_scalar_type;
     use crate::builtins::plotting::{clear_figure, reset_hold_state_for_run};
-    use runmat_builtins::{ResolveContext, Type};
 
     #[test]
     fn surf_color_forms_keep_the_color_array_out_of_style_arguments() {
@@ -610,14 +608,31 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn surf_type_is_numeric_handle() {
-        assert_eq!(
-            handle_scalar_type(
-                &[Type::tensor(), Type::tensor(), Type::tensor()],
-                &ResolveContext::new(Vec::new())
-            ),
-            Type::Num
+    fn surf_catalog_infers_host_double_handle() {
+        use runmat_types::*;
+        let numeric = ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        });
+        let input = ValueFact::proven(
+            numeric.clone(),
+            ShapeFact::from(vec![Some(3), Some(2)]),
+            StorageFact::Dense,
         );
+        let request = CallRequest {
+            arguments: vec![input; 3],
+            literals: LiteralContext::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        };
+        let result =
+            runmat_builtins::infer_catalog_call(&runmat_builtins::SURF_CATALOG_ENTRY, &request);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.outputs.len(), 1);
+        let output = &result.outputs[0];
+        assert_eq!(output.kind, numeric);
+        assert_eq!(output.shape, ShapeFact::Scalar);
+        assert_eq!(output.storage, StorageFact::Scalar);
+        assert_eq!(output.residency, ResidencyFact::Host);
     }
 
     #[test]

@@ -57,7 +57,43 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     };
     let mut output = ValueFact::unknown(DynamicReason::RuntimeValue);
     output.kind = kind;
-    output.shape = ShapeFact::from(vec![Some(1), None]);
+    output.shape = ShapeFact::from(vec![Some(1), exact_double_length(request)]);
     output.storage = StorageFact::Unknown;
     finish_fixed(entry, request, output, diagnostics)
+}
+
+// Integer-valued quotients in this range are unaffected by the runtime's
+// endpoint tolerance. Other floating endpoints retain a dynamic length rather
+// than treating an approximate quotient as a proven extent.
+fn exact_double_length(request: &CallRequest) -> Option<usize> {
+    use runmat_types::{LiteralValue, NumericFact};
+    if !request.arguments.iter().all(|argument| {
+        argument.kind
+            == ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Real,
+            })
+    }) {
+        return None;
+    }
+    let (start, step, end) = match request.literals.literal_args.as_slice() {
+        [LiteralValue::Number(start), LiteralValue::Number(end)] => (*start, 1.0, *end),
+        [LiteralValue::Number(start), LiteralValue::Number(step), LiteralValue::Number(end)] => {
+            (*start, *step, *end)
+        }
+        _ => return None,
+    };
+    if !start.is_finite() || !step.is_finite() || !end.is_finite() || step == 0.0 {
+        return None;
+    }
+    let quotient = (end - start) / step;
+    if !quotient.is_finite()
+        || quotient < 0.0
+        || quotient.fract() != 0.0
+        || quotient >= (1u64 << 52) as f64
+        || quotient >= usize::MAX as f64
+    {
+        return None;
+    }
+    (quotient as usize).checked_add(1)
 }

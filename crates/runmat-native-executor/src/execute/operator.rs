@@ -40,18 +40,42 @@ fn evaluate_inner(
         })?;
         return Ok(state.arena.insert(value));
     }
+    let selected_host_route = super::region::observation::host_route(state);
+    if let Some(route) = &selected_host_route {
+        let site = state.current_request.ok_or_else(|| {
+            crate::NativeExecutorError::Host(
+                "selected native host operation has no current source site".into(),
+            )
+        })?;
+        route.begin(&state.runtime, site, operator)?;
+    }
     let retained_roots = operands
         .iter()
         .map(|operand| super::operand::evaluate_operand(state, operand))
         .collect::<NativeExecutorResult<Vec<_>>>()?;
     let arguments = retained_roots
         .iter()
-        .map(|reference| state.arena.get(*reference).cloned())
+        .enumerate()
+        .map(|(operand, reference)| {
+            if let Some(site) = state.current_request {
+                if let Some(value) =
+                    super::region::observation::host_operand(state, site, operator, operand)?
+                {
+                    // Only the closed admitted numeric capture can supply an
+                    // override; these clones retain payload/shape owners.
+                    return Ok(value.clone());
+                }
+            }
+            state.arena.get(*reference).cloned()
+        })
         .collect::<NativeExecutorResult<Vec<_>>>()?;
     let name = operator
         .overload_name()
         .expect("short-circuit operators do not reach runtime evaluation");
-    let runtime = state.runtime.clone();
+    let runtime = match selected_host_route {
+        Some(route) => state.runtime.clone().with_native_region_host_route(route),
+        None => state.runtime.clone(),
+    };
     let future = async move {
         let unary = match operator {
             OperatorKind::UnaryPlus => {

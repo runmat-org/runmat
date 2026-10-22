@@ -51,10 +51,13 @@ fn canonical_entries_have_one_binding_and_documentation() {
         .contract
         .effects
         .contains(&EffectKind::Clock));
-    assert!(!BUSDAYS_CATALOG_ENTRY
-        .contract
-        .effects
-        .contains(&EffectKind::Clock));
+    for entry in &entries {
+        assert!(
+            entry.contract.effects.contains(&EffectKind::Clock),
+            "relative date/holiday text must retain Clock: {}",
+            entry.identity.name
+        );
+    }
     for entry in &entries {
         for extension in [
             BUSINESS_DAY_TYPED_LEGACY_SERIAL_EXTENSION,

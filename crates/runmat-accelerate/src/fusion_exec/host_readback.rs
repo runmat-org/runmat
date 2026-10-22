@@ -15,8 +15,8 @@ pub enum CpuReadbackFailure {
     AfterEffect(RuntimeError),
 }
 
-mod resources;
 mod managed_readback;
+mod resources;
 pub(crate) use resources::resources;
 
 pub(crate) struct CpuHostResources {
@@ -28,6 +28,11 @@ pub(crate) struct CpuHostResources {
 }
 
 pub(super) enum CpuHostPlacement<'a> {
+    Native {
+        cpu: Option<&'a runmat_runtime::numeric_region::service::NativeNumericRegionCpuCandidates>,
+        right: &'a runmat_runtime::numeric_region::service::NativeNumericRegionRight,
+        source_host: Option<&'a CpuHostResources>,
+    },
     Legacy,
     Unavailable,
     Readbacks(&'a CpuHostResources),

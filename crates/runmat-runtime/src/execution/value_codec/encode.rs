@@ -10,6 +10,13 @@ use runmat_value::{ComplexStorage, IntValue, IntegerStorage, SparseTensor, Tenso
 
 #[path = "encode/aggregate.rs"]
 mod aggregate;
+#[cfg(test)]
+pub(super) fn encode_factor_for_test(
+    factor: &runmat_value::NumericFactorData,
+    path: &str,
+) -> Result<runmat_execution::value::DurableNumericFactor, ValueCodecError> {
+    aggregate::encode_factor_for_test(factor, path)
+}
 
 pub(super) trait InlineSourceAuthority {
     fn session_lease(&self) -> std::sync::Weak<()>;
@@ -140,8 +147,9 @@ fn encode(
                 .collect(),
         },
         Value::CharArray(value) => InlineValue::Char {
+            encoding: runmat_execution::value::CharacterEncoding::Utf16CodeUnitsV1,
             shape: shape(&value.shape, path)?,
-            code_points: value.data().iter().map(|value| *value as u32).collect(),
+            code_units: value.data().iter().map(|value| value.raw()).collect(),
         },
         Value::Tensor(value) => InlineValue::Dense(encode_tensor(value, path)?),
         Value::SparseTensor(value) => InlineValue::Sparse(encode_sparse(value, path)?),
@@ -753,6 +761,9 @@ fn exception_runtime_metadata(
             }
             runmat_async::RuntimeFailureOrigin::LanguageEvaluation => {
                 ExceptionFailureOrigin::LanguageEvaluation
+            }
+            runmat_async::RuntimeFailureOrigin::ExecutionControlCancellation => {
+                ExceptionFailureOrigin::ExecutionControlCancellation
             }
         },
     })

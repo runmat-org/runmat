@@ -76,6 +76,7 @@ pub(crate) struct FileOperation {
     fid: i32,
     handle: SharedFileHandle,
     file: Option<File>,
+    text_input: Option<super::super::encoding::TextInputBox>,
     rollback_cursor_to: Option<u64>,
     pub(crate) info: FileInfo,
     issuer: FileIssuer,
@@ -83,6 +84,84 @@ pub(crate) struct FileOperation {
 }
 
 impl FileOperation {
+    pub(crate) fn prepare_encoded_input(
+        &mut self,
+        runtime: Option<&RuntimeContext>,
+    ) -> crate::BuiltinResult<()> {
+        self.check_authority(runtime).map_err(|source| {
+            crate::build_runtime_error("fread: file authority rejected encoded input")
+                .with_builtin("fread")
+                .with_source(source)
+                .build()
+        })?;
+        if self.text_input.is_none() {
+            let encoding = super::super::encoding::TextEncoding::parse(&self.info.encoding)
+                .map_err(|detail| {
+                    crate::build_runtime_error(format!("fread: {detail}"))
+                        .with_builtin("fread")
+                        .build()
+                })?;
+            let at_start = self
+                .file
+                .as_mut()
+                .expect("operation retains file")
+                .stream_position()
+                .map_err(|source| {
+                    crate::build_runtime_error("fread: cannot inspect encoded source position")
+                        .with_builtin("fread")
+                        .with_source(source)
+                        .build()
+                })?
+                == 0;
+            self.text_input = Some(
+                super::super::encoding::EncodedInput::allocate(runtime, encoding, at_start)
+                    .map_err(|source| {
+                        crate::build_runtime_error("fread: encoded input control admission failed")
+                            .with_builtin("fread")
+                            .with_source(source)
+                            .build()
+                    })?,
+            );
+        }
+        Ok(())
+    }
+
+    pub(crate) fn encoded_input_step(
+        &mut self,
+    ) -> io::Result<super::super::encoding::EncodedInputStep> {
+        self.check_live()?;
+        let mut input = self.text_input.take().expect("encoded input was prepared");
+        let result = input.step(|buffer| {
+            self.file
+                .as_mut()
+                .expect("operation retains file")
+                .read(buffer)
+        });
+        self.text_input = Some(input);
+        result
+    }
+
+    pub(crate) fn skip_encoded_bytes(&mut self, bytes: i64) -> io::Result<u64> {
+        self.check_live()?;
+        if bytes == 0 {
+            return self.stream_position();
+        }
+        let result = self
+            .file
+            .as_mut()
+            .expect("operation retains file")
+            .seek(SeekFrom::Current(bytes));
+        match &result {
+            Ok(position) => {
+                if let Some(input) = &mut self.text_input {
+                    input.reset(*position == 0);
+                }
+            }
+            Err(_) => self.text_input = None,
+        }
+        result
+    }
+
     pub(crate) fn file_mut(&mut self) -> &mut Self {
         self
     }
@@ -119,6 +198,9 @@ impl FileOperation {
 impl Read for FileOperation {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         self.check_live()?;
+        if !buffer.is_empty() {
+            self.text_input = None;
+        }
         self.file
             .as_mut()
             .expect("operation retains file")
@@ -129,6 +211,9 @@ impl Read for FileOperation {
 impl Write for FileOperation {
     fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
         self.check_live()?;
+        if !buffer.is_empty() {
+            self.text_input = None;
+        }
         self.file
             .as_mut()
             .expect("operation retains file")
@@ -142,8 +227,17 @@ impl Write for FileOperation {
 }
 
 impl Seek for FileOperation {
+    fn stream_position(&mut self) -> io::Result<u64> {
+        self.check_live()?;
+        self.file
+            .as_mut()
+            .expect("operation retains file")
+            .stream_position()
+    }
+
     fn seek(&mut self, position: SeekFrom) -> io::Result<u64> {
         self.check_live()?;
+        self.text_input = None;
         self.file
             .as_mut()
             .expect("operation retains file")
@@ -187,6 +281,11 @@ impl Drop for FileOperation {
                 .is_some_and(|handle| Arc::ptr_eq(&handle, &self.handle))
         });
         if let Some(entry) = current {
+            entry.text_input = if self.rollback_cursor_to.is_none() {
+                self.text_input.take()
+            } else {
+                None
+            };
             if let Some(error) = restore_failure {
                 entry.restore_failure = Some(Arc::new(error));
             }
@@ -210,10 +309,10 @@ pub(crate) fn acquire_file_in(
     fid: i32,
     runtime: Option<&RuntimeContext>,
 ) -> Result<FileOperation, FileOperationError> {
-    let registry = REGISTRY.lock().map_err(|_| FileOperationError::Poisoned)?;
+    let mut registry = REGISTRY.lock().map_err(|_| FileOperationError::Poisoned)?;
     let entry = registry
         .entries
-        .get(&fid)
+        .get_mut(&fid)
         .ok_or(FileOperationError::InvalidIdentifier)?;
     if !entry_visible(entry, runtime) {
         return Err(FileOperationError::ForeignSession);
@@ -232,12 +331,14 @@ pub(crate) fn acquire_file_in(
     let info = entry.info();
     let issuer = entry.issuer.clone();
     let filesystem = entry.filesystem.clone();
+    let text_input = entry.text_input.take();
     drop(slot);
     drop(registry);
     let operation = FileOperation {
         fid,
         handle,
         file: Some(file),
+        text_input,
         rollback_cursor_to: None,
         info,
         issuer,

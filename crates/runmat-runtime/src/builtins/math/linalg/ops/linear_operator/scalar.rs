@@ -3,7 +3,7 @@ use runmat_value::ComplexElement;
 /// Native scalar arithmetic shared by dense and CSC matrix-vector products.
 /// This is intentionally about the four supported host storage classes, not
 /// an independent numeric class or Value-conversion authority.
-pub(in crate::builtins::math::linalg::ops) trait LinearOperatorScalar:
+pub(in crate::builtins::math::linalg) trait LinearOperatorScalar:
     Copy
 {
     fn zero() -> Self;

@@ -17,6 +17,7 @@ pub(super) async fn apply(
         values.push(gather_if_needed_async(&value).await?);
     }
     let input = FindGroupsInput::prepare(values)?;
-    let index = build_index(input.columns(), false, KeyOrder::Sorted).map_err(error::invalid)?;
+    let index = build_index(input.columns(), false, KeyOrder::Sorted)
+        .map_err(|source| source.attach(error::invalid("invalid grouping variable")))?;
     output::build(&input, &index)
 }

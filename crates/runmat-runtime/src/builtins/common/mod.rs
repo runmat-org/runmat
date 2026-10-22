@@ -4,6 +4,7 @@
 pub mod arg_tokens;
 pub(crate) mod binary;
 pub mod broadcast;
+pub(crate) mod character_output;
 pub(crate) mod complex_arithmetic;
 pub mod concatenation;
 pub(crate) mod control_flow_error;
@@ -16,6 +17,7 @@ pub mod format;
 pub mod fs;
 pub mod gpu_helpers;
 pub(crate) mod grouping_keys;
+pub(crate) mod host_unary_output;
 pub mod identifiers;
 pub mod indexing;
 pub mod integer_capability;
@@ -31,7 +33,6 @@ pub(crate) mod provider_restore;
 pub mod random;
 pub mod random_args;
 pub(crate) mod real_unary_preparation;
-pub(crate) mod host_unary_output;
 pub mod residency;
 pub mod resident_output;
 pub mod shape;
@@ -39,8 +40,8 @@ pub mod spec;
 pub mod tensor;
 #[cfg(test)]
 pub mod test_support;
+pub mod text;
 pub(crate) mod uniform_scalar_output;
 pub mod validation;
-pub(crate) mod character_output;
 
 pub(crate) use self::control_flow_error::map_control_flow_with_builtin;

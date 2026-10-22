@@ -398,7 +398,13 @@ fn parse_cutoff(value: Value) -> BuiltinResult<Vec<f64>> {
 fn parse_option_token(value: Value) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.into_string_unbounded()),
-        Value::CharArray(chars) => Ok(chars.data().iter().copied().collect()),
+        Value::CharArray(chars) => {
+            runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
+                let mut error = butter_error(&BUTTER_ERROR_INVALID_OPTION);
+                error.source = Some(Box::new(source));
+                error
+            })
+        }
         Value::StringArray(array) if array.data().len() == 1 => {
             Ok(array.data()[0].as_str().to_owned())
         }

@@ -27,7 +27,8 @@ pub enum RuntimeNameResolutionError {
     WasmRegistryNotReady,
     SearchPathChanged,
     ClassRegistryChanged,
-    Search(String),
+    Search(crate::builtins::common::path_search::PathSearchError),
+    Control(Box<crate::RuntimeError>),
 }
 
 impl std::fmt::Display for RuntimeNameResolutionError {
@@ -43,14 +44,21 @@ impl std::fmt::Display for RuntimeNameResolutionError {
             Self::ClassRegistryChanged => {
                 formatter.write_str("name resolution: class registry changed during observation")
             }
-            Self::Search(error) => formatter.write_str(error),
+            Self::Search(error) => std::fmt::Display::fmt(error, formatter),
+            Self::Control(error) => formatter.write_str(error.message()),
         }
     }
 }
 
-impl From<String> for RuntimeNameResolutionError {
-    fn from(error: String) -> Self {
+impl From<crate::builtins::common::path_search::PathSearchError> for RuntimeNameResolutionError {
+    fn from(error: crate::builtins::common::path_search::PathSearchError) -> Self {
         Self::Search(error)
+    }
+}
+
+impl From<crate::RuntimeError> for RuntimeNameResolutionError {
+    fn from(error: crate::RuntimeError) -> Self {
+        Self::Control(Box::new(error))
     }
 }
 
@@ -341,7 +349,7 @@ pub async fn observe_runtime_name(
         }
     }
     for folder in class_folder_candidates_with_origin(name, "which")? {
-        if crate::builtins::common::path_search::path_is_directory(folder.path()).await
+        if crate::builtins::common::path_search::path_is_directory(folder.path()).await?
             && seen_paths.insert(folder.path().to_path_buf())
         {
             candidates.push(RuntimeNameCandidate::ClassFolder(folder));
@@ -388,7 +396,7 @@ pub async fn observe_runtime_name(
         }
     }
     for directory in directory_candidates_with_origin(name, "which")? {
-        if crate::builtins::common::path_search::path_is_directory(directory.path()).await
+        if crate::builtins::common::path_search::path_is_directory(directory.path()).await?
             && seen_paths.insert(directory.path().to_path_buf())
         {
             candidates.push(RuntimeNameCandidate::Directory(directory));

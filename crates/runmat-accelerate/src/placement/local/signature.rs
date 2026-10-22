@@ -30,6 +30,9 @@ pub(super) fn with_total_candidate_observation_contract(
             PREPARED_BODY_CLEANUP_CONTRACT
         }
         super::TotalCandidateObservationContract::FullCall => FULL_CALL_CONTRACT,
+        super::TotalCandidateObservationContract::NativeFullCall => {
+            b"runmat-local-native-source-outer-fence-v1"
+        }
     };
     let mut bytes = Vec::with_capacity(label.len() + 32);
     bytes.extend_from_slice(label);

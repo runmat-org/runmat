@@ -74,14 +74,76 @@ pub(super) fn assignment_root_for_place(
     creation: AssignmentCreationPolicy,
 ) -> NativeExecutorResult<Value> {
     validate_creation_policy(place, false, creation)?;
-    let mut segments = Vec::new();
-    let root = flatten_place(place, &mut segments)?;
-    assignment_root_for_segments(state, root, creation, &segments)
+    let root = place.root_local().ok_or_else(|| {
+        NativeExecutorError::Host("assignment root is not a canonical Native local".into())
+    })?;
+    if creation != AssignmentCreationPolicy::ExistingOnly
+        && matches!(
+            place.first_root_step(),
+            Some(runmat_mir::MirRootStep::Index(IndexKind::Brace))
+        )
+    {
+        return state
+            .sequence_root(root.0, runmat_mir::SequenceRootCreation::EmptyCell)
+            .map(|(value, _retained_seed)| value);
+    }
+    let root_creation = if creation == AssignmentCreationPolicy::ExistingOnly {
+        creation
+    } else {
+        match place.first_root_step() {
+            Some(runmat_mir::MirRootStep::Member) => {
+                AssignmentCreationPolicy::CreateStructFieldPath
+            }
+            Some(runmat_mir::MirRootStep::Index(IndexKind::Paren)) => {
+                AssignmentCreationPolicy::CreateArrayByIndex
+            }
+            _ => AssignmentCreationPolicy::ExistingOnly,
+        }
+    };
+    state.assignment_root(root.0, root_creation)
+}
+
+/// Capture the actual current arena generation, not a new reference to a
+/// cloned payload. The one retained count belongs to the prepared fixed owner
+/// and is released on consume/catch; only absent roots allocate a new seed.
+pub(super) fn assignment_root_reference_for_place(
+    state: &mut HostState,
+    place: &MirPlace,
+    creation: AssignmentCreationPolicy,
+) -> NativeExecutorResult<NativeValueRef> {
+    validate_creation_policy(place, false, creation)?;
+    let root = place.root_local().ok_or_else(|| {
+        NativeExecutorError::Host("assignment root is not a canonical Native local".into())
+    })?;
+    let value = if creation != AssignmentCreationPolicy::ExistingOnly
+        && matches!(
+            place.first_root_step(),
+            Some(runmat_mir::MirRootStep::Index(IndexKind::Brace))
+        ) {
+        let (value, seed) =
+            state.sequence_root(root.0, runmat_mir::SequenceRootCreation::EmptyCell)?;
+        if let Some(seed) = seed {
+            return Ok(seed);
+        }
+        value
+    } else {
+        assignment_root_for_place(state, place, creation)?
+    };
+    // The canonical helper just refreshed this exact local. Reading its frame
+    // slot does not reconcile/reinvoke the workspace or lexical source again.
+    let reference = state.locals.get(root.0).copied().ok_or_else(|| {
+        NativeExecutorError::Host("assignment root is outside the native frame".into())
+    })?;
+    if reference.is_null() {
+        return Ok(state.arena.insert(value));
+    }
+    state.arena.retain(reference)?;
+    Ok(reference)
 }
 
 mod sequence;
 pub(in crate::execute) use sequence::{
-    assign_prepared_sequence, assign_sequence, PendingSequenceAssign,
+    assign_prepared_fixed, assign_prepared_sequence, assign_sequence, PendingSequenceAssign,
 };
 
 /// The invocation-owned cursor for one statement site. Values are arena

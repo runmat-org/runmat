@@ -160,11 +160,10 @@ pub struct UserCallContext<'a> {
 /// stack. Semantic and lexical targets can re-enter the VM through their
 /// selected invoker; unknown effects therefore take the sibling continuation.
 fn descriptor_needs_continuation(descriptor: &CallableDescriptor) -> bool {
-    let CallableTarget::Resolved {
-        identity: CallableIdentity::Builtin(id),
-        ..
-    } = &descriptor.target
-    else {
+    let CallableTarget::Resolved { identity, .. } = &descriptor.target else {
+        return true;
+    };
+    let CallableIdentity::Builtin(id) = identity.as_identity() else {
         return true;
     };
     let semantics = runmat_builtins::builtin_catalog_entry_by_name(&id.0)

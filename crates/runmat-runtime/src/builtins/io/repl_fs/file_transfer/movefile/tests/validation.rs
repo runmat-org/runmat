@@ -86,7 +86,9 @@ fn resident_paths_reject_without_provider_access_and_character_pages_do_not_flat
         crate::builtins::io::repl_fs::test_support::unregistered_numeric_allocation(vec![1, 1])
             .handle,
     );
-    let pages = Value::CharArray(CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap());
+    let pages = Value::CharArray(
+        CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap(),
+    );
     for source in [resident, pages] {
         assert_eq!(
             evaluate(&[source, Value::from("unused")])

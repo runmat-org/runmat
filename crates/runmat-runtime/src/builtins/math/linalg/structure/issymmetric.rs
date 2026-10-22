@@ -134,8 +134,8 @@ fn is_flag_alias_argument(value: &Value) -> bool {
     };
     text.is_some_and(|value| value.trim().eq_ignore_ascii_case("symmetric"))
         || matches!(value, Value::CharArray(value) if value.rows == 1 && {
-            let text = value.data().iter().collect::<String>().trim().to_ascii_lowercase();
-            text == "symmetric"
+            let equals=|expected:&str|{let mut units=value.data().iter().map(|u|u.raw());while units.clone().next().is_some_and(|u|char::from_u32(u32::from(u)).is_some_and(char::is_whitespace)){units.next();}while units.clone().next_back().is_some_and(|u|char::from_u32(u32::from(u)).is_some_and(char::is_whitespace)){units.next_back();}units.map(|u|if (65..=90).contains(&u){u+32}else{u}).eq(expected.encode_utf16())};
+            equals("symmetric")
         })
 }
 
@@ -305,7 +305,16 @@ fn parse_mode_flag(value: &Value) -> BuiltinResult<Option<SymmetryMode>> {
     let text = match value {
         Value::String(s) => Some(s.as_str().to_owned()),
         Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].as_str().to_owned()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data().iter().collect()),
+        Value::CharArray(ca) if ca.rows == 1 => Some(
+            runmat_value::decode_utf16_code_units(ca.data()).map_err(|source| {
+                let mut error = issymmetric_error_with_detail(
+                    &ISSYMMETRIC_ERROR_INVALID_ARGUMENT,
+                    source.to_string(),
+                );
+                error.source = Some(Box::new(source));
+                error
+            })?,
+        ),
         _ => None,
     };
 

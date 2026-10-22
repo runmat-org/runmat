@@ -639,7 +639,7 @@ impl ExecutableUnit {
         }
         [
             (Kind::Mir, canonical_json(self.mir())?),
-            (Kind::Analysis, canonical_json(self.analysis())?),
+            (Kind::Analysis, self.analysis().canonical_bytes()?),
             (Kind::Bytecode, canonical_json(&bytecode)?),
             (Kind::VmLayout, canonical_json(self.vm_layout())?),
             (Kind::FunctionRegistry, canonical_json(&functions)?),

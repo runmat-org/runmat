@@ -63,12 +63,14 @@ fn read_f32(provider: &WgpuProvider, exported: &WgpuBufferRef) -> Vec<u32> {
     let bytes = (exported.len * 4) as u64;
     let staging = provider
         .with_emission(|emission, pending| -> anyhow::Result<_> {
-            let staging = emission.device().create_buffer(&wgpu::BufferDescriptor {
-                label: Some("logical-export-test-readback"),
-                size: bytes,
-                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
+            let staging = runmat_accelerate_api::WgpuBufferOwner::new(
+                emission.device().create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("logical-export-test-readback"),
+                    size: bytes,
+                    usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }),
+            );
             let mut encoder = pending.profiled_encoder(emission, &Default::default());
             encoder.copy_buffer_to_buffer(exported.buffer(emission)?, 0, &staging, 0, bytes);
             provider.submit(emission, pending, encoder)?;

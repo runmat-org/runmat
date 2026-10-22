@@ -504,7 +504,7 @@ async fn commit(
         }
         for (k, v) in attrs {
             crate::data::cooperate_data_work(&mut budget, 1).await?;
-            manifest.attrs.insert(k, value_to_json(&v));
+            manifest.attrs.insert(k, value_to_json(&v)?);
         }
         crate::data::cooperate_data_work(&mut budget, 0).await?;
         manifest.updated_at = now_rfc3339();

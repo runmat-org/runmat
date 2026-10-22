@@ -54,9 +54,11 @@ fn binary_write_yield_cancellation_stops_before_next_element() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn nd_character_payload_flattens_every_page_in_column_first_order() {
-    let chars =
-        runmat_value::CharArray::new_with_shape("abcdefgh".chars().collect(), vec![2, 2, 2])
-            .unwrap();
+    let chars = runmat_value::CharArray::from_unicode_scalars_with_shape(
+        "abcdefgh".chars().collect(),
+        vec![2, 2, 2],
+    )
+    .unwrap();
     let values: Vec<_> = borrow_elements(&Value::CharArray(chars))
         .expect("character elements")
         .map(|element| element.as_f64())
@@ -142,9 +144,11 @@ fn borrowed_integer_storage_writes_exact_bytes_for_every_class() {
 fn borrowed_character_pages_strings_and_logical_values_write_exact_bytes() {
     let _guard = registry_guard();
     registry::reset_for_tests();
-    let chars =
-        runmat_value::CharArray::new_with_shape("abcdefgh".chars().collect(), vec![2, 2, 2])
-            .unwrap();
+    let chars = runmat_value::CharArray::from_unicode_scalars_with_shape(
+        "abcdefgh".chars().collect(),
+        vec![2, 2, 2],
+    )
+    .unwrap();
     let strings =
         runmat_value::StringArray::new(vec!["ab".into(), "".into(), "c".into()], vec![1, 3])
             .unwrap();

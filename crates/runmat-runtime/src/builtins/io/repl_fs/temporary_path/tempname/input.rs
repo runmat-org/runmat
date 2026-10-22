@@ -16,7 +16,9 @@ pub(super) fn folder(value: &Value) -> crate::BuiltinResult<PathBuf> {
             if array.rows == 1
                 && crate::builtins::common::shape::effective_rank(&array.shape) <= 2 =>
         {
-            array.data().iter().collect::<String>()
+            crate::builtins::io::utf16::decode_utf16_with_error(array.data(), || {
+                error::builtin(IDENTITY, &TEMPNAME_ERROR_FOLDER_TYPE)
+            })?
         }
         Value::StringArray(array) if array.data().len() == 1 => array.data()[0].as_str().to_owned(),
         _ => return Err(error::builtin(IDENTITY, &TEMPNAME_ERROR_FOLDER_TYPE)),

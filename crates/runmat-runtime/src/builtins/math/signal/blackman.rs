@@ -43,6 +43,11 @@ fn blackman_error_with_message(
 
 fn blackman_map_window_error(error: WindowArgError) -> RuntimeError {
     match error {
+        WindowArgError::Text(source) => {
+            let mut error = blackman_error(&BLACKMAN_ERROR_INVALID_OPTION);
+            error.source = Some(Box::new(source));
+            error
+        }
         WindowArgError::TooManyOptions => blackman_error(&BLACKMAN_ERROR_ARG_COUNT),
         WindowArgError::InvalidLength => blackman_error(&BLACKMAN_ERROR_INVALID_LENGTH),
         WindowArgError::InvalidOptionType => blackman_error(&BLACKMAN_ERROR_INVALID_OPTION),

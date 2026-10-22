@@ -40,12 +40,18 @@ where
 }
 
 fn scalar_text(value: &Value, arg: &str) -> BuiltinResult<String> {
-    super::checked_text::scalar_text(value).ok_or_else(|| {
-        info_error(
-            &IMFINFO_ERROR_ARGUMENT,
-            format!("{arg} must be a string scalar or character vector"),
-        )
-    })
+    super::checked_text::scalar_text(value)
+        .map_err(|source| {
+            let mut error = info_error(&IMFINFO_ERROR_ARGUMENT, source.to_string());
+            error.source = Some(Box::new(source));
+            error
+        })?
+        .ok_or_else(|| {
+            info_error(
+                &IMFINFO_ERROR_ARGUMENT,
+                format!("{arg} must be a string scalar or character vector"),
+            )
+        })
 }
 
 fn char_value(text: &str) -> Value {

@@ -3,10 +3,14 @@
 
 use std::{future::Future, rc::Rc};
 
-use futures::channel::oneshot;
+use futures::{channel::oneshot, future::Either};
 
 use super::{CanonicalLocalTaskAdmission, RuntimeContext};
-use crate::{call::RootedFunctionArguments, execution::RootedValueLease, RuntimeError};
+use crate::{
+    call::RootedFunctionArguments,
+    execution::{RootedValueLease, RuntimeContinuationFuture},
+    RuntimeError,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NativeContinuationPlacement {
@@ -47,45 +51,77 @@ impl Drop for CancelOnDrop {
 
 /// Retain already-owned inputs until the child finishes or its ticket is
 /// cancelled. The helper does not copy a workspace or open a second driver.
-pub async fn run_native_continuation<T, F>(
+pub fn run_native_continuation<T, F>(
     runtime: &RuntimeContext,
     placement: NativeContinuationPlacement,
     roots: RootedValueLease,
     future: F,
-) -> Result<T, RuntimeError>
+) -> impl Future<Output = Result<T, RuntimeError>> + 'static
 where
     T: 'static,
     F: Future<Output = Result<T, RuntimeError>> + 'static,
 {
-    run_native_continuation_with_roots(runtime, placement, Some(roots), future).await
+    run_native_continuation_with(runtime, placement, roots, || future)
+}
+
+/// Factory form for native executors whose concrete future owns a large
+/// interpreter state. Admission happens before the factory runs, and callers
+/// retain the same direct-versus-sibling placement semantics.
+pub fn run_native_continuation_with<T, F>(
+    runtime: &RuntimeContext,
+    placement: NativeContinuationPlacement,
+    roots: RootedValueLease,
+    make_future: impl FnOnce() -> F + 'static,
+) -> impl Future<Output = Result<T, RuntimeError>> + 'static
+where
+    T: 'static,
+    F: Future<Output = Result<T, RuntimeError>> + 'static,
+{
+    let selected = runtime.clone();
+    let admitted =
+        crate::execution::rooted_continuation::admit_native_continuation_with(runtime, make_future);
+    match admitted {
+        Ok(future) => Either::Left(async move {
+            run_native_continuation_with_roots(&selected, placement, Some(roots), future).await
+        }),
+        Err(error) => Either::Right(std::future::ready(Err(error))),
+    }
 }
 
 /// A selected callable already carries its capture generation and supplied
 /// input roots. Move that exact owner into the child future before queueing;
 /// no second traversal, registration, or empty proof lease is fabricated.
-pub async fn run_rooted_function_native_continuation<T, F>(
+pub fn run_rooted_function_native_continuation<T, F>(
     runtime: &RuntimeContext,
     placement: NativeContinuationPlacement,
     arguments: RootedFunctionArguments,
     consume: impl FnOnce(RootedFunctionArguments) -> F + 'static,
-) -> Result<T, RuntimeError>
+) -> impl Future<Output = Result<T, RuntimeError>> + 'static
 where
     T: 'static,
     F: Future<Output = Result<T, RuntimeError>> + 'static,
 {
-    let future = async move { consume(arguments).await };
-    run_native_continuation_with_roots(runtime, placement, None, future).await
+    let selected = runtime.clone();
+    let admitted = crate::execution::rooted_continuation::admit_native_continuation_with(
+        runtime,
+        move || async move { consume(arguments).await },
+    );
+    match admitted {
+        Ok(future) => Either::Left(async move {
+            run_native_continuation_with_roots(&selected, placement, None, future).await
+        }),
+        Err(error) => Either::Right(std::future::ready(Err(error))),
+    }
 }
 
-async fn run_native_continuation_with_roots<T, F>(
+async fn run_native_continuation_with_roots<T>(
     runtime: &RuntimeContext,
     placement: NativeContinuationPlacement,
     roots: Option<RootedValueLease>,
-    future: F,
+    future: RuntimeContinuationFuture<'static, T>,
 ) -> Result<T, RuntimeError>
 where
     T: 'static,
-    F: Future<Output = Result<T, RuntimeError>> + 'static,
 {
     if placement.is_direct() {
         let _roots = roots;
@@ -128,6 +164,32 @@ where
         return runtime.scope(future).await;
     }
     spawn_foreground_sibling(runtime, admission, None, future).await
+}
+
+/// Factory form for selected callbacks whose concrete future contains a
+/// substantial interpreter or foreign-service state. Admit and erase that
+/// exact state before constructing it, then retain the ordinary direct versus
+/// supervised-sibling callback placement.
+#[inline(never)]
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn run_selected_callback_continuation_with<T, F>(
+    runtime: &RuntimeContext,
+    make_future: impl FnOnce() -> F + 'static,
+) -> impl Future<Output = Result<T, RuntimeError>> + 'static
+where
+    T: 'static,
+    F: Future<Output = Result<T, RuntimeError>> + 'static,
+{
+    let selected = runtime.clone();
+    match crate::execution::rooted_continuation::admit_native_continuation_with(
+        runtime,
+        make_future,
+    ) {
+        Ok(future) => {
+            Either::Left(async move { run_selected_callback_continuation(&selected, future).await })
+        }
+        Err(error) => Either::Right(std::future::ready(Err(error))),
+    }
 }
 
 /// Split an owned request's poll stack only while its exact host supervisor is
@@ -193,7 +255,13 @@ where
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
-    use crate::{context::RuntimeServicePorts, execution::RuntimeExecutionService};
+    use crate::{
+        context::{
+            host_effect::ManagedHostEffectLedger, ParallelCapability, RuntimeParallelResources,
+            RuntimeParallelService, RuntimeServicePorts,
+        },
+        execution::RuntimeExecutionService,
+    };
     use runmat_value::Value;
     use std::cell::Cell;
 
@@ -208,6 +276,27 @@ mod tests {
             .expect("test reactor")
     }
 
+    struct ManagedParallel(ManagedHostEffectLedger);
+
+    impl RuntimeParallelService for ManagedParallel {
+        fn supports(&self, _: ParallelCapability) -> bool {
+            false
+        }
+
+        fn placement_resources(&self) -> RuntimeParallelResources {
+            let snapshot = self.0.snapshot();
+            RuntimeParallelResources {
+                memory_available_bytes: Some(snapshot.free_bytes()),
+                epoch: snapshot.epoch,
+                ..RuntimeParallelResources::default()
+            }
+        }
+
+        fn managed_host_effect_ledger(&self) -> Option<ManagedHostEffectLedger> {
+            Some(self.0.clone())
+        }
+    }
+
     #[test]
     fn direct_invocation_needs_no_task_service() {
         let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
@@ -220,6 +309,47 @@ mod tests {
             async { Ok::<_, RuntimeError>(7) },
         ));
         assert_eq!(result.expect("direct result"), 7);
+    }
+
+    #[test]
+    fn direct_factory_is_not_constructed_before_managed_admission() {
+        let ledger = ManagedHostEffectLedger::new(1);
+        let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
+            .with_service_ports(
+                RuntimeServicePorts::default()
+                    .with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
+            );
+        let (selected, placement) = runtime.native_invocation_context();
+        let constructed = Rc::new(Cell::new(false));
+        let observed = Rc::clone(&constructed);
+        let completion = run_native_continuation_with(&selected, placement, roots(), move || {
+            observed.set(true);
+            async { Ok::<_, RuntimeError>(7) }
+        });
+        assert!(!constructed.get());
+        assert!(host().block_on(completion).is_err());
+        assert!(!constructed.get());
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    }
+
+    #[test]
+    fn unpolled_rooted_function_does_not_consume_arguments() {
+        let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        let (selected, placement) = runtime.native_invocation_context();
+        let arguments = RootedFunctionArguments::ordinary(
+            crate::execution::RootedValues::new(Vec::new()).expect("empty rooted arguments"),
+        );
+        let consumed = Rc::new(Cell::new(false));
+        let observed = Rc::clone(&consumed);
+        let completion =
+            run_rooted_function_native_continuation(&selected, placement, arguments, move |_| {
+                observed.set(true);
+                async { Ok::<_, RuntimeError>(()) }
+            });
+        assert!(!consumed.get());
+        drop(completion);
+        assert!(!consumed.get());
     }
 
     #[test]
@@ -280,11 +410,13 @@ mod tests {
         let observed = Rc::clone(&polls);
         let result = host()
             .block_on(supervisor.drive_until(async {
-                let mut completion =
-                    Box::pin(run_selected_callback_continuation(&base, async move {
+                let mut completion = Box::pin(run_selected_callback_continuation_with(
+                    &base,
+                    move || async move {
                         observed.set(observed.get() + 1);
                         Ok::<_, RuntimeError>(17)
-                    }));
+                    },
+                ));
                 let first_poll = futures::future::poll_fn(|cx| {
                     std::task::Poll::Ready(completion.as_mut().poll(cx))
                 })

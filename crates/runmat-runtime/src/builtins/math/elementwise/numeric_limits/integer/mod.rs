@@ -13,8 +13,8 @@ pub(super) fn execute(
 ) -> BuiltinResult<Value> {
     match (arguments.len(), arguments.get(0), arguments.get(1)) {
         (0, _, _) => Ok(Value::Int(value::scalar(NumericDType::I32, kind))),
-        (1, Some(class), _) if super::syntax::text(class).is_some() => {
-            let text = super::syntax::text(class).expect("guarded text value");
+        (1, Some(class), _) if super::syntax::text(class, builtin)?.is_some() => {
+            let text = super::syntax::text(class, builtin)?.expect("guarded text value");
             let class = runmat_types::NumericClass::from_class_name(text.trim())
                 .and_then(runmat_types::NumericClass::integer_class)
                 .ok_or_else(|| {
@@ -23,7 +23,7 @@ pub(super) fn execute(
             Ok(Value::Int(value::scalar(class.into(), kind)))
         }
         (2, Some(keyword), Some(prototype))
-            if super::syntax::text(keyword)
+            if super::syntax::text(keyword, builtin)?
                 .is_some_and(|text| text.eq_ignore_ascii_case("like")) =>
         {
             like(prototype, kind, builtin)

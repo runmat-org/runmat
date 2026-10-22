@@ -30,7 +30,9 @@ pub(super) fn columns(
                         _ => None,
                     })
                     .ok_or_else(|| {
-                        "grouping child changed during immutable traversal".to_string()
+                        super::VariableError::from(
+                            "grouping child changed during immutable traversal",
+                        )
                     })?;
                 columns.extend(self::columns(
                     &format!("{name}{}", index + 1),

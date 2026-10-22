@@ -5,30 +5,32 @@
 //! use a provider hook or typed host fallback, then public outputs are restored
 //! to the owning provider.
 
+#[cfg(test)]
+use super::type_resolvers::unique_values_output_type;
+use crate::call::{BuiltinArguments, FunctionArgumentView};
+pub use runmat_builtins::{
+    UNIQUE_DESCRIPTOR, UNIQUE_ERROR_CONFLICTING_OCCURRENCE_OPTIONS,
+    UNIQUE_ERROR_CONFLICTING_ORDER_OPTIONS, UNIQUE_ERROR_GPU_OPTION_COMBINATION,
+    UNIQUE_ERROR_INTERNAL, UNIQUE_ERROR_INVALID_ARGUMENT, UNIQUE_ERROR_LEGACY_OPTION_UNSUPPORTED,
+    UNIQUE_ERROR_ROWS_REQUIRES_2D_MATRIX, UNIQUE_ERROR_UNKNOWN_OPTION,
+    UNIQUE_ERROR_UNSUPPORTED_INPUT_TYPE, UNIQUE_INTEGER_CAPABILITIES,
+};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use runmat_accelerate_api::{
     GpuTensorHandle, UniqueOccurrence, UniqueOptions, UniqueOrder, UniqueResult,
 };
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, LogicalArray,
-    NumericStorage, StringArray, Tensor, Utf8Text, Value,
+    NumericStorage, StringArray, Tensor, Utf16CodeUnit, Utf8Text, Value,
 };
 
 use super::{
     float_order::{ComplexSequence, SetFloat},
     integer_order,
-    type_resolvers::unique_values_output_type,
 };
 use crate::build_runtime_error;
 use crate::builtins::common::arg_tokens::tokens_from_values;
@@ -71,217 +73,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "unique";
 
-const UNIQUE_OUTPUT_C: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "C",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Unique values or rows.",
-}];
-
-const UNIQUE_OUTPUT_C_IA: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "C",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Unique values or rows.",
-    },
-    BuiltinParamDescriptor {
-        name: "ia",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indices selecting representatives in input A.",
-    },
-];
-
-const UNIQUE_OUTPUT_C_IA_IC: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "C",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Unique values or rows.",
-    },
-    BuiltinParamDescriptor {
-        name: "ia",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indices selecting representatives in input A.",
-    },
-    BuiltinParamDescriptor {
-        name: "ic",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Indices mapping each input element/row to C.",
-    },
-];
-
-const UNIQUE_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input array.",
-}];
-
-const UNIQUE_INPUTS_A_OPTIONS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "option",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Option tokens plus the 'TreatMissingAsDistinct', logical name-value pair.",
-    },
-];
-
-const UNIQUE_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
-    BuiltinSignatureDescriptor {
-        label: "C = unique(A)",
-        inputs: &UNIQUE_INPUTS_A,
-        outputs: &UNIQUE_OUTPUT_C,
-    },
-    BuiltinSignatureDescriptor {
-        label: "C = unique(A, option...)",
-        inputs: &UNIQUE_INPUTS_A_OPTIONS,
-        outputs: &UNIQUE_OUTPUT_C,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[C, ia] = unique(A)",
-        inputs: &UNIQUE_INPUTS_A,
-        outputs: &UNIQUE_OUTPUT_C_IA,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[C, ia] = unique(A, option...)",
-        inputs: &UNIQUE_INPUTS_A_OPTIONS,
-        outputs: &UNIQUE_OUTPUT_C_IA,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[C, ia, ic] = unique(A)",
-        inputs: &UNIQUE_INPUTS_A,
-        outputs: &UNIQUE_OUTPUT_C_IA_IC,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[C, ia, ic] = unique(A, option...)",
-        inputs: &UNIQUE_INPUTS_A_OPTIONS,
-        outputs: &UNIQUE_OUTPUT_C_IA_IC,
-    },
-];
-
-const UNIQUE_ERROR_LEGACY_OPTION_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UNIQUE.LEGACY_OPTION_UNSUPPORTED",
-    identifier: Some("RunMat:unique:LegacyOptionUnsupported"),
-    when: "Legacy compatibility options are requested.",
-    message: "unique: the 'legacy' behaviour is not supported",
-};
-
-const UNIQUE_ERROR_CONFLICTING_ORDER_OPTIONS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UNIQUE.CONFLICTING_ORDER_OPTIONS",
-    identifier: Some("RunMat:unique:ConflictingOrderOptions"),
-    when: "Both 'sorted' and 'stable' options are provided.",
-    message: "unique: cannot combine 'sorted' with 'stable'",
-};
-
-const UNIQUE_ERROR_CONFLICTING_OCCURRENCE_OPTIONS: BuiltinErrorDescriptor =
-    BuiltinErrorDescriptor {
-        code: "RM.UNIQUE.CONFLICTING_OCCURRENCE_OPTIONS",
-        identifier: Some("RunMat:unique:ConflictingOccurrenceOptions"),
-        when: "Both 'first' and 'last' options are provided.",
-        message: "unique: cannot combine 'first' with 'last'",
-    };
-
-const UNIQUE_ERROR_UNKNOWN_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UNIQUE.UNKNOWN_OPTION",
-    identifier: Some("RunMat:unique:UnknownOption"),
-    when: "An unsupported option token is provided.",
-    message: "unique: unrecognised option",
-};
-
-const UNIQUE_ERROR_ROWS_REQUIRES_2D_MATRIX: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UNIQUE.ROWS_REQUIRES_2D_MATRIX",
-    identifier: Some("RunMat:unique:RowsRequiresTwoDimensionalInput"),
-    when: "'rows' mode is used with non-2D data.",
-    message: "unique: 'rows' option requires a 2-D matrix input",
-};
-
-const UNIQUE_ERROR_UNSUPPORTED_INPUT_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UNIQUE.UNSUPPORTED_INPUT_TYPE",
-    identifier: Some("RunMat:unique:UnsupportedInputType"),
-    when: "Input cannot be converted into a supported unique domain.",
-    message: "unique: unsupported input type",
-};
-
-const UNIQUE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UNIQUE.INVALID_ARGUMENT",
-    identifier: Some("RunMat:unique:InvalidArgument"),
-    when: "Option arguments or name-value pairs are malformed.",
-    message: "unique: invalid option arguments",
-};
-
-const UNIQUE_ERROR_GPU_OPTION_COMBINATION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UNIQUE.GPU_OPTION_COMBINATION",
-    identifier: Some("RunMat:unique:GpuOptionCombination"),
-    when: "A resident input specifies both set-order and occurrence options.",
-    message: "unique: GPU inputs cannot combine a set-order option with 'first' or 'last'",
-};
-
-const UNIQUE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.UNIQUE.INTERNAL",
-    identifier: Some("RunMat:unique:Internal"),
-    when: "Internal conversion/allocation/provider decode fails.",
-    message: "unique: internal operation failed",
-};
-
-const UNIQUE_ERRORS: [BuiltinErrorDescriptor; 9] = [
-    UNIQUE_ERROR_LEGACY_OPTION_UNSUPPORTED,
-    UNIQUE_ERROR_CONFLICTING_ORDER_OPTIONS,
-    UNIQUE_ERROR_CONFLICTING_OCCURRENCE_OPTIONS,
-    UNIQUE_ERROR_UNKNOWN_OPTION,
-    UNIQUE_ERROR_ROWS_REQUIRES_2D_MATRIX,
-    UNIQUE_ERROR_UNSUPPORTED_INPUT_TYPE,
-    UNIQUE_ERROR_INVALID_ARGUMENT,
-    UNIQUE_ERROR_GPU_OPTION_COMBINATION,
-    UNIQUE_ERROR_INTERNAL,
-];
-
-const UNIQUE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "A accepts every real integer class and retains exact typed storage throughout host evaluation.",
-    }];
-
-const UNIQUE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "[C, ia, ic] = unique(integer_A, options)",
-        inputs: &UNIQUE_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GpuRestricted,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "C preserves A's exact integer class; ia and ic are one-based double. GPU supports integer classes through 32 bits and restores all requested outputs after typed fallback.",
-    }];
-
-pub const UNIQUE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &UNIQUE_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &UNIQUE_ERRORS,
-};
-
 fn unique_error_with(
     error: &'static BuiltinErrorDescriptor,
     message: impl Into<String>,
@@ -303,19 +94,10 @@ fn unique_internal_error(message: impl Into<String>) -> crate::RuntimeError {
 
 #[runtime_builtin(
     name = "unique",
-    category = "array/sorting_sets",
-    summary = "Return unique elements or rows with optional index mappings.",
-    keywords = "unique,set,distinct,stable,rows,indices,gpu",
-    accel = "array_construct",
-    sink = true,
-    type_resolver(unique_values_output_type),
-    descriptor(crate::builtins::array::sorting_sets::unique::UNIQUE_DESCRIPTOR),
-    integer_capabilities(
-        crate::builtins::array::sorting_sets::unique::UNIQUE_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::sorting_sets::unique"
 )]
-async fn unique_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn unique_builtin(value: Value, rest: BuiltinArguments) -> crate::BuiltinResult<Value> {
     if matches!(crate::output_count::current_output_count(), Some(n) if n > 3) {
         return Err(unique_error_with(
             &UNIQUE_ERROR_INVALID_ARGUMENT,
@@ -323,7 +105,7 @@ async fn unique_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<
         ));
     }
     let provider = super::output_provider(&value);
-    let eval = evaluate(value, &rest).await?;
+    let eval = evaluate_view(value, rest.view()).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::output_list(Vec::new()));
@@ -367,15 +149,27 @@ async fn unique_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<
 
 /// Evaluate `unique` once and expose all outputs to the caller.
 pub async fn evaluate(value: Value, rest: &[Value]) -> crate::BuiltinResult<UniqueEvaluation> {
+    evaluate_view(value, FunctionArgumentView::from_slice(rest)).await
+}
+
+pub(super) async fn evaluate_view(
+    value: Value,
+    rest: FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<UniqueEvaluation> {
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "unique")?;
-    let opts = parse_options(rest)?;
+    let opts = parse_options_view(rest)?;
     match value {
         Value::GpuTensor(handle) => unique_gpu(handle, &opts).await,
         other => unique_host(other, &opts),
     }
 }
 
+#[cfg(test)]
 fn parse_options(rest: &[Value]) -> crate::BuiltinResult<UniqueOptions> {
+    parse_options_view(FunctionArgumentView::from_slice(rest))
+}
+
+fn parse_options_view(rest: FunctionArgumentView<'_>) -> crate::BuiltinResult<UniqueOptions> {
     let mut opts = UniqueOptions {
         rows: false,
         order: UniqueOrder::Sorted,
@@ -567,12 +361,23 @@ async fn unique_gpu(
         return Err(unique_error(&UNIQUE_ERROR_GPU_OPTION_COMBINATION));
     }
     let logical = runmat_accelerate_api::handle_is_logical(&handle);
-    if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
+    if super::provider_result::plain_real(&handle) || logical {
         if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle)
             .or_else(runmat_accelerate_api::provider)
         {
-            if let Ok(result) = provider.unique(&handle, opts).await {
-                let evaluation = UniqueEvaluation::from_unique_result(result)?;
+            if let Some(result) = super::provider_result::attempt(
+                provider.unique(&handle, opts),
+                unique_internal_error,
+            )
+            .await?
+            {
+                let (values, ia, ic) = super::provider_result::unique(
+                    result,
+                    &handle,
+                    opts.rows,
+                    unique_internal_error,
+                )?;
+                let evaluation = UniqueEvaluation::new(tensor::tensor_into_value(values), ia, ic);
                 return if logical {
                     evaluation.into_logical_values()
                 } else {
@@ -581,13 +386,8 @@ async fn unique_gpu(
             }
         }
     }
-    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-    let evaluation = unique_numeric_from_tensor(tensor, opts)?;
-    if logical {
-        evaluation.into_logical_values()
-    } else {
-        Ok(evaluation)
-    }
+    let host = gpu_helpers::gather_value_async(&Value::GpuTensor(handle)).await?;
+    unique_host(host, opts)
 }
 
 fn unique_host(value: Value, opts: &UniqueOptions) -> crate::BuiltinResult<UniqueEvaluation> {
@@ -1377,7 +1177,7 @@ fn unique_char_elements(
     let mut element_entry_index = Vec::with_capacity(total);
 
     for (linear_idx, &ch) in input.iter().enumerate() {
-        let key = ch as u32;
+        let key = ch.raw() as u32;
         match map.get(&key) {
             Some(&entry_idx) => {
                 entries[entry_idx].last = linear_idx;
@@ -1452,7 +1252,7 @@ fn unique_char_rows(
     let rows = array.rows;
     let cols = array.cols;
     if rows == 0 {
-        let values = CharArray::new(Vec::new(), 0, cols)
+        let values = CharArray::from_code_units(Vec::new(), 0, cols)
             .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
         let ia = Tensor::new(Vec::new(), vec![0, 1])
             .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
@@ -1499,7 +1299,7 @@ fn unique_char_rows(
     }
 
     let unique_rows_count = order.len();
-    let mut values = vec!['\0'; unique_rows_count * cols];
+    let mut values = vec![runmat_value::Utf16CodeUnit::from_raw(0); unique_rows_count * cols];
     for (row_pos, &entry_idx) in order.iter().enumerate() {
         let row = &entries[entry_idx].row_data;
         for col in 0..cols {
@@ -1526,7 +1326,7 @@ fn unique_char_rows(
         ic.push((pos + 1) as f64);
     }
 
-    let value_array = CharArray::new(values, unique_rows_count, cols)
+    let value_array = CharArray::from_code_units(values, unique_rows_count, cols)
         .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![unique_rows_count, 1])
         .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
@@ -1803,7 +1603,7 @@ struct ComplexRowEntry<T> {
 
 #[derive(Debug)]
 struct CharElementEntry {
-    ch: char,
+    ch: Utf16CodeUnit,
     first: usize,
     last: usize,
 }
@@ -1812,14 +1612,14 @@ struct CharElementEntry {
 struct RowCharKey(Vec<u32>);
 
 impl RowCharKey {
-    fn from_slice(values: &[char]) -> Self {
-        RowCharKey(values.iter().map(|&ch| ch as u32).collect())
+    fn from_slice(values: &[Utf16CodeUnit]) -> Self {
+        RowCharKey(values.iter().map(|&ch| ch.raw() as u32).collect())
     }
 }
 
 #[derive(Debug, Clone)]
 struct CharRowEntry {
-    row_data: Vec<char>,
+    row_data: Vec<Utf16CodeUnit>,
     first: usize,
     last: usize,
 }
@@ -1896,7 +1696,7 @@ fn compare_complex_rows<T: SetFloat>(a: &[(T, T)], b: &[(T, T)]) -> Ordering {
     Ordering::Equal
 }
 
-fn compare_char_rows(a: &[char], b: &[char]) -> Ordering {
+fn compare_char_rows(a: &[Utf16CodeUnit], b: &[Utf16CodeUnit]) -> Ordering {
     for (lhs, rhs) in a.iter().zip(b.iter()) {
         let ord = lhs.cmp(rhs);
         if ord != Ordering::Equal {
@@ -2016,7 +1816,10 @@ pub(crate) mod tests {
     }
 
     fn builtin_sync(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-        futures::executor::block_on(unique_builtin(value, rest))
+        futures::executor::block_on(unique_builtin(
+            value,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2259,14 +2062,24 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_char_elements_sorted() {
-        let chars = CharArray::new(vec!['m', 'z', 'm', 'a'], 2, 2).unwrap();
+        let chars = CharArray::from_code_units(
+            [0xD800, 0xDC00, 0xD800, 65]
+                .map(runmat_value::Utf16CodeUnit::from_raw)
+                .to_vec(),
+            2,
+            2,
+        )
+        .unwrap();
         let eval = evaluate_sync(Value::CharArray(chars), &[]).expect("unique");
         let (values, ia, ic) = eval.into_triple();
         match values {
             Value::CharArray(arr) => {
                 assert_eq!(arr.rows, 3);
                 assert_eq!(arr.cols, 1);
-                assert_eq!(arr.data(), vec!['a', 'm', 'z']);
+                assert_eq!(
+                    arr.data().iter().map(|unit| unit.raw()).collect::<Vec<_>>(),
+                    vec![65, 0xD800, 0xDC00]
+                );
             }
             other => panic!("unexpected values {other:?}"),
         }
@@ -2283,7 +2096,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn unique_char_rows_last() {
-        let chars = CharArray::new(vec!['a', 'b', 'a', 'b', 'a', 'c'], 3, 2).unwrap();
+        let chars =
+            CharArray::from_unicode_scalars(vec!['a', 'b', 'a', 'b', 'a', 'c'], 3, 2).unwrap();
         let eval = evaluate_sync(
             Value::CharArray(chars),
             &[Value::from("rows"), Value::from("last")],
@@ -2294,7 +2108,7 @@ pub(crate) mod tests {
             Value::CharArray(arr) => {
                 assert_eq!(arr.rows, 2);
                 assert_eq!(arr.cols, 2);
-                assert_eq!(arr.data(), vec!['a', 'b', 'a', 'c']);
+                assert_eq!(arr.data(), runmat_value::encode_utf16_code_units("abac"));
             }
             other => panic!("unexpected values {other:?}"),
         }
@@ -2607,7 +2421,11 @@ pub(crate) mod tests {
             UNIQUE_ERROR_ROWS_REQUIRES_2D_MATRIX.identifier
         );
 
-        let chars = CharArray::from_column_major(vec!['a', 'b'], vec![1, 2, 1]).unwrap();
+        let chars = CharArray::from_column_major(
+            runmat_value::encode_utf16_code_units("ab"),
+            vec![1, 2, 1],
+        )
+        .unwrap();
         let err = evaluate_sync(Value::CharArray(chars), &[Value::from("rows")]).unwrap_err();
         assert_eq!(
             err.identifier(),
@@ -2884,7 +2702,8 @@ pub(crate) mod tests {
         };
         assert_eq!(complex.shape(), &[1, 2]);
 
-        let chars = CharArray::new(vec!['z', 'a', 'z'], 1, 3).expect("character row input");
+        let chars = CharArray::from_unicode_scalars(vec!['z', 'a', 'z'], 1, 3)
+            .expect("character row input");
         let Value::CharArray(chars) = evaluate_sync(Value::CharArray(chars), &[])
             .expect("unique character row")
             .into_values_value()
@@ -2892,7 +2711,7 @@ pub(crate) mod tests {
             panic!("expected character array");
         };
         assert_eq!(chars.shape, vec![1, 2]);
-        assert_eq!(chars.data(), vec!['a', 'z']);
+        assert_eq!(chars.data(), runmat_value::encode_utf16_code_units("az"));
 
         let strings = StringArray::new(vec!["z".into(), "a".into(), "z".into()], vec![1, 3])
             .expect("string row input");
@@ -2904,8 +2723,11 @@ pub(crate) mod tests {
         };
         assert_eq!(strings.shape, vec![1, 2]);
 
-        let nd_chars = CharArray::from_column_major(vec!['c', 'a', 'b', 'c'], vec![2, 1, 2])
-            .expect("N-D character input");
+        let nd_chars = CharArray::from_column_major(
+            runmat_value::encode_utf16_code_units("cabc"),
+            vec![2, 1, 2],
+        )
+        .expect("N-D character input");
         let Value::CharArray(nd_chars) = evaluate_sync(Value::CharArray(nd_chars), &[])
             .expect("unique N-D character input")
             .into_values_value()
@@ -2913,7 +2735,10 @@ pub(crate) mod tests {
             panic!("expected character array");
         };
         assert_eq!(nd_chars.shape, vec![3, 1]);
-        assert_eq!(nd_chars.to_column_major(), vec!['a', 'b', 'c']);
+        assert_eq!(
+            nd_chars.to_column_major(),
+            runmat_value::encode_utf16_code_units("abc")
+        );
     }
 
     #[test]

@@ -26,7 +26,8 @@ fn manually_constructed_keyword_bundle_cannot_coerce_nontext_names() {
 #[test]
 fn keyword_bundle_accepts_effective_character_row_without_coercing_values() {
     let mut bundle = ObjectInstance::new(runmat_types::standard::PYTHON_ARGUMENTS);
-    let row = runmat_value::CharArray::new_with_shape(vec!['x'], vec![1, 1, 1]).unwrap();
+    let row =
+        runmat_value::CharArray::from_unicode_scalars_with_shape(vec!['x'], vec![1, 1, 1]).unwrap();
     bundle.replace_property_unbounded(
         "Names".into(),
         Value::Cell(CellArray::new(vec![Value::CharArray(row)], 1, 1).unwrap()),

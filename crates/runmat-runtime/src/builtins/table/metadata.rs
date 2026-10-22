@@ -3,6 +3,7 @@ use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
+pub use runmat_builtins::{DICTIONARY_DESCRIPTOR, TABLE_DESCRIPTOR};
 pub use runmat_builtins::{PARQUETINFO_DESCRIPTOR, PARQUETREAD_DESCRIPTOR};
 pub(super) use runmat_builtins::{
     TABLE_ERROR_INVALID_ARGUMENT, TABLE_ERROR_INVALID_INDEX, TABLE_ERROR_INVALID_VARIABLE,
@@ -18,43 +19,6 @@ use crate::{build_runtime_error, RuntimeError};
 use super::TABLE_CLASS;
 
 use runmat_builtins::TABLE_IMPORT_ANY_OUTPUT as ANY_OUTPUT;
-const TABLE_INPUTS_VALUES: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "variables",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Variables to assemble as table columns.",
-}];
-const TABLE_INPUTS_PREALLOCATE: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "Size",
-        ty: BuiltinParamType::SizeArg,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Two-element table size vector [rows variables].",
-    },
-    BuiltinParamDescriptor {
-        name: "VariableTypes",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "String array or cellstr naming each preallocated variable type.",
-    },
-    BuiltinParamDescriptor {
-        name: "VariableNames",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Optional names for the preallocated variables.",
-    },
-    BuiltinParamDescriptor {
-        name: "RowNames",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Optional names for the preallocated rows.",
-    },
-];
 const VALUE_AND_ARGS_INPUTS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "A",
@@ -108,69 +72,7 @@ const VARIADIC_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     default: None,
     description: "Input values and name-value options.",
 }];
-const WRITE_NO_OUTPUT: [BuiltinParamDescriptor; 0] = [];
 
-const DICTIONARY_KEYS_VALUES_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "keys",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Uniform or cell-wrapped dictionary keys.",
-    },
-    BuiltinParamDescriptor {
-        name: "values",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Uniform, scalar-expanded, or cell-wrapped dictionary values.",
-    },
-];
-const DICTIONARY_PAIR_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "keyValuePair1",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First key/value argument pair.",
-    },
-    BuiltinParamDescriptor {
-        name: "keyValuePairN",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Additional key/value argument pairs.",
-    },
-];
-const DICTIONARY_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
-    BuiltinSignatureDescriptor {
-        label: "d = dictionary()",
-        inputs: &[],
-        outputs: &ANY_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "d = dictionary(keys, values)",
-        inputs: &DICTIONARY_KEYS_VALUES_INPUTS,
-        outputs: &ANY_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "d = dictionary(k1, v1, ..., kN, vN)",
-        inputs: &DICTIONARY_PAIR_INPUTS,
-        outputs: &ANY_OUTPUT,
-    },
-];
-const TABLE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "T = table(variables...)",
-        inputs: &TABLE_INPUTS_VALUES,
-        outputs: &ANY_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "T = table(Size=sz, VariableTypes=varTypes, Name=Value...)",
-        inputs: &TABLE_INPUTS_PREALLOCATE,
-        outputs: &ANY_OUTPUT,
-    },
-];
 const ARRAY_DATASTORE_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
         label: "arrds = arrayDatastore(A)",
@@ -193,27 +95,10 @@ const COMPAT_VARIADIC_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSign
     inputs: &VARIADIC_INPUTS,
     outputs: &ANY_OUTPUT,
 }];
-const WRITE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "writeTabular(T, filename, ...)",
-    inputs: &VALUE_AND_ARGS_INPUTS,
-    outputs: &WRITE_NO_OUTPUT,
-}];
 
 pub use runmat_builtins::DETECT_IMPORT_OPTIONS_DESCRIPTOR;
 pub use runmat_builtins::READTABLE_DESCRIPTOR;
 pub use runmat_builtins::SPREADSHEET_IMPORT_OPTIONS_DESCRIPTOR;
-pub const DICTIONARY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &DICTIONARY_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &TABLE_ERRORS,
-};
-pub const TABLE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &TABLE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &TABLE_ERRORS,
-};
 pub const ARRAY_DATASTORE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &ARRAY_DATASTORE_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -228,12 +113,6 @@ pub const TABLE_COMPAT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 };
 pub const TABLE_VARIADIC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &COMPAT_VARIADIC_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &TABLE_ERRORS,
-};
-pub const TABLE_WRITE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &WRITE_SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &TABLE_ERRORS,
@@ -274,7 +153,9 @@ pub(super) fn table_error(
     if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
     }
-    builder.build()
+    builder
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .build()
 }
 
 pub(super) fn table_error_with_source<E>(
@@ -291,7 +172,9 @@ where
     if let Some(identifier) = error.identifier {
         builder = builder.with_identifier(identifier);
     }
-    builder.build()
+    builder
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .build()
 }
 
 pub(super) fn invalid_argument(message: impl Into<String>) -> RuntimeError {
@@ -306,14 +189,10 @@ pub(super) fn invalid_variable(message: impl Into<String>) -> RuntimeError {
     table_error(&TABLE_ERROR_INVALID_VARIABLE, message)
 }
 
-pub(super) fn map_control_flow(err: RuntimeError) -> RuntimeError {
-    let identifier = err.identifier().map(ToString::to_string);
-    let message = err.message().to_string();
-    let mut builder = build_runtime_error(message)
-        .with_builtin(TABLE_CLASS)
-        .with_source(err);
-    if let Some(identifier) = identifier {
-        builder = builder.with_identifier(identifier);
-    }
-    builder.build()
+pub(super) fn map_control_flow(mut err: RuntimeError) -> RuntimeError {
+    // Gather/control errors already have their owning typed identity/category.
+    // Adding table context must not turn cancellation or admission into an
+    // ordinary semantic error or grant an operational retry.
+    err.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    err
 }

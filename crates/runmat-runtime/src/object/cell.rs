@@ -23,7 +23,11 @@ fn writable_cell(
     if cell.data_owner().is_unique() {
         return Ok((cell, None));
     }
-    if !cell.data_owner().is_exact() {
+    if !cell.data_owner().is_exact()
+        && crate::context::host_allocation::HostAllocationReceipt::policy(context)
+            .map_err(|source| crate::object::indexing::allocation_error(context, source))?
+            == crate::context::host_allocation::HostAllocationPolicy::Unbounded
+    {
         cell.make_data_unique_unbounded()
             .map_err(|error| map_cell_shape_error("cell write owner", error))?;
         return Ok((cell, None));
@@ -54,7 +58,28 @@ fn borrowed_cell<'a>(
     Ok((cell, roots))
 }
 
-fn empty_numeric_cell_value() -> Result<Value, RuntimeError> {
+fn empty_numeric_cell_value(
+    context: Option<&crate::context::RuntimeContext>,
+) -> Result<Value, RuntimeError> {
+    use crate::context::host_allocation::{HostAllocationPlan, HostAllocationReceipt};
+    let error = |source| crate::object::indexing::allocation_error(context, source);
+    let output =
+        HostAllocationPlan::retained_tensor_bytes(runmat_value::NumericDType::F64, &[0, 0])
+            .map_err(error)?;
+    if let Some(receipt) =
+        HostAllocationReceipt::admit(context, HostAllocationPlan::new(0, output).map_err(error)?)
+            .map_err(error)?
+    {
+        let runtime = context.expect("managed filler has an explicit context");
+        let value = receipt
+            .exact_output_tensor(runtime, runmat_value::NumericDType::F64, &[0, 0])
+            .map_err(error)?
+            .into_tensor()
+            .map(Value::Tensor)
+            .map_err(|source| error(source.into()))?;
+        receipt.checkpoint(runtime).map_err(error)?;
+        return Ok(value);
+    }
     Tensor::new(Vec::new(), vec![0, 0])
         .map(Value::Tensor)
         .map_err(|e| map_cell_shape_error("cell growth empty filler", e))
@@ -151,21 +176,57 @@ fn parse_cell_index_value_for_len(value: &Value, len: usize) -> Result<usize, Ru
 }
 
 fn parse_cell_index_values_for_assignment(value: &Value) -> Result<Vec<usize>, RuntimeError> {
+    (0..cell_assignment_index_count(value))
+        .map(|index| cell_assignment_index_at(value, index))
+        .collect()
+}
+
+fn cell_assignment_index_count(value: &Value) -> usize {
     match value {
         // An empty numeric selector has zero brace-assignment destinations.
         // The prepared-output cardinality owner already reports zero for it;
         // do not misroute it through scalar index conversion.
-        Value::Tensor(t) if t.is_empty() => Ok(Vec::new()),
-        Value::Tensor(t) if tensor_element_len(t) > 1 => (0..t.len())
-            .map(|index| {
-                parse_positive_cell_index(index_scalar_from_numeric(
-                    t.numeric_value_at(index)
-                        .expect("validated numeric tensor storage"),
-                )?)
-            })
-            .collect(),
-        _ => Ok(vec![parse_cell_index_value(value)?]),
+        Value::Tensor(t) if t.is_empty() => 0,
+        Value::Tensor(t) if tensor_element_len(t) > 1 => t.len(),
+        _ => 1,
     }
+}
+
+fn cell_assignment_index_at(value: &Value, index: usize) -> Result<usize, RuntimeError> {
+    match value {
+        Value::Tensor(t) if tensor_element_len(t) > 1 => {
+            parse_positive_cell_index(index_scalar_from_numeric(
+                t.numeric_value_at(index)
+                    .expect("validated numeric tensor storage"),
+            )?)
+        }
+        _ => parse_cell_index_value(value),
+    }
+}
+
+/// Same linear Cell brace-selector policy as the ordinary Value adapter,
+/// retaining the final position table's exact admission through mutation.
+pub(crate) fn resolve_cell_assignment_components_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    cell: &CellArray,
+    components: &[crate::object::indexing::ObjectIndexComponent],
+) -> Result<runmat_value::ExactArrayStorage<usize>, RuntimeError> {
+    use crate::object::indexing::ObjectIndexComponent;
+    let [component] = components else {
+        return Err(mex("CellIndexType", "Unsupported cell index type"));
+    };
+    let count = match component {
+        ObjectIndexComponent::Colon => cell.data().len(),
+        ObjectIndexComponent::Value(value) => cell_assignment_index_count(value),
+    };
+    crate::context::host_allocation::initialize_host_array(
+        context,
+        count,
+        |index| match component {
+            ObjectIndexComponent::Colon => Ok(index + 1),
+            ObjectIndexComponent::Value(value) => cell_assignment_index_at(value, index),
+        },
+    )
 }
 
 fn decode_cell_end_plus(value: f64) -> Option<usize> {
@@ -376,15 +437,15 @@ where
                         "Cell growth via linear brace assignment is only supported for vectors",
                     ));
                 }
-                let filler = empty_numeric_cell_value()?;
+                let filler = empty_numeric_cell_value(context)?;
                 let shape = if old_len == 0 {
                     // MATLAB linear growth from empty cell shapes (for example `0x5` or `5x0`)
                     // normalizes to a row vector.
-                    vec![1, i]
+                    [1, i]
                 } else if ca.rows <= 1 {
-                    vec![1, i]
+                    [1, i]
                 } else {
-                    vec![i, 1]
+                    [i, 1]
                 };
                 let old = ca.data();
                 let values = (0..i).map(|position| old.get(position).unwrap_or(&filler));
@@ -419,7 +480,7 @@ where
                         "Cell array expansion exceeds supported size",
                     )
                 })?;
-                let filler = empty_numeric_cell_value()?;
+                let filler = empty_numeric_cell_value(context)?;
                 let old = ca.data();
                 let old_rows = ca.rows;
                 let values = (0..total).map(|linear| {
@@ -477,15 +538,62 @@ pub fn assign_cell_value_multi_in_context<OnWrite>(
     ca: CellArray,
     positions: &[usize],
     rhs_values: &[Value],
+    on_write: OnWrite,
+) -> Result<Value, RuntimeError>
+where
+    OnWrite: FnMut(&Value, &Value),
+{
+    assign_cell_values_in_context(
+        context,
+        ca,
+        positions,
+        CellAssignmentSource::Elements(rhs_values),
+        on_write,
+    )
+}
+
+/// Ordinary fixed-RHS brace assignment repeats a borrowed scalar at the
+/// mutation owner, not an intermediate RHS vector proportional to the target.
+pub fn assign_cell_value_scalar_in_context<OnWrite>(
+    context: Option<&crate::context::RuntimeContext>,
+    ca: CellArray,
+    positions: &[usize],
+    rhs: &Value,
+    on_write: OnWrite,
+) -> Result<Value, RuntimeError>
+where
+    OnWrite: FnMut(&Value, &Value),
+{
+    assign_cell_values_in_context(
+        context,
+        ca,
+        positions,
+        CellAssignmentSource::Replicate(rhs),
+        on_write,
+    )
+}
+
+enum CellAssignmentSource<'a> {
+    Elements(&'a [Value]),
+    Replicate(&'a Value),
+}
+
+fn assign_cell_values_in_context<OnWrite>(
+    context: Option<&crate::context::RuntimeContext>,
+    ca: CellArray,
+    positions: &[usize],
+    source: CellAssignmentSource<'_>,
     mut on_write: OnWrite,
 ) -> Result<Value, RuntimeError>
 where
     OnWrite: FnMut(&Value, &Value),
 {
+    let owner = crate::indexing::plan::admission::Owner::new(context)?;
     if positions.is_empty() {
         return Ok(Value::Cell(ca));
     }
-    if positions.len() != rhs_values.len() {
+    if matches!(&source, CellAssignmentSource::Elements(values) if positions.len() != values.len())
+    {
         return Err(mex(
             "CellAssignmentArityMismatch",
             "Cell brace assignment target count does not match source value count",
@@ -504,11 +612,11 @@ where
                 ));
             }
             let shape = if old_len == 0 || ca.rows <= 1 {
-                vec![1, max_pos]
+                [1, max_pos]
             } else {
-                vec![max_pos, 1]
+                [max_pos, 1]
             };
-            let filler = empty_numeric_cell_value()?;
+            let filler = empty_numeric_cell_value(context)?;
             let old = ca.data();
             let values = (0..max_pos).map(|position| old.get(position).unwrap_or(&filler));
             let (cell, roots) = borrowed_cell(context, &shape, values)?;
@@ -519,7 +627,12 @@ where
     } else {
         writable_cell(ca, context)?
     };
-    for (position, rhs) in positions.iter().zip(rhs_values.iter()) {
+    owner.check()?;
+    for (index, position) in positions.iter().enumerate() {
+        let rhs = match &source {
+            CellAssignmentSource::Elements(values) => &values[index],
+            CellAssignmentSource::Replicate(value) => *value,
+        };
         if *position == 0 || *position > ca.data().len() {
             return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
         }
@@ -800,6 +913,183 @@ mod tests {
             panic!("expected cell result");
         };
         assert_eq!(cell.data()[2], Value::Num(42.0));
+    }
+
+    #[test]
+    fn scalar_brace_replication_uses_the_shared_mutation_and_barrier_order() {
+        let cell = CellArray::new(vec![Value::Num(10.0), Value::Num(20.0)], 1, 2).unwrap();
+        let positions = [2, 1, 2];
+        let rhs = Value::Num(7.0);
+        let mut scalar_writes = Vec::new();
+        let scalar = super::assign_cell_value_scalar_in_context(
+            None,
+            cell.clone(),
+            &positions,
+            &rhs,
+            |old, new| scalar_writes.push((old.clone(), new.clone())),
+        )
+        .unwrap();
+        let mut explicit_writes = Vec::new();
+        let explicit = super::assign_cell_value_multi(
+            cell,
+            &positions,
+            &[rhs.clone(), rhs.clone(), rhs],
+            |old, new| explicit_writes.push((old.clone(), new.clone())),
+        )
+        .unwrap();
+        assert_eq!(scalar, explicit);
+        assert_eq!(scalar_writes, explicit_writes);
+        assert_eq!(scalar_writes.len(), positions.len());
+    }
+
+    #[test]
+    fn bounded_typed_brace_positions_and_mutation_retain_original_payloads() {
+        use crate::context::{
+            host_effect::ManagedHostEffectLedger, ParallelCapability, RuntimeContext,
+            RuntimeParallelResources, RuntimeParallelService, RuntimeServicePorts,
+        };
+        use crate::object::indexing::ObjectIndexComponent;
+        use std::rc::Rc;
+        struct Parallel(ManagedHostEffectLedger);
+        impl RuntimeParallelService for Parallel {
+            fn supports(&self, _: ParallelCapability) -> bool {
+                false
+            }
+            fn placement_resources(&self) -> RuntimeParallelResources {
+                let state = self.0.snapshot();
+                RuntimeParallelResources {
+                    cpu_millicores_available: 1000,
+                    memory_available_bytes: Some(state.free_bytes()),
+                    epoch: state.epoch,
+                }
+            }
+            fn managed_host_effect_ledger(&self) -> Option<ManagedHostEffectLedger> {
+                Some(self.0.clone())
+            }
+        }
+        let context = |ledger: &ManagedHostEffectLedger| {
+            RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+                .with_service_ports(
+                    RuntimeServicePorts::default().with_parallel(Rc::new(Parallel(ledger.clone()))),
+                )
+        };
+        let ledger = ManagedHostEffectLedger::new(1 << 20);
+        let runtime = context(&ledger);
+        {
+            let original = CellArray::new(
+                vec![
+                    Value::Num(11.),
+                    Value::Num(12.),
+                    Value::Num(21.),
+                    Value::Num(22.),
+                ],
+                2,
+                2,
+            )
+            .unwrap();
+            let indices = [ObjectIndexComponent::Value(Value::Tensor(
+                Tensor::new(vec![4., 1., 4.], vec![1, 3]).unwrap(),
+            ))];
+            let positions = super::resolve_cell_assignment_components_in_context(
+                Some(&runtime),
+                &original,
+                &indices,
+            )
+            .unwrap();
+            assert_eq!(positions.as_slice(), &[4, 1, 4]);
+            let rhs = Value::Tensor(Tensor::new(vec![7., 8.], vec![1, 2]).unwrap());
+            let Value::Tensor(tensor) = &rhs else {
+                unreachable!()
+            };
+            let pointer = tensor.as_f64_slice().unwrap().as_ptr();
+            let mut writes = Vec::new();
+            let result = super::assign_cell_value_scalar_in_context(
+                Some(&runtime),
+                original.clone(),
+                &positions,
+                &rhs,
+                |old, _| writes.push(old.clone()),
+            )
+            .unwrap();
+            assert_eq!(writes, [Value::Num(22.), Value::Num(11.), rhs.clone()]);
+            assert_eq!(
+                original.data(),
+                &[
+                    Value::Num(11.),
+                    Value::Num(12.),
+                    Value::Num(21.),
+                    Value::Num(22.)
+                ]
+            );
+            let Value::Cell(result) = result else {
+                panic!("Cell output")
+            };
+            for position in [0, 3] {
+                let Value::Tensor(tensor) = &result.data()[position] else {
+                    panic!("retained Tensor")
+                };
+                assert_eq!(tensor.as_f64_slice().unwrap().as_ptr(), pointer);
+            }
+            assert!(ledger.snapshot().live_claimed_bytes > 0);
+            let all = super::resolve_cell_assignment_components_in_context(
+                Some(&runtime),
+                &original,
+                &[ObjectIndexComponent::Colon],
+            )
+            .unwrap();
+            assert_eq!(all.as_slice(), &[1, 2, 3, 4]);
+            assert!(super::resolve_cell_assignment_components_in_context(
+                Some(&runtime),
+                &original,
+                &[ObjectIndexComponent::Colon, ObjectIndexComponent::Colon]
+            )
+            .is_err());
+            let denied = ManagedHostEffectLedger::new(1);
+            assert!(super::resolve_cell_assignment_components_in_context(
+                Some(&context(&denied)),
+                &original,
+                &indices
+            )
+            .is_err());
+            assert_eq!(denied.snapshot().live_claimed_bytes, 0);
+            assert_eq!(denied.snapshot().live_reserved_bytes, 0);
+            let mut denied_writes = 0;
+            assert!(super::assign_cell_value_multi_in_context(
+                Some(&runtime),
+                original.clone(),
+                &positions,
+                &[],
+                |_, _| denied_writes += 1
+            )
+            .is_err());
+            assert_eq!(denied_writes, 0);
+        }
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+        {
+            let original = CellArray::new(Vec::new(), 0, 0).unwrap();
+            let result = super::assign_cell_value_scalar_in_context(
+                Some(&runtime),
+                original,
+                &[3],
+                &Value::Num(9.),
+                |_, _| {},
+            )
+            .unwrap();
+            let Value::Cell(result) = result else {
+                panic!("grown Cell")
+            };
+            assert_eq!(result.shape(), &[1, 3]);
+            let (Value::Tensor(left), Value::Tensor(right)) =
+                (&result.data()[0], &result.data()[1])
+            else {
+                panic!("empty fillers")
+            };
+            assert_eq!(left.shape(), &[0, 0]);
+            assert_eq!(left.shape().as_ptr(), right.shape().as_ptr());
+        }
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
     }
 
     #[test]

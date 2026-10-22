@@ -231,7 +231,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ipermute_char_array_roundtrip() {
-        let chars = CharArray::new("runmat".chars().collect(), 2, 3).unwrap();
+        let chars = CharArray::from_unicode_scalars("runmat".chars().collect(), 2, 3).unwrap();
         let order = make_tensor(&[2.0, 1.0], &[1, 2]);
         let order_vec =
             parse_order_argument("ipermute", Value::Tensor(order.clone())).expect("parse order");

@@ -7,15 +7,20 @@ fn java_control_decoder_accepts_only_nonempty_text_scalar_shapes() {
         "java.lang.String"
     );
     let text = "java.lang.String";
-    let trailing =
-        CharArray::new_with_shape(text.chars().collect(), vec![1, text.chars().count(), 1])
-            .unwrap();
+    let trailing = CharArray::from_unicode_scalars_with_shape(
+        text.chars().collect(),
+        vec![1, text.chars().count(), 1],
+    )
+    .unwrap();
     assert_eq!(
         string_argument(Some(Value::CharArray(trailing)), "class").unwrap(),
         text
     );
-    let pages = CharArray::new_with_shape(text.chars().collect(), vec![1, 1, text.chars().count()])
-        .unwrap();
+    let pages = CharArray::from_unicode_scalars_with_shape(
+        text.chars().collect(),
+        vec![1, 1, text.chars().count()],
+    )
+    .unwrap();
     for invalid in [
         Value::Num(7.0),
         Value::Bool(true),

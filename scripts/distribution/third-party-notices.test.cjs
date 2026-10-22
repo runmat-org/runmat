@@ -13,9 +13,21 @@ test("distribution notices survive native and npm archives without changing pack
     const expected = Buffer.concat([
       readFileSync(join(runtime, "src/builtins/math/linalg/ops/linear_operator/LAPACK-LICENSE.txt")),
       Buffer.from("\n"),
+      readFileSync(join(runtime, "src/builtins/math/linalg/ops/sparse_factor/managed_lu/FAER-LICENSE.txt")),
+      Buffer.from("\n"),
       readFileSync(join(runtime, "licenses/UNICODE-LICENSE.txt")),
     ]);
     assert.deepEqual(thirdPartyNoticeBytes(), expected);
+    // The native/AOT owner deliberately uses only literal include_str! and
+    // newline concatenation. Check that exact assembly, not a second notice
+    // inventory that can pass while the actual Rust payload silently drifts.
+    const native = readFileSync(join(runtime, "src/third_party_notices.rs"), "utf8");
+    const assembly = native.match(/concat!\(([\s\S]*?)\)\s*\.as_bytes\(\)/)?.[1];
+    assert.ok(assembly, "native notice owner must expose its literal assembly");
+    assert.equal(assembly.replace(/include_str!\("[^"]+"\)|"\\n"|[\s,]/g, ""), "", "unrecognized native notice assembly");
+    const nativeParts = [...assembly.matchAll(/include_str!\("([^"]+)"\)|"\\n"/g)].map(part =>
+      part[1] ? readFileSync(resolve(runtime, "src", part[1])) : Buffer.from("\n"));
+    assert.deepEqual(Buffer.concat(nativeParts), expected, "native/AOT and JS delivery must retain identical notice bytes");
     const product = join(root, "native");
     mkdirSync(product);
     stageThirdPartyNotices(product);

@@ -14,44 +14,80 @@ use crate::RuntimeError;
 use futures::TryFutureExt;
 use runmat_value::{BoundFunctionBinding, Value};
 use std::future::Future;
-use std::pin::Pin;
 
-type ExecutionFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, RuntimeError>> + 'a>>;
-
+type ExecutionFuture<'a, T> = crate::execution::RuntimeContinuationFuture<'a, T>;
+pub(super) fn admit_future<'a, F, O>(
+    runtime: Option<&RuntimeContext>,
+    future: F,
+) -> ExecutionFuture<'a, O>
+where
+    F: Future<Output = Result<O, RuntimeError>> + 'a,
+    O: crate::execution::rooted_continuation::RootedCompletion + 'a,
+{
+    crate::execution::rooted_continuation::admit_rooted_future(
+        runtime,
+        "callable descriptor",
+        crate::builtin::builtin_control_error,
+        future,
+    )
+}
+pub(super) trait DescriptorArguments {
+    fn prepare(
+        self,
+        runtime: Option<&RuntimeContext>,
+    ) -> Result<crate::call::BuiltinArguments, RuntimeError>;
+}
+impl DescriptorArguments for Vec<Value> {
+    fn prepare(
+        self,
+        runtime: Option<&RuntimeContext>,
+    ) -> Result<crate::call::BuiltinArguments, RuntimeError> {
+        match runtime {
+            Some(runtime) => RootedValues::in_context(self, runtime),
+            None => RootedValues::new(self).map_err(|e| e.into_runtime_error()),
+        }
+        .map(Into::into)
+    }
+}
+impl DescriptorArguments for crate::call::BuiltinArguments {
+    fn prepare(self, _runtime: Option<&RuntimeContext>) -> Result<Self, RuntimeError> {
+        Ok(self)
+    }
+}
 fn root_arguments(
     runtime: Option<&RuntimeContext>,
-    args: Vec<Value>,
-) -> Result<RootedValues, RuntimeError> {
-    match runtime {
-        Some(runtime) => RootedValues::in_context(args, runtime),
-        None => RootedValues::new(args).map_err(|error| error.into_runtime_error()),
-    }
+    args: crate::call::BuiltinArguments,
+) -> Result<crate::call::RootedFunctionArguments, RuntimeError> {
+    args.into_supplied_function_arguments(runtime)
 }
 
 #[inline(never)]
 fn captured_resolved(
     runtime: Option<&RuntimeContext>,
-    identity: runmat_types::CallableIdentity,
+    identity: crate::call::identity::CallableIdentityOwner,
     fallback_policy: runmat_types::CallableFallbackPolicy,
     closure: super::RetainedClosureValue,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
     requested_outputs: usize,
     metadata: CallableMetadata,
 ) -> ExecutionFuture<'_, RootedValueSequence> {
     let callable = match closure.retain_for_call(runtime) {
         Ok(callable) => callable,
-        Err(error) => return Box::pin(async move { Err(error) }),
+        Err(error) => return admit_future(runtime, async move { Err(error) }),
     };
     let supplied = match root_arguments(runtime, args) {
         Ok(supplied) => supplied,
-        Err(error) => return Box::pin(async move { Err(error) }),
+        Err(error) => return admit_future(runtime, async move { Err(error) }),
     };
-    let arguments = match crate::call::RootedFunctionArguments::captured(callable, supplied) {
+    let arguments = match crate::call::BuiltinArguments::new(supplied)
+        .rebind_callee(Some(callable), runtime)
+        .map(|args| args.into_function_arguments())
+    {
         Ok(arguments) => arguments,
-        Err(error) => return Box::pin(async move { Err(error) }),
+        Err(error) => return admit_future(runtime, async move { Err(error) }),
     };
-    Box::pin(async move {
-        if let runmat_types::CallableIdentity::BoundFunction(function) = identity {
+    admit_future(runtime, async move {
+        if let runmat_types::CallableIdentity::BoundFunction(function) = identity.as_identity() {
             let Some(result) = crate::user_functions::try_call_rooted_semantic_function_in_context(
                 runtime,
                 function.0,
@@ -79,9 +115,9 @@ fn captured_resolved(
     })
 }
 
-pub(super) fn execute(
+pub(super) fn execute<A: DescriptorArguments>(
     runtime: Option<&RuntimeContext>,
-    descriptor: CallableDescriptor,
+    descriptor: CallableDescriptor<A>,
 ) -> impl Future<Output = Result<RootedValueSequence, RuntimeError>> + '_ {
     let CallableDescriptor {
         target,
@@ -89,44 +125,51 @@ pub(super) fn execute(
         requested_outputs,
         metadata,
     } = descriptor;
-    let selected = match target {
-        CallableTarget::Bound(binding) => {
-            bound(runtime, binding, args, requested_outputs, metadata)
-        }
-        CallableTarget::BoundLexical { binding, closure } => {
-            bound_lexical(runtime, binding, closure, args, requested_outputs, metadata)
-        }
-        CallableTarget::CapturedResolved {
-            identity,
-            fallback_policy,
-            closure,
-        } => captured_resolved(
-            runtime,
-            identity,
-            fallback_policy,
-            closure,
-            args,
-            requested_outputs,
-            metadata,
-        ),
-        CallableTarget::Resolved {
-            identity,
-            fallback_policy,
-        } => resolved(
-            runtime,
-            identity,
-            args,
-            requested_outputs,
-            metadata,
-            fallback_policy,
-        ),
-        CallableTarget::FevalForward(value) => forwarded(runtime, value, args, requested_outputs),
-        CallableTarget::RetainedFevalForward(_) => Box::pin(async move {
-            Err(crate::runtime_error::semantic_error(
-                "RunMat:Callable:RepeatableOwner",
-                "retained forwarded target requires its repeatable root owner",
-            ))
-        }),
+    let selected = match args.prepare(runtime) {
+        Err(error) => admit_future(runtime, async move { Err(error) }),
+        Ok(args) => match target {
+            CallableTarget::Bound(binding) => {
+                bound(runtime, binding, args, requested_outputs, metadata)
+            }
+            CallableTarget::BoundLexical { binding, closure } => {
+                bound_lexical(runtime, binding, closure, args, requested_outputs, metadata)
+            }
+            CallableTarget::CapturedResolved {
+                identity,
+                fallback_policy,
+                closure,
+            } => captured_resolved(
+                runtime,
+                identity,
+                fallback_policy,
+                closure,
+                args,
+                requested_outputs,
+                metadata,
+            ),
+            CallableTarget::Resolved {
+                identity,
+                fallback_policy,
+            } => resolved(
+                runtime,
+                identity,
+                args,
+                requested_outputs,
+                metadata,
+                fallback_policy,
+            ),
+            CallableTarget::FevalForward(value) => forwarded(
+                runtime,
+                value,
+                args,
+                requested_outputs,
+                metadata.function_input_callsite,
+            ),
+            CallableTarget::RetainedFevalForward(value) => admit_future(
+                runtime,
+                invoke_retained_forwarded(runtime, value, args, requested_outputs, metadata),
+            ),
+        },
     };
     selected.map_ok(move |value| {
         if requested_outputs == 0 {
@@ -137,9 +180,9 @@ pub(super) fn execute(
     })
 }
 
-pub(super) fn try_execute(
+pub(super) fn try_execute<A: DescriptorArguments>(
     runtime: Option<&RuntimeContext>,
-    descriptor: CallableDescriptor,
+    descriptor: CallableDescriptor<A>,
 ) -> impl Future<Output = Result<Option<RootedValueSequence>, RuntimeError>> + '_ {
     let CallableDescriptor {
         target,
@@ -147,50 +190,58 @@ pub(super) fn try_execute(
         requested_outputs,
         metadata,
     } = descriptor;
-    let selected = match target {
-        CallableTarget::Bound(binding) => {
-            try_bound(runtime, binding, args, requested_outputs, metadata)
-        }
-        CallableTarget::BoundLexical { binding, closure } => Box::pin(
-            bound_lexical(runtime, binding, closure, args, requested_outputs, metadata)
-                .map_ok(Some),
-        ),
-        CallableTarget::CapturedResolved {
-            identity,
-            fallback_policy,
-            closure,
-        } => Box::pin(
-            captured_resolved(
+    let selected = match args.prepare(runtime) {
+        Err(error) => admit_future(runtime, async move { Err(error) }),
+        Ok(args) => match target {
+            CallableTarget::Bound(binding) => {
+                try_bound(runtime, binding, args, requested_outputs, metadata)
+            }
+            CallableTarget::BoundLexical { binding, closure } => admit_future(
                 runtime,
+                bound_lexical(runtime, binding, closure, args, requested_outputs, metadata)
+                    .map_ok(Some),
+            ),
+            CallableTarget::CapturedResolved {
                 identity,
                 fallback_policy,
                 closure,
+            } => admit_future(
+                runtime,
+                captured_resolved(
+                    runtime,
+                    identity,
+                    fallback_policy,
+                    closure,
+                    args,
+                    requested_outputs,
+                    metadata,
+                )
+                .map_ok(Some),
+            ),
+            CallableTarget::Resolved {
+                identity,
+                fallback_policy,
+            } => try_resolved(
+                runtime,
+                identity,
                 args,
                 requested_outputs,
                 metadata,
-            )
-            .map_ok(Some),
-        ),
-        CallableTarget::Resolved {
-            identity,
-            fallback_policy,
-        } => try_resolved(
-            runtime,
-            identity,
-            args,
-            requested_outputs,
-            metadata,
-            fallback_policy,
-        ),
-        CallableTarget::FevalForward(value) => {
-            try_forwarded(runtime, value, args, requested_outputs)
-        }
-        CallableTarget::RetainedFevalForward(_) => Box::pin(async move {
-            Err(crate::runtime_error::semantic_error(
-                "RunMat:Callable:RepeatableOwner",
-                "retained forwarded target requires its repeatable root owner",
-            ))
-        }),
+                fallback_policy,
+            ),
+            CallableTarget::FevalForward(value) => try_forwarded(
+                runtime,
+                value,
+                args,
+                requested_outputs,
+                metadata.function_input_callsite,
+            ),
+            CallableTarget::RetainedFevalForward(value) => admit_future(
+                runtime,
+                invoke_retained_forwarded(runtime, value, args, requested_outputs, metadata)
+                    .map_ok(Some),
+            ),
+        },
     };
     selected.map_ok(move |value| {
         value.map(|value| {
@@ -207,22 +258,25 @@ pub(super) fn try_execute(
 fn bound(
     runtime: Option<&RuntimeContext>,
     binding: BoundFunctionBinding,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
     requested_outputs: usize,
     metadata: CallableMetadata,
 ) -> ExecutionFuture<'_, RootedValueSequence> {
     let arguments = match root_arguments(runtime, args) {
         Ok(arguments) => arguments,
-        Err(error) => return Box::pin(async move { Err(error) }),
+        Err(error) => return admit_future(runtime, async move { Err(error) }),
     };
-    Box::pin(invoke_bound(
+    admit_future(
         runtime,
-        binding,
-        crate::call::RootedFunctionArguments::ordinary(arguments),
-        requested_outputs,
-        metadata,
-        None,
-    ))
+        invoke_bound(
+            runtime,
+            binding,
+            arguments,
+            requested_outputs,
+            metadata,
+            None,
+        ),
+    )
 }
 
 #[inline(never)]
@@ -230,12 +284,12 @@ fn bound_lexical(
     runtime: Option<&RuntimeContext>,
     binding: BoundFunctionBinding,
     closure: super::RetainedClosureValue,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
     requested_outputs: usize,
     metadata: CallableMetadata,
 ) -> ExecutionFuture<'_, RootedValueSequence> {
     if closure.as_closure().binding.as_ref() != Some(&binding) {
-        return Box::pin(async {
+        return admit_future(runtime, async {
             Err(crate::runtime_error::semantic_error(
                 "UnavailableBoundFunction",
                 "captured closure disagrees with its selected bound function",
@@ -246,18 +300,21 @@ fn bound_lexical(
     // external root lease now, before an unpolled future can enter a queue.
     let callable = match closure.retain_for_call(runtime) {
         Ok(callable) => callable,
-        Err(error) => return Box::pin(async move { Err(error) }),
+        Err(error) => return admit_future(runtime, async move { Err(error) }),
     };
     let environment = closure.as_closure().lexical_environment.clone();
     let supplied = match root_arguments(runtime, args) {
         Ok(supplied) => supplied,
-        Err(error) => return Box::pin(async move { Err(error) }),
+        Err(error) => return admit_future(runtime, async move { Err(error) }),
     };
-    let arguments = match crate::call::RootedFunctionArguments::captured(callable, supplied) {
+    let arguments = match crate::call::BuiltinArguments::new(supplied)
+        .rebind_callee(Some(callable), runtime)
+        .map(|args| args.into_function_arguments())
+    {
         Ok(arguments) => arguments,
-        Err(error) => return Box::pin(async move { Err(error) }),
+        Err(error) => return admit_future(runtime, async move { Err(error) }),
     };
-    Box::pin(async move {
+    admit_future(runtime, async move {
         invoke_bound(
             runtime,
             binding,
@@ -274,19 +331,20 @@ fn bound_lexical(
 fn try_bound(
     runtime: Option<&RuntimeContext>,
     binding: BoundFunctionBinding,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
     requested_outputs: usize,
     metadata: CallableMetadata,
 ) -> ExecutionFuture<'_, Option<RootedValueSequence>> {
     let arguments = match root_arguments(runtime, args) {
         Ok(arguments) => arguments,
-        Err(error) => return Box::pin(async move { Err(error) }),
+        Err(error) => return admit_future(runtime, async move { Err(error) }),
     };
-    Box::pin(
+    admit_future(
+        runtime,
         invoke_bound(
             runtime,
             binding,
-            crate::call::RootedFunctionArguments::ordinary(arguments),
+            arguments,
             requested_outputs,
             metadata,
             None,
@@ -359,8 +417,8 @@ async fn try_invoke_bound(
 #[inline(never)]
 fn resolved(
     runtime: Option<&RuntimeContext>,
-    identity: runmat_types::CallableIdentity,
-    args: Vec<Value>,
+    identity: crate::call::identity::CallableIdentityOwner,
+    args: crate::call::BuiltinArguments,
     requested_outputs: usize,
     metadata: CallableMetadata,
     fallback_policy: runmat_types::CallableFallbackPolicy,
@@ -378,8 +436,8 @@ fn resolved(
 #[inline(never)]
 fn try_resolved(
     runtime: Option<&RuntimeContext>,
-    identity: runmat_types::CallableIdentity,
-    args: Vec<Value>,
+    identity: crate::call::identity::CallableIdentityOwner,
+    args: crate::call::BuiltinArguments,
     requested_outputs: usize,
     metadata: CallableMetadata,
     fallback_policy: runmat_types::CallableFallbackPolicy,
@@ -398,40 +456,94 @@ fn try_resolved(
 fn forwarded(
     runtime: Option<&RuntimeContext>,
     value: Value,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
     requested_outputs: usize,
+    input_callsite: Option<crate::callsite::CallsiteInfo>,
 ) -> ExecutionFuture<'_, RootedValueSequence> {
-    Box::pin(invoke_forwarded(runtime, value, args, requested_outputs))
+    admit_future(
+        runtime,
+        invoke_forwarded(runtime, value, args, requested_outputs, input_callsite),
+    )
 }
 
 #[inline(never)]
 fn try_forwarded(
     runtime: Option<&RuntimeContext>,
     value: Value,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
     requested_outputs: usize,
+    input_callsite: Option<crate::callsite::CallsiteInfo>,
 ) -> ExecutionFuture<'_, Option<RootedValueSequence>> {
-    Box::pin(invoke_forwarded(runtime, value, args, requested_outputs).map_ok(Some))
+    admit_future(
+        runtime,
+        invoke_forwarded(runtime, value, args, requested_outputs, input_callsite).map_ok(Some),
+    )
 }
 
 async fn invoke_forwarded(
     runtime: Option<&RuntimeContext>,
     value: Value,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
     requested_outputs: usize,
+    input_callsite: Option<crate::callsite::CallsiteInfo>,
 ) -> Result<RootedValueSequence, RuntimeError> {
-    match runtime {
-        Some(runtime) => {
-            crate::call_feval_sequence_async_with_outputs_in_context(
+    crate::call::feval::invoke_retained(runtime, value, args, requested_outputs, input_callsite)
+        .await
+}
+
+async fn invoke_retained_forwarded(
+    runtime: Option<&RuntimeContext>,
+    value: super::RetainedCallableValue,
+    args: crate::call::BuiltinArguments,
+    requested_outputs: usize,
+    metadata: CallableMetadata,
+) -> Result<RootedValueSequence, RuntimeError> {
+    let name = super::repeatable::retained_target_name(value.value());
+    let Some(name) = name else {
+        return crate::call::feval::invoke_object_retained(
+            runtime,
+            value.value().clone(),
+            args,
+            requested_outputs,
+        )
+        .await;
+    };
+    let captures = matches!(value.value(), Value::Closure(_));
+    let args = args
+        .rebind_callee(captures.then(|| value.0.clone()), runtime)?
+        .into_function_arguments();
+    match crate::user_functions::try_call_rooted_semantic_name_in_context(
+        runtime,
+        name,
+        args,
+        requested_outputs,
+    )
+    .await
+    {
+        std::ops::ControlFlow::Break(result) => result,
+        std::ops::ControlFlow::Continue(args) => {
+            let (identity, fallback) = match value.value() {
+                Value::ExternalFunctionHandle(name) => (
+                    crate::external_callable_identity_for_name(name),
+                    runmat_types::CallableFallbackPolicy::ExternalBoundary,
+                ),
+                Value::MethodFunctionHandle(name) => (
+                    runmat_types::CallableIdentity::Method(runmat_types::MethodId(
+                        name.name().to_owned(),
+                    )),
+                    runmat_types::CallableFallbackPolicy::RuntimeNameResolution,
+                ),
+                _ => crate::callable_identity_for_handle_name(name),
+            };
+            crate::dispatch_prepared_callable_with_policy_in_runtime(
                 runtime,
-                value,
-                &args,
+                identity,
+                fallback,
+                args,
                 requested_outputs,
+                metadata.function_input_callsite,
             )
             .await
-        }
-        None => {
-            crate::call_feval_sequence_async_with_outputs(value, &args, requested_outputs).await
         }
     }
 }
@@ -451,6 +563,29 @@ pub(crate) async fn invoke_selected_retained_closure(
     let closure = closure.as_closure();
     let metadata = CallableMetadata::feval(Some(closure.function_name.clone()));
     if let Some(binding) = closure.binding.clone() {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(runtime) = runtime {
+            let selected = runtime.clone();
+            let environment = closure.lexical_environment.clone();
+            // A mapped callback may enter another interpreter from an active
+            // builtin. Keep that owned child on the existing host supervisor,
+            // not on the suspended mapping operation's poll stack.
+            return crate::context::run_selected_callback_continuation_with(
+                runtime,
+                move || async move {
+                    try_invoke_bound(
+                        Some(&selected),
+                        binding,
+                        args,
+                        requested_outputs,
+                        metadata,
+                        environment,
+                    )
+                    .await
+                },
+            )
+            .await;
+        }
         return try_invoke_bound(
             runtime,
             binding,

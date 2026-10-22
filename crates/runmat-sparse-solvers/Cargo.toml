@@ -1,0 +1,11 @@
+[package]
+name = "runmat-sparse-solvers"
+version = "0.6.2"
+edition = "2021"
+license-file = "../../LICENSE.md"
+description = "Value-free caller-owned sparse Krylov mechanisms"
+
+[dependencies]
+num-complex = "0.4"
+libm = "0.2"
+

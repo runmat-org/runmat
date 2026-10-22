@@ -1,4 +1,6 @@
-use runmat_value::{CharArray, IntValue, IntegerStorage, LogicalArray, StringArray, Tensor, Value};
+use runmat_value::{
+    CharArray, IntValue, IntegerStorage, LogicalArray, StringArray, Tensor, Utf16CodeUnit, Value,
+};
 
 use crate::indexing::plan::IndexPlan;
 use crate::runtime_error::semantic_error;
@@ -43,9 +45,13 @@ pub(super) fn read_char(value: &CharArray, plan: &IndexPlan) -> Result<Value, Ru
                 .ok_or_else(index_out_of_bounds)
         })
         .collect::<Result<Vec<_>, _>>()?;
-    CharArray::from_column_major(data, plan.output_shape.clone())
-        .map(Value::CharArray)
-        .map_err(shape_error)
+    let context = crate::context::legacy::active();
+    CharArray::from_column_major(
+        data,
+        plan.row_major_output_shape_in_context(context.as_ref())?,
+    )
+    .map(Value::CharArray)
+    .map_err(shape_error)
 }
 
 pub(super) fn read_scalar_struct(
@@ -72,7 +78,7 @@ pub(super) fn assign_logical(
     let target_len = checked_shape_len(&plan.base_shape)?;
     if value.data.len() < target_len {
         value.data.resize(target_len, 0);
-        value.shape = runmat_value::SharedShape::new_unmanaged(plan.base_shape.clone());
+        value.shape = plan.base_shape.clone();
     }
     let replacements = match rhs {
         Value::Bool(value) => vec![u8::from(*value); plan.indices.len()],
@@ -120,7 +126,7 @@ pub(super) fn assign_char(
 ) -> Result<Value, RuntimeError> {
     let replacements = match rhs {
         Value::CharArray(value) => value.to_column_major(),
-        Value::String(value) => value.chars().collect(),
+        Value::String(value) => value.encode_utf16().map(Utf16CodeUnit::from_raw).collect(),
         _ => {
             return Err(semantic_error(
                 "AssignmentTypeMismatch",
@@ -139,14 +145,21 @@ pub(super) fn assign_char(
         ));
     };
     let mut data = value.to_column_major();
-    data.resize(checked_shape_len(&plan.base_shape)?, ' ');
+    data.resize(
+        checked_shape_len(&plan.base_shape)?,
+        Utf16CodeUnit::from_raw(b' ' as u16),
+    );
     for (index, replacement) in plan.indices.iter().zip(replacements) {
         let index = usize::try_from(*index).map_err(|_| index_out_of_bounds())?;
         *data.get_mut(index).ok_or_else(index_out_of_bounds)? = replacement;
     }
-    CharArray::from_column_major(data, plan.base_shape.clone())
-        .map(Value::CharArray)
-        .map_err(shape_error)
+    let context = crate::context::legacy::active();
+    CharArray::from_column_major(
+        data,
+        plan.row_major_base_shape_in_context(context.as_ref())?,
+    )
+    .map(Value::CharArray)
+    .map_err(shape_error)
 }
 
 pub(super) fn integer_scalar_tensor(value: IntValue) -> Result<Tensor, RuntimeError> {

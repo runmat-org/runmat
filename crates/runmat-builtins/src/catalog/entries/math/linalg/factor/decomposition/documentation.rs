@@ -1,70 +1,98 @@
 use crate::*;
+
 pub(super) const SECTIONS: &[BuiltinDocumentationSection] = &[
- BuiltinDocumentationSection { heading: "Behavior",
- paragraphs: &["The MATLAB-compatible surface accepts full real or complex coefficient matrices of class `single` or `double`. With RunMat extensions enabled, all eight integer coefficient classes and logical coefficients are accepted, subject to the selected type's validation, and retained exactly in the object; strict compatibility mode rejects those forms before gathering a resident value. Sparse inputs remain rejected until RunMat has a sparse solve path behind the decomposition object.",
-"Supported type strings are `'auto'`, `'lu'`, `'qr'`, `'chol'`, `'triangular'`, and `'diagonal'`. The default `'auto'` selects `diagonal`, `triangular`, `lu`, or `qr` based on the matrix shape and structure.",
-"Square-only types reject rectangular matrices. The `diagonal` and `triangular` types validate the corresponding structure. The optional `'upper'` or `'lower'` triangular flag is supported for `decomposition(A, 'triangular', flag)` and ignores the opposite triangle.",
-"The `'chol'` type requires a square symmetric or Hermitian positive-definite matrix. `decomposition(A, 'chol', 'upper')` and `decomposition(A, 'chol', 'lower')` construct that matrix from the selected triangle, ignoring the opposite triangle and conjugating mirrored complex entries. Without a triangle flag, the supplied matrix itself must be symmetric or Hermitian. Triangle flags are rejected for other types except `'triangular'`.",
-"Cholesky validation performs floating arithmetic before storing the object. Real integer coefficients must be exactly representable in binary64, and complex-integer storage is rejected even when its components would be representable. For example, the exact integer `uint64(2^53) + uint64(1)` is rejected for `'chol'`, while `'diagonal'` can retain that value exactly. Logical coefficients remain admitted subject to positive-definiteness.",
-"Name-value options include `CheckCondition` and `RankTolerance`. MATLAB-compatible `CheckCondition` values are logical; accepting an integer scalar is a separately gated RunMat extension. `CheckCondition` is exposed as an object property, while `RankTolerance` is accepted and stored for QR compatibility metadata.",
-"Typed-integer `RankTolerance` and real or paired-complex typed-integer scale factors are independently gated RunMat extensions. Each authoritative integer component must be exactly representable before crossing into binary64 scale or tolerance metadata.",
-"Object properties include `MatrixSize`, `Type`, `CheckCondition`, `Datatype`, `IsConjugateTransposed`, `IsReal`, `IsSparse`, and `ScaleFactor`. Internal coefficient storage is not publicly readable.",
-"Unary plus returns the same decomposition. Unary minus, scalar multiplication, and scalar division return a new decomposition with an adjusted scale factor. GPU scalar operands are gated before provider access because the public decomposition surface does not document GPU Arrays.",
-"Conjugate transpose (`dA'`) toggles `IsConjugateTransposed`, conjugates the scale factor, and solves against the conjugate-transposed coefficient matrix. Gated integer and logical objects retain exact coefficient storage through this structural operation.",
-"Left division (`dA \\ b`) and right division (`b / dA`) support the same real, complex, square, rectangular, and least-squares behavior as RunMat's `mldivide` and `mrdivide` builtins. Integer and logical coefficients are promoted explicitly to binary64 only at this solve boundary, so their solutions are double or complex double.",
-"Element-wise left division (`ldivide` or `.\\`) is not a decomposition-object method, and `decomposition.ldivide` is absent from the builtin registry."] },
-
- BuiltinDocumentationSection { heading: "GPU behavior",
- paragraphs: &["The compatibility target does not document GPU Array support for `decomposition`. RunMat retains gpuArray arguments behind its explicit extension mode and gathers them to host storage because the object owns normalized matrix metadata.",
-"Solves through `dA \\ b` and `b / dA` call the existing `mldivide` and `mrdivide` implementations with the effective coefficient matrix. If a provider accepts that solve, residency follows the same provider behavior as direct matrix division; otherwise RunMat uses the host fallback."] },
-
- BuiltinDocumentationSection { heading: "Execution and ownership",
- paragraphs: &["All identities return one value. Discarding the output does not skip validation; extra requested outputs fail before provider access. Construction defaults to auto type, CheckCondition=true and no RankTolerance. All arrays with more than two dimensions and sparse coefficients are rejected; empty matrices retain shape.",
- "Objects have value semantics and own host coefficient storage; structural operations return new metadata without mutating the input. There are no user callbacks or filesystem, network, clock, RNG, or workspace effects. Compatibility mode and optional provider services are ambient dependencies. GPU controls are gated and gathered through their owner; solves retain their shared solver provider route. Nested property indexing uses the canonical object indexing protocol.",
- "The portable typed runtime binding is the native/JIT/AOT semantic slow path. Provider gather and solve may suspend. Execution stack, rooting, output adoption and continuation are managed by shared runtime services. Direct distributed values are unsupported; ordinary workers may use transferable value objects and numeric operands, subject to canonical value-transfer and provider-affinity admission. Provider failures are not an invitation to replay side effects.",
- "Timing and placement use shared gather and solver operation boundaries; no decomposition-specific threshold, scheduler, timer or cost table is introduced. Coefficient shape, storage and precision, effective transpose/scale, solve direction and RHS shape are the semantic workload inputs. Native, browser, provider ownership and timing conformance need integrated execution evidence."] }
+    BuiltinDocumentationSection {
+        heading: "Construction and factor selection",
+        paragraphs: &[
+            "Coefficient matrices can be full or sparse, real or complex, single or double. Trailing singleton dimensions are accepted; non-singleton dimensions beyond the second are rejected. Empty matrices retain their exact shape.",
+            "Supported types are 'auto', 'lu', 'qr', 'cod', 'chol', 'triangular' and 'diagonal'. Automatic selection uses diagonal or triangular structure when available, LU for other square matrices and QR for rectangular matrices. Other type names are rejected rather than silently mapped to a different algorithm.",
+            "LU, Cholesky, triangular and diagonal objects require square matrices. A diagonal or unqualified triangular request validates that structure. For triangular and Cholesky requests, an optional 'upper' or 'lower' flag selects one triangle and ignores the other. Cholesky constructs the corresponding symmetric or Hermitian matrix and requires positive definiteness.",
+            "Explicit LU, Cholesky, QR and COD constructors compute and retain their numerical factors once. Dense matrices use compact native dense factors; sparse matrices retain sparse factors and ordering maps without densifying the coefficients. Diagonal and triangular objects borrow their original storage and use substitution without creating an unnecessary LU factorization.",
+        ],
+    },
+    BuiltinDocumentationSection {
+        heading: "Solves, rank and warnings",
+        paragraphs: &[
+            "Use dA \\ b for a left solve and b / dA for a right solve. A QR object returns a basic least-squares solution. A COD object instead returns a minimum-norm least-squares solution, including wide and rank-deficient systems. QR does not support solving through dA' or using b / dA; choose COD for those forms. Singular explicit LU retains its selected LU arithmetic and does not silently switch to a minimum-norm solver.",
+            "RankTolerance is an absolute threshold on the magnitudes of the pivoted R diagonal. It determines the retained rank for QR, COD and automatically selected rectangular QR; other types preserve but ignore it. It must be a nonnegative real scalar. A different tolerance can change the low-rank approximation and the returned solution.",
+            "CheckCondition defaults to true. Set it to false to suppress the implemented singular-pivot and rank-deficiency warnings; it does not change the selected algorithm, rank tolerance or numerical result. RunMat does not yet implement a general near-singular condition estimator for this object. MATLAB documents logical controls; RunMat also retains its existing real-numeric truth-value coercion, with typed integer controls separately gated as an extension.",
+            "Solutions are dense arrays. Single precision is retained if the coefficient factor or right-hand side is single; otherwise floating solutions use double. Complex coefficients, right-hand sides or scale factors produce complex solutions. A real factor can solve a complex right-hand side without discarding its imaginary part.",
+            "A nonscalar floating coefficient matrix requires a floating right-hand side. The real scalar double-coefficient/integer-right-hand-side form retains the existing integer division rules; an integer coefficient matrix admitted by RunMat extensions instead uses the documented checked floating calculation boundary.",
+        ],
+    },
+    BuiltinDocumentationSection {
+        heading: "Properties and value semantics",
+        paragraphs: &[
+            "Public properties include MatrixSize, Type, CheckCondition, Datatype, IsConjugateTransposed, IsReal, IsSparse and ScaleFactor. RankTolerance and Triangle are present when supplied. The original coefficient payload and numerical factor arrays are not publicly readable.",
+            "MatrixSize is a two-element double row vector. Exact storage dimensions remain authoritative; this display property is not used to reconstruct a shape. Datatype records the original coefficient class, including admitted integer or logical extensions.",
+            "Unary plus preserves the object. Negation, scalar multiplication and scalar division create new metadata sharing the same immutable factors. Conjugate transpose toggles the selected orientation and conjugates the scale without forming a transposed coefficient array or refactoring it. Neither operation mutates the original object. QR solve restrictions still apply after transposition.",
+            "Element-wise left division (ldivide or .\\) is not a decomposition-object method. The registry does not expose decomposition.ldivide.",
+        ],
+    },
+    BuiltinDocumentationSection {
+        heading: "RunMat extensions and GPU inputs",
+        paragraphs: &[
+            "With RunMat extensions enabled, coefficient arrays may use any of the eight integer classes or logical storage. Their original class and values remain in the object. Strict compatibility mode rejects extension-only inputs before a provider gather.",
+            "LU, QR and COD convert nonfloating coefficients once at factor construction. Every integer real and imaginary component must be exactly representable in binary64; conversion failure is reported instead of rounding a wide value silently. Cholesky keeps its additional rejection of paired complex-integer storage. Structural diagonal and triangular objects can retain wide integers exactly at construction, but still require a checked floating boundary when solving.",
+            "Typed integer RankTolerance, integer CheckCondition and real or paired-complex integer scale controls have independent extension checks. Scale and tolerance components must be exactly representable at their floating metadata boundary.",
+            "Explicit gpuArray coefficients, operands and controls use the declared RunMat extension gates. Admitted resident inputs gather through their provider owner. Factor construction and retained-factor solves execute on the host. A solve with a resident right-hand side restores the result through that operand's provider, preserving its device, output class and placement intent. It does not refactor the matrix through a generic GPU solver or claim a resident GPU factorization.",
+        ],
+    },
+    BuiltinDocumentationSection {
+        heading: "Execution, ownership and persistence",
+        paragraphs: &[
+            "Each operation returns one value. Discarding it still validates the call; requesting extra outputs fails before provider access. Runtime services own gathering, cooperative work, CPU jobs, rooting and output publication. A later solve uses its current caller's authority and fresh scratch/output owners while sharing immutable factor payloads.",
+            "Structural operations do not duplicate the coefficient or factor arrays. Right and adjoint solves read the selected orientation without first creating a whole transposed right-hand-side copy. Factor payloads retain their physical allocation owners until the last alias is retired.",
+            "Native, JIT, AOT and browser execution use the same typed Runtime bindings and numerical contracts. Placement uses the existing host work and provider-transfer boundaries; no separate decomposition timer, cost table or dispatch threshold is introduced.",
+            "Durable preferences preserve retained factors and their rank/permutation metadata. Selected readback validates and imports them under the current Runtime context rather than refactoring on every solve. MAT persistence stores the coefficient/options recipe and reconstructs it once during selected import. ExecutionV2 worker transport currently rejects decomposition objects; a generic object record is not an alternative transport for native factor state.",
+        ],
+    },
 ];
-pub(super) const FAQS: &[BuiltinDocumentationFaq] = &[BuiltinDocumentationFaq { question: "Does `decomposition` expose the raw LU or QR factors?",
- answer: "No. MATLAB's `decomposition` object is an opaque solve object, and RunMat follows that surface. Use `lu`, `qr`, `chol`, or `svd` when you need explicit factors." },
 
-BuiltinDocumentationFaq { question: "Does RunMat cache native factor arrays internally?",
- answer: "The current implementation stores the normalized coefficient matrix plus decomposition metadata and delegates each solve to the shared matrix-division solvers. This preserves MATLAB solve semantics across square, rectangular, and complex cases; dedicated cached factor storage can be added behind the same object surface later." },
+pub(super) const FAQS: &[BuiltinDocumentationFaq] = &[
+    BuiltinDocumentationFaq {
+        question: "Can I read the LU or QR arrays from the object?",
+        answer: "No. Use lu, qr or chol when you need explicit factors. A decomposition object retains private immutable factors for reuse by its solve methods.",
+    },
+    BuiltinDocumentationFaq {
+        question: "When should I choose COD instead of QR?",
+        answer: "Choose COD when a wide or rank-deficient problem needs the minimum-norm answer, or when you need a right or conjugate-transposed solve. QR provides a basic least-squares answer and rejects those solve orientations.",
+    },
+    BuiltinDocumentationFaq {
+        question: "Does sparse construction create a dense coefficient copy?",
+        answer: "No. Sparse input uses sparse factor storage. Factor fill can still require more space than the original matrix; allocation and growth are admitted by the existing numerical owners.",
+    },
+    BuiltinDocumentationFaq {
+        question: "Which broader forms remain unsupported?",
+        answer: "LDL, banded, Hessenberg and permuted-triangular decomposition types are not implemented. General near-singular condition estimation and ExecutionV2 transport also remain outside the supported object surface. Unsupported forms return an error rather than a different factorization.",
+    },
+];
 
-BuiltinDocumentationFaq { question: "Which object operations are supported?",
- answer: "RunMat supports property access, unary plus/minus, conjugate transpose, scalar multiplication, scalar division, left division, and right division for decomposition objects." },
+pub(super) const LINKS: &[BuiltinDocumentationLink] = &[
+    BuiltinDocumentationLink { label: "mldivide", target: BuiltinDocumentationLinkTarget::Builtin("mldivide") },
+    BuiltinDocumentationLink { label: "mrdivide", target: BuiltinDocumentationLinkTarget::Builtin("mrdivide") },
+    BuiltinDocumentationLink { label: "lu", target: BuiltinDocumentationLinkTarget::Builtin("lu") },
+    BuiltinDocumentationLink { label: "qr", target: BuiltinDocumentationLinkTarget::Builtin("qr") },
+    BuiltinDocumentationLink { label: "chol", target: BuiltinDocumentationLinkTarget::Builtin("chol") },
+    BuiltinDocumentationLink { label: "svd", target: BuiltinDocumentationLinkTarget::Builtin("svd") },
+    BuiltinDocumentationLink {
+        label: "MATLAB decomposition reference",
+        target: BuiltinDocumentationLinkTarget::External("https://www.mathworks.com/help/matlab/ref/decomposition.html"),
+    },
+    BuiltinDocumentationLink {
+        label: "Runtime implementation",
+        target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/factor/decomposition.rs"),
+    },
+];
 
-BuiltinDocumentationFaq { question: "How are integer and logical coefficient matrices handled?",
- answer: "They are RunMat-only extensions. With extensions enabled, successful construction and structural transpose preserve exact host storage for all eight integer classes and logical arrays. The `'chol'` constructor additionally requires exactly binary64-representable real integer coefficients and rejects complex-integer storage because its validation performs floating arithmetic. A solve promotes the effective coefficient matrix to double at the solve boundary and reports a double or complex-double solution. With extensions disabled, construction and later object methods reject the extended object with a stable compatibility identifier." },
-
-BuiltinDocumentationFaq { question: "Are condition warnings emitted?",
- answer: "No. The `CheckCondition` property is parsed and preserved, but RunMat does not yet emit MATLAB-compatible condition warnings during decomposition construction or solve." },
-
-BuiltinDocumentationFaq { question: "Are sparse decomposition objects supported?",
- answer: "Not yet. RunMat rejects sparse coefficient matrices instead of silently densifying them, because large sparse matrices need a dedicated sparse solve path to be safe and MATLAB-compatible." },
-
-BuiltinDocumentationFaq { question: "Which broader decomposition features are still incomplete?",
- answer: "The current object does not implement sparse decomposition, cached native factor storage, condition warnings, algorithmic use of RankTolerance, or the additional banded, Hessenberg, LDL, COD, and permuted-triangular forms. Unsupported type strings are rejected explicitly." }];
-pub(super) const LINKS: &[BuiltinDocumentationLink] = &[BuiltinDocumentationLink { label: "mldivide",
- target: BuiltinDocumentationLinkTarget::Builtin("mldivide") },
-
-BuiltinDocumentationLink { label: "mrdivide",
- target: BuiltinDocumentationLinkTarget::Builtin("mrdivide") },
-
-BuiltinDocumentationLink { label: "lu",
- target: BuiltinDocumentationLinkTarget::Builtin("lu") },
-
-BuiltinDocumentationLink { label: "qr",
- target: BuiltinDocumentationLinkTarget::Builtin("qr") },
-
-BuiltinDocumentationLink { label: "chol",
- target: BuiltinDocumentationLinkTarget::Builtin("chol") },
-
-BuiltinDocumentationLink { label: "svd",
- target: BuiltinDocumentationLinkTarget::Builtin("svd") },
- BuiltinDocumentationLink { label: "crates/runmat-runtime/src/builtins/math/linalg/factor/decomposition.rs",
- target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/factor/decomposition.rs") }];
-pub(super) const EVIDENCE: BuiltinDocumentationEvidence = BuiltinDocumentationEvidence { implementation: &[],
- verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest,
- label: "Decomposition semantic, integer and gate tests",
- location: "builtins::math::linalg::factor::decomposition::tests" }],
- notes: &["Legacy title/category/keywords/summary/description/behaviors/examples/FAQ/links/source and GPU behavior preserved; examples now carry numerical oracles. Legacy null requires_feature is no requirement. GPU precisions and fusion flags are represented by typed optional-provider/boundary declarations and prose; no direct fusion is claimed. No legacy media or integration test fields existed. DynamicByDesign reflects opaque coefficient metadata and property/solve output-dependent facts, not a claim of platform qualification."] };
+pub(super) const EVIDENCE: BuiltinDocumentationEvidence = BuiltinDocumentationEvidence {
+    implementation: &[],
+    verification: &[BuiltinEvidenceReference {
+        kind: BuiltinEvidenceKind::UnitTest,
+        label: "Decomposition semantics, native factors, ownership and extension gates",
+        location: "builtins::math::linalg::factor::decomposition::tests",
+    }],
+    notes: &[
+        "Opaque object facts do not prove the class or shape of every solve output. Native factors, selected-context persistence, browser and hardware execution require their actual matching qualification receipts; documentation is not execution evidence.",
+    ],
+};

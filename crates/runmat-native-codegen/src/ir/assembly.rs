@@ -22,6 +22,15 @@ pub struct NativeAssembly {
     pub program: ProgramRevision,
     pub executable_cache_key: Digest,
     pub native_cache_key: Digest,
+    /// Digest of the admitted AnalysisStore component from which operation
+    /// contracts were projected. This is checked against the executable
+    /// manifest; it is not self-issued Native IR authority.
+    pub analysis_component: Digest,
+    /// Canonical digest of the exact admitted AnalysisStore projection used
+    /// for the retained Native functions. Consumers must verify this field
+    /// against the independently owned AnalysisStore; it is not authority by
+    /// itself.
+    pub analysis_projection: Digest,
     pub target: NativeTarget,
     pub requirements: NativeRequirements,
     /// Compiler/session identity selected for this product. Portable artifact
@@ -55,6 +64,14 @@ impl NativeAssembly {
             .flat_map(|block| &block.instructions)
         {
             effects.extend(instruction.effects.0.iter().copied());
+        }
+        for terminator in self
+            .functions
+            .iter()
+            .flat_map(|function| &function.blocks)
+            .map(|block| &block.terminator)
+        {
+            effects.extend(terminator.effects.0.iter().copied());
         }
         for region in &self.requirements.regions {
             effects.extend(region.effects.0.iter().copied());

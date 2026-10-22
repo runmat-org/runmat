@@ -66,7 +66,7 @@ fn characters(shape: &[usize]) -> crate::BuiltinResult<Value> {
     }
     let rows = normalized.first().copied().unwrap_or(1);
     let columns = normalized.get(1).copied().unwrap_or(1);
-    CharArray::new(Vec::new(), rows, columns)
+    CharArray::from_code_units(Vec::new(), rows, columns)
         .map(Value::CharArray)
         .map_err(arrayfun_internal)
 }

@@ -328,6 +328,72 @@ impl InterpreterStack {
         drop(drained);
         Ok(result)
     }
+
+    /// Move a non-tail captured window into the canonical exact output owner.
+    /// The source backing and its claim remain live while the separately
+    /// admitted destination initializes; allocation denial precedes draining.
+    pub(crate) fn try_extract_output_range(
+        &mut self,
+        start: usize,
+        end: usize,
+    ) -> Result<runmat_value::OutputListStorage, RuntimeError> {
+        if start > end || end > self.values.len() {
+            return Err(mex(
+                "StackWindow",
+                "captured output range is outside the operand stack",
+            ));
+        }
+        let Some(context) = &self.context else {
+            return Ok(runmat_value::OutputListStorage::unbounded(
+                self.values.drain(start..end).collect(),
+            ));
+        };
+        let count = end - start;
+        let allocation = |source| {
+            crate::runtime::workspace::frame_allocation_error_in_context(Some(context), source)
+        };
+        let bytes = u64::try_from(
+            runmat_value::OutputListStorage::requested_bytes(count)
+                .map_err(HostAllocationError::Numeric)
+                .map_err(allocation)?,
+        )
+        .map_err(|_| allocation(HostAllocationError::Overflow))?;
+        let retained =
+            HostAllocationPlan::retained_exact_output_bytes(bytes, usize::from(count != 0))
+                .map_err(allocation)?;
+        let receipt = HostAllocationReceipt::admit(
+            Some(context),
+            HostAllocationPlan::new(0, retained).map_err(allocation)?,
+        )
+        .map_err(allocation)?
+        .ok_or_else(|| allocation(HostAllocationError::MissingManagedOwner))?;
+        let permit = receipt.output_permit(context).map_err(allocation)?;
+        let mut drained = None;
+        let mut source = Some(&mut self.values);
+        let result = runmat_value::OutputListStorage::try_initialize(count, &permit, |_| {
+            if drained.is_none() {
+                drained = Some(
+                    source
+                        .take()
+                        .expect("one range initializer")
+                        .drain(start..end),
+                );
+            }
+            drained
+                .as_mut()
+                .and_then(Iterator::next)
+                .ok_or(runmat_value::ExactHostNumericAllocationError::AllocationFailed)
+        })
+        .map_err(|error| match error {
+            runmat_value::OutputListInitializationError::Allocation(source)
+            | runmat_value::OutputListInitializationError::Element(source) => {
+                allocation(HostAllocationError::Numeric(source))
+            }
+        })?;
+        drop(drained);
+        receipt.checkpoint(context).map_err(allocation)?;
+        Ok(result)
+    }
 }
 
 fn stack_extent_error(message: &'static str) -> RuntimeError {
@@ -496,5 +562,46 @@ mod tests {
         drop(output);
         assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
         assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+
+        // The same frame admission owner funds CSL metadata; a slot move
+        // retains its exact stack window, including on denied cancellation.
+        let ledger = ManagedHostEffectLedger::new(65_536);
+        let cancellation = runmat_execution::cancellation::CancellationSource::new();
+        let context = RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ))
+        .with_service_ports(
+            RuntimeServicePorts::default().with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
+        )
+        .with_cancellation_token(cancellation.token());
+        let mut sequences =
+            crate::interpreter::dispatch::SequenceState::new_in_context(&context).unwrap();
+        let mut operands = InterpreterStack::unbounded();
+        sequences
+            .capture(1, &mut operands, vec![Value::Num(7.0), Value::Num(8.0)])
+            .unwrap();
+        let pointer = operands.as_slice().as_ptr();
+        sequences.move_capture(1, 2).unwrap();
+        assert_eq!(operands.as_slice().as_ptr(), pointer);
+        assert_eq!(operands.as_slice(), &[Value::Num(7.0), Value::Num(8.0)]);
+        assert!(ledger.snapshot().live_claimed_bytes > 0);
+        let claimed = ledger.snapshot().live_claimed_bytes;
+        cancellation.cancel(runmat_execution::CancellationReason::User);
+        assert!(sequences.move_capture(2, 3).is_err());
+        assert_eq!(ledger.snapshot().live_claimed_bytes, claimed);
+        assert_eq!(operands.as_slice().as_ptr(), pointer);
+        drop(sequences);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+
+        let ledger = ManagedHostEffectLedger::new(0);
+        let context = RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ))
+        .with_service_ports(
+            RuntimeServicePorts::default().with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
+        );
+        assert!(crate::interpreter::dispatch::SequenceState::new_in_context(&context).is_err());
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
     }
 }

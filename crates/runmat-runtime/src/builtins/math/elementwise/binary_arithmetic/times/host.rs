@@ -14,7 +14,7 @@ fn scalar_real_value(value: &Value) -> Option<f64> {
             value
                 .data()
                 .first()
-                .map(|&character| character as u32 as f64)
+                .map(|&character| f64::from(character.raw()))
                 .unwrap_or(0.0),
         ),
         _ => None,
@@ -337,7 +337,7 @@ fn char_array_to_tensor(chars: &CharArray) -> BuiltinResult<Tensor> {
     let data: Vec<f64> = chars
         .to_column_major()
         .iter()
-        .map(|&ch| ch as u32 as f64)
+        .map(|&ch| f64::from(ch.raw()))
         .collect();
     Tensor::new(data, chars.shape.clone()).map_err(|e| builtin_error(format!("times: {e}")))
 }

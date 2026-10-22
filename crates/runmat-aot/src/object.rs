@@ -13,6 +13,8 @@ pub use paired::{
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeObjectOptions {
+    pub clock_inputs: Option<runmat_execution::host::NativeClockInputs>,
+    pub local_service_inputs: Option<runmat_execution::host::NativeLocalServiceInputs>,
     pub optimization: NativeOptimization,
     pub retained_functions: Option<BTreeSet<FunctionId>>,
     pub runtime_binding_mode: runmat_native_codegen::aot::AotRuntimeBindingMode,
@@ -29,6 +31,8 @@ fn object_data_options(
     options: &NativeObjectOptions,
 ) -> AotResult<runmat_core::AotObjectDataOptions> {
     Ok(runmat_core::AotObjectDataOptions {
+        clock_inputs: options.clock_inputs.clone(),
+        local_service_inputs: options.local_service_inputs.clone(),
         runtime_binding_mode: options.runtime_binding_mode,
         builtin_bindings: options.retained_builtin_bindings.clone(),
         foreign_policy: options.foreign_policy.clone(),
@@ -58,6 +62,8 @@ fn object_data_options(
 impl Default for NativeObjectOptions {
     fn default() -> Self {
         Self {
+            clock_inputs: None,
+            local_service_inputs: None,
             optimization: NativeOptimization::Speed,
             retained_functions: None,
             runtime_binding_mode: runmat_native_codegen::aot::AotRuntimeBindingMode::Dynamic,

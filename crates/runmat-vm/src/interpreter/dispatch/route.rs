@@ -44,6 +44,8 @@ pub(super) fn family(instruction: &Instr) -> InstructionDispatchFamily {
         | Instr::Collective { .. } => Parallel,
 
         Instr::BeginOutputAssignment { .. }
+        | Instr::BeginFixedAssignment { .. }
+        | Instr::CommitFixedAssignment { .. }
         | Instr::PrepareFixedOutputTarget
         | Instr::PrepareDiscardOutputTarget
         | Instr::PrepareMemberSequenceOutputTarget { .. }
@@ -64,6 +66,7 @@ pub(super) fn family(instruction: &Instr) -> InstructionDispatchFamily {
         | Instr::FinishMemberSequenceOutputTarget(..)
         | Instr::FinishDynamicMemberSequenceOutputTarget
         | Instr::FinishCellContentsSequenceOutputTarget { .. }
+        | Instr::FinishFixedAssignmentTarget { .. }
         | Instr::LoadPreparedOutputCardinality
         | Instr::CommitPreparedOutputTargets { .. } => PreparedOutput,
 
@@ -122,6 +125,7 @@ pub(super) fn family(instruction: &Instr) -> InstructionDispatchFamily {
         | Instr::CaptureMemberDynamicSequence { .. }
         | Instr::CaptureCellContentsSequence { .. }
         | Instr::CaptureReturnedOutputsSequence { .. }
+        | Instr::MoveCapturedSequence { .. }
         | Instr::ReadSubscriptPath { .. }
         | Instr::CaptureSubscriptPath { .. }
         | Instr::BeginSubscriptEndReceiver { .. }

@@ -1,4 +1,5 @@
 //! MATLAB-compatible `find` builtin with GPU-aware semantics for RunMat.
+mod publication;
 
 use runmat_accelerate_api::ProviderFindResult;
 use runmat_builtins::{
@@ -138,24 +139,9 @@ async fn find_builtin(
     value: Value,
     rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(value, rest.view()).await?;
-    if let Some(out_count) = crate::output_count::current_output_count() {
-        if out_count == 0 {
-            return Ok(Value::output_list(Vec::new()));
-        }
-        if out_count <= 1 {
-            let linear = eval.linear_value()?;
-            return Ok(crate::output_count::output_list_with_padding(
-                out_count,
-                vec![linear],
-            ));
-        }
-        let outputs = eval.output_values(out_count)?;
-        return Ok(crate::output_count::output_list_with_padding(
-            out_count, outputs,
-        ));
-    }
-    eval.linear_value()
+    evaluate(value, rest.view())
+        .await?
+        .into_publication(crate::output_count::current_output_count())
 }
 
 /// Evaluate `find` and return an object that can materialise the various outputs.
@@ -626,8 +612,8 @@ async fn materialize_input(value: Value) -> crate::BuiltinResult<(DataStorage, b
             let mut data = Vec::with_capacity(chars.data().len());
             for c in 0..chars.cols {
                 for r in 0..chars.rows {
-                    let ch = chars.data()[r * chars.cols + c] as u32;
-                    data.push(ch as f64);
+                    let ch = chars.data()[r * chars.cols + c].raw();
+                    data.push(f64::from(ch));
                 }
             }
             let tensor = Tensor::new(data, vec![chars.rows, chars.cols])
@@ -734,36 +720,24 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
         }
         DataStorage::Complex(tensor) => {
             let mut indices = Vec::new();
-            let mut values = Vec::new();
-            let typed_storage = tensor.integer_storage();
 
             if matches!(limit, Some(0)) {
-                let values = find_values_for_complex_tensor(tensor, &indices, values);
+                let values = find_values_for_complex_tensor(tensor, &indices);
                 return FindResult::new(shape, indices, values);
             }
 
-            let len = typed_storage
-                .map(|storage| storage.len())
-                .unwrap_or(tensor.materialize_f64().len());
+            let len = tensor.len();
+            let nonzero = |index| {
+                let (real, imaginary) = tensor
+                    .numeric_value_at(index)
+                    .expect("validated complex find storage");
+                !real.is_zero() || !imaginary.is_zero()
+            };
             match options.direction {
                 FindDirection::First => {
                     for idx in 0..len {
-                        let nonzero = typed_storage.map_or_else(
-                            || {
-                                let (re, im) = tensor.materialize_f64()[idx];
-                                re != 0.0 || im != 0.0
-                            },
-                            |storage| {
-                                storage
-                                    .is_nonzero_at(idx)
-                                    .expect("typed complex integer storage is structurally valid")
-                            },
-                        );
-                        if nonzero {
+                        if nonzero(idx) {
                             indices.push(idx + 1);
-                            if typed_storage.is_none() {
-                                values.push(tensor.materialize_f64()[idx]);
-                            }
                             if limit.is_some_and(|k| indices.len() >= k) {
                                 break;
                             }
@@ -772,22 +746,8 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
                 }
                 FindDirection::Last => {
                     for idx in (0..len).rev() {
-                        let nonzero = typed_storage.map_or_else(
-                            || {
-                                let (re, im) = tensor.materialize_f64()[idx];
-                                re != 0.0 || im != 0.0
-                            },
-                            |storage| {
-                                storage
-                                    .is_nonzero_at(idx)
-                                    .expect("typed complex integer storage is structurally valid")
-                            },
-                        );
-                        if nonzero {
+                        if nonzero(idx) {
                             indices.push(idx + 1);
-                            if typed_storage.is_none() {
-                                values.push(tensor.materialize_f64()[idx]);
-                            }
                             if limit.is_some_and(|k| indices.len() >= k) {
                                 break;
                             }
@@ -798,9 +758,8 @@ fn compute_find(storage: &DataStorage, options: &FindOptions) -> FindResult {
 
             if matches!(options.direction, FindDirection::Last) {
                 indices.reverse();
-                values.reverse();
             }
-            let values = find_values_for_complex_tensor(tensor, &indices, values);
+            let values = find_values_for_complex_tensor(tensor, &indices);
             FindResult::new(shape, indices, values)
         }
     }
@@ -1102,23 +1061,26 @@ fn find_values_for_tensor(tensor: &Tensor, indices: &[usize]) -> FindValues {
     FindValues::Integer(select_integer_values(storage, &selected))
 }
 
-fn find_values_for_complex_tensor(
-    tensor: &ComplexTensor,
-    indices: &[usize],
-    values: Vec<(f64, f64)>,
-) -> FindValues {
-    let Some(storage) = tensor.integer_storage() else {
-        return if tensor.numeric_dtype() == runmat_value::NumericDType::F32 {
-            FindValues::ComplexF32(
-                values
-                    .into_iter()
-                    .map(|(real, imaginary)| (real as f32, imaginary as f32))
-                    .collect(),
-            )
-        } else {
-            FindValues::Complex(values)
-        };
-    };
+fn find_values_for_complex_tensor(tensor: &ComplexTensor, indices: &[usize]) -> FindValues {
+    if let Some(values) = tensor.as_f32_slice() {
+        return FindValues::ComplexF32(
+            indices
+                .iter()
+                .map(|index| values[index - 1].into())
+                .collect(),
+        );
+    }
+    if let Some(values) = tensor.as_f64_slice() {
+        return FindValues::Complex(
+            indices
+                .iter()
+                .map(|index| values[index - 1].into())
+                .collect(),
+        );
+    }
+    let storage = tensor
+        .integer_storage()
+        .expect("complex find has native floating or integer storage");
     let selected: Vec<usize> = indices.iter().map(|index| index - 1).collect();
     let real = select_integer_values(storage.real(), &selected);
     let imag = select_integer_values(storage.imag(), &selected);
@@ -1421,7 +1383,9 @@ pub(crate) mod tests {
                     }
                 }
                 FindFault::AliasedInput => {
-                    let discarded = std::mem::replace(&mut result.rows, input.clone());
+                    let alias = input.with_view(input.view().clone())?;
+                    assert_ne!(alias.view_identity(), input.view_identity());
+                    let discarded = std::mem::replace(&mut result.rows, alias);
                     discarded.release().expect("release replaced fixture rows");
                 }
                 FindFault::WrongShape => {
@@ -1457,7 +1421,9 @@ pub(crate) mod tests {
                     discarded.release().expect("release replaced fixture rows");
                 }
                 FindFault::CrossOutputAlias => {
-                    let discarded = std::mem::replace(&mut result.rows, result.linear.clone());
+                    let alias = result.linear.with_view(result.linear.view().clone())?;
+                    assert_ne!(alias.view_identity(), result.linear.view_identity());
+                    let discarded = std::mem::replace(&mut result.rows, alias);
                     discarded.release().expect("release replaced fixture rows");
                 }
             }
@@ -1573,6 +1539,56 @@ pub(crate) mod tests {
         };
         assert_eq!(values.shape(), [1, 1]);
         assert_eq!(values.materialize_f64(), vec![(1.0, 2.0)]);
+
+        // Selection copies only chosen native components, preserving even
+        // subnormals, signed zero and NaN payload bits in either precision.
+        let single = [
+            (0.0, -0.0),
+            (f32::from_bits(1), -0.0),
+            (f32::from_bits(0x7fc0_1234), 3.0),
+            (f32::INFINITY, f32::NEG_INFINITY),
+        ];
+        let double = [
+            (0.0, -0.0),
+            (f64::from_bits(1), -0.0),
+            (f64::from_bits(0x7ff8_0000_0000_1234), 3.0),
+            (f64::INFINITY, f64::NEG_INFINITY),
+        ];
+        for (limit, direction, expected) in [
+            (Some(0), FindDirection::First, &[][..]),
+            (Some(1), FindDirection::First, &[2][..]),
+            (Some(2), FindDirection::Last, &[3, 4][..]),
+            (None, FindDirection::First, &[2, 3, 4][..]),
+            (None, FindDirection::Last, &[4][..]),
+        ] {
+            let options = FindOptions { limit, direction };
+            let input =
+                DataStorage::Complex(ComplexTensor::from_f32(single.to_vec(), vec![2, 2]).unwrap());
+            let result = compute_find(&input, &options);
+            assert_eq!(result.indices, expected);
+            let FindValues::ComplexF32(values) = result.values else {
+                panic!("native single selection must retain its component class");
+            };
+            assert_eq!(values.len(), expected.len());
+            for ((real, imaginary), &index) in values.iter().zip(expected) {
+                let (expected_real, expected_imaginary) = single[index - 1];
+                assert_eq!(real.to_bits(), expected_real.to_bits());
+                assert_eq!(imaginary.to_bits(), expected_imaginary.to_bits());
+            }
+            let input =
+                DataStorage::Complex(ComplexTensor::new(double.to_vec(), vec![2, 2]).unwrap());
+            let result = compute_find(&input, &options);
+            assert_eq!(result.indices, expected);
+            let FindValues::Complex(values) = result.values else {
+                panic!("native double selection must retain its component class");
+            };
+            assert_eq!(values.len(), expected.len());
+            for ((real, imaginary), &index) in values.iter().zip(expected) {
+                let (expected_real, expected_imaginary) = double[index - 1];
+                assert_eq!(real.to_bits(), expected_real.to_bits());
+                assert_eq!(imaginary.to_bits(), expected_imaginary.to_bits());
+            }
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2485,7 +2501,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn find_char_array_supports_nonzero_codes() {
-        let chars = CharArray::new(vec!['\0', 'A', '\0'], 1, 3).unwrap();
+        let chars = CharArray::from_unicode_scalars(vec!['\0', 'A', '\0'], 1, 3).unwrap();
         let result = find_builtin(Value::CharArray(chars), Vec::new()).expect("find");
         match result {
             Value::Num(n) => assert_eq!(n, 2.0),

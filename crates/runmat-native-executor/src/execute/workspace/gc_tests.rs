@@ -43,6 +43,7 @@ fn workspace_for_context(
                 region_capacity: 0,
                 retained_input_capacity: 0,
             },
+        operation_contracts: vec![],
         expected_sites: vec![],
     };
     NativeWorkspaceState::new_with_runtime(
@@ -173,6 +174,7 @@ fn stale_service_does_not_retain_the_canonical_projection_after_state_drop() {
                     region_capacity: 0,
                     retained_input_capacity: 0,
                 },
+            operation_contracts: vec![],
             expected_sites: vec![],
         };
         let state = NativeWorkspaceState::new(

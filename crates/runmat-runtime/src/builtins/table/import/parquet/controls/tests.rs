@@ -124,7 +124,7 @@ fn controls_admit_only_needed_readback_after_host_validation() {
         {
             let paged = |text: &str| {
                 Value::CharArray(
-                    CharArray::new_with_shape(
+                    CharArray::from_unicode_scalars_with_shape(
                         text.chars().collect(),
                         vec![1, 1, text.chars().count()],
                     )

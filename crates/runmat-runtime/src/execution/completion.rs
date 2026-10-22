@@ -9,6 +9,7 @@ mod initialization;
 mod publication;
 #[path = "completion/iteration.rs"]
 mod iteration;
+pub(crate) use iteration::RootedValuesIteration;
 #[path = "completion/argument_transform.rs"]
 mod argument_transform;
 pub(crate) use argument_transform::ArgumentProjection;
@@ -786,6 +787,14 @@ impl<T: Trace> RootedResult<T> {
         &self.value
     }
 
+    /// Retain the existing registration through a consuming transformation.
+    /// This shares the root authority, without scanning or copying the value.
+    pub fn root_lease(&self) -> RootedValueLease {
+        RootedValueLease {
+            _roots: self._roots.clone(),
+        }
+    }
+
     /// Transfer an owned value and its existing root registration separately
     /// into an iterative effectful transformation. The raw value must remain
     /// alongside this lease until a successor has been rooted or published.
@@ -833,6 +842,14 @@ impl<T: Trace> RootedResult<T> {
 }
 
 impl RootedResult<Value> {
+    /// Wrap the existing single Value without changing its root registration.
+    pub fn try_into_sequence(self) -> Result<RootedValueSequence, crate::RuntimeError> {
+        let Self { value, _roots } = self;
+        let value =
+            ValueSequence::single(value).map_err(crate::sequence::sequence_error_to_runtime)?;
+        Ok(RootedResult { value, _roots })
+    }
+
     /// Root with the actual selected context, or require an ordinary policy.
     /// Absence of a context never licenses unbounded managed root planning.
     pub(crate) fn in_optional_context(
@@ -893,6 +910,36 @@ impl RootedResult<Value> {
 }
 
 impl RootedResult<ValueSequence> {
+    /// Select the required single result while transferring its existing roots.
+    /// Inline results need no collection, and shared columns retain their
+    /// original backing until the selected canonical Value has been projected.
+    pub fn try_into_single(self) -> Result<RootedValue, crate::RuntimeError> {
+        if self.value.len() != 1 {
+            return Err(crate::runtime_error::semantic_error(
+                "CommaSeparatedListRequiresSingleValue",
+                format!(
+                    "this expression requires one value, but the comma-separated list contains {}",
+                    self.value.len()
+                ),
+            ));
+        }
+        let Self { value, _roots } = self;
+        let value = iteration::RootedValuesIteration::from_sequence(value)
+            .next()
+            .expect("checked single result");
+        Ok(RootedResult { value, _roots })
+    }
+
+    /// Transfer the existing root forest and physical sequence owner into the
+    /// canonical iterator. Singles stay inline; aliases retain their backing.
+    pub fn try_into_values(self) -> Result<RootedValuesIntoIter, crate::RuntimeError> {
+        let Self { value, _roots } = self;
+        Ok(RootedValuesIntoIter {
+            values: iteration::RootedValuesIteration::from_sequence(value),
+            _roots: RetainedValueRoots::direct(_roots),
+        })
+    }
+
     /// Register the existing canonical sequence slice under the selected
     /// operation; no output-slot or child payload copy is required.
     pub fn in_context(
@@ -996,7 +1043,70 @@ mod tests {
         });
         assert_eq!(sequence.as_slice().as_ptr(), pointer);
         assert!(live.load(Ordering::SeqCst) > 0);
-        drop(sequence);
+        let alias = sequence.clone();
+        let mut values = sequence.try_into_values().unwrap();
+        assert_eq!(values.next(), Some(Value::Num(1.0)));
+        assert!(live.load(Ordering::SeqCst) > 0);
+        assert_eq!(values.next_back(), Some(Value::Num(2.0)));
+        assert_eq!(values.len(), 0);
+        drop(values);
+        assert!(live.load(Ordering::SeqCst) > 0);
+        drop(alias);
+        assert_eq!(live.load(Ordering::SeqCst), 0);
+
+        let storage =
+            OutputListStorage::try_initialize(1, &OutputPermit(Arc::clone(&live)), |_| {
+                Ok::<_, ()>(Value::Num(13.0))
+            })
+            .unwrap();
+        let alias = storage.clone();
+        let selected =
+            RootedValueSequence::new(ValueSequence::from_output_storage(storage).unwrap())
+                .unwrap()
+                .try_into_single()
+                .unwrap();
+        assert_eq!(selected.value(), &Value::Num(13.0));
+        assert!(live.load(Ordering::SeqCst) > 0);
+        drop(alias);
+        assert_eq!(live.load(Ordering::SeqCst), 0);
+        drop(selected);
+        assert!(RootedValueSequence::empty().try_into_single().is_err());
+
+        let single =
+            RootedValueSequence::new(ValueSequence::single(Value::Num(7.0)).unwrap()).unwrap();
+        let mut single = single.try_into_values().unwrap();
+        assert_eq!(single.len(), 1);
+        assert_eq!(single.next(), Some(Value::Num(7.0)));
+        assert_eq!(single.next_back(), None);
+
+        let column = OutputListStorage::try_initialize(2, &OutputPermit(live.clone()), |index| {
+            Ok::<_, ()>(Value::Num(index as f64 + 3.0))
+        })
+        .unwrap();
+        let pointer = column.as_slice().as_ptr();
+        let alias = column.clone();
+        let rows = (0..2)
+            .map(|_| runmat_value::UnboundedStructValueBuilder::new().finish())
+            .collect();
+        let array = runmat_value::StructArray::new(rows, vec![1, 2]).unwrap();
+        let output = crate::aggregate::structure::assign_member_sequence(
+            None,
+            array,
+            "field".into(),
+            ValueSequence::from_output_storage(column).unwrap(),
+            |_, _| {},
+        )
+        .unwrap();
+        let Value::StructArray(array) = output.value() else {
+            panic!("structure array")
+        };
+        assert_eq!(
+            array.column_owner("field").unwrap().as_slice().as_ptr(),
+            pointer
+        );
+        drop(alias);
+        assert!(live.load(Ordering::SeqCst) > 0);
+        drop(output);
         assert_eq!(live.load(Ordering::SeqCst), 0);
 
         use crate::context::host_effect::ManagedHostEffectLedger;

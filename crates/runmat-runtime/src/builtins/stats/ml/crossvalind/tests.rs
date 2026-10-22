@@ -208,7 +208,7 @@ fn classes_keep_adjacent_wide_integer_labels_distinct() {
     assert_eq!(grouped_indices(&labels).len(), 2);
 
     let character_classes =
-        Value::CharArray(CharArray::new(vec!['a', '1', 'b', '2'], 2, 2).unwrap());
+        Value::CharArray(CharArray::from_unicode_scalars(vec!['a', '1', 'b', '2'], 2, 2).unwrap());
     assert_eq!(
         classes_from_value(&character_classes, 2).unwrap(),
         vec![

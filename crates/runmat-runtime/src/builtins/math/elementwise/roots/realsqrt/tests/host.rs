@@ -114,7 +114,7 @@ fn integer_logical_and_char_inputs_are_rejected() {
     let logical = call(Value::LogicalArray(logical)).unwrap_err();
     assert_eq!(logical.identifier(), ERROR_INVALID_INPUT.identifier);
 
-    let chars = CharArray::new("AZ".chars().collect(), 1, 2).unwrap();
+    let chars = CharArray::from_unicode_scalars("AZ".chars().collect(), 1, 2).unwrap();
     let chars = call(Value::CharArray(chars)).unwrap_err();
     assert_eq!(chars.identifier(), ERROR_INVALID_INPUT.identifier);
 }

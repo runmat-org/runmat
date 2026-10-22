@@ -45,20 +45,20 @@ impl From<io::Error> for PcodeSourceReadError {
     }
 }
 
-pub async fn prefer_pcode_source_path(path: &Path) -> PathBuf {
+pub async fn prefer_pcode_source_path(
+    path: &Path,
+) -> Result<PathBuf, crate::builtins::common::path_search::PathSearchError> {
     if path
         .extension()
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| ext.eq_ignore_ascii_case("m"))
     {
         let pcode_path = path.with_extension("p");
-        if let Ok(metadata) = vfs::metadata_async(&pcode_path).await {
-            if metadata.is_file() {
-                return pcode_path;
-            }
+        if crate::builtins::common::path_search::path_is_file(&pcode_path).await? {
+            return Ok(pcode_path);
         }
     }
-    path.to_path_buf()
+    Ok(path.to_path_buf())
 }
 
 pub async fn read_source_text_async(path: &Path) -> Result<String, PcodeSourceReadError> {
@@ -99,7 +99,10 @@ async fn resolve_item(item: &str) -> BuiltinResult<Vec<PathBuf>> {
     let expanded = expand_user_path(item, BUILTIN_NAME)
         .map(PathBuf::from)
         .map_err(|err| pcode_error_with_detail(&PCODE_ERROR_PATH_RESOLVE, err))?;
-    if path_is_directory(&expanded).await {
+    if path_is_directory(&expanded)
+        .await
+        .map_err(|error| error.into_builtin_error(BUILTIN_NAME, &PCODE_ERROR_PATH_RESOLVE))?
+    {
         return resolve_folder_item(&expanded).await;
     }
     if has_unsupported_extension(&expanded) {
@@ -110,7 +113,7 @@ async fn resolve_item(item: &str) -> BuiltinResult<Vec<PathBuf>> {
     }
     let Some(path) = find_file_with_extensions(item, SOURCE_EXTENSIONS, BUILTIN_NAME)
         .await
-        .map_err(|err| pcode_error_with_detail(&PCODE_ERROR_PATH_RESOLVE, err))?
+        .map_err(|error| error.into_builtin_error(BUILTIN_NAME, &PCODE_ERROR_PATH_RESOLVE))?
     else {
         return Err(pcode_error_with_detail(&PCODE_ERROR_FILE_NOT_FOUND, item));
     };

@@ -183,7 +183,7 @@ fn finish_qualification(
     if passed {
         return empty_value();
     }
-    let message = diagnostic_message(diagnostic_args.view()).unwrap_or(default_message);
+    let message = diagnostic_message(diagnostic_args.view(), builtin)?.unwrap_or(default_message);
     let phase = crate::testing::active_test_context()
         .map(|context| context.phase)
         .unwrap_or(ExecutionPhase::TestBody);
@@ -278,23 +278,35 @@ fn logical_scalar(value: &Value) -> Option<bool> {
     }
 }
 
-fn diagnostic_message(values: crate::call::FunctionArgumentView<'_>) -> Option<String> {
-    values.first().and_then(|value| match value {
-        Value::String(message) => Some(message.as_str().to_owned()),
-        Value::CharArray(chars) if chars.rows <= 1 => Some(chars.data().iter().collect::<String>()),
-        Value::Object(object)
+fn diagnostic_message(
+    values: crate::call::FunctionArgumentView<'_>,
+    builtin: &'static str,
+) -> BuiltinResult<Option<String>> {
+    match values.first() {
+        None => Ok(None),
+        Some(Value::String(message)) => Ok(Some(message.as_str().to_owned())),
+        Some(Value::CharArray(chars)) if chars.rows <= 1 => {
+            crate::builtins::common::text::decode_utf16_with_error(chars.data(), || {
+                build_runtime_error("diagnostic message is not valid UTF-16 text")
+                    .with_identifier("RunMat:Testing:InvalidDiagnostic")
+                    .with_builtin(builtin)
+                    .build()
+            })
+            .map(Some)
+        }
+        Some(Value::Object(object))
             if crate::class_registry::is_class_or_subclass(
                 object.class_name(),
                 &runmat_types::standard::UNIT_TEST_DIAGNOSTIC.owned(),
             ) =>
         {
-            object.property("Message").and_then(|value| match value {
+            Ok(object.property("Message").and_then(|value| match value {
                 Value::String(message) => Some(message.as_str().to_owned()),
                 _ => None,
-            })
+            }))
         }
-        _ => None,
-    })
+        _ => Ok(None),
+    }
 }
 
 fn bounded_value(value: &Value) -> String {
@@ -370,9 +382,13 @@ mod tests {
         );
         diagnostic.insert("Message".into(), Value::String("specific failure".into()));
         assert_eq!(
-            diagnostic_message(crate::call::FunctionArgumentView::from_slice(&[
-                Value::Object(diagnostic.finish())
-            ])),
+            diagnostic_message(
+                crate::call::FunctionArgumentView::from_slice(&[Value::Object(
+                    diagnostic.finish()
+                )]),
+                "verifyEqual"
+            )
+            .unwrap(),
             Some("specific failure".into())
         );
     }

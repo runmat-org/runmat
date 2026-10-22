@@ -494,16 +494,7 @@ mod tests {
             Some("RunMat:compatibility:RandiWideIntegerExtension")
         );
 
-        let catalog_extensions =
-            runmat_builtins::builtin_catalog_entries()
-                .iter()
-                .flat_map(|entry| {
-                    entry
-                        .extensions
-                        .iter()
-                        .map(move |extension| (entry.identity.name, extension.id))
-                });
-        let declared = runmat_builtins::builtin_functions()
+        let declared = metadata_view::non_fixture_metadata()
             .into_iter()
             .flat_map(|builtin| {
                 builtin
@@ -511,7 +502,6 @@ mod tests {
                     .iter()
                     .map(move |extension| (builtin.name, extension.id))
             })
-            .chain(catalog_extensions)
             .collect::<std::collections::BTreeSet<_>>();
         let expected = std::collections::BTreeSet::from([
             ("axis", "axis-state-output"),
@@ -2259,6 +2249,38 @@ mod tests {
             ("yticklabels", "axes-control-setter-output"),
             ("yticks", "axes-control-setter-output"),
             ("zlim", "axes-control-setter-output"),
+            // Newly completed public integer-extension contracts. Method-only
+            // datetime operators remain in the raw inventory but are not part
+            // of the default public completion export.
+            ("contour3", "contour-integer-line-color"),
+            ("cylinder", "cylinder-typed-resolution"),
+            ("datetime.eq", "datetime-logical-numeric-input"),
+            ("datetime.ge", "datetime-logical-numeric-input"),
+            ("datetime.gt", "datetime-logical-numeric-input"),
+            ("datetime.le", "datetime-logical-numeric-input"),
+            ("datetime.lt", "datetime-logical-numeric-input"),
+            ("datetime.minus", "datetime-logical-numeric-input"),
+            ("datetime.ne", "datetime-logical-numeric-input"),
+            ("datetime.plus", "datetime-logical-numeric-input"),
+            ("fileDatastore", "filedatastore-boolean-coercion"),
+            ("fileDatastore", "filedatastore-gpu-input"),
+            ("fileDatastore", "filedatastore-metadata-payloads"),
+            ("minreal", "tf-integer-coefficients"),
+            ("minreal", "tf-integer-sample-time"),
+            ("minreal", "tf-logical-coefficients"),
+            ("series", "ss-integer-matrix-input"),
+            ("series", "ss-integer-sample-time"),
+            ("series", "tf-integer-coefficients"),
+            ("series", "tf-integer-sample-time"),
+            ("series", "tf-logical-coefficients"),
+            ("ss2tf", "ss2tf-explicit-gpu-input"),
+            ("strip", "strip-character-set"),
+            ("strip", "strip-direction-alias"),
+            ("tfdata", "ss-integer-matrix-input"),
+            ("tfdata", "ss-integer-sample-time"),
+            ("tfdata", "tf-integer-coefficients"),
+            ("tfdata", "tf-integer-sample-time"),
+            ("tfdata", "tf-logical-coefficients"),
         ]);
         assert_eq!(
             declared.difference(&expected).copied().collect::<Vec<_>>(),
@@ -2292,16 +2314,8 @@ mod tests {
             serde_json::from_str(include_str!("../../../docs/builtins/meta.json"))
                 .expect("builtin metadata catalog");
         let builtins = catalog["builtins"].as_array().expect("builtin entries");
-        for registered in metadata_view::integer_metadata()
+        for registered in metadata_view::public_completion_metadata()
             .into_iter()
-            // The generated docs catalog is the producer's public-policy
-            // projection; method/internal extensions remain covered by the
-            // exhaustive live-registration checks above.
-            .filter(|builtin| {
-                builtin.descriptor.is_some_and(|descriptor| {
-                    descriptor.completion_policy == runmat_builtins::BuiltinCompletionPolicy::Public
-                })
-            })
             .filter(|builtin| !builtin.extensions.is_empty())
         {
             let name = registered.name;
@@ -2326,7 +2340,7 @@ mod tests {
         for name in [
             "gcd", "intmax", "intmin", "linspace", "logspace", "mod", "rem",
         ] {
-            let registered = metadata_view::integer_metadata()
+            let registered = metadata_view::public_completion_metadata()
                 .into_iter()
                 .find(|builtin| builtin.name == name)
                 .unwrap_or_else(|| panic!("registered {name} builtin"));
@@ -2369,21 +2383,10 @@ mod tests {
             .filter(|entry| entry.get("integer_capabilities").is_some())
             .map(|entry| entry["name"].as_str().expect("builtin name"))
             .collect::<std::collections::BTreeSet<_>>();
-        let registered_names = registered
+        let registered_names = metadata_view::public_completion_metadata()
             .iter()
-            .filter(|builtin| {
-                builtin.descriptor.is_some_and(|descriptor| {
-                    descriptor.completion_policy == runmat_builtins::BuiltinCompletionPolicy::Public
-                }) && !builtin.integer_capabilities.is_empty()
-            })
+            .filter(|builtin| !builtin.integer_capabilities.is_empty())
             .map(|builtin| builtin.name)
-            .chain(
-                runmat_builtins::builtin_catalog_entries()
-                    .iter()
-                    .filter_map(|entry| {
-                        (!entry.integer_capabilities.is_empty()).then_some(entry.identity.name)
-                    }),
-            )
             .collect::<std::collections::BTreeSet<_>>();
         assert_eq!(
             registered_names, catalog_names,
@@ -2670,8 +2673,12 @@ mod tests {
         // The native FFI calllib/libpointer/libstruct/setdatatype entries now
         // declare positive typed integer capabilities instead of audit-only
         // dispositions; retain this as the independently reviewed audit set.
+        let reviewed_audited = metadata_view::reviewed_audit_metadata()
+            .into_iter()
+            .filter_map(|builtin| builtin.integer_audit.map(|audit| (builtin.name, audit)))
+            .collect::<std::collections::BTreeMap<_, _>>();
         assert_eq!(
-            audited.keys().copied().collect::<Vec<_>>(),
+            reviewed_audited.keys().copied().collect::<Vec<_>>(),
             [
                 "DataArray.chunk_shape",
                 "DataArray.codec",
@@ -2706,6 +2713,10 @@ mod tests {
                 "argsort",
                 "audioinfo",
                 "box",
+                "calendarDuration.eq",
+                "calendarDuration.minus",
+                "calendarDuration.ne",
+                "calendarDuration.plus",
                 "cancel",
                 "caxis",
                 "cellstr",
@@ -2723,6 +2734,7 @@ mod tests {
                 "data.list",
                 "data.move",
                 "data.open",
+                "datetick",
                 "deblank",
                 "diary",
                 "dir",
@@ -2780,6 +2792,7 @@ mod tests {
                 "iscellstr",
                 "ischar",
                 "iscolumn",
+                "isdatetime",
                 "isdeployed",
                 "isdiag",
                 "isempty",
@@ -2787,8 +2800,6 @@ mod tests {
                 "isfield",
                 "isfile",
                 "isfolder",
-                "isgraphics",
-                "ishandle",
                 "ishermitian",
                 "isjava",
                 "iskeyword",
@@ -2884,6 +2895,7 @@ mod tests {
                 "shading",
                 "splitlines",
                 "stats",
+                "stopWords",
                 "str2double",
                 "str2func",
                 "str2num",
@@ -2967,20 +2979,10 @@ mod tests {
             serde_json::from_str(include_str!("../../../docs/builtins/meta.json"))
                 .expect("builtin metadata catalog");
         let builtins = catalog["builtins"].as_array().expect("builtin entries");
-        for registered in metadata_view::integer_metadata()
+        for registered in metadata_view::public_completion_metadata()
             .into_iter()
-            // docs/builtins/meta.json is the producer's default public-only
-            // export. Method/internal definitions still participate in all
-            // live metadata invariants above, but are not public exports.
             .filter(|builtin| {
-                builtin.descriptor.is_some_and(|descriptor| {
-                    descriptor.completion_policy == runmat_builtins::BuiltinCompletionPolicy::Public
-                })
-            })
-            .filter(|builtin| {
-                builtin.descriptor.is_some_and(|descriptor| {
-                    descriptor.completion_policy == runmat_builtins::BuiltinCompletionPolicy::Public
-                }) && (!builtin.integer_capabilities.is_empty() || builtin.integer_audit.is_some())
+                !builtin.integer_capabilities.is_empty() || builtin.integer_audit.is_some()
             })
         {
             let name = registered.name;

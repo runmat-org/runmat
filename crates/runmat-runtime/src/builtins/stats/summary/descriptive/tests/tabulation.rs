@@ -275,7 +275,8 @@ fn tabulate_string_array_returns_cell_table() {
 
 #[test]
 fn tabulate_rejects_multirow_characters_and_nested_cell_labels() {
-    let chars = runmat_value::CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap();
+    let chars =
+        runmat_value::CharArray::from_unicode_scalars(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap();
     assert!(block_on(tabulate::tabulate_builtin(Value::CharArray(chars))).is_err());
 
     let inner = runmat_value::CellArray::new(vec![Value::from("a")], 1, 1).unwrap();

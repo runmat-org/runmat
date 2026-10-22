@@ -167,7 +167,11 @@ pub(super) fn kstest_scalar_text<'a>(
 ) -> BuiltinResult<Cow<'a, str>> {
     match value {
         Value::String(text) => Ok(Cow::Borrowed(text.as_str())),
-        Value::CharArray(array) if array.rows == 1 => Ok(Cow::Owned(array.data().iter().collect())),
+        Value::CharArray(array) if array.rows == 1 => Ok(Cow::Owned(
+            crate::builtins::stats::decode_utf16_with_error(array.data(), || {
+                kstest_invalid_argument(format!("kstest: {context} is not valid UTF-16 text"))
+            })?,
+        )),
         Value::StringArray(array) if array.data().len() == 1 => {
             Ok(Cow::Borrowed(array.data()[0].as_str()))
         }

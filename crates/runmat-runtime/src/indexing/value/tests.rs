@@ -130,8 +130,8 @@ fn numeric_shape_dispatch_preserves_low_rank_metadata() {
 fn repeated_scalar_reads_preserve_runtime_family_and_shape() {
     let plan = build_index_plan(
         &[SliceSelector::LinearIndices {
-            values: vec![1, 1, 1],
-            output_shape: vec![1, 3],
+            values: vec![1, 1, 1].into(),
+            output_shape: vec![1, 3].into(),
         }],
         1,
         &[1, 1],

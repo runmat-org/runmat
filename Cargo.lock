@@ -7956,6 +7956,7 @@ dependencies = [
  "runmat-plot",
  "runmat-process-host",
  "runmat-python",
+ "runmat-sparse-solvers",
  "runmat-test",
  "runmat-thread-local",
  "runmat-time",
@@ -8022,6 +8023,14 @@ dependencies = [
  "url",
  "uuid",
  "webbrowser 0.8.15",
+]
+
+[[package]]
+name = "runmat-sparse-solvers"
+version = "0.6.2"
+dependencies = [
+ "libm",
+ "num-complex",
 ]
 
 [[package]]
@@ -8099,14 +8108,17 @@ dependencies = [
  "anyhow",
  "log",
  "runmat-aot",
+ "runmat-config",
  "runmat-core",
  "runmat-execution",
  "runmat-execution-artifact",
  "runmat-native-codegen",
+ "runmat-native-ffi",
  "runmat-package",
  "runmat-process-host",
  "runmat-test",
  "runmat-test-runner",
+ "runmat-types",
  "serde",
  "serde_json",
  "sha2 0.10.9",

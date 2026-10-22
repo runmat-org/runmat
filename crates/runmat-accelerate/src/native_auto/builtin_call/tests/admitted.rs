@@ -67,9 +67,6 @@ fn scalar_provider_preparation_fallback_keeps_original_host_body_without_feedbac
         selected_fallbacks: Rc<Cell<usize>>,
     }
     impl RuntimeAccelerationService for ScalarFallbackAdapter {
-        fn supports_operation(&self, _: &str) -> bool {
-            true
-        }
         fn prepare_admitted(
             &self,
             context: RuntimeContext,

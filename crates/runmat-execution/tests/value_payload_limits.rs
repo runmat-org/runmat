@@ -89,6 +89,7 @@ fn durable_object_array_elements_count_as_nodes_and_depth() {
         class_identity: runmat_types::ClassIdentity::new("PreferencePayload").unwrap(),
         properties: Vec::new(),
         dynamic_properties: Vec::new(),
+        decomposition: None,
     };
     let payload = ValuePayload::Inline(Box::new(InlineValue::DurableObjectArray(
         DurableObjectArray {
@@ -329,6 +330,32 @@ fn frozen_value_payload_v1_reference_is_rejected_before_use() {
         error,
         runmat_execution::ContractError::UnsupportedSchema {
             actual: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
+            supported: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION,
+        }
+    ));
+}
+
+#[test]
+fn pre_utf16_value_payload_schema_is_rejected_before_use() {
+    let reference = ValueRef {
+        schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V3,
+        id: ValueId::derive(&[b"pre-utf16-value"]),
+        logical_digest: Digest::sha256(b"pre-utf16-value"),
+        encoded_length: 1,
+        media_type: "application/runmat-value".into(),
+        value_schema: "runmat-value/v3".into(),
+        encryption_context: Digest::sha256(b"pre-utf16-context"),
+        kind: ValueRefKind::ResultObject,
+        authorization_scope: "scope".into(),
+        resident_fence: None,
+    };
+    let error = ValuePayload::Object(Box::new(reference))
+        .validate(ValueLimits::default())
+        .expect_err("pre-UTF-16 payloads must require re-encoding");
+    assert!(matches!(
+        error,
+        runmat_execution::ContractError::UnsupportedSchema {
+            actual: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V3,
             supported: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_VERSION,
         }
     ));

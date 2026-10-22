@@ -1,5 +1,94 @@
 use super::*;
+use runmat_runtime::context::RuntimeBaseWorkspaceService;
 use runmat_runtime::context::RuntimeWorkspaceService;
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn invocation_base_write_prepares_the_same_observed_binding_before_publication() {
+    let session = RunMatSession::with_options(false, false).expect("session");
+    let runtime = &session.runtime_context;
+    let projection = std::rc::Rc::new(
+        runmat_runtime::workspace::BaseWorkspaceProjectionService::new_for_context(
+            session
+                .base_workspace
+                .begin_projection()
+                .expect("projection"),
+            runtime,
+        )
+        .with_publication_observer(
+            session
+                .workspace_publication_observer_with_context(runtime)
+                .expect("admitted observer"),
+        ),
+    );
+    let base = runmat_runtime::workspace::BaseWorkspaceService::new(session.base_workspace.clone())
+        .with_invocation_projection(projection.clone())
+        .expect("same canonical owner");
+    base.assign_logical_ref_with_context(
+        &runtime.session_variable_authority(),
+        runtime,
+        "effect_name",
+        &Value::Num(17.0),
+    )
+    .expect("selected base mutation");
+    assert_eq!(
+        session.logical_workspace_value("effect_name").unwrap(),
+        Some(Value::Num(17.0))
+    );
+    assert!(matches!(
+        &session.workspace_bindings.borrow()["effect_name"].key,
+        crate::abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "effect_name"
+    ));
+    let foreign = runmat_runtime::workspace::BaseWorkspaceService::new(
+        runmat_runtime::workspace::BaseWorkspaceOwner::new(),
+    );
+    assert!(foreign.with_invocation_projection(projection).is_err());
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn invocation_base_write_rejects_unrepresentable_binding_before_canonical_mutation() {
+    let mut session = RunMatSession::with_options(false, false).expect("session");
+    session.bind_workspace_slot("prior".into(), usize::MAX);
+    let runtime = &session.runtime_context;
+    let projection = std::rc::Rc::new(
+        runmat_runtime::workspace::BaseWorkspaceProjectionService::new_for_context(
+            session
+                .base_workspace
+                .begin_projection()
+                .expect("projection"),
+            runtime,
+        )
+        .with_publication_observer(
+            session
+                .workspace_publication_observer_with_context(runtime)
+                .expect("admitted observer"),
+        ),
+    );
+    let base = runmat_runtime::workspace::BaseWorkspaceService::new(session.base_workspace.clone())
+        .with_invocation_projection(projection)
+        .expect("same canonical owner");
+    let error = base
+        .assign_logical_ref_with_context(
+            &runtime.session_variable_authority(),
+            runtime,
+            "effect_name",
+            &Value::Num(17.0),
+        )
+        .expect_err("observer must reject exhausted binding space before mutation");
+    assert_eq!(
+        error.identifier.as_deref(),
+        Some("RunMat:WorkspaceBindingSlots")
+    );
+    assert_eq!(
+        session.logical_workspace_value("effect_name").unwrap(),
+        None
+    );
+    assert!(!session
+        .workspace_bindings
+        .borrow()
+        .contains_key("effect_name"));
+}
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

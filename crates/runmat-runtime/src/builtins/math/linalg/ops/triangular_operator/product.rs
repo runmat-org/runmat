@@ -30,7 +30,7 @@ fn adjoint(orientation: Orientation) -> bool {
     }
 }
 
-fn diagonal_divide<T: TriangularScalar>(
+pub(super) fn diagonal_divide<T: TriangularScalar>(
     value: T,
     diagonal: T,
     mode: Diagonal,

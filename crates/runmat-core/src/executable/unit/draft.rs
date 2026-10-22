@@ -109,7 +109,7 @@ impl ExecutableUnitDraft {
             source_map: Rc::new(self.source_map),
             coverage: Rc::new(self.coverage),
             mir: Rc::new(self.mir),
-            analysis: Rc::new(self.analysis),
+            analysis: Arc::new(self.analysis),
             bytecode: Rc::new(self.bytecode),
             layout: Rc::new(layout),
             functions,

@@ -184,13 +184,7 @@ fn synchronize(file: std::fs::File, path: &Path, executable: Option<bool>) -> Ao
 }
 
 pub(crate) fn read_regular(path: &Path, max_bytes: u64) -> AotResult<Vec<u8>> {
-    let metadata = std::fs::symlink_metadata(path)
-        .map_err(|error| AotError::io("inspect bounded native file", path, error))?;
-    if !metadata.is_file() || metadata.len() > max_bytes {
-        return Err(invalid("native file is not a bounded physical file"));
-    }
-    let file = std::fs::File::open(path)
-        .map_err(|error| AotError::io("open bounded native file", path, error))?;
+    let (file, _) = open_bounded_regular(path, max_bytes)?;
     let mut bytes = Vec::new();
     file.take(max_bytes.saturating_add(1))
         .read_to_end(&mut bytes)
@@ -199,6 +193,44 @@ pub(crate) fn read_regular(path: &Path, max_bytes: u64) -> AotResult<Vec<u8>> {
         return Err(invalid("native file exceeds its admitted byte bound"));
     }
     Ok(bytes)
+}
+
+/// Retain the exact regular file currently named by `path` and independently
+/// validate its opened extent. The path identity comparison prevents a
+/// pre-open inspection from silently authorizing a different opened inode.
+pub(crate) fn open_bounded_regular(path: &Path, max_bytes: u64) -> AotResult<(std::fs::File, u64)> {
+    let named = std::fs::symlink_metadata(path)
+        .map_err(|error| AotError::io("inspect bounded native file", path, error))?;
+    if !named.is_file() || named.file_type().is_symlink() || named.len() > max_bytes {
+        return Err(invalid("native file is not a bounded physical file"));
+    }
+    let file = std::fs::File::open(path)
+        .map_err(|error| AotError::io("open bounded native file", path, error))?;
+    let opened = file
+        .metadata()
+        .map_err(|error| AotError::io("inspect opened native file", path, error))?;
+    if !opened.is_file() || opened.len() != named.len() || opened.len() > max_bytes {
+        return Err(invalid(
+            "opened native file differs from its admitted extent",
+        ));
+    }
+    let retained = same_file::Handle::from_file(
+        file.try_clone()
+            .map_err(|error| AotError::io("retain opened native file", path, error))?,
+    )
+    .map_err(|error| AotError::io("identify opened native file", path, error))?;
+    let current = same_file::Handle::from_path(path)
+        .map_err(|error| AotError::io("identify named native file", path, error))?;
+    let still_named = std::fs::symlink_metadata(path)
+        .map_err(|error| AotError::io("reinspect named native file", path, error))?;
+    if !still_named.is_file()
+        || still_named.file_type().is_symlink()
+        || still_named.len() != opened.len()
+        || retained != current
+    {
+        return Err(invalid("native file identity changed while it was opened"));
+    }
+    Ok((file, opened.len()))
 }
 
 pub(crate) fn hash_open_file(
@@ -224,4 +256,31 @@ pub(crate) fn hash_open_file(
 
 fn invalid(error: impl std::fmt::Display) -> AotError {
     AotError::contract("aot.tree.physical", error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bounded_regular_file_uses_opened_extent() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("image");
+        std::fs::write(&path, b"native-image").unwrap();
+        let (file, length) = open_bounded_regular(&path, 12).unwrap();
+        assert_eq!(length, 12);
+        assert_eq!(file.metadata().unwrap().len(), length);
+        assert!(open_bounded_regular(&path, 11).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bounded_regular_file_rejects_symbolic_links() {
+        let root = tempfile::tempdir().unwrap();
+        let image = root.path().join("image");
+        let alias = root.path().join("alias");
+        std::fs::write(&image, b"native-image").unwrap();
+        std::os::unix::fs::symlink(&image, &alias).unwrap();
+        assert!(open_bounded_regular(&alias, 12).is_err());
+    }
 }

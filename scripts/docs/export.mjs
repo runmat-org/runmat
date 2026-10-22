@@ -8,7 +8,8 @@ import { collectExamples } from "./examples.mjs";
 import { collectFea } from "./fea.mjs";
 import { writeManifest } from "./manifest.mjs";
 import { collectGraphics } from "./graphics.mjs";
-export function buildSourceDocs({ source, output, requirementsPath, builtinDescriptorsPath, evidencePath, snapshotsRoot, graphicsRoot }) {
+import { productionDocumentation } from "./production-documentation.mjs";
+export function buildSourceDocs({ source, output, requirementsPath, builtinDescriptorsPath, builtinDocumentationPath, verifiedBuiltinDocumentation, evidencePath, snapshotsRoot, graphicsRoot }) {
     source = resolve(source);
     output = resolve(output);
     if (!output.startsWith(source + "/target/"))
@@ -26,7 +27,7 @@ export function buildSourceDocs({ source, output, requirementsPath, builtinDescr
         const requirements = new Map(register.requirements.map(requirement => [requirement.id, requirement]));
         const examples = collectExamples(source, staging, validate, requirements, snapshotsRoot);
         if (examples.some(example => example.playback)) collectGraphics(graphicsRoot, staging);
-        collectDocuments(source, staging, validate);
+        collectDocuments(source, staging, validate, builtinDocumentationPath, verifiedBuiltinDocumentation);
         collectFea(source, staging, register, examples, evidencePath ? readJson(evidencePath) : { schema_version: 1, records: [] }, validate);
         mkdirSync(join(staging, "builtins"), { recursive: true });
         const descriptors = readJson(builtinDescriptorsPath);
@@ -80,6 +81,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     for (const required of ["--requirements", "--builtin-descriptors", "--out"])
         if (!options.has(required))
             throw new Error(`Missing ${required}`);
-    const manifest = buildSourceDocs({ source: resolve(dirname(fileURLToPath(import.meta.url)), "../.."), output: options.get("--out"), requirementsPath: options.get("--requirements"), builtinDescriptorsPath: options.get("--builtin-descriptors"), evidencePath: options.get("--evidence-manifest"), snapshotsRoot: options.get("--example-snapshots"), graphicsRoot: options.get("--graphics-runtime") });
+    const source = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+    const verifiedBuiltinDocumentation = productionDocumentation(source, { exportPath: options.get("--builtin-documentation") });
+    const manifest = buildSourceDocs({ source, output: options.get("--out"), requirementsPath: options.get("--requirements"), builtinDescriptorsPath: options.get("--builtin-descriptors"), verifiedBuiltinDocumentation, evidencePath: options.get("--evidence-manifest"), snapshotsRoot: options.get("--example-snapshots"), graphicsRoot: options.get("--graphics-runtime") });
     console.log(`Source docs: ${manifest.content_hash} (${manifest.files.length} files)`);
 }
