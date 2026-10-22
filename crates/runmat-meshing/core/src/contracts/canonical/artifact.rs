@@ -76,8 +76,8 @@ impl SolverMeshTopology {
                 }
             }
         }
-        if self.nodes.len() as u64 > request.resources.maximum_nodes
-            || self.volume_elements.len() as u64 > request.resources.maximum_elements
+        if self.nodes.len() as u64 > request.limits.maximum_nodes
+            || self.volume_elements.len() as u64 > request.limits.maximum_elements
         {
             return Err(MeshingContractError::invalid(
                 "mesh topology",

@@ -208,3 +208,17 @@ fn conflicting_identity_and_cancelled_handoff_reject() {
         DelaunayVolumeMeshErrorKind::Cancelled
     );
 }
+
+// witness: conformal multi-region interfaces are meshed in one component so both sides share
+// every interface Steiner point (fsi-compliant-tube bore).
+#[test]
+fn regions_joined_by_an_interface_facet_form_one_component() {
+    let constraints = crate::cdt::test_fixtures::same_facet_multi_steiner_constraints();
+    let components = super::partition_constraints(&constraints).unwrap();
+    assert_eq!(components.len(), 1);
+    assert!(components[0].joined_regions);
+    assert_eq!(
+        components[0].constraints.facets.len(),
+        constraints.facets.len()
+    );
+}

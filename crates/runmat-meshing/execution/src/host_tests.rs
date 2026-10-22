@@ -140,7 +140,7 @@ fn exact_geometry_document_round_trips_and_binds_its_externalized_root() {
     let host = MeshingHostWorkload::new(
         fixture.workload.clone(),
         fixture.identity.clone(),
-        fixture.request.clone(),
+        fixture.request.clone(), runmat_meshing_core::MeshingExecutionCeilings::PORTABLE_DEFAULT,
         access,
         Some(document.clone()),
     )
@@ -155,7 +155,7 @@ fn exact_geometry_document_round_trips_and_binds_its_externalized_root() {
     assert!(MeshingHostWorkload::new(
         fixture.workload.clone(),
         fixture.identity.clone(),
-        fixture.request.clone(),
+        fixture.request.clone(), runmat_meshing_core::MeshingExecutionCeilings::PORTABLE_DEFAULT,
         fixture.context.artifact_access.clone(),
         None,
     )
@@ -166,7 +166,7 @@ fn exact_geometry_document_round_trips_and_binds_its_externalized_root() {
     assert!(MeshingHostWorkload::new(
         fixture.workload,
         fixture.identity,
-        fixture.request,
+        fixture.request, runmat_meshing_core::MeshingExecutionCeilings::PORTABLE_DEFAULT,
         fixture.context.artifact_access,
         Some(wrong_document),
     )
@@ -193,7 +193,7 @@ fn faceted_geometry_document_binds_without_exact_kernel_capability() {
     let host = MeshingHostWorkload::new(
         fixture.workload.clone(),
         fixture.identity.clone(),
-        fixture.request.clone(),
+        fixture.request.clone(), runmat_meshing_core::MeshingExecutionCeilings::PORTABLE_DEFAULT,
         access,
         Some(document.clone()),
     )
@@ -210,7 +210,7 @@ fn faceted_geometry_document_binds_without_exact_kernel_capability() {
     assert!(MeshingHostWorkload::new(
         fixture.workload,
         fixture.identity,
-        fixture.request,
+        fixture.request, runmat_meshing_core::MeshingExecutionCeilings::PORTABLE_DEFAULT,
         fixture.context.artifact_access,
         Some(wrong_kind),
     )
@@ -221,7 +221,7 @@ fn host(fixture: &Fixture) -> MeshingHostWorkload {
     MeshingHostWorkload::new(
         fixture.workload.clone(),
         fixture.identity.clone(),
-        fixture.request.clone(),
+        fixture.request.clone(), runmat_meshing_core::MeshingExecutionCeilings::PORTABLE_DEFAULT,
         fixture.context.artifact_access.clone(),
         None,
     )

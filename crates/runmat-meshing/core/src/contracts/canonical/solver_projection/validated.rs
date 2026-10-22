@@ -1,10 +1,19 @@
 //! Process-local immutable authority; wire decoding never constructs these types.
 use super::*;
 
+/// What order elevation did beyond curving: Tet10 edges it kept straight because no valid curved
+/// placement could be certified. Recorded in the stage evidence; not part of the mesh encoding.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SolverElevationReport {
+    pub straightened_elements: u64,
+    pub straightened_edges: u64,
+}
+
 #[derive(Debug)]
 pub struct ValidatedSolverMeshTopology {
     topology: SolverMeshTopology,
     request: MeshingRequest,
+    elevation: SolverElevationReport,
 }
 impl ValidatedSolverMeshTopology {
     pub fn new(
@@ -14,7 +23,18 @@ impl ValidatedSolverMeshTopology {
     ) -> Result<Self, MeshingContractError> {
         request.validate()?;
         topology.validate(&request, cancellation)?;
-        Ok(Self { topology, request })
+        Ok(Self {
+            topology,
+            request,
+            elevation: SolverElevationReport::default(),
+        })
+    }
+    pub fn with_elevation_report(mut self, elevation: SolverElevationReport) -> Self {
+        self.elevation = elevation;
+        self
+    }
+    pub fn elevation_report(&self) -> SolverElevationReport {
+        self.elevation
     }
     pub fn into_topology(self) -> SolverMeshTopology {
         self.topology

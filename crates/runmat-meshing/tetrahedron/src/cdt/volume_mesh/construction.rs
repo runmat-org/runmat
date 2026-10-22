@@ -80,7 +80,7 @@ fn construct_with_observer(
         let mut component_options = options;
         component_options.refinement.maximum_insertions = remaining_insertions;
         let mut mesh = construct_component_mesh(
-            &component.region,
+            (!component.joined_regions).then_some(&component.region),
             component.constraints,
             metric_request,
             &frame,

@@ -30,6 +30,7 @@ impl MeshingStageKernel for ChunkKernel {
 
 #[test]
 fn serial_publication_requires_metadata_budget_beyond_its_exact_chunk_envelope() {
+    let mut ceilings = crate::serial_tests::ceilings();
     let streams = vec![MeshingChunkStream {
         media_type: MeshingChunkMediaType::SurfacePartitions,
         schema_version: 2,
@@ -48,9 +49,9 @@ fn serial_publication_requires_metadata_budget_beyond_its_exact_chunk_envelope()
         profile.requested_storage_bytes,
         512 << 20,
     ] {
-        let mut request = request();
-        request.resources.maximum_memory_bytes = cap;
-        let mut fixture = Fixture::with_request(request);
+        let request = request();
+        ceilings.maximum_memory_bytes = cap;
+        let mut fixture = Fixture::with_request_and_ceilings(request, ceilings);
         let original_objects = fixture.store.objects.clone();
         let result = execute_serial_stage(
             &fixture.program,

@@ -121,8 +121,8 @@ impl NodeOptimizer<'_, '_, '_> {
             match jacobian::validate_elements(
                 topology,
                 movable.incident_elements.iter().copied(),
-                self.input.request.resources.maximum_search_work,
-                self.input.request.resources.maximum_recursion_depth,
+                jacobian::ELEMENT_SEARCH_WORK,
+                self.input.request.limits.maximum_recursion_depth,
                 self.options.cancellation_check_interval,
                 self.cancellation,
                 jacobian::ValidationWork {

@@ -6,7 +6,7 @@ mod metric_authority;
 use runmat_meshing_core::{
     AlgorithmVersionSet, CancellationPolicy, CurveQualityTargets, ElementOrder,
     GeometryTolerancePolicy, MeshingCancellationSignal, MeshingQualityTargets, MeshingRequest,
-    MeshingResourceBudget, NeverCancelled, SurfaceQualityTargets, VolumeQualityTargets,
+    MeshingSizeLimits, NeverCancelled, SurfaceQualityTargets, VolumeQualityTargets,
     MESHING_REQUEST_SCHEMA_VERSION,
 };
 use runmat_meshing_size::metric::{MetricCombinationRule, MetricFieldRequest, MetricTensor3};
@@ -62,16 +62,10 @@ fn request(order: ElementOrder) -> MeshingRequest {
                 maximum_metric_edge_length: 2.0,
             },
         },
-        resources: MeshingResourceBudget {
+        limits: MeshingSizeLimits {
             maximum_nodes: 100,
             maximum_elements: 100,
-            maximum_memory_bytes: 1_000_000,
-            maximum_scratch_bytes: 1_000_000,
-            maximum_wall_time_ms: 10_000,
-            maximum_artifact_bytes: 1_000_000,
-            maximum_search_work: 10_000,
             maximum_recursion_depth: 32,
-            maximum_iterations: 10_000,
         },
         cancellation: CancellationPolicy {
             maximum_checkpoint_latency_ms: 100,
@@ -372,7 +366,7 @@ fn deterministic_tet10_elevation_shares_exact_boundary_midpoints() {
     runmat_meshing_core::validate_solver_mesh_topology(&topology, &request).unwrap();
 
     let mut limited_request = request.clone();
-    limited_request.resources.maximum_nodes = 9;
+    limited_request.limits.maximum_nodes = 9;
     let limited = DelaunaySolverTopologyInput {
         request: &limited_request,
         ..input()

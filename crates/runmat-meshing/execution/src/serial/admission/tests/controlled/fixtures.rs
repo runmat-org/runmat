@@ -96,6 +96,7 @@ fn evidence() -> MeshingEvidence {
     });
     MeshingEvidence {
         schema_version: MESHING_EVIDENCE_SCHEMA_VERSION,
+        ceilings: crate::serial_tests::ceilings(),
         geometry: GeometryRevisionRef {
             source_digest: StableDigest::from_bytes([1; 32]),
             geometry_revision: 1,

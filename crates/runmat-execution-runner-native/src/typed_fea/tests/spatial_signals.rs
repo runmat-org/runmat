@@ -217,6 +217,7 @@ async fn authored_named_spatial_input_retains_deferred_authority_until_actual_me
         let meshing = runmat_meshing_execution::execute_exact_meshing_dag(
             runmat_meshing_execution::ExactMeshingDagRun {
                 geometry: &exact,
+                ceilings: runmat_meshing_core::MeshingExecutionCeilings::PORTABLE_DEFAULT,
                 request,
                 artifact_access: decoded.artifact_access.clone(),
                 capability_cohort: Some(output.platform.capability_cohort.clone()),

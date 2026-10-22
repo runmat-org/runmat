@@ -132,7 +132,7 @@ impl<F: FnMut() -> Result<(), MeshingContractError>> Storage<'_, F> {
             tolerance: _,
             metric,
             quality: _,
-            resources: _,
+            limits: _,
             cancellation: _,
         } = request;
         let super::AlgorithmVersionSet {

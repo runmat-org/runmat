@@ -32,6 +32,7 @@ fn production_dag_runner_executes_the_complete_serial_exact_pipeline() {
     let result = crate::execute_exact_meshing_dag(
         crate::ExactMeshingDagRun {
             geometry: &exact,
+            ceilings: runmat_meshing_core::MeshingExecutionCeilings::PORTABLE_DEFAULT,
             request,
             artifact_access: access,
             capability_cohort: cohort,
@@ -74,6 +75,7 @@ fn production_dag_runner_executes_the_complete_serial_exact_pipeline() {
 
 #[test]
 fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
+    let ceilings = runmat_meshing_core::MeshingExecutionCeilings::PORTABLE_DEFAULT;
     let fixture = Fixture::with_exact_tetrahedron_curve_partition_order(ElementOrder::Tet10);
     let policy = workflow_chunk_policy(&fixture.host.resolved_request);
     let (mut fixture, surface_host, exact_root, curve_stage, surface_partition, surface_stage) =
@@ -136,9 +138,9 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
         &exact.geometry_objects().topology,
         runmat_meshing_surface::ExactSurfaceJoinOptions {
             coordinate_tolerance_m: host.resolved_request.tolerance.absolute_floor_m,
-            maximum_nodes: host.resolved_request.resources.maximum_nodes,
-            maximum_triangles: host.resolved_request.resources.maximum_elements,
-            maximum_boundary_segments: host.resolved_request.resources.maximum_elements,
+            maximum_nodes: host.resolved_request.limits.maximum_nodes,
+            maximum_triangles: host.resolved_request.limits.maximum_elements,
+            maximum_boundary_segments: host.resolved_request.limits.maximum_elements,
         },
     )
     .unwrap();
@@ -154,7 +156,7 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
         let stage_control = MeshingStageControl::new(
             MeshingStageKind::OrderElevation,
             0,
-            &host.resolved_request,
+            &host.resolved_request, ceilings,
             &NeverCancelled,
             &mut metric_progress,
         )
@@ -184,7 +186,7 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
     .unwrap();
     assert!(!mesh.topology.tetrahedra.is_empty());
     assert!(
-        mesh.topology.tetrahedra.len() as u64 <= host.resolved_request.resources.maximum_elements
+        mesh.topology.tetrahedra.len() as u64 <= host.resolved_request.limits.maximum_elements
     );
     assert_eq!(mesh.topology.incidence.regions.len(), 1);
     invariants::assert_boundary_conservation(&mesh, &surface);
@@ -203,7 +205,7 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
     let diagnostic_control = MeshingStageControl::new(
         MeshingStageKind::Tetrahedralization,
         0,
-        &host.resolved_request,
+        &host.resolved_request, ceilings,
         &NeverCancelled,
         &mut diagnostic_progress,
     )
@@ -380,6 +382,7 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
             sizing: Vec::new(),
             cache_admission: runmat_meshing_core::CacheAdmissionDecision::Admitted,
             wall_time_ms: serial_wall_time_ms,
+            ceilings: runmat_meshing_core::MeshingExecutionCeilings::PORTABLE_DEFAULT,
         },
     )
     .unwrap();
@@ -490,9 +493,84 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
 
 // Total artifact admission belongs to the original resolved workload. A chunk
 // size is a transport bound; it must not silently become a one-chunk total cap.
-fn workflow_chunk_policy(request: &runmat_meshing_core::MeshingRequest) -> MeshingChunkPolicy {
+fn workflow_chunk_policy(_request: &runmat_meshing_core::MeshingRequest) -> MeshingChunkPolicy {
+    let ceilings = runmat_meshing_core::MeshingExecutionCeilings::PORTABLE_DEFAULT;
     MeshingChunkPolicy {
-        maximum_total_encoded_bytes: request.resources.maximum_artifact_bytes,
+        maximum_total_encoded_bytes: ceilings.maximum_artifact_bytes,
         ..chunk_policy(1_000_000)
     }
+}
+
+// witness: meshing execution ceilings decide only whether a run completes; the same request
+// meshed under two different ceilings publishes the same artifact (option A ceiling split).
+#[test]
+fn execution_ceilings_do_not_change_the_published_mesh() {
+    let run = |ceilings: runmat_meshing_core::MeshingExecutionCeilings| {
+        let mut fixture = Fixture::with_exact_tetrahedron_curve_partition_order(ElementOrder::Tet10);
+        let policy = workflow_chunk_policy(&fixture.host.resolved_request);
+        let exact_root = root(&fixture.program.arguments[1]);
+        let exact = import_exact_geometry_input(
+            &fixture.store,
+            fixture.host.geometry_document.clone().unwrap(),
+            &exact_root,
+            fixture.host.artifact_access.clone(),
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap();
+        let request = fixture.host.resolved_request.clone();
+        let access = fixture.host.artifact_access.clone();
+        let cohort = fixture.host.stage_identity.capability_cohort.clone();
+        let mut progress = Progress::default();
+        let mut executor = crate::SerialExactMeshingExecutor {
+            store: &mut fixture.store,
+            kernel: &crate::MeshingKernelDispatcher::default(),
+            cancellation: &NeverCancelled,
+            progress: &mut progress,
+            chunk_policy: policy,
+            inventory_limits: ObjectInventoryLimits::default(),
+        };
+        crate::execute_exact_meshing_dag(
+            crate::ExactMeshingDagRun {
+                geometry: &exact,
+                ceilings,
+                request,
+                artifact_access: access,
+                capability_cohort: cohort,
+                program_revision: revision(),
+                preferred_edges_per_partition: 3,
+                preferred_faces_per_partition: 32,
+                inventory_limits: ObjectInventoryLimits::default(),
+                evidence: crate::MeshingRunEvidenceContext {
+                    platform: runmat_meshing_core::PlatformBuildIdentity {
+                        capability_cohort: "serial-exact-test".into(),
+                        target_triple: "portable-test-host".into(),
+                        build_digest: StableDigest::from_bytes(
+                            *Digest::sha256(b"meshing-test-build").bytes(),
+                        ),
+                        exact_kernel_abi: Some("portable-exact-test".into()),
+                    },
+                    sizing: Vec::new(),
+                    cache_admission: runmat_meshing_core::CacheAdmissionDecision::Admitted,
+                },
+            },
+            &mut executor,
+        )
+        .unwrap()
+    };
+    let portable = runmat_meshing_core::MeshingExecutionCeilings::PORTABLE_DEFAULT;
+    let large = runmat_meshing_core::MeshingExecutionCeilings {
+        maximum_memory_bytes: 8 << 30,
+        maximum_scratch_bytes: 8 << 30,
+        maximum_wall_time_ms: 7_200_000,
+        maximum_artifact_bytes: 4 << 30,
+        maximum_search_work: 1 << 40,
+        maximum_iterations: 1 << 40,
+    };
+    let first = run(portable);
+    let second = run(large);
+    assert_eq!(first.artifact.canonical_digest, second.artifact.canonical_digest);
+    assert_eq!(first.artifact, second.artifact);
+    assert_eq!(first.evidence.ceilings, portable);
+    assert_eq!(second.evidence.ceilings, large);
+    second.evidence.validate(&second.artifact).unwrap();
 }

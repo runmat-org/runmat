@@ -10,7 +10,7 @@ use super::{
     MeshingResourceBudget, MeshingStageKind, PersistentEntityId, StableDigest,
 };
 
-pub const MESHING_EVIDENCE_SCHEMA_VERSION: u16 = 3;
+pub const MESHING_EVIDENCE_SCHEMA_VERSION: u16 = 4;
 const MAX_STAGE_COUNTERS: usize = 256;
 const MAX_STAGE_INVARIANTS: usize = 256;
 const MAX_STAGE_EVIDENCE: usize = 65_536;
@@ -300,6 +300,9 @@ pub struct MeshingEvidence {
     pub stages: Vec<MeshingStageEvidence>,
     pub sizing: Vec<SizingResolutionEvidence>,
     pub resources: MeshingResourceUsage,
+    /// The execution ceilings the run was admitted under; with the request's size limits they
+    /// form the hard budget the usage is checked against.
+    pub ceilings: super::MeshingExecutionCeilings,
     pub cache_admission: CacheAdmissionDecision,
 }
 
@@ -330,8 +333,10 @@ impl MeshingEvidence {
                 "generated entity counts and canonical bytes must match the validated artifact",
             ));
         }
-        self.resources
-            .validate_against(&artifact.resolved_request.resources)
+        self.resources.validate_against(&MeshingResourceBudget::new(
+            artifact.resolved_request.limits,
+            self.ceilings,
+        ))
     }
 
     /// Validates the terminal evidence against the identities and byte inventory sealed by the
@@ -363,7 +368,10 @@ impl MeshingEvidence {
                 "artifact byte inventory does not match the serialized artifact",
             ));
         }
-        self.resources.validate_against(&resolved_request.resources)
+        self.resources.validate_against(&MeshingResourceBudget::new(
+            resolved_request.limits,
+            self.ceilings,
+        ))
     }
 
     pub(super) fn validate_standalone(&self) -> Result<(), MeshingContractError> {

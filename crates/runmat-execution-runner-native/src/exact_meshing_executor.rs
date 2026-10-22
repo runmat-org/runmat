@@ -328,7 +328,7 @@ pub(crate) fn stage_cpu_millicores(
     if host.workload.stage != runmat_meshing_core::MeshingStageKind::Tetrahedralization {
         return policy_cpu_millicores.min(1_000);
     }
-    let memory_threads = host.resolved_request.resources.maximum_memory_bytes
+    let memory_threads = host.ceilings.maximum_memory_bytes
         / runmat_cpu_execution::WORKER_STACK_BYTES;
     let memory_millicores = u32::try_from(memory_threads.max(1).saturating_mul(1_000))
         .unwrap_or(u32::MAX);

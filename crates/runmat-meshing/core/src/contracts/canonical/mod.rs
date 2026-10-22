@@ -86,7 +86,8 @@ pub use metric::{
 pub use request::{
     AlgorithmVersionSet, CurveQualityTargets, ElementOrder, MeshDimension, MeshingQualityTargets,
     MeshingRequest,
-    MeshingResourceBudget, SurfaceQualityTargets, VolumeQualityTargets,
+    MeshingExecutionCeilings, MeshingResourceBudget, MeshingSizeLimits, SurfaceQualityTargets,
+    VolumeQualityTargets,
     MESHING_REQUEST_SCHEMA_VERSION,
 };
 pub use runmat_geometry_core::{GeometryTolerancePolicy, PersistentEntityId, PersistentEntityKind};
@@ -94,7 +95,8 @@ pub use settings::{
     production_algorithm_versions, resolve_meshing_request, MeshingRequestSettings,
 };
 pub use solver_projection::{
-    SolverMeshProjection, SolverMeshValidation, ValidatedSolverMeshProjection,
+    SolverElevationReport, SolverMeshProjection, SolverMeshValidation,
+    ValidatedSolverMeshProjection,
     ValidatedSolverMeshTopology, SOLVER_MESH_PROJECTION_SCHEMA_VERSION,
     SOLVER_MESH_VALIDATION_SCHEMA_VERSION,
 };

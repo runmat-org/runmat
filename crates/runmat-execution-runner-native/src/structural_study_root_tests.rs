@@ -539,12 +539,11 @@ fn prepare_source(
         &source.roots,
     )
     .unwrap();
-    let mut meshing_request = crate::resolve_native_meshing_request(
+    let meshing_request = crate::resolve_native_meshing_request(
         &geometry_request.import_options,
         resolved.mesh.settings,
     )
     .unwrap();
-    meshing_request.resources.maximum_wall_time_ms = 180_000;
     let geometry_meshing =
         crate::prepare_geometry_meshing_root(crate::GeometryMeshingRootPreparation {
             program_revision: revision.clone(),

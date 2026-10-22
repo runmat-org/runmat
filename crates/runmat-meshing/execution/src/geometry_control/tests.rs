@@ -6,11 +6,12 @@ use std::time::Duration;
 
 #[test]
 fn time_failure_identifies_wall_and_checkpoint_envelopes_independently() {
+    let mut ceilings = runmat_meshing_core::MeshingExecutionCeilings::PORTABLE_DEFAULT;
     for wall_failure in [true, false] {
         let now = Instant::now();
         let expired = now - Duration::from_secs(2);
         let mut settings = MeshingRequestSettings::default();
-        settings.resources.maximum_wall_time_ms = 1_000;
+        ceilings.maximum_wall_time_ms = 1_000;
         settings.cancellation.maximum_checkpoint_latency_ms = 1_000;
         let control = MeshingGeometryEvaluationControl::new(
             &NeverCancelled,
@@ -22,7 +23,7 @@ fn time_failure_identifies_wall_and_checkpoint_envelopes_independently() {
             })),
             Arc::new(AtomicU64::new(0)),
             Arc::new(AtomicU64::new(0)),
-            &settings.resources,
+            &runmat_meshing_core::MeshingResourceBudget::new(settings.limits, ceilings),
             &settings.cancellation,
         );
         let failure = control.checkpoint().unwrap_err();
@@ -45,8 +46,9 @@ fn time_failure_identifies_wall_and_checkpoint_envelopes_independently() {
 }
 
 pub(crate) fn bounded_control(limit: u64) -> MeshingGeometryEvaluationControl<'static> {
-    let mut settings = MeshingRequestSettings::default();
-    settings.resources.maximum_memory_bytes = limit;
+    let mut ceilings = runmat_meshing_core::MeshingExecutionCeilings::PORTABLE_DEFAULT;
+    let settings = MeshingRequestSettings::default();
+    ceilings.maximum_memory_bytes = limit;
     let now = Instant::now();
     MeshingGeometryEvaluationControl::new(
         &NeverCancelled,
@@ -54,7 +56,7 @@ pub(crate) fn bounded_control(limit: u64) -> MeshingGeometryEvaluationControl<'s
         Arc::new(CheckpointClock::new(now)),
         Arc::new(AtomicU64::new(0)),
         Arc::new(AtomicU64::new(0)),
-        &settings.resources,
+        &runmat_meshing_core::MeshingResourceBudget::new(settings.limits, ceilings),
         &settings.cancellation,
     )
 }

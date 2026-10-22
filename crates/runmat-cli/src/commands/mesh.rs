@@ -100,7 +100,7 @@ fn meshing_settings(command: &MeshCommand) -> MeshingRequestSettings {
         maximum_chordal_deviation_m: command.maximum_deviation_m,
         ..MeshingRequestSettings::default()
     };
-    settings.resources.maximum_elements = command.maximum_elements;
+    settings.limits.maximum_elements = command.maximum_elements;
     settings
 }
 

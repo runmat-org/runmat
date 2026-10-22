@@ -22,7 +22,7 @@ impl<'a> CacheControl<'a> {
             session,
             started,
             maximum_wall: Duration::from_millis(
-                stage.host().resolved_request.resources.maximum_wall_time_ms,
+                stage.host().ceilings.maximum_wall_time_ms,
             ),
             deadline,
             stage: stage.host().workload.stage,

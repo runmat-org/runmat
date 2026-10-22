@@ -1,6 +1,8 @@
 mod validated;
 use serde::{Deserialize, Serialize};
-pub use validated::{ValidatedSolverMeshProjection, ValidatedSolverMeshTopology};
+pub use validated::{
+    SolverElevationReport, ValidatedSolverMeshProjection, ValidatedSolverMeshTopology,
+};
 
 use super::{
     CanonicalMeshingContract, GeometryRevisionRef, MeshingCancellationSignal, MeshingContractError,

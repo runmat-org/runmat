@@ -16,7 +16,7 @@ fn exact_meshing_dag_plans_initial_curve_batches_and_an_order_independent_join()
         crate::ExactMeshingDagPlanner::from_exact_host(&fixture.host, exact_root.clone()).unwrap();
     let product_planner = crate::ExactMeshingDagPlanner::new(
         &exact,
-        fixture.host.resolved_request.clone(),
+        fixture.host.resolved_request.clone(), fixture.host.ceilings,
         fixture.host.artifact_access.clone(),
         fixture.host.stage_identity.capability_cohort.clone(),
     )
@@ -89,7 +89,7 @@ fn exact_meshing_dag_product_boundary_rejects_mismatched_authority_and_tolerance
     wrong_access.authorization_scope.push_str("-other");
     assert!(crate::ExactMeshingDagPlanner::new(
         &exact,
-        fixture.host.resolved_request.clone(),
+        fixture.host.resolved_request.clone(), fixture.host.ceilings,
         wrong_access,
         fixture.host.stage_identity.capability_cohort.clone(),
     )
@@ -101,7 +101,7 @@ fn exact_meshing_dag_product_boundary_rejects_mismatched_authority_and_tolerance
     wrong_tolerance.tolerance.absolute_floor_m *= 2.0;
     assert!(crate::ExactMeshingDagPlanner::new(
         &exact,
-        wrong_tolerance,
+        wrong_tolerance, crate::serial_tests::ceilings(),
         fixture.host.artifact_access.clone(),
         fixture.host.stage_identity.capability_cohort.clone(),
     )
@@ -269,9 +269,9 @@ fn exact_surface_dag_restarts_on_a_refined_curve_and_rejects_stale_partitions() 
         .clone();
     let options = runmat_meshing_surface::ExactSurfaceJoinOptions {
         coordinate_tolerance_m: curve_host.resolved_request.tolerance.absolute_floor_m,
-        maximum_nodes: curve_host.resolved_request.resources.maximum_nodes,
-        maximum_triangles: curve_host.resolved_request.resources.maximum_elements,
-        maximum_boundary_segments: curve_host.resolved_request.resources.maximum_elements,
+        maximum_nodes: curve_host.resolved_request.limits.maximum_nodes,
+        maximum_triangles: curve_host.resolved_request.limits.maximum_elements,
+        maximum_boundary_segments: curve_host.resolved_request.limits.maximum_elements,
     };
     let partitions = [partition];
     let pass = runmat_meshing_surface::decide_exact_surface_pass(
@@ -332,7 +332,7 @@ fn exact_surface_dag_enforces_its_convergence_budget_and_context() {
     let mut shallow_host = curve_host.clone();
     shallow_host
         .resolved_request
-        .resources
+        .limits
         .maximum_recursion_depth = 1;
     shallow_host.stage_identity.resolved_request_digest =
         shallow_host.resolved_request.canonical_digest().unwrap();

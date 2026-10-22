@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     AlgorithmVersionSet, CancellationPolicy, CurveQualityTargets, ElementOrder, MeshDimension,
-    MeshingContractError, MeshingQualityTargets, MeshingRequest, MeshingResourceBudget,
+    MeshingContractError, MeshingQualityTargets, MeshingRequest, MeshingSizeLimits,
     MetricCombinationRule, MetricFieldRequest, MetricTensor3, SurfaceQualityTargets,
     VolumeQualityTargets, MESHING_REQUEST_SCHEMA_VERSION,
 };
@@ -20,7 +20,7 @@ pub struct MeshingRequestSettings {
     pub target_edge_length_m: f64,
     pub maximum_chordal_deviation_m: f64,
     pub maximum_grading_ratio: f64,
-    pub resources: MeshingResourceBudget,
+    pub limits: MeshingSizeLimits,
     pub cancellation: CancellationPolicy,
 }
 
@@ -33,16 +33,10 @@ impl Default for MeshingRequestSettings {
             target_edge_length_m: 0.01,
             maximum_chordal_deviation_m: 0.0001,
             maximum_grading_ratio: 1.3,
-            resources: MeshingResourceBudget {
+            limits: MeshingSizeLimits {
                 maximum_nodes: 10_000_000,
                 maximum_elements: 10_000_000,
-                maximum_memory_bytes: 512 << 20,
-                maximum_scratch_bytes: 512 << 20,
-                maximum_wall_time_ms: 3_600_000,
-                maximum_artifact_bytes: 512 << 20,
-                maximum_search_work: 1_000_000_000,
                 maximum_recursion_depth: 256,
-                maximum_iterations: 1_000_000_000,
             },
             cancellation: CancellationPolicy {
                 maximum_checkpoint_latency_ms: 1_000,
@@ -78,7 +72,7 @@ impl MeshingRequestSettings {
                 "must be at least one",
             ));
         }
-        self.resources.validate()?;
+        self.limits.validate()?;
         self.cancellation.validate()
     }
 }
@@ -144,7 +138,7 @@ pub fn resolve_meshing_request(
                 maximum_metric_edge_length: 1.0,
             },
         },
-        resources: settings.resources,
+        limits: settings.limits,
         cancellation: settings.cancellation,
     };
     request.validate()?;
