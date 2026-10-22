@@ -32,6 +32,9 @@ pub struct ExactFaceRefinementCandidate {
 #[derive(Clone, Debug, PartialEq)]
 pub enum ExactFaceCandidateDisposition {
     Insert,
+    /// A shape-only point lying on a shared exact curve: it can be neither inserted nor used to
+    /// rewrite the curve, so it is withdrawn.
+    Withdraw,
     SplitProtectedSegment(Box<ExactProtectedSegmentSplit>),
     SplitChartCut(Box<ExactChartCutSplit>),
 }

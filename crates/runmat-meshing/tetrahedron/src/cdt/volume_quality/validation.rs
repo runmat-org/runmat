@@ -66,11 +66,7 @@ pub fn validate_delaunay_volume_quality(
         .iter()
         .flat_map(|facet| facet.node_identities)
         .collect::<BTreeSet<_>>();
-    let protected_facets = provenance
-        .facets
-        .iter()
-        .map(|facet| facet.node_identities)
-        .collect::<BTreeSet<_>>();
+    let protected_facets = super::protected_facet_identities(provenance);
 
     for (index, (((tetrahedron, context), observed), resolved)) in topology
         .tetrahedra

@@ -399,6 +399,19 @@ pub(crate) fn refine_exact_face_domain_until_blocked(
             };
             current = refined;
             insertion_count += inserted;
+        } else if classifications.withdrawn > 0 {
+            // Every remaining candidate is a shape point withdrawn against a shared curve. As
+            // with collar-suppressed shape points, the current constrained mesh is the result;
+            // independent acceptance still checks it.
+            return finish_refinement(
+                domain,
+                current,
+                geometry,
+                collars,
+                context,
+                (insertion_count, chart_cut_split_count),
+                &iteration_storage,
+            );
         } else {
             return Err(ExactFaceRefinementError::new(
                 ExactFaceRefinementErrorKind::InvalidGeometry,

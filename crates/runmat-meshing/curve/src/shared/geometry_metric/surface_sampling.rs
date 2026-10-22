@@ -93,8 +93,6 @@ impl<'a> FaceMetricSamples<'a> {
                 duv_m: transform.transform_vector(raw.duv_m),
                 dvv_m: transform.transform_vector(raw.dvv_m),
             };
-            let curvature = surface_principal_curvature(&derivatives)
-                .map_err(|error| geometry_error(edge, error))?;
             let failure = || {
                 SharedCurveError::new(
                     SharedCurveErrorKind::GeometryEvaluation(
@@ -105,7 +103,18 @@ impl<'a> FaceMetricSamples<'a> {
                 )
                 .for_edge(&edge.id)
             };
-            let normal = normalize(cross(derivatives.du_m, derivatives.dv_m)).ok_or_else(failure)?;
+            // At a parameterization singularity (a sphere pole, a cone apex) the surface
+            // derivatives span no tangent plane, so the sample has no normal or principal frame.
+            // The edge's other samples carry the face's curvature and its normal for feature
+            // detection.
+            let area = cross(derivatives.du_m, derivatives.dv_m);
+            let scale = norm(derivatives.du_m).powi(2) + norm(derivatives.dv_m).powi(2);
+            if !(norm(area) > SINGULAR_PARAMETERIZATION_RATIO * scale) {
+                continue;
+            }
+            let normal = normalize(area).ok_or_else(failure)?;
+            let curvature = surface_principal_curvature(&derivatives)
+                .map_err(|error| geometry_error(edge, error))?;
             normals.push(normal);
             if curvature.minimum_1_per_m == 0.0 && curvature.maximum_1_per_m == 0.0 {
                 continue;
@@ -172,6 +181,10 @@ impl<'a> FaceMetricSamples<'a> {
             .collect()
     }
 }
+
+/// Area element below this fraction of the squared derivative scale marks a parameterization
+/// singularity: at a sphere pole one derivative is roundoff (~1e-16 of the other).
+const SINGULAR_PARAMETERIZATION_RATIO: f64 = 1.0e-10;
 
 /// Orthonormal physical principal directions from the curvature solver's UV directions mapped to
 /// physical space. At an umbilic the solver may return a nonorthogonal basis, so the second
