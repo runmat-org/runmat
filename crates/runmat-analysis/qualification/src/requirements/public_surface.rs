@@ -206,13 +206,19 @@ const FEA_PUBLIC_LANGUAGE_001: Requirement = Requirement {
         ),
         obligation(
             "output_expression_forms",
-            "Output forms the pages show check with dimensions, lower and run: `pressure_drop(analysis, from =, to =)`, `transmission_loss(analysis, incident =, transmitted =)`, `sound_power(analysis, through =)`, `interpolate(output, at = [x, y, z])`, `mean(field, over = time)`, `max(field, over = region)`, field names such as `field.face.wall_shear_stress`, and arithmetic between outputs of different analyses in one study.",
+            "Output forms the pages show check with dimensions, lower and run: `pressure_drop(analysis, from =, to =)`, `transmission_loss(analysis, incident =, transmitted =)`, `sound_power(analysis, through =)`, `interpolate(output, at = [x, y, z])`, `mean(field, over = time)`, `max(field, over = region)`, field names such as `field.face.wall_shear_stress`, and arithmetic between outputs of different analyses in one study, `oscillatory_shear_index(...)`, `coefficient_of_variation(...)` over a region, and the `lubrication` outputs `film_pressure` and `friction_torque`.",
             EvidenceKind::SemanticRealization,
             STUDY,
         ),
         obligation(
+            "unit_and_source_forms",
+            "`rpm` is a unit, units with fractional powers (such as Pa*s^0.45 for a power-law consistency) parse with exact dimensions, and total power on a body (`heat_generation on <body> = 2 W`) is accepted alongside W/m^3 and converts to the correct volumetric source.",
+            EvidenceKind::SemanticRealization,
+            CHECK,
+        ),
+        obligation(
             "input_forms",
-            "Typed input forms the pages show are admitted: `input film : heat_transfer_coefficient`, frequency tables and generated one-third-octave center sets, `samples = file \"...csv\"` with `interpolation = periodic_spline`, impedance tables over frequency with a `delany_bazley` model, and `normal_velocity` read from a retained state of another analysis.",
+            "Typed input forms the pages show are admitted: `input film : heat_transfer_coefficient`, frequency tables and generated one-third-octave center sets, `samples = file \"...csv\"` with `interpolation = periodic_spline`, impedance tables over frequency with a `delany_bazley` model, `normal_velocity` read from a retained state of another analysis, `species <name> { diffusivity }` with `fluid steady { transport = [...] }`, `porous { law = darcy_forchheimer; permeability; inertial_coefficient; porosity }`, fluid laws `carreau` and `power_law`, the `lubrication` family (`lubrication.journal`, `lubrication.pressure`, `lubrication steady { cavitation = elrod }`), and `mass_flow_rate` as a sweep input type.",
             EvidenceKind::SemanticRealization,
             STUDY,
         ),

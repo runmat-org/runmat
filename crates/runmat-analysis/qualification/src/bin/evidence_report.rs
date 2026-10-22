@@ -93,10 +93,11 @@ fn run_tests(
     }
     let mut results = BTreeMap::new();
     for (package, locators) in tests {
-        let mut command = Command::new(&cargo[0]);
-        command
-            .args(&cargo[1..])
-            .args(["test", "--offline", "-p", package]);
+        // One shell merges stderr into stdout so cargo's `Running ...` headers stay ordered
+        // with the test lines that follow them.
+        let mut command = Command::new("sh");
+        command.args(["-c", "\"$@\" 2>&1", "sh"]).args(cargo);
+        command.args(["test", "--offline", "-p", package]);
         let mut libs = false;
         let mut integrations = BTreeSet::new();
         for l in &locators {
@@ -119,11 +120,7 @@ fn run_tests(
         command.env("RUST_MIN_STACK", "67108864");
         eprintln!("running {package}: {} tests", locators.len());
         let output = command.output()?;
-        let text = format!(
-            "{}\n{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
+        let text = String::from_utf8_lossy(&output.stdout).into_owned();
         let mut seen: BTreeMap<(Target, String), TestResult> = BTreeMap::new();
         let mut section: Option<Target> = None;
         for line in text.lines() {

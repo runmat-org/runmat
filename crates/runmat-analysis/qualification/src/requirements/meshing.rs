@@ -75,6 +75,12 @@ const FEA_MESH_GEOMETRY_001: Requirement = Requirement {
             IMPORT,
         ),
         obligation(
+            "curved_import_validation_budget",
+            "Exact import validation of curved parts (coaxial pipes with chamber and baffle, a 1.5 m hemisphere, spherical sinuses) completes within a stated allocation and time budget and either passes or fails with a typed diagnostic naming the entity; `EXACT_VALIDATION_BUDGET_EXCEEDED` on a valid part is a defect, and the budget accounts allocation consumption in every validation stage.",
+            EvidenceKind::ResourceAdmission,
+            IMPORT,
+        ),
+        obligation(
             "geometry_load_units_option",
             "The `geometry.load` units option and the `units` declaration of a geometry block scale imported coordinates consistently and reject mixed or missing units with a typed diagnostic before meshing.",
             EvidenceKind::RejectionInvariant,
@@ -112,6 +118,12 @@ const FEA_MESH_DISCRETIZATION_001: Requirement = Requirement {
             "volume_quality_convergence",
             "Volume quality refinement terminates within the authored work and time budget on the bracket, heat sink and tuning fork, ending with every element at or above the declared quality floor, and refinement yields to coupled repair fairly with stale rejections invalidated and true global exhaustion detected.",
             EvidenceKind::ResourceAdmission,
+            MESH,
+        ),
+        obligation(
+            "analytic_surface_coverage",
+            "Surface meshing handles every analytic surface kind including spheres, tori, cones and cylinders with poles, seams and umbilic points: a plain sphere, a hemisphere, spherical fillets and domes, and a carotid bulb and sinus mesh with the directional curvature metric defined at umbilic points.",
+            EvidenceKind::IndependentReference,
             MESH,
         ),
         obligation(
