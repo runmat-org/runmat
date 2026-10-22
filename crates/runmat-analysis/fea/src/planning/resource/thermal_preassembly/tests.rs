@@ -381,7 +381,7 @@ fn planning_ceiling_precedes_geometric_projection_at_exact_boundary() {
         mesh.validate_canonical().unwrap();
         let mut workload = workload();
         let schedule = workload.solve_schedule().unwrap();
-        let history = ThermalHistoryResourceFacts::derive(&mesh, &schedule).unwrap();
+        let history = ThermalHistoryResourceFacts::derive(&mesh, &schedule, &[]).unwrap();
         let model_bytes = runmat_canonical_codec::profile_serialized_shape(
             &workload.model,
             crate::execution::THERMAL_WORKLOAD_LIMITS,

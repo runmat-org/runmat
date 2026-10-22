@@ -208,6 +208,52 @@ pub fn conductivity_at(
     Ok(law.conductivity_s_per_m / factor)
 }
 
+/// Element mean temperatures of one thermal snapshot. Elements on the second side of a
+/// finite-conductance interface use that side's temperature at the interface nodes.
+pub fn element_temperatures_of_snapshot(
+    projection: &AnalysisProjection,
+    interfaces: &[runmat_analysis_core::AnalysisInterface],
+    thermal: &crate::FeaThermalRunResult,
+    index: usize,
+) -> AnalysisExecutionResult<Vec<f64>> {
+    let nodal = thermal
+        .temperature_snapshots
+        .get(index)
+        .and_then(|snapshot| snapshot.as_host_f64())
+        .ok_or_else(|| invalid("thermal snapshot is not host data"))?;
+    if thermal.interface_node_ids.is_empty() {
+        return element_temperatures(projection, nodal);
+    }
+    let second = thermal
+        .interface_temperature_snapshots
+        .get(index)
+        .and_then(|snapshot| snapshot.as_host_f64())
+        .ok_or_else(|| invalid("thermal interface snapshot is not host data"))?;
+    let (plans, dofs) = crate::physics::thermal_interface::solid_conduction(projection, interfaces)
+        .map_err(invalid)?;
+    if dofs.second().len() != thermal.interface_node_ids.len()
+        || dofs
+            .second()
+            .iter()
+            .zip(&thermal.interface_node_ids)
+            .any(|(&(node, _), &id)| projection.nodes[node].node_id != id)
+    {
+        return Err(invalid("thermal interface nodes differ from the declared interfaces"));
+    }
+    let values = dofs
+        .join(
+            nodal,
+            &dofs
+                .second()
+                .iter()
+                .zip(second)
+                .map(|(&(node, _), &value)| (node, value))
+                .collect::<Vec<_>>(),
+        )
+        .map_err(invalid)?;
+    element_temperatures(&dofs.split_projection(projection, &plans), &values)
+}
+
 /// Element mean temperatures from nodal values (volume average with the element's shape
 /// functions, so Tet10 midside temperatures are honoured).
 pub fn element_temperatures(
@@ -454,11 +500,13 @@ pub fn execute_coupled_electrothermal(
             return Err(invalid("thermal history differs from the coupled schedule"));
         }
         let mut next = Vec::with_capacity(times.len());
-        for snapshot in &thermal.temperature_snapshots {
-            let nodal = snapshot
-                .as_host_f64()
-                .ok_or_else(|| invalid("thermal snapshot is not host data"))?;
-            next.push(element_temperatures(&projection, nodal)?);
+        for index in 0..thermal.temperature_snapshots.len() {
+            next.push(element_temperatures_of_snapshot(
+                &projection,
+                &thermal_template.model.interfaces,
+                &thermal,
+                index,
+            )?);
         }
         let mut change = 0.0_f64;
         let mut rise = 0.0_f64;

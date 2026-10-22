@@ -455,10 +455,32 @@ async fn execute_study_cases(
     };
     if let Some(analysis) = chain::electrothermal_analysis(&study) {
         // Heat transfer iterated with conduction to the two-way fixed point, then the
-        // conduction field at the solved temperatures (final time of a transient). Each case
-        // derives the operating point from the authored study, so either runs on any placement.
+        // conduction field at the temperatures the heat case published (final time of a
+        // transient). The conduction case carries those temperatures in its planning policy, so
+        // it runs on any placement without solving the coupled loop again.
         let mut heat = execute_case(source, study.clone(), Vec::new(), options).await?;
         heat.case_id = label(&analysis);
+        let CompletedFeaStudyResult::Thermal(thermal) = &heat.result else {
+            return Err("the heat case of an electrothermal analysis must be a thermal study".into());
+        };
+        let state = thermal
+            .completion
+            .states
+            .iter()
+            .filter_map(|state| state.payload.thermal())
+            .max_by(|a, b| a.sample_time_s.total_cmp(&b.sample_time_s))
+            .ok_or("the electrothermal heat case published no thermal state")?;
+        let transient = !matches!(
+            thermal.completion.workload.procedure,
+            runmat_analysis_fea::ThermalProcedureControl::Steady
+        );
+        let (element_temperature_k, operating_time_s) =
+            runmat_analysis_fea::execution::conduction_operating_temperatures(
+                state,
+                &thermal.mesh,
+                transient,
+            )
+            .map_err(|error| error.to_string())?;
         let authority = format!("typed-fea-local:{}", uuid::Uuid::new_v4());
         let prepared = preparation::prepare_study_with_role(
             source,
@@ -466,7 +488,10 @@ async fn execute_study_cases(
             &[],
             &authority,
             options,
-            preparation::PreparationRole::ElectrothermalConduction,
+            preparation::PreparationRole::ElectrothermalConduction {
+                element_temperature_k,
+                operating_time_s,
+            },
         )
         .await?;
         let mut conduction = execute_prepared_with_source(prepared, options, Some(source)).await?;

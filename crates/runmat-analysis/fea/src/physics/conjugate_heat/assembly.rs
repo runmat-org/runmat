@@ -12,83 +12,20 @@ use crate::{
         realize_step_excitations, sample_prescribed_heat_flux, sample_prescribed_temperature,
         RealizedExcitationKind, RealizedExcitationTarget,
     },
-    topology::{AnalysisProjection, ProjectedBoundaryFace},
+    topology::AnalysisProjection,
 };
-use runmat_analysis_core::{
-    AnalysisConstraint, AnalysisInterfaceKind, BoundaryOperator, ThermalConstraintKind,
-    ThermalInterfaceTransfer,
+use crate::physics::thermal_interface::{
+    self, add_conductance, InterfaceDofs, InterfacePlan,
 };
+pub(super) use crate::physics::thermal_interface::InterfaceLaw;
+use runmat_analysis_core::{AnalysisConstraint, BoundaryOperator, ThermalConstraintKind};
 use runmat_meshing_core::BoundaryFaceRole;
-use std::collections::{BTreeMap, BTreeSet};
-
-/// Node degrees of freedom. A node on an interface with a temperature jump has a second,
-/// side-owned degree of freedom used by the elements of that interface's second side.
-#[derive(Debug)]
-pub(super) struct Dofs {
-    nodes: usize,
-    /// (projection node, second-side dof), sorted by node.
-    second: Vec<(usize, usize)>,
-}
-
-impl Dofs {
-    pub(super) fn count(&self) -> usize {
-        self.nodes + self.second.len()
-    }
-    fn second_of(&self, node: usize) -> Option<usize> {
-        self.second
-            .binary_search_by_key(&node, |(n, _)| *n)
-            .ok()
-            .map(|i| self.second[i].1)
-    }
-    pub(super) fn split(&self, values: &[f64]) -> Result<(Vec<f64>, Vec<(usize, f64)>), Error> {
-        if values.len() != self.count() {
-            return Err(Error::Invalid("temperature dof inventory"));
-        }
-        Ok((
-            values[..self.nodes].to_vec(),
-            self.second.iter().map(|&(n, d)| (n, values[d])).collect(),
-        ))
-    }
-    pub(super) fn join(&self, nodes: &[f64], second: &[(usize, f64)]) -> Result<Vec<f64>, Error> {
-        if nodes.len() != self.nodes
-            || second.len() != self.second.len()
-            || second
-                .iter()
-                .zip(&self.second)
-                .any(|((a, _), (b, _))| a != b)
-            || nodes
-                .iter()
-                .chain(second.iter().map(|(_, v)| v))
-                .any(|v| !v.is_finite())
-        {
-            return Err(Error::Invalid("retained temperature inventory"));
-        }
-        let mut values = nodes.to_vec();
-        values.extend(second.iter().map(|(_, v)| *v));
-        Ok(values)
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) enum InterfaceLaw {
-    Perfect,
-    /// Interface conductance h = 1 / R, W/m^2/K.
-    Conductance(f64),
-}
-
-#[derive(Debug)]
-pub(super) struct InterfacePlan {
-    pub interface_id: String,
-    pub law: InterfaceLaw,
-    /// (projection boundary face, first-side element, second-side element).
-    pub faces: Vec<(usize, usize, usize)>,
-}
+use std::collections::BTreeSet;
 
 #[derive(Debug)]
 pub(super) struct ElementCoefficients {
     pub conductivity_w_per_mk: f64,
     pub volumetric_capacity_j_per_m3k: f64,
-    pub second_side: bool,
 }
 
 /// Exterior boundary contribution attributed to the side of its adjacent element.
@@ -105,7 +42,7 @@ pub(super) enum BoundaryTerm {
 }
 
 pub(super) struct AssembledEnergy {
-    pub dofs: Dofs,
+    pub dofs: InterfaceDofs,
     pub elements: Vec<ElementCoefficients>,
     pub velocity: Vec<Option<CellVelocity>>,
     pub interfaces: Vec<InterfacePlan>,
@@ -119,20 +56,6 @@ pub(super) struct AssembledEnergy {
     pub rhs: Vec<f64>,
     pub constrained: RealSparseMatrix,
     pub constrained_rhs: Vec<f64>,
-}
-
-pub(super) fn dof(
-    dofs: &Dofs,
-    elements: &[ElementCoefficients],
-    element: usize,
-    node: usize,
-) -> usize {
-    if elements[element].second_side {
-        if let Some(second) = dofs.second_of(node) {
-            return second;
-        }
-    }
-    node
 }
 
 /// Local element operator split by physical term, so evidence can attribute each part.
@@ -297,25 +220,6 @@ pub(super) fn boundary_operator(
 }
 
 /// Consistent interface mass ∫ N_i N_j dA on one conformal face.
-pub(super) fn interface_mass(
-    projection: &AnalysisProjection,
-    face: &ProjectedBoundaryFace,
-) -> Result<Vec<f64>, Error> {
-    let n = face.node_indices.len();
-    let mut mass = vec![0.0; n * n];
-    projection
-        .visit_boundary_quadrature(face, |point| {
-            let shapes = point.shape_values();
-            for i in 0..n {
-                for j in 0..n {
-                    mass[i * n + j] += shapes[i] * shapes[j] * point.area_weight_m2;
-                }
-            }
-        })
-        .map_err(|e| Error::InvalidDetail(e.to_string()))?;
-    Ok(mass)
-}
-
 pub(super) fn assemble(input: &ConjugateHeatInput<'_>) -> Result<AssembledEnergy, Error> {
     let p = input.projection;
     let velocity = lift(p, input.fluid_topology, input.face_volume_flux_m3_per_s)?;
@@ -352,7 +256,6 @@ pub(super) fn assemble(input: &ConjugateHeatInput<'_>) -> Result<AssembledEnergy
         elements.push(ElementCoefficients {
             conductivity_w_per_mk: thermal.conductivity_w_per_mk,
             volumetric_capacity_j_per_m3k: capacity,
-            second_side: false,
         });
     }
     if input.properties.cell_materials().len() != input.fluid_topology.cells.len() {
@@ -361,47 +264,7 @@ pub(super) fn assemble(input: &ConjugateHeatInput<'_>) -> Result<AssembledEnergy
         ));
     }
     let interfaces = plan_interfaces(input, &velocity)?;
-    // Second-side ownership is by region: every element of a region on the second side of a
-    // jump interface takes the second-side identity of the jump nodes it touches, including
-    // elements meeting the interface only along an edge or at a vertex. Face adjacency alone
-    // would let those elements short-circuit the jump through the first-side value.
-    let mut jump_nodes = BTreeMap::<usize, ()>::new();
-    let mut first_regions = BTreeSet::new();
-    let mut second_regions = BTreeSet::new();
-    for plan in &interfaces {
-        if plan.law == InterfaceLaw::Perfect {
-            continue;
-        }
-        for &(face, first, second) in &plan.faces {
-            first_regions.insert(&p.elements[first].region_id);
-            second_regions.insert(&p.elements[second].region_id);
-            for &node in &p.boundary_faces[face].node_indices {
-                jump_nodes.insert(node, ());
-            }
-        }
-    }
-    // A region on both sides of temperature-jump interfaces would need two jump identities
-    // at one node; that topology is rejected.
-    if first_regions.iter().any(|r| second_regions.contains(r)) {
-        return Err(Error::Unsupported(
-            "a region on both sides of temperature-jump interfaces",
-        ));
-    }
-    for (index, e) in p.elements.iter().enumerate() {
-        if second_regions.contains(&e.region_id)
-            && e.node_indices.iter().any(|n| jump_nodes.contains_key(n))
-        {
-            elements[index].second_side = true;
-        }
-    }
-    let dofs = Dofs {
-        nodes: p.nodes.len(),
-        second: jump_nodes
-            .keys()
-            .enumerate()
-            .map(|(i, &n)| (n, p.nodes.len() + i))
-            .collect(),
-    };
+    let dofs = InterfaceDofs::derive(p, &interfaces).map_err(Error::InvalidDetail)?;
     let sample = input.sample;
     let excitations = realize_step_excitations(input.model, input.step, sample)
         .map_err(|e| Error::InvalidDetail(e.to_string()))?;
@@ -517,7 +380,7 @@ pub(super) fn assemble(input: &ConjugateHeatInput<'_>) -> Result<AssembledEnergy
                     let f = &p.boundary_faces[face];
                     let element = f.adjacent_element_indices[0];
                     for &node in &f.node_indices {
-                        let d = dof(&dofs, &elements, element, node);
+                        let d = dofs.dof(element, node);
                         if dirichlet[d].is_some_and(|old| old != t.real) {
                             return Err(Error::Invalid("conflicting prescribed temperatures"));
                         }
@@ -529,37 +392,20 @@ pub(super) fn assemble(input: &ConjugateHeatInput<'_>) -> Result<AssembledEnergy
             _ => return Err(Error::Unsupported("constraint in a conjugate heat study")),
         }
     }
-    require_inflow_temperature(input, &dofs, &elements, &dirichlet)?;
+    require_inflow_temperature(input, &dofs, &dirichlet)?;
     // Sparse support from element, interface and boundary dof sets.
     let mut rows = vec![Vec::<usize>::new(); dofs.count()];
-    let element_dofs = |index: usize| -> Vec<usize> {
-        p.elements[index]
-            .node_indices
-            .iter()
-            .map(|&n| dof(&dofs, &elements, index, n))
-            .collect()
-    };
+    let element_dofs = |index: usize| dofs.element_dofs(p, index);
     for index in 0..p.elements.len() {
         let d = element_dofs(index);
         for &r in &d {
             rows[r].extend_from_slice(&d);
         }
     }
-    for plan in &interfaces {
-        if plan.law == InterfaceLaw::Perfect {
-            continue;
-        }
-        for &(face, first, second) in &plan.faces {
-            let nodes = &p.boundary_faces[face].node_indices;
-            let mut d = nodes
-                .iter()
-                .map(|&n| dof(&dofs, &elements, first, n))
-                .collect::<Vec<_>>();
-            d.extend(nodes.iter().map(|&n| dof(&dofs, &elements, second, n)));
-            for &r in &d {
-                rows[r].extend_from_slice(&d);
-            }
-        }
+    let mut interface_rows = vec![BTreeSet::new(); dofs.count()];
+    dofs.extend_support(p, &interfaces, &mut interface_rows);
+    for (row, extra) in rows.iter_mut().zip(interface_rows) {
+        row.extend(extra);
     }
     let mut offsets = Vec::with_capacity(rows.len() + 1);
     let mut columns = Vec::new();
@@ -597,11 +443,7 @@ pub(super) fn assemble(input: &ConjugateHeatInput<'_>) -> Result<AssembledEnergy
         let (face, matrix, load) = boundary_operator(p, term)?;
         let f = &p.boundary_faces[face];
         let element = f.adjacent_element_indices[0];
-        let d = f
-            .node_indices
-            .iter()
-            .map(|&n| dof(&dofs, &elements, element, n))
-            .collect::<Vec<_>>();
+        let d = dofs.face_dofs(f, element);
         let n = d.len();
         for i in 0..n {
             rhs[d[i]] += load[i];
@@ -610,35 +452,8 @@ pub(super) fn assemble(input: &ConjugateHeatInput<'_>) -> Result<AssembledEnergy
             }
         }
     }
-    for plan in &interfaces {
-        let InterfaceLaw::Conductance(h) = plan.law else {
-            continue;
-        };
-        for &(face, first, second) in &plan.faces {
-            let f = &p.boundary_faces[face];
-            let mass = interface_mass(p, f)?;
-            let n = f.node_indices.len();
-            let a = f
-                .node_indices
-                .iter()
-                .map(|&node| dof(&dofs, &elements, first, node))
-                .collect::<Vec<_>>();
-            let b = f
-                .node_indices
-                .iter()
-                .map(|&node| dof(&dofs, &elements, second, node))
-                .collect::<Vec<_>>();
-            for i in 0..n {
-                for j in 0..n {
-                    let m = h * mass[i * n + j];
-                    full.add(a[i], a[j], m);
-                    full.add(a[i], b[j], -m);
-                    full.add(b[i], b[j], m);
-                    full.add(b[i], a[j], -m);
-                }
-            }
-        }
-    }
+    add_conductance(p, &interfaces, &dofs, |r, c, v| full.add(r, c, v))
+        .map_err(Error::InvalidDetail)?;
     let full = full.finish().map_err(|e| Error::Operator(e.to_string()))?;
     let capacity = capacity
         .finish()
@@ -726,84 +541,22 @@ fn exterior_faces(
     Ok(faces.into_iter().map(|(i, _)| i).collect())
 }
 
-/// Every conformal fluid–solid face belongs to exactly one declared conjugate interface.
+/// Every conformal fluid–solid face belongs to exactly one declared conjugate interface. The
+/// fluid side is the second side; between two solids, the greater region.
 fn plan_interfaces(
     input: &ConjugateHeatInput<'_>,
     velocity: &[Option<CellVelocity>],
 ) -> Result<Vec<InterfacePlan>, Error> {
     let p = input.projection;
-    let mut claimed = vec![false; p.boundary_faces.len()];
-    let mut plans = Vec::new();
-    for interface in &input.model.interfaces {
-        let AnalysisInterfaceKind::ConjugateHeatTransfer(model) = &interface.kind else {
-            return Err(Error::Unsupported(
-                "non-thermal interface in a conjugate heat study",
-            ));
-        };
-        let law = match model.transfer {
-            ThermalInterfaceTransfer::Perfect => InterfaceLaw::Perfect,
-            ThermalInterfaceTransfer::Conductance(h) => {
-                InterfaceLaw::Conductance(h.watts_per_square_meter_kelvin)
-            }
-            ThermalInterfaceTransfer::Resistance(r) => {
-                InterfaceLaw::Conductance(1.0 / r.square_meter_kelvin_per_watt)
-            }
-        };
-        if let InterfaceLaw::Conductance(h) = law {
-            if !h.is_finite() || h <= 0.0 {
-                return Err(Error::Invalid(
-                    "interface conductance must be positive and finite",
-                ));
-            }
+    let (plans, claimed) = thermal_interface::plan(p, &input.model.interfaces, |a, b| {
+        match (velocity[a].is_some(), velocity[b].is_some()) {
+            (false, true) => Ok((a, b)),
+            (true, false) => Ok((b, a)),
+            (false, false) => Ok(thermal_interface::solid_sides(p, a, b)),
+            (true, true) => Err("thermal interface inside the fluid".into()),
         }
-        let mut faces = Vec::new();
-        for (index, f) in p.boundary_faces.iter().enumerate() {
-            let selected = f.provenance.iter().any(|entity| {
-                interface.primary.matches_persistent_entity(entity)
-                    || interface.secondary.matches_persistent_entity(entity)
-            });
-            if !selected {
-                continue;
-            }
-            let [a, b] = f.adjacent_element_indices[..] else {
-                return Err(Error::InvalidDetail(format!(
-                    "interface `{}` selects a face that is not a conformal interface between two bodies",
-                    interface.interface_id
-                )));
-            };
-            if f.role != BoundaryFaceRole::ConformalInterface {
-                return Err(Error::Invalid("interface face role"));
-            }
-            if std::mem::replace(&mut claimed[index], true) {
-                return Err(Error::InvalidDetail(format!(
-                    "interface `{}` overlaps another declared interface",
-                    interface.interface_id
-                )));
-            }
-            // The fluid side is the second side; between two solids, the greater region.
-            let (first, second) = match (velocity[a].is_some(), velocity[b].is_some()) {
-                (false, true) => (a, b),
-                (true, false) => (b, a),
-                (false, false) if p.elements[a].region_id <= p.elements[b].region_id => (a, b),
-                (false, false) => (b, a),
-                (true, true) => {
-                    return Err(Error::Unsupported("thermal interface inside the fluid"))
-                }
-            };
-            faces.push((index, first, second));
-        }
-        if faces.is_empty() {
-            return Err(Error::InvalidDetail(format!(
-                "interface `{}` selects no conformal interface face",
-                interface.interface_id
-            )));
-        }
-        plans.push(InterfacePlan {
-            interface_id: interface.interface_id.clone(),
-            law,
-            faces,
-        });
-    }
+    })
+    .map_err(Error::InvalidDetail)?;
     for (index, f) in p.boundary_faces.iter().enumerate() {
         if f.role != BoundaryFaceRole::ConformalInterface || claimed[index] {
             continue;
@@ -825,8 +578,7 @@ fn plan_interfaces(
 /// Flow entering the fluid must carry an authored inlet temperature.
 fn require_inflow_temperature(
     input: &ConjugateHeatInput<'_>,
-    dofs: &Dofs,
-    elements: &[ElementCoefficients],
+    dofs: &InterfaceDofs,
     dirichlet: &[Option<f64>],
 ) -> Result<(), Error> {
     let p = input.projection;
@@ -841,7 +593,7 @@ fn require_inflow_temperature(
         let element = input.fluid_topology.cells[face.owner].source_element_index;
         if f.node_indices
             .iter()
-            .any(|&n| dirichlet[dof(dofs, elements, element, n)].is_none())
+            .any(|&n| dirichlet[dofs.dof(element, n)].is_none())
         {
             return Err(Error::Invalid(
                 "fluid inflow boundary needs a prescribed inlet temperature",

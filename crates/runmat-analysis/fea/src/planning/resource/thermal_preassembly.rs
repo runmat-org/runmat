@@ -106,7 +106,7 @@ impl ThermalPreassemblyResourceFacts {
                 "thermal resource identity differs from the selected procedure".into(),
             ));
         }
-        let history = ThermalHistoryResourceFacts::derive(mesh, schedule)?;
+        let history = ThermalHistoryResourceFacts::derive(mesh, schedule, &model.interfaces)?;
         history.require_fits(step.accuracy.resources.maximum_resident_bytes)?;
         // Reuse the workload's bounded input envelope; do not allocate canonical bytes or a
         // serde value tree to decide whether the model fits the authored resident ceiling.
@@ -128,7 +128,7 @@ impl ThermalPreassemblyResourceFacts {
             before_projection,
             step.accuracy.resources.maximum_resident_bytes,
         )?;
-        let operators = ThermalOperatorResourceFacts::derive(mesh)?;
+        let operators = ThermalOperatorResourceFacts::derive(mesh, &model.interfaces)?;
         operators.require_fits(&history, step.accuracy.resources.maximum_resident_bytes)?;
         let sources = ThermalSourceEvidenceResourceFacts::derive(model, step, schedule)?;
         let observations = match observations {

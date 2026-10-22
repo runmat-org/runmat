@@ -1,8 +1,7 @@
 //! Interface heat balances and global energy closure evaluated from retained temperatures.
 use super::{
     assembly::{
-        boundary_operator, dof, element_operator, interface_mass, AssembledEnergy, BoundaryTerm,
-        InterfaceLaw,
+        boundary_operator, element_operator, AssembledEnergy, BoundaryTerm, InterfaceLaw,
     },
     ConjugateHeatError as Error, ConjugateHeatInput,
 };
@@ -130,7 +129,7 @@ pub(super) fn evaluate(
         let dofs = p.elements[index]
             .node_indices
             .iter()
-            .map(|&node| dof(&system.dofs, &system.elements, index, node))
+            .map(|&node| system.dofs.dof(index, node))
             .collect::<Vec<_>>();
         let mut local = vec![0.0; dofs.len()];
         for i in 0..dofs.len() {
@@ -157,7 +156,7 @@ pub(super) fn evaluate(
         let dofs = f
             .node_indices
             .iter()
-            .map(|&node| dof(&system.dofs, &system.elements, element, node))
+            .map(|&node| system.dofs.dof(element, node))
             .collect::<Vec<_>>();
         let m = dofs.len();
         let mut local = vec![0.0; m];
@@ -209,12 +208,12 @@ pub(super) fn evaluate(
             let da = f
                 .node_indices
                 .iter()
-                .map(|&node| dof(&system.dofs, &system.elements, a, node))
+                .map(|&node| system.dofs.dof(a, node))
                 .collect::<Vec<_>>();
             let db = f
                 .node_indices
                 .iter()
-                .map(|&node| dof(&system.dofs, &system.elements, b, node))
+                .map(|&node| system.dofs.dof(b, node))
                 .collect::<Vec<_>>();
             for (x, y) in da.iter().zip(&db) {
                 jump = jump.max((values[*x] - values[*y]).abs());
@@ -222,7 +221,8 @@ pub(super) fn evaluate(
                 second_mask[*y] = system.dirichlet[*y].is_none();
             }
             if let InterfaceLaw::Conductance(h) = plan.law {
-                let mass = interface_mass(p, f)?;
+                let mass = crate::physics::thermal_interface::interface_mass(p, f)
+                    .map_err(Error::InvalidDetail)?;
                 let m = da.len();
                 for i in 0..m {
                     for j in 0..m {
@@ -287,7 +287,7 @@ pub(super) fn evaluate(
                 .shape_values()
                 .iter()
                 .zip(nodes)
-                .map(|(s, &node)| s * values[dof(&system.dofs, &system.elements, element, node)])
+                .map(|(s, &node)| s * values[system.dofs.dof(element, node)])
                 .sum::<f64>();
             mean += t * point.area_weight_m2;
             weight += point.area_weight_m2;

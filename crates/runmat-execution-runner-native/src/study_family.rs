@@ -259,22 +259,14 @@ pub(crate) fn plan_family_study(
             )
         }
         StudyRootPlanning::Electrical(policy) => {
-            let mut policy = policy.clone();
+            let policy = policy.clone();
             let compiled = compile(&mut |_| Ok(()))?;
             let product = if runmat_analysis_fea::execution::is_electrothermal_study(&compiled) {
-                // The conduction side of an electrothermal analysis, at the temperatures of
-                // its own two-way operating point.
-                let (_, point) = runmat_analysis_fea::execution::solve_electrothermal_heat_study(
-                    &compiled,
-                    context.mesh,
-                    runmat_analysis_fea::study::ThermalStudyPlanningPolicy {
-                        backend: runmat_analysis_fea::ComputeBackend::Cpu,
-                        element_heat_source: None,
-                    },
-                )
-                .map_err(|error| error.to_string())?;
-                policy.element_temperature_k = Some(point.element_temperature_k);
-                policy.operating_time_s = point.operating_time_s;
+                // The conduction side of an electrothermal analysis, at the temperatures its
+                // heat case published; the coupled loop is solved once, by the heat case.
+                if policy.element_temperature_k.is_none() {
+                    return Err("the conduction side of an electrothermal analysis needs the temperatures its heat case published".into());
+                }
                 let conduction =
                     runmat_analysis_fea::execution::electrothermal_conduction_study(&compiled)
                         .map_err(|error| error.to_string())?;
