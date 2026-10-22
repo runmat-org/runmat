@@ -311,6 +311,16 @@ fn solid_rod_modal_frequency_and_retained_response_have_independent_evidence() {
     modal_continuum(false);
 }
 
+// witness: FEA-DYNAMICS-MODAL-001/physical_mass_base_state @ modal_structural/tet10/public_study;
+//   coverage: partial;
+//   boundary: Axial affine Tet10 slab rod frequency refinement and modal truncation against direct
+//   harmonic response; beam and shell modes, repeated eigenspaces and remote envelopes are not
+//   covered.
+// witness: FEA-DYNAMICS-MODAL-001/references @ modal_structural/tet10/public_study; coverage:
+//   partial;
+//   boundary: Axial rod modal frequency against the continuum reference with retained-response
+//   truncation checked against direct harmonic response; no beam modes, repeated modes or
+//   mass-orthogonality series.
 #[test]
 fn solid_rod_tet10_modal_frequency_and_retained_response_have_independent_evidence() {
     modal_continuum(true);

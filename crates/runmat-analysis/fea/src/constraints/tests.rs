@@ -262,6 +262,10 @@ fn fixed_constraint_projects_a_logical_region_bound_to_multiple_faces() {
     assert_eq!(plan.rows.len(), selected_nodes.len() * 3);
 }
 
+// witness: FEA-STRUCTURAL-CONSTRAINT-001/normal_symmetry_rigid_coupling @
+//   linear_structural/tet4/numerical_kernel; coverage: partial;
+//   boundary: Normal displacement and antisymmetry compile distinct normal and tangent spaces on a
+//   fixture mesh (Tet4).
 #[test]
 fn normal_displacement_and_antisymmetry_compile_distinct_normal_tangent_spaces() {
     let (mut model, mesh) = model_and_mesh();
@@ -1558,6 +1562,9 @@ fn nonlinear_accepted_states_preserve_complete_constraint_kinematics() {
     }
 }
 
+// witness: FEA-STRUCTURAL-CONSTRAINT-001/distributing_ties_equations @
+//   linear_structural/tet4/numerical_kernel; coverage: partial;
+//   boundary: A reference-point wrench solves through distributing coupling on a fixture solid.
 #[test]
 fn reference_point_wrench_solves_through_distributing_coupling() {
     let (mut model, mesh) = model_and_mesh();

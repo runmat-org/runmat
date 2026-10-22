@@ -18,6 +18,9 @@ fn component(dof: CanonicalStructuralDof) -> usize {
         | CanonicalStructuralDof::Rotation(StructuralRotationDof::Rz) => 2,
     }
 }
+// witness: FEA-STRUCTURAL-CONSTRAINT-001/normal_symmetry_rigid_coupling @
+//   linear_structural/tet4|tet10/numerical_kernel; coverage: partial;
+//   boundary: Both-order surface weights, normals and coupling rows match independent geometry.
 #[test]
 fn both_order_surface_weights_normals_and_coupling_rows_match_independent_geometry() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {

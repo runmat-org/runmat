@@ -798,6 +798,9 @@ fn shell_moment_solves_rotation_and_reaction_moment() {
     }));
 }
 
+// witness: FEA-STRUCTURAL-BEAM-001/physical_beam_mixed_dofs @
+//   linear_structural/beam|shell/numerical_kernel; coverage: partial;
+//   boundary: A mixed beam and shell model solves and recovers each formulation.
 #[test]
 fn mixed_beam_shell_model_solves_and_recovers_each_formulation() {
     let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
@@ -1908,6 +1911,10 @@ fn tet10_linear_static_admits_its_assembled_recovery_contract() {
     assert_eq!(estimate.solver_artifact_digest, mesh.canonical_digest);
 }
 
+// witness: FEA-DYNAMICS-PRESTRESS-001/complete_base_operator @
+//   structural_stability/tet4/numerical_kernel; coverage: partial;
+//   boundary: A physical preload publishes a signed-load linear geometric stiffness on a Tet4
+//   fixture.
 #[test]
 fn physical_preload_publishes_signed_load_linear_geometric_stiffness() {
     let mut model = fixture_model(FixtureId::StructuralTransientTet4Reference);
@@ -1993,6 +2000,14 @@ fn physical_preload_publishes_signed_load_linear_geometric_stiffness() {
     assert_eq!(decoded, portable);
 }
 
+// witness: FEA-DYNAMICS-PRESTRESS-001/references @ structural_stability/tet4/numerical_kernel;
+//   coverage: partial;
+//   boundary: A single-tetrahedron compressive preload buckling problem has an exact residual and
+//   load factors that scale inversely with load; column and frame buckling, mesh convergence and
+//   sign cases are not covered.
+// witness: FEA-DYNAMICS-GOVERNANCE-001/modal_preload_buckling @
+//   linear_structural_dynamics/tet4/numerical_kernel; coverage: partial;
+//   boundary: Single-tetrahedron preload buckling with exact residual and inverse load scaling.
 #[test]
 fn physical_compressive_preload_buckling_has_exact_residual_and_inverse_load_scaling() {
     let mut model = fixture_model(FixtureId::StructuralTransientTet4Reference);
@@ -4566,6 +4581,10 @@ fn load_sweep_preserves_solver_mesh_dof_count() {
     assert!(sweep_max > baseline_max);
 }
 
+// witness: FEA-STRUCTURAL-SOLID-001/load_excitation_diagnostics @
+//   linear_structural/beam/numerical_kernel; coverage: partial;
+//   boundary: A large load sweep does not fabricate degrees of freedom from the excitation count;
+//   diagnostic completeness is not asserted.
 #[test]
 fn large_load_sweep_does_not_fabricate_dofs_from_excitation_count() {
     let mut model = fixture_model(FixtureId::CantileverLargeLoadSweep);
@@ -4795,6 +4814,10 @@ fn multi_material_fixture_has_distinct_response_profile() {
         .any(|diag| diag.code == "ANALYSIS_MATERIAL_ASSIGNMENT_CONFLICT_INFERRED"));
 }
 
+// witness: FEA-STRUCTURAL-EXECUTION-001/bounded_parallel_accelerator_remote @
+//   linear_structural/canonical_mixed_topology/parallel_cpu; coverage: partial;
+//   boundary: Admitted parallel solid recovery matches the serial static fields exactly; assembly
+//   and solve parallelism and accelerator or remote placement are not covered.
 #[test]
 fn admitted_parallel_solid_recovery_matches_serial_static_fields_exactly() {
     let model = fixture_model(FixtureId::MultiMaterialAssembly);

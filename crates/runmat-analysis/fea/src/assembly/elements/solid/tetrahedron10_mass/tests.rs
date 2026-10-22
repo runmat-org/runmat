@@ -146,6 +146,10 @@ fn curved_geometry_keeps_its_original_rule_and_richer_independent_integral() {
     }
 }
 
+// witness: FEA-STRUCTURAL-SOLID-001/quadrature_mass @ linear_structural/tet10/numerical_kernel;
+//   coverage: partial;
+//   boundary: Tet10 consistent mass preserves physical rigid-translation mass under reciprocal
+//   density and geometry scaling.
 #[test]
 fn reciprocal_density_and_geometry_scales_preserve_physical_rigid_translation_mass() {
     for (length_exponent, density_exponent) in [(-350, 900), (300, -900)] {

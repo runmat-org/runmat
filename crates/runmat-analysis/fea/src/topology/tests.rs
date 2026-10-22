@@ -2,6 +2,10 @@ use runmat_meshing_core::{fixtures, ElementOrder};
 
 use super::{boundary::project_boundary_face, AnalysisProjection};
 
+// witness: FEA-STRUCTURAL-SOLID-001/quadrature_mass @
+//   linear_structural/tet4|tet10/numerical_kernel; coverage: partial;
+//   boundary: Oblique Tet4 and Tet10 volume quadrature reproduces all world-affine gradients; mass
+//   matrices and face quadrature are other tests.
 #[test]
 fn oblique_both_order_volume_quadrature_reproduces_all_world_affine_gradients() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
