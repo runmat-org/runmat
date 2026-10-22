@@ -48,15 +48,24 @@ pub(super) fn retained(
     observations: &HashMap<String, observations::ObservationAttachment>,
     maximum: u64,
 ) -> Result<u64, AnalysisPublicationError> {
+    // Staged records and attachments are owned typed values; they are priced as such, not as
+    // a materialized value tree (only the commit projection builds one, see `commit_work`).
+    let _ = maximum;
     let mut total = 0;
     for record in runs.values() {
-        total = add(total, resident(&RecordView(record), maximum)?)?;
+        total = add(
+            total,
+            runmat_canonical_codec::typed_resident_bytes_estimate(&RecordView(record))?,
+        )?;
     }
     for bytes in chunks.values() {
         total = add(total, bytes.len() as u64)?;
     }
     for attachment in observations.values() {
-        total = add(total, resident(attachment, maximum)?)?;
+        total = add(
+            total,
+            runmat_canonical_codec::typed_resident_bytes_estimate(attachment)?,
+        )?;
     }
     Ok(total)
 }

@@ -32,7 +32,7 @@ impl StudyIdentity {
         model: &AnalysisModel,
         frozen_project_digest: Option<Digest>,
     ) -> AnalysisExecutionResult<Self> {
-        Self::derive("authored-study", &(model, frozen_project_digest))
+        Self::derive_content("authored-study", &(model, frozen_project_digest))
     }
 }
 
@@ -581,6 +581,28 @@ impl PublicationIdentity {
 
 fn derive_digest<T: Serialize>(domain: &'static str, input: &T) -> AnalysisExecutionResult<Digest> {
     derive_digest_with_limits(domain, input, IDENTITY_LIMITS)
+}
+
+/// Authored studies carry models of any size (meshes, tables, explicit topology), so their
+/// identity's encoding bound follows the profiled content rather than the compact task-identity
+/// cap. The canonical bytes, and therefore the identity, are unchanged by the bound.
+fn derive_content_digest<T: Serialize>(
+    domain: &'static str,
+    input: &T,
+) -> AnalysisExecutionResult<Digest> {
+    let content = |bytes: usize| {
+        CanonicalLimits::new(
+            bytes.max(IDENTITY_LIMITS.maximum_encoded_bytes),
+            bytes.max(IDENTITY_LIMITS.maximum_collection_items),
+            IDENTITY_LIMITS.maximum_string_bytes,
+            IDENTITY_LIMITS.maximum_nesting_depth,
+        )
+    };
+    let profile = runmat_canonical_codec::profile_canonical_encoding(input, content(usize::MAX))?;
+    let bytes = usize::try_from(profile.encoded_bytes_upper_bound).map_err(|_| {
+        AnalysisExecutionError::Invalid(format!("{domain} identity exceeds the address space"))
+    })?;
+    derive_digest_with_limits(domain, input, content(bytes))
 }
 
 fn derive_digest_with_limits<T: Serialize>(

@@ -9,8 +9,12 @@ pub(super) fn build_state_publication_plan(
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     let state_bytes = demand.state_encoded_bytes_upper_bound.0;
     let materialization = demand.state_materialization_resident_bytes_estimate.0;
+    // The published state is encoded directly from its owned typed value; that owned state is
+    // charged in the workspace below, so output construction covers the direct encoding and
+    // its transport only.
     let construction = add(
-        materialization,
+        runmat_canonical_codec::projected_canonical_encoding_resident_bytes_estimate(state_bytes, 1)
+            .ok_or(ResourcePlanningError::Overflow("publication state encoding"))?,
         demand.output.transport_closure_bytes_upper_bound.0,
         "publication encoding and output transport",
     )?;
