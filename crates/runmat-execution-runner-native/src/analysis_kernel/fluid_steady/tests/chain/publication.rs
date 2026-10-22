@@ -188,15 +188,25 @@ fn verify_original_publication(
     let observed = import_reduced_observation(&cold, response, &reduction, limits)
         .unwrap()
         .result;
+    // The observation reports cells in mesh element order; the solver stores them in
+    // finite-volume cell order.
+    let topology = runmat_analysis_fea::topology::FiniteVolumeTopology::derive(
+        &runmat_analysis_fea::topology::AnalysisProjection::derive(&mesh).unwrap(),
+        workload.geometry_policy,
+    )
+    .unwrap();
+    let mut by_element = topology
+        .cells
+        .iter()
+        .zip(&imported.result.original().velocity_m_per_s)
+        .map(|(cell, velocity)| (cell.source_element_index, *velocity))
+        .collect::<Vec<_>>();
+    by_element.sort_by_key(|(element, _)| *element);
     assert_eq!(
         observed.field.as_host_f64().unwrap(),
-        imported
-            .result
-            .original()
-            .velocity_m_per_s
-            .iter()
-            .flatten()
-            .copied()
+        by_element
+            .into_iter()
+            .flat_map(|(_, velocity)| velocity)
             .collect::<Vec<_>>()
     );
     let evaluation = &fanout.source_request;

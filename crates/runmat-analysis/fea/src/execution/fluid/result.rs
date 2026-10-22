@@ -97,8 +97,7 @@ impl FluidSteadySolverResult {
         original: super::FluidTransientSolverResult,
     ) -> AnalysisExecutionResult<Self> {
         let terminal = original
-            .original_results()
-            .last()
+            .terminal()
             .ok_or_else(|| invalid("transient fluid retained no interval"))?
             .numerical_input_identity;
         let reservation = source.problem(workload)?.reservation();
@@ -265,8 +264,7 @@ impl FluidSteadySolverResult {
             FluidRetainedOriginal::FluidStructure(coupled) => &coupled.flow,
             FluidRetainedOriginal::FluidStructureTransient(coupled) => &coupled.flow,
             FluidRetainedOriginal::Transient(history) => history
-                .original_results()
-                .last()
+                .terminal()
                 .expect("admitted transient fluid history is nonempty"),
         }
     }
@@ -436,7 +434,7 @@ impl FluidSteadySolverResult {
                     .map_err(invalid)?;
             }
             (FluidRetainedOriginal::Transient(history), true) if !conjugate && !structural => {
-                if history.original_results().is_empty() {
+                if history.terminal().is_none() {
                     return Err(invalid("transient fluid retained no interval"));
                 }
                 // Release the start-time problem before the kernel prepares its own chain.

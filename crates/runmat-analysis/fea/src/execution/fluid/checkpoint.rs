@@ -81,13 +81,18 @@ impl FluidTransientCheckpoint {
     pub fn charged_operator_work(&self) -> u64 {
         self.data.charged_operator_work
     }
-    pub fn original_results(
+    /// Retained original intervals of every block, with schedule interval ordinals.
+    pub fn retained_results(
         &self,
-    ) -> impl Iterator<Item = &crate::physics::cfd::canonical::CanonicalFluidResult> {
+    ) -> impl Iterator<Item = &(usize, crate::physics::cfd::canonical::CanonicalFluidResult)> {
         self.data
             .blocks
             .iter()
-            .flat_map(|b| b.original.original_results())
+            .flat_map(|b| b.original.retained_results())
+    }
+    /// Evidence of every accepted interval of every block.
+    pub fn intervals(&self) -> impl Iterator<Item = &super::FluidIntervalEvidence> {
+        self.data.blocks.iter().flat_map(|b| b.original.intervals())
     }
     fn terminal_fields(&self) -> CanonicalFluidFields<'_> {
         self.data

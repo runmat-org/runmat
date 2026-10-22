@@ -44,8 +44,17 @@ impl FluidTransientSolverResult {
             data: data(p, p.initial.clone(), original)?,
         })
     }
-    pub fn original_results(&self) -> &[crate::physics::cfd::canonical::CanonicalFluidResult] {
-        self.data.original.original_results()
+    /// Retained original intervals with their schedule interval ordinals.
+    pub fn retained_results(&self) -> &[(usize, crate::physics::cfd::canonical::CanonicalFluidResult)] {
+        self.data.original.retained_results()
+    }
+    /// Evidence of every accepted interval.
+    pub fn intervals(&self) -> &[super::super::FluidIntervalEvidence] {
+        self.data.original.intervals()
+    }
+    /// Terminal original fields of the march.
+    pub fn terminal(&self) -> Option<&crate::physics::cfd::canonical::CanonicalFluidResult> {
+        self.data.original.terminal()
     }
     pub fn initial_state(&self) -> &CanonicalFluidInitialState {
         &self.data.initial
@@ -107,6 +116,12 @@ impl PreparedFluidTransient<'_> {
             source.topology.faces.len(),
             authorities,
             schedule.points_s().len() - 1,
+            super::super::time_block::retained_ordinals(
+                self.workload.selected_step()?,
+                &schedule,
+                &(0..schedule.points_s().len() - 1),
+            )
+            .len(),
         );
         data(self, &self.initial, original)
     }
@@ -128,6 +143,12 @@ impl PreparedFluidTransient<'_> {
             source.topology.faces.len(),
             authorities,
             schedule.points_s().len() - 1,
+            super::super::time_block::retained_ordinals(
+                self.workload.selected_step()?,
+                &schedule,
+                &(0..schedule.points_s().len() - 1),
+            )
+            .len(),
         );
         Ok(runmat_canonical_codec::profile_serialized(
             &data(self, &self.initial, original)?,
