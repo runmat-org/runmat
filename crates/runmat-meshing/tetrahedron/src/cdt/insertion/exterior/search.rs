@@ -1,29 +1,44 @@
-//! The unbounded conflict is a connected visible hull cap; finite conflict
-//! components meet that cap. Search adjacency rather than every tetrahedron.
+//! The unbounded conflict is a connected hull cap: the faces the point sees, plus the faces
+//! coplanar with it whose circumcircle holds it. Finite conflict components meet that cap.
+//! Search adjacency rather than every tetrahedron.
 use super::*;
 use std::collections::VecDeque;
+
+/// Hull faces in conflict with an exterior point. `visible` faces are seen strictly from
+/// outside and receive a new cell. `coplanar` faces lie in a plane through the point and hold it
+/// in their circumcircle: the (unbounded) cell over such a face conflicts with the point exactly
+/// when the finite cell under it does, since that cell's circumsphere meets the face plane in the
+/// face circumcircle. Those finite cells join the cavity, and the cap is connected only through
+/// both kinds of face, so the search must cross them (points on a cylinder cap, a box face).
+pub(super) struct HullConflict {
+    pub(super) visible: BTreeSet<(u32, usize)>,
+    pub(super) coplanar: BTreeSet<u32>,
+}
 
 pub(super) fn visible_faces(
     topology: &TopologyMutation,
     node: DelaunayVolumeNode,
     seed: Option<(u32, usize)>,
     work: &mut InsertionWork<'_>,
-) -> Result<BTreeSet<(u32, usize)>, DelaunayInsertionError> {
+) -> Result<HullConflict, DelaunayInsertionError> {
     let mut first = seed;
     if first.is_none() {
         for &(index, opposite) in topology.boundary_faces.values() {
             let tet = topology
                 .tetrahedron(index)
                 .expect("boundary index references active tetrahedron");
-            if face_side(topology, tet.vertex_indices, opposite, node, work)? == FaceSide::Exterior
-            {
+            if in_conflict(topology, index, tet.vertex_indices, opposite, node, work)?.is_some() {
                 first = Some((index, opposite));
                 break;
             }
         }
     }
+    let mut conflict = HullConflict {
+        visible: BTreeSet::new(),
+        coplanar: BTreeSet::new(),
+    };
     let Some((index, opposite)) = first else {
-        return Ok(BTreeSet::new());
+        return Ok(conflict);
     };
     let initial = face(
         topology
@@ -34,7 +49,6 @@ pub(super) fn visible_faces(
     );
     let mut pending = VecDeque::from([initial]);
     let mut visited = BTreeSet::new();
-    let mut visible = BTreeSet::new();
     while let Some(key) = pending.pop_front() {
         if !visited.insert(key) {
             continue;
@@ -48,29 +62,64 @@ pub(super) fn visible_faces(
         let tet = topology
             .tetrahedron(index)
             .expect("boundary index references active tetrahedron");
-        if face_side(topology, tet.vertex_indices, opposite, node, work)? != FaceSide::Exterior {
-            continue;
+        match in_conflict(topology, index, tet.vertex_indices, opposite, node, work)? {
+            None => continue,
+            Some(FaceSide::Exterior) => {
+                conflict.visible.insert((index, opposite));
+            }
+            Some(_) => {
+                conflict.coplanar.insert(index);
+            }
         }
-        visible.insert((index, opposite));
-        if visible.len() as u64 > work.options.maximum_cavity_boundary_faces {
+        if (conflict.visible.len() + conflict.coplanar.len()) as u64
+            > work.options.maximum_cavity_boundary_faces
+        {
             return Err(resource(
                 "hull insertion visible-face inventory limit exceeded",
             ));
         }
         pending.extend(topology.boundary_neighbors(key));
     }
-    Ok(visible)
+    Ok(conflict)
+}
+
+/// The side of a hull face that is in conflict with `node`, or `None`.
+fn in_conflict(
+    topology: &TopologyMutation,
+    index: u32,
+    vertices: [u32; 4],
+    opposite: usize,
+    node: DelaunayVolumeNode,
+    work: &mut InsertionWork<'_>,
+) -> Result<Option<FaceSide>, DelaunayInsertionError> {
+    Ok(match face_side(topology, vertices, opposite, node, work)? {
+        FaceSide::Exterior => Some(FaceSide::Exterior),
+        FaceSide::Interior => None,
+        FaceSide::Coplanar => {
+            work.predicate()?;
+            let corners = topology
+                .tetrahedron(index)
+                .expect("boundary index references active tetrahedron")
+                .vertex_indices
+                .map(|vertex| topology.nodes()[vertex as usize]);
+            (super::super::cavity::materialized_relation(corners, node)?
+                == PredicateSign::Positive)
+                .then_some(FaceSide::Coplanar)
+        }
+    })
 }
 
 pub(super) fn finite_conflict(
     topology: &TopologyMutation,
     node: DelaunayVolumeNode,
-    visible: &BTreeSet<(u32, usize)>,
+    conflict: &HullConflict,
     work: &mut InsertionWork<'_>,
 ) -> Result<BTreeSet<u32>, DelaunayInsertionError> {
-    let mut pending = visible
+    let mut pending = conflict
+        .visible
         .iter()
         .map(|(index, _)| *index)
+        .chain(conflict.coplanar.iter().copied())
         .collect::<VecDeque<_>>();
     let mut visited = BTreeSet::new();
     let mut removed = BTreeSet::new();

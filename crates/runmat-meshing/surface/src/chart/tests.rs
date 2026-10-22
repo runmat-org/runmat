@@ -95,6 +95,24 @@ fn periodic_seam_images_lift_into_one_canonical_chart() {
         .zip(mixed_charts.charts[0].pslg.segments.iter().cycle().skip(1))
         .all(|(left, right)| left.vertex_indices[1] == right.vertex_indices[0]));
 
+    // The closing node's two pcurve images differ by more than roundoff (a vertex gap of a few
+    // picoradians, as on a trimmed sphere); the loop still closes with winding zero.
+    let mut gapped = source.clone();
+    gapped.outer_loop.segments[3].node_uv[1][0] += 5.0e-12;
+    let gapped_charts = build_exact_face_charts(
+        &gapped,
+        &topology,
+        &evaluator,
+        &Control,
+        ExactFaceChartOptions::default(),
+    )
+    .unwrap();
+    let gapped_loop = &gapped_charts.charts[0].boundary.outer_loop.segments;
+    assert_eq!(
+        gapped_loop.last().unwrap().node_uv[1],
+        gapped_loop[0].node_uv[0]
+    );
+
     let winding = boundary(
         &topology,
         [

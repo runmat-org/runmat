@@ -35,8 +35,12 @@ impl RefinementProgressPolicy {
                 }
             }
             Self::Coupled => {
-                if quality.compare_joint_repair_target(parent) != Ordering::Less {
-                    return Some("joint repair target did not improve");
+                // Each insertion must outrank what it creates with what it removes (multiset
+                // order on the joint defect histogram). Requiring it to improve the single
+                // worst defect of the whole mesh instead rejected every insertion away from
+                // that defect and stalled refinement on plain plates and beams.
+                if quality.compare_joint_target(parent) != Ordering::Less {
+                    return Some("joint defect histogram did not decrease");
                 }
             }
         }

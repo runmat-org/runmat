@@ -63,7 +63,8 @@ fn deterministic_cavity_retriangulates_an_intersected_triangle_strip() {
         &BTreeSet::new(),
         &mut control,
     )
-    .unwrap());
+    .unwrap()
+    .is_ok());
     assert_eq!(triangles.len(), delaunay.triangles.len());
     assert!(triangle_edges(&triangles).contains(&target));
     super::planarity::validate_planar_edges(
@@ -85,7 +86,8 @@ fn deterministic_cavity_retriangulates_an_intersected_triangle_strip() {
         &BTreeSet::new(),
         &mut repeated_control,
     )
-    .unwrap());
+    .unwrap()
+    .is_ok());
     assert_eq!(repeated, triangles);
 
     let mut second_attempt = delaunay.triangles.clone();

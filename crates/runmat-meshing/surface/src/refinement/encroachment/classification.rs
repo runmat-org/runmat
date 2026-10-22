@@ -106,9 +106,11 @@ pub(crate) fn classify_with_context(
     )?;
     let mut encroached_segments = BTreeSet::new();
     let mut insertions = Vec::new();
+    let mut withdrawn = 0;
     for candidate in candidates {
         checkpoint(Some(control), &pslg.source_face_id)?;
         let mut encroached = false;
+        let mut withdraw = false;
         let mut failure = None;
         influence.visit_bounds_with_checkpoint(
             spatial::point(candidate.uv),
@@ -126,7 +128,16 @@ pub(crate) fn classify_with_context(
                     // contract. Face-owned shape refinement may split chart cuts, but it must not
                     // repeatedly rewrite a global curve merely to improve a local triangle angle or
                     // aspect ratio. Geometric-deviation and metric-size candidates remain hard and
-                    // can request an exact-curve split.
+                    // can request an exact-curve split. A shape point exactly on the curve (the
+                    // circumcenter of a right triangle on it) can be neither inserted nor used to
+                    // split the curve, so it is withdrawn; candidate selection keeps shape points
+                    // a minimum metric spacing away from shared curves.
+                    if runmat_meshing_core::predicate::orient2d([first.uv, second.uv, candidate.uv])
+                        .is_ok_and(|sign| sign == runmat_meshing_core::PredicateSign::Zero)
+                        && within_closed_bounds(candidate.uv, first.uv, second.uv)
+                    {
+                        withdraw = true;
+                    }
                     return;
                 }
                 // A CDT permits interior points inside a protected edge's diametral
@@ -164,7 +175,9 @@ pub(crate) fn classify_with_context(
         if let Some(failure) = failure {
             return Err(failure);
         }
-        if !encroached {
+        if withdraw && !encroached {
+            withdrawn += 1;
+        } else if !encroached {
             insertions.push(candidate.clone());
         }
     }
@@ -191,7 +204,7 @@ pub(crate) fn classify_with_context(
                     chart_cut_splits.push(split);
                 }
             }
-            ExactFaceCandidateDisposition::Insert => {
+            ExactFaceCandidateDisposition::Insert | ExactFaceCandidateDisposition::Withdraw => {
                 return Err(invalid(
                     &pslg.source_face_id,
                     "encroached segment classification did not request a split",
@@ -204,5 +217,13 @@ pub(crate) fn classify_with_context(
         protected_splits,
         chart_cut_splits,
         insertions,
+        withdrawn,
+    })
+}
+
+
+fn within_closed_bounds(point: [f64; 2], first: [f64; 2], second: [f64; 2]) -> bool {
+    (0..2).all(|axis| {
+        point[axis] >= first[axis].min(second[axis]) && point[axis] <= first[axis].max(second[axis])
     })
 }
