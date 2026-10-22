@@ -77,8 +77,21 @@ fn verdicts_follow_test_results_and_never_exceed_tags() {
         results.insert(tag.test.describe(), TestResult::Passed);
     }
     let passed = cells(&registry, &tags, Some(&results));
+    // Every tagged test passed: PASS only where some tag claims complete coverage, PARTIAL
+    // everywhere else; nothing is ever PASS from a partial claim alone.
+    for cell in &passed {
+        let complete = cell.tests.iter().any(|t| t.complete);
+        match cell.verdict {
+            Verdict::Pass => assert!(complete),
+            Verdict::Partial => assert!(!complete),
+            _ => {}
+        }
+    }
     assert_eq!(
-        passed.iter().filter(|c| c.verdict == Verdict::Pass).count(),
+        passed
+            .iter()
+            .filter(|c| matches!(c.verdict, Verdict::Pass | Verdict::Partial))
+            .count(),
         tagged
     );
     let broken = tags[0].test.describe();
