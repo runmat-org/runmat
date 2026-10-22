@@ -1301,6 +1301,24 @@ pub fn analysis_results_by_run_id_op(
     query: AnalysisResultsQuery,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisResultsData>, OperationErrorEnvelope> {
+    // A definition run id names every attempt of a study step; results are those of the latest
+    // committed attempt, and the returned run id says which attempt that is.
+    let resolved_run_id = storage::resolve_run_attempt(run_id).map_err(|err| {
+        operation_error(
+            ANALYSIS_RESULTS_OPERATION,
+            ANALYSIS_RESULTS_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "RM.FEA.RESULTS.ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to resolve the latest FEA run attempt: {err}"),
+            BTreeMap::from([("run_id".to_string(), run_id.to_string())]),
+        )
+    })?;
+    let run_id = resolved_run_id.as_str();
     let field_inventory = if query.include_field_values {
         None
     } else {

@@ -54,3 +54,11 @@ pub fn run_attempts(definition_run_id: &str) -> Result<Vec<String>, String> {
         .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
     guard.run_attempts(definition_run_id)
 }
+
+/// A definition run id resolves to its latest committed attempt; any other id is itself.
+pub fn resolve_run_attempt(run_id: &str) -> Result<String, String> {
+    let guard = global_store()
+        .read()
+        .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
+    guard.resolve_run_attempt(run_id)
+}
