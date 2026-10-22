@@ -501,8 +501,10 @@ fn workflow_chunk_policy(_request: &runmat_meshing_core::MeshingRequest) -> Mesh
     }
 }
 
-// witness: meshing execution ceilings decide only whether a run completes; the same request
-// meshed under two different ceilings publishes the same artifact (option A ceiling split).
+// witness: FEA-MESH-EXECUTION-001/budgets_and_cancellation @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Execution ceilings decide only whether a run completes; the same request meshed
+//   under 512 MiB and 8 GiB ceilings publishes the same artifact and digest.
 #[test]
 fn execution_ceilings_do_not_change_the_published_mesh() {
     let run = |ceilings: runmat_meshing_core::MeshingExecutionCeilings| {

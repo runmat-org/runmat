@@ -209,8 +209,10 @@ fn conflicting_identity_and_cancelled_handoff_reject() {
     );
 }
 
-// witness: conformal multi-region interfaces are meshed in one component so both sides share
-// every interface Steiner point (fsi-compliant-tube bore).
+// witness: FEA-MESH-DISCRETIZATION-001/volume_conformity @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Conformal multi-region interfaces mesh in one component so both sides share every
+//   interface Steiner point (fsi-compliant-tube bore).
 #[test]
 fn regions_joined_by_an_interface_facet_form_one_component() {
     let constraints = crate::cdt::test_fixtures::same_facet_multi_steiner_constraints();
