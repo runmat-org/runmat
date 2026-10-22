@@ -56,6 +56,47 @@ pub fn solve_electrothermal_heat_study(
     Ok((thermal, point))
 }
 
+/// The conduction side's operating temperatures, taken from the heat-transfer case's published
+/// thermal state (its last time point), so the conduction case reports the same operating point
+/// the heat case publishes instead of solving the coupled loop again.
+pub fn conduction_operating_temperatures(
+    state: &crate::execution::CanonicalThermalStatePayload,
+    mesh: &SolverMeshArtifact,
+    transient: bool,
+) -> AnalysisExecutionResult<(Vec<f64>, Option<f64>)> {
+    let projection = AnalysisProjection::derive(mesh)
+        .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+    let values = state.temperature.as_host_f64().ok_or_else(|| {
+        AnalysisExecutionError::Invalid("the heat case's temperature must be host-backed".into())
+    })?;
+    if values.len() != state.ordered_node_ids.len() {
+        return Err(AnalysisExecutionError::Invalid(
+            "the heat case's temperature does not match its node order".into(),
+        ));
+    }
+    let by_id: std::collections::BTreeMap<u64, f64> = state
+        .ordered_node_ids
+        .iter()
+        .copied()
+        .zip(values.iter().copied())
+        .collect();
+    let nodal = projection
+        .nodes
+        .iter()
+        .map(|node| {
+            by_id.get(&node.node_id).copied().ok_or_else(|| {
+                AnalysisExecutionError::Invalid(
+                    "the heat case's temperature misses a conduction mesh node".into(),
+                )
+            })
+        })
+        .collect::<AnalysisExecutionResult<Vec<_>>>()?;
+    Ok((
+        element_temperatures(&projection, &nodal)?,
+        transient.then_some(state.sample_time_s),
+    ))
+}
+
 /// The conduction side of an electrothermal study, with only its electrical outputs.
 pub fn electrothermal_conduction_study(
     compiled: &CompiledAnalysisStudy,

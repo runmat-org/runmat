@@ -27,6 +27,7 @@ mod electrical_static;
 mod electrothermal;
 pub use electrothermal::{
     bind_element_heat_source, bind_retained_joule_heat, conductivity_at, electrical_part,
+    conduction_operating_temperatures,
     electrothermal_conduction_study, element_temperatures, execute_coupled_electrothermal,
     is_electrothermal_study, solve_electrothermal_heat_study, ElectrothermalOperatingPoint, execute_steady_electrothermal_from_retained, thermal_part,
     CoupledElectrothermalCompletion, ElectrothermalCouplingControls,
@@ -287,6 +288,7 @@ pub use state::{
     CanonicalAcousticStatePayload, CanonicalElectricalStaticStatePayload,
     CanonicalFluidStatePayload, CanonicalMaxwellStatePayload, CanonicalNonlinearSolidStatePayload,
     CanonicalSemanticState, CanonicalSemanticStateInput, CanonicalSemanticStatePayload,
+    CanonicalThermalStatePayload,
     CanonicalStateTransition, CanonicalStateTransitionInput, SemanticStatePublicationProfileSource,
     SemanticStatePublicationRequest, SemanticStatePublicationSource, StatePublicationProfileEntry,
     StatePublicationProfiles, STATE_PUBLICATION_PROFILES_MAX_ENTRIES,

@@ -29,9 +29,13 @@ pub enum PreparationRole {
     Authored,
     /// A thermal analysis heated by a solved upstream loss field.
     Heated(runmat_analysis_fea::study::ElementHeatSource),
-    /// The conduction side of an electrothermal analysis at its solved temperature field;
+    /// The conduction side of an electrothermal analysis at the temperatures the heat case
+    /// published (element means, canonical element order; the last time of a transient);
     /// publishes potential, current density and Joule loss.
-    ElectrothermalConduction,
+    ElectrothermalConduction {
+        element_temperature_k: Vec<f64>,
+        operating_time_s: Option<f64>,
+    },
 }
 
 pub async fn prepare_study(
@@ -65,7 +69,7 @@ pub async fn prepare_study_with_role(
         .realize_with_models(&resolved.models, &resolved.geometry, inputs)
         .map_err(|error| error.to_string())?;
     let family = match &role {
-        PreparationRole::ElectrothermalConduction => {
+        PreparationRole::ElectrothermalConduction { .. } => {
             if !admission::is_electrothermal(&realized.sequence) {
                 return Err(
                     "the conduction role requires one fresh electrothermal analysis".into(),
@@ -75,9 +79,13 @@ pub async fn prepare_study_with_role(
         }
         _ => admission::select_family(&realized.sequence, realized.model.electromagnetic.as_ref())?,
     };
-    let element_heat_source = match role {
-        PreparationRole::Heated(source) => Some(source),
-        PreparationRole::Authored | PreparationRole::ElectrothermalConduction => None,
+    let (element_heat_source, operating_temperatures) = match role {
+        PreparationRole::Heated(source) => (Some(source), None),
+        PreparationRole::Authored => (None, None),
+        PreparationRole::ElectrothermalConduction {
+            element_temperature_k,
+            operating_time_s,
+        } => (None, Some((element_temperature_k, operating_time_s))),
     };
     let revision = program_revision(source)?;
     let access = checked_fea_artifact_access(authority);
@@ -184,9 +192,13 @@ pub async fn prepare_study_with_role(
             runmat_analysis_fea::study::AcousticResponseStudyPlanningPolicy::default(),
         ),
         admission::PreparedFamily::Electrical => {
+            let (element_temperature_k, operating_time_s) = match operating_temperatures {
+                Some((temperatures, time)) => (Some(temperatures), time),
+                None => (None, None),
+            };
             crate::StudyRootPlanning::Electrical(runmat_analysis_fea::study::ElectricalStudyPlanningPolicy {
-                element_temperature_k: None,
-                operating_time_s: None,
+                element_temperature_k,
+                operating_time_s,
             })
         }
         admission::PreparedFamily::Magnetic => {
