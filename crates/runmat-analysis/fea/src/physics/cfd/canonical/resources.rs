@@ -316,11 +316,15 @@ impl CanonicalFluidReservation {
         // one descriptor per exterior face at most, and two coexisting report arrays
         // during safeguarded recovery. IDs obey the existing256-byte authority limit.
         // Doubled Vec/String payload allowance plus fixed headers.
+        // Index pairs exist only for exterior faces (the boundary faces), one report per face
+        // at most.
+        let exterior = u64::try_from(geometry.boundary_face_count)
+            .map_err(|_| Error::Resource("boundary face count"))?;
         bytes = add(
             bytes,
             add(
                 mul(
-                    f,
+                    exterior,
                     32 * 2
                         + 2 * (256
                             + std::mem::size_of::<super::CanonicalFluidBoundaryBalance>() as u64)

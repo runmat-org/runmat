@@ -69,3 +69,33 @@ Yield-stress laws use Papanastasiou regularization, so unyielded regions flow wi
 but finite viscosity set by `regularization`; `minimum_shear_rate` holds a shear-thinning
 viscosity finite where the fluid is at rest.
 
+
+## Porous zones
+
+A `porous` material describes a region that the surrounding fluid flows through: a filter
+cartridge, a packed bed, a metal foam or a tube bank represented as a resistance. Assign it to
+the porous region. The flowing fluid's density and viscosity come from the fluid material on the
+rest of the domain, so the porous material carries only its resistance law.
+
+| `law` | Momentum sink per unit volume | Members |
+| --- | --- | --- |
+| `darcy` | $\dfrac{\mu}{K}\,\mathbf u$ | `permeability` (m^2), `porosity` |
+| `darcy_forchheimer` | $\left(\dfrac{\mu}{K}+\tfrac12\rho C_2\lvert\mathbf u\rvert\right)\mathbf u$ | `permeability` (m^2), `inertial_coefficient` (1/m), `porosity` |
+
+Velocity in a porous zone is the superficial (Darcy) velocity, so mass flow is continuous
+across the zone boundary. Uniform flow through a zone of length $L$ loses
+$\Delta p = \left(\mu U/K + \tfrac12\rho C_2 U^2\right)L$. The sink is implicit in the momentum
+equation and part of the solver's momentum-balance acceptance.
+
+```fea
+material pleated_media {
+    porous {
+        law = darcy_forchheimer
+        permeability = 2e-11 m^2
+        inertial_coefficient = 1.5e5 m^-1
+        porosity = 0.85
+    }
+}
+```
+
+A material is either a fluid or a porous medium, not both.

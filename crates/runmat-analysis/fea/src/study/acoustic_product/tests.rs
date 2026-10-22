@@ -129,7 +129,7 @@ fn post_sealing_product_retains_material_and_mesh_admission() {
             .acoustic
             .as_mut()
             .unwrap()
-            .damping_ratio = 0.01;
+            .damping_ratio = 1.0;
         let compiled = compile_analysis_study(AnalysisStudyCompilationInput {
             study: &fixture.study,
             geometry: &fixture.geometry,

@@ -587,6 +587,7 @@ fn solve_related(
         &known,
         relations,
         relative_tolerance,
+        crate::solve::preconditioner::SpdPreconditionerKind::Auto,
     )
     .map_err(FeaRunError::Solve)?;
     Ok(LinearSolveResult {

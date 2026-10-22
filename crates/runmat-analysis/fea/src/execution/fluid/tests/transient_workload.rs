@@ -128,7 +128,7 @@ fn transient_workload_retains_authored_initial_time_source_properties_and_cold_o
     let projection = crate::topology::AnalysisProjection::derive(&m).unwrap();
     let topology =
         crate::topology::FiniteVolumeTopology::derive(&projection, w.geometry_policy).unwrap();
-    for (i, r) in result.original_results().iter().enumerate() {
+    for (i, r) in result.retained_results() {
         let time = 0.3 * ((i + 1) as f64 / 3.);
         for u in &r.velocity_m_per_s {
             assert!((u[0] - (0.001 + 0.01 * time)).abs() < 1e-8);
@@ -332,13 +332,11 @@ fn authored_study_workload_retains_and_recovers_the_complete_transient_history()
     let bytes = result.canonical_bytes().unwrap();
     assert!((bytes.len() as u64) <= budget.encoded_bytes_upper_bound);
     let history = result.transient_history().unwrap();
-    assert_eq!(history.original_results().len(), 3);
+    assert_eq!(history.intervals().len(), 3);
     let reference = kernel.execute(&m).unwrap();
-    assert_eq!(history.original_results(), reference.original_results());
-    assert_eq!(
-        result.original(),
-        reference.original_results().last().unwrap()
-    );
+    assert_eq!(history.intervals(), reference.intervals());
+    assert_eq!(history.retained_results(), reference.retained_results());
+    assert_eq!(result.original(), reference.terminal().unwrap());
     let cold = FluidSteadySolverResult::from_canonical_bytes_for(
         &bytes,
         Digest::sha256(&bytes),

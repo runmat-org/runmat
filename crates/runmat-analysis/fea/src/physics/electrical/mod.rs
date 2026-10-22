@@ -67,12 +67,30 @@ pub fn solve_canonical_static(
     )
 }
 
+/// A planned solve: the admitted proof envelope and the planned strategy (sparse Cholesky
+/// when `direct`, AMG-preconditioned CG otherwise).
+#[derive(Clone, Copy)]
+pub(crate) struct PlannedElectricalSolve<'a> {
+    pub admission: &'a crate::planning::resource::SolverAdmissionResourcePolicy,
+    pub direct: bool,
+}
+
+impl PlannedElectricalSolve<'_> {
+    pub(crate) fn strategy(&self) -> crate::solve::preconditioner::SpdPreconditionerKind {
+        if self.direct {
+            crate::solve::preconditioner::SpdPreconditionerKind::Direct
+        } else {
+            crate::solve::preconditioner::SpdPreconditionerKind::Amg
+        }
+    }
+}
+
 pub(crate) fn solve_canonical_static_with_admission(
     model: &AnalysisModel,
     mesh: &SolverMeshArtifact,
     step_id: &str,
     residual_target: f64,
-    admission: Option<&crate::planning::resource::SolverAdmissionResourcePolicy>,
+    admission: Option<PlannedElectricalSolve<'_>>,
     element_conductivity_s_per_m: Option<&[f64]>,
     sample: crate::excitation::ExcitationSamplePoint<'_>,
 ) -> Result<CanonicalElectricalResponse, ElectricalStaticError> {

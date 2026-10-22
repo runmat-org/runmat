@@ -51,8 +51,10 @@ pub(crate) struct ScalarProjectionAccumulator<'a> {
     resolved_entity_count: usize,
     resolved_nodes: Vec<bool>,
     resolved_node_count: usize,
-    requested: ProjectionScalar,
-    projected: ProjectionScalar,
+    /// Compensated (real, imaginary) sums: the conservation check compares two integrals of
+    /// many contributions, so their rounding must not grow with the entity count.
+    requested: [crate::algebra::CompensatedSum; 2],
+    projected: [crate::algebra::CompensatedSum; 2],
     requested_scale: f64,
     projected_scale: f64,
 }
@@ -74,22 +76,16 @@ impl<'a> ScalarProjectionAccumulator<'a> {
             resolved_entity_count,
             resolved_nodes,
             resolved_node_count: 0,
-            requested: ProjectionScalar {
-                real: 0.0,
-                imaginary: 0.0,
-            },
-            projected: ProjectionScalar {
-                real: 0.0,
-                imaginary: 0.0,
-            },
+            requested: Default::default(),
+            projected: Default::default(),
             requested_scale: 0.0,
             projected_scale: 0.0,
         })
     }
 
     pub(crate) fn add_requested(&mut self, real: f64, imaginary: f64) {
-        self.requested.real += real;
-        self.requested.imaginary += imaginary;
+        self.requested[0].add(real);
+        self.requested[1].add(imaginary);
         self.requested_scale += real.hypot(imaginary);
     }
 
@@ -98,22 +94,30 @@ impl<'a> ScalarProjectionAccumulator<'a> {
             self.resolved_nodes[node_index] = true;
             self.resolved_node_count += 1;
         }
-        self.projected.real += real;
-        self.projected.imaginary += imaginary;
+        self.projected[0].add(real);
+        self.projected[1].add(imaginary);
         self.projected_scale += real.hypot(imaginary);
     }
 
     pub(crate) fn finish(self) -> SpatialProjectionEvidence {
+        let requested = ProjectionScalar {
+            real: self.requested[0].total(),
+            imaginary: self.requested[1].total(),
+        };
+        let projected = ProjectionScalar {
+            real: self.projected[0].total(),
+            imaginary: self.projected[1].total(),
+        };
         // Contribution norms bound the integral in exact arithmetic. Include the
         // retained integral norms as well so independent rounding cannot violate
         // that bound. This retains cancellation scales without a dimensional floor.
         let normalization_scale = self
             .requested_scale
             .max(self.projected_scale)
-            .max(self.requested.real.hypot(self.requested.imaginary))
-            .max(self.projected.real.hypot(self.projected.imaginary));
-        let error = (self.requested.real - self.projected.real)
-            .hypot(self.requested.imaginary - self.projected.imaginary);
+            .max(requested.real.hypot(requested.imaginary))
+            .max(projected.real.hypot(projected.imaginary));
+        let error = (requested.real - projected.real)
+            .hypot(requested.imaginary - projected.imaginary);
         let relative_error = if normalization_scale == 0.0 {
             0.0
         } else {
@@ -131,8 +135,8 @@ impl<'a> ScalarProjectionAccumulator<'a> {
             resolved_node_count: self.resolved_node_count,
             reference_point_m: [0.0; 3],
             balance: SpatialProjectionBalance::ScalarIntegral {
-                requested_integral: self.requested,
-                projected_integral: self.projected,
+                requested_integral: requested,
+                projected_integral: projected,
                 normalization_scale,
                 relative_error,
             },

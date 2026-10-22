@@ -189,14 +189,14 @@
       "owner": "native-execution",
       "controls": ["resumable-corrupt-transfer"],
       "expected": "remote object transfer resumes only at the verified offset and rejects corruption",
-      "test": {"source": "crates/runmat-execution-runner-native/src/remote/object_transfer.rs", "name": "object_cache_resumes_and_rejects_corruption"}
+      "test": {"source": "crates/runmat-execution-runner-native/src/remote/object_transfer.rs", "name": "object_cache_resumes_from_disk_and_rejects_corruption"}
     },
     {
       "id": "stale-result-cache-protection",
       "owner": "native-execution",
       "controls": ["stale-result-cache-safety"],
       "expected": "discarding stale result objects cannot evict prerequisite or committed cache entries",
-      "test": {"source": "crates/runmat-execution-runner-native/src/remote/pool_objects.rs", "name": "stale_results_are_discarded_without_evicting_inputs_or_commits"}
+      "test": {"source": "crates/runmat-execution-runner-native/src/remote/pool_objects/tests.rs", "name": "stale_results_are_discarded_without_evicting_inputs_or_commits"}
     }
   ]
 }

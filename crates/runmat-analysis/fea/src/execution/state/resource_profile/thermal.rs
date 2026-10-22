@@ -28,7 +28,9 @@ struct ThermalState<'a, T: Serialize> {
     reference_temperature_k: f64,
     sample_time_s: f64,
     maximum_relative_linear_residual: f64,
+    #[serde(skip_serializing_if = "<[u64]>::is_empty")]
     interface_node_ids: &'a [u64],
+    #[serde(skip_serializing_if = "Option::is_none")]
     interface_temperature: Option<T>,
 }
 

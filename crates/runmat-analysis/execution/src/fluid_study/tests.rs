@@ -38,6 +38,7 @@ fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
         dynamic_viscosity: DynamicViscosity::new(1.0),
         turbulence_intensity: TurbulenceIntensity::new(0.0),
         rheology: None,
+        porous_zones: Vec::new(),
     });
     model.sequence = AnalysisSequence::from_steps(
         "retained-fluid",
@@ -102,6 +103,7 @@ fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {
         model,
         step_id: ProcedureStepId("steady".into()),
         policy: CanonicalFluidPolicy {
+            pressure_velocity_coupling: Default::default(),
             fixed_point_acceleration: None,
             maximum_outer_iterations: 20,
             maximum_nonorthogonal_iterations: 4,

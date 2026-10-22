@@ -23,6 +23,9 @@ pub struct PreparedElectricalStaticResourceFacts {
     pub receipt_output: PreparedOutputResourceFacts,
     pub state_profiles_output: PreparedOutputResourceFacts,
     pub output_set: PreparedOutputSetResourceFacts,
+    /// Memory this machine admits for work (the shared machine-capacity authority), or, when a
+    /// plan is replayed, the solver budget the plan recorded.
+    pub machine_memory_bytes: u64,
 }
 
 const LIMITS: CanonicalLimits = CanonicalLimits::new(usize::MAX, usize::MAX, usize::MAX, 64);
@@ -43,20 +46,42 @@ fn mul(a: u64, b: u64) -> Result<u64, ResourcePlanningError> {
 
 fn support_preparation_bytes(mesh: &SolverMeshArtifact) -> Result<u64, ResourcePlanningError> {
     let nodes = count(mesh.topology.nodes.len())?;
-    let entries = mesh
-        .topology
+    let entries = element_couplings(mesh)?;
+    // Raw ID index and row sets of the support graph, its CSR copy, the undirected proof graph
+    // and the nested-dissection symbolic analysis. Calibrated against measured peak RSS of the
+    // planner on Tet4 and Tet10 meshes (about 70 bytes per element coupling) with headroom.
+    add(mul(nodes, 128)?, mul(entries, 96)?)
+}
+
+/// The local-energy proof's own accounting: 128 bytes per operator entry, 80 per node, the
+/// retained local contributions, and its graph and missing-coupling growth.
+fn local_energy_proof_bytes(mesh: &SolverMeshArtifact) -> Result<u64, ResourcePlanningError> {
+    let energy_source =
+        crate::algebra::anchored_energy::AnchoredEnergySource::resident_bytes_for_widths(
+            mesh.topology
+                .volume_elements
+                .iter()
+                .map(|element| element.node_ids.len()),
+        )
+        .map_err(invalid)?;
+    [
+        mul(element_couplings(mesh)?, 160)?,
+        mul(count(mesh.topology.nodes.len())?, 128)?,
+        energy_source,
+    ]
+    .into_iter()
+    .try_fold(0, add)
+}
+
+/// Element node pairs, with repeats: the sum of squared element widths plus the diagonal.
+fn element_couplings(mesh: &SolverMeshArtifact) -> Result<u64, ResourcePlanningError> {
+    mesh.topology
         .volume_elements
         .iter()
-        .try_fold(nodes, |total, element| {
+        .try_fold(count(mesh.topology.nodes.len())?, |total, element| {
             let width = count(element.node_ids.len())?;
             add(total, mul(width, width)?)
-        })?;
-    // Raw ID index, row headers/diagonals, BTree support/undirected proof graph,
-    // simultaneously retained CSR and later geometric projection construction.
-    add(
-        add(mul(nodes, 256)?, mul(entries, 384)?)?,
-        AnalysisProjection::derivation_resident_bytes_estimate(mesh).map_err(invalid)?,
-    )
+        })
 }
 
 fn require_support_preparation_ceiling(
@@ -130,6 +155,13 @@ pub fn electrical_static_solver_admission(
     workload: &ElectricalStaticWorkload,
     mesh: &SolverMeshArtifact,
 ) -> Result<SolverAdmissionResourcePolicy, ResourcePlanningError> {
+    electrical_static_solver_envelope(workload, mesh).map(|(policy, _)| policy)
+}
+
+fn electrical_static_solver_envelope(
+    workload: &ElectricalStaticWorkload,
+    mesh: &SolverMeshArtifact,
+) -> Result<(SolverAdmissionResourcePolicy, CoercivityWorkEnvelope), ResourcePlanningError> {
     require_support_preparation_ceiling(workload, mesh)?;
     workload.formulation(mesh).map_err(invalid)?;
     let n = mesh.topology.nodes.len();
@@ -167,12 +199,17 @@ pub fn electrical_static_solver_admission(
     let support =
         SparsePattern::try_new(count(n)?, count(n)?, offsets, columns).map_err(invalid)?;
     let envelope = CoercivityWorkEnvelope::derive(&support).map_err(invalid)?;
-    Ok(SolverAdmissionResourcePolicy {
-        dimension: Count(envelope.dimension()),
-        factor_nonzero_upper_bound: Count(envelope.factor_nonzero_limit()),
-        update_count_upper_bound: Count(envelope.update_limit()),
-        resident_bytes_upper_bound: ByteCount(envelope.resident_bytes_limit()),
-    })
+    Ok((
+        SolverAdmissionResourcePolicy {
+            dimension: Count(envelope.dimension()),
+            factor_nonzero_upper_bound: Count(envelope.factor_nonzero_limit()),
+            update_count_upper_bound: Count(envelope.update_limit()),
+            // The electrical operator is proved by the local-energy proof, never by
+            // factorization; its admitted resident bound is that proof's reservation.
+            resident_bytes_upper_bound: ByteCount(local_energy_proof_bytes(mesh)?),
+        },
+        envelope,
+    ))
 }
 
 pub fn build_electrical_static_resource_plan(
@@ -208,20 +245,8 @@ pub fn build_electrical_static_resource_plan(
     let step = &workload.model.sequence.steps[0];
     let nodes = count(mesh.topology.nodes.len())?;
     let elements = count(mesh.topology.volume_elements.len())?;
-    let support = mesh
-        .topology
-        .volume_elements
-        .iter()
-        .try_fold(nodes, |total, element| {
-            add(
-                total,
-                mul(
-                    count(element.node_ids.len())?,
-                    count(element.node_ids.len())?,
-                )?,
-            )
-        })?;
-    let admission = electrical_static_solver_admission(workload, mesh)?;
+    let support = element_couplings(mesh)?;
+    let (admission, envelope) = electrical_static_solver_envelope(workload, mesh)?;
     let projection =
         AnalysisProjection::derivation_resident_bytes_estimate(mesh).map_err(invalid)?;
     let properties = PreparedProperties::prepare(
@@ -234,33 +259,25 @@ pub fn build_electrical_static_resource_plan(
     let metadata = profile_serialized(&workload.model, LIMITS)
         .map_err(invalid)?
         .materialization_resident_bytes_estimate;
-    // Physical assembled K plus normalized K and prepared constrained K can coexist.
-    // BTree discovery/finalization allowance is added separately. Zero M/C own CSR storage.
-    let matrices = add(mul(support, 224)?, mul(add(nodes, 1)?, 128)?)?;
-    // Proof construction/support sets/CSR/edge dedup and both symbolic+numeric proof buffers.
-    let proof = add(
-        mul(admission.resident_bytes_upper_bound.0, 2)?,
-        mul(support, 192)?,
-    )?;
-    // Gauge/component lists, lifting/RHS, Jacobi, PCG temporaries, residual, potentials,
-    // physical flux, terminal node vectors/ownership maps and result validation scratch.
+    // Physical, normalized and constrained K coexist: three CSR copies of at most `support`
+    // entries (value and column index) plus row offsets.
+    let matrices = add(mul(support, 64)?, mul(add(nodes, 1)?, 24)?)?;
+    // Gauge/component lists, lifting/RHS, PCG temporaries, residual, potentials, physical flux,
+    // terminal node vectors/ownership maps and result validation scratch.
     let vectors = add(
         mul(nodes, 512)?,
         mul(mul(nodes, count(workload.model.constraints.len())?)?, 64)?,
     )?;
     // Per-element gradient recovery, physical product integration, retained constitutive
-    // arrays/coefficient data and result clone. All lifetimes are summed, not maxed.
+    // arrays/coefficient data and result clone.
     let recovery = mul(elements, 512)?;
     // Source realization + retained evidence/metadata, gauge increments, source load and
     // cold source rederivation, raw-volume identity index and scalar projection scratch.
-    // These named lifetimes are additive; existing vectors are not presumed to absorb them.
     let charge_sources = add(
         add(mul(metadata, 3)?, mul(nodes, 48)?)?,
         mul(elements, 128)?,
     )?;
-    // Original once-captured local contributions remain live through prepared proof.
-    // The checker additionally verifies their combined residency against the unchanged
-    // actual-operator proof envelope before construction.
+    // Original once-captured local contributions remain live through the local-energy proof.
     let energy_source =
         crate::algebra::anchored_energy::AnchoredEnergySource::resident_bytes_for_widths(
             mesh.topology
@@ -269,13 +286,13 @@ pub fn build_electrical_static_resource_plan(
                 .map(|element| element.node_ids.len()),
         )
         .map_err(invalid)?;
-    let reservation = [
-        support_preparation_bytes(mesh)?,
-        mul(projection, 3)?,
+    // Live through assembly, proof, solve and recovery. The two geometric projections (operator
+    // assembly and result recovery) are derived in sequence, so at most two coexist.
+    let persistent = [
+        mul(projection, 2)?,
         properties,
         metadata,
         matrices,
-        proof,
         add(energy_source, nodes)?,
         vectors,
         recovery,
@@ -284,6 +301,48 @@ pub fn build_electrical_static_resource_plan(
     ]
     .into_iter()
     .try_fold(0, add)?;
+    // The coercivity proof is the anchored local-energy proof (its graph and block scratch);
+    // the solve then factors directly when the exact symbolic factor fits beside the persistent
+    // state within the ceiling, and otherwise runs algebraic-multigrid preconditioned CG.
+    let proof = admission.resident_bytes_upper_bound.0;
+    // The effective budget: the authored ceiling, bounded by what this machine admits.
+    let budget = step
+        .accuracy
+        .resources
+        .maximum_resident_bytes
+        .min(prepared.machine_memory_bytes);
+    let iterative = iterative_solve_bytes(nodes, support)?;
+    let direct = electrical_direct_solve(
+        persistent,
+        &envelope,
+        iterative_solve_flops(nodes, support),
+        budget,
+    );
+    let solve = if direct { envelope.factor_resident_limit() } else { iterative };
+    tracing::info!(
+        nodes,
+        elements,
+        couplings = support,
+        projection_each = projection,
+        properties,
+        matrices,
+        vectors,
+        recovery,
+        charge_sources,
+        energy_source,
+        payload,
+        support_preparation = support_preparation_bytes(mesh)?,
+        proof,
+        solve,
+        direct,
+        "electrical static reservation components (bytes)"
+    );
+    // Support preparation precedes assembly; the proof completes and releases its graph before
+    // the solve starts, so the three are successive phases.
+    let reservation = add(
+        persistent,
+        support_preparation_bytes(mesh)?.max(proof).max(solve),
+    )?;
     let source = workload.identity().map_err(invalid)?;
     build_resource_plan(FeaResourcePlanningInput {
         estimation_model_revision: RESOURCE_ESTIMATION_MODEL_REVISION,
@@ -296,6 +355,8 @@ pub fn build_electrical_static_resource_plan(
             operator_nonzeros_upper_bound: Count(support),
             numerical_reservation_bytes: ByteCount(reservation),
             solver_admission: admission,
+            direct_solve: direct,
+            solver_memory_budget: ByteCount(budget),
             inputs: prepared.inputs,
             result_output: prepared.result_output,
             receipt_output: prepared.receipt_output,
@@ -318,4 +379,42 @@ pub fn build_electrical_static_resource_plan(
         },
         accuracy_ceiling: step.accuracy.resources,
     })
+}
+
+/// The electrical solve factors directly when the factor and the persistent state fit within
+/// 70 % of the effective budget and the factorization's estimated work is below that of
+/// AMG-preconditioned CG; otherwise it runs AMG-preconditioned CG. The plan records the choice and
+/// the budget, so a replay solves exactly as planned, whatever the executing host's memory.
+fn electrical_direct_solve(
+    persistent: u64,
+    envelope: &CoercivityWorkEnvelope,
+    iterative_flops: u64,
+    budget: u64,
+) -> bool {
+    persistent.saturating_add(envelope.factor_resident_limit()) as f64 <= 0.7 * budget as f64
+        && envelope.factor_flop_limit() <= iterative_flops
+}
+
+/// AMG-PCG work: about 100 iterations, each applying the operator and a V-cycle of roughly
+/// four operator-complexity applications (2 flops per stored coupling).
+fn iterative_solve_flops(nodes: u64, entries: u64) -> u64 {
+    entries
+        .saturating_mul(2 * 5)
+        .saturating_add(nodes.saturating_mul(20))
+        .saturating_mul(100)
+}
+
+/// AMG hierarchy (operator complexity, prolongators and level vectors) plus CG workspace for
+/// `entries` couplings, with 25 % headroom over the shared solver's estimate.
+fn iterative_solve_bytes(nodes: u64, entries: u64) -> Result<u64, ResourcePlanningError> {
+    let n = usize::try_from(nodes).map_err(|_| ResourcePlanningError::Overflow("electrical nodes"))?;
+    let nnz =
+        usize::try_from(entries).map_err(|_| ResourcePlanningError::Overflow("electrical couplings"))?;
+    let bytes = runmat_sparse_solvers::estimate::amg_bytes(n, nnz, 1)
+        .saturating_add(runmat_sparse_solvers::estimate::krylov_workspace_bytes(
+            runmat_sparse_solvers::estimate::KrylovMethod::Pcg,
+            n,
+            8,
+        ));
+    Ok(bytes.saturating_add(bytes / 4))
 }

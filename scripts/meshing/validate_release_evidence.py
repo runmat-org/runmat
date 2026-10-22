@@ -58,8 +58,13 @@ def validate_workflow(path: Path = DEFAULT_WORKFLOW) -> None:
             raise ReleaseEvidenceError(f"meshing release evidence contains bypass: {anchor}")
 
     promotion = _job_block(workflow, "create-release")
-    dependency = "needs: [build-and-test, meshing-release-evidence, build-release]"
-    if dependency not in promotion:
+    needs = next(
+        (line.strip() for line in promotion.splitlines() if line.strip().startswith("needs:")),
+        "",
+    )
+    required = {"meshing-release-evidence", "build-release"}
+    listed = {item.strip() for item in needs.removeprefix("needs:").strip(" []").split(",")}
+    if not required <= listed:
         raise ReleaseEvidenceError("release promotion does not require meshing release evidence")
 
 

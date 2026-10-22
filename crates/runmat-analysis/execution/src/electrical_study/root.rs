@@ -49,6 +49,8 @@ mod tests;
 struct PreparationWire {
     #[serde(default = "runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial")]
     local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
+    /// The machine memory the root was planned under, so every task plans with one budget.
+    machine_memory_bytes: u64,
     policy: ElectricalStudyPlanningPolicy,
     compiled: CompiledAnalysisStudy,
     workload: ElectricalStaticWorkload,
@@ -68,6 +70,7 @@ impl PreparationWire {
         let workload = preparation.workload().clone();
         Self {
             local_execution: preparation.local_execution,
+            machine_memory_bytes: preparation.machine_memory_bytes,
             policy: preparation.policy,
             compiled: preparation.product.compiled,
             workload,
@@ -106,6 +109,7 @@ impl PreparationWire {
         }
         Ok(ElectricalStudyPreparation {
             local_execution: self.local_execution,
+            machine_memory_bytes: self.machine_memory_bytes,
             policy: self.policy,
             product: ElectricalStudyProduct {
                 compiled: self.compiled,

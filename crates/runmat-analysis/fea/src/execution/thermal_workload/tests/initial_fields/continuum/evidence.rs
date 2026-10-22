@@ -106,6 +106,23 @@ fn extrapolate(coarse: &FeaThermalRunResult, fine: &FeaThermalRunResult) -> Fiel
     }
 }
 
+/// A second Richardson elimination of two first-order extrapolants with O(dt^2) remainders at dt
+/// and dt/2: (4 fine - coarse) / 3 leaves O(dt^3).
+fn eliminate_second(coarse: &Fields, fine: &Fields) -> Fields {
+    let combine = |left: &[f64], right: &[f64]| {
+        assert_eq!(left.len(), right.len());
+        left.iter()
+            .zip(right)
+            .map(|(a, b)| (4.0 * b - a) / 3.0)
+            .collect()
+    };
+    Fields {
+        temperature: combine(&coarse.temperature, &fine.temperature),
+        flux: combine(&coarse.flux, &fine.flux),
+        power: (4.0 * fine.power - coarse.power) / 3.0,
+    }
+}
+
 #[derive(Debug)]
 struct Norms {
     temperature_error: f64,
@@ -134,6 +151,7 @@ fn integrate(
         heat_difference: 0.0,
     };
     let mut volume = 0.0;
+    let mut weights = 0usize;
     for (index, element) in projection.elements.iter().enumerate() {
         let coordinates = element
             .node_indices
@@ -164,6 +182,7 @@ fn integrate(
                 norms.heat_difference += weight * difference;
                 reference_flux_integral += weight * flux;
                 volume += weight;
+                weights += 1;
             },
         )
         .unwrap();
@@ -176,12 +195,17 @@ fn integrate(
                 * (field.flux[3 * index + axis] - coarse.flux[3 * index + axis]).powi(2);
         }
     }
-    assert!((volume - 1.0).abs() < 1e-12);
+    // Summing n weights carries up to n·ε of rounding error.
+    let tolerance = 1e-12_f64.max(weights as f64 * f64::EPSILON);
+    assert!((volume - 1.0).abs() < tolerance, "{volume} over {weights} weights");
     norms
 }
 
+/// Three time levels: one Richardson elimination, with the O(dt^2) remainder measured from the two
+/// extrapolants (they differ by 3 times the finer error). Four levels: a second elimination, with
+/// the O(dt^3) remainder measured the same way (the two differ by 7 times the finer error).
 pub(super) fn measure(mesh: &SolverMeshArtifact, results: &[FeaThermalRunResult]) -> Errors {
-    assert_eq!(results.len(), 3);
+    assert!(results.len() == 3 || results.len() == 4);
     certify_series_tail(FINAL_TIME);
     for result in results {
         assert_eq!(
@@ -201,8 +225,20 @@ pub(super) fn measure(mesh: &SolverMeshArtifact, results: &[FeaThermalRunResult]
                 .collect::<Vec<_>>()
         );
     }
-    let coarse = extrapolate(&results[0], &results[1]);
-    let fine = extrapolate(&results[1], &results[2]);
+    let first = results
+        .windows(2)
+        .map(|pair| extrapolate(&pair[0], &pair[1]))
+        .collect::<Vec<_>>();
+    let (coarse, fine, remainder_ratio) = if first.len() == 3 {
+        (
+            eliminate_second(&first[0], &first[1]),
+            eliminate_second(&first[1], &first[2]),
+            7.0,
+        )
+    } else {
+        let mut first = first.into_iter();
+        (first.next().unwrap(), first.next().unwrap(), 3.0)
+    };
     let initial = integrate(mesh, &fine, &coarse, &GAUSS_LEGENDRE_EIGHT_UNIT);
     let refined = integrate(mesh, &fine, &coarse, &GAUSS_LEGENDRE_TWELVE_UNIT);
     let norms = integrate(mesh, &fine, &coarse, &GAUSS_LEGENDRE_SIXTEEN_UNIT);
@@ -248,12 +284,14 @@ pub(super) fn measure(mesh: &SolverMeshArtifact, results: &[FeaThermalRunResult]
         flux: norms.flux_error.sqrt() / flux_scale,
         heat: (norms.heat / exact_heat - 1.0).abs(),
         power: (fine.power / exact_power - 1.0).abs(),
-        // For the residual O(dt²) term, extrapolations at dt and dt/2 differ by 3 times
-        // the finer error. This is a measured contamination estimate, not an exact bound;
-        // failure blocks rate qualification rather than silently increasing dt or tolerance.
-        temperature_contamination: norms.temperature_difference.sqrt() / (3.0 * temperature_scale),
-        flux_contamination: norms.flux_difference.sqrt() / (3.0 * flux_scale),
-        heat_contamination: norms.heat_difference.abs() / (3.0 * exact_heat),
-        power_contamination: (fine.power - coarse.power).abs() / (3.0 * exact_power),
+        // For the residual O(dt^p) term, the two extrapolations at dt and dt/2 differ by
+        // (2^p - 1) times the finer error. This is a measured contamination estimate, not an
+        // exact bound; failure blocks rate qualification rather than silently increasing dt or
+        // tolerance.
+        temperature_contamination: norms.temperature_difference.sqrt()
+            / (remainder_ratio * temperature_scale),
+        flux_contamination: norms.flux_difference.sqrt() / (remainder_ratio * flux_scale),
+        heat_contamination: norms.heat_difference.abs() / (remainder_ratio * exact_heat),
+        power_contamination: (fine.power - coarse.power).abs() / (remainder_ratio * exact_power),
     }
 }

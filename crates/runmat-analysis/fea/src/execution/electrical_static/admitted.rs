@@ -35,6 +35,7 @@ impl ElectricalStaticWorkload {
                 receipt_output: demand.receipt_output.clone(),
                 state_profiles_output: demand.state_profiles_output.clone(),
                 output_set,
+                machine_memory_bytes: demand.solver_memory_budget.0,
             },
         )
         .map_err(invalid)?;
@@ -52,7 +53,10 @@ impl ElectricalStaticWorkload {
             mesh,
             self.step_id.as_str(),
             self.relative_residual_target,
-            Some(&demand.solver_admission),
+            Some(crate::physics::electrical::PlannedElectricalSolve {
+                admission: &demand.solver_admission,
+                direct: demand.direct_solve,
+            }),
             conductivity.as_deref(),
             self.sample_point(),
         )
