@@ -175,12 +175,15 @@ fn cooling_convergence(quadratic: bool, cell_counts: [usize; 3]) {
         let binding = solved_temperature_binding(&producer, &mesh);
         let producer_bytes = binding.artifact().canonical_bytes().unwrap();
         let mut results = Vec::new();
-        // The Richardson remainder leaves an O(dt^2) temporal floor near 6e-6 of the heat at
-        // 256 intervals. Quadratic spatial errors fall below that floor by four cells, so the
-        // quadratic measurement uses four times finer steps to keep the floor under a tenth of
-        // the spatial error it isolates.
-        let interval_levels = if quadratic { [256, 512, 1024] } else { [64, 128, 256] };
-        for intervals in interval_levels {
+        // Quadratic spatial errors fall below the O(dt^2) floor of one Richardson elimination by
+        // eight cells, so the quadratic measurement adds a fourth time level and a second
+        // elimination (O(dt^3) floor), keeping the floor under a tenth of the spatial error.
+        let interval_levels: &[usize] = if quadratic {
+            &[64, 128, 256, 512]
+        } else {
+            &[64, 128, 256]
+        };
+        for &intervals in interval_levels {
             let mut consumer = fixture::base();
             fixture::ends(&mut consumer);
             fixture::transient(&mut consumer, intervals);

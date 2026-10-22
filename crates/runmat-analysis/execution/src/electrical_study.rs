@@ -61,6 +61,8 @@ pub struct CompletedElectricalStudy {
 
 pub struct ElectricalStudyPreparation {
     pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
+    /// Memory this machine admits for work, from the shared machine-capacity authority.
+    pub machine_memory_bytes: u64,
     pub policy: ElectricalStudyPlanningPolicy,
     pub product: ElectricalStudyProduct,
     pub mesh: SolverMeshArtifact,
@@ -146,6 +148,7 @@ impl ElectricalStudyCoordinator {
         self.require(ElectricalStudyPhase::ReadyForSolve)?;
         let task = prepare_electrical_static_task(ElectricalStaticTaskPreparation {
             local_execution: self.preparation.local_execution,
+            machine_memory_bytes: self.preparation.machine_memory_bytes,
             authored_study_digest: self.definition_digest,
             frozen_project_digest: self.preparation.frozen_project_digest,
             program_revision: self.preparation.program_revision.clone(),
@@ -314,6 +317,7 @@ impl ElectricalStudyCoordinator {
         Ok(CompletedElectricalStudy {
             replay: completion::ElectricalStudyReplayContext {
                 local_execution: self.preparation.local_execution,
+                machine_memory_bytes: self.preparation.machine_memory_bytes,
                 policy: self.preparation.policy,
                 mesh: self.preparation.mesh,
                 frozen_project_digest: self.preparation.frozen_project_digest,

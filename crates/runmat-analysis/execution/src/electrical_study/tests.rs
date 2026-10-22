@@ -68,6 +68,7 @@ pub(crate) fn preparation() -> ElectricalStudyPreparation {
     let workload = plan_electrical_study(&compiled, policy.clone()).unwrap();
     ElectricalStudyPreparation {
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+        machine_memory_bytes: 16 << 30,
         product: ElectricalStudyProduct { compiled, workload },
         policy,
         mesh,

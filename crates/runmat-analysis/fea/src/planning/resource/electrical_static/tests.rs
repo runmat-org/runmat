@@ -57,6 +57,7 @@ fn facts(
         output_set: PreparedOutputSetResourceFacts {
             encoded_bytes_upper_bound: ByteCount(2048),
         },
+        machine_memory_bytes: 16 << 30,
     }
 }
 

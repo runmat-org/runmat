@@ -286,6 +286,8 @@ pub(crate) fn plan_family_study(
             (
                 FamilyStudyPreparation::Electrical(Box::new(ElectricalStudyPreparation {
                     local_execution: context.local_execution,
+                    machine_memory_bytes: crate::machine_capacity::memory_bytes()
+                        .map_err(|error| error.to_string())?,
                     policy,
                     product,
                     mesh,

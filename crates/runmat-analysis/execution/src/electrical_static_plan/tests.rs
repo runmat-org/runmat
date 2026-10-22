@@ -85,6 +85,7 @@ fn electrical_planning_and_admitted_solve_preserve_physics_and_cold_transport() 
                     &mesh,
                     policy,
                     LocalExecutionPlan::serial(),
+                    16 << 30,
                 )
                 .unwrap();
                 prepared
@@ -188,7 +189,7 @@ fn electrical_ceiling_rejection_precedes_numerical_matrix() {
         .maximum_resident_bytes = 1;
     let policy = AnalysisOutputPolicy::new(1024, ObjectInventoryLimits::default()).unwrap();
     assert!(
-        prepare_electrical_static_inputs(&source, &mesh, policy, LocalExecutionPlan::serial())
+        prepare_electrical_static_inputs(&source, &mesh, policy, LocalExecutionPlan::serial(), 16 << 30)
             .is_err()
     );
 }
@@ -199,7 +200,7 @@ fn electrical_plan_carries_admitted_threads_and_worker_rederivation_converges() 
     let source = workload(&mesh, StaticElectricalEquation::Electrostatics);
     let policy = AnalysisOutputPolicy::new(1024, ObjectInventoryLimits::default()).unwrap();
     let threads = LocalExecutionPlan::from_cpu_millicores(3_000).unwrap();
-    let mut prepared = prepare_electrical_static_inputs(&source, &mesh, policy, threads).unwrap();
+    let mut prepared = prepare_electrical_static_inputs(&source, &mesh, policy, threads, 16 << 30).unwrap();
     assert_eq!(prepared.resource_plan.request.cpu_millicores, 3_000);
     assert_eq!(prepared.resource_plan.input.worker.cpu_millicores, 3_000);
     prepared
