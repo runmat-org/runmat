@@ -18,7 +18,7 @@ Evidence kind: ResourceAdmission. Criterion: Constructive trimmed-surface triang
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-meshing-surface[lib]::face_pipeline_tests::publication_scale::representative_dense_face_publication_fits_default_component_memory` (crates/runmat-meshing/surface/src/face_pipeline_tests/publication_scale.rs:87) - A dense face of 90,601 nodes and 180,000 triangles has a bounded publication representation inside the 512 MiB default component memory and round-trips through ... |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-meshing-surface[lib]::exact_cdt::triangulation::tests::a_point_just_inside_a_hull_edge_keeps_the_hull_edge` (crates/runmat-meshing/surface/src/exact_cdt/triangulation/tests.rs:158) - Regression: a point just inside a hull edge keeps the hull edge in the exact face triangulation; the dense-surface and many-trim cases are separate tests.<br>`runmat-meshing-surface[lib]::face_pipeline_tests::publication_scale::representative_dense_face_publication_fits_default_component_memory` (crates/runmat-meshing/surface/src/face_pipeline_tests/publication_scale.rs:87) - A dense face of 90,601 nodes and 180,000 triangles has a bounded publication representation inside the 512 MiB default component memory and round-trips through ... |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 
@@ -28,7 +28,7 @@ Evidence kind: IndependentReference. Criterion: Three-dimensional constrained De
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-meshing-tetrahedron[lib]::cavity::constrained::tests::shared_face_split::shared_face_split_preserves_component_boundary_and_volume` (crates/runmat-meshing/tetrahedron/src/cavity/constrained/tests/shared_face_split.rs:8) - A shared-face split preserves component boundary and volume; segment and facet recovery and nested voids are separate tests. |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-meshing-tetrahedron[lib]::cavity::constrained::tests::shared_face_split::shared_face_split_preserves_component_boundary_and_volume` (crates/runmat-meshing/tetrahedron/src/cavity/constrained/tests/shared_face_split.rs:8) - A shared-face split preserves component boundary and volume; segment and facet recovery and nested voids are separate tests.<br>`runmat-meshing-tetrahedron[lib]::cdt::point_set::tests::a_point_on_a_flat_hull_cap_replaces_the_cells_whose_circumcircle_holds_it` (crates/runmat-meshing/tetrahedron/src/cdt/point_set/tests.rs:307) - Regression: a point on a flat hull cap replaces exactly the cells whose circumcircle contains it in the incremental point-set construction; facet recovery and c... |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 

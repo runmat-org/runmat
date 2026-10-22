@@ -150,6 +150,10 @@ impl MeshingCancellationSignal for Cancelled {
     }
 }
 
+// witness: FEA-MESH-DISCRETIZATION-001/surface_discretization @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Regression: a point just inside a hull edge keeps the hull edge in the exact face
+//   triangulation; the dense-surface and many-trim cases are separate tests.
 #[test]
 fn a_point_just_inside_a_hull_edge_keeps_the_hull_edge() {
     let (_, pslg) = fixture();

@@ -1,6 +1,6 @@
 # FEA-AUTHORING-OUTPUT-002: Typed source queries, recovery and retained result objects
 
-0 PASS, 7 PARTIAL, 1 FAIL, 5 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 8 PARTIAL, 0 FAIL, 5 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## typed_output_queries
 
@@ -16,7 +16,7 @@ Evidence kind: SemanticRealization. Criterion: `max` is intentionally the ordina
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-language[lib]::operations::output::tests::output_operations_are_one_shared_public_identity_with_fea_overloads` (crates/runmat-analysis/language/src/operations/output.rs:542) - Output operations are one shared public identity with FEA overloads. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[lib]::operations::output::tests::output_operations_are_one_shared_public_identity_with_fea_overloads` (crates/runmat-analysis/language/src/operations/output.rs:578) - Output operations are one shared public identity with FEA overloads. |
 
 ## attributed_extrema
 

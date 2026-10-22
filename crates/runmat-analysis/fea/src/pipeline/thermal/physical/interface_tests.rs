@@ -117,9 +117,11 @@ fn mesh() -> SolverMeshArtifact {
     mesh
 }
 
-// witness: FEA-THERMAL-INPUT-001/boundaries @ thermal_steady/tet4/numerical_kernel; coverage: partial;
-//   boundary: Conductance and resistance contact between two solids on a conformal joint match the
-//   series-resistance flux, both side temperatures and the jump q/h exactly; steady Tet4 only.
+// witness: FEA-THERMAL-DOMAIN-001/constraints @ thermal_steady/tet4/numerical_kernel; coverage:
+//   partial;
+//   boundary: A two-layer linear-mesh box with a contact conductance (or equivalent resistance)
+//   matches the one-dimensional series-resistance solution at every node, the interface jump equals
+//   flux over conductance, and the energy balance closes; Tet10 is not run.
 #[test]
 fn contact_conductance_carries_the_series_resistance_flux_and_jump() {
     // One-dimensional series resistance per unit area: L1/k1 + 1/h + L2/k2. Each layer's
@@ -159,8 +161,9 @@ fn contact_conductance_carries_the_series_resistance_flux_and_jump() {
     }
 }
 
-// witness: FEA-THERMAL-INPUT-001/boundaries @ thermal_steady/tet4/numerical_kernel; coverage: partial;
-//   boundary: Perfect contact shares the joint temperature and reproduces the two-layer series profile.
+// witness: FEA-THERMAL-DOMAIN-001/constraints @ thermal_steady/tet4/numerical_kernel; coverage:
+//   partial;
+//   boundary: Perfect contact shares the interface temperature across the joint.
 #[test]
 fn perfect_contact_shares_the_interface_temperature() {
     let mesh = mesh();

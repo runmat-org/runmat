@@ -1,6 +1,6 @@
 # FEA-SHARED-EXECUTION-001: Placement-independent logical studies and governed scheduling
 
-0 PASS, 5 PARTIAL, 1 FAIL, 138 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 6 PARTIAL, 0 FAIL, 138 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## logical_study_identity
 
@@ -132,7 +132,7 @@ Evidence kind: ExecutionEquivalence. Criterion: A failed independent task may re
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | remote_execution | FAIL | `runmat-execution-runner-native[lib]::remote::pool_tests::remote_rank_failure_releases_a_peer_blocked_in_a_collective` (crates/runmat-execution-runner-native/src/remote/pool_tests.rs:2013) - A remote rank failure releases a peer blocked in a collective within five seconds and surfaces the primary structured error with its source ordinal; SPMD runtim... |
+| shared_infrastructure | canonical_mixed_topology | remote_execution | PARTIAL | `runmat-execution-runner-native[lib]::remote::pool_tests::remote_rank_failure_releases_a_peer_blocked_in_a_collective` (crates/runmat-execution-runner-native/src/remote/pool_tests.rs:2013) - A remote rank failure releases a peer blocked in a collective within five seconds and surfaces the primary structured error with its source ordinal; SPMD runtim... |
 | shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | domain_decomposed | PARTIAL | `runmat-execution-runner-native[lib]::driver::collective::tests::failure_before_submission_fences_a_late_collective_request` (crates/runmat-execution-runner-native/src/driver/collective.rs:314) - A collective request submitted after a rank failure is fenced and fails with the original reason; the gang then completes a later barrier. In-process broker onl... |
 | shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |

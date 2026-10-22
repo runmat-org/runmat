@@ -1,6 +1,6 @@
 # FEA-ACOUSTIC-BOUNDARY-002: Radiation, frequency-dependent impedance and air damping
 
-0 PASS, 0 PARTIAL, 0 FAIL, 20 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 3 PARTIAL, 0 FAIL, 17 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## spherical_radiation
 
@@ -19,9 +19,9 @@ Evidence kind: IndependentReference. Criterion: An impedance boundary takes a co
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| acoustic_harmonic | tet4 | numerical_kernel | OPEN |  |
+| acoustic_harmonic | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::acoustic::canonical::tests::complex_impedance_termination_converges_to_the_two_wave_duct_solution` (crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests.rs:611) - A complex impedance termination on a linear-mesh duct converges to the two-wave duct solution with power closure; frequency tables and the Delany-Bazley porous ...<br>`runmat-analysis-language[test:impedance_tables]::delany_bazley_and_sampled_impedance_tables_lower_into_their_boundaries` (crates/runmat-analysis/language/tests/impedance_tables.rs:58) - Language lowering of Delany-Bazley and sampled impedance tables only; no solve against the closed-form absorption. |
 | acoustic_harmonic | tet4 | public_study | OPEN |  |
-| acoustic_harmonic | tet10 | numerical_kernel | OPEN |  |
+| acoustic_harmonic | tet10 | numerical_kernel | PARTIAL | `runmat-analysis-language[test:impedance_tables]::delany_bazley_and_sampled_impedance_tables_lower_into_their_boundaries` (crates/runmat-analysis/language/tests/impedance_tables.rs:58) - Language lowering of Delany-Bazley and sampled impedance tables only; no solve against the closed-form absorption. |
 | acoustic_harmonic | tet10 | public_study | OPEN |  |
 
 ## region_damping
@@ -30,7 +30,7 @@ Evidence kind: IndependentReference. Criterion: Loss factor or complex sound spe
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| acoustic_harmonic | tet4 | numerical_kernel | OPEN |  |
+| acoustic_harmonic | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::acoustic::canonical::tests::damped_duct_converges_to_the_complex_wavenumber_standing_wave_and_dissipates_its_input` (crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests.rs:345) - A linear-mesh duct with damping ratio 0.05 converges (error ratio above 3 per refinement, below 0.004 at 8 cells) to the complex-wavenumber standing wave and th... |
 | acoustic_harmonic | tet4 | public_study | OPEN |  |
 | acoustic_harmonic | tet10 | numerical_kernel | OPEN |  |
 | acoustic_harmonic | tet10 | public_study | OPEN |  |
