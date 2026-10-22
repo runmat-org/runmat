@@ -309,6 +309,24 @@ pub fn build_electrical_static_resource_plan(
     } else {
         iterative_solve_bytes(nodes, support)?
     };
+    tracing::info!(
+        nodes,
+        elements,
+        couplings = support,
+        projection_each = projection,
+        properties,
+        matrices,
+        vectors,
+        recovery,
+        charge_sources,
+        energy_source,
+        payload,
+        support_preparation = support_preparation_bytes(mesh)?,
+        proof,
+        solve,
+        direct,
+        "electrical static reservation components (bytes)"
+    );
     // Support preparation precedes assembly; the proof and the solve follow it.
     let reservation = add(
         persistent,
