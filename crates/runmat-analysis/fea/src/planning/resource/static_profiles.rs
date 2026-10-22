@@ -23,8 +23,9 @@ pub fn projected_canonical_output_resource_facts(
     let closure = encoded_payload_bytes_upper_bound
         .checked_add(ANALYSIS_MANIFEST_MAX_ENCODED_BYTES)
         .ok_or(ResourcePlanningError::Overflow("canonical output closure"))?;
+    // Outputs are encoded directly from their owned typed values, never through a value tree.
     let construction =
-        runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(
+        runmat_canonical_codec::projected_canonical_encoding_resident_bytes_estimate(
             encoded_payload_bytes_upper_bound,
             1,
         )

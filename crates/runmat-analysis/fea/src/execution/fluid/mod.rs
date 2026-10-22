@@ -24,7 +24,8 @@ mod time_schedule;
 mod transient_workload;
 mod workload;
 pub use time_block::{
-    FluidTransientBlock, FluidTransientBlockReservation, FluidTransientBlockResult,
+    FluidIntervalEvidence, FluidTransientBlock, FluidTransientBlockReservation,
+    FluidTransientBlockResult,
 };
 pub use time_schedule::FluidTransientSchedule;
 pub use transient_workload::{

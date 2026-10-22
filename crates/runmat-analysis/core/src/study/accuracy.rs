@@ -139,7 +139,9 @@ impl AccuracyPlan {
                 maximum_solver_tightenings: 0,
                 maximum_samples: 1_000_000,
                 maximum_wall_time_milliseconds: 3_600_000,
-                maximum_resident_bytes: 8 * 1024 * 1024 * 1024,
+                // Unbounded by default: resident memory is execution policy, limited at placement
+                // by the machine-capacity authority. An authored ceiling stays in the definition.
+                maximum_resident_bytes: u64::MAX,
             },
         }
     }

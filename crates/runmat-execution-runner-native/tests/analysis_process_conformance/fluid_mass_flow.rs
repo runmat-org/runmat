@@ -87,10 +87,12 @@ async fn transient() {
     assert_eq!(split.next_interval(), 3);
     assert_eq!(split.next_output_ordinal(), 3);
     assert_eq!(
-        split.original_results().collect::<Vec<_>>(),
-        full.original_results().collect::<Vec<_>>()
+        split.intervals().collect::<Vec<_>>(),
+        full.intervals().collect::<Vec<_>>()
     );
-    for (ordinal, result) in split.original_results().enumerate() {
+    assert_eq!(split.retained_results().last(), full.retained_results().last());
+    for (ordinal, result) in split.retained_results() {
+        let ordinal = *ordinal;
         let time = 0.3 * ((ordinal + 1) as f64 / 3.0);
         let speed = 0.001 + 0.01 * time;
         for u in &result.velocity_m_per_s {

@@ -230,8 +230,18 @@ fn lower_expression(
                     positions: positions.to_vec(),
                 },
             };
-            draft.spec.output_location = FieldLocation::Point;
-            draft.spec.recovery = RecoveryPolicy::ShapeFunctionInterpolation;
+            match (&draft.spec.target, draft.spec.source_location) {
+                // An element field is piecewise per element: a point samples the native value of
+                // the element that contains it.
+                (ObservationTarget::Point { .. }, FieldLocation::Element) => {
+                    draft.spec.output_location = FieldLocation::Element;
+                    draft.spec.recovery = RecoveryPolicy::Native;
+                }
+                _ => {
+                    draft.spec.output_location = FieldLocation::Point;
+                    draft.spec.recovery = RecoveryPolicy::ShapeFunctionInterpolation;
+                }
+            }
             Ok(draft)
         }
         AuthoredOutputExpression::Sampling {

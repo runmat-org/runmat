@@ -2914,3 +2914,68 @@ fn evaluation_rejects_plan_targets_rebound_to_another_topology_entity() {
     let error = evaluate_observations(&plan, &projection, &fields).unwrap_err();
     assert!(error.to_string().contains("differs from the topology"));
 }
+
+// witness: FEA-SHARED-OBSERVATIONS-001/governed_observation_corpus @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: A point sample of an element field returns the native value of the element that
+//   contains the point (not a centroid match), with that element as its entity, on a
+//   three-element Tet4 mesh. Tet10 and path samples of element fields are not exercised.
+#[test]
+fn element_field_point_sample_reads_the_containing_element() {
+    let mesh = runmat_meshing_core::fixtures::three_region_tetrahedron_solver_mesh();
+    let projection = AnalysisProjection::derive(&mesh).unwrap();
+    assert_eq!(projection.elements.len(), 3);
+    let definition = RecoveredFieldDefinition::new(
+        "stress.recovered",
+        ObservationQuantity::Stress,
+        FieldLocation::Element,
+        RecoveredFieldEntityDomain::VolumeElements,
+        ObservationValueShape::SymmetricTensor3,
+        RecoveredFieldNumericRepresentation::Real,
+    )
+    .unwrap();
+    let fields = catalog(
+        &projection,
+        &definition,
+        vec![3, 6],
+        vec![
+            100.0, 0.0, 0.0, 0.0, 0.0, 0.0, //
+            200.0, 0.0, 0.0, 0.0, 0.0, 0.0, //
+            300.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        ],
+    );
+    for (index, element) in projection.elements.iter().enumerate() {
+        // A point strictly inside the element, away from its centroid.
+        let corner = projection.nodes[element.node_indices[0]].coordinates_m;
+        let position = std::array::from_fn(|axis| {
+            0.7 * element.centroid_m[axis] + 0.3 * corner[axis]
+        });
+        let mut request = spec("sample", ObservationTarget::Point {
+            position: Position::new(position),
+        });
+        request.quantity = ObservationQuantity::Stress;
+        request.value_shape = ObservationValueShape::SymmetricTensor3;
+        request.source_location = FieldLocation::Element;
+        request.output_location = FieldLocation::Element;
+        request.component = ObservationComponent::VonMises;
+        request.cost = runmat_analysis_core::ObservationCostPolicy::Automatic;
+        let mut step = ProcedureStep::structural_static("static");
+        step.observations = vec![ObservationRequest::Probe(request)];
+        let plan = resolve_observation_plan(
+            &step,
+            &projection,
+            std::slice::from_ref(&definition),
+            ObservationLimits::default(),
+        )
+        .unwrap();
+        let result = evaluate_observations(&plan, &projection, &fields).unwrap();
+        assert_eq!(
+            result[0].field.as_host_f64().unwrap(),
+            &[100.0 * (index + 1) as f64]
+        );
+        assert_eq!(
+            result[0].entities,
+            vec![ObservationEntity::Element(element.stable_identity)]
+        );
+    }
+}

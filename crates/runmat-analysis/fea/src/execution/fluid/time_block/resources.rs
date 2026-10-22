@@ -5,6 +5,7 @@ pub(super) fn reserve(
     initial: CanonicalFluidFields<'_>,
     schedule: &FluidTransientSchedule,
     range: &Range<usize>,
+    retained: usize,
     metadata: u64,
     ceiling: u64,
 ) -> AnalysisExecutionResult<FluidTransientBlockReservation> {
@@ -26,12 +27,26 @@ pub(super) fn reserve(
         input.topology.faces.len(),
         authorities,
         range.len(),
+        retained,
     )?;
     let history = output.materialization_resident_bytes_estimate;
     let profile_work = output.encoded_bytes_upper_bound;
-    // Full result history coexists with one numerical interval and its current output.
+    // Retained history and interval evidence coexist with one numerical interval, its
+    // current output and the previous interval (the next predecessor).
+    let working = super::super::profile::original_block_encoding_profile(
+        input.topology.cells.len(),
+        input.topology.faces.len(),
+        crate::physics::cfd::canonical::potential_boundary_authorities(
+            input.constraints,
+            input.boundary_operators,
+            input.excitations,
+        ),
+        0,
+        2,
+    )?
+    .materialization_resident_bytes_estimate;
     let extra = add(
-        add(mul(metadata, 2)?, history)?,
+        add(add(mul(metadata, 2)?, history)?, working)?,
         mul(schedule.points_s().len() as u64, 64)?,
     )?;
     let maximum = input.policy.maximum_resident_bytes.min(ceiling);

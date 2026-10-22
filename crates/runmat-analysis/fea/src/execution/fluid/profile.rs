@@ -174,7 +174,8 @@ pub(super) fn original_block_profile<'a>(
     cells: usize,
     faces: usize,
     authorities: impl Iterator<Item = &'a str> + Clone,
-    count: usize,
+    intervals: usize,
+    retained: usize,
 ) -> impl Serialize {
     #[derive(Serialize)]
     #[serde(bound(serialize = "BoundaryProfiles<I>: Serialize"))]
@@ -182,15 +183,27 @@ pub(super) fn original_block_profile<'a>(
         identity: Digest,
         start_ordinal: usize,
         end_ordinal: usize,
-        original: Repeated<OriginalProfile<I>>,
+        intervals: Repeated<super::FluidIntervalEvidence>,
+        retained: Repeated<(usize, OriginalProfile<I>)>,
     }
     Block {
         identity: Digest::from_bytes([0; 32]),
-        start_ordinal: 0,
-        end_ordinal: 0,
-        original: Repeated {
-            sample: original_profile(cells, faces, authorities),
-            count,
+        start_ordinal: usize::MAX,
+        end_ordinal: usize::MAX,
+        intervals: Repeated {
+            sample: super::FluidIntervalEvidence {
+                ordinal: usize::MAX,
+                outer_iterations: usize::MAX,
+                linear_iterations: u64::MAX,
+                momentum_relative: f64::MAX,
+                continuity_relative: f64::MAX,
+                fields_digest: Digest::from_bytes([0; 32]),
+            },
+            count: intervals,
+        },
+        retained: Repeated {
+            sample: (usize::MAX, original_profile(cells, faces, authorities)),
+            count: retained,
         },
     }
 }
@@ -199,10 +212,11 @@ pub(super) fn original_block_encoding_profile<'a>(
     cells: usize,
     faces: usize,
     authorities: impl Iterator<Item = &'a str> + Clone,
-    count: usize,
+    intervals: usize,
+    retained: usize,
 ) -> AnalysisExecutionResult<SerializedCanonicalProfile> {
     Ok(profile_serialized_shape(
-        &original_block_profile(cells, faces, authorities, count),
+        &original_block_profile(cells, faces, authorities, intervals, retained),
         LIMITS,
     )?)
 }

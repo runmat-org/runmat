@@ -85,6 +85,12 @@ fn field_construction_scratch_is_composed_before_assembly() {
 #[test]
 fn manifest_catalog_is_admitted_with_checked_retained_and_validation_costs() {
     let mut workload = workload();
+    // An authored ceiling with the same canonical integer width as the values set below, so the
+    // workload encoding (and the requirement derived from it) does not change with the value.
+    workload.model.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes = u64::from(u32::MAX);
     let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
     let schedule = workload.solve_schedule().unwrap();
     let facts = ThermalPreassemblyResourceFacts::derive(
@@ -101,11 +107,16 @@ fn manifest_catalog_is_admitted_with_checked_retained_and_validation_costs() {
     workload.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = required - catalog;
+        .maximum_resident_bytes = required - 1;
+    // The catalog is part of that complete requirement.
+    assert!(catalog > 0 && catalog < required);
+    let outcome = workload.execute(&mesh);
     assert!(
-        matches!(workload.execute(&mesh), Err(crate::FeaRunError::Resource(
+        matches!(&outcome, Err(crate::FeaRunError::Resource(
         ResourcePlanningError::AccuracyCeiling { required: actual, .. }
-    )) if actual == required)
+    )) if *actual == required),
+        "{:?} versus {required}",
+        outcome.as_ref().err()
     );
     let mut overflow = facts.manifest_catalog;
     overflow.validation_scratch_bytes = ByteCount(u64::MAX);

@@ -72,7 +72,8 @@ fn native_solve_receipt_and_copy_only_all_face_recovery_survive_cold_store() {
             .result
             .recover_native_fields(&workload, &mesh, &recovery.request)
             .unwrap();
-        assert_eq!(cold.manifest.fields.len(), 3);
+        // Velocity, pressure, face flux, vorticity and wall shear stress.
+        assert_eq!(cold.manifest.fields.len(), 5);
         for (entry, original) in cold.manifest.fields.iter().zip(expected.fields()) {
             let partitions = entry
                 .partitions

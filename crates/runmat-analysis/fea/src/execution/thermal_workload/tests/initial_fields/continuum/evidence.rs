@@ -134,6 +134,7 @@ fn integrate(
         heat_difference: 0.0,
     };
     let mut volume = 0.0;
+    let mut weights = 0usize;
     for (index, element) in projection.elements.iter().enumerate() {
         let coordinates = element
             .node_indices
@@ -164,6 +165,7 @@ fn integrate(
                 norms.heat_difference += weight * difference;
                 reference_flux_integral += weight * flux;
                 volume += weight;
+                weights += 1;
             },
         )
         .unwrap();
@@ -176,7 +178,9 @@ fn integrate(
                 * (field.flux[3 * index + axis] - coarse.flux[3 * index + axis]).powi(2);
         }
     }
-    assert!((volume - 1.0).abs() < 1e-12);
+    // Summing n weights carries up to n·ε of rounding error.
+    let tolerance = 1e-12_f64.max(weights as f64 * f64::EPSILON);
+    assert!((volume - 1.0).abs() < tolerance, "{volume} over {weights} weights");
     norms
 }
 

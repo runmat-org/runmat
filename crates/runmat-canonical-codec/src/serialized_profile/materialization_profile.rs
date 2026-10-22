@@ -57,6 +57,28 @@ pub fn profile_serialized_shape<T: Serialize + ?Sized>(
     profile(value, limits, true)
 }
 
+/// Resident estimate of an owned typed value from its serialization shape: eight bytes per
+/// scalar, a collection header per array or string, string bytes, and inline structs, with the
+/// fixed per-contract allowance. This prices typed storage that already exists or is decoded
+/// directly; it builds neither a value tree nor an encoding.
+pub fn profile_typed_resident_bytes<T: Serialize + ?Sized>(
+    value: &T,
+    limits: CanonicalLimits,
+) -> Result<u64, CanonicalCodecError> {
+    let mut counter = Counter {
+        profile: MaterializationProfile::default(),
+        encoded_bytes: 0,
+        limits,
+        live_map_metadata: 0,
+        peak_map_metadata: 0,
+        integer_value_bounds: false,
+        child_peak: 0,
+    };
+    counter.encoded(ENVELOPE_BYTES)?;
+    value.serialize(Profiler::value(&mut counter, 0))?;
+    crate::materialization::typed_resident_bytes_estimate(counter.profile)
+}
+
 fn profile<T: Serialize + ?Sized>(
     value: &T,
     limits: CanonicalLimits,

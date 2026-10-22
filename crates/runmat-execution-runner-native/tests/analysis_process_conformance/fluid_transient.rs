@@ -123,8 +123,12 @@ pub(super) async fn run() {
     assert_eq!(checkpoint.next_interval(), 3);
     assert_eq!(checkpoint.next_output_ordinal(), 3);
     assert_eq!(
-        checkpoint.original_results().collect::<Vec<_>>(),
-        full.original_results().collect::<Vec<_>>()
+        checkpoint.intervals().collect::<Vec<_>>(),
+        full.intervals().collect::<Vec<_>>()
+    );
+    assert_eq!(
+        checkpoint.retained_results().last(),
+        full.retained_results().last()
     );
     // Independent accelerating-flow and affine-pressure references at every original sample.
     let projection = runmat_analysis_fea::topology::AnalysisProjection::derive(&mesh).unwrap();
@@ -133,7 +137,8 @@ pub(super) async fn run() {
         workload.geometry_policy,
     )
     .unwrap();
-    for (ordinal, result) in checkpoint.original_results().enumerate() {
+    for (ordinal, result) in checkpoint.retained_results() {
+        let ordinal = *ordinal;
         let time = 0.3 * ((ordinal + 1) as f64 / 3.);
         assert!(result
             .velocity_m_per_s
