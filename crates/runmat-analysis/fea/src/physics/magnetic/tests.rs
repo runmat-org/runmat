@@ -82,7 +82,7 @@ fn square_uniform_current_has_independent_potential_field_and_energy_convergence
     );
     for cells in [1, 2, 4] {
         let (projection, data) = problem(ElementOrder::Tet4, cells, 1.0, 1.0);
-        let result = solve_full_grounded_volume(&projection, &data, 1e-10).unwrap();
+        let result = solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &data, 1e-10).unwrap();
         let mut potential_error = 0.0;
         let mut field_error = 0.0;
         for sample in &result.samples {
@@ -125,13 +125,13 @@ fn square_uniform_current_has_independent_potential_field_and_energy_convergence
 #[test]
 fn sign_permeability_and_affine_geometry_order_preserve_physical_scaling() {
     let (projection, data) = problem(ElementOrder::Tet4, 2, 1.0, 1.0);
-    let base = solve_full_grounded_volume(&projection, &data, 1e-10).unwrap();
+    let base = solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &data, 1e-10).unwrap();
     for (order, mu, j) in [
         (ElementOrder::Tet4, 1.25663706212e-6, -2.0),
         (ElementOrder::Tet10, 1.0, 1.0),
     ] {
         let (projection, data) = problem(order, 2, mu, j);
-        let result = solve_full_grounded_volume(&projection, &data, 1e-10).unwrap();
+        let result = solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &data, 1e-10).unwrap();
         for (sample, expected) in result.samples.iter().zip(&base.samples) {
             for axis in 0..3 {
                 assert!(
@@ -160,11 +160,11 @@ fn sign_permeability_and_affine_geometry_order_preserve_physical_scaling() {
 fn invalid_material_identity_current_and_gauge_source_compatibility_fail_closed() {
     let (projection, mut data) = problem(ElementOrder::Tet4, 2, 1.0, 1.0);
     data[0].permeability_h_per_m = 0.0;
-    assert!(solve_full_grounded_volume(&projection, &data, 1e-10).is_err());
+    assert!(solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &data, 1e-10).is_err());
     data[0].permeability_h_per_m = 1.0;
-    assert!(solve_full_grounded_volume(&projection, &data[..data.len() - 1], 1e-10).is_err());
+    assert!(solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &data[..data.len() - 1], 1e-10).is_err());
     data.push(data[0]);
-    assert!(solve_full_grounded_volume(&projection, &data, 1e-10).is_err());
+    assert!(solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &data, 1e-10).is_err());
     data.pop();
     for element in &mut data {
         element.current_density_a_per_m2 = [0.0; 3];
@@ -182,11 +182,11 @@ fn invalid_material_identity_current_and_gauge_source_compatibility_fail_closed(
         .unwrap();
     data[interior].current_density_a_per_m2 = [1.0, 2.0, 3.0];
     assert!(matches!(
-        solve_full_grounded_volume(&projection, &data, 1e-10),
+        solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &data, 1e-10),
         Err(MagnetostaticError::IncompatibleCurrent(_))
     ));
     data[interior].current_density_a_per_m2 = [0.0; 3];
-    let zero = solve_full_grounded_volume(&projection, &data, 1e-10).unwrap();
+    let zero = solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &data, 1e-10).unwrap();
     assert_eq!(zero.magnetic_energy_j, 0.0);
     assert_eq!(zero.source_work_j, 0.0);
     assert!(zero.edge_circulations_wb.iter().all(|&value| value == 0.0));
@@ -208,7 +208,7 @@ fn authored_material_current_ground_and_gauge_compile_into_physical_solve() {
         assert!(result.magnetic_energy_j > 0.0);
         assert!(result.relative_energy_work_error < 1.6e-9);
         let (projection, data) = problem(order, 2, VACUUM_PERMEABILITY_H_PER_M, -2.0);
-        let reference = solve_full_grounded_volume(&projection, &data, 1e-10).unwrap();
+        let reference = solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &data, 1e-10).unwrap();
         assert!((result.magnetic_energy_j / reference.magnetic_energy_j - 1.0).abs() < 1e-8);
         assert_eq!(result.edge_node_identities, reference.edge_node_identities);
         for (a, b) in result
@@ -273,19 +273,22 @@ fn exact_volume_superposition_zero_conductivity_and_missing_boundary_fail_closed
     {
         assert!((a - b).abs() < 1e-14);
     }
-    summed.constraints.remove(0);
+    summed.constraints.retain(|c| {
+        !matches!(c, AnalysisConstraint::Magnetic(m)
+            if matches!(m.kind, MagneticConstraintKind::VectorPotentialGround { .. }))
+    });
     assert!(solve_canonical_static(&summed, &mesh, "potential", 1e-10).is_err());
     let (mut projection, data) = problem(ElementOrder::Tet10, 2, 1.0, 1.0);
     let midside = projection.elements[0].node_indices[4];
     projection.nodes[midside].coordinates_m[0] += 0.01;
     assert!(matches!(
-        solve_full_grounded_volume(&projection, &data, 1e-10),
+        solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &data, 1e-10),
         Err(MagnetostaticError::Unsupported(_))
     ));
     let (mut projection, data) = problem(ElementOrder::Tet4, 2, 1.0, 1.0);
     projection.boundary_faces.pop();
     assert!(matches!(
-        solve_full_grounded_volume(&projection, &data, 1e-10),
+        solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &data, 1e-10),
         Err(MagnetostaticError::Topology(_))
     ));
 }
@@ -296,7 +299,7 @@ fn exact_volume_superposition_zero_conductivity_and_missing_boundary_fail_closed
 #[test]
 fn recovered_curl_has_shared_face_normal_flux_continuity_and_global_flux_closure() {
     let (projection, data) = problem(ElementOrder::Tet4, 3, 1.0, 1.0);
-    let response = solve_full_grounded_volume(&projection, &data, 1e-10).unwrap();
+    let response = solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &data, 1e-10).unwrap();
     let field: std::collections::BTreeMap<_, _> = response
         .samples
         .iter()
@@ -342,4 +345,32 @@ fn recovered_curl_has_shared_face_normal_flux_continuity_and_global_flux_closure
         absolute += flux.abs();
     }
     assert!(net.abs() <= 1e-12 * absolute);
+}
+
+#[test]
+fn insulated_faces_and_one_gauge_admit_a_partially_grounded_field() {
+    // The fixture current runs parallel to the slab's left face. Insulating that face
+    // (n x H = 0) leaves one connected grounded surface, and the field is well posed.
+    let mesh = crate::topology::test_meshes::slab_mesh(2);
+    let full = solve_canonical_static(&authored_model(1.0), &mesh, "potential", 1e-10).unwrap();
+    let mut model = authored_model(1.0);
+    model.constraints.retain(|c| c.constraint_id() != "slab_left");
+    let partial = solve_canonical_static(&model, &mesh, "potential", 1e-10).unwrap();
+    assert!(partial.magnetic_energy_j.is_finite() && partial.magnetic_energy_j > 0.0);
+    // Insulation removes constraints, so the stored energy for the same current can only rise.
+    assert!(partial.magnetic_energy_j >= full.magnetic_energy_j * (1.0 - 1e-9));
+    // Current may not leave through an insulated face: insulating the sides the current
+    // crosses is rejected as an incompatible source, not solved.
+    let mut crossing = authored_model(1.0);
+    crossing
+        .constraints
+        .retain(|c| c.constraint_id() != "slab_insulated");
+    assert!(solve_canonical_static(&crossing, &mesh, "potential", 1e-10).is_err());
+    // Without any ground the gradient part of A is undetermined.
+    let mut ungrounded = authored_model(1.0);
+    ungrounded.constraints.retain(|c| {
+        !matches!(c, AnalysisConstraint::Magnetic(m)
+            if matches!(m.kind, MagneticConstraintKind::VectorPotentialGround { .. }))
+    });
+    assert!(solve_canonical_static(&ungrounded, &mesh, "potential", 1e-10).is_err());
 }

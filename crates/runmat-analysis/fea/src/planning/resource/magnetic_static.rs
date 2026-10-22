@@ -2,10 +2,7 @@
 //! exact sparse edge/gauge support, and codec wire-shape projections. Requested
 //! heap is conservative additive lifetime accounting, never a measured RSS claim.
 use super::*;
-use crate::{
-    execution::MagnetostaticWorkload, physics::magnetic::MagneticSystemPlan,
-    topology::AnalysisProjection,
-};
+use crate::{execution::MagnetostaticWorkload, physics::magnetic::MagneticSystemPlan};
 use runmat_canonical_codec::CanonicalLimits;
 use runmat_execution::Digest;
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
@@ -94,8 +91,16 @@ pub fn build_magnetostatic_resource_plan(
     }
     // Count-only ceiling is checked before either shared geometric projection or
     // sparse plan discovery can allocate. No physical matrices/fields are built.
-    let projection = AnalysisProjection::derive(m).map_err(invalid)?;
-    let system = MagneticSystemPlan::derive(&projection).map_err(invalid)?;
+    let input = crate::physics::magnetic::compile_canonical_input(
+        &w.model,
+        m,
+        w.step_id.as_str(),
+        w.relative_residual_target,
+    )
+    .map_err(invalid)?;
+    let system = MagneticSystemPlan::derive(&input.projection, &input.grounded_faces)
+        .map_err(invalid)?;
+    drop(input);
     let krylov = estimate::magnetic_static::krylov_envelope(
         system.saddle_pattern().rows(),
         system.saddle_pattern().column_indices().len() as u64,

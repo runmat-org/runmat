@@ -503,3 +503,132 @@ fn terminal_voltage_load_holds_its_terminal_like_a_prescribed_potential() {
         assert_relative(actual.terminal_work, expected.terminal_work, 1e-10);
     }
 }
+
+#[test]
+fn integral_current_and_floating_terminals_find_their_common_potential() {
+    let mesh = mesh(ElementOrder::Tet4, 2);
+    // Reference: 1 V across the slab gives the terminal current I1, so R = 1/I1.
+    let mut reference = model(StaticElectricalEquation::SteadyConduction);
+    prescribe(&mut reference, "left".into(), RegionTarget::boundary("slab_left"), 0.0);
+    prescribe(&mut reference, "right".into(), RegionTarget::boundary("slab_right"), 1.0);
+    let unit = solve(&reference, &mesh);
+    let i1 = unit
+        .terminals
+        .iter()
+        .find(|t| t.constraint_id == "right")
+        .unwrap()
+        .outward_flux
+        .abs();
+    // A 2.5 A integral current into the right terminal holds it at 2.5 R.
+    let mut driven = model(StaticElectricalEquation::SteadyConduction);
+    prescribe(&mut driven, "left".into(), RegionTarget::boundary("slab_left"), 0.0);
+    driven
+        .constraints
+        .push(AnalysisConstraint::Electrical(ElectricalConstraint {
+            constraint_id: "right".into(),
+            kind: ElectricalConstraintKind::IntegralCurrent {
+                target: RegionTarget::boundary("slab_right"),
+                value: PrescribedValue::Constant(ElectricCurrent::new(2.5)),
+            },
+        }));
+    let response = solve(&driven, &mesh);
+    let terminal = response
+        .terminals
+        .iter()
+        .find(|t| t.constraint_id == "right")
+        .unwrap();
+    assert_relative(-terminal.outward_flux, 2.5, 1e-8);
+    let projection = AnalysisProjection::derive(&mesh).unwrap();
+    let right_potentials: Vec<f64> = terminal
+        .ordered_node_ids
+        .iter()
+        .map(|id| {
+            let index = projection.nodes.iter().position(|n| n.node_id == *id).unwrap();
+            response.potential_v[index]
+        })
+        .collect();
+    for potential in right_potentials {
+        assert_relative(potential, 2.5 / i1, 1e-8);
+    }
+    // An uncharged floating electrode carries no net flux.
+    let mut floating = model(StaticElectricalEquation::Electrostatics);
+    prescribe(&mut floating, "left".into(), RegionTarget::boundary("slab_left"), 3.0);
+    floating
+        .constraints
+        .push(AnalysisConstraint::Electrical(ElectricalConstraint {
+            constraint_id: "right".into(),
+            kind: ElectricalConstraintKind::FloatingConductor {
+                target: RegionTarget::boundary("slab_right"),
+            },
+        }));
+    let response = solve(&floating, &mesh);
+    let terminal = response
+        .terminals
+        .iter()
+        .find(|t| t.constraint_id == "right")
+        .unwrap();
+    assert!(terminal.outward_flux.abs() <= 1e-9 * 3.0 * coefficient(StaticElectricalEquation::Electrostatics));
+    // With no net flux the whole slab sits at the anchor potential.
+    assert!(response.potential_v.iter().all(|v| (v - 3.0).abs() < 1e-8));
+}
+
+#[test]
+fn face_current_density_injects_its_normal_flux() {
+    let mesh = mesh(ElementOrder::Tet4, 2);
+    let mut model = model(StaticElectricalEquation::SteadyConduction);
+    prescribe(&mut model, "left".into(), RegionTarget::boundary("slab_left"), 0.0);
+    model.signals.push(PhysicalSignal::ElectricCurrentDensity(Signal {
+        signal_id: SignalId("j".into()),
+        shape: SignalShape::Vector3,
+        frame: Some(CoordinateFrame::Global),
+        representation: SignalRepresentation::Constant(SignalValue::Vector3([
+            ElectricCurrentDensity::new(-4.0),
+            ElectricCurrentDensity::new(0.0),
+            ElectricCurrentDensity::new(0.0),
+        ])),
+        precision: SignalPrecision::Real64,
+        provenance: SignalProvenance::Authored,
+        evidence: SignalApproximationEvidence {
+            max_absolute_error: Some(0.0),
+            max_relative_error: Some(0.0),
+            derivative_max_absolute_error: None,
+            sample_count: 1,
+        },
+    }));
+    model
+        .excitations
+        .push(ExcitationAction::CurrentDensity(AnalysisExcitation {
+            excitation_id: ExcitationId("j".into()),
+            target: ExcitationTarget::Region(RegionTarget::boundary("slab_right")),
+            frame: CoordinateFrame::Global,
+            direction: None,
+            distribution: ExcitationDistribution::IntensityPerArea,
+            kinematics: ExcitationKinematics::FixedFrame,
+            signal_id: SignalId("j".into()),
+            active_step_ids: vec!["potential".into()],
+            combination_group: None,
+            projection: ProjectionRequirement {
+                preserve_resultant: true,
+                preserve_moment: false,
+                relative_tolerance: 1e-12,
+            },
+        }));
+    model.excitation_cases.push(ExcitationCase {
+        case_id: ExcitationCaseId("j".into()),
+        action_ids: vec![ExcitationId("j".into())],
+        activation: ExcitationCaseActivation::Always,
+    });
+    let response = solve(&model, &mesh);
+    // Flux into the slab through the right face equals the current through the grounded left face.
+    let projection = AnalysisProjection::derive(&mesh).unwrap();
+    let area: f64 = projection
+        .boundary_faces_for_target(&RegionTarget::boundary("slab_right"))
+        .map(|face| face.area_m2)
+        .sum();
+    let left = response
+        .terminals
+        .iter()
+        .find(|t| t.constraint_id == "left")
+        .unwrap();
+    assert_relative(left.outward_flux, 4.0 * area, 1e-8);
+}

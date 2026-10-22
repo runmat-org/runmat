@@ -30,9 +30,10 @@ pub(super) struct MagneticAssembly<'a> {
 impl<'a> MagneticAssembly<'a> {
     pub fn assemble(
         projection: &'a AnalysisProjection,
+        grounded_faces: &[runmat_meshing_core::StableDigest],
         volumes: &[MagneticVolumeData],
     ) -> Result<Self, MagnetostaticError> {
-        let plan = MagneticSystemPlan::derive(projection)?;
+        let plan = MagneticSystemPlan::derive(projection, grounded_faces)?;
         Self::assemble_with_plan(projection, volumes, &plan)
     }
     pub fn assemble_with_plan(
@@ -43,7 +44,8 @@ impl<'a> MagneticAssembly<'a> {
         plan.validate_for(projection)?;
         let edge_space = TetrahedralEdgeSpace::derive(projection)
             .map_err(|e| MagnetostaticError::Topology(e.to_string()))?;
-        let boundary = MagneticBoundarySpace::derive(projection, &edge_space)?;
+        let boundary =
+            MagneticBoundarySpace::derive(projection, &edge_space, plan.grounded_faces())?;
         let mut inventory = BTreeMap::new();
         for volume in volumes {
             if !volume.permeability_h_per_m.is_finite()

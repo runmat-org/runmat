@@ -2,7 +2,7 @@ use super::ThermalStudyPlanningError;
 use crate::{
     excitation::{
         realize_step_excitations, sample_prescribed_heat_flux, sample_prescribed_temperature,
-        ExcitationSamplePoint, RealizedExcitationKind,
+        ExcitationSamplePoint, RealizedExcitationKind, RealizedExcitationTarget,
     },
     execution::{ThermalSolveSchedule, ThermalWorkload},
     ThermalProcedureControl,
@@ -73,6 +73,26 @@ pub(super) fn validate(
                 if !field.is_real() {
                     return Err(invalid("thermal element scalar density must be real"));
                 }
+                continue;
+            }
+            if let RealizedExcitationKind::AmbientTemperature(value) = action.kind {
+                // The ambient of a convection or radiation boundary on the same faces.
+                let RealizedExcitationTarget::Region(target) = &action.target else {
+                    return Err(invalid("ambient temperature needs a face region"));
+                };
+                if !model.boundaries.iter().any(|boundary| {
+                    boundary.target.region_id == target.region_id
+                        && matches!(
+                            boundary.operator,
+                            BoundaryOperator::ThermalConvection { .. }
+                                | BoundaryOperator::ThermalRadiation { .. }
+                        )
+                }) {
+                    return Err(invalid(
+                        "ambient temperature needs a thermal.convection or thermal.radiation boundary on the same faces",
+                    ));
+                }
+                real(value.real, value.imaginary)?;
                 continue;
             }
             let value = match action.kind {

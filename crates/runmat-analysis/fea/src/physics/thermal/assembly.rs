@@ -517,12 +517,20 @@ pub(crate) fn assemble(
 }
 
 /// Shared by operator assembly and physical recovery, including signal side/approach.
+/// An `ambient_temperature` excitation on the boundary's faces supplies the ambient (for
+/// example a chamber temperature that varies in time) in place of the authored value.
 fn sample_ambient_temperature(
     model: &AnalysisModel,
     boundary_id: &str,
     value: &PrescribedValue<Temperature>,
     sample: ExcitationSamplePoint<'_>,
 ) -> Result<f64, ThermalAssemblyError> {
+    let excited = model
+        .boundaries
+        .iter()
+        .find(|boundary| boundary.boundary_id == boundary_id)
+        .and_then(|boundary| ambient_excitation(model, &boundary.target));
+    let value = excited.as_ref().unwrap_or(value);
     let ambient =
         sample_prescribed_temperature(value, &model.signals, sample).map_err(|error| {
             ThermalAssemblyError::SignalRealization {
@@ -579,3 +587,23 @@ pub(super) fn apply_matrix(matrix: &RealSparseMatrix, vector: &[f64]) -> Vec<f64
 
 #[cfg(test)]
 mod tests;
+
+/// The ambient supplied by an `ambient_temperature` excitation on exactly these faces.
+pub(crate) fn ambient_excitation(
+    model: &AnalysisModel,
+    target: &runmat_analysis_core::RegionTarget,
+) -> Option<PrescribedValue<Temperature>> {
+    model.excitations.iter().find_map(|action| match action {
+        runmat_analysis_core::ExcitationAction::AmbientTemperature(excitation) => {
+            match &excitation.target {
+                runmat_analysis_core::ExcitationTarget::Region(region)
+                    if region.region_id == target.region_id =>
+                {
+                    Some(PrescribedValue::Signal(excitation.signal_id.clone()))
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    })
+}

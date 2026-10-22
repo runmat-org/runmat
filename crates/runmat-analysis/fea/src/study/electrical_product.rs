@@ -83,7 +83,6 @@ fn validate_materials(
         if !coefficient.is_finite()
             || coefficient <= 0.0
             || !electrical.resistive_heating_coefficient.is_finite()
-            || !electrical.conductivity_frequency_response.is_empty()
         {
             return Err(ElectricalStudyProductError::UnsupportedMaterial);
         }

@@ -388,3 +388,49 @@ fn gap_fed_conductor_closes_its_terminal_current_through_air() {
     assert!((response.ohmic_power_w - delivered).abs() < 1e-4 * delivered);
     assert!((delivered - 0.5 * 25.0 * r_dc).abs() < 1e-2 * delivered);
 }
+
+#[test]
+fn tabulated_frequency_response_scales_the_conductor_at_the_analysis_frequency() {
+    let line = strip();
+    let frequency = 2.0e4;
+    let mesh = line.mesh(8, 4);
+    let mut tabulated = line.model(vec![frequency], Drive::Current(2.0));
+    tabulated.materials[0]
+        .electrical
+        .as_mut()
+        .unwrap()
+        .conductivity_frequency_response = vec![
+        runmat_analysis_core::ConductivityFrequencyPoint {
+            frequency_hz: 1.0e4,
+            conductivity_scale: 0.25,
+            dispersive_loss_scale: None,
+            relative_permittivity_scale: None,
+            relative_permeability_scale: None,
+        },
+        runmat_analysis_core::ConductivityFrequencyPoint {
+            frequency_hz: 3.0e4,
+            conductivity_scale: 0.75,
+            dispersive_loss_scale: None,
+            relative_permittivity_scale: None,
+            relative_permeability_scale: None,
+        },
+    ];
+    let scaled = Line {
+        sigma: line.sigma * 0.5,
+        ..strip()
+    };
+    let reference = solve_canonical_harmonic(
+        &scaled.model(vec![frequency], Drive::Current(2.0)),
+        &mesh,
+        "field",
+        1e-9,
+        frequency,
+    )
+    .unwrap();
+    let actual = solve_canonical_harmonic(&tabulated, &mesh, "field", 1e-9, frequency).unwrap();
+    let (a, b) = (&actual.drives[0].voltage_v, &reference.drives[0].voltage_v);
+    assert!((a.real - b.real).abs() <= 1e-9 * b.real.abs());
+    assert!((a.imaginary - b.imaginary).abs() <= 1e-9 * b.imaginary.abs().max(b.real.abs()));
+    // Outside the tabulated band the material is undefined.
+    assert!(solve_canonical_harmonic(&tabulated, &mesh, "field", 1e-9, 5.0e4).is_err());
+}
