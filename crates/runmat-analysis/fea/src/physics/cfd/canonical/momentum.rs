@@ -57,7 +57,7 @@ pub(super) fn assemble_with_time(
             // Impermeable and shear-free: no advective flux. The normal viscous
             // stress is implicit on every component; the tangential part of the
             // same coefficient is returned explicitly so only u·n̂ is penalized.
-            let (coefficient, traction) = symmetry_traction(p, i, u[f.owner])?;
+            let (coefficient, traction) = symmetry_traction(p, i, u[f.owner], &gu[f.owner])?;
             a.add(f.owner, f.owner, coefficient);
             diagonal[f.owner] += coefficient;
             rhs[f.owner] = add(rhs[f.owner], add(scale(u[f.owner], coefficient), traction));

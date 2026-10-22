@@ -33,9 +33,11 @@ impl ThermalManifestRetainedResourceFacts {
         identity: &AnalysisRunIdentity,
         metadata: &ThermalMetadataResourceFacts,
         sources: &ThermalSourceEvidenceResourceFacts,
+        interface_nodes: usize,
     ) -> Result<Self, ResourcePlanningError> {
         let scalar_inventory_bytes = sum(&[
             slots::<u64>(mesh.topology.nodes.len())?,
+            slots::<u64>(interface_nodes)?,
             slots::<u64>(mesh.topology.volume_elements.len())?,
             slots::<f64>(schedule.sample_count())?,
             slots::<f64>(schedule.solve_count())?,

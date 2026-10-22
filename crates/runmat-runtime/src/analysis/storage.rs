@@ -49,7 +49,6 @@ pub use observations::{
 };
 
 use frequency::PersistedStructuralFrequencyArtifact;
-pub(in crate::analysis) use frequency_sample::native_values_match;
 use frequency_sample::PersistedAcousticFrequencyArtifact;
 
 pub(super) const ARTIFACT_SCHEMA_VERSION: &str = "analysis_run_artifact/2026-09-002";

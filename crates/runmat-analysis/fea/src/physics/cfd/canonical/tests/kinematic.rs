@@ -52,6 +52,9 @@ fn is_top_wall(f: &fixture::Fixture, target: &RegionTarget) -> bool {
 //   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel; coverage: partial;
 //   boundary: An inlet_velocity and wall_motion constraint pair reproduces constraint-driven
 //   Couette flow in the kernel.
+// witness: FEA-FLUID-INPUTS-001/signals @ incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel;
+//   coverage: partial; boundary: inlet_velocity (vector signal) and wall_motion (scalar speed with
+//   unit direction) bind the same face law as velocity constraints and reproduce Couette flow.
 #[test]
 fn inlet_velocity_and_wall_motion_reproduce_the_constraint_driven_couette_flow() {
     let reference = case(2, ReferenceCase::Couette, false);

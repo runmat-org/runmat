@@ -105,7 +105,7 @@ fn validate_material(material: &MaterialModel) -> Result<(), AnalysisValidationE
     }
     if material.fluid.is_some() {
         material
-            .require_incompressible_newtonian()
+            .require_incompressible_fluid()
             .map_err(|error| invalid_material(material, error.to_string()))?;
     }
     if let Some(crate::MaterialElasticityModel::IsotropicLinear(mechanical)) = &material.elasticity

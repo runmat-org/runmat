@@ -267,7 +267,8 @@ fn worst_gate(left: QualityGate, right: QualityGate) -> QualityGate {
 }
 
 /// Compare original accepted arrays in canonical component order without recovery or allocation.
-pub(in crate::analysis) fn native_values_match(
+#[cfg(test)]
+fn native_values_match(
     field: &runmat_analysis_core::AnalysisField,
     expected: impl Iterator<Item = f64>,
 ) -> bool {

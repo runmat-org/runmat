@@ -78,11 +78,6 @@ pub(super) fn validate_entry_scoped_acoustic_states(
                 .payload
                 .acoustic()
                 .ok_or_else(|| invalid("acoustic entry has a different state payload"))?;
-            let [pressure, velocity] = payload.fields.fields() else {
-                return Err(invalid(
-                    "acoustic frequency state omits its native field inventory",
-                ));
-            };
             if state.producer != request.producer
                 || state.source_result != request.source_result
                 || state.topology_digest != request.topology_digest
@@ -96,19 +91,7 @@ pub(super) fn validate_entry_scoped_acoustic_states(
                     != numerical
                         .native_field_request_from_result()
                         .map_err(|e| invalid(&e.to_string()))?
-                || !storage::native_values_match(
-                    pressure.storage(),
-                    numerical
-                        .pressure_pa()
-                        .iter()
-                        .flat_map(|pressure| [pressure.real, pressure.imaginary]),
-                )
-                || !storage::native_values_match(
-                    velocity.storage(),
-                    numerical.velocity_m_per_s().iter().flat_map(|velocity| {
-                        (0..3).flat_map(move |axis| [velocity.real[axis], velocity.imaginary[axis]])
-                    }),
-                )
+                || !numerical.native_fields_match(payload.fields.fields())
             {
                 return Err(invalid(
                     "acoustic frequency state differs from its exact entry source",

@@ -36,6 +36,9 @@ fn convective_left(input: &mut crate::execution::ThermalWorkload, ambient_k: f64
     });
 }
 
+// witness: FEA-THERMAL-DOMAIN-001/constraints @ thermal_steady/tet4|tet10/numerical_kernel; coverage: partial;
+//   boundary: A translation-periodic affine temperature jump reproduces the exact linear profile
+//   and energy closure on Tet4 and Tet10 slabs; steady only, no tie on separate meshes.
 #[test]
 fn temperature_jump_carries_a_linear_profile_through_a_periodic_cell() {
     // The right face sits 20 K above the left one, which exchanges heat with a 300 K film.
@@ -67,6 +70,8 @@ fn temperature_jump_carries_a_linear_profile_through_a_periodic_cell() {
     }
 }
 
+// witness: FEA-THERMAL-DOMAIN-001/constraints @ thermal_steady/tet4/numerical_kernel; coverage: partial;
+//   boundary: A periodic pair anchored only by a convective film settles at the film ambient.
 #[test]
 fn periodic_cell_without_sources_settles_at_the_film_ambient() {
     // No source acts and the right face follows the left one, so the left film holds the
@@ -81,18 +86,58 @@ fn periodic_cell_without_sources_settles_at_the_film_ambient() {
     }
 }
 
+// witness: FEA-THERMAL-DOMAIN-001/constraints @ thermal_steady/tet4|tet10/numerical_kernel; coverage: partial;
+//   boundary: Radiation Newton with a periodic jump matches the independent scalar balance of film
+//   and gray-surface radiation and the exact linear profile on Tet4 and Tet10; steady only.
 #[test]
-fn radiation_with_a_periodic_relation_is_named_rather_than_solved_unreduced() {
-    let mesh = mesh(false);
-    let mut input = workload();
-    input.model.constraints.push(AnalysisConstraint::Thermal(ThermalConstraint {
-        constraint_id: "hot-left".into(),
-        kind: ThermalConstraintKind::Prescribed {
+fn radiating_periodic_cell_balances_film_and_radiation_through_the_jump() {
+    // The right face radiates and sits 20 K above the left one, which exchanges heat with a
+    // 300 K film. No source acts, so the film gain equals the radiated loss:
+    // h (T_L - 300) + eps sigma ((T_L + 20)^4 - 300^4) = 0, with T = T_L + 20 x exactly.
+    use crate::physics::thermal::qualification::{AMBIENT, EMISSIVITY, SIGMA};
+    let h = 25.0;
+    let balance = |t: f64| h * (t - 300.0) + EMISSIVITY * SIGMA * ((t + 20.0).powi(4) - AMBIENT.powi(4));
+    let (mut low, mut high) = (200.0_f64, 300.0_f64);
+    assert!(balance(low) < 0.0 && balance(high) > 0.0);
+    for _ in 0..200 {
+        let middle = 0.5 * (low + high);
+        if balance(middle) > 0.0 {
+            high = middle;
+        } else {
+            low = middle;
+        }
+    }
+    let left = 0.5 * (low + high);
+    for quadratic in [false, true] {
+        let mesh = mesh(quadratic);
+        let mut input = workload();
+        input.model.boundaries.push(AnalysisBoundary {
+            boundary_id: "left-film".into(),
             target: RegionTarget::boundary("slab_left"),
-            value: PrescribedValue::Constant(Temperature::new(400.0)),
-        },
-    }));
-    input.model.constraints.push(AnalysisConstraint::Thermal(periodic(Some(5.0))));
-    let error = input.execute(&mesh).unwrap_err().to_string();
-    assert!(error.contains("reduced Newton residual"), "{error}");
+            operator: BoundaryOperator::ThermalConvection {
+                ambient_temperature: PrescribedValue::Constant(Temperature::new(300.0)),
+                coefficient: HeatTransferCoefficient::new(h),
+            },
+        });
+        input.model.constraints.push(AnalysisConstraint::Thermal(periodic(Some(20.0))));
+        let result = input.execute(&mesh).unwrap();
+        for (node, &temperature) in mesh
+            .topology
+            .nodes
+            .iter()
+            .zip(result.temperature_snapshots[0].as_host_f64().unwrap())
+        {
+            let expected = left + 20.0 * node.coordinates_m[0];
+            assert!(
+                (temperature - expected).abs() < 1e-7 * 300.0,
+                "quadratic={quadratic} x={} actual={temperature} expected={expected}",
+                node.coordinates_m[0]
+            );
+        }
+        assert_eq!(result.nonlinear_evidence.len(), 1);
+        for balance in &result.energy_balances {
+            assert!(balance.relative_residual <= input.residual_target);
+        }
+        result.validate_complete().unwrap();
+    }
 }

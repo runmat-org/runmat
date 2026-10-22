@@ -57,7 +57,12 @@ impl FeaThermalRunResult {
     pub fn source_result_identity(&self) -> AnalysisExecutionResult<SolverResultIdentity> {
         self.validate_complete()?;
         let fields = fields::retained_field_identities(self)?;
-        self.metadata().identity(&fields)
+        self.metadata()
+            .identity(super::thermal_result::identity::FieldIdentities {
+                samples: &fields,
+                interface_node_ids: &self.interface_node_ids,
+                identities: super::thermal_result::identity::retained_identities,
+            })
     }
     /// Checks structural consistency and accepted solver evidence, not independent accuracy.
     pub fn validate_complete(&self) -> AnalysisExecutionResult<()> {

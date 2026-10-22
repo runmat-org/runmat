@@ -10,6 +10,7 @@ mod linear_correction;
 mod mass_flow;
 mod moving;
 mod pressure_reference;
+mod rheology;
 mod reconstruction;
 mod symmetry;
 use super::qualification::reference;
@@ -495,6 +496,9 @@ fn pressure_l2(f: &fixture::Fixture, r: &CanonicalFluidResult) -> f64 {
 
 mod time_block;
 
+// witness: FEA-FLUID-OUTPUTS-001/wall_shear_stress_fields @ incompressible_laminar_steady/tet4/numerical_kernel;
+//   coverage: partial; boundary: Couette vorticity and wall shear stress equal the linear profile's;
+//   time-averaged WSS and the oscillatory shear index are not covered.
 #[test]
 fn couette_vorticity_and_wall_shear_match_the_linear_profile() {
     // u = (y, 0, 0) on the unit slab with μ = fixture viscosity: ω = (0, 0, −1),

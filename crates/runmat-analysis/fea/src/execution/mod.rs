@@ -285,6 +285,7 @@ pub use state::{
     fluid_state_publication_profiles, fluid_state_publication_requests,
     fluid_state_publication_workspace_bytes, nonlinear_solid_state_publication_requests,
     semantic_state_retained_storage_bytes, AcousticPhasorConvention, BoundThermalStateTransfer,
+    SolvedTemperatureField,
     CanonicalAcousticStatePayload, CanonicalElectricalStaticStatePayload,
     CanonicalFluidStatePayload, CanonicalMaxwellStatePayload, CanonicalNonlinearSolidStatePayload,
     CanonicalSemanticState, CanonicalSemanticStateInput, CanonicalSemanticStatePayload,

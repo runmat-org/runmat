@@ -41,7 +41,7 @@ pub(super) fn evaluate(
         let pf = face_pressure_offset(p, i, pressure_fluctuation, &gp)?;
         if let FaceBoundary::Symmetry { .. } = p.boundaries[i] {
             advective.push([0.0; 3]);
-            viscous.push(symmetry_traction(p, i, u[f.owner])?.1);
+            viscous.push(symmetry_traction(p, i, u[f.owner], &gu[f.owner])?.1);
         } else {
             let (diffusion, remainder) = viscous_parts(p, i, &gu)?;
             let delta = if let Some(n) = f.neighbor {

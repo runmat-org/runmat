@@ -114,7 +114,7 @@ pub fn derive_fluid_cells(
                 element_id: element.element_id,
             });
         }
-        let current = owner.material.require_incompressible_newtonian()?;
+        let current = owner.material.require_incompressible_fluid()?;
         if coefficients.is_some_and(|prior| prior != current) {
             return Err(FluidMaterialCompilationError::HeterogeneousCoefficients {
                 element_id: element.element_id,
@@ -144,6 +144,7 @@ pub fn derive_fluid_cells(
         // Explicit law admission is laminar; this legacy domain flag is NOT an
         // inferred turbulence closure, velocity/length scale, or material default.
         turbulence_intensity: TurbulenceIntensity::new(0.0),
+        rheology: coefficients.rheology,
     };
     if model
         .cfd

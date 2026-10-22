@@ -2439,6 +2439,12 @@ pub struct ThermalResultsData {
     pub heat_flux_snapshots: Vec<AnalysisField>,
     #[serde(default)]
     pub energy_storage_rate_snapshots: Vec<AnalysisField>,
+    /// Mesh nodes of finite-conductance thermal interfaces; `temperature_snapshots` holds the
+    /// first side's temperature there and `interface_temperature_snapshots` the second side's.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub interface_node_ids: Vec<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub interface_temperature_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
     pub reference_temperature_k: f64,
     pub initial_state: runmat_analysis_fea::ThermalInitialStateEvidence,

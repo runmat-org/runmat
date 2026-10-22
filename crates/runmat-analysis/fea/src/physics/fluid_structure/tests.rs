@@ -184,6 +184,7 @@ pub(super) fn case(youngs_modulus: f64) -> Case {
             density: MassDensity::new(1.0),
             dynamic_viscosity: DynamicViscosity::new(VISCOSITY),
             turbulence_intensity: TurbulenceIntensity::new(0.0),
+            rheology: None,
         },
     }
 }

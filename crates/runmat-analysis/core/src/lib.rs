@@ -10,6 +10,7 @@ pub mod problem {
     pub mod authored_parameterized_signals;
     pub mod authored_properties;
     pub mod acoustic_impedance;
+    pub mod rheology;
     pub mod boundary;
     pub mod connector;
     pub mod constraint;
@@ -119,6 +120,7 @@ pub use problem::authored_properties::{
     GeneralBeamSection, HomogeneousShellSection, RectangularBeamSection, TubularBeamSection,
 };
 pub use problem::acoustic_impedance::AcousticImpedanceLaw;
+pub use problem::rheology::GeneralizedNewtonianLaw;
 pub use problem::boundary::{AnalysisBoundary, BoundaryOperator};
 pub use problem::connector::{AnalysisConnector, ConnectorKind};
 pub use problem::constraint::{

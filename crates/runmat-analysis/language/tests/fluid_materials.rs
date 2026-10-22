@@ -143,3 +143,46 @@ study steady { geometry = geometry.part; mesh = mesh.part; model = model.flow; a
     assert_eq!(domain.density.kilograms_per_cubic_meter, 1000.0);
     assert_eq!(domain.dynamic_viscosity.pascal_seconds, 0.001);
 }
+
+#[test]
+fn generalized_newtonian_laws_lower_with_si_parameters_and_reject_invalid_ones() {
+    use runmat_analysis_core::GeneralizedNewtonianLaw as Law;
+    let law = |body: &str| {
+        let program = check_material(&format!("mass_density = 1060 kg/m^3; fluid {{ {body} }}"));
+        assert!(program.is_valid(), "{body}: {:#?}", program.diagnostics);
+        match program.materials.values().next().unwrap().fluid {
+            Some(MaterialFluidModel::GeneralizedNewtonian { law }) => law,
+            other => panic!("{body}: {other:?}"),
+        }
+    };
+    assert_eq!(
+        law("law = carreau; zero_shear_viscosity = 0.056 Pa*s; infinite_shear_viscosity = 0.00345 Pa*s; relaxation_time = 3.313 s; power_index = 0.3568"),
+        Law::CarreauYasuda {
+            zero_shear_viscosity_pa_s: 0.056,
+            infinite_shear_viscosity_pa_s: 0.00345,
+            relaxation_time_s: 3.313,
+            power_index: 0.3568,
+            transition_exponent: 2.0,
+        }
+    );
+    assert_eq!(
+        law("law = power_law; consistency = 12; power_index = 0.45"),
+        Law::PowerLaw {
+            consistency_pa_s_n: 12.0,
+            power_index: 0.45,
+            minimum_shear_rate_per_s: 1e-3,
+        }
+    );
+    assert!(matches!(
+        law("law = bingham; yield_stress = 10 Pa; plastic_viscosity = 0.1 Pa*s"),
+        Law::HerschelBulkley { power_index, .. } if power_index == 1.0
+    ));
+    for body in [
+        "law = carreau; zero_shear_viscosity = 0.001 Pa*s; infinite_shear_viscosity = 0.01 Pa*s; relaxation_time = 1 s; power_index = 0.5",
+        "law = power_law; consistency = 12; power_index = -1",
+        "law = pseudoplastic; consistency = 12; power_index = 0.5",
+    ] {
+        let program = check_material(&format!("mass_density = 1000 kg/m^3; fluid {{ {body} }}"));
+        assert!(!program.is_valid(), "{body}");
+    }
+}
