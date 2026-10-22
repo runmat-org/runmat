@@ -52,7 +52,10 @@ impl ElectricalStaticWorkload {
             mesh,
             self.step_id.as_str(),
             self.relative_residual_target,
-            Some(&demand.solver_admission),
+            Some(crate::physics::electrical::PlannedElectricalSolve {
+                admission: &demand.solver_admission,
+                direct: demand.direct_solve,
+            }),
             conductivity.as_deref(),
             self.sample_point(),
         )

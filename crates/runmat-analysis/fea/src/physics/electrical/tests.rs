@@ -691,3 +691,43 @@ fn periodic_faces_share_their_potential() {
     let total: f64 = expected.terminals.iter().map(|t| t.outward_flux).sum();
     assert!((left.outward_flux - total).abs() <= 1e-8 * total.abs());
 }
+
+// witness: FEA-EM-QUALIFICATION-001/references @ electrical_conduction/tet10/numerical_kernel; coverage: partial;
+//   boundary: The validation table's steady-current check: copper (59.6 MS/m) with 1 mV across a
+//   1 m bar gives the uniform current density sigma V / L, the Joule power V^2 / R from the loss
+//   density and the terminal current, on a Tet10 slab; one geometry, no curved conductors.
+#[test]
+fn copper_bar_carries_sigma_v_over_l_and_dissipates_v_squared_over_r() {
+    const SIGMA: f64 = 59.6e6;
+    const VOLTS: f64 = 1e-3;
+    let mesh = mesh(ElementOrder::Tet10, 2);
+    let mut model = model(StaticElectricalEquation::SteadyConduction);
+    model.materials[0].electrical.as_mut().unwrap().conductivity_s_per_m = SIGMA;
+    prescribe(&mut model, "left".into(), RegionTarget::boundary("slab_left"), 0.0);
+    prescribe(&mut model, "right".into(), RegionTarget::boundary("slab_right"), VOLTS);
+    let response = solve(&model, &mesh);
+    // Unit cube: L = 1 m, A = 1 m^2, R = L / (sigma A).
+    let ElectricalConstitutiveResponse::SteadyConduction {
+        current_density_a_per_m2,
+        total_joule_power_w,
+        ..
+    } = &response.constitutive
+    else {
+        panic!("steady conduction response expected");
+    };
+    let expected_j = SIGMA * VOLTS;
+    for density in current_density_a_per_m2 {
+        assert!((density[0].abs() - expected_j).abs() <= 1e-9 * expected_j, "{density:?}");
+        assert!(density[1].abs() + density[2].abs() <= 1e-9 * expected_j);
+    }
+    let expected_power = VOLTS * VOLTS * SIGMA;
+    assert!((total_joule_power_w - expected_power).abs() <= 1e-9 * expected_power);
+    let current = response
+        .terminals
+        .iter()
+        .find(|terminal| terminal.constraint_id == "right")
+        .unwrap()
+        .outward_flux
+        .abs();
+    assert!((current * VOLTS - expected_power).abs() <= 1e-9 * expected_power);
+}

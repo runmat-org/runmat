@@ -182,6 +182,7 @@ pub(crate) fn solve(
     known: &[Option<f64>],
     relations: &[ScalarNodeRelation],
     relative_tolerance: f64,
+    strategy: crate::solve::preconditioner::SpdPreconditionerKind,
 ) -> Result<ScalarSolve, String> {
     let count = known.len();
     let by_secondary: BTreeMap<_, _> = relations.iter().map(|r| (r.secondary, r)).collect();
@@ -266,7 +267,7 @@ pub(crate) fn solve(
     .map_err(|error| format!("reduced operator: {error:?}"))?;
     use crate::solve::shared_sparse;
     let strategy = shared_sparse::resolve_spd_strategy(
-        crate::solve::preconditioner::SpdPreconditionerKind::Auto,
+        strategy,
         unknowns,
         nnz,
         1,

@@ -91,6 +91,10 @@ from their published authored outputs.
 | | terminal voltage | 57.6255 mV | $IR(T)$ = 57.6239 mV | 2.7e-5 |
 | | $V\cdot I$ against Joule power | 1728.77 W vs 1728.69 W | equal | 4.7e-5 |
 
+The steady-current row and the two-way Joule-heating bar are also run as tests on every change
+(`copper_bar_carries_sigma_v_over_l_and_dissipates_v_squared_over_r` and
+`two_way_joule_heating_matches_the_closed_form_bar`).
+
 The electrothermal study publishes two cases, `operating_point` (temperature) and
 `operating_point/conduction` (potential, current density and loss at the converged temperatures).
 

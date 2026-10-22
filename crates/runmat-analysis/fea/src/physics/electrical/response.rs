@@ -64,7 +64,7 @@ pub(super) fn solve(
     mut assembly: ElectricalAssembly,
     equation: StaticElectricalEquation,
     residual_target: f64,
-    admission: Option<&crate::planning::resource::SolverAdmissionResourcePolicy>,
+    planned: Option<super::PlannedElectricalSolve<'_>>,
 ) -> Result<CanonicalElectricalResponse, ElectricalStaticError> {
     let count = assembly.projection.nodes.len();
     let constrained = assembly
@@ -158,6 +158,10 @@ pub(super) fn solve(
             &known,
             &relations,
             residual_target,
+            planned.map_or(
+                crate::solve::preconditioner::SpdPreconditionerKind::Auto,
+                |planned| planned.strategy(),
+            ),
         )
         .map_err(ElectricalStaticError::Operator)?;
         let (solution, relative_residual) = (reduced.solution, reduced.relative_residual);
@@ -192,13 +196,16 @@ pub(super) fn solve(
         );
         let solution = crate::solve::linear::solve_operator_system_scoped(
             &system,
-            crate::solve::preconditioner::SpdPreconditionerKind::Auto,
+            planned.map_or(
+                crate::solve::preconditioner::SpdPreconditionerKind::Auto,
+                |planned| planned.strategy(),
+            ),
             crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
             &backend,
             None,
             crate::solve::linear::ScopedLinearSolveSettings {
                 plan: crate::planning::resource::LocalExecutionPlan::serial(),
-                admission,
+                admission: planned.map(|planned| planned.admission),
                 relative_tolerance: residual_target,
                 preparation: Some(&mut preparation),
             },
