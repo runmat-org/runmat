@@ -59,7 +59,7 @@ fn rigid_cube_cavity_modes_match_rectangular_room_frequencies() {
         assert!((value - 171.5).abs() / 171.5 < 0.02, "{values:?}");
     }
     assert_eq!(run.field("acoustic.pressure").len(), 5);
-    assert!(!run.0.production_publishable || run.0.numerically_acceptable);
+    assert!(run.0.numerically_acceptable);
 }
 
 #[test]
