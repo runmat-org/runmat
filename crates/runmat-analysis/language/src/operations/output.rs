@@ -538,7 +538,7 @@ mod tests {
     #[test]
     fn output_operations_are_one_shared_public_identity_with_fea_overloads() {
         let extension = output_operation_extension();
-        assert_eq!(extension.operations.len(), 23);
+        assert_eq!(extension.operations.len(), 24);
         for expected in ["recover", "min", "max"] {
             assert!(extension
                 .operations

@@ -234,10 +234,10 @@ load liner {
 }
 ```
 
-Specific acoustic impedance relates pressure to normal velocity. The current constant field is real;
-frequency-dependent complex liners need a compatible signal/material formulation and cannot be
-encoded by dropping their phase. Check whether the value is specific impedance rather than total
-mechanical impedance.
+Specific acoustic impedance relates pressure to normal velocity, $p=Zv_n$, with $v_n$ along the
+outward normal. A quantity is a constant real (resistive) impedance; a complex or
+frequency-dependent impedance comes from a `table` (below). Check that the value is specific
+impedance rather than total mechanical impedance.
 
 ## How do I model a resistive acoustic liner?
 
@@ -259,11 +259,46 @@ surface-specific acoustic impedance are not interchangeable.
 
 ## How do I model a frequency-dependent complex impedance?
 
-The current constant impedance declaration does not represent a complex table $Z(\omega)$. Do not
-enter only $|Z|$ or only its resistance. A complete contract must preserve resistance, reactance,
-frequency samples, interpolation, extrapolation, and the harmonic sign convention. Until that typed
-form is admitted, use a formulation that explicitly supports the measured impedance data rather
-than approximating it with an unrelated constant.
+Declare a top-level `table` of impedance over frequency and reference it from the boundary. A
+measured liner is a list of resistance and reactance samples; harmonic solves interpolate them
+linearly in frequency and hold the end values beyond the first and last sample:
+
+```fea
+table liner_data : impedance over frequency {
+    samples = [
+        { at = 125 Hz, resistance = 420 Pa*s/m, reactance = -900 Pa*s/m },
+        { at = 250 Hz, resistance = 430 Pa*s/m, reactance = -380 Pa*s/m },
+        { at = 500 Hz, resistance = 440 Pa*s/m, reactance = -120 Pa*s/m },
+    ]
+}
+
+model lined_duct {
+    load liner {
+        acoustic.impedance {
+            target = geometry.duct.region.liner_faces
+            impedance = table.liner_data
+        }
+    }
+}
+```
+
+A rigidly backed porous layer (mineral wool, foam, fibrous ceiling tiles) is described by its flow
+resistivity and thickness with the Delany–Bazley model, which gives the layer's characteristic
+impedance and wavenumber in the adjacent air; the surface impedance is
+$Z=-iZ_c\cot(k_cd)$:
+
+```fea
+table ceiling_tile : impedance over frequency {
+    model = delany_bazley
+    flow_resistivity = 20000 Pa*s/m^2
+    thickness = 50 mm
+}
+```
+
+Reactance follows the $e^{+i\omega t}$ convention of the harmonic solver: a stiffness-like (spring)
+surface has negative reactance and a mass-like surface positive reactance. Resistance must be
+nonnegative. Impedance tables apply to harmonic studies; modal and transient studies take rigid
+walls, pressure release and constant impedance.
 
 ## How do I model a perfectly matched layer (PML)?
 
