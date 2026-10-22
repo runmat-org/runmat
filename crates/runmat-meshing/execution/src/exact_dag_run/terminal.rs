@@ -58,6 +58,7 @@ pub(super) async fn execute_terminal_dag<E: ExactMeshingDagExecutor>(
             sizing: run.evidence.sizing.clone(),
             cache_admission: run.evidence.cache_admission,
             wall_time_ms,
+            ceilings: run.ceilings,
         },
     )?;
     let evidence_input = prepare_evidence_input(

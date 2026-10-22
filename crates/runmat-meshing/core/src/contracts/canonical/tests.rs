@@ -67,16 +67,10 @@ fn request() -> MeshingRequest {
                 maximum_metric_edge_length: 1.5,
             },
         },
-        resources: MeshingResourceBudget {
+        limits: MeshingSizeLimits {
             maximum_nodes: 2_000_000,
             maximum_elements: 10_000_000,
-            maximum_memory_bytes: 8 * 1024 * 1024 * 1024,
-            maximum_scratch_bytes: 16 * 1024 * 1024 * 1024,
-            maximum_wall_time_ms: 3_600_000,
-            maximum_artifact_bytes: 32 * 1024 * 1024 * 1024,
-            maximum_search_work: 1_000_000_000,
             maximum_recursion_depth: 256,
-            maximum_iterations: 100_000_000,
         },
         cancellation: CancellationPolicy {
             maximum_checkpoint_latency_ms: 100,
@@ -105,10 +99,10 @@ fn canonical_request_rejects_non_finite_and_unbounded_inputs() {
     assert_eq!(invalid.validate().unwrap_err().field, "source_tolerance_m");
 
     let mut invalid = request();
-    invalid.resources.maximum_search_work = 0;
+    invalid.limits.maximum_nodes = 0;
     assert_eq!(
         invalid.validate().unwrap_err().field,
-        "meshing resource budget"
+        "meshing size limits"
     );
 
     let mut invalid = request();

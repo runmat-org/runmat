@@ -25,7 +25,7 @@ use runmat_meshing_core::{
     ElementOrder, GeometryRevisionRef, GeometryTolerancePolicy, MeshingCapabilityRequirement,
     MeshingChunkMediaType, MeshingChunkPolicy, MeshingChunkStream, MeshingFailure,
     MeshingInputKind, MeshingInputRef, MeshingPartitionDescriptor, MeshingPartitionKind,
-    MeshingProgress, MeshingQualityTargets, MeshingRequest, MeshingResourceBudget,
+    MeshingProgress, MeshingQualityTargets, MeshingRequest, MeshingSizeLimits,
     MeshingStageIdentity, MeshingStageKind, MeshingWorkloadRequest, MetricCombinationRule,
     MetricFieldRequest, MetricTensor3, NeverCancelled, StableDigest, SurfaceQualityTargets,
     VolumeQualityTargets, MESHING_IDENTITY_SCHEMA_VERSION, MESHING_REQUEST_SCHEMA_VERSION,
@@ -690,6 +690,10 @@ async fn remote_conformance() {
             execute_exact_meshing_dag_async(
                 ExactMeshingDagRun {
                     geometry: &full_dag.0,
+                    ceilings: runmat_meshing_core::MeshingExecutionCeilings {
+                        maximum_wall_time_ms: 120_000,
+                        ..dag_ceilings()
+                    },
                     request: full_dag.1.clone(),
                     artifact_access: full_dag.2.clone(),
                     capability_cohort: Some("native-cohort-v1".into()),
@@ -719,7 +723,7 @@ async fn remote_conformance() {
             .validate(&full_result.artifact)
             .unwrap();
         let elements = full_result.artifact.topology.volume_elements.len() as u64;
-        assert!(elements > 4 && elements <= full_dag.1.resources.maximum_elements);
+        assert!(elements > 4 && elements <= full_dag.1.limits.maximum_elements);
         assert!(!full_executor.drain_progress().is_empty());
 
         let mut exact_serial_store = TestStore::default();
@@ -848,12 +852,8 @@ fn full_dag_fixture(
     request.quality.volume.maximum_metric_edge_length = 2.0;
     request.quality.volume.maximum_radius_edge_ratio = 10.0;
     request.quality.volume.minimum_scaled_jacobian = 0.01;
-    request.resources.maximum_nodes = 10_000;
-    request.resources.maximum_elements = 10_000;
-    request.resources.maximum_search_work = 1_000_000;
-    request.resources.maximum_iterations = 1_000_000;
-    request.resources.maximum_memory_bytes = 64_000_000;
-    request.resources.maximum_wall_time_ms = 120_000;
+    request.limits.maximum_nodes = 10_000;
+    request.limits.maximum_elements = 10_000;
     (geometry, request, access)
 }
 
@@ -1136,7 +1136,7 @@ fn fixture_for(
             },
         ],
     };
-    let host = MeshingHostWorkload::new(workload, identity, request, access, None).unwrap();
+    let host = MeshingHostWorkload::new(workload, identity, request, fixture_ceilings(), access, None).unwrap();
     let program = host
         .prepare_program_request(revision, &[])
         .unwrap()
@@ -1192,16 +1192,10 @@ fn request() -> MeshingRequest {
                 maximum_metric_edge_length: 1.5,
             },
         },
-        resources: MeshingResourceBudget {
+        limits: MeshingSizeLimits {
             maximum_nodes: 100,
             maximum_elements: 100,
-            maximum_memory_bytes: 4_000_000,
-            maximum_scratch_bytes: 4_000_000,
-            maximum_wall_time_ms: 10_000,
-            maximum_artifact_bytes: 1_000_000,
-            maximum_search_work: 100,
             maximum_recursion_depth: 32,
-            maximum_iterations: 100,
         },
         cancellation: CancellationPolicy {
             maximum_checkpoint_latency_ms: 1000,
@@ -1238,4 +1232,26 @@ fn limits() -> NativeMeshingHostLimits {
 
 fn stable(seed: u8) -> StableDigest {
     StableDigest::from_bytes([seed; 32])
+}
+
+/// Execution ceilings of the small conformance fixture.
+fn fixture_ceilings() -> runmat_meshing_core::MeshingExecutionCeilings {
+    runmat_meshing_core::MeshingExecutionCeilings {
+        maximum_memory_bytes: 4_000_000,
+        maximum_scratch_bytes: 4_000_000,
+        maximum_wall_time_ms: 10_000,
+        maximum_artifact_bytes: 1_000_000,
+        maximum_search_work: 100,
+        maximum_iterations: 100,
+    }
+}
+
+/// Execution ceilings for the complete exact-meshing DAG fixtures.
+fn dag_ceilings() -> runmat_meshing_core::MeshingExecutionCeilings {
+    runmat_meshing_core::MeshingExecutionCeilings {
+        maximum_memory_bytes: 64_000_000,
+        maximum_search_work: 1_000_000,
+        maximum_iterations: 1_000_000,
+        ..fixture_ceilings()
+    }
 }

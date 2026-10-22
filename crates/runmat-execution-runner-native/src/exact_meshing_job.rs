@@ -109,6 +109,11 @@ pub fn mesh_exact_geometry(
     let source_edge_ids = prepared_geometry.source_edge_ids().clone();
     let source_face_ids = prepared_geometry.source_face_ids().clone();
     let source_region_ids = prepared_geometry.source_region_ids().clone();
+    // The run's execution ceilings come from this host's capacity; the local workers must be
+    // able to admit tasks of that size.
+    let ceilings = crate::machine_capacity::meshing_execution_ceilings(&job.request.limits);
+    config.worker_memory_bytes = config.worker_memory_bytes.max(ceilings.maximum_memory_bytes);
+    config.worker_scratch_bytes = config.worker_scratch_bytes.max(ceilings.maximum_scratch_bytes);
     let (session, access, geometry) = {
         let span = tracing::info_span!("meshing.native_session");
         let _entered = span.enter();
@@ -143,6 +148,7 @@ pub fn mesh_exact_geometry(
         execute_exact_meshing_dag(
             ExactMeshingDagRun {
                 geometry: &geometry,
+                ceilings,
                 request: job.request,
                 artifact_access: access,
                 capability_cohort: job.capability_cohort,

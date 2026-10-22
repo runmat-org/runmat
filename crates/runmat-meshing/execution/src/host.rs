@@ -12,14 +12,15 @@ use runmat_geometry_core::{
     decode_geometry_document, encode_geometry_document, GeometryDocument, GeometryModel,
 };
 use runmat_meshing_core::{
-    CanonicalMeshingContract, MeshingCapabilityRequirement, MeshingInputKind, MeshingRequest,
+    CanonicalMeshingContract, MeshingCapabilityRequirement, MeshingExecutionCeilings,
+    MeshingInputKind, MeshingRequest, MeshingResourceBudget,
     MeshingStageIdentity, MeshingWorkloadRequest,
 };
 
 use crate::task::validate_inputs;
 use crate::{ArtifactAccess, MeshingExecutionError, MeshingExecutionResult};
 
-pub const MESHING_HOST_WORKLOAD_SCHEMA_VERSION: u16 = 2;
+pub const MESHING_HOST_WORKLOAD_SCHEMA_VERSION: u16 = 3;
 pub const MESHING_HOST_ABI: &str = "host-v2";
 pub const MESHING_HOST_EXECUTION_MODE: &str = "meshing";
 pub const MESHING_HOST_TARGET_PROFILE: &str = "portable-meshing-host-v2";
@@ -38,6 +39,8 @@ pub struct MeshingHostWorkload {
     pub workload: MeshingWorkloadRequest,
     pub stage_identity: MeshingStageIdentity,
     pub resolved_request: MeshingRequest,
+    /// Execution ceilings for this run; outside the request identity.
+    pub ceilings: MeshingExecutionCeilings,
     pub artifact_access: ArtifactAccess,
     pub geometry_document: Option<GeometryDocument>,
 }
@@ -107,6 +110,7 @@ impl MeshingHostWorkload {
         workload: MeshingWorkloadRequest,
         stage_identity: MeshingStageIdentity,
         resolved_request: MeshingRequest,
+        ceilings: MeshingExecutionCeilings,
         artifact_access: ArtifactAccess,
         geometry_document: Option<GeometryDocument>,
     ) -> MeshingExecutionResult<Self> {
@@ -115,11 +119,18 @@ impl MeshingHostWorkload {
             workload,
             stage_identity,
             resolved_request,
+            ceilings,
             artifact_access,
             geometry_document,
         };
         host.validate()?;
         Ok(host)
+    }
+
+    /// The hard budget this host executes under: the request's size limits and the run's
+    /// execution ceilings.
+    pub fn resources(&self) -> MeshingResourceBudget {
+        MeshingResourceBudget::new(self.resolved_request.limits, self.ceilings)
     }
 
     pub fn validate(&self) -> MeshingExecutionResult<()> {
@@ -131,6 +142,9 @@ impl MeshingHostWorkload {
         self.workload.validate()?;
         self.stage_identity.validate()?;
         self.resolved_request.validate()?;
+        self.ceilings
+            .validate()
+            .map_err(|error| MeshingExecutionError::Invalid(error.to_string()))?;
         self.artifact_access.validate()?;
         self.validate_geometry_document()?;
         if self.workload.stage != self.stage_identity.stage
@@ -151,6 +165,7 @@ impl MeshingHostWorkload {
         let workload = self.workload.canonical_encode()?;
         let identity = self.stage_identity.canonical_encode()?;
         let request = self.resolved_request.canonical_encode()?;
+        let ceilings = encode_ceilings(&self.ceilings);
         let access = encode_access(&self.artifact_access)?;
         let geometry_document = self
             .geometry_document
@@ -161,16 +176,17 @@ impl MeshingHostWorkload {
         let mut bytes = Vec::with_capacity(
             HOST_PREFIX.len()
                 + 2
-                + 5 * 4
+                + 6 * 4
                 + workload.len()
                 + identity.len()
                 + request.len()
+                + ceilings.len()
                 + access.len()
                 + geometry_document.len(),
         );
         bytes.extend_from_slice(HOST_PREFIX);
         bytes.extend_from_slice(&self.schema_version.to_be_bytes());
-        for component in [&workload, &identity, &request, &access, &geometry_document] {
+        for component in [&workload, &identity, &request, &ceilings, &access, &geometry_document] {
             if component.len() > MAX_COMPONENT_BYTES {
                 return Err(MeshingExecutionError::Invalid(
                     "meshing host workload component exceeds its bound".into(),
@@ -198,6 +214,7 @@ impl MeshingHostWorkload {
         let workload = MeshingWorkloadRequest::canonical_decode(decoder.component()?)?;
         let stage_identity = MeshingStageIdentity::canonical_decode(decoder.component()?)?;
         let resolved_request = MeshingRequest::canonical_decode(decoder.component()?)?;
+        let ceilings = decode_ceilings(decoder.component()?)?;
         let artifact_access = decode_access(decoder.component()?)?;
         let document_bytes = decoder.component()?;
         let geometry_document = if document_bytes.is_empty() {
@@ -211,6 +228,7 @@ impl MeshingHostWorkload {
             workload,
             stage_identity,
             resolved_request,
+            ceilings,
             artifact_access,
             geometry_document,
         };
@@ -523,4 +541,37 @@ impl<'a> HostDecoder<'a> {
 
 fn truncated() -> MeshingExecutionError {
     MeshingExecutionError::Invalid("meshing host workload is truncated or malformed".into())
+}
+
+fn encode_ceilings(ceilings: &MeshingExecutionCeilings) -> Vec<u8> {
+    [
+        ceilings.maximum_memory_bytes,
+        ceilings.maximum_scratch_bytes,
+        ceilings.maximum_wall_time_ms,
+        ceilings.maximum_artifact_bytes,
+        ceilings.maximum_search_work,
+        ceilings.maximum_iterations,
+    ]
+    .into_iter()
+    .flat_map(u64::to_be_bytes)
+    .collect()
+}
+
+fn decode_ceilings(bytes: &[u8]) -> MeshingExecutionResult<MeshingExecutionCeilings> {
+    if bytes.len() != 48 {
+        return Err(MeshingExecutionError::Invalid(
+            "meshing host execution ceilings are malformed".into(),
+        ));
+    }
+    let value = |index: usize| {
+        u64::from_be_bytes(bytes[index * 8..index * 8 + 8].try_into().expect("eight bytes"))
+    };
+    Ok(MeshingExecutionCeilings {
+        maximum_memory_bytes: value(0),
+        maximum_scratch_bytes: value(1),
+        maximum_wall_time_ms: value(2),
+        maximum_artifact_bytes: value(3),
+        maximum_search_work: value(4),
+        maximum_iterations: value(5),
+    })
 }

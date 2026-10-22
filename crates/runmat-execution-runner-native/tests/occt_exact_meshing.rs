@@ -11,7 +11,7 @@ use runmat_geometry_io::{
 };
 use runmat_meshing_core::{
     AlgorithmVersionSet, CacheAdmissionDecision, CancellationPolicy, CurveQualityTargets,
-    ElementOrder, MeshingChunkPolicy, MeshingQualityTargets, MeshingRequest, MeshingResourceBudget,
+    ElementOrder, MeshingChunkPolicy, MeshingQualityTargets, MeshingRequest, MeshingSizeLimits,
     MetricCombinationRule, MetricFieldRequest, MetricTensor3, NeverCancelled,
     PlatformBuildIdentity, StableDigest, SurfaceQualityTargets, VolumeQualityTargets,
     MESHING_REQUEST_SCHEMA_VERSION,
@@ -226,6 +226,7 @@ fn execute_fixture_with_layout(
     let result = execute_exact_meshing_dag(
         ExactMeshingDagRun {
             geometry: &geometry,
+            ceilings: runmat_meshing_core::MeshingExecutionCeilings::PORTABLE_DEFAULT,
             request: request(document.tolerance),
             artifact_access: access,
             capability_cohort: Some("occt-native-corpus".into()),
@@ -293,16 +294,10 @@ fn request(tolerance: runmat_geometry_core::GeometryTolerancePolicy) -> MeshingR
                 maximum_metric_edge_length: 10.0,
             },
         },
-        resources: MeshingResourceBudget {
+        limits: MeshingSizeLimits {
             maximum_nodes: 10_000,
             maximum_elements: 10_000,
-            maximum_memory_bytes: 512 << 20,
-            maximum_scratch_bytes: 512 << 20,
-            maximum_wall_time_ms: 60_000,
-            maximum_artifact_bytes: 512 << 20,
-            maximum_search_work: 10_000_000,
             maximum_recursion_depth: 128,
-            maximum_iterations: 10_000_000,
         },
         cancellation: CancellationPolicy {
             maximum_checkpoint_latency_ms: 10_000,
