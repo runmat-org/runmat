@@ -1,5 +1,6 @@
 use super::*;
 mod acoustic;
+mod electrical;
 mod fluid;
 mod magnetic;
 mod maxwell;
@@ -44,6 +45,13 @@ pub(super) fn execute_field_recovery(
         .any(|input| input.manifest.kind == AnalysisNumericalObjectKind::MagnetostaticWorkload)
     {
         return magnetic::execute(invocation);
+    }
+    if invocation
+        .inputs
+        .iter()
+        .any(|input| input.manifest.kind == AnalysisNumericalObjectKind::ElectricalStaticWorkload)
+    {
+        return electrical::execute(invocation);
     }
     if statistical::is_statistical(&invocation) {
         return statistical::execute(invocation);

@@ -85,7 +85,7 @@ impl<S: CacheImport + Send + Sync> ElectricalStudySource for RetainedElectricalS
             self.completed.result_closures().to_vec(),
         )
         .map_err(|error| error.to_string())?;
-        let expected = completion(&replay)?;
+        let expected = completion(&replay, self)?;
         if &expected != candidate {
             return Err("runtime electrical completion differs from authenticated replay".into());
         }
@@ -96,8 +96,12 @@ impl<S: CacheImport + Send + Sync> ElectricalStudySource for RetainedElectricalS
     }
 }
 
-fn completion(completed: &CompletedElectricalStudy) -> Result<ElectricalStudyCompletion, String> {
+fn completion(
+    completed: &CompletedElectricalStudy,
+    source: &impl CacheImport,
+) -> Result<ElectricalStudyCompletion, String> {
     let root = prepare_electrical_study_root(completed).map_err(|error| error.to_string())?;
+    let preparation = completed.preparation().map_err(|error| error.to_string())?;
     Ok(ElectricalStudyCompletion {
         host_workload_digest: completed
             .result_closures()
@@ -110,6 +114,34 @@ fn completion(completed: &CompletedElectricalStudy) -> Result<ElectricalStudyCom
         workload: completed.workload.clone(),
         result: completed.result.result.clone(),
         numerical_receipt: completed.result.numerical_receipt.clone(),
+        fields: completed.fields.manifest.clone(),
+        observation_catalog: completed.observation_catalog.clone(),
+        observation_results: match &completed.observations {
+            Some(observations) => completed
+                .workload
+                .model
+                .sequence
+                .steps
+                .iter()
+                .find(|step| step.step_id == completed.workload.step_id)
+                .ok_or("electrical completion omits its selected authored step")?
+                .observations
+                .iter()
+                .map(|request| {
+                    let spec = request.spec().ok_or(
+                        "electrical publication has a non-field observation without a result spec",
+                    )?;
+                    runmat_analysis_execution::import_observation_result(
+                        source,
+                        observations,
+                        &spec.observation_id,
+                        preparation.output_policy.inventory_limits(),
+                    )
+                    .map_err(|error| error.to_string())
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            None => Vec::new(),
+        },
         accuracy: completed.accuracy.artifact.clone(),
         states: completed
             .states
@@ -119,10 +151,7 @@ fn completion(completed: &CompletedElectricalStudy) -> Result<ElectricalStudyCom
         baseline_usage: completed.baseline_usage.evidence.clone(),
         terminal_usage: completed.terminal_usage.evidence.clone(),
         publication: completed.publication.result.clone(),
-        frozen_project_digest: completed
-            .preparation()
-            .map_err(|e| e.to_string())?
-            .frozen_project_digest,
+        frozen_project_digest: preparation.frozen_project_digest,
         root: root.root,
         catalog: root.catalog,
     })
@@ -146,7 +175,7 @@ pub(crate) fn convert(
         completed,
         store,
     };
-    let dto = completion(&source.completed)?;
+    let dto = completion(&source.completed, &source)?;
     source.authenticate(&dto)?;
     Ok((dto, ElectricalStudyObjectSource::new(source)))
 }
@@ -166,7 +195,7 @@ pub fn electrical_study_completion_from_source(
         store: source,
         objects: BTreeMap::new(),
     };
-    let dto = completion(&source.completed)?;
+    let dto = completion(&source.completed, &source)?;
     source.authenticate(&dto)?;
     Ok((dto, ElectricalStudyObjectSource::new(source)))
 }

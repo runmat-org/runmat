@@ -152,7 +152,7 @@ fn both_orders_native_solve_recovery_complex_observation_state_and_accuracy_cold
         drop(store);
         let mut store = FilesystemObjectStore::open(&path, limits.max_object_bytes).unwrap();
         let fields = import_maxwell_recovered_fields(&store, response, &recovery, limits).unwrap();
-        assert_eq!(fields.manifest.fields.len(), 6);
+        assert_eq!(fields.manifest.fields.len(), 11);
         let sampling = imported.result.sampling_topology().clone();
         let fanout = prepare_observation_fanout(
             &store,

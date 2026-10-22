@@ -33,7 +33,7 @@ pub(super) fn verify(
     assert_eq!(&fields[3], energy_density_j_per_m3);
     near(*total_energy_j, epsilon / 6.0, epsilon);
     let source = response.charge_sources.as_ref().unwrap();
-    near(source.integrated_charge_c, sign * 2.0 * epsilon, epsilon);
+    near(source.integrated_source, sign * 2.0 * epsilon, epsilon);
     assert!(source.projection_evidence.iter().all(|e| e.accepted));
     for terminal in &response.terminals {
         near(terminal.outward_flux, sign * epsilon, epsilon);

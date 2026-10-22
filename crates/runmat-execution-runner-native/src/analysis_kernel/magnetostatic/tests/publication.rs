@@ -85,7 +85,7 @@ fn native_magnetic_cold_result_receipt_and_each_state_reopen_without_mesh_or_wor
                 );
                 assert_eq!(
                     state.payload.magnetostatic().unwrap().fields.fields().len(),
-                    4
+                    6
                 );
                 states.push(state.identity);
             }

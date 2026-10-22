@@ -348,6 +348,13 @@ fn substitute_model_inputs(
     }
     for boundary in &mut model.boundaries {
         substitute_region(&mut boundary.target, inputs)?;
+        boundary
+            .kind
+            .realize_model_inputs(inputs)
+            .map_err(|error| AuthoredStudyRealizationError::ParameterizedBoundary {
+                boundary_id: boundary.boundary_id.clone(),
+                detail: error.to_string(),
+            })?;
     }
     for connector in &mut model.connectors {
         let mut error = None;
@@ -486,6 +493,8 @@ pub enum AuthoredStudyRealizationError {
     WrongBoundInputKind(String),
     #[error("parameterized signal `{signal_id}` could not be realized: {detail}")]
     ParameterizedSignal { signal_id: String, detail: String },
+    #[error("boundary `{boundary_id}` coefficient could not be realized: {detail}")]
+    ParameterizedBoundary { boundary_id: String, detail: String },
     #[error("realized authored model is invalid: {0}")]
     InvalidRealizedModel(AuthoredModelError),
 }

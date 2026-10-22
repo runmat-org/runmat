@@ -139,7 +139,7 @@ fn lower_expression(
                 .ok_or_else(|| AuthoredObservationError::UnknownStep(step_id.clone()))?;
             Ok(ObservationDraft {
                 step_id: step_id.clone(),
-                spec: base_spec(*quantity, *location, field_domain(step.procedure)),
+                spec: base_spec(*quantity, *location, field_domain(step.procedure, *quantity)),
                 kind: ObservationKind::Field,
             })
         }

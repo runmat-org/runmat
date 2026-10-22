@@ -3,6 +3,7 @@ mod acoustic;
 mod common;
 mod electrical_static;
 mod fluid;
+mod electrical_recovery;
 mod magnetic_recovery;
 pub(super) mod magnetic_static;
 pub(super) mod maxwell_harmonic;
@@ -114,6 +115,10 @@ pub fn build_resource_plan(
             FeaResourcePhase::MagneticFieldRecovery(request),
             FeaResourceDemand::MagneticFieldRecovery(demand),
         ) if *request == demand.request => magnetic_recovery::build(input.clone(), demand),
+        (
+            FeaResourcePhase::ElectricalFieldRecovery(request),
+            FeaResourceDemand::ElectricalFieldRecovery(demand),
+        ) if *request == demand.request => electrical_recovery::build(input.clone(), demand),
         (
             FeaResourcePhase::AcousticResponse(workload),
             FeaResourceDemand::AcousticResponse(demand),

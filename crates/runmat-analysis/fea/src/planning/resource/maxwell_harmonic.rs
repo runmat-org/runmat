@@ -114,12 +114,25 @@ pub fn build_maxwell_harmonic_resource_plan(
             "Maxwell original inputs or projected outputs disagree",
         ));
     }
-    let system = MaxwellSystemPlan::derive(m).map_err(invalid)?;
-    let dimension = system.block_pattern().rows();
-    let krylov = estimate::maxwell_harmonic::krylov_envelope(
-        dimension,
-        system.block_pattern().column_indices().len() as u64,
+    let input = w.compile_input(m).map_err(invalid)?;
+    let system = MaxwellSystemPlan::derive(m, &input.grounded_faces).map_err(invalid)?;
+    let current_drives = input
+        .drives
+        .iter()
+        .filter(|d| {
+            matches!(
+                d.excitation,
+                crate::physics::maxwell::MaxwellDriveExcitation::Current { .. }
+            )
+        })
+        .count();
+    drop(input);
+    let dimension = add(
+        count(system.free_edge_indices().len())?,
+        count(current_drives)?,
     )?;
+    let nonzeros = count(system.pattern().column_indices().len())?;
+    let factorization = estimate::maxwell_harmonic::factor_envelope(dimension, nonzeros)?;
     let reservation = add(
         add(
             numerical.total_bytes,
@@ -147,9 +160,9 @@ pub fn build_maxwell_harmonic_resource_plan(
             edge_count_upper_bound: Count(numerical.edge_count_upper_bound),
             quadrature_sample_count: Count(numerical.quadrature_sample_count),
             free_edge_count: Count(count(system.free_edge_indices().len())?),
-            real_block_dimension: Count(count(dimension)?),
-            block_nonzeros: Count(count(system.block_pattern().column_indices().len())?),
-            krylov,
+            complex_dimension: Count(dimension),
+            nonzeros: Count(nonzeros),
+            factorization,
             numerical_reservation_bytes: ByteCount(reservation),
             inputs: prepared.inputs,
             result_output: prepared.result_output,

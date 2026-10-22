@@ -42,13 +42,23 @@ pub fn build_electrical_study_product(
         materials: input.materials,
         mesh: input.mesh,
     })?;
-    let workload = plan_electrical_study(&compiled, input.planning)?;
+    plan_electrical_study_product(compiled, input.mesh, input.planning)
+}
+
+/// Plan and admit an already compiled (possibly split) study on its mesh.
+pub fn plan_electrical_study_product(
+    compiled: CompiledAnalysisStudy,
+    mesh: &SolverMeshArtifact,
+    planning: ElectricalStudyPlanningPolicy,
+) -> Result<ElectricalStudyProduct, ElectricalStudyProductError> {
+    compiled.validate_against(mesh)?;
+    let workload = plan_electrical_study(&compiled, planning)?;
     let equation = workload
         .equation()
         .map_err(|error| ElectricalStudyProductError::Admission(error.to_string()))?;
     validate_materials(&compiled, equation)?;
     workload
-        .formulation(input.mesh)
+        .formulation(mesh)
         .map_err(|error| ElectricalStudyProductError::Admission(error.to_string()))?;
     Ok(ElectricalStudyProduct { compiled, workload })
 }
@@ -68,9 +78,11 @@ fn validate_materials(
             StaticElectricalEquation::Electrostatics => electrical.relative_permittivity,
             StaticElectricalEquation::SteadyConduction => electrical.conductivity_s_per_m,
         };
+        // A temperature coefficient is a valid law: standalone conduction evaluates it at
+        // the reference temperature; electrothermal conduction at the solved temperature.
         if !coefficient.is_finite()
             || coefficient <= 0.0
-            || electrical.resistive_heating_coefficient != 0.0
+            || !electrical.resistive_heating_coefficient.is_finite()
             || !electrical.conductivity_frequency_response.is_empty()
         {
             return Err(ElectricalStudyProductError::UnsupportedMaterial);

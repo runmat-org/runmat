@@ -81,7 +81,7 @@ impl ObservationPublicationCatalog {
                 Ok(())
             }
             (
-                AccuracySourceKind::AcousticHarmonic,
+                AccuracySourceKind::ElectricalStatic | AccuracySourceKind::AcousticHarmonic,
                 crate::results::observation::ObservationFieldCatalogSource::VolumeMeshRecovery {
                     recovery_request,
                     manifest,

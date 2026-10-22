@@ -32,7 +32,7 @@ pub(super) fn extend_model_physics(
                 Ok(AnalysisBoundary {
                     boundary_id: value.boundary_id.clone(),
                     target: targets.region_target(&value.target, TargetCardinality::OneOrMore)?,
-                    operator: boundary_operator(&value.kind),
+                    operator: boundary_operator(&value.boundary_id, &value.kind)?,
                 })
             })
             .collect::<Result<Vec<_>, AnalysisModelRealizationError>>()?,
@@ -127,8 +127,12 @@ pub(super) fn extend_model_physics(
     Ok(())
 }
 
-fn boundary_operator(value: &AuthoredBoundaryKind) -> BoundaryOperator {
-    match value {
+fn boundary_operator(
+    boundary_id: &str,
+    value: &AuthoredBoundaryKind,
+) -> Result<BoundaryOperator, AnalysisModelRealizationError> {
+    let unbound = || AnalysisModelRealizationError::UnboundModel(boundary_id.to_string());
+    Ok(match value {
         AuthoredBoundaryKind::StructuralPressure { value } => {
             BoundaryOperator::StructuralPressure {
                 value: value.clone(),
@@ -142,14 +146,14 @@ fn boundary_operator(value: &AuthoredBoundaryKind) -> BoundaryOperator {
             coefficient,
         } => BoundaryOperator::ThermalConvection {
             ambient_temperature: ambient_temperature.clone(),
-            coefficient: *coefficient,
+            coefficient: coefficient.constant().ok_or_else(unbound)?,
         },
         AuthoredBoundaryKind::ThermalRadiation {
             ambient_temperature,
             emissivity,
         } => BoundaryOperator::ThermalRadiation {
             ambient_temperature: ambient_temperature.clone(),
-            emissivity: *emissivity,
+            emissivity: emissivity.constant().ok_or_else(unbound)?,
         },
         AuthoredBoundaryKind::MagneticInsulation => BoundaryOperator::MagneticInsulation,
         AuthoredBoundaryKind::AcousticRigidWall => BoundaryOperator::AcousticRigidWall,
@@ -169,7 +173,7 @@ fn boundary_operator(value: &AuthoredBoundaryKind) -> BoundaryOperator {
                 value: value.clone(),
             }
         }
-    }
+    })
 }
 
 fn interface_kind(value: &AuthoredInterfaceKind) -> AnalysisInterfaceKind {

@@ -18,7 +18,7 @@ use runmat_analysis_execution::{
 use runmat_analysis_fea::execution::InitialFieldBinding;
 use runmat_analysis_fea::planning::resource::LocalExecutionPlan;
 use runmat_analysis_fea::study::{
-    build_electrical_study_product, build_fluid_study_product, build_magnetic_study_product,
+    build_electrical_study_product, build_fluid_study_product, plan_electrical_study_product, build_magnetic_study_product,
     build_maxwell_study_product, build_nonlinear_solid_study_product, compile_analysis_study,
     plan_acoustic_response_study_product, plan_acoustic_study_product,
     plan_thermal_study_product_with_fields,
@@ -186,10 +186,18 @@ pub(crate) fn plan_family_study(
     let (preparation, step) = match context.planning {
         StudyRootPlanning::Structural(_) => unreachable!("checked above"),
         StudyRootPlanning::Thermal(policy) => {
+            let mut compiled = compile(apply_inputs)?;
+            if let Some(heat) = &policy.element_heat_source {
+                heat.bind(&mut compiled.model, context.mesh)
+                    .map_err(|error| error.to_string())?;
+            }
+            if runmat_analysis_fea::execution::is_electrothermal_study(&compiled) {
+                compiled = electrothermal_heat_study(&compiled, context.mesh, policy)?;
+            }
             let product = plan_thermal_study_product_with_fields(
-                compile(apply_inputs)?,
+                compiled,
                 context.mesh,
-                *policy,
+                policy.clone(),
                 context.initial_fields.to_vec(),
             )
             .map_err(|error| error.to_string())?;
@@ -251,20 +259,42 @@ pub(crate) fn plan_family_study(
             )
         }
         StudyRootPlanning::Electrical(policy) => {
-            let product = build_electrical_study_product(ElectricalStudyProductInput {
-                study: context.study,
-                geometry: context.document,
-                regions: context.regions,
-                materials: context.materials,
-                mesh: context.mesh,
-                planning: *policy,
-            })
+            let mut policy = policy.clone();
+            let compiled = compile(&mut |_| Ok(()))?;
+            let product = if runmat_analysis_fea::execution::is_electrothermal_study(&compiled) {
+                // The conduction side of an electrothermal analysis, at the temperatures of
+                // its own two-way operating point.
+                let (_, point) = runmat_analysis_fea::execution::solve_electrothermal_heat_study(
+                    &compiled,
+                    context.mesh,
+                    runmat_analysis_fea::study::ThermalStudyPlanningPolicy {
+                        backend: runmat_analysis_fea::ComputeBackend::Cpu,
+                        element_heat_source: None,
+                    },
+                )
+                .map_err(|error| error.to_string())?;
+                policy.element_temperature_k = Some(point.element_temperature_k);
+                policy.operating_time_s = point.operating_time_s;
+                let conduction =
+                    runmat_analysis_fea::execution::electrothermal_conduction_study(&compiled)
+                        .map_err(|error| error.to_string())?;
+                plan_electrical_study_product(conduction, context.mesh, policy.clone())
+            } else {
+                build_electrical_study_product(ElectricalStudyProductInput {
+                    study: context.study,
+                    geometry: context.document,
+                    regions: context.regions,
+                    materials: context.materials,
+                    mesh: context.mesh,
+                    planning: policy.clone(),
+                })
+            }
             .map_err(|error| error.to_string())?;
             let step = single_step(&product.compiled.model, kind)?;
             (
                 FamilyStudyPreparation::Electrical(Box::new(ElectricalStudyPreparation {
                     local_execution: context.local_execution,
-                    policy: *policy,
+                    policy,
                     product,
                     mesh,
                     frozen_project_digest: frozen,
@@ -387,6 +417,34 @@ pub(crate) fn plan_family_study(
         maximum_resident_bytes: step.0,
         maximum_wall_millis: step.1,
     })
+}
+
+/// Iterate conduction and heat transfer to the two-way fixed point and return the heat-transfer
+/// side with the converged Joule source bound.
+fn electrothermal_heat_study(
+    compiled: &runmat_analysis_fea::study::CompiledAnalysisStudy,
+    mesh: &SolverMeshArtifact,
+    policy: &runmat_analysis_fea::study::ThermalStudyPlanningPolicy,
+) -> Result<runmat_analysis_fea::study::CompiledAnalysisStudy, String> {
+    let (thermal, point) =
+        runmat_analysis_fea::execution::solve_electrothermal_heat_study(compiled, mesh, policy.clone())
+            .map_err(|error| error.to_string())?;
+    tracing::info!(
+        sweeps = point.sweeps.len(),
+        converged = point.converged,
+        joule_power_w = point.joule_power_w,
+        terminal_power_w = point.terminal_power_w,
+        last_temperature_change_k = point.sweeps.last().map(|s| s.maximum_temperature_change_k),
+        maximum_temperature_rise_k = point.sweeps.last().map(|s| s.maximum_temperature_rise_k),
+        "electrothermal two-way coupling converged"
+    );
+    if !point.converged {
+        return Err(format!(
+            "electrothermal coupling did not converge in {} sweeps",
+            point.sweeps.len()
+        ));
+    }
+    Ok(thermal)
 }
 
 fn single_step(model: &AnalysisModel, kind: StudyFamilyKind) -> Result<(u64, u64), String> {

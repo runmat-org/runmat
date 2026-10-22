@@ -51,6 +51,8 @@ pub(crate) fn validate_sampled_authority(
             {
                 sampling.oriented_edges().len()
             }
+            // Element averages of the sampled field over each element's own samples.
+            RecoveredFieldEntityDomain::VolumeElements => sampling.element_identities().len(),
             _ => {
                 return Err(invalid(
                     "sampled native quantity differs from its exact entity domain",

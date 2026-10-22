@@ -482,6 +482,10 @@ fn state_use_accepts_kind(use_as: StateUse, kind: StateKind) -> bool {
         ),
         StateUse::ModalBasis => kind == StateKind::ModalBasis,
         StateUse::CoupledInterface => kind == StateKind::CoupledInterface,
+        StateUse::HeatSource => matches!(
+            kind,
+            StateKind::ElectromagneticStatic | StateKind::ElectromagneticComplex
+        ),
         StateUse::PhysicalInitialState
         | StateUse::LinearizationPoint
         | StateUse::InitialGuess

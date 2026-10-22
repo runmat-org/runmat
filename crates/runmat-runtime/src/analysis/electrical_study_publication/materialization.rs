@@ -1,8 +1,10 @@
-//! Copy accepted native potential/E/D/J/densities to shared cold-query fields; no operator evaluation.
+//! Copy accepted native potential/E/D/J/densities and authored observations to shared
+//! cold-query results; no operator evaluation.
 use super::*;
 use crate::analysis::*;
 use runmat_analysis_fea::{
     contracts::{ExecutionBackend, SolverMethod, SolverPreconditioner},
+    results::field::RecoveredFieldArtifact,
     planning::resource::FeaResourcePhase,
     solve::backend::kind::LinearAlgebraBackendKind,
     ComputeBackend, FeaRunResult,
@@ -12,6 +14,7 @@ pub(super) fn admit(
     completed: &ElectricalStudyCompletion,
     mesh: &SolverMeshArtifact,
     options: &AnalysisElectricalRunOptions,
+    fields: RecoveredFieldArtifact,
     run_id: &str,
     context: &OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, String> {
@@ -28,17 +31,10 @@ pub(super) fn admit(
         &completed.publication,
     )?;
     let accuracy = accuracy_owner(&completed.accuracy);
-    let request = completed
-        .result
-        .native_field_request(&completed.workload, mesh)
-        .map_err(|e| e.to_string())?;
-    let fields = completed
-        .result
-        .recover_native_fields(&completed.workload, mesh, &request)
-        .map_err(|e| e.to_string())?
+    let fields = fields
         .into_fields()
         .into_iter()
-        .map(|f| f.into_storage())
+        .map(|field| field.into_storage())
         .collect();
     let run = FeaRunResult {
         identity: completed.result.formulation().clone(),
@@ -56,7 +52,7 @@ pub(super) fn admit(
         structural_static_balance: None,
         structural_constraint_result: None,
         structural_connector_result: None,
-        observations: Vec::new(),
+        observations: completed.observation_results.clone(),
         observation_histories: Vec::new(),
         series_reductions: Vec::new(),
         fields,

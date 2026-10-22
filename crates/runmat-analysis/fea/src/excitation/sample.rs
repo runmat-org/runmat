@@ -13,7 +13,7 @@ mod point;
 pub(crate) use point::initial_signal_sample_point;
 mod prescribed;
 pub(crate) use prescribed::{
-    sample_prescribed_heat_flux, sample_prescribed_potential, sample_prescribed_pressure,
+    sample_prescribed_current, sample_prescribed_heat_flux, sample_prescribed_potential, sample_prescribed_pressure,
     sample_prescribed_temperature, sample_prescribed_velocity,
 };
 mod static_table;

@@ -241,6 +241,9 @@ pub enum StateUse {
     ModalBasis,
     CoupledInterface,
     Restart,
+    /// An upstream electromagnetic state whose (cycle-averaged) Joule loss density is the
+    /// consumer's volumetric heat source.
+    HeatSource,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

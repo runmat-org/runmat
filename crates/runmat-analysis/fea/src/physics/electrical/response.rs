@@ -133,7 +133,7 @@ pub(super) fn solve(
                     assembly
                         .charge_sources
                         .as_ref()
-                        .map_or(0.0, |source| source.nodal_charge_c[node] / scale)
+                        .map_or(0.0, |source| source.nodal_source[node] / scale)
                 },
                 |value| value - reference,
             )
@@ -211,7 +211,7 @@ pub(super) fn solve(
     let volume_source_work = assembly.charge_sources.as_ref().map_or(0.0, |source| {
         increment
             .iter()
-            .zip(&source.nodal_charge_c)
+            .zip(&source.nodal_source)
             .map(|(value, charge)| value * charge)
             .sum::<f64>()
     });
@@ -224,7 +224,7 @@ pub(super) fn solve(
             let charge = assembly
                 .charge_sources
                 .as_ref()
-                .map_or(0.0, |source| source.nodal_charge_c[node]);
+                .map_or(0.0, |source| source.nodal_source[node]);
             increment[node] * (reactions[node] - charge)
         })
         .sum::<f64>();
@@ -262,7 +262,7 @@ pub(super) fn solve(
             assembly
                 .charge_sources
                 .as_ref()
-                .map_or(0.0, |source| source.nodal_charge_c[node])
+                .map_or(0.0, |source| source.nodal_source[node])
                 - value
         })
         .collect::<Vec<_>>();
@@ -285,11 +285,11 @@ pub(super) fn solve(
     let integrated_charge = assembly
         .charge_sources
         .as_ref()
-        .map_or(0.0, |source| source.integrated_charge_c);
+        .map_or(0.0, |source| source.integrated_source);
     let source_scale = assembly
         .charge_sources
         .as_ref()
-        .map_or(0.0, |source| source.absolute_charge_c);
+        .map_or(0.0, |source| source.absolute_source);
     let relative_flux_imbalance = (terminals
         .iter()
         .map(|terminal| terminal.outward_flux)

@@ -1,6 +1,6 @@
 use runmat_analysis_core::{
-    AnalysisProcedure, AnalysisSequence, ElectromagneticDomain, PhysicsFamily, RestartPolicy,
-    SolutionSpace,
+    AnalysisProcedure, AnalysisSequence, CoupledPhysicsFamily, ElectromagneticDomain,
+    PhysicsFamily, RestartPolicy, SolutionSpace,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -41,11 +41,7 @@ pub(super) fn select_family(
     }) {
         return Err(unsupported());
     }
-    if sequence
-        .steps
-        .iter()
-        .all(|step| step.family == PhysicsFamily::Structural)
-    {
+    if structural_root_sequence(sequence) {
         return Ok(PreparedFamily::Structural);
     }
     let [step] = sequence.steps.as_slice() else {
@@ -91,22 +87,20 @@ pub(super) fn select_family(
         && sequence.transitions.is_empty()
         && sequence.branches.is_empty()
     {
-        let Some(ElectromagneticDomain::Harmonic {
-            reference_frequency,
-        }) = electromagnetic
-        else {
+        if !matches!(
+            electromagnetic,
+            None | Some(ElectromagneticDomain::Harmonic { .. })
+        ) {
             return Err(unsupported());
-        };
+        }
+        // Multi-frequency studies are fanned out into one case per frequency before
+        // preparation, so each prepared harmonic step carries exactly one frequency.
         let runmat_analysis_core::IndependentDomain::FrequencyHertz(frequencies) =
             &step.independent_domain
         else {
             return Err(unsupported());
         };
-        if frequencies.len() != 1
-            || !frequencies[0].is_finite()
-            || frequencies[0] <= 0.0
-            || frequencies[0] != reference_frequency.hertz
-        {
+        if frequencies.len() != 1 || !frequencies[0].is_finite() || frequencies[0] <= 0.0 {
             return Err(unsupported());
         }
         return Ok(PreparedFamily::Maxwell);
@@ -138,6 +132,9 @@ pub(super) fn select_family(
         && sequence.branches.is_empty()
     {
         return Ok(PreparedFamily::Acoustic);
+    }
+    if is_electrothermal(sequence) {
+        return Ok(PreparedFamily::Thermal);
     }
     if step.family == PhysicsFamily::Acoustic
         && matches!(
@@ -171,8 +168,46 @@ pub(super) fn select_family(
     Ok(PreparedFamily::Thermal)
 }
 
+/// One fresh electrothermal (Joule heating) analysis, steady or transient.
+pub(in crate::typed_fea) fn is_electrothermal(sequence: &AnalysisSequence) -> bool {
+    matches!(sequence.steps.as_slice(), [step]
+        if step.family == PhysicsFamily::Coupled(runmat_analysis_core::CoupledPhysicsFamily::Electrothermal)
+            && matches!(step.procedure, AnalysisProcedure::Static | AnalysisProcedure::TransientResponse)
+            && step.solution_space == SolutionSpace::Direct
+            && step.restart == RestartPolicy::Fresh
+            && sequence.dependencies.is_empty()
+            && sequence.transitions.is_empty()
+            && sequence.branches.is_empty())
+}
+
+/// The structural study root owns structural graphs, thermomechanical steps, and a thermal
+/// producer that feeds a thermomechanical step. The exact thermal-to-preload binding and the
+/// supported consumers are validated by structural workload planning, not by this family gate.
+fn structural_root_sequence(sequence: &AnalysisSequence) -> bool {
+    let mechanical = |step: &runmat_analysis_core::ProcedureStep| {
+        matches!(
+            step.family,
+            PhysicsFamily::Structural
+                | PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical)
+        )
+    };
+    let thermal = sequence
+        .steps
+        .iter()
+        .filter(|step| step.family == PhysicsFamily::Thermal)
+        .count();
+    let thermomechanical = sequence.steps.iter().any(|step| {
+        step.family == PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical)
+    });
+    sequence
+        .steps
+        .iter()
+        .all(|step| mechanical(step) || step.family == PhysicsFamily::Thermal)
+        && (thermal == 0 || (thermal == 1 && thermomechanical))
+}
+
 fn unsupported() -> String {
-    "RM.FEA.TYPED_EXECUTION.UNSUPPORTED_PHYSICS_FAMILY: typed native execution admits structural studies or one fresh independent direct thermal steady/transient, fluid steady/transient, steady conjugate heat transfer or fluid–structure interaction, equation-selected static electrical/magnetic, singleton Maxwell harmonic, or acoustic harmonic, modal or transient step".into()
+    "RM.FEA.TYPED_EXECUTION.UNSUPPORTED_PHYSICS_FAMILY: typed native execution admits structural studies or one fresh independent direct thermal steady/transient, fluid steady/transient, steady conjugate heat transfer or fluid–structure interaction, equation-selected static electrical/magnetic, Maxwell harmonic, electrothermal steady/transient, or acoustic harmonic, modal or transient step".into()
 }
 
 #[cfg(test)]
@@ -268,7 +303,11 @@ mod tests {
             super::select_family(&sequence, Some(&domain)).unwrap(),
             PreparedFamily::Maxwell
         );
-        assert!(super::select_family(&sequence, None).is_err());
+        // The analysis's own frequencies define a harmonic study; no domain block is needed.
+        assert_eq!(
+            super::select_family(&sequence, None).unwrap(),
+            PreparedFamily::Maxwell
+        );
         assert!(super::select_family(
             &sequence,
             Some(&ElectromagneticDomain::Magnetostatic {
@@ -279,7 +318,6 @@ mod tests {
         .is_err());
         for frequencies in [
             vec![],
-            vec![1.0],
             vec![2000.0, 3000.0],
             vec![f64::NAN],
             vec![0.0],
@@ -438,6 +476,15 @@ mod tests {
             vec![restart],
             vec![thermal.clone(), ProcedureStep::structural_static("solid")],
             vec![thermal.clone(), ProcedureStep::thermal_transient("other")],
+            vec![
+                thermal.clone(),
+                ProcedureStep::thermal_transient("other"),
+                ProcedureStep::thermomechanical_preload("preload", "heat", "heated"),
+            ],
+            vec![
+                ProcedureStep::structural_preload("preload"),
+                ProcedureStep::acoustic_harmonic("sound"),
+            ],
         ] {
             assert!(
                 select_family(&AnalysisSequence::from_steps("unsupported", steps))
@@ -448,6 +495,23 @@ mod tests {
         let mut wrong = thermal;
         wrong.family = PhysicsFamily::Acoustic;
         assert!(select_family(&AnalysisSequence::from_steps("acoustic", vec![wrong])).is_err());
+    }
+
+    #[test]
+    fn thermal_prefix_and_thermomechanical_graphs_select_the_structural_root() {
+        let chained = vec![
+            ProcedureStep::thermal_steady("heat"),
+            ProcedureStep::thermomechanical_preload("preload", "heat", "heated"),
+            ProcedureStep::structural_prestressed_modal("modes", "preload", "geometric_stiffness"),
+        ];
+        let mut prescribed = ProcedureStep::structural_static("coupled");
+        prescribed.family = PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical);
+        for steps in [chained, vec![prescribed]] {
+            assert_eq!(
+                select_family(&AnalysisSequence::from_steps("thermal_stress", steps)).unwrap(),
+                PreparedFamily::Structural
+            );
+        }
     }
 
     #[test]

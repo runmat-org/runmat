@@ -44,6 +44,7 @@ fn workload(phase: [f64; 2]) -> MaxwellHarmonicWorkload {
         model,
         step_id: ProcedureStepId("potential".into()),
         relative_residual_target: 1e-10,
+        frequency: runmat_analysis_core::Frequency::new(1e8),
     }
 }
 
@@ -135,10 +136,13 @@ fn both_orders_cold_native_fields_preserve_exact_complex_phase_and_sample_author
             assert_eq!(field.storage().field_id, name);
             assert_eq!(field.storage().shape, shape);
             assert_eq!(field.storage().as_host_f64().unwrap(), values);
-            assert_eq!(
-                field.definition().numeric_representation(),
+            // Cycle-averaged loss densities are real; every other native field is a phasor.
+            let expected = if name.contains("joule") {
+                RecoveredFieldNumericRepresentation::Real
+            } else {
                 RecoveredFieldNumericRepresentation::ComplexInterleaved
-            );
+            };
+            assert_eq!(field.definition().numeric_representation(), expected);
             assert_eq!(field.sample(), RecoveredFieldSample::Final);
         }
         assert_eq!(

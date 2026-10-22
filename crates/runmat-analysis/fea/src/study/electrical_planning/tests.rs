@@ -31,7 +31,10 @@ fn compiled(equation: StaticElectricalEquation) -> CompiledAnalysisStudy {
 }
 
 fn policy() -> ElectricalStudyPlanningPolicy {
-    ElectricalStudyPlanningPolicy {}
+    ElectricalStudyPlanningPolicy {
+        element_temperature_k: None,
+        operating_time_s: None,
+    }
 }
 
 #[test]

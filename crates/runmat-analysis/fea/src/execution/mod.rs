@@ -26,7 +26,11 @@ mod buckling_workload;
 mod electrical_static;
 mod electrothermal;
 pub use electrothermal::{
-    bind_retained_joule_heat, execute_steady_electrothermal_from_retained, RetainedJouleHeatSource,
+    bind_element_heat_source, bind_retained_joule_heat, conductivity_at, electrical_part,
+    electrothermal_conduction_study, element_temperatures, execute_coupled_electrothermal,
+    is_electrothermal_study, solve_electrothermal_heat_study, ElectrothermalOperatingPoint, execute_steady_electrothermal_from_retained, thermal_part,
+    CoupledElectrothermalCompletion, ElectrothermalCouplingControls,
+    ElectrothermalElectricalSample, ElectrothermalSweep, RetainedJouleHeatSource,
     RetainedJouleHeatTransfer, SteadyElectrothermalCompletion,
 };
 mod magnetic_static;
@@ -43,7 +47,8 @@ pub use maxwell_harmonic::{
 };
 mod error;
 pub use electrical_static::{
-    ElectricalNumericalReceipt, ElectricalNumericalReceiptArtifact, ElectricalStaticSolverResult,
+    electrical_native_field_definitions, ElectricalNumericalReceipt,
+    ElectricalNumericalReceiptArtifact, ElectricalStaticSolverResult,
     ElectricalStaticWorkload, ELECTRICAL_RECEIPT_MAX_ENCODED_BYTES,
 };
 mod field;

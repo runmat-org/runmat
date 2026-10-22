@@ -41,6 +41,13 @@ pub(super) fn problem(
             }
         })
         .collect();
+    let mut grounded_faces: Vec<_> = mesh
+        .topology
+        .boundary_faces
+        .iter()
+        .map(|face| face.stable_identity)
+        .collect();
+    grounded_faces.sort();
     (
         mesh,
         MaxwellInput {
@@ -48,6 +55,8 @@ pub(super) fn problem(
             sampling,
             volumes,
             source_current,
+            grounded_faces,
+            drives: Vec::new(),
         },
     )
 }

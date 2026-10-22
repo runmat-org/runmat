@@ -15,7 +15,7 @@ fn recovered_complex_flux_has_normal_continuity_and_pec_boundary_closure() {
             },
         );
         let projection = AnalysisProjection::derive(&mesh).unwrap();
-        let result = solve_full_pec_volume(&mesh, &input, 1e-10).unwrap();
+        let result = solve(&mesh, &input, 1e-10).unwrap();
         assert!(result.relative_charge_continuity_residual < 8e-10);
         let field: BTreeMap<_, _> = result
             .samples

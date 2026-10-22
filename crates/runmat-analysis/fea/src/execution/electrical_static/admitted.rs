@@ -46,12 +46,15 @@ impl ElectricalStaticWorkload {
         // All planned ceilings and exact topology/solver work have been checked before the
         // numerical owner can allocate a projection, property map or physical matrix.
         let formulation = self.formulation(mesh)?;
+        let conductivity = self.element_conductivity(mesh)?;
         let response = crate::physics::electrical::solve_canonical_static_with_admission(
             &self.model,
             mesh,
             self.step_id.as_str(),
             self.relative_residual_target,
             Some(&demand.solver_admission),
+            conductivity.as_deref(),
+            self.sample_point(),
         )
         .map_err(invalid)?;
         ElectricalStaticSolverResult::new(self, mesh, formulation, response)

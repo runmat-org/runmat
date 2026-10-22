@@ -46,7 +46,8 @@ pub use electrical_planning::{
     plan_electrical_study, ElectricalStudyPlanningError, ElectricalStudyPlanningPolicy,
 };
 pub use electrical_product::{
-    build_electrical_study_product, ElectricalStudyProduct, ElectricalStudyProductError,
+    build_electrical_study_product, plan_electrical_study_product, ElectricalStudyProduct,
+    ElectricalStudyProductError,
     ElectricalStudyProductInput,
 };
 pub use fluid_material::{
@@ -91,7 +92,7 @@ pub use product::{
 pub use thermal_planning::{
     plan_thermal_step, plan_thermal_step_with_fields, plan_thermal_study,
     plan_thermal_study_with_fields, thermal_step_initial_selection_supported,
-    ThermalStudyPlanningError, ThermalStudyPlanningPolicy,
+    ElementHeatSource, ThermalStudyPlanningError, ThermalStudyPlanningPolicy,
 };
 pub use thermal_product::{
     build_thermal_study_product, plan_thermal_study_product,

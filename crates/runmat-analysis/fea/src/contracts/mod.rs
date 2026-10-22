@@ -165,8 +165,28 @@ impl FeaRunResult {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FeaThermoRegionTemperatureDelta {
-    pub region_id: String,
+    /// The authored volume target with its resolved entities; solver elements match it through
+    /// their region or CAD provenance, never through the authored alias alone.
+    pub target: runmat_analysis_core::RegionTarget,
     pub temperature_delta_k: f64,
+}
+
+impl FeaThermoRegionTemperatureDelta {
+    pub fn region_id(&self) -> &str {
+        &self.target.region_id
+    }
+
+    /// Whether a solver element with this region and provenance lies in the target.
+    pub fn contains_element(
+        &self,
+        region: &runmat_meshing_core::PersistentEntityId,
+        provenance: &[runmat_meshing_core::PersistentEntityId],
+    ) -> bool {
+        self.target.matches_persistent_entity(region)
+            || provenance
+                .iter()
+                .any(|entity| self.target.matches_persistent_entity(entity))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

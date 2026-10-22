@@ -11,6 +11,7 @@ use runmat_analysis_fea::{
 fn planning_policy() -> ThermalStudyPlanningPolicy {
     ThermalStudyPlanningPolicy {
         backend: ComputeBackend::Cpu,
+        element_heat_source: None,
     }
 }
 

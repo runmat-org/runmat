@@ -1,11 +1,10 @@
 //! Explicit affine-geometry eligibility; no physical coefficient assembly or solver.
 use super::{topology, MaxwellError};
 use crate::topology::{AnalysisProjection, TetrahedralEdgeSpace};
-use runmat_meshing_core::ElementOrder;
+use runmat_meshing_core::{BoundaryFaceRole, ElementOrder, StableDigest};
+use std::collections::{BTreeMap, BTreeSet};
 
-pub(super) fn spaces(
-    projection: &AnalysisProjection,
-) -> Result<(TetrahedralEdgeSpace, Vec<usize>), MaxwellError> {
+pub(super) fn spaces(projection: &AnalysisProjection) -> Result<TetrahedralEdgeSpace, MaxwellError> {
     let length = projection.characteristic_length_m;
     if !length.is_finite() || length <= 0.0 || projection.elements.is_empty() {
         return Err(topology("empty or invalid Maxwell geometry"));
@@ -32,6 +31,69 @@ pub(super) fn spaces(
         }
     }
     let edges = TetrahedralEdgeSpace::derive(projection).map_err(topology)?;
-    let exterior = edges.exterior_edge_indices(projection).map_err(topology)?;
-    Ok((edges, exterior))
+    // Validates the exact exterior inventory once for every Maxwell consumer.
+    edges.exterior_edge_indices(projection).map_err(topology)?;
+    Ok(edges)
+}
+
+/// Edges with tangential E = 0: the three corner edges of every grounded exterior face.
+pub(super) fn grounded_edges(
+    projection: &AnalysisProjection,
+    edges: &TetrahedralEdgeSpace,
+    grounded_faces: &[StableDigest],
+) -> Result<BTreeSet<usize>, MaxwellError> {
+    let by_nodes: BTreeMap<[usize; 2], usize> = edges
+        .edges()
+        .iter()
+        .enumerate()
+        .map(|(index, edge)| {
+            let [a, b] = edge.node_indices;
+            ([a.min(b), a.max(b)], index)
+        })
+        .collect();
+    let wanted: BTreeSet<_> = grounded_faces.iter().copied().collect();
+    let mut found = BTreeSet::new();
+    let mut grounded = BTreeSet::new();
+    for face in &projection.boundary_faces {
+        if !wanted.contains(&face.stable_identity) {
+            continue;
+        }
+        if face.role != BoundaryFaceRole::Exterior {
+            return Err(MaxwellError::Unsupported(
+                "vector-potential ground on an internal face".into(),
+            ));
+        }
+        found.insert(face.stable_identity);
+        let corners: [usize; 3] = face
+            .node_indices
+            .get(..3)
+            .and_then(|nodes| nodes.try_into().ok())
+            .ok_or_else(|| topology("invalid grounded face arity"))?;
+        for [a, b] in [[0, 1], [0, 2], [1, 2]] {
+            let key = [corners[a].min(corners[b]), corners[a].max(corners[b])];
+            grounded.insert(
+                *by_nodes
+                    .get(&key)
+                    .ok_or_else(|| topology("grounded face edge absent from edge space"))?,
+            );
+        }
+    }
+    if found != wanted {
+        return Err(topology("grounded face absent from canonical boundary"));
+    }
+    Ok(grounded)
+}
+
+/// Corner nodes lying on grounded faces (their gradients are not admissible test fields).
+pub(super) fn grounded_nodes(
+    projection: &AnalysisProjection,
+    grounded_faces: &[StableDigest],
+) -> BTreeSet<usize> {
+    let wanted: BTreeSet<_> = grounded_faces.iter().copied().collect();
+    projection
+        .boundary_faces
+        .iter()
+        .filter(|face| wanted.contains(&face.stable_identity))
+        .flat_map(|face| face.node_indices.iter().take(3).copied())
+        .collect()
 }

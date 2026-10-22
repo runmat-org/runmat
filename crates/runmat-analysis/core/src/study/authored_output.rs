@@ -6,7 +6,9 @@ use crate::{
 };
 use runmat_types::PhysicalDimension;
 
+mod partition;
 mod types;
+pub use partition::{authored_output_root, retain_authored_outputs};
 
 pub use types::*;
 
@@ -76,7 +78,7 @@ impl AuthoredOutputExpression {
                 Ok(AuthoredOutputType::Field {
                     value: AuthoredOutputValue::Physical(*quantity),
                     shape: quantity.canonical_value_shape(),
-                    domain: field_domain(step.procedure),
+                    domain: field_domain(step.procedure, *quantity),
                     location: *location,
                 })
             }
@@ -494,8 +496,18 @@ fn region_measure(target: &AuthoredRegionSource) -> Result<PhysicalDimension, Au
     })
 }
 
-pub(super) fn field_domain(procedure: crate::AnalysisProcedure) -> AuthoredFieldDomain {
+pub(super) fn field_domain(
+    procedure: crate::AnalysisProcedure,
+    quantity: crate::ObservationQuantity,
+) -> AuthoredFieldDomain {
     match procedure {
+        // A cycle-averaged loss density is a real quantity of a harmonic analysis.
+        crate::AnalysisProcedure::HarmonicResponse
+        | crate::AnalysisProcedure::PrestressedHarmonicResponse
+            if quantity == crate::ObservationQuantity::JoulePowerDensity =>
+        {
+            AuthoredFieldDomain::Real
+        }
         crate::AnalysisProcedure::HarmonicResponse
         | crate::AnalysisProcedure::PrestressedHarmonicResponse => AuthoredFieldDomain::Complex,
         crate::AnalysisProcedure::RandomResponse

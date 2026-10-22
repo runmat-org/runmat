@@ -8,6 +8,10 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum ElectricalStudyResultPhase {
     Solve,
+    FieldRecovery,
+    ObservationPartition { ordinal: usize },
+    ObservationReduction { ordinal: usize },
+    ObservationAssembly,
     Accuracy,
     State { ordinal: usize },
     Publication,
@@ -66,7 +70,7 @@ pub(super) struct ElectricalStudyReplayContext {
 
 impl CompletedElectricalStudy {
     pub fn policy(&self) -> ElectricalStudyPlanningPolicy {
-        self.replay.policy
+        self.replay.policy.clone()
     }
 
     pub fn result_closures(&self) -> &[ElectricalStudyResultClosure] {
@@ -83,7 +87,7 @@ impl CompletedElectricalStudy {
             &self.result.result,
             &self.replay.mesh,
         )?;
-        let workload = plan_electrical_study(&self.compiled, self.replay.policy)
+        let workload = plan_electrical_study(&self.compiled, self.replay.policy.clone())
             .map_err(|error| invalid(error.to_string()))?;
         if workload != self.workload {
             return Err(invalid(
@@ -92,7 +96,7 @@ impl CompletedElectricalStudy {
         }
         Ok(ElectricalStudyPreparation {
             local_execution: self.replay.local_execution,
-            policy: self.replay.policy,
+            policy: self.replay.policy.clone(),
             product: ElectricalStudyProduct {
                 compiled: self.compiled.clone(),
                 workload,
@@ -117,17 +121,49 @@ pub fn import_electrical_study_completion(
     let mut study = ElectricalStudyCoordinator::new(preparation)?;
     let mut closures = closures.into_iter();
     loop {
-        // These transitions have no worker response. Rebuild them instead of trusting a label.
         if study.phase() == ElectricalStudyPhase::ReadyForBaseline {
             study.freeze_baseline()?;
         }
         if study.phase() == ElectricalStudyPhase::Complete {
             break;
         }
+        if study.phase() == ElectricalStudyPhase::ReadyForObservationFanout {
+            study.prepare_observation_fanout(source)?;
+        }
+        let closure = closures
+            .next()
+            .ok_or_else(|| invalid("electrical completion omits an authored phase"))?;
         let (phase, host) = match study.phase() {
             ElectricalStudyPhase::ReadyForSolve => (
                 ElectricalStudyResultPhase::Solve,
                 &study.prepare_solve()?.host,
+            ),
+            ElectricalStudyPhase::ReadyForFieldRecovery => (
+                ElectricalStudyResultPhase::FieldRecovery,
+                &study.prepare_field_recovery()?.host,
+            ),
+            ElectricalStudyPhase::AwaitingObservationPartitions => {
+                let ElectricalStudyResultPhase::ObservationPartition { ordinal } = closure.phase
+                else {
+                    return Err(invalid("electrical completion omits a fanout partition"));
+                };
+                let task = study
+                    .observation_state
+                    .fanout
+                    .as_ref()
+                    .expect("prepared fanout")
+                    .partitions
+                    .get(ordinal)
+                    .ok_or_else(|| invalid("electrical replay partition ordinal outside fanout"))?;
+                (closure.phase, &task.host)
+            }
+            ElectricalStudyPhase::ReadyForObservationReduction { ordinal } => (
+                ElectricalStudyResultPhase::ObservationReduction { ordinal },
+                &study.prepare_observation_reduction()?.host,
+            ),
+            ElectricalStudyPhase::ReadyForObservationAssembly => (
+                ElectricalStudyResultPhase::ObservationAssembly,
+                &study.prepare_observation_assembly()?.host,
             ),
             ElectricalStudyPhase::ReadyForAccuracy => (
                 ElectricalStudyResultPhase::Accuracy,
@@ -147,13 +183,26 @@ pub fn import_electrical_study_completion(
                 ))
             }
         };
-        let closure = closures
-            .next()
-            .ok_or_else(|| invalid("electrical completion omits an authored phase"))?;
         closure.validate_for(phase, host)?;
         match phase {
             ElectricalStudyResultPhase::Solve => {
                 study.complete_solve(source, closure.response, closure.execution)?
+            }
+            ElectricalStudyResultPhase::FieldRecovery => {
+                study.complete_field_recovery(source, closure.response, closure.execution)?
+            }
+            ElectricalStudyResultPhase::ObservationPartition { ordinal } => study
+                .complete_observation_partition(
+                    source,
+                    ordinal,
+                    closure.response,
+                    closure.execution,
+                )?,
+            ElectricalStudyResultPhase::ObservationReduction { .. } => {
+                study.complete_observation_reduction(source, closure.response, closure.execution)?
+            }
+            ElectricalStudyResultPhase::ObservationAssembly => {
+                study.complete_observation_assembly(source, closure.response, closure.execution)?
             }
             ElectricalStudyResultPhase::Accuracy => {
                 study.complete_accuracy(source, closure.response, closure.execution)?
