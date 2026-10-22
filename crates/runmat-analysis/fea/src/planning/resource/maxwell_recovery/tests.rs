@@ -53,6 +53,7 @@ fn workload() -> MaxwellHarmonicWorkload {
         model,
         step_id: ProcedureStepId("potential".into()),
         relative_residual_target: 1e-10,
+        frequency: runmat_analysis_core::Frequency::new(1e8),
     }
 }
 

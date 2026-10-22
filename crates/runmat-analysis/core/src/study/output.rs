@@ -80,6 +80,9 @@ impl ObservationSpec {
         if self.complex_representation == ComplexRepresentation::PhaseRadians {
             return ObservationResultQuantity::Dimensionless;
         }
+        if self.complex_representation == ComplexRepresentation::SoundPressureLevel {
+            return ObservationResultQuantity::Physical(ObservationQuantity::SoundPressureLevel);
+        }
         let quantity = if self.component == ObservationComponent::VonMises {
             ObservationQuantity::VonMisesStress
         } else {
@@ -118,7 +121,10 @@ impl ObservationSpec {
 
     /// SI base dimension after representation and spatial reduction.
     pub fn result_dimension(&self) -> Option<PhysicalDimension> {
-        if self.complex_representation == ComplexRepresentation::PhaseRadians {
+        if matches!(
+            self.complex_representation,
+            ComplexRepresentation::PhaseRadians | ComplexRepresentation::SoundPressureLevel
+        ) {
             return Some(PhysicalDimension::DIMENSIONLESS);
         }
         let source = self.quantity.physical_dimension();
@@ -297,7 +303,13 @@ pub enum ComplexRepresentation {
     Magnitude,
     PhaseRadians,
     Complex,
+    /// Sound pressure level in dB re 20 uPa of a peak pressure phasor:
+    /// 20 log10(|p| / (sqrt(2) * 20e-6 Pa)), i.e. referred to the RMS pressure.
+    SoundPressureLevel,
 }
+
+/// Reference pressure of `ComplexRepresentation::SoundPressureLevel` (air, 20 uPa).
+pub const SOUND_PRESSURE_LEVEL_REFERENCE_PA: f64 = 20.0e-6;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

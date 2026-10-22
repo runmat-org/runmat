@@ -20,7 +20,9 @@ pub use contract::{
     RecoveredFieldIdentity, RecoveredFieldNumericRepresentation, RecoveredFieldSample,
     RecoveredFieldSelection, RecoveredFieldSelectionIdentity,
 };
-pub use entity::{RecoveredFieldEntityCounts, RecoveredFieldEntityDomain};
+pub use entity::{
+    RecoveredFieldEntityCounts, RecoveredFieldEntityDomain, RecoveredFieldSupport, SupportTopology,
+};
 pub use finite_volume::{FiniteVolumeFieldTopology, NativeOrientedFace};
 pub use partition::{RecoveredFieldPartition, RecoveredFieldPartitionIdentity};
 pub use partition_set::{

@@ -147,11 +147,17 @@ fn coupled_profiles_cannot_borrow_the_uncoupled_j2_identity() {
             FormulationAdmissionRejectionReason::UnsupportedFamilyProcedure
         );
     }
-    assert!(crate::admission::registered_formulations(
+    for registered in crate::admission::registered_formulations(
         PhysicsFamily::Coupled(
-            runmat_analysis_core::CoupledPhysicsFamily::FluidStructureInteraction
+            runmat_analysis_core::CoupledPhysicsFamily::FluidStructureInteraction,
         ),
         AnalysisProcedure::TransientResponse,
-    )
-    .is_empty());
+    ) {
+        assert!(registered
+            .realization()
+            .components
+            .iter()
+            .all(|component| component.constitutive
+                != ConstitutiveImplementation::SmallStrainJ2IsotropicHardening));
+    }
 }

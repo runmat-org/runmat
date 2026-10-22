@@ -1,5 +1,5 @@
 //! Independent dense complex oracle for genuinely free phased pressure DOFs.
-mod uniqueness;
+mod certificate;
 
 use super::{solve, AcousticAssembly, AcousticHarmonicPolicy};
 use crate::{
@@ -13,59 +13,46 @@ use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOr
 type Complex = (f64, f64);
 
 #[test]
-fn sparse_reduction_and_physical_warm_starts_match_independent_phased_solution() {
+fn sparse_reduction_and_certified_solve_match_independent_phased_solution() {
     for phase in [0.0, 0.731, std::f64::consts::FRAC_PI_2] {
         for amplitude in [1e-12, 1.0, 1e12] {
             let assembly = assembly(phase, amplitude);
-            for preconditioner in [
-                crate::contracts::SolverPreconditioner::None,
-                crate::contracts::SolverPreconditioner::Ilu0,
-            ] {
-                let policy = AcousticHarmonicPolicy {
-                    uniqueness: None,
-                    preconditioner,
-                    relative_tolerance: 1e-12,
-                    restart: 8,
-                    maximum_iterations: 64,
-                };
-                let prepared = super::PreparedReduced::new(&assembly, policy).unwrap();
-                for column in 0..prepared.rhs.len() {
-                    let mut basis = vec![0.0; prepared.rhs.len()];
-                    basis[column] = 1.0;
-                    let full = prepared.reduction.expand_linear(&basis).unwrap();
-                    let (mut real, imaginary) = assembly.apply(&full[..4], &full[4..]);
-                    real.extend(imaginary);
-                    let expected = prepared.reduction.transpose_apply(&real).unwrap();
-                    let sparse = crate::algebra::spmv(&prepared.operator, &basis).unwrap();
-                    for (actual, expected) in sparse.iter().zip(expected) {
-                        assert!((actual - expected).abs() < 2e-14);
-                    }
+            let policy = AcousticHarmonicPolicy {
+                relative_tolerance: 1e-12,
+                ..Default::default()
+            };
+            let prepared = super::PreparedReduced::new(&assembly, policy).unwrap();
+            for column in 0..prepared.rhs.len() {
+                let mut basis = vec![0.0; prepared.rhs.len()];
+                basis[column] = 1.0;
+                let full = prepared.reduction.expand_linear(&basis).unwrap();
+                let (mut real, imaginary) = assembly.apply(&full[..4], &full[4..]);
+                real.extend(imaginary);
+                let expected = prepared.reduction.transpose_apply(&real).unwrap();
+                let sparse = crate::algebra::spmv(&prepared.operator, &basis).unwrap();
+                for (actual, expected) in sparse.iter().zip(expected) {
+                    assert!((actual - expected).abs() < 2e-14);
                 }
-                let warm = [0.08, -0.12, 0.04, 0.17].map(|value| amplitude * value);
-                let result = prepared.solve(&assembly, policy, Some(&warm)).unwrap();
-                let expected = independent_pressure(phase);
-                for (node, expected) in expected.iter().enumerate() {
-                    let error = (result.real[node] / amplitude - expected.0)
-                        .hypot(result.imaginary[node] / amplitude - expected.1);
-                    assert!(error < 2e-11, "phase={phase} amplitude={amplitude} method={preconditioner:?} error={error}");
-                }
-                let same = prepared
-                    .solve(&assembly, policy, Some(&result.coordinates))
-                    .unwrap();
-                assert_eq!(same.iterations, 0);
-                assert!(same.relative_residual <= policy.relative_tolerance);
-                assert!(prepared.solve(&assembly, policy, Some(&[0.0])).is_err());
             }
+            let result = prepared.solve(&assembly, policy).unwrap();
+            let expected = independent_pressure(phase);
+            for (node, expected) in expected.iter().enumerate() {
+                let error = (result.real[node] / amplitude - expected.0)
+                    .hypot(result.imaginary[node] / amplitude - expected.1);
+                assert!(error < 2e-11, "phase={phase} amplitude={amplitude} error={error}");
+            }
+            assert!(result.relative_residual <= policy.relative_tolerance);
+            assert_eq!(result.certificate.dimension, prepared.rhs.len());
+            assert!(result.certificate.contraction_bound < result.certificate.limit);
         }
     }
 }
 
 #[test]
-fn cancellation_never_accepts_a_converged_warm_start_or_setup() {
+fn cancellation_never_accepts_a_certified_setup_or_solve() {
     let assembly = assembly(0.731, 1.0);
     let policy = AcousticHarmonicPolicy::default();
     let prepared = super::PreparedReduced::new(&assembly, policy).unwrap();
-    let result = prepared.solve(&assembly, policy, None).unwrap();
     let token = crate::progress::FeaCancellationToken::new();
     token.cancel();
     let _guard =
@@ -79,12 +66,8 @@ fn cancellation_never_accepts_a_converged_warm_start_or_setup() {
         Err(super::AcousticHarmonicError::Cancelled)
     ));
     assert!(matches!(
-        prepared.solve(&assembly, policy, Some(&result.coordinates)),
+        prepared.solve(&assembly, policy),
         Err(super::AcousticHarmonicError::Cancelled)
-    ));
-    assert!(matches!(
-        super::ilu_error(crate::solve::krylov::right_ilu::SparseRightIluError::Cancelled),
-        super::AcousticHarmonicError::Cancelled
     ));
 }
 
@@ -149,52 +132,27 @@ fn zero_effective_rhs_keeps_physical_relative_acceptance_across_load_scales() {
                 .into_iter()
                 .map(|(real, imaginary)| ProjectionScalar { real, imaginary })
                 .collect();
-            for preconditioner in [
-                crate::contracts::SolverPreconditioner::None,
-                crate::contracts::SolverPreconditioner::Ilu0,
-            ] {
-                let policy = AcousticHarmonicPolicy {
-                    uniqueness: None,
-                    preconditioner,
-                    relative_tolerance: 1e-12,
-                    restart: 4,
-                    maximum_iterations: 16,
-                };
-                let prepared = super::PreparedReduced::new(&assembly, policy).unwrap();
-                assert!(prepared.rhs.iter().all(|value| *value == 0.0));
-                let physical_reference = if homogeneous {
-                    0.0
-                } else {
-                    1.25_f64.sqrt() * amplitude
-                };
-                assert!(
-                    (prepared.residual_reference - physical_reference).abs()
-                        <= 2e-15 * physical_reference
-                );
-                let cold = prepared.solve(&assembly, policy, None).unwrap();
-                assert_eq!(cold.iterations, 0);
-                assert_eq!(cold.relative_residual, 0.0);
-                let result = prepared
-                    .solve(
-                        &assembly,
-                        policy,
-                        Some(&[3.0 * amplitude, -2.0 * amplitude]),
-                    )
-                    .unwrap();
-                let error = result.real[1].hypot(result.imaginary[1]);
-                let reference = if homogeneous {
-                    65.0_f64.sqrt() * amplitude
-                } else {
-                    physical_reference
-                };
-                // Original free residual is literally (2+i)*p1.
-                let independent_relative = 5.0_f64.sqrt() * error / reference;
-                assert!((result.relative_residual - independent_relative).abs() < 1e-14);
-                assert!(independent_relative <= policy.relative_tolerance);
-                assert!(error / amplitude < 4e-12);
-                assert_eq!(result.real[0], fixed.0);
-                assert_eq!(result.imaginary[0], fixed.1);
-            }
+            let policy = AcousticHarmonicPolicy {
+                relative_tolerance: 1e-12,
+                ..Default::default()
+            };
+            let prepared = super::PreparedReduced::new(&assembly, policy).unwrap();
+            assert!(prepared.rhs.iter().all(|value| *value == 0.0));
+            let physical_reference = if homogeneous {
+                0.0
+            } else {
+                1.25_f64.sqrt() * amplitude
+            };
+            assert!(
+                (prepared.residual_reference - physical_reference).abs()
+                    <= 2e-15 * physical_reference
+            );
+            let cold = prepared.solve(&assembly, policy).unwrap();
+            assert_eq!(cold.relative_residual, 0.0);
+            assert_eq!(cold.real[1], 0.0);
+            assert_eq!(cold.imaginary[1], 0.0);
+            assert_eq!(cold.real[0], fixed.0);
+            assert_eq!(cold.imaginary[0], fixed.1);
         }
     }
 }
@@ -259,6 +217,7 @@ fn assembly(phase: f64, amplitude: f64) -> AcousticAssembly {
     AcousticAssembly {
         projection,
         stiffness: matrix(STIFFNESS, OperatorRole::Stiffness),
+        volume_stiffness: matrix(STIFFNESS, OperatorRole::Stiffness),
         mass: matrix(MASS, OperatorRole::Mass),
         impedance: matrix(IMPEDANCE, OperatorRole::Damping),
         omega: OMEGA,
@@ -398,22 +357,16 @@ fn free_phased_helmholtz_pressure_matches_independent_complex_dense_lifting() {
             let super::ReducedSolution {
                 real,
                 imaginary,
-                iterations,
                 relative_residual: residual,
                 ..
             } = solve(
                 &assembly,
                 AcousticHarmonicPolicy {
-                    uniqueness: None,
-                    preconditioner: crate::contracts::SolverPreconditioner::Ilu0,
                     relative_tolerance: 1e-12,
-                    restart: 8,
-                    maximum_iterations: 64,
+                    ..Default::default()
                 },
-                None,
             )
             .unwrap();
-            assert!(iterations > 0, "free phased DOFs must actually be solved");
             assert!(residual < 1e-11);
             for (node, expected) in expected.iter().enumerate() {
                 let error = (real[node] / amplitude - expected.0)

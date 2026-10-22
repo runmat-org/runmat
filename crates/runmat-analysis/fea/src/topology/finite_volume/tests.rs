@@ -236,7 +236,12 @@ fn rejects_nonmanifold_missing_boundary_inversion_curvature_and_mutated_record()
 #[test]
 fn exact_admission_bounds_succeed_and_each_one_below_rejects() {
     let source = two_cells();
-    let r = FiniteVolumeTopology::reserve(&source, policy()).unwrap();
+    let r = FiniteVolumeTopology::reserve(
+        &source,
+        policy(),
+        &crate::topology::FiniteVolumeCellSelection::AllElements,
+    )
+    .unwrap();
     let exact = FiniteVolumeProjectionPolicy {
         max_cells: r.cell_count,
         max_face_incidences: r.face_incidence_count,

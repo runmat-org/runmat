@@ -25,7 +25,8 @@ fn correction_resolves_small_defect_against_large_background() {
     b[0] = 4.0 + 2.0 * delta;
     b[1] = 4.0 - 2.0 * delta;
     // Independent exact solution: the antisymmetric eigenvector has eigenvalue 2.
-    let (x, iterations) = linear::solve(&p, &a, &b, &current).unwrap();
+    let (x, iterations) =
+        linear::solve(&p, &a, &b, &current, linear::LinearSystem::Momentum).unwrap();
     assert!(iterations > 0);
     assert!((x[0] - (1.0 + delta)).abs() < 1e-15);
     assert!((x[1] - (1.0 - delta)).abs() < 1e-15);
@@ -35,10 +36,18 @@ fn correction_resolves_small_defect_against_large_background() {
 
     b[0] = 4.0;
     b[1] = 4.0;
-    let (unchanged, iterations) = linear::solve(&p, &a, &b, &current).unwrap();
+    let (unchanged, iterations) =
+        linear::solve(&p, &a, &b, &current, linear::LinearSystem::Momentum).unwrap();
     assert_eq!(unchanged, current);
     assert_eq!(iterations, 0);
-    assert!(linear::solve(&p, &a, &b[..n - 1], &current).is_err());
+    assert!(linear::solve(
+        &p,
+        &a,
+        &b[..n - 1],
+        &current,
+        linear::LinearSystem::Momentum
+    )
+    .is_err());
     b[0] = f64::NAN;
-    assert!(linear::solve(&p, &a, &b, &current).is_err());
+    assert!(linear::solve(&p, &a, &b, &current, linear::LinearSystem::Momentum).is_err());
 }

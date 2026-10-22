@@ -141,26 +141,15 @@ fn verify_original_publication(
     drop(store);
     let mut store = FilesystemObjectStore::open(&path, limits.max_object_bytes).unwrap();
     let fields = import_fluid_recovered_fields(&store, response, &recovery, limits).unwrap();
-    let layout = imported
-        .result
-        .native_field_topology(&workload, &mesh)
-        .unwrap();
     let fanout = prepare_observation_fanout(
         &store,
         ObservationPreparation {
             source_host: recovery.host.clone(),
-            source: ObservationPublishedSource::FiniteVolumeRecovery {
+            source: ObservationPublishedSource::VolumeMeshRecovery {
                 recovery_request: recovery.request.clone(),
                 fields: fields.clone(),
-                layout: layout.clone(),
-                resource_plan: recovery
-                    .inputs
-                    .iter()
-                    .find(|i| i.manifest.kind == AnalysisNumericalObjectKind::ResourcePlan)
-                    .unwrap()
-                    .clone(),
             },
-            source_workload: ObservationWorkloadSource::FluidSteady(input(
+            source_workload: ObservationWorkloadSource::VolumeMesh(input(
                 AnalysisNumericalObjectKind::FluidSteadyWorkload,
             )),
             mesh: Some(input(AnalysisNumericalObjectKind::Mesh)),
@@ -216,7 +205,9 @@ fn verify_original_publication(
         producer: evaluation.producer,
         source_selection: evaluation.selection.identity(),
         source: evaluation.selection.source(),
-        topology_digest: layout.identity().discretization_digest(),
+        topology_digest: runmat_analysis_fea::topology::AnalysisProjection::derive(&mesh)
+            .unwrap()
+            .projection_digest,
         plan_identity: evaluation.plan.identity,
         results: vec![observed],
     })
@@ -224,20 +215,18 @@ fn verify_original_publication(
     let catalog = ObservationPublicationCatalog::new(
         imported.result.producer_identity(),
         evaluation.plan.clone(),
-        ObservationFieldCatalog::finite_volume_recovery(
+        ObservationFieldCatalog::volume_mesh_recovery(
             recovery.request.clone(),
             fields.manifest.clone(),
-            layout,
+            SequenceIdentity::from_solver_contract(&workload.model.sequence).unwrap(),
+            workload.model.sequence.steps[0].clone(),
         )
         .unwrap(),
         &workload.model.sequence.steps[0],
         vec![ObservationPublicationEntry::Sample(Box::new(
             ObservationSamplePublication::new(evaluation.clone(), &artifact).unwrap(),
         ))],
-        ObservationHistorySourceContext::FluidSteady {
-            workload: &workload,
-            mesh: &mesh,
-        },
+        ObservationHistorySourceContext::VolumeMesh { mesh: &mesh },
     )
     .unwrap();
     for declaration in &workload.model.sequence.steps[0].state_outputs {

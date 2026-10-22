@@ -10,9 +10,8 @@ pub(super) fn validate_inventory_shape(
         AnalysisNumericalObjectKind::FluidSteadyWorkload,
         AnalysisNumericalObjectKind::Mesh,
         AnalysisNumericalObjectKind::SolverResult,
-        AnalysisNumericalObjectKind::FieldSourceBinding,
     ];
-    if !(5..=6).contains(&inputs.len())
+    if !(4..=5).contains(&inputs.len())
         || kinds
             .iter()
             .any(|kind| inputs.iter().filter(|i| i.manifest.kind == *kind).count() != 1)
@@ -20,10 +19,10 @@ pub(super) fn validate_inventory_shape(
             .iter()
             .filter(|i| i.manifest.kind == AnalysisNumericalObjectKind::ResourcePlan)
             .count()
-            != inputs.len() - 5
+            != inputs.len() - 4
     {
         return Err(invalid(
-            "fluid recovery requires exact request/workload/mesh/result/layout and optional plan",
+            "fluid recovery requires exact request/workload/mesh/result and optional plan",
         ));
     }
     Ok(())

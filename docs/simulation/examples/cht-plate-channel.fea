@@ -1,0 +1,89 @@
+// Conjugate heat transfer reference: laminar coolant in a 10 mm channel over a 10 mm aluminium
+// plate heated from below at 1 kW/m^2. Beyond the thermal entrance, the bulk coolant rises by
+// q x / (rho c U h), the wetted wall sits q Dh / (k Nu) above the bulk with Nu = 5.385 for one
+// heated and one insulated wall, and the plate adds q t / k_s across its thickness.
+geometry cell {
+    file = "./geometry/cht-plate-channel.step"
+    units = m
+    interfaces = shared
+    region coolant : cell { select name "Coolant"; expect exactly_one }
+    region plate : solid { select name "Plate"; expect exactly_one }
+    region inlet : face { select name "Inlet"; expect exactly_one }
+    region outlet : face { select name "Outlet"; expect exactly_one }
+    region lid : face { select name "Lid"; expect exactly_one }
+    region channel_sides : face { select name "Channel sides"; expect one_or_more }
+    region channel_wall : face { select name "Channel wall"; expect exactly_one }
+    region wetted_wall : face { select name "Wetted wall"; expect exactly_one }
+    region heater : face { select name "Heater"; expect exactly_one }
+}
+
+mesh cell on geometry.cell {
+    tetrahedra {
+        order = linear
+        target_size = 0.00125 m
+        maximum_deviation = 0.0001 m
+    }
+}
+
+material coolant {
+    mass_density = 1000 kg/m^3
+    fluid {
+        law = incompressible_newtonian
+        dynamic_viscosity = 0.01 Pa*s
+    }
+    thermal {
+        reference_temperature = 293.15 K
+        modulus_temperature_coefficient = 0 K^-1
+        conductivity = 20 W/m/K
+        specific_heat = 4000 J/kg/K
+        expansion_coefficient = 0 K^-1
+    }
+}
+
+material aluminum {
+    mass_density = 2700 kg/m^3
+    thermal {
+        reference_temperature = 293.15 K
+        modulus_temperature_coefficient = 0 K^-1
+        conductivity = 167 W/m/K
+        specific_heat = 896 J/kg/K
+        expansion_coefficient = 0.000023 K^-1
+    }
+}
+
+model heated_channel {
+    thermal { reference_temperature = 293.15 K }
+    assign material.coolant to geometry.cell.region.coolant
+    assign material.aluminum to geometry.cell.region.plate
+    constraint inlet_flow {
+        fluid.velocity { target = geometry.cell.region.inlet; value = [0.01 m/s, 0 m/s, 0 m/s] }
+    }
+    constraint inlet_temperature {
+        thermal.temperature { target = geometry.cell.region.inlet; value = 293.15 K }
+    }
+    constraint lid { fluid.no_slip_wall { target = geometry.cell.region.lid } }
+    constraint wall { fluid.no_slip_wall { target = geometry.cell.region.channel_wall } }
+    constraint sides { fluid.symmetry { target = geometry.cell.region.channel_sides } }
+    load outlet {
+        fluid.outlet_pressure { target = geometry.cell.region.outlet; value = 0 Pa }
+    }
+    load heating {
+        thermal.heat_flux { target = geometry.cell.region.heater; value = 1000 W/m^2 }
+    }
+    interface wetted {
+        conjugate_heat_transfer.perfect {
+            primary = geometry.cell.region.wetted_wall
+            secondary = geometry.cell.region.channel_wall
+        }
+    }
+}
+
+study plate_channel {
+    geometry = geometry.cell
+    mesh = mesh.cell
+    model = model.heated_channel
+    analysis operating_point { conjugate_heat_transfer steady {} }
+    output temperature = analysis.operating_point.field.node.temperature
+    output velocity = analysis.operating_point.field.cell.fluid_velocity
+    output peak_temperature = max(output.temperature, over = geometry.cell.region.plate)
+}

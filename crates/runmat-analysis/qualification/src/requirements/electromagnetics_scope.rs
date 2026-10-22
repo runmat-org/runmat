@@ -66,7 +66,7 @@ const FEA_EM_TRANSIENT_001: Requirement = Requirement {
     title: "Transient electromagnetics",
     stages: &[Stage::Electromagnetics],
     acceptance: "Time-domain eddy currents (A-V formulation) run from time-history drives, including switching and pulse loads, with the loss passed to heat, from an `electromagnetic transient` study through `fea run`.",
-    owners: &["crates/runmat-analysis/fea/src/physics/maxwell/assembly.rs"],
+    owners: &["crates/runmat-analysis/fea/src/physics/maxwell/system.rs"],
     dependencies: &[],
     obligations: &[
         obligation(
@@ -94,7 +94,7 @@ const FEA_EM_NONLINEAR_001: Requirement = Requirement {
     title: "Saturating iron",
     stages: &[Stage::Electromagnetics],
     acceptance: "Nonlinear B-H curves (tabulated, monotone spline) run in magnetostatics, in harmonic analysis through an effective permeability, and in transient analysis, with Newton and line search.",
-    owners: &["crates/runmat-analysis/fea/src/physics/maxwell/assembly.rs"],
+    owners: &["crates/runmat-analysis/fea/src/physics/maxwell/system.rs"],
     dependencies: &[],
     obligations: &[
         obligation(
@@ -122,7 +122,7 @@ const FEA_EM_INPUTS_002: Requirement = Requirement {
     title: "Every declared electromagnetic input runs",
     stages: &[Stage::Electromagnetics],
     acceptance: "Every electromagnetic input the language declares runs and is documented: terminal_voltage, electric_current terminals, electric_charge, current_density, magnetic_vector_potential, magnetic.insulation, equipotential, floating, integral-current and periodic constraints.",
-    owners: &["crates/runmat-analysis/fea/src/physics/maxwell/assembly.rs"],
+    owners: &["crates/runmat-analysis/fea/src/physics/maxwell/system.rs"],
     dependencies: &[],
     obligations: &[
         obligation(
@@ -144,7 +144,7 @@ const FEA_EM_FREQUENCY_001: Requirement = Requirement {
     title: "Multi-frequency harmonic electromagnetics and fields",
     stages: &[Stage::Electromagnetics],
     acceptance: "Harmonic Maxwell runs several frequencies in one study through the executor with skin effect resolved, AC loss computed, outer air boundaries that do not corrupt the interior field, and the fields and terminal quantities the pages quote.",
-    owners: &["crates/runmat-analysis/fea/src/physics/maxwell/assembly.rs"],
+    owners: &["crates/runmat-analysis/fea/src/physics/maxwell/system.rs"],
     dependencies: &[],
     obligations: &[
         obligation(
@@ -178,7 +178,7 @@ const FEA_EM_OUTPUTS_001: Requirement = Requirement {
     title: "Electromagnetic outputs and fields",
     stages: &[Stage::Electromagnetics],
     acceptance: "Electromagnetic studies publish the derived values and fields the pages show: terminal voltage drop, resistance, current, loss power and field maxima, and current density, flux density and electric field with magnitudes (and phases for AC).",
-    owners: &["crates/runmat-analysis/fea/src/physics/maxwell/assembly.rs"],
+    owners: &["crates/runmat-analysis/fea/src/physics/maxwell/system.rs"],
     dependencies: &[],
     obligations: &[
         obligation(

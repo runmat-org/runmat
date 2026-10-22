@@ -9,26 +9,42 @@ pub fn validate_canonical_input<'a>(
         return Err(invalid("relative residual target"));
     }
     validate_model(model).map_err(invalid)?;
-    let Some(ElectromagneticDomain::Harmonic {
-        reference_frequency,
-    }) = &model.electromagnetic
-    else {
-        return Err(invalid("distinct harmonic electromagnetic intent required"));
-    };
     let step = model
         .sequence
         .steps
         .iter()
         .find(|step| step.step_id.as_str() == step_id)
         .ok_or_else(|| invalid("harmonic step not found"))?;
-    let frequency_matches = matches!(&step.independent_domain,
-        IndependentDomain::FrequencyHertz(values) if values.len() == 1
-            && values[0].is_finite() && values[0] > 0.0
-            && values[0].to_bits() == reference_frequency.hertz.to_bits());
-    if !frequency_matches {
-        return Err(MaxwellError::Unsupported(
-            "one exact step/domain harmonic frequency required; sweeps are not admitted".into(),
+    let IndependentDomain::FrequencyHertz(frequencies) = &step.independent_domain else {
+        return Err(invalid("harmonic step requires authored frequencies"));
+    };
+    let mut seen = std::collections::BTreeSet::new();
+    if frequencies.is_empty()
+        || frequencies
+            .iter()
+            .any(|value| !value.is_finite() || *value <= 0.0 || !seen.insert(value.to_bits()))
+    {
+        return Err(invalid(
+            "harmonic frequencies must be finite, positive and distinct",
         ));
+    }
+    // The step's frequencies are the analysis authority (each runs as its own case). An
+    // authored harmonic domain is optional; its reference frequency only names the domain.
+    match &model.electromagnetic {
+        None => {}
+        Some(ElectromagneticDomain::Harmonic {
+            reference_frequency,
+        }) if reference_frequency.hertz.is_finite() && reference_frequency.hertz > 0.0 => {}
+        Some(ElectromagneticDomain::Harmonic { .. }) => {
+            return Err(invalid(
+                "the model's harmonic reference frequency must be finite and positive",
+            ))
+        }
+        Some(_) => {
+            return Err(invalid(
+                "a harmonic analysis needs a harmonic (or no) electromagnetic model domain",
+            ))
+        }
     }
     crate::results::observation::validate_sampled_requests(step)
         .map_err(|error| MaxwellError::Unsupported(error.to_string()))?;
@@ -64,13 +80,16 @@ pub fn validate_canonical_input<'a>(
                 .into(),
         ));
     }
-    if model
-        .excitations
-        .iter()
-        .any(|action| !matches!(action, ExcitationAction::MagneticVolumeCurrentDensity(_)))
-    {
+    if model.excitations.iter().any(|action| {
+        !matches!(
+            action,
+            ExcitationAction::MagneticVolumeCurrentDensity(_)
+                | ExcitationAction::ElectricCurrent(_)
+                | ExcitationAction::TerminalVoltage(_)
+        )
+    }) {
         return Err(MaxwellError::Unsupported(
-            "only impressed volume current actions are admitted".into(),
+            "harmonic analysis admits impressed volume current density and terminal currents".into(),
         ));
     }
     Ok(step)

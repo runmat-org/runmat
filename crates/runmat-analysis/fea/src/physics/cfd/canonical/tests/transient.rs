@@ -250,6 +250,7 @@ fn original_mass_term_matches_independent_cell_integral_on_every_axis() {
         Some(TimeDerivative {
             previous_velocity: &old,
             duration_s: dt,
+            motion: None,
         }),
     )
     .unwrap();

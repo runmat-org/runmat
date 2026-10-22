@@ -8,17 +8,29 @@ pub use crate::pipeline::thermal::{PreparedThermalPrimarySolve, PreparedThermalS
 mod accuracy;
 mod acoustic;
 pub use acoustic::{
-    assemble_acoustic_frequency_result, AcousticFrequencyAssemblyOutput, AcousticFrequencyResult,
+    acoustic_native_field_definitions, assemble_acoustic_frequency_result,
+    AcousticFrequencyAssemblyOutput, AcousticFrequencyAssemblyRequest, AcousticFrequencyResult,
     AcousticFrequencyWorkload, AcousticHarmonicResultSummary, AcousticHarmonicSolverResult, AcousticHarmonicWorkload,
     AcousticNumericalReceipt, AcousticNumericalReceiptArtifact, ACOUSTIC_RECEIPT_MAX_ENCODED_BYTES,
 };
 mod accuracy_source;
+mod acoustic_response;
+pub use acoustic_response::{
+    AcousticResponseDiagnostics, AcousticResponseNumericalReceipt,
+    AcousticResponseNumericalReceiptArtifact, AcousticResponseSolver,
+    AcousticResponseSolverResult, AcousticResponseWorkload, ACOUSTIC_PRESSURE_FIELD_ID,
+    ACOUSTIC_RESPONSE_RECEIPT_MAX_ENCODED_BYTES,
+};
 mod buckling_result;
 mod buckling_workload;
 mod electrical_static;
 mod electrothermal;
 pub use electrothermal::{
-    bind_retained_joule_heat, execute_steady_electrothermal_from_retained, RetainedJouleHeatSource,
+    bind_element_heat_source, bind_retained_joule_heat, conductivity_at, electrical_part,
+    electrothermal_conduction_study, element_temperatures, execute_coupled_electrothermal,
+    is_electrothermal_study, solve_electrothermal_heat_study, ElectrothermalOperatingPoint, execute_steady_electrothermal_from_retained, thermal_part,
+    CoupledElectrothermalCompletion, ElectrothermalCouplingControls,
+    ElectrothermalElectricalSample, ElectrothermalSweep, RetainedJouleHeatSource,
     RetainedJouleHeatTransfer, SteadyElectrothermalCompletion,
 };
 mod magnetic_static;
@@ -35,7 +47,8 @@ pub use maxwell_harmonic::{
 };
 mod error;
 pub use electrical_static::{
-    ElectricalNumericalReceipt, ElectricalNumericalReceiptArtifact, ElectricalStaticSolverResult,
+    electrical_native_field_definitions, ElectricalNumericalReceipt,
+    ElectricalNumericalReceiptArtifact, ElectricalStaticSolverResult,
     ElectricalStaticWorkload, ELECTRICAL_RECEIPT_MAX_ENCODED_BYTES,
 };
 mod field;
@@ -45,12 +58,14 @@ mod fluid;
 #[cfg(test)]
 pub(crate) use fluid::tests::authored as fluid_test_workload;
 pub use fluid::{
-    fluid_native_field_definition_inventory, fluid_receipt_encoding_profile, FluidNumericalReceipt,
-    FluidNumericalReceiptArtifact, FluidSolverProvenance, FluidSteadySolverResult,
-    FluidSteadyWorkload, FluidTransientBlock, FluidTransientBlockReservation,
-    FluidTransientBlockResult, FluidTransientBlockWorkload, FluidTransientCheckpoint,
-    FluidTransientSchedule, FluidTransientSolverResult, FluidTransientWorkload,
-    PreparedFluidTransient, PreparedFluidTransientContinuation, FLUID_RECEIPT_MAX_ENCODED_BYTES,
+    fluid_native_field_definition_inventory,
+    fluid_native_field_definitions, fluid_receipt_encoding_profile, FluidCoupling, FluidNumericalReceipt,
+    FluidNumericalReceiptArtifact, FluidRetainedOriginal, FluidSolverProvenance,
+    FluidSteadySolverResult, FluidSteadyWorkload, FluidTransientBlock,
+    FluidTransientBlockReservation, FluidTransientBlockResult, FluidTransientBlockWorkload,
+    FluidTransientCheckpoint, FluidTransientSchedule, FluidTransientSolverResult,
+    FluidTransientWorkload, PreparedFluidTransient, PreparedFluidTransientContinuation,
+    FLUID_RECEIPT_MAX_ENCODED_BYTES,
 };
 mod frequency_assembly;
 mod frequency_balance;

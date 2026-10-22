@@ -78,7 +78,7 @@ fn tet10_charged_slab_matches_potential_field_charge_and_energy_with_both_signs_
                 assert!(field[1].abs() < 1e-9 && field[2].abs() < 1e-9);
             }
             let source = response.charge_sources.as_ref().unwrap();
-            assert_relative(source.integrated_charge_c, sign * 2.0 * epsilon, 1e-10);
+            assert_relative(source.integrated_source, sign * 2.0 * epsilon, 1e-10);
             assert!(source.projection_evidence.iter().all(|e| e.accepted));
             for terminal in &response.terminals {
                 assert_relative(terminal.outward_flux, sign * epsilon, 1e-9);
@@ -154,7 +154,7 @@ fn tet4_charged_slab_has_independent_spatial_field_and_energy_convergence() {
                 .charge_sources
                 .as_ref()
                 .unwrap()
-                .integrated_charge_c,
+                .integrated_source,
             2.0 * epsilon,
             1e-10,
         );
@@ -212,8 +212,8 @@ fn exact_volume_region_and_signed_superposition_preserve_charge_and_fields() {
             assert!((a - b).abs() < 1e-9);
         }
         let source = actual.charge_sources.as_ref().unwrap();
-        assert_relative(source.integrated_charge_c, 2.0 * epsilon, 1e-10);
-        assert_relative(source.absolute_charge_c, 4.0 * epsilon, 1e-10);
+        assert_relative(source.integrated_source, 2.0 * epsilon, 1e-10);
+        assert_relative(source.absolute_source, 4.0 * epsilon, 1e-10);
         assert_eq!(source.projection_evidence.len(), 2);
     }
 }

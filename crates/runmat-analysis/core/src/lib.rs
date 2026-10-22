@@ -53,7 +53,7 @@ pub use execution_policy::{
     MAX_CPU_THREADS_PER_WORKER,
 };
 pub use study::{
-    attach_authored_outputs, authored_output_types, geometry_parameter_input_type,
+    attach_authored_outputs, authored_output_root, authored_output_types, retain_authored_outputs, geometry_parameter_input_type,
     lower_authored_observations, validate_authored_outputs, AuthoredCaseOutputRef,
     AuthoredExtremaTiePolicy, AuthoredFieldDomain, AuthoredFieldProjection,
     AuthoredGeometryArgument, AuthoredGeometryArgumentValue, AuthoredGeometryInstance,
@@ -104,7 +104,7 @@ pub use problem::authored_inputs::{
     AuthoredInputDefinition, AuthoredInputError, AuthoredInputType, AuthoredInputValue,
 };
 pub use problem::authored_model_physics::{
-    AuthoredBoundary, AuthoredBoundaryKind, AuthoredConnector, AuthoredConnectorKind,
+    AuthoredBoundary, AuthoredBoundaryCoefficient, AuthoredBoundaryKind, AuthoredConnector, AuthoredConnectorKind,
     AuthoredInterface, AuthoredInterfaceKind, AuthoredModelPhysicsError,
 };
 pub use problem::authored_parameterized_signals::{
@@ -238,6 +238,7 @@ pub use study::output::{
     ObservationThreshold, ObservationValueShape, PartialAccessPolicy, RecoveryPolicy,
     ReductionPolicy, RetentionPolicy, SamplingPolicy, SeriesObservationEvent, SeriesReduction,
     SeriesWeighting, SignConvention, SolverObservationEvent, SpatialReduction,
+    SOUND_PRESSURE_LEVEL_REFERENCE_PA,
 };
 pub use study::sequence::{
     ActivationLifecycle, AnalysisSequence, ExcitationCaseSelection, IndependentDomain,

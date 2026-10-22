@@ -14,6 +14,7 @@ pub enum StudyRootPlanning {
     Magnetic(runmat_analysis_fea::study::MagneticStudyPlanningPolicy),
     Maxwell(runmat_analysis_fea::study::MaxwellStudyPlanningPolicy),
     Acoustic(runmat_analysis_fea::study::AcousticStudyPlanningPolicy),
+    AcousticResponse(runmat_analysis_fea::study::AcousticResponseStudyPlanningPolicy),
     Fluid(runmat_analysis_fea::study::FluidStudyPlanningPolicy),
     NonlinearSolid(NonlinearSolidStudyPlanning),
 }
@@ -40,6 +41,7 @@ impl StudyRootPlanning {
             | Self::Magnetic(_)
             | Self::Maxwell(_)
             | Self::Acoustic(_)
+            | Self::AcousticResponse(_)
             | Self::Fluid(_) => Ok(()),
         }
     }
@@ -53,6 +55,7 @@ impl StudyRootPlanning {
             | Self::Magnetic(_)
             | Self::Maxwell(_)
             | Self::Acoustic(_)
+            | Self::AcousticResponse(_)
             | Self::Fluid(_)
             | Self::NonlinearSolid(_) => runmat_analysis_fea::ComputeBackend::Cpu,
         }

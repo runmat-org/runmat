@@ -33,6 +33,8 @@ pub(super) fn solve(
     tolerance: f64,
 ) -> Result<MagnetostaticResponse, MagnetostaticError> {
     let n = assembled.saddle.rows();
+    // The curl-curl/gauge saddle is indefinite with a material-contrast-dependent spectrum
+    // (iron next to air); a sparse LU solves it exactly instead of an unpreconditioned Krylov.
     let (solution, iterations) = if n == 0 {
         (Vec::new(), 0)
     } else {

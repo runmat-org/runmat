@@ -345,12 +345,12 @@ fn unsupported_identity_and_solution_space_are_typed_rejections() {
             .next()
             .expect("thermal realization must be registered");
     let unsupported_family = admit_formulation(FormulationAdmissionRequest {
-        family: PhysicsFamily::Acoustic,
-        procedure: AnalysisProcedure::TransientResponse,
+        family: PhysicsFamily::Fluid,
+        procedure: AnalysisProcedure::ModalExtraction,
         solution_space: SolutionSpace::Direct,
         realization: realization.clone(),
     })
-    .expect_err("transient acoustic is not exposed");
+    .expect_err("fluid modal extraction is not exposed");
     assert_eq!(
         unsupported_family.reason,
         FormulationAdmissionRejectionReason::UnsupportedFamilyProcedure

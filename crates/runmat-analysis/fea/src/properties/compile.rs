@@ -211,23 +211,25 @@ pub(super) fn visit<'a>(
         }
     }
     if let Some(mesh) = mesh {
-        let cell_role = model
+        let fluid_step = model
             .sequence
             .steps
             .iter()
-            .any(|step| step.family == runmat_analysis_core::PhysicsFamily::Fluid)
-            || model
-                .material_assignments
-                .iter()
-                .any(|assignment| matches!(assignment.target, PropertyRegionTarget::Cell(_)));
-        if cell_role {
-            if model
-                .material_assignments
-                .iter()
-                .any(|assignment| matches!(assignment.target, PropertyRegionTarget::Solid(_)))
-            {
-                return Err(PropertyCompilationError::UnsupportedMixedVolumeRoles);
-            }
+            .any(|step| step.family == runmat_analysis_core::PhysicsFamily::Fluid);
+        let has_cell = model
+            .material_assignments
+            .iter()
+            .any(|assignment| matches!(assignment.target, PropertyRegionTarget::Cell(_)));
+        let has_solid = model
+            .material_assignments
+            .iter()
+            .any(|assignment| matches!(assignment.target, PropertyRegionTarget::Solid(_)));
+        if fluid_step && has_solid {
+            return Err(PropertyCompilationError::UnsupportedMixedVolumeRoles);
+        }
+        if has_cell && has_solid {
+            visit_partitioned_volumes(model, mesh, materials, visitor)?;
+        } else if fluid_step || has_cell {
             visit_cells(model, mesh, materials, visitor)?;
         } else {
             visit_solids(model, mesh, materials, visitor)?;
@@ -300,6 +302,71 @@ fn visit_cells<'a>(
         })?;
     }
     reject_unmatched("cell", &assignments, &matched)
+}
+
+/// A coupled fluid-solid model partitions the volume: every element is owned by exactly one
+/// cell (fluid) or solid assignment, and every assignment owns at least one element.
+fn visit_partitioned_volumes<'a>(
+    model: &'a AnalysisModel,
+    mesh: &'a SolverMeshArtifact,
+    materials: &'a BTreeMap<&'a str, &'a MaterialModel>,
+    visitor: &mut impl FnMut(SelectedProperty<'a>) -> Result<(), PropertyCompilationError>,
+) -> Result<(), PropertyCompilationError> {
+    let cells = assignments_for(model, materials, |target| {
+        matches!(target, PropertyRegionTarget::Cell(_))
+    })?;
+    let solids = assignments_for(model, materials, |target| {
+        matches!(target, PropertyRegionTarget::Solid(_))
+    })?;
+    let mut matched_cells = BTreeSet::new();
+    let mut matched_solids = BTreeSet::new();
+    for element in &mesh.topology.volume_elements {
+        let cell_matches = cells
+            .iter()
+            .filter(|(_, assignment, _)| solid_scope_matches(assignment.target.scope(), element))
+            .count();
+        let solid_matches = solids
+            .iter()
+            .filter(|(_, assignment, _)| solid_scope_matches(assignment.target.scope(), element))
+            .count();
+        if cell_matches + solid_matches != 1 {
+            return Err(PropertyCompilationError::InvalidCoverage {
+                role: "volume",
+                element_id: element.element_id.to_string(),
+                region_id: element.region_id.source_topology_id.clone(),
+                assignment_count: cell_matches + solid_matches,
+            });
+        }
+        if cell_matches == 1 {
+            let (assignment_index, assignment, material) = cells
+                .iter()
+                .find(|(_, assignment, _)| solid_scope_matches(assignment.target.scope(), element))
+                .expect("counted one cell assignment");
+            matched_cells.insert(*assignment_index);
+            visitor(SelectedProperty::Cell {
+                element_id: element.element_id,
+                identity: element.stable_identity,
+                material,
+                assignment_index: *assignment_index,
+                assignment,
+            })?;
+        } else {
+            let (assignment_index, assignment, material) = solids
+                .iter()
+                .find(|(_, assignment, _)| solid_scope_matches(assignment.target.scope(), element))
+                .expect("counted one solid assignment");
+            matched_solids.insert(*assignment_index);
+            visitor(SelectedProperty::Solid {
+                element_id: element.element_id,
+                identity: element.stable_identity,
+                material,
+                assignment_index: *assignment_index,
+                assignment,
+            })?;
+        }
+    }
+    reject_unmatched("cell", &cells, &matched_cells)?;
+    reject_unmatched("solid", &solids, &matched_solids)
 }
 
 fn visit_explicit<'a>(

@@ -33,10 +33,21 @@ pub fn plan_maxwell_study(
         })
         .reduce(f64::min)
         .ok_or(MaxwellStudyPlanningError::MissingRelativeAlgebraicTarget)?;
+    let runmat_analysis_core::IndependentDomain::FrequencyHertz(frequencies) =
+        &step.independent_domain
+    else {
+        return Err(MaxwellStudyPlanningError::UnsupportedIntent(
+            "harmonic step without frequencies".into(),
+        ));
+    };
+    let first = *frequencies
+        .first()
+        .ok_or_else(|| MaxwellStudyPlanningError::UnsupportedIntent("no frequencies".into()))?;
     let workload = MaxwellHarmonicWorkload {
         model: study.model.clone(),
         step_id: step.step_id.clone(),
         relative_residual_target,
+        frequency: runmat_analysis_core::Frequency::new(first),
     };
     workload
         .validate()

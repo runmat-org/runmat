@@ -115,10 +115,40 @@ impl RecoveredFieldPartition {
         Self::select_view(&RecoveredFieldView::from_field(source)?, source_indices)
     }
 
+    /// Select a region-supported field: `support` holds the ascending global indices its values
+    /// are stored at. Every requested index must lie inside the support (fails closed otherwise).
+    pub fn select_supported(
+        source: &RecoveredField,
+        source_indices: Vec<usize>,
+        support: &[usize],
+    ) -> Result<Self, RecoveredFieldError> {
+        let stored = source_indices
+            .iter()
+            .map(|index| {
+                support.binary_search(index).map_err(|_| {
+                    RecoveredFieldError::InvalidArtifact(
+                        "observation target lies outside the field's supported entities".into(),
+                    )
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Self::select_stored(&RecoveredFieldView::from_field(source)?, source_indices, &stored)
+    }
+
     /// Extract from content already validated by the shared borrowed-field identity boundary.
     pub fn select_view(
         source: &RecoveredFieldView<'_>,
         source_indices: Vec<usize>,
+    ) -> Result<Self, RecoveredFieldError> {
+        let stored = source_indices.clone();
+        Self::select_stored(source, source_indices, &stored)
+    }
+
+    /// `source_indices` are global entity indices; `stored` their positions in storage.
+    fn select_stored(
+        source: &RecoveredFieldView<'_>,
+        source_indices: Vec<usize>,
+        stored: &[usize],
     ) -> Result<Self, RecoveredFieldError> {
         if source_indices.is_empty() || source_indices.windows(2).any(|pair| pair[0] >= pair[1]) {
             return Err(RecoveredFieldError::InvalidArtifact(
@@ -134,7 +164,7 @@ impl RecoveredFieldPartition {
                     "field partition extraction requires host-resident f64 values".into(),
                 ))?;
         let mut values = Vec::with_capacity(source_indices.len().saturating_mul(components));
-        for index in &source_indices {
+        for index in stored {
             let start = index
                 .checked_mul(components)
                 .ok_or(RecoveredFieldError::StorageShapeMismatch)?;

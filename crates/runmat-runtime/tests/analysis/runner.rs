@@ -672,6 +672,9 @@ fn primary_result_field_id(procedure_step: &ProcedureStep) -> String {
         AnalysisSolverOptions::AcousticHelmholtz(_) => {
             FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE.to_string()
         }
+        AnalysisSolverOptions::AcousticResponse(_) => {
+            panic!("acoustic modal/transient fixtures execute through the study runner")
+        }
         AnalysisSolverOptions::ElectricalStatic(_)
         | AnalysisSolverOptions::Magnetostatic(_)
         | AnalysisSolverOptions::MaxwellHarmonic(_) => {
@@ -2747,6 +2750,9 @@ fn run_fixture_cpu(
         AnalysisSolverOptions::StructuralBuckling(_) => panic!(
             "structural-buckling fixtures must execute through the study runner, not the legacy single-run CPU fixture harness"
         ),
+        AnalysisSolverOptions::AcousticResponse(_) => panic!(
+            "acoustic modal/transient fixtures must execute through the study runner, not the legacy single-run CPU fixture harness"
+        ),
         AnalysisSolverOptions::AcousticHelmholtz(_) => analysis_run_acoustic_with_options_op(
             model,
             ComputeBackend::Cpu,
@@ -2866,6 +2872,9 @@ fn run_fixture_gpu(
         ),
         AnalysisSolverOptions::StructuralBuckling(_) => panic!(
             "structural-buckling fixtures must execute through the study runner, not the legacy single-run GPU fixture harness"
+        ),
+        AnalysisSolverOptions::AcousticResponse(_) => panic!(
+            "acoustic modal/transient fixtures must execute through the study runner, not the legacy single-run GPU fixture harness"
         ),
         AnalysisSolverOptions::AcousticHelmholtz(_) => analysis_run_acoustic_with_options_op(
             model,

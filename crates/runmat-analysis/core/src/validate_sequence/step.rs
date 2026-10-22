@@ -112,7 +112,8 @@ fn coupled_procedure_is_supported(
         ),
         CoupledPhysicsFamily::FluidStructureInteraction => matches!(
             procedure,
-            AnalysisProcedure::TransientResponse
+            AnalysisProcedure::Static
+                | AnalysisProcedure::TransientResponse
                 | AnalysisProcedure::Nonlinear
                 | AnalysisProcedure::Adaptive
         ),
@@ -416,7 +417,13 @@ fn family_can_publish_state(family: PhysicsFamily, kind: StateKind) -> bool {
                 | StateKind::Integrator
         ),
         PhysicsFamily::Acoustic => {
-            matches!(kind, StateKind::AcousticComplex | StateKind::Integrator)
+            matches!(
+                kind,
+                StateKind::AcousticComplex
+                    | StateKind::AcousticModes
+                    | StateKind::AcousticPressure
+                    | StateKind::Integrator
+            )
         }
         PhysicsFamily::Fluid => matches!(
             kind,
@@ -475,6 +482,10 @@ fn state_use_accepts_kind(use_as: StateUse, kind: StateKind) -> bool {
         ),
         StateUse::ModalBasis => kind == StateKind::ModalBasis,
         StateUse::CoupledInterface => kind == StateKind::CoupledInterface,
+        StateUse::HeatSource => matches!(
+            kind,
+            StateKind::ElectromagneticStatic | StateKind::ElectromagneticComplex
+        ),
         StateUse::PhysicalInitialState
         | StateUse::LinearizationPoint
         | StateUse::InitialGuess

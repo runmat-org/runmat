@@ -265,7 +265,7 @@ const NUMERICS: Requirement = Requirement {
     ),
     owners: &[
         "crates/runmat-analysis/fea/src/physics/acoustic/canonical/response.rs",
-        "crates/runmat-analysis/fea/src/solve/uniqueness/mod.rs",
+        "crates/runmat-analysis/fea/src/solve/certificate.rs",
     ],
     dependencies: &[concat!(
         "Radiation convergence remains a mandatory boundary obligation; candidate ",
@@ -306,11 +306,11 @@ const NUMERICS: Requirement = Requirement {
         obligation(
             "uniqueness",
             concat!(
-                "Source-independent original reduced-operator evidence establishes requested ",
-                "uniqueness before accepting physical residual/power closure. An ",
-                "unsuccessful sufficient check is indeterminate, not a singularity ",
-                "diagnosis; no artificial damping or sampled small matrix substitutes for ",
-                "the operator.",
+                "The sparse LU that solves the original reduced operator certifies its ",
+                "nonsingularity (estimated right-inverse defect contraction below the ",
+                "authored limit) before physical residual/power closure is accepted; above ",
+                "the limit the solve fails closed. No artificial damping or sampled small ",
+                "matrix substitutes for the operator.",
             ),
             EvidenceKind::IndependentReference,
             KERNEL,
@@ -318,10 +318,10 @@ const NUMERICS: Requirement = Requirement {
         obligation(
             "cold_claim",
             concat!(
-                "Retained uniqueness records bind original controls, operator/result and ",
-                "numerical receipt. Cold hashes or decoded producer claims never become ",
-                "trusted mathematical proof; independent replay requires original operator ",
-                "and admitted witness/candidate reconstruction.",
+                "Retained factorization certificates bind the authored limit, original ",
+                "operator identity, result and numerical receipt. Cold hashes or decoded ",
+                "producer claims never become trusted mathematical proof; independent ",
+                "replay requires refactoring the original operator.",
             ),
             EvidenceKind::OriginalStateComparison,
             KERNEL,

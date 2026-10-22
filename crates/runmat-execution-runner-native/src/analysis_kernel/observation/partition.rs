@@ -40,17 +40,12 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
         &invocation,
         AnalysisNumericalObjectKind::MaxwellHarmonicWorkload,
     )?;
-    let fluid_workload = optional_unique_input(
-        &invocation,
-        AnalysisNumericalObjectKind::FluidSteadyWorkload,
-    )?;
     if usize::from(nonlinear_workload.is_some())
         + usize::from(linear_workload.is_some())
         + usize::from(frequency_workload.is_some())
         + usize::from(thermal_workload.is_some())
         + usize::from(magnetic_workload.is_some())
         + usize::from(maxwell_workload.is_some())
-        + usize::from(fluid_workload.is_some())
         > 1
     {
         return Err(AnalysisBridgeError::Invalid(
@@ -100,7 +95,6 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
         thermal_workload.is_some(),
         magnetic_workload.is_some(),
         maxwell_workload.is_some(),
-        fluid_workload.is_some(),
     ]
     .into_iter()
     .filter(|present| *present)
@@ -148,18 +142,7 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
         .transpose()?;
     let mut solid_projection = None;
     let mut sampled_topology = None;
-    let mut finite_volume_topology = None;
-    let (model, backend) = if let Some(workload_objects) = fluid_workload {
-        let (model, projection, geometry) = finite_volume::admit_source(
-            workload_objects,
-            &catalog,
-            &source_request,
-            &partition_plan,
-            mesh.as_ref(),
-        )?;
-        finite_volume_topology = Some((projection, geometry));
-        (Some(model), runmat_analysis_fea::ComputeBackend::Cpu)
-    } else if let Some(workload_objects) = magnetic_workload.or(maxwell_workload) {
+    let (model, backend) = if let Some(workload_objects) = magnetic_workload.or(maxwell_workload) {
         let (model, sampling) = sampled::admit_source(
             workload_objects,
             &catalog,
@@ -282,7 +265,6 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
     if model.is_none()
         && solid_projection.is_none()
         && sampled_topology.is_none()
-        && finite_volume_topology.is_none()
     {
         return Err(AnalysisBridgeError::Identity(
             "structural observation evaluation requires its authored model",
@@ -303,7 +285,7 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
             ))
         }
     };
-    if (sampled_topology.is_some() || finite_volume_topology.is_some())
+    if sampled_topology.is_some()
         && (accelerator.is_some() || request.event_attribution.is_some())
     {
         return Err(AnalysisBridgeError::Identity(
@@ -340,16 +322,6 @@ pub(in crate::analysis_kernel) fn execute_observation_partition(
         ));
     }
     let contribution = match resource_plan.request.accelerators.as_slice() {
-        [] if finite_volume_topology.is_some() => {
-            let runmat_analysis_fea::results::observation::ObservationFieldCatalogSource::FiniteVolumeRecovery { layout, .. } = catalog.source() else {
-                return Err(AnalysisBridgeError::Identity("finite-volume catalog layout absent"));
-            };
-            let (projection, geometry) = finite_volume_topology.as_ref().expect("finite-volume branch");
-            runmat_analysis_fea::results::observation::evaluate_finite_volume_observation_partition(
-                &source_request.plan, &partition_plan, partition,
-                runmat_analysis_fea::results::observation::FiniteVolumeObservationSource { layout, projection, geometry },
-                &fields, runmat_analysis_fea::results::observation::ObservationLimits::default())
-        }
         [] if sampled_topology.is_some() => {
             runmat_analysis_fea::results::observation::evaluate_sampled_observation_partition(
                 &source_request.plan,

@@ -33,42 +33,57 @@ pub(super) fn validate_temperature_regions(
     mesh: &SolverMeshArtifact,
     context: &FeaThermoMechanicalContext,
 ) -> Result<(), ThermoelasticLoadError> {
-    let present = mesh
-        .topology
-        .volume_elements
-        .iter()
-        .map(|element| element.region_id.source_topology_id.as_str())
-        .collect::<BTreeSet<_>>();
     let mut targeted = BTreeSet::new();
     for target in &context.region_temperature_deltas {
-        if !targeted.insert(target.region_id.as_str()) {
+        if !targeted.insert(target.region_id()) {
             return Err(ThermoelasticLoadError::DuplicateRegion(
-                target.region_id.clone(),
+                target.region_id().into(),
             ));
         }
-        if !present.contains(target.region_id.as_str()) {
+        if !mesh
+            .topology
+            .volume_elements
+            .iter()
+            .any(|element| target.contains_element(&element.region_id, &element.provenance))
+        {
             return Err(ThermoelasticLoadError::UnknownRegion(
-                target.region_id.clone(),
+                target.region_id().into(),
             ));
         }
         let temperature = context.reference_temperature_k + target.temperature_delta_k;
         if !temperature.is_finite() || temperature <= 0.0 {
             return Err(ThermoelasticLoadError::InvalidTemperature(
-                target.region_id.clone(),
+                target.region_id().into(),
+            ));
+        }
+    }
+    // Each element takes at most one prescribed regional temperature.
+    for element in &mesh.topology.volume_elements {
+        let owners = context
+            .region_temperature_deltas
+            .iter()
+            .filter(|target| target.contains_element(&element.region_id, &element.provenance))
+            .count();
+        if owners > 1 {
+            return Err(ThermoelasticLoadError::DuplicateRegion(
+                element.region_id.source_topology_id.clone(),
             ));
         }
     }
     Ok(())
 }
 
+/// Prescribed temperature of a solver element: its region's temperature when a regional
+/// field covers it, otherwise the whole-model temperature.
 pub(super) fn element_temperature_k(
-    region_id: &str,
+    region: &runmat_meshing_core::PersistentEntityId,
+    provenance: &[runmat_meshing_core::PersistentEntityId],
     context: &FeaThermoMechanicalContext,
 ) -> Result<f64, ThermoelasticLoadError> {
     let delta = context
         .region_temperature_deltas
         .iter()
-        .find(|target| target.region_id == region_id)
+        .find(|target| target.contains_element(region, provenance))
         .map_or(context.applied_temperature_delta_k, |target| {
             target.temperature_delta_k
         });
@@ -76,20 +91,23 @@ pub(super) fn element_temperature_k(
     if temperature.is_finite() && temperature > 0.0 {
         Ok(temperature)
     } else {
-        Err(ThermoelasticLoadError::InvalidTemperature(region_id.into()))
+        Err(ThermoelasticLoadError::InvalidTemperature(
+            region.source_topology_id.clone(),
+        ))
     }
 }
 
 pub(super) fn element_thermal_eigenstrain(
     owner: &CompiledElementMaterial,
-    region_id: &str,
+    region: &runmat_meshing_core::PersistentEntityId,
+    provenance: &[runmat_meshing_core::PersistentEntityId],
     context: &FeaThermoMechanicalContext,
 ) -> Result<f64, ThermoelasticLoadError> {
     let thermal = owner
         .material
         .require_thermal()
         .map_err(|_| ThermoelasticLoadError::InvalidConstitutive(owner.element_id))?;
-    let temperature_k = element_temperature_k(region_id, context)?;
+    let temperature_k = element_temperature_k(region, provenance, context)?;
     let strain =
         thermal.expansion_coefficient_per_k * (temperature_k - thermal.reference_temperature_k);
     if strain.is_finite() {
@@ -123,7 +141,7 @@ pub(super) fn assemble_prescribed_temperature_load(
             .require_mechanical()
             .map_err(|_| ThermoelasticLoadError::InvalidConstitutive(element.element_id))?;
         let hydrostatic_stress_pa = mechanical.youngs_modulus_pa
-            * element_thermal_eigenstrain(owner, &element.region_id.source_topology_id, context)?
+            * element_thermal_eigenstrain(owner, &element.region_id, &element.provenance, context)?
             / (1.0 - 2.0 * mechanical.poisson_ratio);
         if !hydrostatic_stress_pa.is_finite() {
             return Err(ThermoelasticLoadError::InvalidConstitutive(
@@ -346,7 +364,7 @@ mod tests {
         unknown
             .region_temperature_deltas
             .push(crate::FeaThermoRegionTemperatureDelta {
-                region_id: "missing_region".into(),
+                target: runmat_analysis_core::RegionTarget::volume("missing_region"),
                 temperature_delta_k: 10.0,
             });
         assert!(matches!(
@@ -432,7 +450,7 @@ mod tests {
         prescribed
             .region_temperature_deltas
             .push(crate::FeaThermoRegionTemperatureDelta {
-                region_id: "mid_aluminum".into(),
+                target: runmat_analysis_core::RegionTarget::volume("mid_aluminum"),
                 temperature_delta_k: 30.0,
             });
         let load = assemble_prescribed_temperature_load(&mesh, &properties, &prescribed).unwrap();
@@ -500,7 +518,7 @@ mod tests {
         prescribed
             .region_temperature_deltas
             .push(crate::FeaThermoRegionTemperatureDelta {
-                region_id: "mid_aluminum".into(),
+                target: runmat_analysis_core::RegionTarget::volume("mid_aluminum"),
                 temperature_delta_k: 40.0,
             });
         assert!(matches!(

@@ -50,13 +50,21 @@ impl SampledStudyObservations {
         preparation: ObservationPreparation,
         sample: RecoveredFieldSample,
     ) -> AnalysisBridgeResult<PreparedObservationFanout> {
+        Self::prepare_fanout_if_sampled(source, preparation, sample)?.ok_or_else(|| {
+            invalid("sampled authored observations have no executable partitions")
+        })
+    }
+
+    /// Fan out at one retained sample of a multi-sample source; `None` when no authored
+    /// observation samples this coordinate (for example a final-only output at an earlier
+    /// frequency of a sweep).
+    pub fn prepare_fanout_if_sampled(
+        source: &impl CacheImport,
+        preparation: ObservationPreparation,
+        sample: RecoveredFieldSample,
+    ) -> AnalysisBridgeResult<Option<PreparedObservationFanout>> {
         let task = prepare_observation_fanout(source, preparation, sample, None)?;
-        if task.partitions.is_empty() {
-            return Err(invalid(
-                "sampled authored observations have no executable partitions",
-            ));
-        }
-        Ok(task)
+        Ok((!task.partitions.is_empty()).then_some(task))
     }
     pub fn partition(&self, ordinal: usize) -> AnalysisBridgeResult<&PreparedObservationPartition> {
         if self.contributions.contains_key(&ordinal) {

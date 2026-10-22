@@ -310,3 +310,57 @@ fn transient_formulation_cannot_be_claimed_by_generic_profile_admission() {
     );
     let _ = w;
 }
+
+/// The authored study workload runs the same backward-Euler history as the kernel workload,
+/// retains it with its initial state, and cold-recovers every interval without solving.
+#[test]
+fn authored_study_workload_retains_and_recovers_the_complete_transient_history() {
+    let (kernel, m) = accelerating_transient();
+    let study = FluidSteadyWorkload {
+        model: kernel.model.clone(),
+        step_id: kernel.step_id.clone(),
+        policy: kernel.policy,
+        geometry_policy: kernel.geometry_policy,
+    };
+    assert!(study.is_transient());
+    assert_eq!(
+        study.formulation(&m).unwrap().realization().temporals,
+        vec![TemporalImplementation::FluidBackwardEulerConservativeMomentumPressure]
+    );
+    let budget = study.result_encoding_profile(&m).unwrap();
+    let result = study.execute(&m).unwrap();
+    let bytes = result.canonical_bytes().unwrap();
+    assert!((bytes.len() as u64) <= budget.encoded_bytes_upper_bound);
+    let history = result.transient_history().unwrap();
+    assert_eq!(history.original_results().len(), 3);
+    let reference = kernel.execute(&m).unwrap();
+    assert_eq!(history.original_results(), reference.original_results());
+    assert_eq!(
+        result.original(),
+        reference.original_results().last().unwrap()
+    );
+    let cold = FluidSteadySolverResult::from_canonical_bytes_for(
+        &bytes,
+        Digest::sha256(&bytes),
+        &study,
+        &m,
+    )
+    .unwrap();
+    assert_eq!(cold, result);
+    let receipt = FluidNumericalReceiptArtifact::new(&study, &cold, &m).unwrap();
+    receipt.validate_against(&study, &cold, &m).unwrap();
+    // A steady study cannot adopt a retained transient history, nor the reverse.
+    let mut steady = study.clone();
+    steady.model.sequence = AnalysisSequence::from_steps(
+        "physical-time",
+        vec![ProcedureStep::fluid_static("advance")],
+    );
+    steady.model.initial_conditions.clear();
+    assert!(FluidSteadySolverResult::from_canonical_bytes_for(
+        &bytes,
+        Digest::sha256(&bytes),
+        &steady,
+        &m
+    )
+    .is_err());
+}

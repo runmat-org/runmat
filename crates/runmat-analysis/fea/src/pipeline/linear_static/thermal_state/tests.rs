@@ -174,11 +174,6 @@ fn retained_thermal_state_drives_restrained_expansion_and_source_linked_results(
         crate::run_linear_static_with_options(&model, ComputeBackend::Cpu, options.clone())
             .is_err()
     );
-    let production = LinearStaticSolveOptions { ..options.clone() };
-    assert!(
-        run_linear_static_from_thermal_state(&model, ComputeBackend::Cpu, production, &source)
-            .is_err()
-    );
     let reaction = field(crate::FEA_FIELD_STRUCTURAL_REACTION_FORCE);
     for axis in 0..3 {
         assert!(

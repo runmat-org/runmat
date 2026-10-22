@@ -414,7 +414,7 @@ fn semantic_identity_is_independent_of_assignment_order_but_audit_is_not() {
 }
 
 #[test]
-fn mixed_solid_cell_volume_intent_is_rejected_not_ignored() {
+fn overlapping_solid_and_cell_volume_intent_is_rejected_not_ignored() {
     let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     let mut model = matching_model(&mesh);
     let mut cell = model.material_assignments[0].clone();
@@ -422,7 +422,11 @@ fn mixed_solid_cell_volume_intent_is_rejected_not_ignored() {
     model.material_assignments.push(cell);
     assert!(matches!(
         compile_property_map(&model, Some(&mesh)),
-        Err(PropertyCompilationError::UnsupportedMixedVolumeRoles)
+        Err(PropertyCompilationError::InvalidCoverage {
+            role: "volume",
+            assignment_count: 2,
+            ..
+        })
     ));
 }
 

@@ -12,6 +12,7 @@ pub mod linear;
 pub mod modal;
 pub mod nonlinear;
 pub mod preconditioner;
+pub(crate) mod sparse_direct;
 mod reaction;
 #[cfg(test)]
 pub(crate) use reaction::{recover_structural_reaction, recover_structural_reaction_scoped};

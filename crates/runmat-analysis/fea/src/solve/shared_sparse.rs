@@ -450,7 +450,6 @@ pub(crate) fn solve_direct_real(
     with_plan(LocalExecutionPlan::serial(), || {
         let a = arrays.view();
         let attempts: Vec<DirectOptions> = match structure {
-            DirectStructure::General => vec![DirectOptions::new(FactorKind::Lu)],
             DirectStructure::SaddlePoint { primal_count } => {
                 let scale = a.diagonal().iter().fold(0.0f64, |m, v| m.max(v.abs())).max(1.0);
                 let mut signs = vec![1i8; n];
@@ -503,6 +502,5 @@ pub(crate) fn solve_direct_real(
 /// Algebraic structure that selects the direct factorization.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DirectStructure {
-    General,
     SaddlePoint { primal_count: usize },
 }

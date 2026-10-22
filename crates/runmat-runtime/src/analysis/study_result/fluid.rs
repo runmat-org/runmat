@@ -17,7 +17,6 @@ pub struct FluidStudyCompletion {
     pub result: FluidSteadySolverResult,
     pub numerical_receipt: FluidNumericalReceiptArtifact,
     pub fields: runmat_analysis_fea::results::field::RecoveredFieldArtifactManifest,
-    pub layout: runmat_analysis_fea::results::field::FiniteVolumeFieldTopology,
     pub observation_catalog:
         Option<runmat_analysis_fea::results::observation::ObservationPublicationCatalog>,
     pub observation_results: Vec<runmat_analysis_fea::results::observation::ObservationResult>,

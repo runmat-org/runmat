@@ -5,13 +5,15 @@ use runmat_analysis_core::{
 
 #[test]
 fn original_model_checks_and_owned_planning_topology() {
-    // Captured from original duplicate-graph/owned-copy implementation in job86668.
+    // Regenerated deliberately after the formulation-maturity field left the authored step
+    // encoding (catalog-port b6501a93d2); the owned/checked graphs still agree byte for byte.
     let expected = [
-        "sha256:334a1c979dc3107d05f16a70824aaefc6edfae647da07367ffc3fd19595a57cf",
-        "sha256:2ce7f67375b1f52086fdb52ae9ae92b2fe297c8172c26a7fd975eb4b9f67c971",
-        "sha256:f53a9ec51f87413ad224c924d396732dfa7b642cf8d00dc8e8a8ae02fbf5b6a7",
+        "sha256:dcf8de46389cfee3fdbb67ba74617cb4da80787b95594eed27a1f3c7cfa90315",
+        "sha256:b4302ffc0d6bd8644fd26f61c41df49dc9c99a484255d80ebc3ce09b48657059",
+        "sha256:dfc991103f12cc88c4a61171c9e344986f16a3f85940b421ea7711da617d4149",
     ];
-    for (case, count) in [1, 4, 32].into_iter().enumerate() {
+    let mut actual = Vec::new();
+    for count in [1, 4, 32] {
         let mut model =
             crate::fixtures::fixture_model(crate::fixtures::FixtureId::CantileverLinearStatic);
         let original = model.sequence.steps[0].clone();
@@ -52,9 +54,10 @@ fn original_model_checks_and_owned_planning_topology() {
             )
             .unwrap(),
         );
-        assert_eq!(identity.to_string(), expected[case]);
+        actual.push(identity.to_string());
         println!("MODEL_VALIDATION count={count} checked_peak={checked_peak} owned_peak={owned_peak} owned_live={owned_live}");
     }
+    assert_eq!(actual, expected);
 }
 
 #[test]

@@ -120,12 +120,7 @@ fn task_with_threads(
         model,
         step_id: ProcedureStepId("acoustic".into()),
         frequency: Frequency::new(0.2),
-        solver: AcousticHarmonicPolicy {
-            uniqueness: Some(
-                runmat_analysis_fea::solve::uniqueness::SparseUniquenessPolicy::bounded(),
-            ),
-            ..Default::default()
-        },
+        solver: AcousticHarmonicPolicy::default(),
         power_balance_relative_tolerance: 1e-8,
     };
     let mesh = canonical_tetrahedron_solver_mesh(order);
@@ -386,24 +381,20 @@ fn acoustic_task_submission_requires_the_exact_resource_allocation() {
 //   lifetime or complete cancellation evidence.
 #[test]
 fn native_acoustic_rejects_valid_but_substituted_resource_plan() {
-    for substitution in 0..3 {
+    for substitution in 0..2 {
         let (_, _, mut task) = task(ElementOrder::Tet4, 1024);
         let mut input = task.resource_plan.input.clone();
         match substitution {
             0 => input.worker.fixed_memory_bytes.0 += 1,
-            1 | 2 => {
+            1 => {
                 let runmat_analysis_fea::planning::resource::FeaResourceDemand::AcousticHarmonic(
                     demand,
                 ) = &mut input.demand
                 else {
                     panic!("acoustic demand")
                 };
-                let proof = demand.uniqueness.as_mut().unwrap();
-                if substitution == 1 {
-                    proof.resident_bytes -= 1;
-                } else {
-                    proof.scalar_operations -= 1;
-                }
+                // A larger, still self-consistent reservation is a different plan identity.
+                demand.numerical_reservation_bytes.0 += 1;
             }
             _ => unreachable!(),
         }

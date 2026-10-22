@@ -21,6 +21,8 @@ pub mod qualification;
 pub use initial::CanonicalFluidInitialState;
 mod linear;
 mod momentum;
+mod moving;
+pub use moving::swept_face_flux;
 mod policy;
 mod pressure;
 mod pressure_gradient;
@@ -46,7 +48,9 @@ pub use boundary_balances::CanonicalFluidBoundaryBalance;
 pub use flux_evidence::CanonicalFluidFaceForces;
 pub use recovery::CanonicalFluidResidual;
 pub use resources::CanonicalFluidReservation;
-pub use transient::{CanonicalFluidBackwardEulerStep, CanonicalFluidFields};
+pub use transient::{
+    CanonicalFluidBackwardEulerStep, CanonicalFluidFields, CanonicalFluidMeshMotion,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -376,6 +380,11 @@ impl<'a> CanonicalFluidProblem<'a> {
         self.reservation
     }
 
+    /// Source-bound pressure reference of every cell, Pa.
+    pub fn pressure_reference(&self) -> &[f64] {
+        &self.pressure_reference_pa
+    }
+
     pub fn solve(&self) -> Result<CanonicalFluidResult, CanonicalFluidError> {
         if self.sample != crate::excitation::ProjectionSample::Static {
             return Err(CanonicalFluidError::Unsupported(
@@ -383,6 +392,35 @@ impl<'a> CanonicalFluidProblem<'a> {
             ));
         }
         iterate::solve(self)
+    }
+
+    /// Steady solve continuing from earlier fields of the same cell complex, such as the
+    /// previous iterate of a coupled study. The admitted equations, acceptance and retained
+    /// input identity are unchanged: only the starting iterate differs.
+    pub fn solve_from(
+        &self,
+        initial: CanonicalFluidFields<'_>,
+    ) -> Result<CanonicalFluidResult, CanonicalFluidError> {
+        if self.sample != crate::excitation::ProjectionSample::Static {
+            return Err(CanonicalFluidError::Unsupported(
+                "timed fluid solve requires original predecessor interval",
+            ));
+        }
+        let n = self.topology.cells.len();
+        if initial.velocity_m_per_s.len() != n
+            || initial.pressure_fluctuation_pa.len() != n
+            || initial.face_volume_flux_m3_per_s.len() != self.topology.faces.len()
+            || initial
+                .velocity_m_per_s
+                .iter()
+                .flatten()
+                .chain(initial.pressure_fluctuation_pa)
+                .chain(initial.face_volume_flux_m3_per_s)
+                .any(|v| !v.is_finite())
+        {
+            return Err(CanonicalFluidError::Invalid("steady starting iterate"));
+        }
+        iterate::solve_with_time(self, Some(initial), None, self.numerical_input_identity)
     }
 
     pub fn recover(

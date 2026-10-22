@@ -116,14 +116,10 @@ fn append_inlet_velocity_history(model: &mut AnalysisModel, id: &str, samples: [
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::{
-    fea_cht_fluid_temperature_field_id, fea_cht_interface_heat_flux_field_id,
-    fea_cht_interface_temperature_jump_field_id, fea_cht_solid_temperature_field_id,
-    fea_fsi_interface_displacement_field_id, fea_fsi_interface_pressure_field_id,
-    fea_fsi_interface_traction_field_id, fea_modal_mode_shape_field_id,
-    fea_nonlinear_load_factor_field_id, fea_nonlinear_residual_norm_field_id,
-    fea_transient_residual_norm_field_id, ComputeBackend, ExecutionBackend, SolverMethod,
-    FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
-    FEA_FIELD_CHT_FLUID_PRESSURE, FEA_FIELD_CHT_FLUID_VELOCITY, FEA_FIELD_MODAL_EIGENVALUE,
+    fea_modal_mode_shape_field_id, fea_nonlinear_load_factor_field_id,
+    fea_nonlinear_residual_norm_field_id, fea_transient_residual_norm_field_id, ComputeBackend,
+    ExecutionBackend, SolverMethod, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY,
+    FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_MODAL_EIGENVALUE,
     FEA_FIELD_MODAL_FREQUENCY_HZ, FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS,
     FEA_FIELD_MODAL_M_ORTHOGONALITY, FEA_FIELD_MODAL_PARTICIPATION_FACTOR,
     FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION, FEA_FIELD_MODAL_RESIDUAL_NORM,
@@ -145,13 +141,12 @@ use runmat_runtime::analysis::{
     analysis_run_nonlinear_with_options_op, analysis_run_study_op, analysis_run_study_sweep_op,
     analysis_run_thermal_with_options_op, analysis_run_transient_with_options_op,
     analysis_trends_op, analysis_validate, analysis_validate_study_op,
-    analysis_validate_study_sweep_op, AnalysisChtRunOptions, AnalysisExecutionPlan,
-    AnalysisExecutionStep, AnalysisModalRunOptions, AnalysisNonlinearRunOptions,
-    AnalysisResultsCompareQuery, AnalysisResultsQuery, AnalysisRunOptions, AnalysisRunResult,
-    AnalysisSolverOptions, AnalysisStructuralTimeStepPolicy, AnalysisStudySpec,
-    AnalysisStudySweepSpec, AnalysisTransientRunOptions, AnalysisTrendsQuery, ModalFrequencyBasis,
-    ModalFrequencyUnits, PrecisionMode, PreconditionerMode, QualityGate, QualityPolicy,
-    QualityReasonCode, RunStatus,
+    analysis_validate_study_sweep_op, AnalysisExecutionPlan, AnalysisExecutionStep,
+    AnalysisModalRunOptions, AnalysisNonlinearRunOptions, AnalysisResultsCompareQuery,
+    AnalysisResultsQuery, AnalysisRunOptions, AnalysisRunResult, AnalysisSolverOptions,
+    AnalysisStructuralTimeStepPolicy, AnalysisStudySpec, AnalysisStudySweepSpec,
+    AnalysisTransientRunOptions, AnalysisTrendsQuery, ModalFrequencyBasis, ModalFrequencyUnits,
+    PrecisionMode, PreconditionerMode, QualityGate, QualityPolicy, QualityReasonCode, RunStatus,
 };
 use runmat_runtime::geometry::{
     geometry_capture_view_op, geometry_inspect_op, geometry_list_regions_op, geometry_load_op,
@@ -1366,82 +1361,27 @@ fn analysis_run_cfd_requires_authored_execution_without_proxy_fields() {
 }
 
 #[test]
-fn analysis_run_cht_contract_shapes_coupled_interface_fields() {
+fn analysis_run_cht_contract_requires_an_authored_study() {
     let model = contract_cht_model("contract_cht_model");
-
-    let (_artifact_root, mesh_path) = write_model_solver_mesh(&model);
-
     let envelope = analysis_run_cht_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        AnalysisChtRunOptions {
-            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
-            ..Default::default()
-        },
+        Default::default(),
         OperationContext::new(Some("trace-contract-cht-3".to_string()), None),
     )
-    .expect("cht run should return envelope");
+    .expect_err("the removed reduced executor cannot publish fields");
     assert_eq!(envelope.operation, "fea.run_cht");
     assert_eq!(envelope.op_version, "fea.run_cht/v1");
-    assert_registered_result_identity(
-        &envelope.data,
-        PhysicsFamily::Coupled(runmat_analysis_core::CoupledPhysicsFamily::ConjugateHeatTransfer),
-        AnalysisProcedure::TransientResponse,
-    );
     assert_eq!(
-        envelope.data.run.solver_method,
-        SolverMethod::ChtConjugateProjection
+        envelope.error_code,
+        "RM.FEA.RUN_CHT.AUTHORED_STUDY_REQUIRED"
     );
-    assert!(envelope.data.transient_results.is_none());
-
-    let fluid_velocity = envelope
-        .data
-        .run
-        .field(FEA_FIELD_CHT_FLUID_VELOCITY)
-        .expect("cht fluid velocity should be present");
-    let fluid_pressure = envelope
-        .data
-        .run
-        .field(FEA_FIELD_CHT_FLUID_PRESSURE)
-        .expect("cht fluid pressure should be present");
-    let fluid_temperature = envelope
-        .data
-        .run
-        .field(&fea_cht_fluid_temperature_field_id(0))
-        .expect("cht fluid temperature should be present");
-    let solid_temperature = envelope
-        .data
-        .run
-        .field(&fea_cht_solid_temperature_field_id(0))
-        .expect("cht solid temperature should be present");
-    let interface_heat_flux = envelope
-        .data
-        .run
-        .field(&fea_cht_interface_heat_flux_field_id(0))
-        .expect("cht interface heat flux should be present");
-    let interface_temperature_jump = envelope
-        .data
-        .run
-        .field(&fea_cht_interface_temperature_jump_field_id(0))
-        .expect("cht interface temperature jump should be present");
-    let thermal = envelope
-        .data
-        .thermal_results
-        .as_ref()
-        .expect("cht should retain the thermal payload");
-    let thermal_flux_face_count = thermal
-        .heat_flux_snapshots
-        .first()
-        .and_then(|field| field.shape.first().copied())
-        .expect("thermal heat-flux snapshot should carry a recovery domain");
-
-    assert_eq!(fluid_velocity.shape.len(), 2);
-    assert_eq!(fluid_velocity.shape[1], 3);
-    assert_eq!(fluid_pressure.shape, vec![fluid_velocity.shape[0]]);
-    assert_eq!(solid_temperature.shape, fluid_temperature.shape);
-    assert_eq!(interface_heat_flux.shape.len(), 1);
-    assert!(interface_heat_flux.shape[0] >= thermal_flux_face_count);
-    assert_eq!(interface_temperature_jump.shape, interface_heat_flux.shape);
+    assert!(!envelope.retryable);
+    let wire = serde_json::to_value(&envelope).unwrap();
+    assert!(
+        wire.get("data").is_none(),
+        "rejection must not publish proxy fields"
+    );
 }
 
 #[test]
@@ -1573,7 +1513,7 @@ fn analysis_run_transient_contract_is_v1_and_typed() {
 }
 
 #[test]
-fn analysis_run_fsi_contract_is_v1_and_typed() {
+fn analysis_run_fsi_contract_requires_an_authored_study() {
     let mut model = contract_linear_static_model();
     model.sequence = runmat_analysis_core::AnalysisSequence::from_steps(
         "fsi_sequence",
@@ -1596,86 +1536,18 @@ fn analysis_run_fsi_contract_is_v1_and_typed() {
         Default::default(),
         OperationContext::new(Some("trace-contract-fsi-1".to_string()), None),
     )
-    .expect("fsi run should return envelope");
+    .expect_err("the removed reduced executor cannot publish fields");
     assert_eq!(envelope.operation, "fea.run_fsi");
     assert_eq!(envelope.op_version, "fea.run_fsi/v1");
-    assert_registered_result_identity(
-        &envelope.data,
-        PhysicsFamily::Coupled(
-            runmat_analysis_core::CoupledPhysicsFamily::FluidStructureInteraction,
-        ),
-        AnalysisProcedure::TransientResponse,
-    );
     assert_eq!(
-        envelope.data.run.solver_method,
-        SolverMethod::FsiPartitionedProjection
+        envelope.error_code,
+        "RM.FEA.RUN_FSI.AUTHORED_STUDY_REQUIRED"
     );
-    assert!(envelope.data.transient_results.is_none());
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_CFD_FLOW"));
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_CFD_RESIDUAL"));
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_FSI_INTERFACE_RESIDUAL"));
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_FSI_COUPLING"));
-    let interface_pressure = envelope
-        .data
-        .run
-        .field(&fea_fsi_interface_pressure_field_id(0))
-        .expect("fsi interface pressure field should be present");
-    let interface_traction = envelope
-        .data
-        .run
-        .field(&fea_fsi_interface_traction_field_id(0))
-        .expect("fsi interface traction field should be present");
-    let interface_displacement = envelope
-        .data
-        .run
-        .field(&fea_fsi_interface_displacement_field_id(0))
-        .expect("fsi interface displacement field should be present");
-    assert_eq!(interface_pressure.shape.len(), 1);
-    assert_eq!(
-        interface_traction.shape,
-        vec![interface_pressure.shape[0], 3]
+    let wire = serde_json::to_value(&envelope).unwrap();
+    assert!(
+        wire.get("data").is_none(),
+        "rejection must not publish proxy fields"
     );
-    assert_eq!(interface_displacement.shape.len(), 2);
-    assert_eq!(interface_displacement.shape[1], 3);
-    assert_eq!(
-        interface_displacement.shape[0],
-        interface_pressure.shape[0] + 1
-    );
-
-    let mut invalid_model = model.clone();
-    invalid_model.sequence.steps = vec![runmat_analysis_core::ProcedureStep::fluid_static(
-        "fsi_flow_only".to_string(),
-    )];
-    let invalid = analysis_run_fsi_with_options_op(
-        &invalid_model,
-        ComputeBackend::Cpu,
-        Default::default(),
-        OperationContext::new(Some("trace-contract-fsi-2".to_string()), None),
-    )
-    .expect_err("fsi run should reject missing transient step");
-    assert_eq!(invalid.operation, "fea.run_fsi");
-    assert_eq!(invalid.op_version, "fea.run_fsi/v1");
-    assert_eq!(invalid.error_code, "RM.FEA.RUN_FSI.INVALID_MODEL");
 }
 
 #[test]

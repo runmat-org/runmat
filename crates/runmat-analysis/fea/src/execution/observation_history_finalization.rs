@@ -18,10 +18,6 @@ const LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 4_000_000
 
 #[derive(Clone, Copy)]
 pub enum ObservationHistorySourceContext<'a> {
-    FluidSteady {
-        workload: &'a super::FluidSteadyWorkload,
-        mesh: &'a SolverMeshArtifact,
-    },
     MaxwellHarmonic {
         workload: &'a super::MaxwellHarmonicWorkload,
         mesh: &'a SolverMeshArtifact,
@@ -50,8 +46,7 @@ impl ObservationHistorySourceContext<'_> {
         match self {
             Self::Magnetostatic { .. }
             | Self::MaxwellHarmonic { .. }
-            | Self::VolumeMesh { .. }
-            | Self::FluidSteady { .. } => ObservationExecutionPolicy::serial(),
+            | Self::VolumeMesh { .. } => ObservationExecutionPolicy::serial(),
             Self::Structural { source, .. } => source.observation_execution(),
             Self::Thermal { .. } => ObservationExecutionPolicy::serial(),
         }
@@ -59,7 +54,6 @@ impl ObservationHistorySourceContext<'_> {
 
     pub fn validate(self) -> AnalysisExecutionResult<()> {
         match self {
-            Self::FluidSteady { workload, .. } => workload.validate(),
             Self::Magnetostatic { workload, .. } => workload.validate(),
             Self::MaxwellHarmonic { workload, .. } => workload.validate(),
             Self::VolumeMesh { mesh } => {

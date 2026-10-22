@@ -371,11 +371,8 @@ fn complex_prescribed_pressure_lifting_matches_independent_reduced_block_system(
                     assembly,
                     0.2,
                     AcousticHarmonicPolicy {
-                        uniqueness: None,
-                        preconditioner: crate::contracts::SolverPreconditioner::Ilu0,
                         relative_tolerance: 1e-12,
-                        restart: 32,
-                        maximum_iterations: 128,
+                        ..Default::default()
                     },
                     1e-8,
                 )

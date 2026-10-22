@@ -3,9 +3,8 @@ use std::collections::BTreeSet;
 use runmat_analysis_core::{
     AcousticConstraint, AcousticConstraintKind, AnalysisBoundary, AnalysisConstraint,
     AnalysisProcedure, AnalysisSequence, BoundaryOperator, IndependentDomain,
-    MaterialAcousticModel, ObservationId, ObservationRequest, PhysicsFamily, PrescribedValue,
-    Pressure, ProcedureStep, PropertyRegionTarget, RegionTarget, RestartPolicy, RetentionPolicy,
-    SamplingPolicy, SpecificAcousticImpedance,
+    MaterialAcousticModel, PhysicsFamily, PrescribedValue, Pressure, ProcedureStep,
+    PropertyRegionTarget, RegionTarget, RestartPolicy, SpecificAcousticImpedance,
 };
 use runmat_meshing_core::StableDigest;
 
@@ -115,30 +114,12 @@ fn rejects_lifecycle_family_and_procedure_substitution() {
 }
 
 #[test]
-fn rejects_unimplemented_publication_and_missing_state() {
+fn rejects_missing_state() {
     let mut study = compiled_duct();
     study.model.sequence.steps[0].state_outputs.clear();
     assert!(matches!(
         plan_acoustic_study(&study, AcousticStudyPlanningPolicy::standard()),
         Err(AcousticStudyPlanningError::UnsupportedStatePublication)
-    ));
-
-    study = compiled_duct();
-    study.model.sequence.steps[0] = ProcedureStep::acoustic_harmonic("acoustic");
-    study.model.sequence.steps[0].independent_domain = IndependentDomain::FrequencyHertz(vec![0.2]);
-    study.model.sequence.steps[0]
-        .observations
-        .push(ObservationRequest::Diagnostic(
-            runmat_analysis_core::DiagnosticObservation {
-                observation_id: ObservationId("balance".into()),
-                diagnostic: runmat_analysis_core::DiagnosticKind::Balance,
-                sampling: SamplingPolicy::Final,
-                retention: RetentionPolicy::Canonical,
-            },
-        ));
-    assert!(matches!(
-        plan_acoustic_study(&study, AcousticStudyPlanningPolicy::standard()),
-        Err(AcousticStudyPlanningError::UnsupportedPublication)
     ));
 }
 
@@ -163,7 +144,7 @@ fn plans_sweep_with_original_authored_model_and_entry_scoped_states() {
 fn rejects_invalid_policy_and_formulation_mismatch() {
     let study = compiled_duct();
     let mut policy = AcousticStudyPlanningPolicy::standard();
-    policy.krylov_restart = 0;
+    policy.contraction_limit = 1.0;
     assert!(matches!(
         plan_acoustic_study(&study, policy),
         Err(AcousticStudyPlanningError::InvalidNumericalPolicy)

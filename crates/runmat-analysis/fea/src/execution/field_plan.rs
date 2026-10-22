@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::results::field::{
     RecoveredFieldDefinition, RecoveredFieldEntityCounts, RecoveredFieldEntityDomain,
-    StructuralRecoveredFieldTopology,
+    RecoveredFieldSupport, StructuralRecoveredFieldTopology,
 };
 
 use super::{AnalysisExecutionError, AnalysisExecutionResult};
@@ -31,6 +31,9 @@ pub struct FieldRecoveryRequirement {
     pub value_shape: ObservationValueShape,
     pub entity_domain: RecoveredFieldEntityDomain,
     pub cost: FieldRecoveryCost,
+    /// The entities of the domain the field covers (the fluid regions of a conjugate model).
+    #[serde(default, skip_serializing_if = "RecoveredFieldSupport::is_complete")]
+    pub support: RecoveredFieldSupport,
 }
 
 /// Closed, immutable publication plan derived from authored observations and admitted topology.
@@ -100,6 +103,7 @@ impl FieldRecoveryPlan {
                 source_entity_count
             };
             let requirement = FieldRecoveryRequirement {
+                support: Default::default(),
                 quantity: spec.quantity,
                 source_location: spec.source_location,
                 output_location,
@@ -158,6 +162,7 @@ impl FieldRecoveryPlan {
                     definition.quantity() == requirement.quantity
                         && definition.value_shape() == &requirement.value_shape
                         && definition.entity_domain() == requirement.entity_domain
+                        && definition.support() == &requirement.support
                         && definition.satisfies_recovery(
                             requirement.source_location,
                             requirement.output_location,

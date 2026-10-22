@@ -257,15 +257,19 @@ fn original_nonzero_uniform_flow_cold_roundtrip_preserves_analytic_face_flux() {
     let native = result
         .recover_native_fields(&workload, &mesh, &request)
         .unwrap();
+    // Cells are stored in mesh element order; the whole mesh is fluid, so faces keep their
+    // order and orientation.
+    let mut cells = (0..source.topology.cells.len()).collect::<Vec<_>>();
+    cells.sort_by_key(|&cell| source.topology.cells[cell].source_element_index);
     for (field, expected) in native.fields().iter().zip([
-        result
-            .original()
-            .velocity_m_per_s
+        cells
             .iter()
-            .flatten()
-            .copied()
+            .flat_map(|&cell| result.original().velocity_m_per_s[cell])
             .collect::<Vec<_>>(),
-        result.original().pressure_pa.clone(),
+        cells
+            .iter()
+            .map(|&cell| result.original().pressure_pa[cell])
+            .collect(),
         result.original().face_volume_flux_m3_per_s.clone(),
     ]) {
         assert_eq!(
@@ -301,8 +305,7 @@ fn native_cells_and_internal_faces_preserve_original_fields_and_authored_observa
     use crate::results::{
         field::{FiniteVolumeFieldTopology, RecoveredFieldCatalog, RecoveredFieldEntityDomain},
         observation::{
-            evaluate_finite_volume_observations, resolve_finite_volume_observation_plan,
-            ObservationEntity, ObservationLimits,
+            evaluate_observations, resolve_observation_plan, ObservationEntity, ObservationLimits,
         },
     };
     let (mut workload, mesh) = authored();
@@ -376,31 +379,34 @@ fn native_cells_and_internal_faces_preserve_original_fields_and_authored_observa
         artifact.fields()[2].storage().shape,
         vec![source.topology.faces.len()]
     );
+    // The whole mesh is fluid: complete support, mesh faces in fluid face order.
+    assert!(artifact
+        .fields()
+        .iter()
+        .all(|field| field.definition().support().is_complete()));
+    assert_eq!(
+        artifact.fields()[2].storage().as_host_f64().unwrap(),
+        &result.original().face_volume_flux_m3_per_s[..]
+    );
+    let definitions = artifact
+        .fields()
+        .iter()
+        .map(|field| field.definition().clone())
+        .collect::<Vec<_>>();
     let catalog = RecoveredFieldCatalog::new_for_topology(
-        layout.identity().discretization_digest(),
-        layout.entity_counts(),
+        source.source.projection_digest,
+        artifact.entity_counts(),
         artifact.into_fields(),
     )
     .unwrap();
-    let definitions = fluid_native_field_definition_inventory().unwrap();
-    let plan = resolve_finite_volume_observation_plan(
+    let plan = resolve_observation_plan(
         &workload.model.sequence.steps[0],
-        &layout,
         &source.source,
-        &source.topology,
         &definitions,
         ObservationLimits::default(),
     )
     .unwrap();
-    let observed = evaluate_finite_volume_observations(
-        &plan,
-        &layout,
-        &source.source,
-        &source.topology,
-        &catalog,
-        ObservationLimits::default(),
-    )
-    .unwrap();
+    let observed = evaluate_observations(&plan, &source.source, &catalog).unwrap();
     assert_eq!(observed[0].location, FieldLocation::Cell);
     assert_eq!(observed[2].entities.len(), source.topology.faces.len());
     assert!(observed[2]
@@ -464,20 +470,22 @@ fn original_velocity_pressure_flux_traction_and_resource_substitution_reject() {
     let (workload, mesh) = authored();
     let result = workload.execute(&mesh).unwrap();
     for path in [
-        vec!["original", "velocity_m_per_s", "0", "0"],
-        vec!["original", "pressure_pa", "0"],
-        vec!["original", "pressure_fluctuation_pa", "0"],
+        vec!["original", "steady", "velocity_m_per_s", "0", "0"],
+        vec!["original", "steady", "pressure_pa", "0"],
+        vec!["original", "steady", "pressure_fluctuation_pa", "0"],
         vec![
             "original",
+            "steady",
             "residual",
             "boundary_balances",
             "0",
             "volume_flow_rate_m3_per_s",
         ],
-        vec!["original", "face_volume_flux_m3_per_s", "0"],
-        vec!["original", "pressure_reference_pa", "0"],
+        vec!["original", "steady", "face_volume_flux_m3_per_s", "0"],
+        vec!["original", "steady", "pressure_reference_pa", "0"],
         vec![
             "original",
+            "steady",
             "residual",
             "face_forces",
             "viscous_traction_n",
@@ -513,9 +521,9 @@ fn original_velocity_pressure_flux_traction_and_resource_substitution_reject() {
         let mut wire = serde_json::to_value(&result).unwrap();
         if legacy_schema >= 2 {
             wire["data"]["schema_version"] =
-                serde_json::json!(if legacy_schema == 2 { 1 } else { 3 });
+                serde_json::json!(if legacy_schema == 2 { 1 } else { 4 });
         } else {
-            wire["data"]["original"]
+            wire["data"]["original"]["steady"]
                 .as_object_mut()
                 .unwrap()
                 .remove(if legacy_schema == 0 {

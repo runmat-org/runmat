@@ -38,6 +38,19 @@ impl FeaResourceDemand {
             (Self::MaxwellFieldRecovery(demand), AnalysisNumericalObjectKind::Field) => {
                 Some(&demand.output)
             }
+            (Self::AcousticFieldRecovery(demand), AnalysisNumericalObjectKind::Field) => {
+                Some(&demand.output)
+            }
+            (Self::AcousticResponse(demand), AnalysisNumericalObjectKind::SolverResult) => {
+                Some(&demand.result_output)
+            }
+            (Self::AcousticResponse(demand), AnalysisNumericalObjectKind::NumericalReceipt) => {
+                Some(&demand.receipt_output)
+            }
+            (
+                Self::AcousticResponse(demand),
+                AnalysisNumericalObjectKind::StatePublicationProfiles,
+            ) => Some(&demand.state_profiles_output),
             (Self::MaxwellHarmonic(demand), AnalysisNumericalObjectKind::SolverResult) => {
                 Some(&demand.result_output)
             }
@@ -58,6 +71,9 @@ impl FeaResourceDemand {
                 Self::MagneticFieldRecovery(demand) | Self::StatisticalFieldRecovery(demand),
                 AnalysisNumericalObjectKind::Field,
             ) => {
+                Some(&demand.output)
+            }
+            (Self::ElectricalFieldRecovery(demand), AnalysisNumericalObjectKind::Field) => {
                 Some(&demand.output)
             }
             (Self::Magnetostatic(demand), AnalysisNumericalObjectKind::SolverResult) => {
@@ -183,9 +199,6 @@ impl FeaResourceDemand {
                 Self::AcousticFrequencyAssembly(demand),
                 AnalysisNumericalObjectKind::FrequencySamplePublication,
             ) => Some(&demand.publication_output),
-            (Self::AcousticFrequencyAssembly(demand), AnalysisNumericalObjectKind::Field) => {
-                Some(&demand.fields_output)
-            }
             (
                 Self::StructuralFrequencyResultAssembly(demand),
                 AnalysisNumericalObjectKind::SolverResult,

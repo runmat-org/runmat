@@ -84,7 +84,8 @@ pub(super) fn boundary_summary(
     for boundary in &model.boundaries {
         match &boundary.operator {
             BoundaryOperator::AcousticRigidWall => rigid_wall_count += 1,
-            BoundaryOperator::AcousticRadiation => radiation_boundary_count += 1,
+            BoundaryOperator::AcousticRadiation
+            | BoundaryOperator::AcousticSphericalRadiation { .. } => radiation_boundary_count += 1,
             BoundaryOperator::AcousticImpedance { impedance } => {
                 impedance_boundary_count += 1;
                 impedance_sum += impedance.pascal_seconds_per_meter.max(1.0);

@@ -40,6 +40,7 @@ impl PhysicalDimension {
     pub const POWER: Self = Self::new([2, 1, -3, 0, 0, 0, 0, 0]);
     pub const HEAT_FLUX: Self = Self::new([0, 1, -3, 0, 0, 0, 0, 0]);
     pub const THERMAL_CONDUCTIVITY: Self = Self::new([1, 1, -3, 0, -1, 0, 0, 0]);
+    pub const HEAT_TRANSFER_COEFFICIENT: Self = Self::new([0, 1, -3, 0, -1, 0, 0, 0]);
     pub const SPECIFIC_HEAT: Self = Self::new([2, 0, -2, 0, -1, 0, 0, 0]);
     pub const ELECTRICAL_CONDUCTIVITY: Self = Self::new([-3, -1, 3, 2, 0, 0, 0, 0]);
     pub const ELECTRIC_CURRENT: Self = Self::new([0, 0, 0, 1, 0, 0, 0, 0]);
@@ -114,6 +115,7 @@ impl From<QuantityDimension> for PhysicalDimension {
             QuantityDimension::Power => Self::POWER,
             QuantityDimension::HeatFlux => Self::HEAT_FLUX,
             QuantityDimension::ThermalConductivity => Self::THERMAL_CONDUCTIVITY,
+            QuantityDimension::HeatTransferCoefficient => Self::HEAT_TRANSFER_COEFFICIENT,
             QuantityDimension::ElectricPotential => Self::ELECTRIC_POTENTIAL,
             QuantityDimension::ElectricCurrent => Self::ELECTRIC_CURRENT,
             QuantityDimension::MagneticFluxDensity => Self::MAGNETIC_FLUX_DENSITY,

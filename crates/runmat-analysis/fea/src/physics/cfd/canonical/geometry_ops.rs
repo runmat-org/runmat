@@ -119,6 +119,25 @@ pub(super) fn face_pressure_offset(
     })
 }
 
+/// Symmetry-plane viscous traction on the owner fluid: zero shear and the normal
+/// stress 2µ ∂u_n/∂n with zero normal velocity on the plane. Returns the implicit
+/// per-component coefficient 2µα and the traction −2µα (u·n̂) n̂ in newtons.
+pub(super) fn symmetry_traction(
+    p: &CanonicalFluidProblem<'_>,
+    i: usize,
+    owner_velocity: V,
+) -> Result<(f64, V), Error> {
+    let f = &p.topology.faces[i];
+    let (alpha, _, _) = face_geometry(p, f)?;
+    let normal = scale(f.owner_area_vector_m2, 1.0 / f.area_m2);
+    let coefficient = 2.0 * p.viscosity * alpha;
+    let traction = scale(normal, -coefficient * dot(owner_velocity, normal));
+    if !coefficient.is_finite() || traction.iter().any(|x| !x.is_finite()) {
+        return Err(Error::Invalid("symmetry face traction"));
+    }
+    Ok((coefficient, traction))
+}
+
 /// Single Newtonian face-physics authority shared by assembly and original recovery.
 pub(super) fn viscous_parts(
     p: &CanonicalFluidProblem<'_>,

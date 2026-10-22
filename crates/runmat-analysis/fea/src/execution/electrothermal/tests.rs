@@ -3,6 +3,7 @@ use crate::physics::electrical::tests::{mesh, model, prescribe};
 use runmat_analysis_core::*;
 use runmat_meshing_core::ElementOrder;
 
+mod coupled;
 mod source;
 
 fn electrical_workload(voltage: f64, gauge: f64) -> ElectricalStaticWorkload {
@@ -23,6 +24,8 @@ fn electrical_workload(voltage: f64, gauge: f64) -> ElectricalStaticWorkload {
         model,
         step_id: ProcedureStepId("potential".into()),
         relative_residual_target: 1e-11,
+        element_temperature_k: None,
+        operating_time_s: None,
     }
 }
 

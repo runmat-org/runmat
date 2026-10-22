@@ -91,9 +91,13 @@ pub(super) fn admit(
         quality_reasons: accuracy.quality_reasons,
         provenance,
     };
+    // Standalone flow publishes as CFD; conjugate heat transfer as CHT, from the admitted identity.
+    let operation =
+        crate::analysis::execution_dispatch::run_operation_for_identity(&result.run.identity)
+            .ok_or_else(|| "flow publication identity has no analysis operation".to_string())?;
     Ok(OperationEnvelope::new(
-        AnalysisOperation::Cfd.name(),
-        AnalysisOperation::Cfd.version(),
+        operation.name(),
+        operation.version(),
         context,
         result,
     ))

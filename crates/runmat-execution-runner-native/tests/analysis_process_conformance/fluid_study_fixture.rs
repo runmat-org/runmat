@@ -220,10 +220,7 @@ pub(super) async fn cold_fixture(
             entry.definition.clone(),
             entry.sample,
             partitions,
-            cold.fields
-                .manifest
-                .entity_counts
-                .entity_count(entry.definition.entity_domain()),
+            entry.definition.stored_entities(cold.fields.manifest.entity_counts),
         )
         .unwrap();
         assert_eq!(&actual, original);

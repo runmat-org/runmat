@@ -10,7 +10,8 @@ fn exact_local_ceiling_and_raw_metadata_are_counted_before_expansion() {
         let reservation = require_canonical_ceiling(&model, &mesh, u64::MAX).unwrap();
         assert_eq!(reservation.edge_count_upper_bound, 6);
         assert_eq!(reservation.real_block_dimension_upper_bound, 12);
-        assert_eq!(reservation.support_entries_upper_bound, 144);
+        // One complex entry per edge pair of each element.
+        assert_eq!(reservation.support_entries_upper_bound, 36);
         assert_eq!(reservation.quadrature_sample_count, 15);
         assert_eq!(
             require_canonical_ceiling(&model, &mesh, reservation.total_bytes).unwrap(),
@@ -38,8 +39,14 @@ fn exact_local_ceiling_and_raw_metadata_are_counted_before_expansion() {
             .resources
             .maximum_resident_bytes = 0;
         let step_id = denied.sequence.steps[0].step_id.as_str();
-        let error = crate::physics::maxwell::compile_canonical_input(&denied, &mesh, step_id, 1e-8)
-            .unwrap_err();
+        let error = crate::physics::maxwell::compile_canonical_input(
+            &denied,
+            &mesh,
+            step_id,
+            1e-8,
+            1.0,
+        )
+        .unwrap_err();
         assert!(error
             .to_string()
             .contains("Maxwell local resource preflight"));
@@ -87,6 +94,14 @@ fn replicated_property_metadata_and_selected_policy_are_not_ignored() {
         .accuracy
         .resources
         .maximum_resident_bytes = grown.total_bytes;
+    // The authored ceiling is part of the serialized model, so re-measure with it set.
+    let exact = require_canonical_ceiling(&big, &mesh, u64::MAX)
+        .unwrap()
+        .total_bytes;
+    big.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes = exact;
     assert!(require_selected_ceiling(&big, &mesh, id.as_str()).is_ok());
     big.sequence.steps[0]
         .accuracy

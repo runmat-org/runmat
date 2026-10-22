@@ -13,7 +13,6 @@ pub struct AcousticFrequencyAssemblyResourceDemand {
     pub workspace_bytes_upper_bound: ByteCount,
     pub result_output: PreparedOutputResourceFacts,
     pub publication_output: PreparedOutputResourceFacts,
-    pub fields_output: PreparedOutputResourceFacts,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

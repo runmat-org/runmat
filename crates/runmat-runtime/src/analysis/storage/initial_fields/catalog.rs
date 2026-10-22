@@ -15,9 +15,7 @@ pub(in crate::analysis::storage) fn validate_catalog(
         let [field] = fields.as_slice() else {
             return Err("original field has no unique persisted payload".into());
         };
-        let count = catalog
-            .entity_counts
-            .entity_count(entry.definition.entity_domain());
+        let count = entry.definition.stored_entities(catalog.entity_counts);
         if field.shape
             != entry
                 .definition
