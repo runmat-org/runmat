@@ -19,6 +19,7 @@ pub enum AccuracySourceReceipt {
     Magnetostatic(MagneticNumericalReceiptArtifact),
     ElectricalStatic(ElectricalNumericalReceiptArtifact),
     AcousticHarmonic(AcousticNumericalReceiptArtifact),
+    AcousticResponse(super::AcousticResponseNumericalReceiptArtifact),
     Thermal(ThermalNumericalReceiptArtifact),
     StructuralLinear(StructuralLinearNumericalReceiptArtifact),
     StructuralModalResponseSpectrum(StructuralModalResponseSpectrumNumericalReceipt),
@@ -49,6 +50,9 @@ impl AccuracySourceReceipt {
             AccuracySourceKind::AcousticHarmonic => Self::AcousticHarmonic(
                 AcousticNumericalReceiptArtifact::from_canonical_bytes(bytes)?,
             ),
+            AccuracySourceKind::AcousticResponse => Self::AcousticResponse(
+                super::AcousticResponseNumericalReceiptArtifact::from_canonical_bytes(bytes)?,
+            ),
             AccuracySourceKind::Thermal => Self::Thermal(
                 ThermalNumericalReceiptArtifact::from_canonical_bytes(bytes)?,
             ),
@@ -76,6 +80,7 @@ impl AccuracySourceReceipt {
             Self::Magnetostatic(_) => AccuracySourceKind::Magnetostatic,
             Self::ElectricalStatic(_) => AccuracySourceKind::ElectricalStatic,
             Self::AcousticHarmonic(_) => AccuracySourceKind::AcousticHarmonic,
+            Self::AcousticResponse(_) => AccuracySourceKind::AcousticResponse,
             Self::Thermal(_) => AccuracySourceKind::Thermal,
             Self::StructuralLinear(_) => AccuracySourceKind::StructuralLinear,
             Self::StructuralModalResponseSpectrum(_) => {
@@ -93,6 +98,7 @@ impl AccuracySourceReceipt {
             Self::Magnetostatic(receipt) => receipt.source_workload(),
             Self::ElectricalStatic(receipt) => receipt.source_workload(),
             Self::AcousticHarmonic(receipt) => receipt.source_workload(),
+            Self::AcousticResponse(receipt) => receipt.source_workload(),
             Self::Thermal(receipt) => receipt.source_workload,
             Self::StructuralLinear(receipt) => receipt.source_workload,
             Self::StructuralModalResponseSpectrum(receipt) => receipt.source_workload(),
@@ -108,6 +114,7 @@ impl AccuracySourceReceipt {
             Self::Magnetostatic(receipt) => receipt.source_result(),
             Self::ElectricalStatic(receipt) => receipt.source_result(),
             Self::AcousticHarmonic(receipt) => receipt.source_result(),
+            Self::AcousticResponse(receipt) => receipt.source_result(),
             Self::Thermal(receipt) => receipt.source_result(),
             Self::StructuralLinear(receipt) => receipt.source_result(),
             Self::StructuralModalResponseSpectrum(receipt) => receipt.source_result(),
@@ -123,6 +130,7 @@ impl AccuracySourceReceipt {
             Self::Magnetostatic(receipt) => receipt.identity(),
             Self::ElectricalStatic(receipt) => receipt.identity(),
             Self::AcousticHarmonic(receipt) => receipt.identity(),
+            Self::AcousticResponse(receipt) => receipt.identity(),
             Self::Thermal(receipt) => receipt.identity(),
             Self::StructuralLinear(receipt) => receipt.identity(),
             Self::StructuralModalResponseSpectrum(receipt) => receipt.identity(),
@@ -172,6 +180,13 @@ impl AccuracySourceReceipt {
             if receipt.receipt().producer != request.producer {
                 return Err(AnalysisExecutionError::Identity(
                     "acoustic accuracy receipt differs from requested producer",
+                ));
+            }
+        }
+        if let Self::AcousticResponse(receipt) = self {
+            if receipt.receipt().producer != request.producer {
+                return Err(AnalysisExecutionError::Identity(
+                    "acoustic response accuracy receipt differs from requested producer",
                 ));
             }
         }
@@ -269,6 +284,13 @@ impl AccuracySourceReceipt {
                     Some((receipt.receipt().power_relative_error,
                         "absolute mean input-minus-impedance-loss power divided by max(sum of nodal apparent source power magnitudes including prescribed-pressure reactions, absolute impedance loss); zero scale gives zero error with no dimensional floor; equation-based power conservation only, not field accuracy"))
                 }
+                Self::AcousticResponse(receipt)
+                    if criterion.target == runmat_analysis_core::AccuracyTarget::GlobalEquilibrium
+                        && criterion.contribution == ErrorContributionKind::Algebraic
+                        && criterion.evidence == RequiredAccuracyEvidence::ResidualBound => {
+                    Some((receipt.receipt().maximum_relative_residual,
+                        "cavity modes: largest eigenpair residual |K phi - lambda M phi| / ((|lambda| + s) |M phi|) with shift s; pressure transient: largest effective-operator residual of any accepted Newmark step divided by its right-hand-side norm; algebraic equation satisfaction only, not spatial or temporal discretization error"))
+                }
                 Self::Thermal(receipt)
                     if criterion.target == runmat_analysis_core::AccuracyTarget::GlobalEquilibrium
                         && criterion.contribution == ErrorContributionKind::Nonlinear
@@ -358,6 +380,7 @@ impl AccuracySourceReceipt {
             Self::Magnetostatic(receipt) => receipt.validate(),
             Self::ElectricalStatic(receipt) => receipt.validate(),
             Self::AcousticHarmonic(receipt) => receipt.validate(),
+            Self::AcousticResponse(receipt) => receipt.validate(),
             Self::Thermal(receipt) => receipt.validate(),
             Self::StructuralLinear(receipt) => receipt.validate(),
             Self::StructuralModalResponseSpectrum(receipt) => receipt.validate_source(),

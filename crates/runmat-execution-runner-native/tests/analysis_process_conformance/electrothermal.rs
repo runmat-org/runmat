@@ -59,6 +59,7 @@ pub(super) async fn run() {
             "heat",
             ThermalStudyPlanningPolicy {
                 backend: ComputeBackend::Cpu,
+                element_heat_source: None,
             },
         )
         .unwrap();

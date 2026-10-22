@@ -5,25 +5,28 @@ use runmat_analysis_core::{PhysicalQuantityKind, StaticElectricalEquation};
 
 pub(super) fn validate(r: &CanonicalElectricalResponse) -> AnalysisExecutionResult<()> {
     if let Some(source) = &r.charge_sources {
-        if r.equation != StaticElectricalEquation::Electrostatics
-            || source.nodal_charge_c.len() != r.ordered_node_ids.len()
-            || source.nodal_charge_c.iter().any(|value| !value.is_finite())
-            || !source.integrated_charge_c.is_finite()
-            || !source.absolute_charge_c.is_finite()
-            || source.absolute_charge_c < 0.0
-            || source.absolute_charge_c < source.integrated_charge_c.abs()
+        let quantity = match r.equation {
+            StaticElectricalEquation::Electrostatics => PhysicalQuantityKind::ElectricChargeDensity,
+            StaticElectricalEquation::SteadyConduction => PhysicalQuantityKind::ElectricCurrent,
+        };
+        if source.nodal_source.len() != r.ordered_node_ids.len()
+            || source.nodal_source.iter().any(|value| !value.is_finite())
+            || !source.integrated_source.is_finite()
+            || !source.absolute_source.is_finite()
+            || source.absolute_source < 0.0
+            || source.absolute_source < source.integrated_source.abs()
         {
-            return Err(invalid("invalid retained electrostatic volume charge"));
+            return Err(invalid("invalid retained electrical source"));
         }
-        let sum = source.nodal_charge_c.iter().sum::<f64>();
+        let sum = source.nodal_source.iter().sum::<f64>();
         let scale = source
-            .nodal_charge_c
+            .nodal_source
             .iter()
             .map(|v| v.abs())
             .sum::<f64>()
-            .max(source.absolute_charge_c)
+            .max(source.absolute_source)
             .max(f64::MIN_POSITIVE);
-        if (sum - source.integrated_charge_c).abs()
+        if (sum - source.integrated_source).abs()
             > 128.0 * f64::EPSILON * r.ordered_node_ids.len() as f64 * scale
         {
             return Err(invalid(
@@ -33,11 +36,11 @@ pub(super) fn validate(r: &CanonicalElectricalResponse) -> AnalysisExecutionResu
         for evidence in &source.projection_evidence {
             evidence.validate().map_err(invalid)?;
             if !evidence.accepted
-                || evidence.quantity != PhysicalQuantityKind::ElectricChargeDensity
+                || evidence.quantity != quantity
                 || evidence.sample != ProjectionSample::Static
             {
                 return Err(invalid(
-                    "invalid retained volume charge projection evidence",
+                    "invalid retained electrical source projection evidence",
                 ));
             }
         }
@@ -45,7 +48,7 @@ pub(super) fn validate(r: &CanonicalElectricalResponse) -> AnalysisExecutionResu
     let volume_work = r.charge_sources.as_ref().map_or(0.0, |source| {
         r.potential_increment_v
             .iter()
-            .zip(&source.nodal_charge_c)
+            .zip(&source.nodal_source)
             .map(|(potential, charge)| potential * charge)
             .sum::<f64>()
     });

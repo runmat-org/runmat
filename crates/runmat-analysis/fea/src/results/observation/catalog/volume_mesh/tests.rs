@@ -45,6 +45,7 @@ fn source(
     let count = nodes as u64;
     let plan = FieldRecoveryPlan {
         requirements: vec![FieldRecoveryRequirement {
+            support: Default::default(),
             quantity: definition.quantity(),
             source_location: FieldLocation::Node,
             output_location: FieldLocation::Node,
@@ -106,6 +107,18 @@ fn source(
 }
 
 fn maximum(id: &str, quantity: ObservationQuantity, complex: bool) -> ObservationRequest {
+    maximum_as(
+        id,
+        quantity,
+        complex.then_some(ComplexRepresentation::Magnitude),
+    )
+}
+
+fn maximum_as(
+    id: &str,
+    quantity: ObservationQuantity,
+    representation: Option<ComplexRepresentation>,
+) -> ObservationRequest {
     let mut spec = crate::results::observation::tests::spec(id, ObservationTarget::WholeModel);
     spec.quantity = quantity;
     spec.reduction = Some(ReductionPolicy {
@@ -113,8 +126,8 @@ fn maximum(id: &str, quantity: ObservationQuantity, complex: bool) -> Observatio
         series: SeriesReduction::None,
         extrema_ties: ExtremaTiePolicy::FirstCanonical,
     });
-    if complex {
-        spec.complex_representation = ComplexRepresentation::Magnitude;
+    if let Some(representation) = representation {
+        spec.complex_representation = representation;
         spec.storage.precision = SignalPrecision::Real64;
     }
     ObservationRequest::Reduction(spec)
@@ -245,4 +258,47 @@ fn complex_acoustic_pressure_peak_magnitude_uses_the_same_authority_at_its_frequ
     );
     let peak = authority_round_trip(&step, &source, &mesh, &projection);
     assert!((peak - 5.0).abs() < 1e-12, "{peak}");
+}
+
+#[test]
+fn sound_pressure_level_peak_is_the_rms_level_of_the_largest_pressure_phasor() {
+    let mesh = slab_mesh(2);
+    let projection = AnalysisProjection::derive(&mesh).unwrap();
+    let mut step = ProcedureStep::acoustic_harmonic("sound");
+    step.independent_domain = IndependentDomain::FrequencyHertz(vec![100.0]);
+    step.observations = vec![maximum_as(
+        "peak_level",
+        ObservationQuantity::AcousticPressure,
+        Some(ComplexRepresentation::SoundPressureLevel),
+    )];
+    let definition = RecoveredFieldDefinition::new(
+        "acoustic.pressure",
+        ObservationQuantity::AcousticPressure,
+        FieldLocation::Node,
+        RecoveredFieldEntityDomain::Nodes,
+        ObservationValueShape::Scalar,
+        RecoveredFieldNumericRepresentation::ComplexInterleaved,
+    )
+    .unwrap();
+    // |p| = 5 (1 + x) Pa: the peak 10 Pa at x = 1 is 20 log10(10 / (sqrt(2) 20 uPa)) dB.
+    let values = projection
+        .nodes
+        .iter()
+        .flat_map(|node| {
+            let scale = 1.0 + node.coordinates_m[0];
+            [3.0 * scale, 4.0 * scale]
+        })
+        .collect();
+    let source = source(
+        &step,
+        &definition,
+        RecoveredFieldSample::FrequencyHertz(100.0),
+        &projection,
+        &mesh,
+        values,
+        2,
+    );
+    let level = authority_round_trip(&step, &source, &mesh, &projection);
+    let expected = 20.0 * (10.0 / (std::f64::consts::SQRT_2 * 20.0e-6)).log10();
+    assert!((level - expected).abs() < 1e-10, "{level} vs {expected}");
 }

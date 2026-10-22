@@ -319,6 +319,15 @@ impl AuthoredModel {
                 require_input(input, &inputs)?;
             }
         }
+        for boundary in &self.boundaries {
+            boundary
+                .kind
+                .validate_model_inputs(&self.inputs)
+                .map_err(|error| AuthoredModelError::InvalidPhysics {
+                    kind: "boundary",
+                    detail: format!("`{}`: {error}", boundary.boundary_id),
+                })?;
+        }
         for connector in &self.connectors {
             let mut result = Ok(());
             connector.kind.visit_targets(|source| {

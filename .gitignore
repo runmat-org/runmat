@@ -3,6 +3,8 @@
 
 # Rust
 /target/
+# Extra Cargo target dirs (parallel builds); build output, never commit
+/target-*/
 **/.runmat-wasm-registry-*/
 
 # VSCode

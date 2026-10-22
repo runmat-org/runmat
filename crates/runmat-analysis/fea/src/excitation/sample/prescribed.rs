@@ -4,7 +4,7 @@ use super::{
     ExcitationSamplePoint, RealizationError, SampledValue,
 };
 use runmat_analysis_core::{
-    ElectricPotential, HeatFlux, PhysicalSignal, PrescribedValue, Pressure, Signal, Temperature,
+    ElectricCurrent, ElectricPotential, HeatFlux, PhysicalSignal, PrescribedValue, Pressure, Signal, Temperature,
     Velocity,
 };
 
@@ -47,6 +47,23 @@ pub(crate) fn sample_prescribed_potential(
             _ => None,
         },
         |value| value.volts,
+    )
+}
+
+pub(crate) fn sample_prescribed_current(
+    value: &PrescribedValue<ElectricCurrent>,
+    signals: &[PhysicalSignal],
+    sample: ExcitationSamplePoint<'_>,
+) -> Result<ComplexScalar, RealizationError> {
+    sample_prescribed_scalar(
+        value,
+        signals,
+        sample,
+        |signal| match signal {
+            PhysicalSignal::ElectricCurrent(signal) => Some(signal),
+            _ => None,
+        },
+        |current| current.amperes,
     )
 }
 

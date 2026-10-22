@@ -72,7 +72,7 @@ fn coherently_changed_retained_fields_fail_original_matrix_free_equation() {
         assert!(
             error
                 .to_string()
-                .contains("original physical residual differs"),
+                .contains("differs from re-evaluation of its original equations"),
             "{error}"
         );
     }
@@ -97,7 +97,7 @@ fn fresh_rehashed_charge_summary_is_bound_to_original_weak_continuity() {
         assert!(
             error
                 .to_string()
-                .contains("original charge continuity differs"),
+                .contains("differs from re-evaluation of its original equations"),
             "{error}"
         );
     }

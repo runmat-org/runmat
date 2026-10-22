@@ -34,6 +34,7 @@ pub(super) fn h_flux(
             } else {
                 match p.boundaries[i] {
                     FaceBoundary::Velocity { value, .. } => Ok(dot(value, f.owner_area_vector_m2)),
+                    FaceBoundary::Symmetry { .. } => Ok(0.0),
                     FaceBoundary::PressureOutlet { .. } => Ok(dot(
                         add(
                             face_velocity_trace(p, i, f.owner, u, &gu),
@@ -78,7 +79,9 @@ pub(super) fn corrected_flux(
                     + dot(interpolate(gp[f.owner], gp[n], w), tangent)
             } else {
                 match p.boundaries[i] {
-                    FaceBoundary::Velocity { .. } => return Ok(qh[i]),
+                    FaceBoundary::Velocity { .. } | FaceBoundary::Symmetry { .. } => {
+                        return Ok(qh[i])
+                    }
                     FaceBoundary::PressureOutlet { pressure: pb, .. } => {
                         alpha * ((pb - p.pressure_reference_pa[f.owner]) - pressure[f.owner])
                             + dot(gp[f.owner], tangent)
@@ -139,7 +142,9 @@ pub(super) fn solve(
                 b[n] -= explicit;
             } else {
                 match p.boundaries[i] {
-                    FaceBoundary::Velocity { .. } => b[f.owner] -= qh[i],
+                    FaceBoundary::Velocity { .. } | FaceBoundary::Symmetry { .. } => {
+                        b[f.owner] -= qh[i]
+                    }
                     FaceBoundary::PressureOutlet { pressure: pb, .. } => {
                         a.add(f.owner, f.owner, d);
                         b[f.owner] += -qh[i]
@@ -153,7 +158,13 @@ pub(super) fn solve(
         let a = a.finish().map_err(|e| Error::Operator(e.to_string()))?;
         let roots = p.pressure_reference_plan.roots();
         let (mut next, count) = if roots.is_empty() {
-            linear::solve(p, &a, &b, &pressure)?
+            linear::solve(
+                p,
+                &a,
+                &b,
+                &pressure,
+                linear::LinearSystem::PressureCorrection,
+            )?
         } else {
             let (prepared, rhs) = crate::algebra::prepare_scalar_component_gauges(
                 &a,
@@ -165,7 +176,13 @@ pub(super) fn solve(
                     .collect::<Vec<_>>(),
             )
             .map_err(|e| Error::Operator(e.to_string()))?;
-            linear::solve(p, &prepared, &rhs, &pressure)?
+            linear::solve(
+                p,
+                &prepared,
+                &rhs,
+                &pressure,
+                linear::LinearSystem::PressureCorrection,
+            )?
         };
         p.pressure_reference_plan.normalize(p, &mut next)?;
         pressure = next;

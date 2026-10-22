@@ -42,11 +42,7 @@ impl AnalysisPublicationBuilder {
                 .collect::<Vec<_>>();
             let counts = definitions
                 .iter()
-                .map(|definition| {
-                    source
-                        .entity_counts
-                        .entity_count(definition.entity_domain())
-                })
+                .map(|definition| definition.stored_entities(source.entity_counts))
                 .collect::<Vec<_>>();
             // Every producer in this vertical uses one sample variant; profiles bound scalar widths.
             let sample = source.fields[0].sample;
@@ -73,9 +69,7 @@ impl AnalysisPublicationBuilder {
                     != entry
                         .definition
                         .storage_shape(
-                            source
-                                .entity_counts
-                                .entity_count(entry.definition.entity_domain()),
+                            entry.definition.stored_entities(source.entity_counts),
                         )
                         .map_err(|error| error.to_string())?
                 {

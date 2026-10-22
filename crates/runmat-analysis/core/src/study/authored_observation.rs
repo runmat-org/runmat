@@ -139,7 +139,7 @@ fn lower_expression(
                 .ok_or_else(|| AuthoredObservationError::UnknownStep(step_id.clone()))?;
             Ok(ObservationDraft {
                 step_id: step_id.clone(),
-                spec: base_spec(*quantity, *location, field_domain(step.procedure)),
+                spec: base_spec(*quantity, *location, field_domain(step.procedure, *quantity)),
                 kind: ObservationKind::Field,
             })
         }
@@ -345,6 +345,16 @@ fn apply_projection(
         }
         AuthoredFieldProjection::Phase => {
             spec.complex_representation = ComplexRepresentation::PhaseRadians;
+        }
+        AuthoredFieldProjection::Level => {
+            if spec.quantity != ObservationQuantity::AcousticPressure
+                || spec.complex_representation != ComplexRepresentation::Complex
+            {
+                return Err(AuthoredObservationError::InvalidProjection(
+                    "level requires complex acoustic pressure".into(),
+                ));
+            }
+            spec.complex_representation = ComplexRepresentation::SoundPressureLevel;
         }
         AuthoredFieldProjection::Principal(which) => {
             if !matches!(

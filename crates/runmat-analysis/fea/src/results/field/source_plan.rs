@@ -32,10 +32,9 @@ impl OriginalFieldSourcePlan {
         let mut ids = std::collections::BTreeSet::new();
         for entry in &self.fields {
             entry.sample.validate()?;
-            entry.definition.storage_shape(
-                self.entity_counts
-                    .entity_count(entry.definition.entity_domain()),
-            )?;
+            entry
+                .definition
+                .storage_shape(entry.definition.stored_entities(self.entity_counts))?;
             if !ids.insert(entry.definition.field_id()) {
                 return Err(RecoveredFieldError::InvalidArtifact(
                     "original field source has an ambiguous channel".into(),

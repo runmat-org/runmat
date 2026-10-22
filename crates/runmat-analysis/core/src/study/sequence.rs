@@ -241,6 +241,9 @@ pub enum StateUse {
     ModalBasis,
     CoupledInterface,
     Restart,
+    /// An upstream electromagnetic state whose (cycle-averaged) Joule loss density is the
+    /// consumer's volumetric heat source.
+    HeatSource,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -276,6 +279,10 @@ pub enum StateKind {
     ElectromagneticStatic,
     ElectromagneticComplex,
     AcousticComplex,
+    /// Cavity pressure mode shapes and their natural frequencies.
+    AcousticModes,
+    /// Real time-domain pressure field (and its rate) at the end of a transient.
+    AcousticPressure,
     Fluid,
     MovingMesh,
     ModalBasis,
@@ -650,6 +657,37 @@ impl ProcedureStep {
             SolutionSpace::Direct,
             IndependentDomain::FrequencyHertz(vec![1_000.0]),
             vec![state("acoustic_complex", StateKind::AcousticComplex)],
+        )
+    }
+
+    pub fn acoustic_modal(step_id: impl Into<String>, requested_count: usize) -> Self {
+        Self::new(
+            step_id,
+            PhysicsFamily::Acoustic,
+            AnalysisProcedure::ModalExtraction,
+            SolutionSpace::Direct,
+            IndependentDomain::Eigenvalue { requested_count },
+            vec![state("acoustic_modes", StateKind::AcousticModes)],
+        )
+    }
+
+    pub fn acoustic_transient(
+        step_id: impl Into<String>,
+        end: f64,
+        interval_count: usize,
+    ) -> Self {
+        Self::new(
+            step_id,
+            PhysicsFamily::Acoustic,
+            AnalysisProcedure::TransientResponse,
+            SolutionSpace::Direct,
+            IndependentDomain::TimeSeconds {
+                origin: 0.0,
+                start: 0.0,
+                end,
+                interval_count,
+            },
+            vec![state("acoustic_pressure", StateKind::AcousticPressure)],
         )
     }
 

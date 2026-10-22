@@ -12,7 +12,6 @@ use crate::execution::{
 };
 use crate::results::field::RecoveredFieldArtifactManifest;
 
-mod finite_volume;
 mod frequency;
 mod sampled;
 mod selection;
@@ -26,11 +25,6 @@ const LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 4_000_000
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]
 pub enum ObservationFieldCatalogSource {
-    FiniteVolumeRecovery {
-        recovery_request: Box<FieldRecoveryRequest>,
-        manifest: Box<RecoveredFieldArtifactManifest>,
-        layout: Box<crate::results::field::FiniteVolumeFieldTopology>,
-    },
     SampledRecovery {
         recovery_request: Box<FieldRecoveryRequest>,
         manifest: Box<RecoveredFieldArtifactManifest>,
@@ -194,17 +188,6 @@ impl ObservationFieldCatalog {
 
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         match &self.source {
-            ObservationFieldCatalogSource::FiniteVolumeRecovery {
-                recovery_request,
-                manifest,
-                layout,
-            } => {
-                super::source::validate_finite_volume_authority(
-                    recovery_request,
-                    manifest,
-                    layout,
-                )?;
-            }
             ObservationFieldCatalogSource::SampledRecovery {
                 recovery_request,
                 manifest,
@@ -265,7 +248,6 @@ impl ObservationFieldCatalog {
             } => selection.validate_structural(recovery_request, manifest),
             ObservationFieldCatalogSource::Thermal { .. }
             | ObservationFieldCatalogSource::StructuralFrequencyHistory { .. }
-            | ObservationFieldCatalogSource::FiniteVolumeRecovery { .. }
             | ObservationFieldCatalogSource::VolumeMeshRecovery { .. }
             | ObservationFieldCatalogSource::SampledRecovery { .. } => {
                 Err(invalid("expected structural catalog"))
@@ -286,7 +268,6 @@ impl ObservationFieldCatalog {
             }
             ObservationFieldCatalogSource::Structural { .. }
             | ObservationFieldCatalogSource::StructuralFrequencyHistory { .. }
-            | ObservationFieldCatalogSource::FiniteVolumeRecovery { .. }
             | ObservationFieldCatalogSource::VolumeMeshRecovery { .. }
             | ObservationFieldCatalogSource::SampledRecovery { .. } => {
                 Err(invalid("expected thermal catalog"))

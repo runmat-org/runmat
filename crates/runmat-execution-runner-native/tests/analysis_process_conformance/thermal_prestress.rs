@@ -163,6 +163,7 @@ fn base(order: ElementOrder, scope: &str, revision: ProgramRevision) -> ThermalS
         &compiled,
         ThermalStudyPlanningPolicy {
             backend: ComputeBackend::Cpu,
+            element_heat_source: None,
         },
     )
     .unwrap();

@@ -1,4 +1,5 @@
 //! Shared count-only admission facts for the fixed-support factor and its apply.
+#[cfg(test)]
 use crate::algebra::RealSparseMatrix;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -8,6 +9,7 @@ pub(crate) struct SparseRightIluEnvelope {
     pub application_scalar_operations: u64,
 }
 impl SparseRightIluEnvelope {
+    #[cfg(test)]
     pub(crate) fn derive(matrix: &RealSparseMatrix) -> Option<Self> {
         if matrix.rows() != matrix.columns() {
             return None;

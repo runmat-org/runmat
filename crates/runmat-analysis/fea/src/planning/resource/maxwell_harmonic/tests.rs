@@ -64,6 +64,7 @@ fn workload() -> MaxwellHarmonicWorkload {
         model,
         step_id: ProcedureStepId("potential".into()),
         relative_residual_target: 1e-10,
+        frequency: runmat_analysis_core::Frequency::new(1e8),
     }
 }
 fn facts(
@@ -116,14 +117,15 @@ fn exact_complex_support_codec_and_retained_cold_outputs_fit_both_orders() {
         let FeaResourceDemand::MaxwellHarmonic(d) = &plan.input.demand else {
             panic!("Maxwell demand");
         };
-        let system = MaxwellSystemPlan::derive(&m).unwrap();
+        let grounded = crate::physics::maxwell::grounded_face_identities(&w.model, &m).unwrap();
+        let system = MaxwellSystemPlan::derive(&m, &grounded).unwrap();
         assert_eq!(d.system_plan_identity, system.identity().unwrap());
-        assert_eq!(d.real_block_dimension.0, 2 * d.free_edge_count.0);
+        assert_eq!(d.complex_dimension.0, d.free_edge_count.0);
         assert_eq!(
-            d.block_nonzeros.0,
-            system.block_pattern().column_indices().len() as u64
+            d.nonzeros.0,
+            system.pattern().column_indices().len() as u64
         );
-        assert!(d.krylov.dimension.0 > 0);
+        assert!(d.factorization.dimension.0 > 0);
         assert_eq!(
             d.quadrature_sample_count.0,
             (m.topology.volume_elements.len() * 15) as u64
@@ -177,7 +179,7 @@ fn prepared_understatement_and_count_only_tiny_policy_fail_closed() {
     assert!(maxwell_harmonic_result_payload_bytes_upper_bound(&tiny, &malformed).is_err());
 }
 #[test]
-fn shared_gmres_envelope_and_forged_exact_facts_are_rejected() {
+fn direct_factor_envelope_and_forged_exact_facts_are_rejected() {
     let w = workload();
     let m = fixtures::slab_mesh(2);
     let plan = build_maxwell_harmonic_resource_plan(&w, &m, facts(&w, &m)).unwrap();
@@ -187,16 +189,16 @@ fn shared_gmres_envelope_and_forged_exact_facts_are_rejected() {
             panic!();
         };
         match which {
-            0 => d.real_block_dimension.0 += 1,
-            1 => d.krylov.resident_bytes.0 -= 1,
-            2 => d.block_nonzeros.0 = d.element_count.0 * 144 + 1,
+            0 => d.complex_dimension.0 += 1,
+            1 => d.factorization.resident_bytes.0 -= 1,
+            2 => d.nonzeros.0 = d.element_count.0 * 36 + 1,
             _ => d.edge_count_upper_bound.0 -= 1,
         }
         assert!(build_resource_plan(input).is_err());
     }
     assert_eq!(
-        estimate::maxwell_harmonic::krylov_envelope(0, 0).unwrap(),
-        MaxwellGmresResourceEnvelope::default()
+        estimate::maxwell_harmonic::factor_envelope(0, 0).unwrap(),
+        MaxwellDirectFactorEnvelope::default()
     );
-    assert!(estimate::maxwell_harmonic::krylov_envelope(usize::MAX, u64::MAX).is_err());
+    assert!(estimate::maxwell_harmonic::factor_envelope(u64::MAX, 0).is_err());
 }

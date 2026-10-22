@@ -1,0 +1,70 @@
+// Fluid–structure reference: Poiseuille flow through a soft tube clamped at both ends. The bore
+// widens by C p (Lame thick-walled cylinder in plane strain), so the pressure gradient
+// -8 mu Q / (pi r^4) eases along the tube. Integrating gives the coupled inlet pressure
+// p_in = ((a^5 + 5 C K L)^(1/5) - a) / C with K = 8 mu Q / pi, against the rigid 8 mu U L / a^2.
+geometry tube {
+    file = "./geometry/compliant-tube.step"
+    units = m
+    interfaces = shared
+    region water : cell { select name "Water"; expect exactly_one }
+    region wall : solid { select name "Tube"; expect exactly_one }
+    region inlet : face { select name "Inlet"; expect exactly_one }
+    region outlet : face { select name "Outlet"; expect exactly_one }
+    region bore : face { select name "Bore"; expect exactly_one }
+    region tube_bore : face { select name "Tube bore"; expect exactly_one }
+    region clamps : face { select name "Tube ends"; expect one_or_more }
+}
+
+mesh tube on geometry.tube {
+    tetrahedra {
+        order = linear
+        target_size = 0.0025 m
+        maximum_deviation = 0.0002 m
+    }
+}
+
+material glycerol {
+    mass_density = 1000 kg/m^3
+    fluid {
+        law = incompressible_newtonian
+        dynamic_viscosity = 1 Pa*s
+    }
+}
+
+material gel {
+    mass_density = 1100 kg/m^3
+    elastic {
+        youngs_modulus = 15 kPa
+        poisson_ratio = 0.45
+    }
+}
+
+model soft_tube {
+    assign material.glycerol to geometry.tube.region.water
+    assign material.gel to geometry.tube.region.wall
+    constraint inflow {
+        fluid.velocity { target = geometry.tube.region.inlet; value = [0.01 m/s, 0 m/s, 0 m/s] }
+    }
+    load outflow {
+        fluid.outlet_pressure { target = geometry.tube.region.outlet; value = 0 Pa }
+    }
+    constraint clamped {
+        structural.fixed { target = geometry.tube.region.clamps }
+    }
+    interface wetted {
+        fluid_structure.no_slip {
+            primary = geometry.tube.region.bore
+            secondary = geometry.tube.region.tube_bore
+        }
+    }
+}
+
+study compliant_tube {
+    geometry = geometry.tube
+    mesh = mesh.tube
+    model = model.soft_tube
+    analysis equilibrium { fluid_structure_interaction steady {} }
+    output displacement = analysis.equilibrium.field.node.displacement
+    output pressure = analysis.equilibrium.field.cell.fluid_pressure
+    output inlet_pressure = max(output.pressure, over = geometry.tube.region.water)
+}

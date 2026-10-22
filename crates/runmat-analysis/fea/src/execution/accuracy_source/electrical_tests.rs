@@ -34,6 +34,8 @@ fn electrical_receipts_supply_only_retained_algebraic_equilibrium_evidence() {
                 model,
                 step_id: ProcedureStepId("potential".into()),
                 relative_residual_target: 1e-11,
+        element_temperature_k: None,
+        operating_time_s: None,
             };
             let mesh = mesh(order, 2);
             let result = workload.execute(&mesh).unwrap();

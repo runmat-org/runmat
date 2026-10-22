@@ -89,7 +89,7 @@ fn acoustic_standalone_coordinator_rejects_foreign_mesh_policy_and_definition() 
     input.product.compiled.solver_mesh_digest = StableDigest::ZERO;
     assert!(AcousticStudyCoordinator::new(input).is_err());
     let mut input = preparation();
-    input.policy.maximum_iterations -= 1;
+    input.policy.contraction_limit *= 0.5;
     assert!(AcousticStudyCoordinator::new(input).is_err());
     let mut input = preparation();
     input.product.compiled.model.geometry_revision += 1;

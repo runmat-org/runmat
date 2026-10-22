@@ -152,6 +152,11 @@ fn type_assignable(expected: AuthoredInputType, actual: AuthoredInputType) -> bo
                     AuthoredInputType::Complex,
                     AuthoredInputType::Integer | AuthoredInputType::Real
                 )
+                // A bare number is a dimensionless quantity.
+                | (
+                    AuthoredInputType::Quantity(QuantityDimension::Dimensionless),
+                    AuthoredInputType::Integer | AuthoredInputType::Real
+                )
         )
 }
 
@@ -361,6 +366,8 @@ fn quantity_dimension(dimension: PhysicalDimension) -> Option<QuantityDimension>
         QuantityDimension::HeatFlux
     } else if dimension == PhysicalDimension::THERMAL_CONDUCTIVITY {
         QuantityDimension::ThermalConductivity
+    } else if dimension == PhysicalDimension::HEAT_TRANSFER_COEFFICIENT {
+        QuantityDimension::HeatTransferCoefficient
     } else if dimension == PhysicalDimension::ELECTRIC_POTENTIAL {
         QuantityDimension::ElectricPotential
     } else if dimension == PhysicalDimension::ELECTRIC_CURRENT {

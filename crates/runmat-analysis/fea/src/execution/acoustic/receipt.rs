@@ -3,7 +3,7 @@
 use super::*;
 use crate::execution::{NumericalReceiptIdentity, SolverResultIdentity, StepIdentity};
 
-const PREFIX: &[u8] = b"runmat-acoustic-numerical-receipt/v1\0";
+const PREFIX: &[u8] = b"runmat-acoustic-numerical-receipt/v2\0";
 pub const ACOUSTIC_RECEIPT_MAX_ENCODED_BYTES: u64 = 64 * 1024;
 const LIMITS: CanonicalLimits =
     CanonicalLimits::new(ACOUSTIC_RECEIPT_MAX_ENCODED_BYTES as usize, 4096, 4096, 32);
@@ -18,7 +18,8 @@ pub struct AcousticNumericalReceipt {
     pub power_relative_error: f64,
     pub solver_relative_tolerance: f64,
     pub power_balance_relative_tolerance: f64,
-    pub uniqueness: Option<crate::solve::uniqueness::SparseUniquenessRecord>,
+    /// Factorization nonsingularity certificate of the reduced operator.
+    pub certificate: crate::physics::acoustic::AcousticSolveCertificate,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -69,12 +70,12 @@ impl AcousticNumericalReceiptArtifact {
             power_relative_error: result.power_relative_error(),
             solver_relative_tolerance: workload.solver.relative_tolerance,
             power_balance_relative_tolerance: workload.power_balance_relative_tolerance,
-            uniqueness: result.uniqueness(),
+            certificate: result.certificate(),
         };
         let source_workload = workload.identity()?;
         let source_result = result.source_result_identity()?;
         let artifact = Self {
-            schema_version: 1,
+            schema_version: 2,
             identity: receipt_identity(source_workload, source_result, &receipt)?,
             source_workload,
             source_result,
@@ -97,10 +98,10 @@ impl AcousticNumericalReceiptArtifact {
     }
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         let r = self.receipt;
-        if let Some(record) = r.uniqueness {
-            record.validate().map_err(invalid)?;
-        }
-        if self.schema_version != 1
+        r.certificate
+            .validate(r.certificate.limit, usize::MAX)
+            .map_err(invalid)?;
+        if self.schema_version != 2
             || !r.frequency_hz.is_finite()
             || r.frequency_hz <= 0.0
             || !r.solver_relative_tolerance.is_finite()

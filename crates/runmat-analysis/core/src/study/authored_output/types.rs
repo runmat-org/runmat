@@ -92,6 +92,8 @@ pub enum AuthoredFieldProjection {
     Real,
     Imaginary,
     Phase,
+    /// Sound pressure level of a complex acoustic pressure, dB re 20 uPa (RMS).
+    Level,
     Principal(AuthoredPrincipalSelection),
     VonMises,
 }

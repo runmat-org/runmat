@@ -54,30 +54,31 @@ fn pec_is_harmonic_electric_face_intent_not_static_or_magnetic_ground() {
 }
 
 #[test]
-fn harmonic_electric_intent_rejects_scalar_and_magnetic_constraint_mixing() {
+fn harmonic_admits_grounds_and_terminals_but_not_gauges() {
     let domain = ElectromagneticDomain::Harmonic {
         reference_frequency: Frequency::new(60.0),
     };
     for constraint in [
         AnalysisConstraint::Electrical(ElectricalConstraint {
-            constraint_id: "scalar".into(),
+            constraint_id: "terminal".into(),
             kind: ElectricalConstraintKind::PotentialReference {
                 target: target(EntityDimension::Face),
             },
         }),
         AnalysisConstraint::Magnetic(MagneticConstraint {
-            constraint_id: "magnetic".into(),
+            constraint_id: "far_field".into(),
             kind: MagneticConstraintKind::VectorPotentialGround {
                 target: target(EntityDimension::Face),
             },
         }),
-        AnalysisConstraint::Magnetic(MagneticConstraint {
-            constraint_id: "gauge".into(),
-            kind: MagneticConstraintKind::CoulombGauge {
-                target: target(EntityDimension::Volume),
-            },
-        }),
     ] {
-        assert!(validate_maxwell_constraints(Some(&domain), &[constraint]).is_err());
+        assert!(validate_maxwell_constraints(Some(&domain), &[constraint]).is_ok());
     }
+    let gauge = AnalysisConstraint::Magnetic(MagneticConstraint {
+        constraint_id: "gauge".into(),
+        kind: MagneticConstraintKind::CoulombGauge {
+            target: target(EntityDimension::Volume),
+        },
+    });
+    assert!(validate_maxwell_constraints(Some(&domain), &[gauge]).is_err());
 }

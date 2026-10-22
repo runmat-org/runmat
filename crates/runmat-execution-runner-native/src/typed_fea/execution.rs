@@ -196,6 +196,26 @@ pub fn prepare_study_publication(
                 identity(digest, &result.completion.root.logical_digest)?,
             )
         }
+        CompletedFeaStudyResult::AcousticResponse(result) => {
+            let digest = result
+                .completion
+                .compiled
+                .definition_digest()
+                .map_err(|e| e.to_string())?;
+            runmat_runtime::analysis::prepare_acoustic_response_study_publication(
+                &result.completion,
+                &result.source,
+                &result.mesh,
+                &result.meshing_evidence,
+                &runmat_runtime::analysis::AnalysisAcousticResponseRunOptions {
+                    precision_mode: PrecisionMode::Fp64,
+                    residual_target: result.completion.workload.solver.relative_tolerance(),
+                },
+                digest,
+                context(),
+                identity(digest, &result.completion.root.logical_digest)?,
+            )
+        }
         CompletedFeaStudyResult::Structural(result) => {
             let digest = result.definition_digest()?;
             runmat_runtime::analysis::prepare_structural_study_publication(

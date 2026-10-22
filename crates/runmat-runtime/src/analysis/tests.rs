@@ -23,31 +23,25 @@ use runmat_analysis_core::{
 };
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::{
-    fea_acoustic_frequency_response_field_id, fea_cht_energy_residual_field_id,
-    fea_cht_fluid_temperature_field_id, fea_cht_interface_heat_flux_field_id,
-    fea_cht_interface_temperature_jump_field_id, fea_cht_solid_temperature_field_id,
-    fea_fsi_coupling_iteration_count_field_id, fea_fsi_fluid_pressure_field_id,
-    fea_fsi_fluid_velocity_field_id, fea_fsi_interface_displacement_field_id,
-    fea_fsi_interface_pressure_field_id, fea_fsi_interface_residual_field_id,
-    fea_fsi_interface_traction_field_id, fea_fsi_structural_displacement_field_id,
-    fea_modal_mode_shape_field_id, fea_nonlinear_contact_pressure_field_id,
-    fea_thermal_energy_storage_rate_field_id, fea_thermal_heat_flux_field_id,
-    fea_thermal_temperature_gradient_field_id, fea_thermo_mechanical_coupling_residual_field_id,
-    fea_thermo_mechanical_displacement_field_id, fea_thermo_mechanical_temperature_field_id,
-    fea_thermo_mechanical_thermal_strain_field_id, fea_thermo_mechanical_thermal_stress_field_id,
-    fea_thermo_mechanical_von_mises_field_id, fea_transient_acceleration_field_id,
-    fea_transient_angular_acceleration_field_id, fea_transient_angular_velocity_field_id,
-    fea_transient_damping_dissipation_field_id, fea_transient_energy_balance_residual_field_id,
-    fea_transient_external_work_field_id, fea_transient_kinetic_energy_field_id,
-    fea_transient_reaction_force_field_id, fea_transient_relative_energy_balance_error_field_id,
-    fea_transient_residual_norm_field_id, fea_transient_rotation_field_id,
-    fea_transient_strain_energy_density_field_id, fea_transient_strain_energy_field_id,
-    fea_transient_strain_field_id, fea_transient_stress_field_id,
-    fea_transient_support_work_field_id, fea_transient_velocity_field_id, ComputeBackend,
-    FeaProgressPhase, FeaProgressStatus, SolverMethod, SolverPreconditioner,
-    FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY, FEA_FIELD_ACOUSTIC_PRESSURE_IMAG,
-    FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE, FEA_FIELD_ACOUSTIC_PRESSURE_REAL,
-    FEA_FIELD_CFD_WALL_SHEAR_STRESS, FEA_FIELD_CHT_FLUID_PRESSURE, FEA_FIELD_CHT_FLUID_VELOCITY,
+    fea_acoustic_frequency_response_field_id, fea_cht_interface_heat_flux_field_id,
+    fea_fsi_interface_traction_field_id, fea_modal_mode_shape_field_id,
+    fea_nonlinear_contact_pressure_field_id, fea_thermal_energy_storage_rate_field_id,
+    fea_thermal_heat_flux_field_id, fea_thermal_temperature_gradient_field_id,
+    fea_thermo_mechanical_coupling_residual_field_id, fea_thermo_mechanical_displacement_field_id,
+    fea_thermo_mechanical_temperature_field_id, fea_thermo_mechanical_thermal_strain_field_id,
+    fea_thermo_mechanical_thermal_stress_field_id, fea_thermo_mechanical_von_mises_field_id,
+    fea_transient_acceleration_field_id, fea_transient_angular_acceleration_field_id,
+    fea_transient_angular_velocity_field_id, fea_transient_damping_dissipation_field_id,
+    fea_transient_energy_balance_residual_field_id, fea_transient_external_work_field_id,
+    fea_transient_kinetic_energy_field_id, fea_transient_reaction_force_field_id,
+    fea_transient_relative_energy_balance_error_field_id, fea_transient_residual_norm_field_id,
+    fea_transient_rotation_field_id, fea_transient_strain_energy_density_field_id,
+    fea_transient_strain_energy_field_id, fea_transient_strain_field_id,
+    fea_transient_stress_field_id, fea_transient_support_work_field_id,
+    fea_transient_velocity_field_id, ComputeBackend, FeaProgressPhase, FeaProgressStatus,
+    SolverMethod, SolverPreconditioner, FEA_FIELD_ACOUSTIC_PARTICLE_VELOCITY,
+    FEA_FIELD_ACOUSTIC_PRESSURE_IMAG, FEA_FIELD_ACOUSTIC_PRESSURE_MAGNITUDE,
+    FEA_FIELD_ACOUSTIC_PRESSURE_REAL, FEA_FIELD_CFD_WALL_SHEAR_STRESS,
     FEA_FIELD_ELECTRO_THERMAL_JOULE_HEAT, FEA_FIELD_MODAL_EIGENVALUE, FEA_FIELD_MODAL_FREQUENCY_HZ,
     FEA_FIELD_MODAL_MODAL_MASS, FEA_FIELD_MODAL_MODAL_STIFFNESS, FEA_FIELD_MODAL_M_ORTHOGONALITY,
     FEA_FIELD_MODAL_PARTICIPATION_FACTOR, FEA_FIELD_MODAL_RELATIVE_FREQUENCY_SEPARATION,
@@ -3775,100 +3769,35 @@ fn analysis_trends_never_records_rejected_reduced_cfd_as_a_run() {
 }
 
 #[test]
-fn analysis_trends_classifies_cht_runs_separately() {
+fn analysis_trends_omit_rejected_coupled_flow_runs() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();
-
-    let (_mesh_root, mesh_path) = write_ready_minimal_analysis_mesh_artifact("cht-trends");
-    let model = sample_cht_model();
     for _ in 0..3 {
-        let _ = analysis_run_cht_with_options_op(
-            &model,
-            ComputeBackend::Cpu,
-            AnalysisChtRunOptions {
-                solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
-                ..Default::default()
-            },
-            OperationContext::new(None, None),
-        )
-        .expect("cht run should persist for trends");
-    }
-
-    let trends = analysis_trends_op(
-        AnalysisTrendsQuery { window_size: 2 },
-        OperationContext::new(None, None),
-    )
-    .expect("trends should succeed");
-
-    let cht = trends
-        .data
-        .summaries
-        .iter()
-        .find(|summary| {
-            summary.identity.family()
-                == PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer)
-        })
-        .expect("cht trend summary should exist");
-    assert_eq!(cht.sample_count, 2);
-    assert!(cht.median_solve_ms.is_some());
-    assert!(cht.p95_solve_ms.is_some());
-    assert!(cht.failed_increment_rate.is_none());
-
-    let cfd = trends
-        .data
-        .summaries
-        .iter()
-        .find(|summary| summary.identity.family() == PhysicsFamily::Fluid);
-    assert!(cfd.is_none(), "cht runs should not classify as cfd");
-
-    storage::reset_artifact_store_for_tests();
-}
-
-#[test]
-fn analysis_trends_classifies_fsi_runs_separately() {
-    let _guard = analysis_test_guard();
-    storage::reset_artifact_store_for_tests();
-
-    let model = sample_fsi_model();
-    for _ in 0..3 {
-        let _ = analysis_run_fsi_with_options_op(
-            &model,
+        analysis_run_cht_with_options_op(
+            &sample_cht_model(),
             ComputeBackend::Cpu,
             Default::default(),
             OperationContext::new(None, None),
         )
-        .expect("fsi run should persist for trends");
+        .expect_err("rejected CHT runs are not persisted");
+        analysis_run_fsi_with_options_op(
+            &sample_fsi_model(),
+            ComputeBackend::Cpu,
+            Default::default(),
+            OperationContext::new(None, None),
+        )
+        .expect_err("rejected FSI runs are not persisted");
     }
-
     let trends = analysis_trends_op(
         AnalysisTrendsQuery { window_size: 2 },
         OperationContext::new(None, None),
     )
     .expect("trends should succeed");
-
-    let fsi = trends
+    assert!(trends
         .data
         .summaries
         .iter()
-        .find(|summary| {
-            summary.identity.family()
-                == PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction)
-        })
-        .expect("fsi trend summary should exist");
-    assert_eq!(fsi.sample_count, 2);
-    assert!(fsi.median_solve_ms.is_some());
-    assert!(fsi.p95_solve_ms.is_some());
-    assert!(fsi.failed_increment_rate.is_none());
-
-    let transient = trends.data.summaries.iter().find(|summary| {
-        summary.identity.family() == PhysicsFamily::Structural
-            && summary.identity.procedure() == AnalysisProcedure::TransientResponse
-    });
-    assert!(
-        transient.is_none(),
-        "fsi runs should not classify as transient"
-    );
-
+        .all(|summary| !matches!(summary.identity.family(), PhysicsFamily::Coupled(_))));
     storage::reset_artifact_store_for_tests();
 }
 
@@ -4516,7 +4445,7 @@ fn analysis_results_by_run_id_rejects_unknown_artifact_schema() {
 }
 
 #[test]
-fn analysis_artifacts_record_family_specific_op_versions_for_coupled_runs() {
+fn analysis_artifacts_record_family_specific_op_versions() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();
     let root = temp_artifact_root("family-op-version");
@@ -4525,38 +4454,8 @@ fn analysis_artifacts_record_family_specific_op_versions_for_coupled_runs() {
         root: root.clone(),
     })
     .expect("configure filesystem artifact store");
-    let (mesh_root, mesh_path) =
-        write_ready_minimal_analysis_mesh_artifact("family-op-version-cht");
+    let (mesh_root, mesh_path) = write_ready_minimal_analysis_mesh_artifact("family-op-version");
 
-    let mut cfd_model = sample_model();
-    cfd_model.sequence.steps[0] = ProcedureStep::fluid_static("cfd_test");
-    cfd_model.cfd = Some(sample_cfd_domain());
-    let cfd = analysis_run_cfd_with_options_op(
-        &cfd_model,
-        ComputeBackend::Cpu,
-        Default::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("cfd run should succeed");
-
-    let cht = analysis_run_cht_with_options_op(
-        &sample_cht_model(),
-        ComputeBackend::Cpu,
-        AnalysisChtRunOptions {
-            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
-            ..Default::default()
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("cht run should succeed");
-
-    let fsi = analysis_run_fsi_with_options_op(
-        &sample_fsi_model(),
-        ComputeBackend::Cpu,
-        Default::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("fsi run should succeed");
     let acoustic_model = test_model_for_geometry(
         &sample_geometry_asset(),
         TestModelSpec {
@@ -4612,9 +4511,6 @@ fn analysis_artifacts_record_family_specific_op_versions_for_coupled_runs() {
             .to_string()
     };
 
-    assert_eq!(read_op_version(&cfd.data.run_id), "fea.run_cfd/v1");
-    assert_eq!(read_op_version(&cht.data.run_id), "fea.run_cht/v1");
-    assert_eq!(read_op_version(&fsi.data.run_id), "fea.run_fsi/v1");
     assert_eq!(read_op_version(&thermal.data.run_id), "fea.run_thermal/v1");
     assert_eq!(
         read_op_version(&acoustic.data.run_id),
@@ -5231,297 +5127,46 @@ fn analysis_run_thermal_rejects_invalid_thermal_boundary_values() {
 }
 
 #[test]
-fn analysis_run_cht_rejects_uncoupled_thermal_step() {
+fn analysis_run_cht_requires_an_authored_study() {
     let _guard = analysis_test_guard();
-    let mut model = sample_model();
-    model.sequence.steps = vec![ProcedureStep::thermal_transient("thermal_1".to_string())];
-    set_model_thermo_coupling(
-        &mut model,
-        TestThermoMechanicalCoupling {
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 50.0,
-            thermal_expansion_coefficient: 1.2e-5,
-            region_temperature_deltas: Vec::new(),
-        },
-    );
-    let err = analysis_run_cht_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        Default::default(),
-        OperationContext::new(None, None),
-    )
-    .expect_err("cht run should reject an uncoupled thermal step");
-
-    assert_eq!(err.operation, "fea.run_cht");
-    assert_eq!(err.op_version, "fea.run_cht/v1");
-    assert_eq!(err.error_code, "RM.FEA.RUN_CHT.INVALID_MODEL");
+    let mut thermal_only = sample_model();
+    thermal_only.sequence.steps = vec![ProcedureStep::thermal_transient("thermal_1".to_string())];
+    let mut moment = sample_cht_model();
+    replace_with_moment_excitation(&mut moment, "cht_moment");
+    for model in [sample_cht_model(), thermal_only, moment] {
+        let err = analysis_run_cht_with_options_op(
+            &model,
+            ComputeBackend::Cpu,
+            Default::default(),
+            OperationContext::new(None, None),
+        )
+        .expect_err("the removed reduced CHT endpoint must not fabricate a coupled run");
+        assert_eq!(err.operation, "fea.run_cht");
+        assert_eq!(err.op_version, "fea.run_cht/v1");
+        assert_eq!(err.error_code, "RM.FEA.RUN_CHT.AUTHORED_STUDY_REQUIRED");
+    }
 }
 
 #[test]
-fn analysis_run_cht_rejects_uncoupled_fluid_step() {
+fn analysis_run_fsi_requires_an_authored_study() {
     let _guard = analysis_test_guard();
-    let mut model = sample_model();
-    model.sequence.steps = vec![ProcedureStep::fluid_static("cfd_1".to_string())];
-    model.cfd = Some(sample_cfd_domain());
-    let err = analysis_run_cht_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        Default::default(),
-        OperationContext::new(None, None),
-    )
-    .expect_err("cht run should reject an uncoupled fluid step");
-
-    assert_eq!(err.operation, "fea.run_cht");
-    assert_eq!(err.op_version, "fea.run_cht/v1");
-    assert_eq!(err.error_code, "RM.FEA.RUN_CHT.INVALID_MODEL");
-}
-
-#[test]
-fn analysis_run_cht_rejects_invalid_cfd_domain_parameters() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_cht_model();
-    model
-        .cfd
-        .as_mut()
-        .expect("cht model should include cfd")
-        .dynamic_viscosity
-        .pascal_seconds = 0.0;
-    let err = analysis_run_cht_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        Default::default(),
-        OperationContext::new(None, None),
-    )
-    .expect_err("cht run should fail for invalid cfd domain values");
-
-    assert_eq!(err.operation, "fea.run_cht");
-    assert_eq!(err.op_version, "fea.run_cht/v1");
-    assert_eq!(err.error_code, "RM.FEA.RUN_CHT.INVALID_OPTIONS");
-}
-
-#[test]
-fn analysis_run_cht_rejects_moment_excitations() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_cht_model();
-    replace_with_moment_excitation(&mut model, "cht_moment");
-
-    let err = analysis_run_cht_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        Default::default(),
-        OperationContext::new(None, None),
-    )
-    .expect_err("cht run should reject structural moment excitations");
-
-    assert_eq!(err.operation, "fea.run_cht");
-    assert_eq!(err.op_version, "fea.run_cht/v1");
-    assert_eq!(err.error_code, "RM.FEA.RUN_CHT.INVALID_LOAD");
-}
-
-#[test]
-fn analysis_run_cht_rejects_contact_interface_mapping() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_cht_model();
-    set_model_contact(&mut model, 0.0);
-    let err = analysis_run_cht_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        Default::default(),
-        OperationContext::new(None, None),
-    )
-    .expect_err("cht run should fail for contact interface mapping");
-
-    assert_eq!(err.operation, "fea.run_cht");
-    assert_eq!(err.op_version, "fea.run_cht/v1");
-    assert_eq!(err.error_code, "RM.FEA.RUN_CHT.INVALID_INTERFACE_MAPPING");
-}
-
-#[test]
-fn analysis_run_cht_requires_a_canonical_solver_mesh() {
-    let _guard = analysis_test_guard();
-    let model = sample_cht_model();
-
-    let error = analysis_run_cht_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        AnalysisChtRunOptions::default(),
-        OperationContext::new(None, None),
-    )
-    .expect_err("CHT execution must not synthesize topology");
-
-    assert_eq!(error.error_code, "RM.FEA.RUN_CHT.SOLVER_MESH_REQUIRED");
-}
-
-#[test]
-fn analysis_run_cht_uses_authored_conjugate_heat_transfer_interface() {
-    let _guard = analysis_test_guard();
-    let (_mesh_root, mesh_path) = write_ready_minimal_analysis_mesh_artifact("cht-interface");
-    let mut model = sample_cht_model();
-    model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
-        interface_id: "cht_channel_slab_interface".to_string(),
-        primary: runmat_analysis_core::RegionTarget::boundary("fluid_channel"),
-        secondary: runmat_analysis_core::RegionTarget::boundary("solid_slab"),
-        kind: runmat_analysis_core::AnalysisInterfaceKind::ConjugateHeatTransfer(
-            runmat_analysis_core::ConjugateHeatTransferInterfaceModel {
-                transfer: runmat_analysis_core::ThermalInterfaceTransfer::Conductance(
-                    runmat_analysis_core::HeatTransferCoefficient::new(750.0),
-                ),
-            },
-        ),
-    }];
-
-    let envelope = analysis_run_cht_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        AnalysisChtRunOptions {
-            deterministic_mode: true,
-            precision_mode: PrecisionMode::Fp64,
-            quality_policy: QualityPolicy::Balanced,
-            sample_count: 4,
-            max_linear_iters: 64,
-            tolerance: 1.0e-8,
-            residual_warn_threshold: 1.0e-4,
-            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("cht run should accept authored conjugate heat-transfer interface");
-
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_CHT_INTERFACE_CLOSURE"
-            && diag.message.contains("interface_conductance_w_per_m2k=750")
-    }));
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_CHT_COUPLING"
-            && diag.message.contains("authored_interface_count=1")));
-}
-
-#[test]
-fn analysis_run_fsi_rejects_uncoupled_fluid_step() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_model();
-    model.sequence.steps = vec![ProcedureStep::fluid_static("cfd_1".to_string())];
-    model.cfd = Some(sample_cfd_domain());
-    let err = analysis_run_fsi_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        Default::default(),
-        OperationContext::new(None, None),
-    )
-    .expect_err("fsi run should reject an uncoupled fluid step");
-
-    assert_eq!(err.operation, "fea.run_fsi");
-    assert_eq!(err.op_version, "fea.run_fsi/v1");
-    assert_eq!(err.error_code, "RM.FEA.RUN_FSI.INVALID_MODEL");
-}
-
-#[test]
-fn analysis_run_fsi_rejects_invalid_cfd_domain_parameters() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_fsi_model();
-    model
-        .cfd
-        .as_mut()
-        .expect("fsi model should include cfd")
-        .dynamic_viscosity
-        .pascal_seconds = 0.0;
-    let err = analysis_run_fsi_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        Default::default(),
-        OperationContext::new(None, None),
-    )
-    .expect_err("fsi run should fail for invalid cfd domain values");
-
-    assert_eq!(err.operation, "fea.run_fsi");
-    assert_eq!(err.op_version, "fea.run_fsi/v1");
-    assert_eq!(err.error_code, "RM.FEA.RUN_FSI.INVALID_OPTIONS");
-}
-
-#[test]
-fn analysis_run_fsi_rejects_moment_excitations() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_fsi_model();
-    replace_with_moment_excitation(&mut model, "fsi_moment");
-
-    let err = analysis_run_fsi_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        Default::default(),
-        OperationContext::new(None, None),
-    )
-    .expect_err("fsi run should reject structural moment excitations");
-
-    assert_eq!(err.operation, "fea.run_fsi");
-    assert_eq!(err.op_version, "fea.run_fsi/v1");
-    assert_eq!(err.error_code, "RM.FEA.RUN_FSI.INVALID_LOAD");
-}
-
-#[test]
-fn analysis_run_fsi_rejects_contact_interface_mapping() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_fsi_model();
-    set_model_contact(&mut model, 0.0);
-    let err = analysis_run_fsi_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        Default::default(),
-        OperationContext::new(None, None),
-    )
-    .expect_err("fsi run should fail for contact interface mapping");
-
-    assert_eq!(err.operation, "fea.run_fsi");
-    assert_eq!(err.op_version, "fea.run_fsi/v1");
-    assert_eq!(err.error_code, "RM.FEA.RUN_FSI.INVALID_INTERFACE_MAPPING");
-}
-
-#[test]
-fn analysis_run_fsi_uses_authored_fluid_structure_interface() {
-    let _guard = analysis_test_guard();
-    let mut model = sample_fsi_model();
-    model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
-        interface_id: "fsi_pipe_plate_interface".to_string(),
-        primary: runmat_analysis_core::RegionTarget::boundary("fluid_pipe"),
-        secondary: runmat_analysis_core::RegionTarget::boundary("plate_wall"),
-        kind: runmat_analysis_core::AnalysisInterfaceKind::FluidStructure(
-            runmat_analysis_core::FluidStructureInterfaceModel {
-                kinematics: runmat_analysis_core::FluidStructureKinematics::NoSlip,
-            },
-        ),
-    }];
-
-    let envelope = analysis_run_fsi_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        AnalysisFsiRunOptions {
-            deterministic_mode: true,
-            precision_mode: PrecisionMode::Fp64,
-            quality_policy: QualityPolicy::Balanced,
-            sample_count: 4,
-            max_linear_iters: 64,
-            tolerance: 1.0e-8,
-            residual_warn_threshold: 1.0e-4,
-            solver_mesh_artifact_path: None,
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("fsi run should accept authored fluid-structure interface");
-
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_FSI_INTERFACE_CLOSURE"
-            && diag.message.contains("interface_stiffness_pa_per_m=")
-    }));
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_FSI_COUPLING"
-            && diag.message.contains("authored_interface_count=1")));
+    let mut fluid_only = sample_model();
+    fluid_only.sequence.steps = vec![ProcedureStep::fluid_static("cfd_1".to_string())];
+    fluid_only.cfd = Some(sample_cfd_domain());
+    let mut moment = sample_fsi_model();
+    replace_with_moment_excitation(&mut moment, "fsi_moment");
+    for model in [sample_fsi_model(), fluid_only, moment] {
+        let err = analysis_run_fsi_with_options_op(
+            &model,
+            ComputeBackend::Cpu,
+            Default::default(),
+            OperationContext::new(None, None),
+        )
+        .expect_err("the removed reduced FSI endpoint must not fabricate a coupled run");
+        assert_eq!(err.operation, "fea.run_fsi");
+        assert_eq!(err.op_version, "fea.run_fsi/v1");
+        assert_eq!(err.error_code, "RM.FEA.RUN_FSI.AUTHORED_STUDY_REQUIRED");
+    }
 }
 
 #[test]
@@ -6314,403 +5959,6 @@ fn analysis_run_cfd_rejects_partial_authored_boundary_conditions() {
     assert_eq!(err.operation, "fea.run_cfd");
     assert_eq!(err.op_version, "fea.run_cfd/v1");
     assert_eq!(err.error_code, "RM.FEA.RUN_CFD.AUTHORED_STUDY_REQUIRED");
-}
-
-#[test]
-fn analysis_run_cht_returns_coupled_payload_and_diagnostics() {
-    let _guard = analysis_test_guard();
-    let (_mesh_root, mesh_path) = write_ready_minimal_analysis_mesh_artifact("cht-payload");
-    let model = sample_cht_model();
-
-    let envelope = analysis_run_cht_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        AnalysisChtRunOptions {
-            deterministic_mode: true,
-            precision_mode: PrecisionMode::Fp64,
-            quality_policy: QualityPolicy::Balanced,
-            sample_count: 4,
-            max_linear_iters: 64,
-            tolerance: 1.0e-8,
-            residual_warn_threshold: 1.0e-4,
-            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("cht run should return envelope");
-
-    assert_eq!(envelope.operation, "fea.run_cht");
-    assert_eq!(envelope.op_version, "fea.run_cht/v1");
-    assert_eq!(
-        envelope.data.run.solver_method,
-        SolverMethod::ChtConjugateProjection
-    );
-    assert!(envelope.data.transient_results.is_none());
-    assert!(envelope.data.thermal_results.is_some());
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_CFD_FLOW"
-            && diag.message.contains("reynolds_number=")
-            && diag.message.contains("topology_basis=solver_mesh")));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_CFD_ASSEMBLY"
-            && diag.message.contains("topology_basis=solver_mesh")
-            && diag
-                .message
-                .contains("topology_geometry_source=solver_mesh")
-            && diag.message.contains("control_volume_count=")
-            && diag.message.contains("domain_length_m=")
-    }));
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_CHT_COUPLING"
-            && diag.message.contains("applied_temperature_delta_k=60")));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_CHT_INTERFACE_CLOSURE"
-            && diag.message.contains("interface_face_count=")
-            && diag.message.contains("max_temperature_jump_k=")
-            && diag.message.contains("max_energy_residual=")
-            && diag.message.contains("heat_flux_balance_ratio=")
-            && diag.message.contains("thermal_transport_residual_ratio=")
-            && diag
-                .message
-                .contains("interface_temperature_continuity_ratio=")
-            && diag.message.contains("max_advection_temperature_shift_k=")
-            && diag.message.contains("interface_conductance_w_per_m2k=")
-            && diag
-                .message
-                .contains("flux_temperature_law_residual_ratio=")
-            && diag
-                .message
-                .contains("heat_flux_realization_residual_ratio=")
-            && diag.message.contains("coupled_interface_iteration_count=")
-            && diag.message.contains("coupled_interface_residual_ratio=")
-            && diag.message.contains("thermal_network_node_count=")
-            && diag.message.contains("thermal_network_edge_count=")
-            && diag
-                .message
-                .contains("interface_connectivity_coverage_ratio=")
-            && diag
-                .message
-                .contains("mesh_backed_interface_connectivity_ratio=")
-            && diag.message.contains("full_topology_edge_count=")
-            && diag.message.contains("full_topology_element_count=")
-            && diag.message.contains("thermal_network_residual_ratio=")
-    }));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_CHT_KNOWN_ANSWER"
-            && diag.message.contains("basis=heated_channel_conjugate_slab")
-            && diag
-                .message
-                .contains("heated_channel_energy_residual_ratio=")
-            && diag
-                .message
-                .contains("conjugate_slab_flux_law_residual_ratio=")
-            && diag.message.contains("advection_shift_coverage_ratio=")
-            && diag.message.contains("coupled_interface_residual_ratio=")
-            && diag
-                .message
-                .contains("heat_flux_realization_residual_ratio=")
-            && diag
-                .message
-                .contains("interface_connectivity_coverage_ratio=")
-            && diag
-                .message
-                .contains("mesh_backed_interface_connectivity_ratio=")
-            && diag.message.contains("thermal_network_residual_ratio=")
-            && diag.message.contains("known_answer_coverage_ratio=")
-    }));
-    let thermal = envelope
-        .data
-        .thermal_results
-        .as_ref()
-        .expect("thermal payload should exist");
-    assert_eq!(thermal.time_points_s.len(), 4);
-    let fluid_temperature = envelope
-        .data
-        .run
-        .field(&fea_cht_fluid_temperature_field_id(0))
-        .expect("cht fluid temperature field should be present");
-    let solid_temperature = envelope
-        .data
-        .run
-        .field(&fea_cht_solid_temperature_field_id(0))
-        .expect("cht solid temperature field should be present");
-    let interface_heat_flux = envelope
-        .data
-        .run
-        .field(&fea_cht_interface_heat_flux_field_id(0))
-        .expect("cht interface heat-flux field should be present");
-    let interface_temperature_jump = envelope
-        .data
-        .run
-        .field(&fea_cht_interface_temperature_jump_field_id(0))
-        .expect("cht interface temperature jump field should be present");
-    let thermal_flux_face_count = thermal
-        .heat_flux_snapshots
-        .first()
-        .and_then(|field| field.shape.first().copied())
-        .expect("thermal heat-flux snapshot should carry a recovery domain");
-    let solver_mesh =
-        runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
-    let expected_interface_face_count = runmat_analysis_fea::physics::cfd::interface_face_count(
-        &CfdDomainTopology::from_model(&model, Some(&solver_mesh)),
-    );
-    assert_eq!(solid_temperature.shape, fluid_temperature.shape);
-    assert!(expected_interface_face_count >= thermal_flux_face_count);
-    assert_eq!(
-        interface_heat_flux.shape,
-        vec![expected_interface_face_count]
-    );
-    assert_eq!(interface_temperature_jump.shape, interface_heat_flux.shape);
-    let results = analysis_results_op(
-        &envelope.data,
-        AnalysisResultsQuery::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("cht results should be queryable");
-    let descriptor = |field_id: &str| {
-        results
-            .data
-            .field_descriptors
-            .iter()
-            .find(|descriptor| descriptor.field_id == field_id)
-            .expect("CHT descriptor should be present")
-    };
-    let velocity_descriptor = descriptor(FEA_FIELD_CHT_FLUID_VELOCITY);
-    assert_eq!(velocity_descriptor.kind, AnalysisFieldKind::Vector);
-    assert_eq!(velocity_descriptor.component_count, Some(3));
-    for field_id in [
-        FEA_FIELD_CHT_FLUID_PRESSURE.to_string(),
-        fea_cht_fluid_temperature_field_id(0),
-        fea_cht_solid_temperature_field_id(0),
-        fea_cht_interface_temperature_jump_field_id(0),
-        fea_cht_energy_residual_field_id(0),
-    ] {
-        let descriptor = descriptor(&field_id);
-        assert_eq!(descriptor.kind, AnalysisFieldKind::Scalar);
-        assert_eq!(descriptor.component_count, None);
-    }
-    let interface_heat_flux_descriptor = descriptor(&fea_cht_interface_heat_flux_field_id(0));
-    assert_eq!(
-        interface_heat_flux_descriptor.kind,
-        AnalysisFieldKind::Scalar
-    );
-    assert_eq!(interface_heat_flux_descriptor.component_count, None);
-}
-
-#[test]
-fn analysis_run_fsi_returns_coupled_payload_and_diagnostics() {
-    let _guard = analysis_test_guard();
-    let model = sample_fsi_model();
-
-    let envelope = analysis_run_fsi_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        AnalysisFsiRunOptions {
-            deterministic_mode: true,
-            precision_mode: PrecisionMode::Fp64,
-            quality_policy: QualityPolicy::Balanced,
-            sample_count: 4,
-            max_linear_iters: 64,
-            tolerance: 1.0e-8,
-            residual_warn_threshold: 1.0e-4,
-            solver_mesh_artifact_path: None,
-        },
-        OperationContext::new(None, None),
-    )
-    .expect("fsi run should return envelope");
-
-    assert_eq!(envelope.operation, "fea.run_fsi");
-    assert_eq!(envelope.op_version, "fea.run_fsi/v1");
-    assert_eq!(
-        envelope.data.run.solver_method,
-        SolverMethod::FsiPartitionedProjection
-    );
-    assert!(envelope.data.transient_results.is_none());
-    assert!(envelope.data.thermal_results.is_none());
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_CFD_FLOW"
-            && diag.message.contains("reynolds_number=")
-            && diag.message.contains("topology_basis=implicit_channel")));
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_CFD_RESIDUAL"
-            && diag.message.contains("max_momentum_residual=")));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_CFD_ASSEMBLY"
-            && diag.message.contains("topology_basis=implicit_channel")
-            && diag.message.contains("control_volume_count=")
-            && diag.message.contains("domain_length_m=")
-    }));
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_FSI_INTERFACE_RESIDUAL"
-            && diag.message.contains("max_interface_residual=")));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_FSI_INTERFACE_CLOSURE"
-            && diag.message.contains("interface_node_count=")
-            && diag.message.contains("interface_face_count=")
-            && diag.message.contains("force_balance_ratio=")
-            && diag
-                .message
-                .contains("max_displacement_transfer_residual_m=")
-            && diag.message.contains("max_coupling_iteration_count=")
-            && diag.message.contains("pressure_feedback_residual_ratio=")
-            && diag.message.contains("two_way_interface_residual_ratio=")
-            && diag
-                .message
-                .contains("structural_traction_update_residual_ratio=")
-            && diag
-                .message
-                .contains("pressure_displacement_law_residual_ratio=")
-            && diag.message.contains("structural_solve_residual_ratio=")
-            && diag.message.contains("interface_work_j_per_m2=")
-            && diag.message.contains("structural_strain_energy_j_per_m2=")
-            && diag
-                .message
-                .contains("interface_work_energy_residual_ratio=")
-            && diag.message.contains("structural_coupling_edge_count=")
-            && diag
-                .message
-                .contains("interface_connectivity_coverage_ratio=")
-            && diag
-                .message
-                .contains("mesh_backed_interface_connectivity_ratio=")
-            && diag.message.contains("full_topology_edge_count=")
-            && diag.message.contains("full_topology_element_count=")
-            && diag.message.contains("interface_stiffness_pa_per_m=")
-    }));
-    assert!(envelope.data.run.diagnostics.iter().any(|diag| {
-        diag.code == "FEA_FSI_KNOWN_ANSWER"
-            && diag
-                .message
-                .contains("basis=pressure_loaded_wall_partitioned")
-            && diag
-                .message
-                .contains("pressure_loaded_wall_displacement_law_residual_ratio=")
-            && diag
-                .message
-                .contains("interface_traction_balance_residual_ratio=")
-            && diag
-                .message
-                .contains("partitioned_pressure_feedback_residual_ratio=")
-            && diag.message.contains("two_way_interface_residual_ratio=")
-            && diag
-                .message
-                .contains("structural_traction_update_residual_ratio=")
-            && diag.message.contains("structural_solve_residual_ratio=")
-            && diag
-                .message
-                .contains("interface_work_energy_residual_ratio=")
-            && diag
-                .message
-                .contains("interface_connectivity_coverage_ratio=")
-            && diag
-                .message
-                .contains("mesh_backed_interface_connectivity_ratio=")
-            && diag.message.contains("known_answer_coverage_ratio=")
-    }));
-    assert!(envelope
-        .data
-        .run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code == "FEA_FSI_COUPLING"
-            && diag.message.contains("cfd_executed_sample_count=4")
-            && diag.message.contains("authored_interface_count=")
-            && diag.message.contains("interface_node_count=")
-            && diag.message.contains("interface_face_count=")));
-    let first_fluid_velocity = envelope
-        .data
-        .run
-        .field(&fea_fsi_fluid_velocity_field_id(0))
-        .and_then(AnalysisField::as_host_f64)
-        .expect("first FSI fluid velocity should be host-real");
-    let final_fluid_velocity = envelope
-        .data
-        .run
-        .field(&fea_fsi_fluid_velocity_field_id(3))
-        .and_then(AnalysisField::as_host_f64)
-        .expect("final FSI fluid velocity should be host-real");
-    assert!((first_fluid_velocity[0] - 2.4).abs() <= 1.0e-12);
-    assert!((final_fluid_velocity[0] - 4.0).abs() <= 1.0e-12);
-    let interface_pressure = envelope
-        .data
-        .run
-        .field(&fea_fsi_interface_pressure_field_id(0))
-        .expect("fsi interface pressure field should be present");
-    let interface_traction = envelope
-        .data
-        .run
-        .field(&fea_fsi_interface_traction_field_id(0))
-        .expect("fsi interface traction field should be present");
-    let interface_displacement = envelope
-        .data
-        .run
-        .field(&fea_fsi_interface_displacement_field_id(0))
-        .expect("fsi interface displacement field should be present");
-    assert_eq!(interface_pressure.shape.len(), 1);
-    assert_eq!(
-        interface_traction.shape,
-        vec![interface_pressure.shape[0], 3]
-    );
-    assert_eq!(interface_displacement.shape.len(), 2);
-    assert_eq!(interface_displacement.shape[1], 3);
-    assert_eq!(
-        interface_displacement.shape[0],
-        interface_pressure.shape[0] + 1
-    );
-    let results = analysis_results_op(
-        &envelope.data,
-        AnalysisResultsQuery::default(),
-        OperationContext::new(None, None),
-    )
-    .expect("fsi results should be queryable");
-    let descriptor = |field_id: &str| {
-        results
-            .data
-            .field_descriptors
-            .iter()
-            .find(|descriptor| descriptor.field_id == field_id)
-            .expect("FSI descriptor should be present")
-    };
-    for field_id in [
-        fea_fsi_fluid_velocity_field_id(0),
-        fea_fsi_structural_displacement_field_id(0),
-        fea_fsi_interface_traction_field_id(0),
-        fea_fsi_interface_displacement_field_id(0),
-    ] {
-        let descriptor = descriptor(&field_id);
-        assert_eq!(descriptor.kind, AnalysisFieldKind::Vector);
-        assert_eq!(descriptor.component_count, Some(3));
-    }
-    for field_id in [
-        fea_fsi_fluid_pressure_field_id(0),
-        fea_fsi_interface_pressure_field_id(0),
-        fea_fsi_interface_residual_field_id(0),
-        fea_fsi_coupling_iteration_count_field_id(0),
-    ] {
-        let descriptor = descriptor(&field_id);
-        assert_eq!(descriptor.kind, AnalysisFieldKind::Scalar);
-        assert_eq!(descriptor.component_count, None);
-    }
 }
 
 #[test]

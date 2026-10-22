@@ -1,6 +1,6 @@
 //! One original weak charge-continuity authority for solve and retained validation.
 use super::{ComplexPhasor, ComplexVector3};
-use crate::topology::{AnalysisProjection, EdgeQuadraturePoint, TetrahedralEdgeSpace};
+use crate::topology::{AnalysisProjection, EdgeQuadraturePoint};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(super) struct ChargeContinuity {
@@ -11,20 +11,14 @@ pub(super) struct ChargeContinuity {
     term_scale: Vec<f64>,
 }
 impl ChargeContinuity {
-    pub fn new(
-        projection: &AnalysisProjection,
-        space: &TetrahedralEdgeSpace,
-        exterior: &[usize],
-    ) -> Self {
-        let boundary_nodes: BTreeSet<_> = exterior
-            .iter()
-            .flat_map(|&edge| space.edges()[edge].node_indices)
-            .collect();
+    /// Test rows are the corner nodes off grounded faces: exactly the nodal gradients that
+    /// belong to the free edge space.
+    pub fn new(projection: &AnalysisProjection, grounded_nodes: &BTreeSet<usize>) -> Self {
         let interior_nodes: BTreeSet<_> = projection
             .elements
             .iter()
             .flat_map(|element| element.node_indices[..4].iter().copied())
-            .filter(|node| !boundary_nodes.contains(node))
+            .filter(|node| !grounded_nodes.contains(node))
             .collect();
         let rows: BTreeMap<_, _> = interior_nodes
             .into_iter()

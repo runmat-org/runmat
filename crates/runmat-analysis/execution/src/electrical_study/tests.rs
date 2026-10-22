@@ -61,8 +61,11 @@ pub(crate) fn preparation() -> ElectricalStudyPreparation {
         model,
         solver_mesh_digest: mesh.canonical_digest,
     };
-    let policy = ElectricalStudyPlanningPolicy {};
-    let workload = plan_electrical_study(&compiled, policy).unwrap();
+    let policy = ElectricalStudyPlanningPolicy {
+        element_temperature_k: None,
+        operating_time_s: None,
+    };
+    let workload = plan_electrical_study(&compiled, policy.clone()).unwrap();
     ElectricalStudyPreparation {
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         product: ElectricalStudyProduct { compiled, workload },

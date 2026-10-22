@@ -262,6 +262,11 @@ impl VolumeQuadraturePoint {
         &self.shape_values[..self.node_count]
     }
 
+    /// Corner (P1) barycentric gradients at this point; constant on affine elements.
+    pub fn physical_barycentric_gradients(&self) -> &[[f64; 3]; 4] {
+        &self.physical_barycentric_gradients
+    }
+
     pub fn physical_shape_gradients(&self) -> &[[f64; 3]] {
         &self.physical_shape_gradients[..self.node_count]
     }

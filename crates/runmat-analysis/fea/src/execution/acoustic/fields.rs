@@ -164,6 +164,36 @@ impl AcousticHarmonicSolverResult {
     }
 }
 
+/// Native pressure and particle-velocity definitions named by an acoustic recovery request.
+pub fn acoustic_native_field_definitions(
+    request: &FieldRecoveryRequest,
+) -> AnalysisExecutionResult<Vec<RecoveredFieldDefinition>> {
+    request.validate()?;
+    if !matches!(request.topology, FieldTopologyIdentity::VolumeMesh { .. }) {
+        return Err(invalid(
+            "acoustic native fields require canonical volume-mesh topology",
+        ));
+    }
+    let [pressure, velocity] = request.plan.requirements.as_slice() else {
+        return Err(invalid(
+            "acoustic native inventory is nodal pressure and element particle velocity",
+        ));
+    };
+    let expected = native_acoustic_field_plan(
+        usize::try_from(pressure.cost.output_entity_count).map_err(invalid)?,
+        usize::try_from(velocity.cost.output_entity_count).map_err(invalid)?,
+    )?;
+    if request.plan != expected {
+        return Err(invalid(
+            "acoustic recovery plan differs from the canonical native inventory",
+        ));
+    }
+    Ok(vec![
+        native_acoustic_field_definition("acoustic.pressure", pressure)?,
+        native_acoustic_field_definition("acoustic.particle_velocity", velocity)?,
+    ])
+}
+
 /// Shared native publication inventory, also used to validate cold acoustic state payloads.
 pub(in crate::execution) fn native_acoustic_field_plan(
     nodes: usize,
@@ -200,6 +230,7 @@ fn native_requirement(
 ) -> AnalysisExecutionResult<FieldRecoveryRequirement> {
     let count = u64::try_from(count).map_err(invalid)?;
     Ok(FieldRecoveryRequirement {
+        support: Default::default(),
         quantity,
         source_location: location,
         output_location: location,

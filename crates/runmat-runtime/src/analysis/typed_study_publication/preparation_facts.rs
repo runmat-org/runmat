@@ -22,6 +22,15 @@ pub(super) fn describe(result: &StructuralStudyResult, maximum: u64) -> String {
                 basis.modes().len()
             )
         }
+        crate::analysis::StructuralStudyNumericalResult::ThermalPrestress {
+            thermal,
+            structural,
+            ..
+        } => format!(
+            "thermal_prefix_projection_bytes={}, prestressed_structural_projection_bytes={}",
+            projection(thermal.as_ref(), maximum),
+            projection(structural.as_ref(), maximum),
+        ),
         _ => "modal_basis=not_applicable".into(),
     };
     let mesh_storage = result
