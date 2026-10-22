@@ -445,8 +445,7 @@ mod periodic_bounds_tests {
     use super::*;
     use runmat_geometry_core::PersistentEntityKind;
 
-    // witness: a partial-period face (hv-electrode rounded quarter torus) maps a chart coordinate
-    // a few ulps below its trimmed start onto the start, not across the period.
+    // witness: FEA-MESH-DISCRETIZATION-001/surface_discretization @ shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial; boundary: periodic chart coordinates within roundoff of partial-period trimmed bounds (hv-electrode rounded quarter torus)
     #[test]
     fn roundoff_outside_partial_period_bounds_lands_on_the_bound() {
         let face = PersistentEntityId::new(PersistentEntityKind::Face, "face".into(), Vec::new());
