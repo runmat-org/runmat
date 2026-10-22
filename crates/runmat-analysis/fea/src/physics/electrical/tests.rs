@@ -606,3 +606,48 @@ fn face_current_density_injects_its_normal_flux() {
         .unwrap();
     assert_relative(left.outward_flux, 4.0 * area, 1e-8);
 }
+
+#[test]
+fn periodic_faces_share_their_potential() {
+    // A charged slab grounded on both faces, against the same slab grounded on the left and
+    // periodic (by translation) on the right: the right face carries the left face's potential,
+    // so the fields agree.
+    let mesh = mesh(ElementOrder::Tet4, 2);
+    let projection = AnalysisProjection::derive(&mesh).unwrap();
+    let mean_x = |target: &str| {
+        let xs: Vec<f64> = projection
+            .boundary_faces_for_target(&RegionTarget::boundary(target))
+            .flat_map(|face| face.node_indices.iter().map(|&n| projection.nodes[n].coordinates_m[0]))
+            .collect();
+        xs.iter().sum::<f64>() / xs.len() as f64
+    };
+    let shift = mean_x("slab_right") - mean_x("slab_left");
+    let both = charge_density::charged_model(1e-6, 0.0);
+    let mut periodic = both.clone();
+    periodic.constraints.retain(|c| c.constraint_id() != "right");
+    periodic
+        .constraints
+        .push(AnalysisConstraint::Electrical(ElectricalConstraint {
+            constraint_id: "periodic".into(),
+            kind: ElectricalConstraintKind::Periodic(PeriodicConstraint {
+                pair: PairedConstraint {
+                    primary: RegionTarget::boundary("slab_left"),
+                    secondary: RegionTarget::boundary("slab_right"),
+                    pairing: PairingPolicy::GeometricTolerance(Length::new(1e-9)),
+                },
+                transform: PeriodicTransform::Translation(Translation::new([shift, 0.0, 0.0])),
+            }),
+        }));
+    let expected = solve(&both, &mesh);
+    let actual = solve(&periodic, &mesh);
+    let scale = expected.potential_v.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
+    assert!(scale > 0.0);
+    for (a, b) in actual.potential_v.iter().zip(&expected.potential_v) {
+        assert!((a - b).abs() <= 1e-8 * scale, "{a} vs {b}");
+    }
+    // All the charge's flux leaves through the grounded face once the periodic face's share
+    // is passed on to it.
+    let left = actual.terminals.iter().find(|t| t.constraint_id == "left").unwrap();
+    let total: f64 = expected.terminals.iter().map(|t| t.outward_flux).sum();
+    assert!((left.outward_flux - total).abs() <= 1e-8 * total.abs());
+}

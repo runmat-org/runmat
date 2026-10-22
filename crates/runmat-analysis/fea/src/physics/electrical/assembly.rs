@@ -21,6 +21,8 @@ pub(super) struct ElectricalAssembly {
     pub prescribed: Vec<Option<f64>>,
     pub terminal_nodes: Vec<(String, Vec<usize>)>,
     pub charge_sources: Option<super::ElectricalChargeSources>,
+    /// Periodic node relations (equal potentials across paired faces).
+    pub relations: Vec<crate::physics::scalar_constraints::ScalarNodeRelation>,
 }
 
 impl ElectricalAssembly {
@@ -157,6 +159,7 @@ impl ElectricalAssembly {
             local_energy: Some(local_energy),
             prescribed: vec![None; count],
             terminal_nodes: Vec::new(),
+            relations: Vec::new(),
             charge_sources: None,
         })
     }

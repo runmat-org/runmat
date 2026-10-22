@@ -8,5 +8,6 @@ pub mod fluid_structure;
 pub mod fsi;
 pub mod magnetic;
 pub mod maxwell;
+pub(crate) mod scalar_constraints;
 pub mod structural;
 pub mod thermal;

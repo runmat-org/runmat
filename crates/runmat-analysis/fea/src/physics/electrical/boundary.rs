@@ -24,6 +24,7 @@ impl ElectricalAssembly {
             .collect::<BTreeMap<_, _>>();
         let mut owners = vec![false; self.projection.nodes.len()];
         let mut ids = std::collections::BTreeSet::new();
+        let mut pairings = Vec::new();
         for constraint in &model.constraints {
             if !step.object_is_active(&StepObjectRef::Constraint(
                 constraint.constraint_id().into(),
@@ -56,6 +57,15 @@ impl ElectricalAssembly {
                     (target, sampled.real)
                 }
                 ElectricalConstraintKind::PotentialReference { target } => (target, 0.0),
+                ElectricalConstraintKind::Periodic(periodic) => {
+                    pairings.push(crate::physics::scalar_constraints::ScalarPairing {
+                        constraint_id: &constraint.constraint_id,
+                        pair: &periodic.pair,
+                        transform: &periodic.transform,
+                        offset: 0.0,
+                    });
+                    continue;
+                }
                 _ => {
                     return Err(ElectricalStaticError::Unsupported(
                         "equipotential, floating, integral current or periodic constraint".into(),
@@ -88,6 +98,9 @@ impl ElectricalAssembly {
             self.terminal_nodes
                 .push((constraint.constraint_id.clone(), nodes));
         }
+        self.relations =
+            crate::physics::scalar_constraints::relations(mesh, &self.projection, &pairings)
+                .map_err(ElectricalStaticError::Boundary)?;
         // `terminal_voltage` loads hold a terminal at a sampled potential (a source that may
         // vary in time), exactly as a prescribed potential does.
         if model
