@@ -385,7 +385,7 @@ pub(super) fn solve_with_time(
             .iter()
             .enumerate()
             .fold((0, 0.0f64), |acc, (c, r)| if *r > acc.1 { (c, *r) } else { acc });
-        tracing::debug!(
+        tracing::info!(
             target: "runmat_fea::fluid::coupled",
             iteration,
             linear = report.iterations,
