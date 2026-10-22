@@ -168,6 +168,9 @@ fn boundary_operator(
                 impedance: *impedance,
             }
         }
+        AuthoredBoundaryKind::AcousticImpedanceLaw { law } => {
+            BoundaryOperator::AcousticImpedanceLaw { law: law.clone() }
+        }
         AuthoredBoundaryKind::FluidOutletPressure { value } => {
             BoundaryOperator::FluidOutletPressure {
                 value: value.clone(),

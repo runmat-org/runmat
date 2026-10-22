@@ -438,6 +438,7 @@ fn keyword_markdown(keyword: FeaKeyword) -> String {
         FeaKeyword::Layup => ("layup", "Declares an ordered composite ply layup."),
         FeaKeyword::Orientation => ("orientation", "Declares a local material or section coordinate system."),
         FeaKeyword::Signal => ("signal", "Declares a typed quantity varying over time, frequency, or another domain."),
+        FeaKeyword::Table => ("table", "Declares a named quantity over a domain, such as an impedance over frequency from samples or a model."),
         FeaKeyword::Excitation => ("excitation", "Applies a signal-driven input to a typed model target."),
         FeaKeyword::ResponseSpectrum => ("response_spectrum", "Declares a response-spectrum input for modal combination."),
         FeaKeyword::RandomExcitation => ("random_excitation", "Declares spectral-density or cross-spectral input for random response."),

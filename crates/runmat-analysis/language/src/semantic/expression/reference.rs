@@ -22,6 +22,8 @@ pub(super) fn contextual_reference_type(path: &[String]) -> Option<FeaType> {
         [analysis, _, state, _] if analysis == "analysis" && state == "state" => {
             Some(FeaType::Unknown)
         }
+        // A whole analysis step, the subject of derived outputs such as `sound_power`.
+        [analysis, _] if analysis == "analysis" => Some(FeaType::Unknown),
         [analysis, _, field, location, quantity] if analysis == "analysis" && field == "field" => {
             let location = super::super::procedure::field_location(location)?;
             super::super::procedure::field_reference_type(quantity).map(|(quantity, value_type)| {

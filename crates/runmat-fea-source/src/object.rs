@@ -263,7 +263,10 @@ impl FeaSourceCheckResult {
                 .find(|v| v.module_path == module && &v.policy_id == name)
                 .cloned()
                 .map(FeaObjectDefinition::Execution),
-            FeaSymbolKind::Function => return Err(FeaQueryError::DefinitionUnavailable),
+            // A table is lowered into the boundaries that use it; it has no standalone object.
+            FeaSymbolKind::Function | FeaSymbolKind::Table => {
+                return Err(FeaQueryError::DefinitionUnavailable)
+            }
         }
         .ok_or(FeaQueryError::NotFound)?;
         Ok(FeaObjectDetails {

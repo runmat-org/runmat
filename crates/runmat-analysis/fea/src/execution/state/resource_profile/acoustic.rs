@@ -57,6 +57,7 @@ impl Serialize for FieldProjection<'_> {
 enum NativeValues<'a> {
     Pressure(&'a [ProjectionScalar]),
     Velocity(&'a [ProjectionVector3]),
+    Intensity(&'a [[f64; 3]]),
 }
 impl Serialize for NativeValues<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -69,6 +70,7 @@ impl Serialize for NativeValues<'_> {
                     .iter()
                     .flat_map(|v| (0..3).flat_map(move |axis| [v.real[axis], v.imaginary[axis]])),
             ),
+            Self::Intensity(values) => serializer.collect_seq(values.iter().flatten()),
         }
     }
 }
@@ -98,6 +100,15 @@ pub(super) fn profile(
             sample,
             values: NativeValues::Velocity(result.velocity_m_per_s()),
             shape: vec![result.ordered_element_ids().len(), 3, 2],
+        },
+        FieldProjection {
+            definition: native_acoustic_field_definition(
+                crate::execution::acoustic::ACOUSTIC_INTENSITY_FIELD_ID,
+                &recovery_request.plan.requirements[2],
+            )?,
+            sample,
+            values: NativeValues::Intensity(result.intensity_w_per_m2()),
+            shape: vec![result.ordered_element_ids().len(), 3],
         },
     ];
     let payload = AcousticProjection {

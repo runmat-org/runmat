@@ -24,6 +24,8 @@ fn assembly(amplitude: f64) -> AcousticAssembly {
         volume_stiffness: matrix([1., 2., 3., 4.], OperatorRole::Stiffness),
         mass: matrix([0.; 4], OperatorRole::Mass),
         impedance: matrix([0.1, 0.5, 0.8, 1.], OperatorRole::Damping),
+        volume_admittance: matrix([0.; 4], OperatorRole::Damping),
+        lossy: false,
         omega: 1.,
         density: vec![1.],
         compressibility: vec![1.],

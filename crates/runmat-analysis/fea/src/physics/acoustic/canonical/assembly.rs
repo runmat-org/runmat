@@ -20,7 +20,13 @@ pub(super) struct AcousticAssembly {
     /// Volume stiffness only; boundary resampling rebuilds `stiffness` from it.
     pub volume_stiffness: RealSparseMatrix,
     pub mass: RealSparseMatrix,
+    /// Total admittance B of the harmonic operator K − ω²M + iωB: the volume loss of
+    /// damped regions plus the boundary admittance.
     pub impedance: RealSparseMatrix,
+    /// Volume loss alone; boundary resampling rebuilds `impedance` from it.
+    pub volume_admittance: RealSparseMatrix,
+    /// Whether any region carries material loss (a complex bulk modulus).
+    pub lossy: bool,
     pub omega: f64,
     pub density: Vec<f64>,
     pub compressibility: Vec<f64>,
@@ -41,6 +47,9 @@ impl AcousticAssembly {
         let mut density = Vec::with_capacity(projection.elements.len());
         let mut compressibility = Vec::with_capacity(projection.elements.len());
         let mut sound_speed = Vec::with_capacity(projection.elements.len());
+        // Loss factor η = 2ζ of each element: complex bulk modulus K(1 + iη), so the
+        // compressibility term −ω²M/(1 + iη) splits into −ω²M/(1 + η²) and +iω·ωηM/(1 + η²).
+        let mut loss = Vec::with_capacity(projection.elements.len());
         for element in &projection.elements {
             let material = &properties
                 .solid_material(element.stable_identity)
@@ -58,11 +67,13 @@ impl AcousticAssembly {
                     "density and sound speed must be positive finite".into(),
                 ));
             }
-            if acoustic.damping_ratio != 0.0 {
-                return Err(AcousticHarmonicError::Unsupported(
-                    "material attenuation law".into(),
+            let zeta = acoustic.damping_ratio;
+            if !zeta.is_finite() || !(0.0..1.0).contains(&zeta) {
+                return Err(AcousticHarmonicError::Material(
+                    "acoustic damping ratio must be finite in [0, 1)".into(),
                 ));
             }
+            loss.push(2.0 * zeta);
             density.push(rho);
             let beta = 1.0 / rho / c / c;
             if !beta.is_finite() || beta <= 0.0 {
@@ -84,13 +95,16 @@ impl AcousticAssembly {
             &map,
             &pattern,
             ElementOutputShape {
-                matrices: 2,
+                matrices: 3,
                 ..Default::default()
             },
             plan,
             |index, _, out: &mut ElementOutputs<'_, f64>| {
                 let element = &projection.elements[index];
                 let (rho, c) = (density[index], sound_speed[index]);
+                let eta = loss[index];
+                let mass_scale = 1.0 / (1.0 + eta * eta);
+                let loss_scale = omega * eta * mass_scale;
                 let n = element.node_indices.len();
                 let mut local_stiffness = vec![0.0; n * n];
                 let mut local_mass = vec![0.0; n * n];
@@ -114,7 +128,12 @@ impl AcousticAssembly {
                     })
                     .map_err(|e| AcousticHarmonicError::Topology(e.to_string()))?;
                 out.matrix(0).copy_from_slice(&local_stiffness);
-                out.matrix(1).copy_from_slice(&local_mass);
+                for (target, value) in out.matrix(1).iter_mut().zip(&local_mass) {
+                    *target = value * mass_scale;
+                }
+                for (target, value) in out.matrix(2).iter_mut().zip(&local_mass) {
+                    *target = value * loss_scale;
+                }
                 Ok(())
             },
             no_visit,
@@ -136,17 +155,21 @@ impl AcousticAssembly {
             OperatorRole::Mass,
             "pressure_compressibility",
         )?;
+        let volume_admittance = finish(planned(
+            &pattern,
+            matrices.next().unwrap_or_default(),
+            OperatorRole::Damping,
+            "volume_loss",
+        )?)?;
         let stiffness = finish(stiffness)?;
         Ok(Self {
             projection,
             volume_stiffness: stiffness.clone(),
             stiffness,
             mass: finish(mass)?,
-            impedance: finish(assembler(
-                size,
-                OperatorRole::Damping,
-                "boundary_admittance",
-            ))?,
+            impedance: volume_admittance.clone(),
+            volume_admittance,
+            lossy: loss.iter().any(|eta| *eta > 0.0),
             omega,
             density,
             compressibility,
