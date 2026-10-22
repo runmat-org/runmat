@@ -7,6 +7,7 @@ mod boundary;
 mod recovery;
 mod response;
 pub(crate) mod sources;
+mod terminals;
 #[cfg(test)]
 pub(crate) mod tests;
 
@@ -76,6 +77,19 @@ pub(crate) fn solve_canonical_static_with_admission(
     sample: crate::excitation::ExcitationSamplePoint<'_>,
 ) -> Result<CanonicalElectricalResponse, ElectricalStaticError> {
     let step = validate_canonical_input(model, step_id, residual_target)?;
+    if terminals::has_floating_terminals(model) {
+        return terminals::solve(model, step_id, sample.clone(), |fixed| {
+            solve_canonical_static_with_admission(
+                fixed,
+                mesh,
+                step_id,
+                residual_target,
+                admission,
+                element_conductivity_s_per_m,
+                sample.clone(),
+            )
+        });
+    }
     let Some(ElectromagneticDomain::Static { equation }) = &model.electromagnetic else {
         unreachable!("validated static electrical domain")
     };
@@ -110,6 +124,18 @@ pub(crate) fn solve_conduction_with_conductivity(
         step_id,
         residual_target,
     )?;
+    if terminals::has_floating_terminals(model) {
+        return terminals::solve(model, step_id, sample.clone(), |fixed| {
+            solve_conduction_with_conductivity(
+                fixed,
+                mesh,
+                step_id,
+                residual_target,
+                sample.clone(),
+                element_conductivity_s_per_m,
+            )
+        });
+    }
     if !matches!(
         model.electromagnetic,
         Some(ElectromagneticDomain::Static {
@@ -202,6 +228,7 @@ pub(crate) fn validate_canonical_input<'a>(
                 runmat_analysis_core::ExcitationAction::ElectricChargeDensity(_)
                     | runmat_analysis_core::ExcitationAction::ElectricCurrent(_)
                     | runmat_analysis_core::ExcitationAction::TerminalVoltage(_)
+                    | runmat_analysis_core::ExcitationAction::ElectricCharge(_)
             )
         })
     {

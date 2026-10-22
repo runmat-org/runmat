@@ -477,3 +477,71 @@ fn terminal_voltage_load_holds_its_terminal_like_a_prescribed_potential() {
         assert_relative(actual.terminal_work, expected.terminal_work, 1e-10);
     }
 }
+
+#[test]
+fn integral_current_and_floating_terminals_find_their_common_potential() {
+    let mesh = mesh(ElementOrder::Tet4, 2);
+    // Reference: 1 V across the slab gives the terminal current I1, so R = 1/I1.
+    let mut reference = model(StaticElectricalEquation::SteadyConduction);
+    prescribe(&mut reference, "left".into(), RegionTarget::boundary("slab_left"), 0.0);
+    prescribe(&mut reference, "right".into(), RegionTarget::boundary("slab_right"), 1.0);
+    let unit = solve(&reference, &mesh);
+    let i1 = unit
+        .terminals
+        .iter()
+        .find(|t| t.constraint_id == "right")
+        .unwrap()
+        .outward_flux
+        .abs();
+    // A 2.5 A integral current into the right terminal holds it at 2.5 R.
+    let mut driven = model(StaticElectricalEquation::SteadyConduction);
+    prescribe(&mut driven, "left".into(), RegionTarget::boundary("slab_left"), 0.0);
+    driven
+        .constraints
+        .push(AnalysisConstraint::Electrical(ElectricalConstraint {
+            constraint_id: "right".into(),
+            kind: ElectricalConstraintKind::IntegralCurrent {
+                target: RegionTarget::boundary("slab_right"),
+                value: PrescribedValue::Constant(ElectricCurrent::new(2.5)),
+            },
+        }));
+    let response = solve(&driven, &mesh);
+    let terminal = response
+        .terminals
+        .iter()
+        .find(|t| t.constraint_id == "right")
+        .unwrap();
+    assert_relative(-terminal.outward_flux, 2.5, 1e-8);
+    let projection = AnalysisProjection::derive(&mesh).unwrap();
+    let right_potentials: Vec<f64> = terminal
+        .ordered_node_ids
+        .iter()
+        .map(|id| {
+            let index = projection.nodes.iter().position(|n| n.node_id == *id).unwrap();
+            response.potential_v[index]
+        })
+        .collect();
+    for potential in right_potentials {
+        assert_relative(potential, 2.5 / i1, 1e-8);
+    }
+    // An uncharged floating electrode carries no net flux.
+    let mut floating = model(StaticElectricalEquation::Electrostatics);
+    prescribe(&mut floating, "left".into(), RegionTarget::boundary("slab_left"), 3.0);
+    floating
+        .constraints
+        .push(AnalysisConstraint::Electrical(ElectricalConstraint {
+            constraint_id: "right".into(),
+            kind: ElectricalConstraintKind::FloatingConductor {
+                target: RegionTarget::boundary("slab_right"),
+            },
+        }));
+    let response = solve(&floating, &mesh);
+    let terminal = response
+        .terminals
+        .iter()
+        .find(|t| t.constraint_id == "right")
+        .unwrap();
+    assert!(terminal.outward_flux.abs() <= 1e-9 * 3.0 * coefficient(StaticElectricalEquation::Electrostatics));
+    // With no net flux the whole slab sits at the anchor potential.
+    assert!(response.potential_v.iter().all(|v| (v - 3.0).abs() < 1e-8));
+}
