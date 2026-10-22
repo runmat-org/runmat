@@ -41,7 +41,7 @@ pub(super) fn original(
         entry.definition.clone(),
         entry.sample,
         partitions,
-        counts.entity_count(entry.definition.entity_domain()),
+        entry.definition.stored_entities(counts),
     )
     .unwrap()
 }

@@ -56,6 +56,7 @@ pub(crate) fn preparation() -> ThermalStudyPreparation {
         &compiled,
         ThermalStudyPlanningPolicy {
             backend: ComputeBackend::Cpu,
+            element_heat_source: None,
         },
     )
     .unwrap();
@@ -265,6 +266,7 @@ fn original_temperature_fields_survive_borrowed_authored_intent_validation() {
         &p.product.compiled,
         ThermalStudyPlanningPolicy {
             backend: ComputeBackend::Cpu,
+            element_heat_source: None,
         },
         input.initial_fields,
     )

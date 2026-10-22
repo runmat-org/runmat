@@ -258,7 +258,7 @@ pub fn quadratic_slab_mesh(cell_count: usize) -> SolverMeshArtifact {
     mesh
 }
 
-fn signed_six_volume(corners: [u64; 4], nodes: &[SolverMeshNode]) -> f64 {
+pub(super) fn signed_six_volume(corners: [u64; 4], nodes: &[SolverMeshNode]) -> f64 {
     let [a, b, c, d] = corners.map(|id| nodes[id as usize - 1].coordinates_m);
     let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
     let ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
@@ -267,17 +267,17 @@ fn signed_six_volume(corners: [u64; 4], nodes: &[SolverMeshNode]) -> f64 {
         + ab[2] * (ac[0] * ad[1] - ac[1] * ad[0])
 }
 
-fn node_digest(index: usize) -> StableDigest {
+pub(super) fn node_digest(index: usize) -> StableDigest {
     let mut bytes = [0_u8; 32];
     bytes[..8].copy_from_slice(&(index as u64 + 1).to_le_bytes());
     StableDigest::from_bytes(bytes)
 }
 
-fn entity(kind: PersistentEntityKind, source: &str) -> PersistentEntityId {
+pub(super) fn entity(kind: PersistentEntityKind, source: &str) -> PersistentEntityId {
     PersistentEntityId::new(kind, source.into(), vec!["root".into()])
 }
 
-fn field(
+pub(super) fn field(
     topology_id: &str,
     location: FieldTopologyLocation,
     ordered_entity_ids: Vec<u64>,

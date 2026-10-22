@@ -139,6 +139,7 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
         };
         let policy = ThermalStudyPlanningPolicy {
             backend: ComputeBackend::Cpu,
+            element_heat_source: None,
         };
         let workload = match scope {
             ThermalStudyScope::Standalone => plan_thermal_study(&compiled, policy),

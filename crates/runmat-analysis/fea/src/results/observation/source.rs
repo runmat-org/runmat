@@ -26,12 +26,6 @@ mod tests;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", deny_unknown_fields)]
 pub enum ObservationFieldSource {
-    FiniteVolumeRecovery {
-        recovery_request: FieldRecoveryRequestIdentity,
-        artifact: RecoveredFieldArtifactIdentity,
-        numerical_source: FieldRecoverySource,
-        topology: FieldTopologyIdentity,
-    },
     SampledRecovery {
         recovery_request: FieldRecoveryRequestIdentity,
         artifact: RecoveredFieldArtifactIdentity,
@@ -66,9 +60,6 @@ pub enum ObservationFieldSource {
 impl ObservationFieldSource {
     pub const fn solver_result(self) -> Option<SolverResultIdentity> {
         match self {
-            Self::FiniteVolumeRecovery {
-                numerical_source, ..
-            } => numerical_source.solver_result(),
             Self::SampledRecovery {
                 numerical_source, ..
             } => numerical_source.solver_result(),
@@ -84,7 +75,6 @@ impl ObservationFieldSource {
 
     pub fn observation_topology_digest(self) -> Digest {
         match self {
-            Self::FiniteVolumeRecovery { topology, .. } => topology.discretization_digest(),
             Self::SampledRecovery { topology, .. } => topology.discretization_digest(),
             Self::StructuralRecovery { topology, .. } => topology.discretization_digest(),
             Self::VolumeMeshRecovery {
@@ -100,10 +90,8 @@ impl ObservationFieldSource {
 mod thermal;
 pub(super) use thermal::ThermalFieldSourceAuthority;
 
-mod finite_volume;
 mod sampled;
 mod volume_mesh;
-pub(crate) use finite_volume::validate_finite_volume_authority;
 pub(crate) use sampled::validate_sampled_authority;
 pub(crate) use volume_mesh::validate_volume_mesh_authority;
 
@@ -313,20 +301,6 @@ impl ObservationFieldSelection {
     }
 
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
-        if let ObservationFieldSource::FiniteVolumeRecovery {
-            topology,
-            numerical_source,
-            ..
-        } = self.source
-        {
-            if !matches!(topology, FieldTopologyIdentity::FiniteVolumeMesh { .. })
-                || numerical_source.solver_result().is_none()
-            {
-                return Err(invalid(
-                    "finite-volume selection requires original native topology and solver result",
-                ));
-            }
-        }
         if let ObservationFieldSource::SampledRecovery {
             topology,
             numerical_source,

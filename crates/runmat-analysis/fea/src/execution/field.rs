@@ -197,6 +197,7 @@ mod tests {
             structural_topology_digest: Digest::sha256("topology"),
         };
         let requirement = FieldRecoveryRequirement {
+            support: Default::default(),
             quantity: ObservationQuantity::VonMisesStress,
             source_location: FieldLocation::Element,
             output_location: FieldLocation::Node,

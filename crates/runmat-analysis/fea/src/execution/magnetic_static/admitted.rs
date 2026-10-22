@@ -1,5 +1,5 @@
 //! Exact pre-quadrature plan rederivation; worker allocation remains the shared
-//! runner's responsibility and production qualification remains closed.
+//! runner's responsibility.
 use super::*;
 use crate::planning::resource::{
     build_magnetostatic_resource_plan, FeaResourceDemand, FeaResourcePlan, LocalExecutionPlan,

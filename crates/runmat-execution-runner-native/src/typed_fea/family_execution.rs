@@ -8,7 +8,8 @@ use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::ArtifactAccess;
 use runmat_meshing_core::{MeshingEvidence, SolverMeshArtifact};
 use runmat_runtime::analysis::{
-    AcousticStudyCompletion, AcousticStudyObjectSource, ElectricalStudyCompletion,
+    AcousticResponseStudyCompletion, AcousticResponseStudyObjectSource, AcousticStudyCompletion,
+    AcousticStudyObjectSource, ElectricalStudyCompletion,
     ElectricalStudyObjectSource, FluidStudyCompletion, FluidStudyObjectSource,
     MagneticStudyCompletion, MagneticStudyObjectSource, MaxwellStudyCompletion,
     MaxwellStudyObjectSource, NonlinearSolidStudyCompletion, NonlinearSolidStudyObjectSource,
@@ -60,6 +61,12 @@ completed_family!(
     CompletedAuthoredAcousticStudy,
     AcousticStudyCompletion,
     AcousticStudyObjectSource
+);
+completed_family!(
+    /// Completed acoustic cavity-mode or transient study.
+    CompletedAuthoredAcousticResponseStudy,
+    AcousticResponseStudyCompletion,
+    AcousticResponseStudyObjectSource
 );
 completed_family!(
     /// Completed steady fluid study.
@@ -122,6 +129,12 @@ pub(crate) fn local_result(
             Acoustic,
             CompletedAuthoredAcousticStudy,
             crate::analysis_acoustic::source::convert,
+            completed
+        ),
+        CompletedFamilyStudy::AcousticResponse(completed) => bind!(
+            AcousticResponse,
+            CompletedAuthoredAcousticResponseStudy,
+            crate::analysis_acoustic_response::source::convert,
             completed
         ),
         CompletedFamilyStudy::Fluid(completed) => bind!(
@@ -201,6 +214,12 @@ pub fn imported_family_result(
             CompletedAuthoredAcousticStudy,
             runmat_analysis_execution::import_acoustic_study_root,
             crate::acoustic_study_completion_from_source
+        ),
+        StudyFamilyKind::AcousticResponse => bind!(
+            AcousticResponse,
+            CompletedAuthoredAcousticResponseStudy,
+            runmat_analysis_execution::import_acoustic_response_study_root,
+            crate::acoustic_response_study_completion_from_source
         ),
         StudyFamilyKind::Fluid => bind!(
             Fluid,

@@ -83,6 +83,7 @@ fn standalone_preparation(
         &prepared.product.compiled,
         ThermalStudyPlanningPolicy {
             backend: runmat_analysis_fea::ComputeBackend::Cpu,
+            element_heat_source: None,
         },
     )
     .unwrap();

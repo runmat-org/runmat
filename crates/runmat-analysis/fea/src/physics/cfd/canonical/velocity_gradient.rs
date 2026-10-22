@@ -9,6 +9,8 @@ use crate::topology::FiniteVolumeTopology;
 enum Sample {
     Cell(usize),
     VelocityFace(usize),
+    /// Mirror trace u − (u·n̂)n̂ at a symmetry plane, read from the owner cell.
+    SymmetryFace(usize),
     ZeroNormalDerivative,
 }
 #[derive(Clone, Copy)]
@@ -43,6 +45,12 @@ pub(super) fn derive(
             ) {
                 samples[j] = Sample::VelocityFace(incidence.face_index);
                 displacements[j] = sub(f.centroid_m, cell.centroid_m);
+            } else if matches!(
+                boundaries[incidence.face_index],
+                FaceBoundary::Symmetry { .. }
+            ) {
+                samples[j] = Sample::SymmetryFace(incidence.face_index);
+                displacements[j] = sub(f.centroid_m, cell.centroid_m);
             } else {
                 displacements[j] = scale(f.owner_area_vector_m2, 1.0 / f.area_m2);
             }
@@ -73,6 +81,11 @@ pub(super) fn evaluate(p: &CanonicalFluidProblem<'_>, values: &[V]) -> Result<Ve
                         return Err(Error::Invalid("velocity gradient boundary authority"));
                     };
                     sub(value, values[c])
+                }
+                Sample::SymmetryFace(i) => {
+                    let f = &p.topology.faces[i];
+                    let normal = scale(f.owner_area_vector_m2, 1.0 / f.area_m2);
+                    scale(normal, -dot(values[c], normal))
                 }
                 Sample::ZeroNormalDerivative => [0.0; 3],
             };

@@ -23,9 +23,7 @@ pub fn recovered_field_transport_reservation_bytes(
         .checked_add(catalog.materialization_resident_bytes_estimate)
         .ok_or_else(|| invalid("field source workspace overflows"))?;
     for field in artifact.fields() {
-        let mut remaining = artifact
-            .entity_counts
-            .entity_count(field.definition().entity_domain());
+        let mut remaining = field.definition().stored_entities(artifact.entity_counts);
         while remaining > 0 {
             let count = remaining.min(RECOVERED_FIELD_PARTITION_ENTITY_COUNT);
             let profile =

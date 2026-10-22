@@ -1,73 +1,56 @@
 # Electrothermal FEA in RunMat: current flow, Joule heating, and temperature
 
-Electrothermal analysis couples electrical conduction to heat transfer. Electrical loss becomes a
-volumetric thermal source; temperature may change conductivity and therefore feed back into the
-electrical field.
+Electrothermal analysis couples steady current flow to heat transfer. The resistive loss
+$\sigma(T)|\nabla V|^2$ is the volumetric heat source, and the temperature changes the
+conductivity, which changes where the current flows. RunMat solves the two together, steady or over
+time, from a `.fea` study:
 
-RunMat has typed electrothermal procedure, material, state, and output contracts, but **no admitted
-electrothermal numerical realization** and no public typed `.fea` execution path today. The existing
-library helper computes only a bounded coupling-severity indicator from voltage, conductivity, and a
-heating coefficient. It is not an electrothermal solve.
+| Procedure | What runs |
+| --- | --- |
+| `electrothermal steady {}` | Current flow and steady heat transfer iterated to the two-way fixed point |
+| `electrothermal transient { start_time; end_time; time_step }` | Current flow at every time step and backward-Euler heat transfer, iterated over the whole history |
 
-## Which electrothermal procedures are defined?
-
-| Procedure | Contract | Registered realization |
-| --- | --- | --- |
-| `electrothermal steady` | Static electrical and thermal coupled state | None |
-| `electrothermal transient` | Time samples and coupled initial state | None |
-| `electrothermal nonlinear` | Load-factor domain and nonlinear coupled state | None |
-
-All three are authoring and type-checking contracts. Admission fails for execution rather than
-selecting an unrelated electromagnetic or thermal component.
-
-## What equations must an electrothermal realization solve?
-
-For electric potential $V$ and conductivity $\sigma(T)$,
+## What equations are solved?
 
 $$
-\nabla\cdot(\sigma(T)\nabla V)=0,
-\qquad
-\mathbf J=-\sigma(T)\nabla V,
+\nabla\cdot(\sigma(T)\nabla V)=0,\qquad
+\sigma(T)=\frac{\sigma_{ref}}{1+\alpha\,(T-T_{ref})},
 $$
 
-with Joule heating
-
 $$
-Q_J=\mathbf J\cdot\mathbf E
-=\sigma(T)|\nabla V|^2,
+\rho c_p\frac{\partial T}{\partial t}-\nabla\cdot(k\nabla T)=\sigma(T)|\nabla V|^2+Q_{other},
 $$
 
-coupled to
+with $\alpha$ the material's `resistive_heating_coefficient` (resistivity linear in temperature,
+$\rho(T)=\rho_{ref}(1+\alpha(T-T_{ref}))$) and $T_{ref}$ its electrical reference temperature.
 
-$$
-\rho c_p\frac{\partial T}{\partial t}
--\nabla\cdot(k(T)\nabla T)=Q_J+Q_{other}.
-$$
+Both fields live on the same canonical mesh, so the loss reaches the thermal solve element by element
+with no interpolation, and the integrated heat source equals the electrical power.
 
-A complete implementation must state whether the coupling is one-way, staggered fixed-point, or
-monolithic; preserve power during electrical-to-thermal projection; converge both electrical and
-thermal residuals; and publish charge and energy balance. RunMat will not treat a convergence
-severity heuristic as this formulation.
+**Coupling.** Each element's conductivity is evaluated at its mean temperature. A sweep solves current
+flow with the current temperatures, then the heat transfer with the resulting Joule density. Sweeps
+repeat until the largest change of any element temperature is below $10^{-6}$ of the temperature
+rise. For a transient study each sweep solves current flow at every time point (sources such as a
+fault-current signal are sampled at that time) and then the whole transient with the tabulated Joule
+source. With $\alpha=0$ the first sweep is already exact (one-way coupling) and the second confirms it.
 
-## How do I author an electrothermal study contract?
+## How do I author an electrothermal study?
 
 ```fea
 model heated_conductor {
+    thermal { reference_temperature = 293.15 K }
     assign material.copper to geometry.busbar.region.body
     constraint ground {
-        electrical.potential {
-            target = geometry.busbar.region.ground_terminal
-            value = 0 V
-        }
+        electrical.potential { target = geometry.busbar.region.ground_terminal; value = 0 V }
     }
     load current {
-        electric_current on geometry.busbar.region.input_terminal = 100 A
+        electric_current on geometry.busbar.region.input_terminal = 400 A
     }
     load cooling {
         thermal.convection {
             target = geometry.busbar.region.exterior
             ambient_temperature = 298.15 K
-            coefficient = 20 W/m^2/K
+            coefficient = 10 W/m^2/K
         }
     }
 }
@@ -77,25 +60,37 @@ study heated_busbar {
     mesh = mesh.busbar
     model = model.heated_conductor
     analysis operating_point { electrothermal steady {} }
+    output temperature = analysis.operating_point.field.node.temperature
+    output current_density = analysis.operating_point.field.element.electric_current_density
 }
 ```
 
-This declares intent and can be statically checked when the complete material/geometry contract is
-present. `runmat fea run` must reject it until a matching realization is admitted.
+## What does a run publish?
+
+Two cases:
+
+- `<analysis>`: the heat transfer at the converged operating point (temperature, temperature
+  gradient, heat flux; the full history for a transient), with the converged Joule source bound.
+- `<analysis>/conduction`: current flow at the converged temperatures (potential, electric field,
+  current density, Joule power density), at the last time point of a transient.
+
+Each authored output belongs to the case that produces its quantity. The run log records every
+sweep's temperature change and the Joule power and terminal power ($\sum V I$), which agree.
 
 ## What material and boundary data are required?
 
-Every conductor needs conductivity, thermal conductivity, density, and specific heat; temperature-
-dependent conductivity must state its interpolation/range. Electrical terminals need a well-posed
-voltage/current/reference set. Thermal boundaries need explicit sinks, convection, flux, or contact
-resistance. Electrical contact resistance and thermal contact resistance are distinct quantities.
+Every conductor needs `conductivity`, `resistive_heating_coefficient` and `reference_temperature`
+(electrical), and `conductivity`, `specific_heat` and `mass_density` (thermal). Terminals need at
+least one prescribed potential per conductor; thermal boundaries need a sink (fixed temperature,
+convection or radiation). Heat crossing a joint can use a thermal contact interface; an electrical
+contact resistance is modeled as a thin body with its own conductivity.
 
-## How should I validate electrothermal results?
+## How accurate is it?
 
-Require electrical power balance $P=\int\mathbf J\cdot\mathbf E\,d\Omega$ to match the projected
-thermal source, and require thermal energy balance against boundary loss and storage. Check mesh
-resolution at current crowding/hot spots, temperature-dependent property sensitivity, contact
-resistance, and convergence of the coupled iteration.
+A bar with fixed end temperatures carrying a fixed current has the closed-form solution
+$\theta(x)=\left(\cos(m(x-L/2))/\cos(mL/2)-1\right)/\alpha$ with $m^2=\alpha J^2\rho_{ref}/k$. RunMat
+reproduces it to the tolerances in [electromagnetic validation](../validation/electromagnetic), and
+its Joule power matches $I^2R(T)$ integrated along the bar.
 
 See [electromagnetics](./electromagnetic), [heat transfer](./thermal),
 [electromagnetic loads](../loads/electromagnetic), [thermal loads](../loads/thermal), and

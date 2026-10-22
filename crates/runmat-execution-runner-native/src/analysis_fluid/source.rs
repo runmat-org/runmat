@@ -200,11 +200,6 @@ fn completion(
         result: completed.result.result.clone(),
         numerical_receipt: completed.result.numerical_receipt.clone(),
         fields: completed.fields.manifest.clone(),
-        layout: completed
-            .result
-            .result
-            .native_field_topology(&completed.workload, &preparation.mesh)
-            .map_err(|error| error.to_string())?,
         observation_catalog: completed.observation_catalog.clone(),
         observation_results: match &completed.observations {
             Some(observations) => completed

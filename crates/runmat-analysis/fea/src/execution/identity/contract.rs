@@ -124,6 +124,7 @@ pub enum AnalysisWorkKind {
     SolveAcousticHarmonic,
     AssembleAcousticFrequencyResult,
     SolveElectricalStatic,
+    SolveAcousticResponse,
     SolveMagnetostatic,
     SolveMaxwellHarmonic,
     MaterializeSignal,

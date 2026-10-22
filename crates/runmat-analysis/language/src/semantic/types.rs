@@ -88,6 +88,9 @@ impl FeaType {
                 (self, value),
                 (Self::Real, Self::Integer) | (Self::Complex, Self::Integer | Self::Real)
             )
+            // A bare number is a dimensionless quantity (emissivity, ratios, factors).
+            || matches!((self, value), (Self::Quantity(dimension), Self::Integer | Self::Real)
+                if *dimension == PhysicalDimension::DIMENSIONLESS)
             || matches!(self, Self::Unknown | Self::Error)
             || matches!(value, Self::Unknown | Self::Error)
     }

@@ -3,7 +3,7 @@ use super::*;
 use crate::execution::{NumericalReceiptIdentity, SolverResultIdentity};
 use crate::physics::maxwell::ComplexPhasor;
 use runmat_meshing_core::ElementOrder;
-const PREFIX: &[u8] = b"runmat-maxwell-numerical-receipt/v1\0";
+const PREFIX: &[u8] = b"runmat-maxwell-numerical-receipt/v2\0";
 pub const MAXWELL_RECEIPT_MAX_ENCODED_BYTES: u64 = 64 * 1024;
 const RECEIPT_LIMITS: CanonicalLimits =
     CanonicalLimits::new(MAXWELL_RECEIPT_MAX_ENCODED_BYTES as usize, 4096, 4096, 32);
@@ -19,7 +19,6 @@ pub struct MaxwellNumericalReceipt {
     pub oriented_edges: usize,
     pub integration_samples: usize,
     pub angular_frequency_rad_per_s: f64,
-    pub iterations: u32,
     pub relative_physical_residual: f64,
     pub relative_charge_continuity_residual: f64,
     pub relative_complex_power_error: f64,
@@ -79,7 +78,6 @@ impl MaxwellNumericalReceiptArtifact {
             oriented_edges: r.edge_circulations_v.len(),
             integration_samples: r.samples.len(),
             angular_frequency_rad_per_s: r.angular_frequency_rad_per_s,
-            iterations: r.iterations,
             relative_physical_residual: r.relative_physical_residual,
             relative_charge_continuity_residual: r.relative_charge_continuity_residual,
             relative_complex_power_error: r.relative_complex_power_error,
@@ -126,12 +124,6 @@ impl MaxwellNumericalReceiptArtifact {
             .elements
             .checked_mul(6)
             .ok_or_else(|| invalid("Maxwell receipt edge overflow"))?;
-        let maximum_iterations = edges
-            .checked_mul(2)
-            .and_then(|n| n.checked_mul(40))
-            .map(|n| n.max(128))
-            .filter(|n| u32::try_from(*n).is_ok())
-            .ok_or_else(|| invalid("Maxwell receipt iteration bound overflow"))?;
         let reactive =
             2.0 * r.angular_frequency_rad_per_s * (r.magnetic_energy_j - r.electric_energy_j);
         let predicted = ComplexPhasor::new(r.ohmic_power_w, reactive);
@@ -144,7 +136,6 @@ impl MaxwellNumericalReceiptArtifact {
             || r.oriented_edges == 0
             || r.oriented_edges > edges
             || r.integration_samples != samples
-            || r.iterations as usize > maximum_iterations
             || !r.angular_frequency_rad_per_s.is_finite()
             || r.angular_frequency_rad_per_s <= 0.0
             || !t.is_finite()

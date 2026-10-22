@@ -26,6 +26,7 @@ impl ThermalStudyPreparation {
         }
         let policy = ThermalStudyPlanningPolicy {
             backend: self.product.workload.backend,
+            element_heat_source: None,
         };
         let workload = &self.product.workload;
         match self.scope {
@@ -54,6 +55,7 @@ impl ThermalStudyPreparation {
                 &self.product.compiled,
                 ThermalStudyPlanningPolicy {
                     backend: self.product.workload.backend,
+                    element_heat_source: None,
                 },
             )
             .map_err(|e| invalid(e.to_string()))?;

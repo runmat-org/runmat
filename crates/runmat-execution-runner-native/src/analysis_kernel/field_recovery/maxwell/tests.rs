@@ -42,7 +42,7 @@ fn invoke(
 }
 
 #[test]
-fn both_orders_publish_all_six_original_complex_fields_and_reopen_cold() {
+fn both_orders_publish_all_original_native_fields_and_reopen_cold() {
     for quadratic in [false, true] {
         for chunk in [1024, 8192] {
             let (workload, mesh, task) = task(quadratic, chunk);
@@ -72,7 +72,7 @@ fn both_orders_publish_all_six_original_complex_fields_and_reopen_cold() {
                 .result
                 .recover_native_fields(&workload, &mesh, &prepared.request)
                 .unwrap();
-            assert_eq!(original.fields().len(), 6);
+            assert_eq!(original.fields().len(), 11);
             // Negative admission evidence uses freshly valid closures, not only missing inputs.
             let mut wrong_policy = prepared.output_policy.inventory_limits();
             wrong_policy.max_objects = 1;
@@ -113,7 +113,7 @@ fn both_orders_publish_all_six_original_complex_fields_and_reopen_cold() {
             let cold = FilesystemObjectStore::open(&path, limits.max_object_bytes).unwrap();
             let imported =
                 import_maxwell_recovered_fields(&cold, response, &prepared, limits).unwrap();
-            assert_eq!(imported.manifest.fields.len(), 6);
+            assert_eq!(imported.manifest.fields.len(), 11);
             assert_eq!(
                 imported.manifest.recovery_request,
                 prepared.request.identity()
@@ -121,7 +121,12 @@ fn both_orders_publish_all_six_original_complex_fields_and_reopen_cold() {
             for (entry, field) in imported.manifest.fields.iter().zip(original.fields()) {
                 assert_eq!(entry.definition, *field.definition());
                 let expected = field.storage().as_host_f64().unwrap();
-                let width = field.definition().value_shape().component_count().unwrap() * 2;
+                // Phasor fields interleave real and imaginary parts; cycle-averaged losses are real.
+                let width = field.definition().value_shape().component_count().unwrap()
+                    * match field.definition().numeric_representation() {
+                        runmat_analysis_fea::results::field::RecoveredFieldNumericRepresentation::ComplexInterleaved => 2,
+                        _ => 1,
+                    };
                 let mut count = 0;
                 for descriptor in &entry.partitions {
                     let object = import_analysis_partition(

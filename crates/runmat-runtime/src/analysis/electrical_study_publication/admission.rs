@@ -1,6 +1,16 @@
-//! Authenticate the complete retained closure before writing public artifacts.
+//! Authenticate the complete retained closure, including native fields and authored
+//! observations, before writing public artifacts.
 use super::*;
 use runmat_analysis_core::{AnalysisProcedure, IndependentDomain, PhysicsFamily};
+use runmat_analysis_fea::{
+    execution::{AccuracySourceKind, ObservationHistorySourceContext},
+    results::{
+        field::RecoveredFieldArtifact,
+        observation::{
+            ObservationArtifact, ObservationFieldCatalogSource, ObservationPublicationEntry,
+        },
+    },
+};
 
 pub(super) fn validate(
     completed: &ElectricalStudyCompletion,
@@ -9,7 +19,7 @@ pub(super) fn validate(
     evidence: &MeshingEvidence,
     options: &AnalysisElectricalRunOptions,
     definition: Digest,
-) -> Result<(), String> {
+) -> Result<RecoveredFieldArtifact, String> {
     source.authenticate(completed)?;
     completed.catalog.validate().map_err(|e| e.to_string())?;
     if !completed.catalog.roots.contains(&completed.root) {
@@ -36,15 +46,16 @@ pub(super) fn validate(
         || step.family != PhysicsFamily::Electromagnetic
         || step.procedure != AnalysisProcedure::Static
         || step.independent_domain != IndependentDomain::Static
-        || !step.observations.is_empty()
-        || !completed.compiled.outputs.is_empty()
     {
-        return Err("electrical publication requires exact singleton workload without unsupported observations".into());
+        return Err("electrical publication differs from its original authored static workload".into());
     }
     validate_options(options, completed.workload.relative_residual_target)?;
     let plan = runmat_analysis_fea::study::plan_electrical_study(
         &completed.compiled,
-        runmat_analysis_fea::study::ElectricalStudyPlanningPolicy {},
+        runmat_analysis_fea::study::ElectricalStudyPlanningPolicy {
+            element_temperature_k: completed.workload.element_temperature_k.clone(),
+            operating_time_s: completed.workload.operating_time_s,
+        },
     )
     .map_err(|e| e.to_string())?;
     if plan != completed.workload {
@@ -58,14 +69,30 @@ pub(super) fn validate(
         .numerical_receipt
         .validate_against(&completed.workload, &completed.result, mesh)
         .map_err(|e| e.to_string())?;
+    let recovery = completed
+        .result
+        .native_field_request(&completed.workload, mesh)
+        .map_err(|e| e.to_string())?;
+    // Copy already retained native values once; no operator evaluation or re-solve.
+    let fields = completed
+        .result
+        .recover_native_fields(&completed.workload, mesh, &recovery)
+        .map_err(|e| e.to_string())?;
+    if fields.manifest().map_err(|e| e.to_string())? != completed.fields {
+        return Err(
+            "electrical native field manifest differs from original retained physical values"
+                .into(),
+        );
+    }
+    validate_observations(completed, step, mesh, &recovery)?;
     let request = runmat_analysis_fea::execution::AccuracyEvaluationRequest::new(
         completed.result.producer(),
-        runmat_analysis_fea::execution::AccuracySourceKind::ElectricalStatic,
+        AccuracySourceKind::ElectricalStatic,
         completed
             .result
             .source_result_identity()
             .map_err(|e| e.to_string())?,
-        None,
+        completed.observation_catalog.as_ref(),
         step.accuracy.clone(),
     )
     .map_err(|e| e.to_string())?;
@@ -110,6 +137,86 @@ pub(super) fn validate(
                 "electrical publication state differs from its exact producer result".into(),
             );
         }
+    }
+    Ok(fields)
+}
+
+fn validate_observations(
+    completed: &ElectricalStudyCompletion,
+    step: &runmat_analysis_core::ProcedureStep,
+    mesh: &SolverMeshArtifact,
+    recovery: &runmat_analysis_fea::execution::FieldRecoveryRequest,
+) -> Result<(), String> {
+    let Some(catalog) = &completed.observation_catalog else {
+        if step.observations.is_empty() && completed.observation_results.is_empty() {
+            return Ok(());
+        }
+        return Err(
+            "electrical authored observations require their original publication catalog".into(),
+        );
+    };
+    let ObservationFieldCatalogSource::VolumeMeshRecovery {
+        recovery_request,
+        manifest,
+        step: catalog_step,
+        ..
+    } = catalog.source().source()
+    else {
+        return Err("electrical observations require their original volume-mesh source".into());
+    };
+    if recovery_request.as_ref() != recovery
+        || manifest.as_ref() != &completed.fields
+        || catalog_step.as_ref() != step
+    {
+        return Err(
+            "electrical observation catalog differs from exact retained native fields".into(),
+        );
+    }
+    catalog
+        .validate_for(step, ObservationHistorySourceContext::VolumeMesh { mesh })
+        .map_err(|e| e.to_string())?;
+    catalog
+        .validate_source_result(
+            completed.result.producer(),
+            AccuracySourceKind::ElectricalStatic,
+            completed
+                .result
+                .source_result_identity()
+                .map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
+    let mut seen = std::collections::BTreeSet::new();
+    for entry in catalog.entries() {
+        let ObservationPublicationEntry::Sample(sample) = entry else {
+            return Err("electrical static histories are not admitted".into());
+        };
+        let results = sample
+            .manifest
+            .results
+            .iter()
+            .map(|entry| {
+                let matching = completed
+                    .observation_results
+                    .iter()
+                    .filter(|result| result.logical_identity == entry.result)
+                    .collect::<Vec<_>>();
+                if matching.len() != 1 || !seen.insert(entry.result) {
+                    return Err(
+                        "electrical observation result coverage or identity differs".to_string(),
+                    );
+                }
+                Ok(matching[0].clone())
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        let artifact =
+            ObservationArtifact::from_manifest_and_results(sample.manifest.clone(), results)
+                .map_err(|e| e.to_string())?;
+        sample
+            .validate_artifact(&artifact)
+            .map_err(|e| e.to_string())?;
+    }
+    if seen.len() != completed.observation_results.len() {
+        return Err("electrical completion contains unpublished observation results".into());
     }
     Ok(())
 }

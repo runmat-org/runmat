@@ -308,6 +308,16 @@ fn project_observation_value(
                     .chunks_exact(2)
                     .map(|pair| pair[1].atan2(pair[0]))
                     .collect(),
+                // Peak phasor to RMS, dB re 20 uPa. Zero pressure has no finite level.
+                ComplexRepresentation::SoundPressureLevel => value
+                    .chunks_exact(2)
+                    .map(|pair| {
+                        20.0 * (pair[0].hypot(pair[1])
+                            / (std::f64::consts::SQRT_2
+                                * runmat_analysis_core::SOUND_PRESSURE_LEVEL_REFERENCE_PA))
+                            .log10()
+                    })
+                    .collect(),
                 ComplexRepresentation::Complex => value.to_vec(),
             }
         }

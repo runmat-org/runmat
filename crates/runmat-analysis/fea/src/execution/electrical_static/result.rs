@@ -84,10 +84,14 @@ impl ElectricalStaticSolverResult {
                 != &crate::admission::canonical_electrical_realization(
                     r.equation,
                     d.element_order,
-                    if r.charge_sources.is_some() {
-                        crate::physics::electrical::CanonicalElectricalSource::VolumeCharge
-                    } else {
-                        crate::physics::electrical::CanonicalElectricalSource::SourceFree
+                    match (&r.charge_sources, r.equation) {
+                        (None, _) => crate::physics::electrical::CanonicalElectricalSource::SourceFree,
+                        (Some(_), runmat_analysis_core::StaticElectricalEquation::Electrostatics) => {
+                            crate::physics::electrical::CanonicalElectricalSource::VolumeCharge
+                        }
+                        (Some(_), runmat_analysis_core::StaticElectricalEquation::SteadyConduction) => {
+                            crate::physics::electrical::CanonicalElectricalSource::BoundaryCurrent
+                        }
                     },
                 )
             || d.formulation.procedure() != AnalysisProcedure::Static
@@ -221,7 +225,7 @@ impl ElectricalStaticSolverResult {
         )
         .map_err(invalid)?;
         let sources =
-            crate::physics::electrical::sources::assemble(&workload.model, mesh, step, &projection)
+            crate::physics::electrical::sources::assemble(&workload.model, mesh, step, &projection, workload.sample_point())
                 .map_err(invalid)?;
         if r.charge_sources != sources {
             return Err(invalid(

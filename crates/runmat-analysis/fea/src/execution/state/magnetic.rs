@@ -29,7 +29,7 @@ impl CanonicalMagnetostaticStatePayload {
             || self.result.source_result_identity()? != source_result
             || expected_request.topology.discretization_digest() != topology_digest
             || self.recovery_request != expected_request
-            || self.fields.fields().len() != 4
+            || self.fields.fields().len() != expected_request.plan.requirements.len()
             || self.fields.source != FieldRecoverySource::SolverResult(source_result)
             || self.fields.topology_digest != topology_digest
             || self.fields.recovery_request != expected_request.identity()

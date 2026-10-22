@@ -25,9 +25,30 @@ pub struct FluidSteadySolverResult {
     data: FluidResultData,
 }
 
+/// Original retained fields of the authored procedure: one steady state, or the realized
+/// initial state with every backward-Euler interval of the authored time schedule.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FluidRetainedOriginal {
+    Steady(CanonicalFluidResult),
+    Transient(super::FluidTransientSolverResult),
+    /// Converged steady flow on the deformed configuration with the structure's state.
+    FluidStructure(crate::physics::fluid_structure::FluidStructureResult),
+    /// Final instant of a transient fluid–structure march, with the state departing its last
+    /// interval and every accepted interval's coupling and energy evidence.
+    FluidStructureTransient(crate::physics::fluid_structure::FluidStructureTransientResult),
+    /// Steady flow advecting a transient conjugate temperature march.
+    ConjugateHeatTransient(crate::physics::conjugate_heat::ConjugateHeatTransientResult),
+    /// Steady flow and the conjugate temperatures it advects.
+    ConjugateHeat {
+        flow: CanonicalFluidResult,
+        energy: crate::physics::conjugate_heat::ConjugateHeatResult,
+    },
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct FluidResultData<T = CanonicalFluidResult> {
+pub(super) struct FluidResultData<T = FluidRetainedOriginal> {
     schema_version: u16,
     source_workload: AnalysisWorkloadIdentity,
     producer: StepIdentity,
@@ -46,7 +67,7 @@ pub(super) struct FluidResultData<T = CanonicalFluidResult> {
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct FluidResultWire<T = CanonicalFluidResult> {
+pub(super) struct FluidResultWire<T = FluidRetainedOriginal> {
     pub(super) data: FluidResultData<T>,
 }
 
@@ -65,13 +86,203 @@ impl FluidSteadySolverResult {
                 source,
                 reservation,
                 original.numerical_input_identity,
-                original,
+                FluidRetainedOriginal::Steady(original),
             )?,
         })
     }
 
+    pub(super) fn from_transient(
+        workload: &FluidSteadyWorkload,
+        source: &PreparedFluidSource,
+        original: super::FluidTransientSolverResult,
+    ) -> AnalysisExecutionResult<Self> {
+        let terminal = original
+            .original_results()
+            .last()
+            .ok_or_else(|| invalid("transient fluid retained no interval"))?
+            .numerical_input_identity;
+        let reservation = source.problem(workload)?.reservation();
+        Ok(Self {
+            data: source_data(
+                workload,
+                source,
+                reservation,
+                terminal,
+                FluidRetainedOriginal::Transient(original),
+            )?,
+        })
+    }
+
+    pub(super) fn from_conjugate_heat(
+        workload: &FluidSteadyWorkload,
+        source: &PreparedFluidSource,
+        flow: CanonicalFluidResult,
+        energy: crate::physics::conjugate_heat::ConjugateHeatResult,
+    ) -> AnalysisExecutionResult<Self> {
+        let problem = source.problem(workload)?;
+        problem.recover(&flow).map_err(invalid)?;
+        source
+            .conjugate_heat(workload, &flow.face_volume_flux_m3_per_s)?
+            .recover(&energy)
+            .map_err(invalid)?;
+        let reservation = problem.reservation();
+        Ok(Self {
+            data: source_data(
+                workload,
+                source,
+                reservation,
+                flow.numerical_input_identity,
+                FluidRetainedOriginal::ConjugateHeat { flow, energy },
+            )?,
+        })
+    }
+
+    pub(super) fn from_fluid_structure(
+        workload: &FluidSteadyWorkload,
+        source: &PreparedFluidSource,
+        mesh: &SolverMeshArtifact,
+        coupled: crate::physics::fluid_structure::FluidStructureResult,
+    ) -> AnalysisExecutionResult<Self> {
+        source
+            .fluid_structure(workload, mesh)?
+            .recover(&coupled)
+            .map_err(invalid)?;
+        let reservation = source.problem(workload)?.reservation();
+        let identity = coupled.flow.numerical_input_identity;
+        Ok(Self {
+            data: source_data(
+                workload,
+                source,
+                reservation,
+                identity,
+                FluidRetainedOriginal::FluidStructure(coupled),
+            )?,
+        })
+    }
+
+    pub(super) fn from_fluid_structure_transient(
+        workload: &FluidSteadyWorkload,
+        source: &PreparedFluidSource,
+        mesh: &SolverMeshArtifact,
+        coupled: crate::physics::fluid_structure::FluidStructureTransientResult,
+    ) -> AnalysisExecutionResult<Self> {
+        source
+            .fluid_structure(workload, mesh)?
+            .recover_transient(&coupled)
+            .map_err(invalid)?;
+        let reservation = source.problem(workload)?.reservation();
+        let identity = coupled.flow.numerical_input_identity;
+        Ok(Self {
+            data: source_data(
+                workload,
+                source,
+                reservation,
+                identity,
+                FluidRetainedOriginal::FluidStructureTransient(coupled),
+            )?,
+        })
+    }
+
+    /// Node displacement of a fluid–structure result: the structure and its fluid mesh motion.
+    pub fn coupled_displacement(&self) -> Option<&[[f64; 3]]> {
+        match &self.data.original {
+            FluidRetainedOriginal::FluidStructure(coupled) => Some(&coupled.displacement_m),
+            FluidRetainedOriginal::FluidStructureTransient(coupled) => {
+                Some(&coupled.displacement_m)
+            }
+            _ => None,
+        }
+    }
+
+    /// The fluid–structure state retained with the flow, when the study couples a structure.
+    pub fn fluid_structure(
+        &self,
+    ) -> Option<&crate::physics::fluid_structure::FluidStructureResult> {
+        match &self.data.original {
+            FluidRetainedOriginal::FluidStructure(coupled) => Some(coupled),
+            _ => None,
+        }
+    }
+
+    pub(super) fn from_conjugate_heat_transient(
+        workload: &FluidSteadyWorkload,
+        source: &PreparedFluidSource,
+        coupled: crate::physics::conjugate_heat::ConjugateHeatTransientResult,
+    ) -> AnalysisExecutionResult<Self> {
+        let problem = source.problem(workload)?;
+        Self::recover_conjugate_transient(workload, source, &problem, &coupled)?;
+        let reservation = problem.reservation();
+        let identity = coupled.flow.numerical_input_identity;
+        Ok(Self {
+            data: source_data(
+                workload,
+                source,
+                reservation,
+                identity,
+                FluidRetainedOriginal::ConjugateHeatTransient(coupled),
+            )?,
+        })
+    }
+
+    fn recover_conjugate_transient(
+        workload: &FluidSteadyWorkload,
+        source: &PreparedFluidSource,
+        problem: &crate::physics::cfd::canonical::CanonicalFluidProblem<'_>,
+        coupled: &crate::physics::conjugate_heat::ConjugateHeatTransientResult,
+    ) -> AnalysisExecutionResult<()> {
+        problem.recover(&coupled.flow).map_err(invalid)?;
+        let arrival = coupled
+            .steps
+            .last()
+            .ok_or_else(|| invalid("transient conjugate study retained no interval"))?
+            .time_s;
+        source
+            .conjugate_heat_at(workload, &coupled.flow.face_volume_flux_m3_per_s, arrival)?
+            .recover_step(
+                &coupled.departure,
+                &coupled.energy,
+                arrival - coupled.departure_time_s,
+            )
+            .map_err(invalid)
+    }
+
+    /// Conjugate temperatures retained with the flow, when the study couples heat transfer:
+    /// the steady state or the final instant of a transient march.
+    pub fn conjugate_heat(&self) -> Option<&crate::physics::conjugate_heat::ConjugateHeatResult> {
+        match &self.data.original {
+            FluidRetainedOriginal::ConjugateHeat { energy, .. } => Some(energy),
+            FluidRetainedOriginal::ConjugateHeatTransient(coupled) => Some(&coupled.energy),
+            _ => None,
+        }
+    }
+
+    /// Terminal original fields: the steady state, or the last backward-Euler interval.
     pub fn original(&self) -> &CanonicalFluidResult {
+        match &self.data.original {
+            FluidRetainedOriginal::Steady(original) => original,
+            FluidRetainedOriginal::ConjugateHeat { flow, .. } => flow,
+            FluidRetainedOriginal::ConjugateHeatTransient(coupled) => &coupled.flow,
+            FluidRetainedOriginal::FluidStructure(coupled) => &coupled.flow,
+            FluidRetainedOriginal::FluidStructureTransient(coupled) => &coupled.flow,
+            FluidRetainedOriginal::Transient(history) => history
+                .original_results()
+                .last()
+                .expect("admitted transient fluid history is nonempty"),
+        }
+    }
+    pub fn retained(&self) -> &FluidRetainedOriginal {
         &self.data.original
+    }
+    /// Initial state followed by every original interval endpoint, with physical times.
+    pub fn transient_history(&self) -> Option<&super::FluidTransientSolverResult> {
+        match &self.data.original {
+            FluidRetainedOriginal::Steady(_)
+            | FluidRetainedOriginal::ConjugateHeat { .. }
+            | FluidRetainedOriginal::FluidStructure(_)
+            | FluidRetainedOriginal::FluidStructureTransient(_)
+            | FluidRetainedOriginal::ConjugateHeatTransient(_) => None,
+            FluidRetainedOriginal::Transient(history) => Some(history),
+        }
     }
     pub fn source_workload(&self) -> AnalysisWorkloadIdentity {
         self.data.source_workload
@@ -141,7 +352,7 @@ impl FluidSteadySolverResult {
         // Validation below prepares its own original problem. Do not retain a
         // second pressure-stencil/authority cache across that preparation.
         drop(problem);
-        value.validate_prepared(workload, &source)?;
+        value.validate_prepared(workload, &source, mesh)?;
         Ok(value)
     }
 
@@ -150,7 +361,7 @@ impl FluidSteadySolverResult {
         workload: &FluidSteadyWorkload,
         mesh: &SolverMeshArtifact,
     ) -> AnalysisExecutionResult<()> {
-        self.validate_prepared(workload, &workload.prepare(mesh)?)
+        self.validate_prepared(workload, &workload.prepare(mesh)?, mesh)
     }
     pub fn recover_original(
         &self,
@@ -158,19 +369,20 @@ impl FluidSteadySolverResult {
         mesh: &SolverMeshArtifact,
     ) -> AnalysisExecutionResult<CanonicalFluidResidual> {
         let source = workload.prepare(mesh)?;
-        self.validate_prepared(workload, &source)?;
+        self.validate_prepared(workload, &source, mesh)?;
         // Return retained verified evidence, not a recomputed replacement field.
-        Ok(self.data.original.residual.clone())
+        Ok(self.original().residual.clone())
     }
     fn validate_prepared(
         &self,
         workload: &FluidSteadyWorkload,
         source: &PreparedFluidSource,
+        mesh: &SolverMeshArtifact,
     ) -> AnalysisExecutionResult<()> {
         let d = &self.data;
         let problem = source.problem(workload)?;
         let source_workload = workload.identity()?;
-        if d.schema_version != 4
+        if d.schema_version != 5
             || d.source_workload != source_workload
             || d.producer != workload.producer_identity()?
             || d.mesh_digest != source.source.mesh_digest
@@ -185,14 +397,58 @@ impl FluidSteadySolverResult {
                     source_workload,
                     source,
                     &d.reservation,
-                    d.original.numerical_input_identity,
+                    self.original().numerical_input_identity,
                 )?
         {
             return Err(AnalysisExecutionError::Identity(
                 "steady fluid source/material/resource identity mismatch",
             ));
         }
-        problem.recover(&d.original).map_err(invalid)?;
+        let coupling = workload.coupling();
+        let conjugate = coupling == super::workload::FluidCoupling::ConjugateHeat;
+        let structural = coupling == super::workload::FluidCoupling::FluidStructure;
+        match (&d.original, workload.is_transient()) {
+            (FluidRetainedOriginal::FluidStructureTransient(coupled), true) if structural => {
+                drop(problem);
+                source
+                    .fluid_structure(workload, mesh)?
+                    .recover_transient(coupled)
+                    .map_err(invalid)?;
+            }
+            (FluidRetainedOriginal::FluidStructure(coupled), false) if structural => {
+                drop(problem);
+                source
+                    .fluid_structure(workload, mesh)?
+                    .recover(coupled)
+                    .map_err(invalid)?;
+            }
+            (FluidRetainedOriginal::Steady(original), false) if !conjugate && !structural => {
+                problem.recover(original).map_err(invalid)?;
+            }
+            (FluidRetainedOriginal::ConjugateHeatTransient(coupled), true) if conjugate => {
+                Self::recover_conjugate_transient(workload, source, &problem, coupled)?;
+            }
+            (FluidRetainedOriginal::ConjugateHeat { flow, energy }, false) if conjugate => {
+                problem.recover(flow).map_err(invalid)?;
+                source
+                    .conjugate_heat(workload, &flow.face_volume_flux_m3_per_s)?
+                    .recover(energy)
+                    .map_err(invalid)?;
+            }
+            (FluidRetainedOriginal::Transient(history), true) if !conjugate && !structural => {
+                if history.original_results().is_empty() {
+                    return Err(invalid("transient fluid retained no interval"));
+                }
+                // Release the start-time problem before the kernel prepares its own chain.
+                drop(problem);
+                history.recover(&workload.transient_view(), mesh)?;
+            }
+            _ => {
+                return Err(AnalysisExecutionError::Identity(
+                    "retained fluid procedure differs from the authored step",
+                ))
+            }
+        }
         Ok(())
     }
 }
@@ -208,7 +464,7 @@ pub(super) fn source_data<T>(
     let source_workload = workload.identity()?;
     let numerical_plan = plan_identity(source_workload, source, &reservation, numerical_input)?;
     Ok(FluidResultData {
-        schema_version: 4,
+        schema_version: 5,
         source_workload,
         producer: workload.producer_identity()?,
         mesh_digest: source.source.mesh_digest,

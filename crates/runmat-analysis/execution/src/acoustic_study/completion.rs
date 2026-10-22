@@ -8,6 +8,10 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum AcousticStudyResultPhase {
     Solve,
+    FieldRecovery,
+    ObservationPartition { ordinal: usize },
+    ObservationReduction { ordinal: usize },
+    ObservationAssembly,
     Accuracy,
     State { ordinal: usize },
     Publication,
@@ -183,53 +187,40 @@ pub fn import_acoustic_study_completion(
         }
         let mut closures = saved.closures.into_iter();
         loop {
-            if entry.phase() == AcousticStudyPhase::ReadyForBaseline {
-                entry.freeze_baseline()?;
-            }
             if entry.phase() == AcousticStudyPhase::Complete {
                 break;
             }
-            let (phase, host) = match entry.phase() {
-                AcousticStudyPhase::ReadyForSolve => (
-                    AcousticStudyResultPhase::Solve,
-                    &entry.prepare_solve()?.host,
-                ),
-                AcousticStudyPhase::ReadyForAccuracy => (
-                    AcousticStudyResultPhase::Accuracy,
-                    &entry.prepare_accuracy()?.host,
-                ),
-                AcousticStudyPhase::ReadyForState { ordinal } => (
-                    AcousticStudyResultPhase::State { ordinal },
-                    &entry.prepare_next_state()?.host,
-                ),
-                AcousticStudyPhase::ReadyForPublication => (
-                    AcousticStudyResultPhase::Publication,
-                    &entry.prepare_publication()?.host,
-                ),
+            entry.prepare_next(source)?;
+            let phase = match entry.phase() {
+                AcousticStudyPhase::AwaitingSolve => AcousticStudyResultPhase::Solve,
+                AcousticStudyPhase::AwaitingFieldRecovery => {
+                    AcousticStudyResultPhase::FieldRecovery
+                }
+                AcousticStudyPhase::AwaitingObservationPartition { ordinal } => {
+                    AcousticStudyResultPhase::ObservationPartition { ordinal }
+                }
+                AcousticStudyPhase::AwaitingObservationReduction { ordinal } => {
+                    AcousticStudyResultPhase::ObservationReduction { ordinal }
+                }
+                AcousticStudyPhase::AwaitingObservationAssembly => {
+                    AcousticStudyResultPhase::ObservationAssembly
+                }
+                AcousticStudyPhase::AwaitingAccuracy => AcousticStudyResultPhase::Accuracy,
+                AcousticStudyPhase::AwaitingState { ordinal } => {
+                    AcousticStudyResultPhase::State { ordinal }
+                }
+                AcousticStudyPhase::AwaitingPublication => AcousticStudyResultPhase::Publication,
                 _ => {
                     return Err(invalid(
-                        "acoustic completion replay reached an awaiting phase",
+                        "acoustic completion replay reached a phase without a task",
                     ))
                 }
             };
             let closure = closures
                 .next()
                 .ok_or_else(|| invalid("acoustic entry completion omits an authored phase"))?;
-            closure.validate_for(phase, host)?;
-            match phase {
-                AcousticStudyResultPhase::Solve => {
-                    entry.complete_solve(source, closure.response, closure.execution)?
-                }
-                AcousticStudyResultPhase::Accuracy => {
-                    entry.complete_accuracy(source, closure.response, closure.execution)?
-                }
-                AcousticStudyResultPhase::State { .. } => {
-                    entry.complete_next_state(source, closure.response, closure.execution)?
-                }
-                AcousticStudyResultPhase::Publication => {
-                    entry.complete_publication(source, closure.response, closure.execution)?
-                }
-            }
+            closure.validate_for(phase, entry.pending_task()?.0)?;
+            entry.complete_next(source, closure.response, closure.execution)?;
         }
         if closures.next().is_some() {
             return Err(invalid("acoustic entry completion contains an extra phase"));

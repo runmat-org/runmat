@@ -8,8 +8,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_analysis_core::{AnalysisModel, AuthoredMaterialRef, MaterialModel, RealizedStudy};
 use runmat_analysis_execution::{
-    AcousticStudyPreparation, AnalysisCapabilityRequirement, AnalysisOutputPolicy,
-    CompletedAcousticStudy, CompletedElectricalStudy, CompletedFluidStudy, CompletedMagneticStudy,
+    AcousticResponseStudyPreparation, AcousticStudyPreparation, AnalysisCapabilityRequirement, AnalysisOutputPolicy,
+    CompletedAcousticResponseStudy, CompletedAcousticStudy, CompletedElectricalStudy, CompletedFluidStudy, CompletedMagneticStudy,
     CompletedMaxwellStudy, CompletedNonlinearSolidStudy, CompletedThermalStudy,
     ElectricalStudyPreparation, FluidStudyPreparation, MagneticStudyPreparation,
     MaxwellStudyPreparation, NonlinearSolidStudyPreparation, ThermalStudyPreparation,
@@ -18,9 +18,10 @@ use runmat_analysis_execution::{
 use runmat_analysis_fea::execution::InitialFieldBinding;
 use runmat_analysis_fea::planning::resource::LocalExecutionPlan;
 use runmat_analysis_fea::study::{
-    build_electrical_study_product, build_fluid_study_product, build_magnetic_study_product,
+    build_electrical_study_product, build_fluid_study_product, plan_electrical_study_product, build_magnetic_study_product,
     build_maxwell_study_product, build_nonlinear_solid_study_product, compile_analysis_study,
-    plan_acoustic_study_product, plan_thermal_study_product_with_fields,
+    plan_acoustic_response_study_product, plan_acoustic_study_product,
+    plan_thermal_study_product_with_fields,
     AnalysisStudyCompilationInput, ElectricalStudyProductInput, FluidStudyProductInput,
     MagneticStudyProductInput, MaxwellStudyProductInput, NonlinearSolidStudyProductInput,
 };
@@ -46,6 +47,7 @@ pub enum StudyFamilyKind {
     Magnetic,
     Maxwell,
     Acoustic,
+    AcousticResponse,
     Fluid,
     NonlinearSolid,
 }
@@ -59,6 +61,7 @@ impl StudyFamilyKind {
             StudyRootPlanning::Magnetic(_) => Self::Magnetic,
             StudyRootPlanning::Maxwell(_) => Self::Maxwell,
             StudyRootPlanning::Acoustic(_) => Self::Acoustic,
+            StudyRootPlanning::AcousticResponse(_) => Self::AcousticResponse,
             StudyRootPlanning::Fluid(_) => Self::Fluid,
             StudyRootPlanning::NonlinearSolid(_) => Self::NonlinearSolid,
         })
@@ -71,6 +74,7 @@ impl StudyFamilyKind {
             Self::Magnetic => "magnetic",
             Self::Maxwell => "Maxwell",
             Self::Acoustic => "acoustic",
+            Self::AcousticResponse => "acoustic response",
             Self::Fluid => "fluid",
             Self::NonlinearSolid => "nonlinear solid",
         }
@@ -104,6 +108,7 @@ pub(crate) enum FamilyStudyPreparation {
     Magnetic(Box<MagneticStudyPreparation>),
     Maxwell(Box<MaxwellStudyPreparation>),
     Acoustic(Box<AcousticStudyPreparation>),
+    AcousticResponse(Box<AcousticResponseStudyPreparation>),
     Fluid(Box<FluidStudyPreparation>),
     NonlinearSolid(Box<NonlinearSolidStudyPreparation>),
 }
@@ -181,10 +186,18 @@ pub(crate) fn plan_family_study(
     let (preparation, step) = match context.planning {
         StudyRootPlanning::Structural(_) => unreachable!("checked above"),
         StudyRootPlanning::Thermal(policy) => {
+            let mut compiled = compile(apply_inputs)?;
+            if let Some(heat) = &policy.element_heat_source {
+                heat.bind(&mut compiled.model, context.mesh)
+                    .map_err(|error| error.to_string())?;
+            }
+            if runmat_analysis_fea::execution::is_electrothermal_study(&compiled) {
+                compiled = electrothermal_heat_study(&compiled, context.mesh, policy)?;
+            }
             let product = plan_thermal_study_product_with_fields(
-                compile(apply_inputs)?,
+                compiled,
                 context.mesh,
-                *policy,
+                policy.clone(),
                 context.initial_fields.to_vec(),
             )
             .map_err(|error| error.to_string())?;
@@ -224,21 +237,64 @@ pub(crate) fn plan_family_study(
                 step,
             )
         }
+        StudyRootPlanning::AcousticResponse(policy) => {
+            let product =
+                plan_acoustic_response_study_product(compile(apply_inputs)?, context.mesh, *policy)
+                    .map_err(|error| error.to_string())?;
+            let step = single_step(&product.compiled.model, kind)?;
+            (
+                FamilyStudyPreparation::AcousticResponse(Box::new(
+                    AcousticResponseStudyPreparation {
+                        policy: *policy,
+                        product,
+                        mesh,
+                        frozen_project_digest: frozen,
+                        artifact_access: access,
+                        program_revision: revision,
+                        output_policy,
+                        required_capabilities: capabilities,
+                    },
+                )),
+                step,
+            )
+        }
         StudyRootPlanning::Electrical(policy) => {
-            let product = build_electrical_study_product(ElectricalStudyProductInput {
-                study: context.study,
-                geometry: context.document,
-                regions: context.regions,
-                materials: context.materials,
-                mesh: context.mesh,
-                planning: *policy,
-            })
+            let mut policy = policy.clone();
+            let compiled = compile(&mut |_| Ok(()))?;
+            let product = if runmat_analysis_fea::execution::is_electrothermal_study(&compiled) {
+                // The conduction side of an electrothermal analysis, at the temperatures of
+                // its own two-way operating point.
+                let (_, point) = runmat_analysis_fea::execution::solve_electrothermal_heat_study(
+                    &compiled,
+                    context.mesh,
+                    runmat_analysis_fea::study::ThermalStudyPlanningPolicy {
+                        backend: runmat_analysis_fea::ComputeBackend::Cpu,
+                        element_heat_source: None,
+                    },
+                )
+                .map_err(|error| error.to_string())?;
+                policy.element_temperature_k = Some(point.element_temperature_k);
+                policy.operating_time_s = point.operating_time_s;
+                let conduction =
+                    runmat_analysis_fea::execution::electrothermal_conduction_study(&compiled)
+                        .map_err(|error| error.to_string())?;
+                plan_electrical_study_product(conduction, context.mesh, policy.clone())
+            } else {
+                build_electrical_study_product(ElectricalStudyProductInput {
+                    study: context.study,
+                    geometry: context.document,
+                    regions: context.regions,
+                    materials: context.materials,
+                    mesh: context.mesh,
+                    planning: policy.clone(),
+                })
+            }
             .map_err(|error| error.to_string())?;
             let step = single_step(&product.compiled.model, kind)?;
             (
                 FamilyStudyPreparation::Electrical(Box::new(ElectricalStudyPreparation {
                     local_execution: context.local_execution,
-                    policy: *policy,
+                    policy,
                     product,
                     mesh,
                     frozen_project_digest: frozen,
@@ -363,6 +419,34 @@ pub(crate) fn plan_family_study(
     })
 }
 
+/// Iterate conduction and heat transfer to the two-way fixed point and return the heat-transfer
+/// side with the converged Joule source bound.
+fn electrothermal_heat_study(
+    compiled: &runmat_analysis_fea::study::CompiledAnalysisStudy,
+    mesh: &SolverMeshArtifact,
+    policy: &runmat_analysis_fea::study::ThermalStudyPlanningPolicy,
+) -> Result<runmat_analysis_fea::study::CompiledAnalysisStudy, String> {
+    let (thermal, point) =
+        runmat_analysis_fea::execution::solve_electrothermal_heat_study(compiled, mesh, policy.clone())
+            .map_err(|error| error.to_string())?;
+    tracing::info!(
+        sweeps = point.sweeps.len(),
+        converged = point.converged,
+        joule_power_w = point.joule_power_w,
+        terminal_power_w = point.terminal_power_w,
+        last_temperature_change_k = point.sweeps.last().map(|s| s.maximum_temperature_change_k),
+        maximum_temperature_rise_k = point.sweeps.last().map(|s| s.maximum_temperature_rise_k),
+        "electrothermal two-way coupling converged"
+    );
+    if !point.converged {
+        return Err(format!(
+            "electrothermal coupling did not converge in {} sweeps",
+            point.sweeps.len()
+        ));
+    }
+    Ok(thermal)
+}
+
 fn single_step(model: &AnalysisModel, kind: StudyFamilyKind) -> Result<(u64, u64), String> {
     let [step] = model.sequence.steps.as_slice() else {
         return Err(format!(
@@ -392,6 +476,7 @@ pub enum CompletedFamilyStudy {
     Magnetic(Box<CompletedMagneticStudy>),
     Maxwell(Box<CompletedMaxwellStudy>),
     Acoustic(Box<CompletedAcousticStudy>),
+    AcousticResponse(Box<CompletedAcousticResponseStudy>),
     Fluid(Box<CompletedFluidStudy>),
     NonlinearSolid(Box<CompletedNonlinearSolidStudy>),
 }
@@ -479,6 +564,21 @@ pub(crate) async fn execute_family_study(
             ))
             .await?,
         )),
+        FamilyStudyPreparation::AcousticResponse(preparation) => {
+            CompletedFamilyStudy::AcousticResponse(Box::new(
+                Box::pin(crate::analysis_acoustic_response::execute_with_pool(
+                    pool,
+                    *preparation,
+                    crate::analysis_acoustic_response::AcousticResponseStudyExecutionPolicy {
+                        resources,
+                        retry,
+                        deadline_unix_millis,
+                        priority,
+                    },
+                ))
+                .await?,
+            ))
+        }
         FamilyStudyPreparation::Fluid(preparation) => CompletedFamilyStudy::Fluid(Box::new(
             Box::pin(crate::analysis_fluid::execute_with_pool(
                 pool,
@@ -534,6 +634,7 @@ impl CompletedFamilyStudy {
             Self::Magnetic(_) => StudyFamilyKind::Magnetic,
             Self::Maxwell(_) => StudyFamilyKind::Maxwell,
             Self::Acoustic(_) => StudyFamilyKind::Acoustic,
+            Self::AcousticResponse(_) => StudyFamilyKind::AcousticResponse,
             Self::Fluid(_) => StudyFamilyKind::Fluid,
             Self::NonlinearSolid(_) => StudyFamilyKind::NonlinearSolid,
         }
@@ -575,6 +676,9 @@ impl CompletedFamilyStudy {
                     completed
                 ))
             }
+            Self::AcousticResponse(completed) => root!(
+                runmat_analysis_execution::prepare_acoustic_response_study_root(completed)
+            ),
             Self::Fluid(completed) => {
                 root!(runmat_analysis_execution::prepare_fluid_study_root(completed))
             }

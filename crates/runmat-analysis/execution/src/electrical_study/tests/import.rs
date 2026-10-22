@@ -62,7 +62,7 @@ fn exact_equation_order_result_receipt_profiles_survive_cold_import_and_reject_m
                 compile_property_map(&input.product.compiled.model, Some(&input.mesh)).unwrap();
             input.product.compiled.solver_mesh_digest = input.mesh.canonical_digest;
             input.product.workload =
-                plan_electrical_study(&input.product.compiled, input.policy).unwrap();
+                plan_electrical_study(&input.product.compiled, input.policy.clone()).unwrap();
             let workload = input.product.workload.clone();
             let result = workload.execute(&input.mesh).unwrap();
             let receipt =
@@ -186,7 +186,8 @@ fn exact_equation_order_result_receipt_profiles_survive_cold_import_and_reject_m
             let accounting =
                 crate::tests::phase_execution(&task.host, &task.program, &allocation, &response);
             study.complete_solve(&cold, response, accounting).unwrap();
-            assert_eq!(study.phase(), ElectricalStudyPhase::ReadyForAccuracy);
+            // Native fields are recovered (and observations evaluated) before accuracy.
+            assert_eq!(study.phase(), ElectricalStudyPhase::ReadyForFieldRecovery);
             assert_eq!(study.result().unwrap().result, result);
         }
     }

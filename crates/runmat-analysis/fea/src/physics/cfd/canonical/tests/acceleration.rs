@@ -130,8 +130,12 @@ fn acceleration_policy_is_explicit_bound_and_admitted_before_work() {
 #[test]
 fn additional_acceleration_storage_and_work_cannot_escape_ceilings() {
     let f = case(1, ReferenceCase::Couette, false);
-    let geometry =
-        crate::topology::FiniteVolumeTopology::reserve(&f.source, f.topology.policy).unwrap();
+    let geometry = crate::topology::FiniteVolumeTopology::reserve(
+        &f.source,
+        f.topology.policy,
+        &f.topology.selection,
+    )
+    .unwrap();
     let faces = f.topology.faces.len();
     let baseline = CanonicalFluidReservation::for_counts(&geometry, faces, f.policy).unwrap();
     let mut policy = f.policy;

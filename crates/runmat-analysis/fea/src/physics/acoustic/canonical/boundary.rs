@@ -37,6 +37,11 @@ impl AcousticAssembly {
             OperatorRole::Damping,
             "boundary_admittance",
         );
+        let mut boundary_stiffness = assembler(
+            self.projection.nodes.len(),
+            OperatorRole::Stiffness,
+            "spherical_radiation_curvature",
+        );
         let mut owned = BTreeSet::new();
         let mut pressure_faces = BTreeSet::new();
         let mut velocity_faces = BTreeSet::new();
@@ -59,7 +64,8 @@ impl AcousticAssembly {
                 }
                 // Radiation is face-local: its medium is resolved below from the unique
                 // exterior owner, not from the first material in the model.
-                BoundaryOperator::AcousticRadiation => 0.0,
+                BoundaryOperator::AcousticRadiation
+                | BoundaryOperator::AcousticSphericalRadiation { .. } => 0.0,
                 _ => {
                     return Err(AcousticHarmonicError::Unsupported(
                         "non-acoustic boundary in acoustic model".into(),
@@ -68,12 +74,63 @@ impl AcousticAssembly {
             };
             let faces = self.faces(&boundary.target)?;
             for face in faces {
-                let admittance = if matches!(boundary.operator, BoundaryOperator::AcousticRadiation)
-                {
+                let admittance = if matches!(
+                    boundary.operator,
+                    BoundaryOperator::AcousticRadiation
+                        | BoundaryOperator::AcousticSphericalRadiation { .. }
+                ) {
                     self.radiation_admittance(&face)?
                 } else {
                     admittance
                 };
+                // Spherical outgoing wave: dp/dn = -(ik + 1/r) p. The 1/r part is a real,
+                // frequency-independent boundary stiffness integral(N_i N_j / (rho r)).
+                if let BoundaryOperator::AcousticSphericalRadiation { center_m } = boundary.operator
+                {
+                    let [owner] = face.adjacent_element_indices.as_slice() else {
+                        return Err(AcousticHarmonicError::Boundary(
+                            "radiation requires exactly one exterior owning element".into(),
+                        ));
+                    };
+                    let rho = self.density[*owner];
+                    if !center_m.iter().all(|value| value.is_finite()) {
+                        return Err(AcousticHarmonicError::Boundary(
+                            "spherical radiation center must be finite".into(),
+                        ));
+                    }
+                    let mut failure = None;
+                    self.projection
+                        .visit_boundary_quadrature(&face, |point| {
+                            let radius = point
+                                .position_m
+                                .iter()
+                                .zip(center_m)
+                                .map(|(x, c)| (x - c).powi(2))
+                                .sum::<f64>()
+                                .sqrt();
+                            if !(radius.is_finite() && radius > 0.0) {
+                                failure = Some(());
+                                return;
+                            }
+                            for (i, &row) in face.node_indices.iter().enumerate() {
+                                for (j, &column) in face.node_indices.iter().enumerate() {
+                                    boundary_stiffness.add(
+                                        row,
+                                        column,
+                                        point.shape_values()[i] * point.shape_values()[j]
+                                            * point.area_weight_m2
+                                            / (rho * radius),
+                                    );
+                                }
+                            }
+                        })
+                        .map_err(|e| AcousticHarmonicError::Topology(e.to_string()))?;
+                    if failure.is_some() {
+                        return Err(AcousticHarmonicError::Boundary(
+                            "spherical radiation surface passes through its center".into(),
+                        ));
+                    }
+                }
                 if !owned.insert(face.face_id) {
                     return Err(AcousticHarmonicError::Boundary(
                         "overlapping acoustic boundaries".into(),
@@ -255,6 +312,13 @@ impl AcousticAssembly {
             }
         }
         self.impedance = finish(impedance)?;
+        let boundary_stiffness = finish(boundary_stiffness)?;
+        self.stiffness = crate::algebra::RealSparseMatrix::scaled_sum(
+            &[(1.0, &self.volume_stiffness), (1.0, &boundary_stiffness)],
+            OperatorRole::Stiffness,
+            crate::algebra::MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+        )
+        .map_err(|e| AcousticHarmonicError::Operator(e.to_string()))?;
         if self
             .source
             .iter()

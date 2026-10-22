@@ -4,7 +4,7 @@ use super::{
     StepIdentity,
 };
 use crate::admission::AnalysisRunIdentity;
-use runmat_analysis_core::{AnalysisModel, ProcedureStepId};
+use runmat_analysis_core::{AnalysisModel, Frequency, ProcedureStepId};
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 use runmat_meshing_core::SolverMeshArtifact;
@@ -25,7 +25,7 @@ pub use result::MaxwellHarmonicSolverResult;
 #[cfg(test)]
 mod tests;
 
-const PREFIX: &[u8] = b"runmat-maxwell-harmonic-workload/v1\0";
+const PREFIX: &[u8] = b"runmat-maxwell-harmonic-workload/v2\0";
 const LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -34,6 +34,8 @@ pub struct MaxwellHarmonicWorkload {
     pub model: AnalysisModel,
     pub step_id: ProcedureStepId,
     pub relative_residual_target: f64,
+    /// One of the step's authored frequencies; each frequency is its own workload.
+    pub frequency: Frequency,
 }
 impl MaxwellHarmonicWorkload {
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
@@ -43,7 +45,35 @@ impl MaxwellHarmonicWorkload {
             self.relative_residual_target,
         )
         .map_err(invalid)?;
+        let frequencies = crate::physics::maxwell::harmonic_frequencies(
+            &self.model,
+            self.step_id.as_str(),
+            self.relative_residual_target,
+        )
+        .map_err(invalid)?;
+        if !frequencies
+            .iter()
+            .any(|value| value.to_bits() == self.frequency.hertz.to_bits())
+        {
+            return Err(invalid(
+                "Maxwell workload frequency is not one of the step's authored frequencies",
+            ));
+        }
         Ok(())
+    }
+    /// Compile the canonical physical input at this workload's frequency.
+    pub fn compile_input(
+        &self,
+        mesh: &SolverMeshArtifact,
+    ) -> AnalysisExecutionResult<crate::physics::maxwell::MaxwellInput> {
+        crate::physics::maxwell::compile_canonical_input(
+            &self.model,
+            mesh,
+            self.step_id.as_str(),
+            self.relative_residual_target,
+            self.frequency.hertz,
+        )
+        .map_err(invalid)
     }
     pub fn canonical_bytes(&self) -> AnalysisExecutionResult<Vec<u8>> {
         self.validate()?;
@@ -84,20 +114,11 @@ impl MaxwellHarmonicWorkload {
         &self,
         mesh: &SolverMeshArtifact,
     ) -> AnalysisExecutionResult<MaxwellHarmonicSolverResult> {
-        let input = crate::physics::maxwell::compile_canonical_input(
-            &self.model,
-            mesh,
-            self.step_id.as_str(),
-            self.relative_residual_target,
-        )
-        .map_err(invalid)?;
+        let input = self.compile_input(mesh)?;
         let formulation = self.formulation(mesh)?;
-        let response = crate::physics::maxwell::solve_full_pec_volume(
-            mesh,
-            &input,
-            self.relative_residual_target,
-        )
-        .map_err(invalid)?;
+        let response =
+            crate::physics::maxwell::solve(mesh, &input, self.relative_residual_target)
+                .map_err(invalid)?;
         MaxwellHarmonicSolverResult::new(self, mesh, formulation, input, response)
     }
 }

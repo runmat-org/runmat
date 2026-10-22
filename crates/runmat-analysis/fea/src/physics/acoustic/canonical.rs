@@ -9,11 +9,16 @@
 
 mod assembly;
 mod boundary;
+mod modal;
+mod real_solve;
+mod transient;
+pub use modal::{solve_canonical_modal, AcousticModalPolicy, CanonicalAcousticModes};
+pub use transient::{
+    solve_canonical_transient, AcousticTransientPolicy, CanonicalAcousticTransient, TransientRetention,
+};
 mod periodic;
 mod recovery;
 mod response;
-mod uniqueness;
-pub(crate) use uniqueness::uniqueness_admission;
 #[cfg(test)]
 mod tests;
 
@@ -30,66 +35,46 @@ use crate::{
 };
 use assembly::AcousticAssembly;
 
-pub use response::CanonicalAcousticResponse;
+pub use response::{AcousticSolveCertificate, CanonicalAcousticResponse};
 
+/// Direct harmonic solve: one sparse LU of the reduced real block operator certifies that the
+/// operator is nonsingular (factorization-derived contraction bound, failing closed above
+/// `contraction_limit`), then solves with iterative refinement against the original operator.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AcousticHarmonicPolicy {
-    /// None explicitly requests only physical closure in the CPU
-    /// library. Authored study planning always requests source-independent proof.
-    #[serde(deserialize_with = "deserialize_uniqueness")]
-    pub uniqueness: Option<crate::solve::uniqueness::SparseUniquenessPolicy>,
-    pub preconditioner: crate::contracts::SolverPreconditioner,
+    /// Upper limit on the certificate's contraction bound `‖I − A F⁻¹‖`; strictly below one.
+    pub contraction_limit: f64,
+    /// Relative residual on the original reduced operator the refined solve must reach.
     pub relative_tolerance: f64,
-    pub restart: usize,
-    pub maximum_iterations: usize,
-}
-
-fn deserialize_uniqueness<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Option<crate::solve::uniqueness::SparseUniquenessPolicy>, D::Error> {
-    // An explicit null is a physical-closure-only request, not a missing-field default.
-    serde::Deserialize::deserialize(deserializer)
 }
 
 impl Default for AcousticHarmonicPolicy {
     fn default() -> Self {
         Self {
-            uniqueness: None,
-            preconditioner: crate::contracts::SolverPreconditioner::Ilu0,
+            contraction_limit: crate::solve::certificate::DEFAULT_CONTRACTION_LIMIT,
             relative_tolerance: 1e-9,
-            restart: 64,
-            maximum_iterations: 4096,
         }
     }
 }
 
 impl AcousticHarmonicPolicy {
     pub fn validate(self, frequency: Frequency) -> Result<(), AcousticHarmonicError> {
-        if let Some(policy) = self.uniqueness {
-            policy
-                .validate()
-                .map_err(|error| AcousticHarmonicError::InvalidInput(error.to_string()))?;
-        }
         let frequency_hz = frequency.hertz;
         let omega = std::f64::consts::TAU * frequency_hz;
         if !frequency_hz.is_finite()
-            || !matches!(
-                self.preconditioner,
-                crate::contracts::SolverPreconditioner::None
-                    | crate::contracts::SolverPreconditioner::Ilu0
-            )
             || frequency_hz <= 0.0
             || !omega.is_finite()
             || !(omega * omega).is_finite()
             || !self.relative_tolerance.is_finite()
             || self.relative_tolerance <= 0.0
             || self.relative_tolerance >= 1.0
-            || self.restart == 0
-            || self.maximum_iterations == 0
+            || !self.contraction_limit.is_finite()
+            || self.contraction_limit <= 0.0
+            || self.contraction_limit >= 1.0
         {
             return Err(AcousticHarmonicError::InvalidInput(
-                "frequency or Krylov policy".into(),
+                "frequency, residual target or certificate limit".into(),
             ));
         }
         Ok(())
@@ -110,11 +95,9 @@ pub enum AcousticHarmonicError {
     Operator(String),
     #[error("canonical acoustic source or boundary is invalid: {0}")]
     Boundary(String),
-    #[error("canonical acoustic Krylov solve broke down (a resonant singular system is possible)")]
-    Breakdown,
-    #[error("canonical acoustic Krylov solve did not converge")]
+    #[error("canonical acoustic refined direct solve did not reach its residual target")]
     NotConverged,
-    #[error("canonical acoustic power closure did not converge: iterations={iterations}, relative_residual={relative_residual:e}, power_relative_error={power_relative_error:e}, power_tolerance={power_tolerance:e}")]
+    #[error("canonical acoustic power closure failed: refinement_steps={iterations}, relative_residual={relative_residual:e}, power_relative_error={power_relative_error:e}, power_tolerance={power_tolerance:e}")]
     PowerNotConverged {
         iterations: u32,
         relative_residual: f64,
@@ -123,16 +106,8 @@ pub enum AcousticHarmonicError {
     },
     #[error("canonical acoustic solve was cancelled")]
     Cancelled,
-    #[error("canonical acoustic uniqueness admission or diagnostic failed: {0}")]
-    Uniqueness(crate::solve::uniqueness::SparseUniquenessError),
-    #[error("canonical acoustic uniqueness is indeterminate for original operator {operator_identity:?}: {reason:?}, completed_columns={completed_columns}, iterations={iterations}, defect_upper={defect_infinity_upper:?}; this is not a singularity diagnosis")]
-    UniquenessIndeterminate {
-        operator_identity: runmat_execution::Digest,
-        reason: crate::solve::uniqueness::SparseUniquenessUncertainty,
-        completed_columns: usize,
-        iterations: u64,
-        defect_infinity_upper: Option<f64>,
-    },
+    #[error("canonical acoustic operator is not certified nonsingular: {0}")]
+    Certificate(crate::solve::certificate::CertificateError),
 }
 
 /// Solve one explicitly authored acoustic harmonic step on its sealed canonical mesh.
@@ -159,8 +134,6 @@ pub fn solve_canonical_harmonic(
         ));
     }
     let step = validate_input(model, step_id, frequency, policy)?;
-    // Count-only component ceiling precedes projection, assembly and diagnostics.
-    let uniqueness = uniqueness_admission(mesh, policy.uniqueness)?;
     let frequency_hz = frequency.hertz;
     let omega = std::f64::consts::TAU * frequency_hz;
     let projection = AnalysisProjection::derive(mesh)
@@ -184,7 +157,7 @@ pub fn solve_canonical_harmonic(
         sample,
     )?;
     let assembly = assembly.with_periodic_constraints(mesh, model, step, &excitations)?;
-    response::solve_admitted(assembly, frequency_hz, policy, power_tolerance, uniqueness)
+    response::solve(assembly, frequency_hz, policy, power_tolerance)
 }
 
 pub(crate) fn validate_input<'a>(

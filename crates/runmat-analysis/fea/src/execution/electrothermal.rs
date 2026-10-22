@@ -15,6 +15,17 @@ use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 use runmat_meshing_core::SolverMeshArtifact;
 
+mod coupled;
+pub use coupled::{
+    bind_element_heat_source, conductivity_at, electrical_part, element_temperatures, execute_coupled_electrothermal,
+    thermal_part, CoupledElectrothermalCompletion, ElectrothermalCouplingControls,
+    ElectrothermalElectricalSample, ElectrothermalSweep,
+};
+mod operating_point;
+pub use operating_point::{
+    electrothermal_conduction_study, is_electrothermal_study, solve_electrothermal_heat_study,
+    ElectrothermalOperatingPoint,
+};
 mod transfer;
 pub use transfer::RetainedJouleHeatTransfer;
 mod source;

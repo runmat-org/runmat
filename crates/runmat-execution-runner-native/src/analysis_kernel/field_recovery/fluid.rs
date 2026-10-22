@@ -14,13 +14,13 @@ pub(super) fn execute(
     invocation: AnalysisKernelInvocation<'_>,
 ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
     use AnalysisNumericalObjectKind::{
-        FieldRecoveryRequest as Request, FieldSourceBinding, FluidSteadyWorkload as Workload, Mesh,
+        FieldRecoveryRequest as Request, FluidSteadyWorkload as Workload, Mesh,
         ResourcePlan, SolverResult,
     };
     invocation.host.validate()?;
     if invocation.kind != AnalysisWorkKind::RecoverField
         || invocation.host.workload.kind != invocation.kind
-        || invocation.inputs.len() != 6
+        || invocation.inputs.len() != 5
         || invocation.host.workload.outputs != [AnalysisNumericalObjectKind::Field]
         || invocation.host.workload.inputs
             != invocation
@@ -64,9 +64,6 @@ pub(super) fn execute(
             "fluid field request/resource plan differs from original source",
         ));
     }
-    // Explicit exact binding is admitted by the bridge rederivation, not inferred
-    // from node or exterior-face counts in a generic field request.
-    unique_input(&invocation, FieldSourceBinding)?;
     let workload_objects = unique_input(&invocation, Workload)?;
     let mesh_objects = unique_input(&invocation, Mesh)?;
     let result_objects = unique_input(&invocation, SolverResult)?;

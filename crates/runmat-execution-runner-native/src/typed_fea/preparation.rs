@@ -21,6 +21,19 @@ pub struct PreparedFeaStudy {
     pub realized: RealizedStudy,
 }
 
+/// How a prepared root executes an authored study.
+#[derive(Clone, Debug)]
+pub enum PreparationRole {
+    /// The authored study as written. An electrothermal analysis runs as its heat-transfer
+    /// side: conduction and heat transfer iterated to the two-way fixed point.
+    Authored,
+    /// A thermal analysis heated by a solved upstream loss field.
+    Heated(runmat_analysis_fea::study::ElementHeatSource),
+    /// The conduction side of an electrothermal analysis at its solved temperature field;
+    /// publishes potential, current density and Joule loss.
+    ElectrothermalConduction,
+}
+
 pub async fn prepare_study(
     source: &runmat_core::CheckedFeaSessionSource,
     resolved: runmat_analysis_language::ResolvedAnalysisStudy,
@@ -28,12 +41,44 @@ pub async fn prepare_study(
     authority: &str,
     options: &LocalFeaExecutionOptions,
 ) -> Result<PreparedFeaStudy, String> {
+    prepare_study_with_role(
+        source,
+        resolved,
+        inputs,
+        authority,
+        options,
+        PreparationRole::Authored,
+    )
+    .await
+}
+
+pub async fn prepare_study_with_role(
+    source: &runmat_core::CheckedFeaSessionSource,
+    resolved: runmat_analysis_language::ResolvedAnalysisStudy,
+    inputs: &[AuthoredStudyInputBinding],
+    authority: &str,
+    options: &LocalFeaExecutionOptions,
+    role: PreparationRole,
+) -> Result<PreparedFeaStudy, String> {
     let realized: RealizedStudy = resolved
         .study
         .realize_with_models(&resolved.models, &resolved.geometry, inputs)
         .map_err(|error| error.to_string())?;
-    let family =
-        admission::select_family(&realized.sequence, realized.model.electromagnetic.as_ref())?;
+    let family = match &role {
+        PreparationRole::ElectrothermalConduction => {
+            if !admission::is_electrothermal(&realized.sequence) {
+                return Err(
+                    "the conduction role requires one fresh electrothermal analysis".into(),
+                );
+            }
+            admission::PreparedFamily::Electrical
+        }
+        _ => admission::select_family(&realized.sequence, realized.model.electromagnetic.as_ref())?,
+    };
+    let element_heat_source = match role {
+        PreparationRole::Heated(source) => Some(source),
+        PreparationRole::Authored | PreparationRole::ElectrothermalConduction => None,
+    };
     let revision = program_revision(source)?;
     let access = checked_fea_artifact_access(authority);
     let geometry_source = super::geometry::prepare_geometry_source(
@@ -127,6 +172,7 @@ pub async fn prepare_study(
         admission::PreparedFamily::Thermal => {
             crate::StudyRootPlanning::Thermal(runmat_analysis_fea::study::ThermalStudyPlanningPolicy {
                 backend: options.backend,
+                element_heat_source,
             })
         }
         admission::PreparedFamily::Acoustic => {
@@ -134,8 +180,13 @@ pub async fn prepare_study(
                 runmat_analysis_fea::study::AcousticStudyPlanningPolicy::standard(),
             )
         }
+        admission::PreparedFamily::AcousticResponse => crate::StudyRootPlanning::AcousticResponse(
+            runmat_analysis_fea::study::AcousticResponseStudyPlanningPolicy::default(),
+        ),
         admission::PreparedFamily::Electrical => {
             crate::StudyRootPlanning::Electrical(runmat_analysis_fea::study::ElectricalStudyPlanningPolicy {
+                element_temperature_k: None,
+                operating_time_s: None,
             })
         }
         admission::PreparedFamily::Magnetic => {

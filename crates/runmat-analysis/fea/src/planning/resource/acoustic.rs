@@ -35,8 +35,8 @@ const PROFILE_LIMITS: CanonicalLimits =
     CanonicalLimits::new(usize::MAX, usize::MAX, usize::MAX, 64);
 // Only the fixed result keys, producer/fixed-width identity/digest values, six vector headers,
 // frequency/solver/tolerance/residual/power/iteration scalars and contract prefix. Even counting
-// every key at 64 bytes and every summary scalar at 9 bytes, including uniqueness
-// controls, operator/candidate digests and claim, fits 8192 bytes. The formulation
+// every key at 64 bytes and every summary scalar at 9 bytes, including the factorization
+// certificate and its operator digest, fits 8192 bytes. The formulation
 // realization is independently profiled below (its vectors are not covered by this constant).
 // Authored strings are separately profiled using their declaration and shared evidence wire.
 const CLOSED_RESULT_SCHEMA_BYTES: u64 = 8192;
@@ -54,21 +54,6 @@ fn add(a: u64, b: u64) -> Result<u64, ResourcePlanningError> {
 fn mul(a: u64, b: u64) -> Result<u64, ResourcePlanningError> {
     a.checked_mul(b)
         .ok_or(ResourcePlanningError::Overflow("acoustic byte product"))
-}
-
-fn krylov_workspace_bytes(block: u64, restart: u64) -> Result<u64, ResourcePlanningError> {
-    // GMRES basis may grow geometrically. Include twice (restart+1) vectors; Hessenberg,
-    // rotations, projected RHS, residual/update temporaries and Vec headers independently.
-    let krylov_values = add(
-        mul(mul(add(restart, 1)?, block)?, 2)?,
-        add(
-            mul(add(restart, 1)?, restart)?,
-            // Twelve original block work vectors and one retained physical
-            // warm start for power continuation within the same iteration budget.
-            add(mul(block, 13)?, mul(add(restart, 1)?, 8)?)?,
-        )?,
-    )?;
-    add(mul(krylov_values, 8)?, mul(add(restart, 1)?, 96)?)
 }
 
 fn evidence_profile(
@@ -165,9 +150,6 @@ pub fn build_acoustic_resource_plan(
     prepared: PreparedAcousticResourceFacts,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     let payload_bound = acoustic_harmonic_result_payload_bytes_upper_bound(workload, mesh)?;
-    let uniqueness =
-        crate::physics::acoustic::canonical_uniqueness_admission(mesh, workload.solver.uniqueness)
-            .map_err(invalid)?;
     let state_profiles = workload
         .state_publication_profiles_encoding_profile(Digest::from_bytes(
             *mesh.canonical_digest.bytes(),
@@ -201,9 +183,6 @@ pub fn build_acoustic_resource_plan(
     let nodes = count(mesh.topology.nodes.len())?;
     let elements = count(mesh.topology.volume_elements.len())?;
     let block = mul(nodes, 2)?;
-    let restart = count(workload.solver.restart)?
-        .min(block)
-        .min(count(workload.solver.maximum_iterations)?);
     // Exact local supports bound discovered sparse nonzeros, with shared entries counted more
     // than once. Each operator owns its row offsets and columns; K/M never share storage.
     let volume_support =
@@ -243,7 +222,6 @@ pub fn build_acoustic_resource_plan(
     // including spare node/key/pointer slots. CSR values+columns add 16 bytes per entry;
     // finalization and discovered storage coexist. Spare capacity is included conservatively.
     let operators = add(mul(support, 160)?, mul(add(nodes, 1)?, 3 * 64)?)?;
-    let krylov = krylov_workspace_bytes(block, restart)?;
     // Full vectors: lifting/real/imaginary/apply's six SpMV buffers, source, prescribed,
     // free indexes, pressure and recovery fields. Boundary ownership sets/faces and source
     // accumulators are separate from projection. These phase lifetimes are summed, not maxed.
@@ -264,12 +242,7 @@ pub fn build_acoustic_resource_plan(
     // Without an active periodic relation, recovery rows are identity or
     // prescribed (one or zero entries), not general two-entry phase rows.
     let recovery_row_support = if periodic_count == 0 { 1 } else { 2 };
-    let sparse_solve = sparse_workspace_bound(
-        support,
-        block,
-        recovery_row_support,
-        workload.solver.preconditioner,
-    )?;
+    let sparse_solve = sparse_workspace_bound(support, block, recovery_row_support)?;
     let phase_constraints = add(mul(nodes, 512)?, mul(mul(nodes, periodic_count)?, 128)?)?;
     let evidence = evidence_profile(workload)?;
     // Workload clone/source realization metadata is profiled from the complete authored input;
@@ -286,13 +259,11 @@ pub fn build_acoustic_resource_plan(
         properties,
         operators,
         sparse_solve,
-        krylov,
         vectors,
         boundaries,
         phase_constraints,
         metadata,
         evidence.materialization_resident_bytes_estimate,
-        uniqueness.map_or(0, |envelope| envelope.resident_bytes),
     ]
     .into_iter()
     .try_fold(0u64, add)?;
@@ -307,11 +278,8 @@ pub fn build_acoustic_resource_plan(
             element_count: Count(elements),
             operator_nonzeros_upper_bound: Count(support),
             block_dimension_upper_bound: Count(block),
-            krylov_restart_upper_bound: Count(restart),
             recovery_row_support_upper_bound: Count(recovery_row_support),
-            preconditioner: workload.solver.preconditioner,
             sparse_solve_reservation_bytes: ByteCount(sparse_solve),
-            uniqueness,
             numerical_reservation_bytes: ByteCount(reservation),
             inputs: prepared.inputs,
             result_output: prepared.result_output,

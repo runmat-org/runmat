@@ -6,9 +6,9 @@ use crate::{
 };
 use runmat_analysis_core::{
     validate_model, AnalysisConstraint, AnalysisModel, AnalysisProcedure, CoordinateFrame,
-    ExcitationCaseActivation, ExcitationCaseSelection, IndependentDomain, PhysicsFamily,
-    ProcedureSettings, ProcedureStepId, RestartPolicy, SolutionSpace, StateCompleteness, StateKind,
-    StatePersistence,
+    CoupledPhysicsFamily, ExcitationCaseActivation, ExcitationCaseSelection, IndependentDomain,
+    PhysicsFamily, ProcedureSettings, ProcedureStepId, RestartPolicy, SolutionSpace,
+    StateCompleteness, StateKind, StatePersistence,
 };
 use runmat_canonical_codec::{
     decode_contract, encode_contract, serialized_materialization_resident_bytes_estimate,
@@ -28,13 +28,36 @@ pub struct FluidSteadyWorkload {
 
 pub(crate) use super::source::PreparedFluidSource;
 
+/// The physics solved together with the authored flow in this workload.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FluidCoupling {
+    Standalone,
+    /// Coolant flow and conduction in the cooled solid, one energy equation over both.
+    ConjugateHeat,
+    /// Flow loading a small-strain elastic structure whose wall motion reshapes the flow.
+    FluidStructure,
+}
+
 impl FluidSteadyWorkload {
     pub fn formulation(
         &self,
         mesh: &SolverMeshArtifact,
     ) -> AnalysisExecutionResult<crate::admission::AnalysisRunIdentity> {
         self.validate()?;
-        crate::admission::admit_canonical_fluid_steady(mesh).map_err(invalid)
+        if self.coupling() == FluidCoupling::ConjugateHeat && self.is_transient() {
+            crate::admission::admit_canonical_conjugate_heat_transient(mesh)
+        } else if self.coupling() == FluidCoupling::ConjugateHeat {
+            crate::admission::admit_canonical_conjugate_heat_steady(mesh)
+        } else if self.coupling() == FluidCoupling::FluidStructure && self.is_transient() {
+            crate::admission::admit_canonical_fluid_structure_transient(mesh)
+        } else if self.coupling() == FluidCoupling::FluidStructure {
+            crate::admission::admit_canonical_fluid_structure_steady(mesh)
+        } else if self.is_transient() {
+            crate::admission::admit_canonical_fluid_transient(mesh)
+        } else {
+            crate::admission::admit_canonical_fluid_steady(mesh)
+        }
+        .map_err(invalid)
     }
     pub(crate) fn resident_ceiling(&self) -> AnalysisExecutionResult<u64> {
         let [step] = self.model.sequence.steps.as_slice() else {
@@ -50,14 +73,53 @@ impl FluidSteadyWorkload {
             .maximum_resident_bytes
             .min(step.accuracy.resources.maximum_resident_bytes))
     }
+    pub fn coupling(&self) -> FluidCoupling {
+        match self.model.sequence.steps.as_slice() {
+            [step]
+                if step.family
+                    == PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer) =>
+            {
+                FluidCoupling::ConjugateHeat
+            }
+            [step]
+                if step.family
+                    == PhysicsFamily::Coupled(CoupledPhysicsFamily::FluidStructureInteraction) =>
+            {
+                FluidCoupling::FluidStructure
+            }
+            _ => FluidCoupling::Standalone,
+        }
+    }
+
+    /// Authored procedure of the singleton fluid step. Steady and backward-Euler transient
+    /// studies share this workload, its task lifecycle and its publication.
+    pub fn is_transient(&self) -> bool {
+        matches!(
+            self.model.sequence.steps.as_slice(),
+            [step] if step.procedure == AnalysisProcedure::TransientResponse
+        )
+    }
+
+    /// The same authored intent seen by the shared backward-Euler kernel. A fresh authored
+    /// root carries no upstream initial-field bindings: initial state comes from the model.
+    pub(crate) fn transient_view(&self) -> super::FluidTransientWorkload {
+        super::FluidTransientWorkload {
+            model: self.model.clone(),
+            step_id: self.step_id.clone(),
+            policy: self.policy,
+            geometry_policy: self.geometry_policy,
+            initial_fields: Vec::new(),
+        }
+    }
+
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         validate_model(&self.model).map_err(invalid)?;
         let [step] = self.model.sequence.steps.as_slice() else {
-            return Err(invalid("steady fluid requires exactly one authored step"));
+            return Err(invalid("fluid study requires exactly one authored step"));
         };
         self.policy.validate().map_err(invalid)?;
         crate::results::observation::validate_sampled_requests(step).map_err(invalid)?;
-        let definitions = super::fields::fluid_native_field_definition_inventory()?;
+        let definitions = super::fields::field_definition_inventory(self.coupling())?;
         if step
             .observations
             .iter()
@@ -74,6 +136,18 @@ impl FluidSteadyWorkload {
             return Err(invalid(
                 "fluid observations require original native cell U/p or owner-oriented face q",
             ));
+        }
+        if step.step_id != self.step_id {
+            return Err(invalid("fluid workload producer differs from its step"));
+        }
+        if self.coupling() == FluidCoupling::ConjugateHeat {
+            return self.validate_conjugate_heat(step);
+        }
+        if self.coupling() == FluidCoupling::FluidStructure {
+            return self.validate_fluid_structure(step);
+        }
+        if self.is_transient() {
+            return self.transient_view().validate();
         }
         if self
             .model
@@ -136,6 +210,202 @@ impl FluidSteadyWorkload {
         Ok(())
     }
 
+    /// Authored uniform starting temperature of a transient conjugate study, kelvin. The
+    /// steady flow it is advected by needs no initial state.
+    pub(crate) fn initial_temperature(&self) -> AnalysisExecutionResult<f64> {
+        use runmat_analysis_core::{InitialCondition, InitialConditionTarget, InitialValue};
+        let [step] = self.model.sequence.steps.as_slice() else {
+            return Err(invalid("conjugate heat requires one authored step"));
+        };
+        let mut found = None;
+        for condition in self
+            .model
+            .initial_conditions
+            .iter()
+            .filter(|c| c.applies_to_step(step))
+        {
+            let InitialCondition::Temperature(value) = condition else {
+                return Err(invalid(
+                    "transient conjugate heat transfer admits only an initial temperature",
+                ));
+            };
+            let (InitialConditionTarget::WholeModel, InitialValue::Uniform(t)) =
+                (&value.target, &value.value)
+            else {
+                return Err(invalid(
+                    "transient conjugate heat transfer needs a uniform whole-model initial temperature",
+                ));
+            };
+            if found.replace(t.kelvin).is_some() || !t.kelvin.is_finite() || t.kelvin <= 0.0 {
+                return Err(invalid("one finite initial temperature"));
+            }
+        }
+        found.ok_or_else(|| {
+            invalid("transient conjugate heat transfer needs an authored initial temperature")
+        })
+    }
+
+    /// Steady conjugate heat transfer: fluid and thermal authority only, with every
+    /// fluid–solid interface declared.
+    fn validate_conjugate_heat(
+        &self,
+        step: &runmat_analysis_core::ProcedureStep,
+    ) -> AnalysisExecutionResult<()> {
+        use runmat_analysis_core::{
+            AnalysisInterfaceKind, BoundaryOperator, ExcitationAction, ThermalConstraintKind,
+        };
+        let transient = match (step.procedure, &step.independent_domain) {
+            (AnalysisProcedure::Static, IndependentDomain::Static) => Some(false),
+            (AnalysisProcedure::TransientResponse, IndependentDomain::TimeSeconds { .. }) => {
+                super::FluidTransientSchedule::derive(&self.model, step)?;
+                self.initial_temperature()?;
+                Some(true)
+            }
+            _ => None,
+        };
+        if transient.is_none()
+            || step.solution_space != SolutionSpace::Direct
+            || step.settings != ProcedureSettings::None
+            || step.restart != RestartPolicy::Fresh
+            || step.excitation_case_selection != ExcitationCaseSelection::All
+            || !step.activations.is_empty()
+            || !step.state_inputs.is_empty()
+            || step.state_outputs.is_empty()
+            || step.state_outputs.iter().any(|output| {
+                !matches!(output.kind, StateKind::CoupledInterface | StateKind::Fluid)
+                    || output.completeness != StateCompleteness::Complete
+                    || output.persistence != StatePersistence::UntilDependentsComplete
+            })
+            || !self.model.sequence.dependencies.is_empty()
+            || !self.model.sequence.transitions.is_empty()
+            || !self.model.sequence.branches.is_empty()
+            || self.model.frame != CoordinateFrame::Global
+            || self.model.structural.is_some()
+            || self.model.thermo_mechanical.is_some()
+            || self.model.electro_thermal.is_some()
+            || self.model.electromagnetic.is_some()
+            || !self.model.connectors.is_empty()
+            || (transient == Some(false) && !self.model.initial_conditions.is_empty())
+            || !self.model.response_spectra.is_empty()
+            || !self.model.random_excitations.is_empty()
+            || self
+                .model
+                .excitation_cases
+                .iter()
+                .any(|c| c.activation != ExcitationCaseActivation::Always)
+            || self.model.constraints.iter().any(|c| match c {
+                AnalysisConstraint::Fluid(_) => false,
+                AnalysisConstraint::Thermal(t) => {
+                    !matches!(t.kind, ThermalConstraintKind::Prescribed { .. })
+                }
+                _ => true,
+            })
+            || self.model.boundaries.iter().any(|b| {
+                !matches!(
+                    b.operator,
+                    BoundaryOperator::FluidOutletPressure { .. }
+                        | BoundaryOperator::ThermalHeatFlux { .. }
+                        | BoundaryOperator::ThermalConvection { .. }
+                )
+            })
+            || self.model.excitations.iter().any(|a| {
+                !crate::physics::cfd::canonical::supports_action(a)
+                    && !matches!(
+                        a,
+                        ExcitationAction::HeatGeneration(_) | ExcitationAction::HeatFlux(_)
+                    )
+            })
+            || self.model.interfaces.is_empty()
+            || self
+                .model
+                .interfaces
+                .iter()
+                .any(|i| !matches!(i.kind, AnalysisInterfaceKind::ConjugateHeatTransfer(_)))
+        {
+            return Err(invalid(
+                "unsupported steady conjugate heat transfer authority",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Steady fluid–structure interaction: flow, small-strain structure and declared walls.
+    fn validate_fluid_structure(
+        &self,
+        step: &runmat_analysis_core::ProcedureStep,
+    ) -> AnalysisExecutionResult<()> {
+        use runmat_analysis_core::{
+            AnalysisInterfaceKind, BoundaryOperator, StructuralConstraintKind,
+        };
+        let timing = match (step.procedure, &step.independent_domain) {
+            (AnalysisProcedure::Static, IndependentDomain::Static) => true,
+            (AnalysisProcedure::TransientResponse, IndependentDomain::TimeSeconds { .. }) => {
+                super::FluidTransientSchedule::derive(&self.model, step)?;
+                true
+            }
+            _ => false,
+        };
+        if !timing
+            || step.solution_space != SolutionSpace::Direct
+            || step.settings != ProcedureSettings::None
+            || step.restart != RestartPolicy::Fresh
+            || step.excitation_case_selection != ExcitationCaseSelection::All
+            || !step.activations.is_empty()
+            || !step.state_inputs.is_empty()
+            || step.state_outputs.is_empty()
+            || step.state_outputs.iter().any(|output| {
+                !matches!(output.kind, StateKind::CoupledInterface | StateKind::Fluid)
+                    || output.completeness != StateCompleteness::Complete
+                    || output.persistence != StatePersistence::UntilDependentsComplete
+            })
+            || !self.model.sequence.dependencies.is_empty()
+            || !self.model.sequence.transitions.is_empty()
+            || !self.model.sequence.branches.is_empty()
+            || self.model.frame != CoordinateFrame::Global
+            || self.model.thermal.is_some()
+            || self.model.thermo_mechanical.is_some()
+            || self.model.electro_thermal.is_some()
+            || self.model.electromagnetic.is_some()
+            || !self.model.connectors.is_empty()
+            || !self.model.initial_conditions.is_empty()
+            || !self.model.response_spectra.is_empty()
+            || !self.model.random_excitations.is_empty()
+            || self
+                .model
+                .excitation_cases
+                .iter()
+                .any(|c| c.activation != ExcitationCaseActivation::Always)
+            || self.model.constraints.iter().any(|c| match c {
+                AnalysisConstraint::Fluid(_) => false,
+                AnalysisConstraint::Structural(s) => !matches!(
+                    s.kind,
+                    StructuralConstraintKind::Fixed { .. }
+                        | StructuralConstraintKind::Symmetry { .. }
+                ),
+                _ => true,
+            })
+            || self
+                .model
+                .boundaries
+                .iter()
+                .any(|b| !matches!(b.operator, BoundaryOperator::FluidOutletPressure { .. }))
+            || self
+                .model
+                .excitations
+                .iter()
+                .any(|a| !crate::physics::cfd::canonical::supports_action(a))
+            || self.model.interfaces.is_empty()
+            || self
+                .model
+                .interfaces
+                .iter()
+                .any(|i| !matches!(i.kind, AnalysisInterfaceKind::FluidStructure(_)))
+        {
+            return Err(invalid("unsupported fluid–structure interaction authority"));
+        }
+        Ok(())
+    }
+
     pub fn canonical_bytes(&self) -> AnalysisExecutionResult<Vec<u8>> {
         self.validate()?;
         Ok(encode_contract(
@@ -173,6 +443,74 @@ impl FluidSteadyWorkload {
         mesh: &SolverMeshArtifact,
     ) -> AnalysisExecutionResult<FluidSteadySolverResult> {
         let source = self.prepare(mesh)?;
+        if self.coupling() == FluidCoupling::FluidStructure && self.is_transient() {
+            let schedule =
+                super::FluidTransientSchedule::derive(&self.model, &self.model.sequence.steps[0])?;
+            let coupled = source
+                .fluid_structure(self, mesh)?
+                .solve_transient(schedule.points_s())
+                .map_err(invalid)?;
+            return FluidSteadySolverResult::from_fluid_structure_transient(
+                self, &source, mesh, coupled,
+            );
+        }
+        if self.coupling() == FluidCoupling::FluidStructure {
+            let coupled = source
+                .fluid_structure(self, mesh)?
+                .solve()
+                .map_err(invalid)?;
+            return FluidSteadySolverResult::from_fluid_structure(self, &source, mesh, coupled);
+        }
+        if self.coupling() == FluidCoupling::ConjugateHeat && self.is_transient() {
+            let flow = source.problem(self)?.solve().map_err(invalid)?;
+            let schedule =
+                super::FluidTransientSchedule::derive(&self.model, &self.model.sequence.steps[0])?;
+            let times = schedule.points_s();
+            let first =
+                source.conjugate_heat_at(self, &flow.face_volume_flux_m3_per_s, times[0])?;
+            let mut state = first.uniform_state(self.initial_temperature()?);
+            drop(first);
+            let mut steps = Vec::with_capacity(times.len() - 1);
+            let mut departure = state.clone();
+            for window in times.windows(2) {
+                let problem =
+                    source.conjugate_heat_at(self, &flow.face_volume_flux_m3_per_s, window[1])?;
+                let next = problem
+                    .step_backward_euler(&state, window[1] - window[0])
+                    .map_err(invalid)?;
+                steps.push(crate::physics::conjugate_heat::ConjugateHeatStep {
+                    time_s: window[1],
+                    peak_temperature_k: next.temperature_k.iter().copied().fold(f64::MIN, f64::max),
+                    stored_heat_rate_w: next.evidence.energy.stored_heat_rate_w,
+                    relative_imbalance: next.evidence.energy.relative_imbalance,
+                });
+                departure = std::mem::replace(&mut state, next);
+            }
+            return FluidSteadySolverResult::from_conjugate_heat_transient(
+                self,
+                &source,
+                crate::physics::conjugate_heat::ConjugateHeatTransientResult {
+                    flow,
+                    departure_time_s: times[times.len() - 2],
+                    departure,
+                    energy: state,
+                    steps,
+                },
+            );
+        }
+        if self.coupling() == FluidCoupling::ConjugateHeat {
+            let flow = source.problem(self)?.solve().map_err(invalid)?;
+            let energy = source
+                .conjugate_heat(self, &flow.face_volume_flux_m3_per_s)?
+                .solve()
+                .map_err(invalid)?;
+            return FluidSteadySolverResult::from_conjugate_heat(self, &source, flow, energy);
+        }
+        if self.is_transient() {
+            let view = self.transient_view();
+            let original = view.prepare(mesh)?.execute()?;
+            return FluidSteadySolverResult::from_transient(self, &source, original);
+        }
         let original = source.problem(self)?.solve().map_err(invalid)?;
         FluidSteadySolverResult::from_original(self, &source, original)
     }

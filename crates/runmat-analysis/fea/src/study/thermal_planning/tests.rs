@@ -39,6 +39,7 @@ fn compiled(step: ProcedureStep) -> CompiledAnalysisStudy {
 fn policy() -> ThermalStudyPlanningPolicy {
     ThermalStudyPlanningPolicy {
         backend: ComputeBackend::Cpu,
+        element_heat_source: None,
     }
 }
 

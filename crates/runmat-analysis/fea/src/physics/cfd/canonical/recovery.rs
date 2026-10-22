@@ -9,6 +9,8 @@ use crate::algebra::spmv;
 #[serde(deny_unknown_fields)]
 pub struct CanonicalFluidResidual {
     pub face_forces: super::flux_evidence::CanonicalFluidFaceForces,
+    /// Cell vorticity ∇×u, 1/s, from the boundary-aware gradient of the viscous stress.
+    pub cell_vorticity_per_s: Vec<V>,
     /// Sorted exact authored boundary IDs, with original outward force/flow terms.
     pub boundary_balances: Vec<super::CanonicalFluidBoundaryBalance>,
     pub cell_momentum_n: Vec<V>,
@@ -173,7 +175,14 @@ pub(super) fn evaluate_with_time(
     let continuity_relative = continuity.relative.iter().copied().fold(0.0, f64::max);
     let momentum_relative = relative(momentum_norm, momentum_scale);
     let flux_constitutive_relative = relative(discrepancy, discrepancy_scale);
-    let face_forces = super::flux_evidence::evaluate(p, u, pressure_fluctuation_pa, q)?;
+    let (face_forces, cell_vorticity_per_s) = super::flux_evidence::evaluate(
+        p,
+        u,
+        pressure_fluctuation_pa,
+        q,
+        time.and_then(|t| t.motion)
+            .map(|m| m.face_mesh_flux_m3_per_s),
+    )?;
     let mut independent_cells = vec![[0.0; 3]; n];
     let mut local_scales = vec![0.0; n];
     let mut global_momentum = [0.0; 3];
@@ -224,6 +233,7 @@ pub(super) fn evaluate_with_time(
     let boundary_balances = p.boundary_balance_plan.evaluate(p, q, &face_forces)?;
     Ok(CanonicalFluidResidual {
         face_forces,
+        cell_vorticity_per_s,
         boundary_balances,
         cell_momentum_n: independent_cells,
         cell_algebraic_momentum_n: rm,

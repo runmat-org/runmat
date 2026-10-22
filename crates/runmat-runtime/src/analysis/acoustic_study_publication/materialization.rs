@@ -54,6 +54,8 @@ impl AcousticFrequencyCompletionResults {
                     host_workload_digest: entry.host_workload_digest,
                     result: entry.result.summary().map_err(|error| error.to_string())?,
                     numerical_receipt: entry.numerical_receipt.clone(),
+                    observations: entry.observation_results.clone(),
+                    observation_catalog: entry.observation_catalog.clone(),
                     accuracy: entry.accuracy.clone(),
                     states: entry
                         .states
@@ -133,8 +135,8 @@ pub(super) fn admit(
             solver_host_sync_count: 0,
             precision_mode: contracts::format_precision_mode(options.precision_mode),
             deterministic_mode: options.deterministic_mode,
-            solver_method: SolverMethod::AcousticCanonicalHelmholtzGmres,
-            preconditioner: common.workload.solver.preconditioner,
+            solver_method: SolverMethod::AcousticCanonicalHelmholtzCertifiedLu,
+            preconditioner: runmat_analysis_fea::SolverPreconditioner::None,
             quality_policy: contracts::format_quality_policy(options.quality_policy),
             fallback_events: Vec::new(),
         },

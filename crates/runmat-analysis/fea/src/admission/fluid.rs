@@ -76,6 +76,148 @@ pub fn canonical_fluid_steady_realization() -> ExactFormulationRealization {
     }
 }
 
+/// Canonical steady conjugate heat transfer: the finite-volume flow component plus the nodal
+/// conjugate energy component, joined through declared conformal interfaces.
+pub fn canonical_conjugate_heat_steady_realization() -> ExactFormulationRealization {
+    let mut flow = canonical_fluid_steady_realization();
+    flow.components.push(ExactFormulationComponent {
+        spatial_operator:
+            SpatialOperatorImplementation::ConjugateEnergyGalerkinConservativeAdvection,
+        constitutive: ConstitutiveImplementation::IsotropicThermalConduction,
+        recovery: RecoveryImplementation::ConjugateNodalTemperatureInterfaceHeat,
+        topologies: vec![TopologyImplementation::CanonicalSolverMeshTet4],
+        sources: vec![
+            SourceImplementation::CanonicalVolumeProjection,
+            SourceImplementation::CanonicalBoundaryProjection,
+        ],
+    });
+    flow.temporals = vec![TemporalImplementation::ConjugateSteadyFlowMonolithicEnergy];
+    flow.coupling = CouplingImplementation::FlowAdvectedMonolithicConjugateEnergy;
+    flow.boundary_transfers = vec![
+        BoundaryTransferImplementation::CanonicalBoundaryProjection,
+        BoundaryTransferImplementation::DeclaredConformalInterfaceLaw,
+    ];
+    flow
+}
+
+pub fn admit_canonical_conjugate_heat_steady(
+    mesh: &SolverMeshArtifact,
+) -> Result<AnalysisRunIdentity, FeaRunError> {
+    if mesh.resolved_request.element_order != ElementOrder::Tet4
+        || mesh
+            .topology
+            .volume_elements
+            .iter()
+            .any(|element| element.order != ElementOrder::Tet4)
+    {
+        return Err(FeaRunError::InvalidModel(
+            "canonical conjugate heat transfer admits only Tet4 cell geometry".into(),
+        ));
+    }
+    admit_formulation(FormulationAdmissionRequest {
+        family: PhysicsFamily::Coupled(
+            runmat_analysis_core::CoupledPhysicsFamily::ConjugateHeatTransfer,
+        ),
+        procedure: AnalysisProcedure::Static,
+        solution_space: SolutionSpace::Direct,
+        realization: canonical_conjugate_heat_steady_realization(),
+    })
+    .map(|receipt| receipt.into_identity())
+    .map_err(Into::into)
+}
+
+/// Canonical steady fluid–structure interaction: the finite-volume flow on the deformed
+/// fluid domain and a small-strain solid, coupled through declared conformal walls.
+pub fn canonical_fluid_structure_steady_realization() -> ExactFormulationRealization {
+    let mut flow = canonical_fluid_steady_realization();
+    flow.components.push(ExactFormulationComponent {
+        spatial_operator: SpatialOperatorImplementation::Structural(
+            runmat_analysis_core::StructuralOperatorImplementation::Tet4LinearElasticity,
+        ),
+        constitutive: ConstitutiveImplementation::IsotropicLinearElasticity,
+        recovery: RecoveryImplementation::FluidStructureNodalDisplacementInterfaceEvidence,
+        topologies: vec![TopologyImplementation::CanonicalSolverMeshTet4],
+        sources: vec![SourceImplementation::CanonicalBoundaryProjection],
+    });
+    flow.temporals = vec![TemporalImplementation::FluidStructureSteadyAitkenPartitioned];
+    flow.coupling = CouplingImplementation::PartitionedFluidStructureRelaxation;
+    flow.boundary_transfers = vec![
+        BoundaryTransferImplementation::CanonicalBoundaryProjection,
+        BoundaryTransferImplementation::DeclaredConformalInterfaceLaw,
+    ];
+    flow
+}
+
+pub fn admit_canonical_fluid_structure_steady(
+    mesh: &SolverMeshArtifact,
+) -> Result<AnalysisRunIdentity, FeaRunError> {
+    if mesh.resolved_request.element_order != ElementOrder::Tet4
+        || mesh
+            .topology
+            .volume_elements
+            .iter()
+            .any(|element| element.order != ElementOrder::Tet4)
+    {
+        return Err(FeaRunError::InvalidModel(
+            "canonical fluid–structure interaction admits only Tet4 cell geometry".into(),
+        ));
+    }
+    admit_formulation(FormulationAdmissionRequest {
+        family: PhysicsFamily::Coupled(
+            runmat_analysis_core::CoupledPhysicsFamily::FluidStructureInteraction,
+        ),
+        procedure: AnalysisProcedure::Static,
+        solution_space: SolutionSpace::Direct,
+        realization: canonical_fluid_structure_steady_realization(),
+    })
+    .map(|receipt| receipt.into_identity())
+    .map_err(Into::into)
+}
+
+pub fn canonical_fluid_structure_transient_realization() -> ExactFormulationRealization {
+    let mut realization = canonical_fluid_structure_steady_realization();
+    realization.temporals = vec![TemporalImplementation::FluidStructureTransientAitkenPartitioned];
+    realization
+}
+
+pub fn admit_canonical_fluid_structure_transient(
+    mesh: &SolverMeshArtifact,
+) -> Result<AnalysisRunIdentity, FeaRunError> {
+    admit_canonical_fluid_structure_steady(mesh)?;
+    admit_formulation(FormulationAdmissionRequest {
+        family: PhysicsFamily::Coupled(
+            runmat_analysis_core::CoupledPhysicsFamily::FluidStructureInteraction,
+        ),
+        procedure: AnalysisProcedure::TransientResponse,
+        solution_space: SolutionSpace::Direct,
+        realization: canonical_fluid_structure_transient_realization(),
+    })
+    .map(|receipt| receipt.into_identity())
+    .map_err(Into::into)
+}
+
+pub fn canonical_conjugate_heat_transient_realization() -> ExactFormulationRealization {
+    let mut realization = canonical_conjugate_heat_steady_realization();
+    realization.temporals = vec![TemporalImplementation::ConjugateSteadyFlowBackwardEulerEnergy];
+    realization
+}
+
+pub fn admit_canonical_conjugate_heat_transient(
+    mesh: &SolverMeshArtifact,
+) -> Result<AnalysisRunIdentity, FeaRunError> {
+    admit_canonical_conjugate_heat_steady(mesh)?;
+    admit_formulation(FormulationAdmissionRequest {
+        family: PhysicsFamily::Coupled(
+            runmat_analysis_core::CoupledPhysicsFamily::ConjugateHeatTransfer,
+        ),
+        procedure: AnalysisProcedure::TransientResponse,
+        solution_space: SolutionSpace::Direct,
+        realization: canonical_conjugate_heat_transient_realization(),
+    })
+    .map(|receipt| receipt.into_identity())
+    .map_err(Into::into)
+}
+
 pub fn canonical_fluid_transient_realization() -> ExactFormulationRealization {
     let mut realization = canonical_fluid_steady_realization();
     realization.temporals =
@@ -105,7 +247,6 @@ mod tests {
                 .count(),
             1
         );
-        assert!(admit_canonical_fluid_steady(&mesh).is_err());
         assert!(
             admit_canonical_fluid_steady(&canonical_tetrahedron_solver_mesh(ElementOrder::Tet10))
                 .is_err()

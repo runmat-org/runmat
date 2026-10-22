@@ -27,6 +27,7 @@ fn fixture(
         SemanticStatePublicationSource::StructuralPrimaryFields => StateKind::StructuralPrimary,
         SemanticStatePublicationSource::ThermalPrimaryField => StateKind::Thermal,
         SemanticStatePublicationSource::AcousticNativeFields => StateKind::AcousticComplex,
+        SemanticStatePublicationSource::AcousticResponseFields => StateKind::AcousticPressure,
         SemanticStatePublicationSource::StaticElectricalNativeFields
         | SemanticStatePublicationSource::MagnetostaticNativeFields => {
             StateKind::ElectromagneticStatic

@@ -254,6 +254,9 @@ fn validate_boundaries(
             BoundaryOperator::AcousticImpedance { impedance } => {
                 impedance.is_finite() && impedance.pascal_seconds_per_meter > 0.0
             }
+            BoundaryOperator::AcousticSphericalRadiation { center_m } => {
+                center_m.iter().all(|value| value.is_finite())
+            }
             _ => true,
         };
         if !valid {
