@@ -32,6 +32,9 @@ impl CompiledPropertyMap {
             + runmat_canonical_codec::CANONICAL_MATERIALIZATION_FIXED_BYTES_PER_CONTRACT;
         add(&mut total, identity.geometry_id.capacity() as u64)?;
         add(&mut total, (5 * 2 * std::mem::size_of::<usize>()) as u64)?;
+        // Elements reference one shared owner per material: charge each distinct owner once
+        // (its allocation and owned buffers); the per-element reference is in the map slot.
+        let mut owners = std::collections::BTreeSet::new();
         for map in [cell_materials, solid_materials] {
             add(
                 &mut total,
@@ -43,14 +46,25 @@ impl CompiledPropertyMap {
                 material,
             } in map.values()
             {
-                add(
-                    &mut total,
-                    material
-                        .owned_buffer_bytes()
-                        .ok_or("material storage overflow")?,
-                )?;
+                if owners.insert(Arc::as_ptr(material) as usize) {
+                    add(
+                        &mut total,
+                        (std::mem::size_of::<MaterialModel>() + 2 * std::mem::size_of::<usize>())
+                            as u64,
+                    )?;
+                    add(
+                        &mut total,
+                        material
+                            .owned_buffer_bytes()
+                            .ok_or("material storage overflow")?,
+                    )?;
+                }
             }
         }
+        add(
+            &mut total,
+            map_slots::<usize, ()>(owners.len())?,
+        )?;
         // Beam/shell metadata has variable section/ply owners. Its conservative
         // shared projection remains additional to map slots, never a solid-map tree.
         add(

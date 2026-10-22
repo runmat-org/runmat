@@ -107,7 +107,7 @@ fn columns(
 
 fn rows(
     columns: ElementColumns,
-    table: &[MaterialModel],
+    table: &[Arc<MaterialModel>],
     role: &str,
 ) -> Result<BTreeMap<StableDigest, CompiledElementMaterial>, String> {
     let count = columns.element_ids.len();
@@ -221,8 +221,10 @@ fn keyed<T>(
 }
 
 fn from_wire(wire: Wire) -> Result<CompiledPropertyMap, String> {
-    let solid_materials = rows(wire.solids, &wire.materials, "solid")?;
-    let cell_materials = rows(wire.cells, &wire.materials, "cell")?;
+    // One shared owner per table entry; every element row references it.
+    let table = wire.materials.into_iter().map(Arc::new).collect::<Vec<_>>();
+    let solid_materials = rows(wire.solids, &table, "solid")?;
+    let cell_materials = rows(wire.cells, &table, "cell")?;
     let beam_properties = keyed(wire.beam_properties, |entry| entry.element_identity)?;
     let shell_properties = keyed(wire.shell_properties, |entry| entry.element_identity)?;
     if wire.audit.elements.len() != wire.audit.owners.len() {

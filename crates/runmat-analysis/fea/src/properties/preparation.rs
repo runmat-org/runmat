@@ -2,7 +2,7 @@
 use std::collections::BTreeMap;
 
 use runmat_analysis_core::{AnalysisModel, MaterialModel};
-use runmat_canonical_codec::{serialized_materialization_resident_bytes_estimate, CanonicalLimits};
+use runmat_canonical_codec::CanonicalLimits;
 use runmat_meshing_core::{SolverMeshArtifact, StableDigest};
 use serde::{
     ser::{SerializeSeq, SerializeTuple},
@@ -118,7 +118,9 @@ impl<'a> PreparedProperties<'a> {
             },
         )?;
         require_fits(add(selection, typed_bytes)?, maximum)?;
-        let metadata = serialized_materialization_resident_bytes_estimate(
+        // Identity and audit encodings write the selected metadata directly into reserved
+        // output, one encoding at a time; their workspace is the direct encoder's profile.
+        let metadata = runmat_canonical_codec::profile_canonical_encoding(
             &Metadata {
                 model,
                 mesh,
@@ -128,12 +130,23 @@ impl<'a> PreparedProperties<'a> {
             // Expanded selected occurrences are not bounded by the authored workload byte cap.
             CanonicalLimits::new(usize::MAX, usize::MAX, usize::MAX, 64),
         )
-        .map_err(|error| PropertyCompilationError::Resource(error.to_string()))?;
-        // Compose two shared-codec metadata estimates with the typed storage terms to cover
-        // owned metadata plus concurrent identity materialization. The resource view is not the
-        // canonical identity contract itself. Semantic/audit encodings and rehashes are sequential,
-        // not four simultaneous buffers. Typed map/audit/ply slots are accounted independently.
-        let estimated_resident_bytes = add(add(selection, typed_bytes)?, add(metadata, metadata)?)?;
+        .map_err(|error| PropertyCompilationError::Resource(error.to_string()))?
+        .resident_workspace_bytes_estimate;
+        // Elements share one owner per material; the table is charged once, not per element.
+        let shared_materials = materials.values().try_fold(0_u64, |total, material| {
+            add(
+                total,
+                add(
+                    (std::mem::size_of::<MaterialModel>() + 2 * std::mem::size_of::<usize>())
+                        as u64,
+                    material.owned_buffer_bytes().ok_or_else(overflow)?,
+                )?,
+            )
+        })?;
+        let estimated_resident_bytes = add(
+            add(selection, typed_bytes)?,
+            add(shared_materials, metadata)?,
+        )?;
         require_fits(estimated_resident_bytes, maximum)?;
         Ok(Self {
             model,
