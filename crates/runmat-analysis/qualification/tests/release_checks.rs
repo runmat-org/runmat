@@ -32,6 +32,7 @@ fn run(program: &str, script: &str) {
 //   boundary: scripts/development/check-architecture-boundaries.mjs passes: dependency direction, forbidden
 //   imports and module-size debt ceilings; it does not review code quality beyond those rules.
 #[test]
+#[ignore = "pipeline check; evidence_report runs it as a witness and a failure is a finding, not a register defect"]
 fn architecture_boundary_check_passes() {
     run(
         "node",
@@ -44,6 +45,7 @@ fn architecture_boundary_check_passes() {
 //   boundary: The same architecture script enforces the dependency edges between the analysis crates and the
 //   shared platform; the full edge list in the obligation is not compared one by one.
 #[test]
+#[ignore = "pipeline check; evidence_report runs it as a witness and a failure is a finding, not a register defect"]
 fn architecture_boundary_check_enforces_dependency_edges() {
     run(
         "node",
@@ -57,6 +59,7 @@ fn architecture_boundary_check_enforces_dependency_edges() {
 //   authoring surface has a reviewed disposition in the ledger; semantic equivalence of old and new forms
 //   is not checked by it.
 #[test]
+#[ignore = "pipeline check; evidence_report runs it as a witness and a failure is a finding, not a register defect"]
 fn language_surface_ledger_has_no_unreviewed_field() {
     run("node", "scripts/fea/check-language-surface-ledger.mjs");
 }
@@ -66,6 +69,7 @@ fn language_surface_ledger_has_no_unreviewed_field() {
 //   boundary: The meshing conformance catalog validator passes (15 cases covering the 16 required feature
 //   classes); the SLO report freshness and the other validators are separate witnesses.
 #[test]
+#[ignore = "pipeline check; evidence_report runs it as a witness and a failure is a finding, not a register defect"]
 fn meshing_conformance_catalog_validates() {
     run("python3", "scripts/meshing/validate_conformance.py");
 }
@@ -74,6 +78,7 @@ fn meshing_conformance_catalog_validates() {
 //   shared_infrastructure/canonical_mixed_topology/source_check; coverage: partial;
 //   boundary: The meshing corpus validator passes: the fixture inventory matches the registered corpus.
 #[test]
+#[ignore = "pipeline check; evidence_report runs it as a witness and a failure is a finding, not a register defect"]
 fn meshing_corpus_catalog_validates() {
     run("python3", "scripts/meshing/validate_corpus.py");
 }
@@ -82,6 +87,7 @@ fn meshing_corpus_catalog_validates() {
 //   shared_infrastructure/canonical_mixed_topology/source_check; coverage: partial;
 //   boundary: The meshing differential catalog validator passes (independent mesher cases dispositioned).
 #[test]
+#[ignore = "pipeline check; evidence_report runs it as a witness and a failure is a finding, not a register defect"]
 fn meshing_differential_catalog_validates() {
     run("python3", "scripts/meshing/validate_differential.py");
 }
@@ -91,6 +97,7 @@ fn meshing_differential_catalog_validates() {
 //   boundary: The meshing reliability catalog validator passes: every reliability control (budgets, cancellation,
 //   atomic writes, restart, worker loss, stale publication) anchors to an existing test.
 #[test]
+#[ignore = "pipeline check; evidence_report runs it as a witness and a failure is a finding, not a register defect"]
 fn meshing_reliability_catalog_anchors_exist() {
     run("python3", "scripts/meshing/validate_reliability.py");
 }
@@ -100,6 +107,7 @@ fn meshing_reliability_catalog_anchors_exist() {
 //   boundary: The meshing release-evidence validator passes: release promotion depends on meshing release
 //   evidence; FEA release evidence and the rest of the graph are not checked.
 #[test]
+#[ignore = "pipeline check; evidence_report runs it as a witness and a failure is a finding, not a register defect"]
 fn meshing_release_evidence_is_a_release_dependency() {
     run("python3", "scripts/meshing/validate_release_evidence.py");
 }
