@@ -69,7 +69,13 @@ impl PreparedFluidSource {
             add_bytes(metadata, metadata)?,
         )?;
         let preliminary = add_bytes(base, numerical.resident_bytes_upper_bound)?;
-        require_bytes(preliminary, ceiling)?;
+        require_bytes(preliminary, ceiling).map_err(|error| {
+            invalid(format!(
+                "{error} (projection {projection}, geometry scratch {}, metadata 2x{metadata}, \
+                 solver {} for {} cells)",
+                geometry.scratch_bytes, numerical.resident_bytes_upper_bound, geometry.cell_count
+            ))
+        })?;
         let prepared = PreparedProperties::prepare(model, Some(mesh), ceiling - preliminary)
             .map_err(invalid)?;
         // Material source authentication independently recompiles: both maps can coexist.
@@ -86,7 +92,15 @@ impl PreparedFluidSource {
                 numerical.resident_bytes_upper_bound,
             )?,
             ceiling,
-        )?;
+        )
+        .map_err(|error| {
+            invalid(format!(
+                "{error} (projection {projection}, geometry scratch {}, metadata 2x{metadata}, \
+                 properties 2x{}, solver {} for {} cells)",
+                geometry.scratch_bytes, prepared.estimated_resident_bytes,
+                numerical.resident_bytes_upper_bound, geometry.cell_count
+            ))
+        })?;
         validate_model(model).map_err(invalid)?;
         let source = AnalysisProjection::derive(mesh).map_err(invalid)?;
         let properties = prepared.materialize().map_err(invalid)?;

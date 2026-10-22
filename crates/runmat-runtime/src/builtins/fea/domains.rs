@@ -146,6 +146,7 @@ pub async fn fluid_domain_builtin(
                 "ratio",
             )?),
             rheology: None,
+            porous_zones: Vec::new(),
         },
     )
 }

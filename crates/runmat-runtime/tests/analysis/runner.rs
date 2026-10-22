@@ -573,6 +573,7 @@ fn fixture_cfd_domain(
         dynamic_viscosity: runmat_analysis_core::DynamicViscosity::new(dynamic_viscosity_pa_s),
         turbulence_intensity: runmat_analysis_core::TurbulenceIntensity::new(turbulence_intensity),
         rheology: None,
+        porous_zones: Vec::new(),
     }
 }
 

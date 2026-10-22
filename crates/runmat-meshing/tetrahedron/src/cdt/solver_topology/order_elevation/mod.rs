@@ -50,6 +50,14 @@ pub(super) fn elevate(
         cancellation,
         evaluation.control,
     )?;
+    // The exact midside placements before any optimization move: each is the edge's image on its
+    // curve or surface, so its distance from the chord is the straight edge's geometric error.
+    let exact_midsides = topology
+        .nodes
+        .iter()
+        .filter(|node| !node.exact_parameters.is_empty())
+        .map(|node| (node.node_id, node.coordinates_m))
+        .collect::<std::collections::BTreeMap<_, _>>();
     let mut invalid_elements = jacobian::invalid_element_indices(
         &topology,
         jacobian::ELEMENT_SEARCH_WORK,
@@ -220,6 +228,7 @@ pub(super) fn elevate(
         let changed = straighten_element_edges(
             &mut topology,
             &invalid_elements,
+            &exact_midsides,
             maximum_deviation_m,
             cancellation,
         )?;
@@ -267,11 +276,13 @@ pub(super) fn elevate(
 /// Moves each curved midside node of the given elements to its edge's chord midpoint. Returns
 /// how many nodes moved.
 /// A boundary midside keeps its exact parameters as the node's foot on its source entity; the
-/// straight node lies off that entity by the chord's sagitta, which must stay within the
-/// requested chordal deviation (checked here for every straightened boundary node).
+/// straight node lies off that entity by the chord's sagitta (its distance from the edge's exact
+/// midside image), which must stay within the requested chordal deviation (checked here for
+/// every straightened boundary node).
 fn straighten_element_edges(
     topology: &mut SolverMeshTopology,
     elements: &[usize],
+    exact_midsides: &std::collections::BTreeMap<u64, [f64; 3]>,
     maximum_deviation_m: f64,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<u64, DelaunaySolverTopologyError> {
@@ -306,7 +317,10 @@ fn straighten_element_edges(
                     + topology.nodes[right].coordinates_m[axis])
             });
             if topology.nodes[middle].coordinates_m != chord {
-                let curved = topology.nodes[middle].coordinates_m;
+                let curved = exact_midsides
+                    .get(&topology.nodes[middle].node_id)
+                    .copied()
+                    .unwrap_or(topology.nodes[middle].coordinates_m);
                 let sagitta = (0..3)
                     .map(|axis| (curved[axis] - chord[axis]).powi(2))
                     .sum::<f64>()

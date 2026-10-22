@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "corpus_revision": 4,
+  "corpus_revision": 5,
   "fixture_root": "crates/runmat-geometry/io/tests/fixtures",
   "entries": [
     {
@@ -302,6 +302,126 @@
       "features": ["independent-exporter", "iges", "wireframe", "typed-admission-failure"],
       "expected": { "outcome": "admission-rejection", "topology": "wireframe has no face, wire, edge, and vertex boundary closure required for solver meshing", "mass_properties": "not applicable after admission rejection", "regions": 0, "mesh_error_bounds": "not applicable after admission rejection" },
       "test": { "source": "crates/runmat-geometry/io/tests/external_cad_corpus.rs", "name": "public_iges_wireframe_is_read_then_rejected_by_typed_admission" }
+    },
+    {
+      "id": "authored-face-names",
+      "path": "named-faces.step",
+      "sha256": "c9d90ee66a7f42d3fbd2de96617acdc0466552a084d5dd1cf4a0d14a9f4c5007",
+      "tier": "small",
+      "format": "step",
+      "supported_input": true,
+      "provenance": { "origin": "repository-authored naming fixture", "exporter": "Open CASCADE STEP processor (XCAF)", "exporter_version": "7.9", "license": "RunMat repository license" },
+      "features": ["solid", "persistent-labels"],
+      "expected": { "outcome": "success", "topology": "1 solid, 6 named faces", "mass_properties": "single 100 x 20 x 10 mm block", "regions": 1, "mesh_error_bounds": "resolved request bounds" },
+      "test": { "source": "crates/runmat-geometry/io/tests/step_face_names.rs", "name": "authored_step_face_names_become_face_region_names" }
+    },
+    {
+      "id": "part-in-air-assembly",
+      "path": "part_in_air_assembly.step",
+      "sha256": "21be7ee1395b843676132e5b4a781f51fa306061241cd6a695380cd588659e95",
+      "tier": "small",
+      "format": "step",
+      "supported_input": true,
+      "provenance": { "origin": "repository-authored multi-body fixture", "exporter": "Open CASCADE STEP processor (XCAF)", "exporter_version": "7.9", "license": "RunMat repository license" },
+      "features": ["assembly", "conformal-interface", "persistent-labels"],
+      "expected": { "outcome": "success", "topology": "2 solids; 18 independent or 12 shared faces with 6 interfaces", "mass_properties": "independent body properties", "regions": 2, "mesh_error_bounds": "resolved request bounds" },
+      "test": { "source": "crates/runmat-geometry/io/tests/shared_interfaces.rs", "name": "separate_parts_stay_independent_unless_interfaces_are_shared" }
+    },
+    {
+      "id": "two-cavity-air-assembly",
+      "path": "two_cavity_air_assembly.step",
+      "sha256": "fcbe3cabf2fa025719f14e55a38beae63cd019105d32c1a188a4a50eb0741df2",
+      "tier": "small",
+      "format": "step",
+      "supported_input": true,
+      "provenance": { "origin": "repository-authored multi-body fixture", "exporter": "Open CASCADE STEP processor (XCAF)", "exporter_version": "7.9", "license": "RunMat repository license" },
+      "features": ["assembly", "cavity", "conformal-interface"],
+      "expected": { "outcome": "success", "topology": "3 solids; air with two cavities imports as one solid", "mass_properties": "independent body properties", "regions": 3, "mesh_error_bounds": "resolved request bounds" },
+      "test": { "source": "crates/runmat-geometry/io/tests/shared_interfaces.rs", "name": "an_air_body_with_two_cavities_imports_as_one_solid" }
+    },
+    {
+      "id": "touching-parts-assembly",
+      "path": "touching_parts_assembly.step",
+      "sha256": "281a67929226be74484dd6ceec329a715a47e1fa28aa6685723dafa14bbcf62d",
+      "tier": "small",
+      "format": "step",
+      "supported_input": true,
+      "provenance": { "origin": "repository-authored multi-body fixture", "exporter": "Open CASCADE STEP processor (XCAF)", "exporter_version": "7.9", "license": "RunMat repository license" },
+      "features": ["assembly", "conformal-interface"],
+      "expected": { "outcome": "success", "topology": "2 solids sharing only their contact patch", "mass_properties": "independent body properties", "regions": 2, "mesh_error_bounds": "resolved request bounds" },
+      "test": { "source": "crates/runmat-geometry/io/tests/shared_interfaces.rs", "name": "partially_touching_parts_share_only_their_contact_patch" }
+    },
+    {
+      "id": "overlapping-parts-assembly",
+      "path": "overlapping_parts_assembly.step",
+      "sha256": "09a250ce9edd595fc44bdff09fa863a81df3c460ae51b80c10209e922c5be261",
+      "tier": "small",
+      "format": "step",
+      "supported_input": false,
+      "provenance": { "origin": "repository-authored multi-body fixture", "exporter": "Open CASCADE STEP processor (XCAF)", "exporter_version": "7.9", "license": "RunMat repository license" },
+      "features": ["assembly", "typed-admission-failure"],
+      "expected": { "outcome": "admission-rejection", "topology": "2 interpenetrating solids", "mass_properties": "not admitted", "regions": 2, "mesh_error_bounds": "resolved request bounds" },
+      "test": { "source": "crates/runmat-geometry/io/tests/shared_interfaces.rs", "name": "interpenetrating_parts_are_rejected_by_name" }
+    },
+    {
+      "id": "fused-compound",
+      "path": "fused_compound.step",
+      "sha256": "61b0cb86a64b81416a381150706ee8051b2ce723a7e5da7409714f859319dfc5",
+      "tier": "small",
+      "format": "step",
+      "supported_input": true,
+      "provenance": { "origin": "repository-authored multi-body fixture", "exporter": "Open CASCADE STEP processor (XCAF)", "exporter_version": "7.9", "license": "RunMat repository license" },
+      "features": ["multiple-solids", "conformal-interface", "persistent-labels"],
+      "expected": { "outcome": "success", "topology": "General Fuse compound with shared faces", "mass_properties": "independent body properties", "regions": 2, "mesh_error_bounds": "resolved request bounds" },
+      "test": { "source": "crates/runmat-geometry/io/tests/shared_interfaces.rs", "name": "a_general_fuse_compound_imports_with_its_shared_faces_and_solid_names" }
+    },
+    {
+      "id": "free-wireframe-part",
+      "path": "free_wireframe_part.step",
+      "sha256": "59be234085d78ff81486ea43b106b3d1fdd0070824726e30bbd47ec420bfbfb2",
+      "tier": "small",
+      "format": "step",
+      "supported_input": true,
+      "provenance": { "origin": "repository-authored multi-body fixture", "exporter": "Open CASCADE STEP processor (XCAF)", "exporter_version": "7.9", "license": "RunMat repository license" },
+      "features": ["solid", "wireframe"],
+      "expected": { "outcome": "success", "topology": "1 solid; free construction line excluded", "mass_properties": "single cube", "regions": 1, "mesh_error_bounds": "resolved request bounds" },
+      "test": { "source": "crates/runmat-geometry/io/tests/shared_interfaces.rs", "name": "construction_wireframe_beside_a_solid_is_not_part_of_the_model" }
+    },
+    {
+      "id": "named-cavity-part",
+      "path": "named_cavity_part.step",
+      "sha256": "4e9d7ff0ccb312db28d09f1279b65a86b49414010a0b9fb5157bba41acd67739",
+      "tier": "small",
+      "format": "step",
+      "supported_input": true,
+      "provenance": { "origin": "repository-authored multi-body fixture", "exporter": "Open CASCADE STEP processor (XCAF)", "exporter_version": "7.9", "license": "RunMat repository license" },
+      "features": ["solid", "cavity", "persistent-labels"],
+      "expected": { "outcome": "success", "topology": "1 solid with a named closed cavity shell", "mass_properties": "block minus cavity", "regions": 1, "mesh_error_bounds": "resolved request bounds" },
+      "test": { "source": "crates/runmat-geometry/io/tests/shared_interfaces.rs", "name": "face_names_on_a_cavity_shell_are_read" }
+    },
+    {
+      "id": "strip-line-imprinted-assembly",
+      "path": "strip_line_imprinted_assembly.step",
+      "sha256": "aa3155898f4f33966c68f253dd67af9e09284cbeff69351707e901800cc3febc",
+      "tier": "small",
+      "format": "step",
+      "supported_input": true,
+      "provenance": { "origin": "q-em strip-line generator", "exporter": "Open CASCADE STEP processor (XCAF)", "exporter_version": "7.9", "license": "RunMat repository license" },
+      "features": ["assembly", "conformal-interface", "persistent-labels"],
+      "expected": { "outcome": "success", "topology": "2 solids, each with an imprinted copy of one coincident face; one shared face when interfaces are shared", "mass_properties": "independent body properties", "regions": 2, "mesh_error_bounds": "resolved request bounds" },
+      "test": { "source": "crates/runmat-geometry/io/tests/shared_interfaces.rs", "name": "imprinted_coincident_faces_become_one_shared_face_with_one_source_ordinal" }
+    },
+    {
+      "id": "ap242-exchange-metadata",
+      "path": "ap242_exchange_metadata.step",
+      "sha256": "1f2c27bb412487af3d7288f42f93555983ea9e81d363ce65a17d0fe7b766b444",
+      "tier": "small",
+      "format": "step",
+      "supported_input": true,
+      "provenance": { "origin": "repository-authored AP242 fixture", "exporter": "Open CASCADE STEP processor (XCAF)", "exporter_version": "7.9", "license": "RunMat repository license" },
+      "features": ["solid", "persistent-labels"],
+      "expected": { "outcome": "success", "topology": "AP242 exchange metadata with typed parameters and materials", "mass_properties": "declared by the AP242 file", "regions": 1, "mesh_error_bounds": "resolved request bounds" },
+      "test": { "source": "crates/runmat-geometry/io/src/ap242/profile.rs", "name": "resolves_typed_parameters_material_properties_and_associations" }
     }
   ]
 }

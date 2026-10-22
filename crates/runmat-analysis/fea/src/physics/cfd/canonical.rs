@@ -8,6 +8,7 @@ mod acceleration;
 mod boundary;
 mod boundary_balances;
 mod continuity;
+mod coupled;
 mod flux_evidence;
 mod forcing;
 mod geometry_ops;
@@ -55,6 +56,9 @@ pub use transient::{
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CanonicalFluidPolicy {
+    /// How the pressure–velocity fixed point is reached; the discrete equations are the same.
+    #[serde(default)]
+    pub pressure_velocity_coupling: PressureVelocityCoupling,
     #[serde(deserialize_with = "deserialize_acceleration")]
     pub fixed_point_acceleration: Option<crate::solve::fixed_point::AndersonOnePolicy>,
     pub maximum_outer_iterations: usize,
@@ -70,9 +74,22 @@ pub struct CanonicalFluidPolicy {
     pub maximum_authority_items: usize,
 }
 
+/// Solution path of the incompressible pressure–velocity system.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PressureVelocityCoupling {
+    /// Picard steps on the whole (u, p) system by flexible GMRES with a SIMPLE
+    /// block preconditioner.
+    #[default]
+    Coupled,
+    /// Relaxed SIMPLE outer iteration (segregated momentum and pressure solves).
+    Segregated,
+}
+
 impl Default for CanonicalFluidPolicy {
     fn default() -> Self {
         Self {
+            pressure_velocity_coupling: PressureVelocityCoupling::Coupled,
             fixed_point_acceleration: Some(crate::solve::fixed_point::AndersonOnePolicy::default()),
             maximum_outer_iterations: 200,
             maximum_nonorthogonal_iterations: 4,
@@ -160,6 +177,8 @@ pub struct CanonicalFluidProblem<'a> {
     viscosity: f64,
     /// Shear-rate dependent viscosity law; `viscosity` is then its low-shear reference.
     rheology: Option<runmat_analysis_core::GeneralizedNewtonianLaw>,
+    /// Per cell: the porous-zone linear (μ/K) and quadratic (½ρC₂) resistance coefficients.
+    porous: Vec<Option<(f64, f64)>>,
     boundaries: Vec<boundary::FaceBoundary<'a>>,
     boundary_balance_plan: boundary_balances::BoundaryBalancePlan,
     body_force_n_per_m3: Vec<[f64; 3]>,
@@ -314,6 +333,29 @@ impl<'a> CanonicalFluidProblem<'a> {
         if material.rheology.is_some_and(|law| !law.is_valid()) {
             return Err(CanonicalFluidError::Invalid("generalized-Newtonian viscosity law"));
         }
+        if material
+            .porous_zones
+            .iter()
+            .any(|zone| !zone.law.is_valid() || zone.regions.is_empty())
+        {
+            return Err(CanonicalFluidError::Invalid("porous zone law or regions"));
+        }
+        let porous = topology
+            .cells
+            .iter()
+            .map(|cell| {
+                material
+                    .porous_zones
+                    .iter()
+                    .find(|zone| zone.regions.binary_search(&cell.region).is_ok())
+                    .map(|zone| {
+                        (
+                            viscosity / zone.law.permeability_m2,
+                            0.5 * density * zone.law.inertial_coefficient_per_m,
+                        )
+                    })
+            })
+            .collect::<Vec<_>>();
         if material.turbulence_intensity.ratio != 0.0 {
             return Err(CanonicalFluidError::Unsupported("turbulence closure"));
         }
@@ -348,7 +390,7 @@ impl<'a> CanonicalFluidProblem<'a> {
                 topology.projection_digest,
                 topology.geometry_digest,
                 density,
-                (viscosity, material.rheology),
+                (viscosity, material.rheology, &material.porous_zones),
                 &boundaries,
                 &body_force_n_per_m3,
                 &pressure_reference_pa,
@@ -363,6 +405,7 @@ impl<'a> CanonicalFluidProblem<'a> {
             density,
             viscosity,
             rheology: material.rheology,
+            porous,
             boundaries,
             boundary_balance_plan,
             body_force_n_per_m3,
@@ -445,7 +488,7 @@ impl<'a> CanonicalFluidProblem<'a> {
 }
 
 const INPUT_IDENTITY_LIMITS: runmat_canonical_codec::CanonicalLimits =
-    runmat_canonical_codec::CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65536, 32);
+    runmat_canonical_codec::CanonicalLimits::new(1 << 44, 1 << 36, 65536, 32);
 
 fn identity<T: Serialize>(domain: &'static str, value: &T) -> Result<Digest, CanonicalFluidError> {
     runmat_canonical_codec::encode_contract(

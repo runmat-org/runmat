@@ -351,7 +351,16 @@ fn map_evaluator_parameters(
                 "surface evaluator returned periodicity inconsistent with its bounds",
             ));
         }
+        // A chart coordinate within roundoff of the trimmed bounds is on them; wrapping it by a
+        // period would carry it to the far side of a partial-period face.
+        let roundoff = f64::EPSILON.sqrt() * bound.start.abs().max(bound.end.abs()).max(1.0);
+        if *value < bound.start && bound.start - *value <= roundoff {
+            *value = bound.start;
+        } else if *value > bound.end && *value - bound.end <= roundoff {
+            *value = bound.end;
+        }
         if *value < bound.start || *value > bound.end {
+            let original = *value;
             *value = bound.start + (*value - bound.start).rem_euclid(period);
             let tolerance = f64::EPSILON.sqrt()
                 * bound
@@ -363,7 +372,10 @@ fn map_evaluator_parameters(
             if *value > bound.end + tolerance {
                 return Err(invalid_evaluation(
                     source_face_id,
-                    "periodic chart coordinate has no equivalent inside the trimmed face bounds",
+                    &format!(
+                        "periodic chart coordinate {original} on axis {axis} (period {period}) has no equivalent inside the trimmed face bounds [{}, {}]",
+                        bound.start, bound.end
+                    ),
                 ));
             }
             *value = value.min(bound.end);
@@ -426,4 +438,31 @@ fn geometry_error(
         Some(source_face_id),
         error.reason,
     )
+}
+
+#[cfg(test)]
+mod periodic_bounds_tests {
+    use super::*;
+    use runmat_geometry_core::PersistentEntityKind;
+
+    // witness: FEA-MESH-DISCRETIZATION-001/surface_discretization @ shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial; boundary: periodic chart coordinates within roundoff of partial-period trimmed bounds (hv-electrode rounded quarter torus)
+    #[test]
+    fn roundoff_outside_partial_period_bounds_lands_on_the_bound() {
+        let face = PersistentEntityId::new(PersistentEntityKind::Face, "face".into(), Vec::new());
+        let start = 4.712388980384587;
+        let end = std::f64::consts::TAU;
+        let domain = EvaluatorParameterDomain {
+            bounds: [
+                ParameterRange { start, end },
+                ParameterRange {
+                    start: 0.0,
+                    end: 1.0,
+                },
+            ],
+            periodicity: [Some(std::f64::consts::TAU), None],
+        };
+        let mapped = map_evaluator_parameters(&domain, &face, [4.712388980384277, 0.5]).unwrap();
+        assert_eq!(mapped, [start, 0.5]);
+        assert!(map_evaluator_parameters(&domain, &face, [3.0, 0.5]).is_err());
+    }
 }

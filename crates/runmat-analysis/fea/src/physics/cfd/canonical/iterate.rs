@@ -16,6 +16,9 @@ pub(super) fn solve_with_time(
     if crate::is_fea_cancelled() {
         return Err(Error::Cancelled);
     }
+    if p.policy.pressure_velocity_coupling == super::PressureVelocityCoupling::Coupled {
+        return super::coupled::solve_with_time(p, initial, time, numerical_input_identity);
+    }
     let n = p.topology.cells.len();
     let (mut u, mut pressure_fluctuation, mut q) = match initial {
         Some(fields) => (

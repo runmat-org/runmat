@@ -42,10 +42,12 @@ pub fn material() -> CfdDomain {
         dynamic_viscosity: DynamicViscosity::new(1.0),
         turbulence_intensity: TurbulenceIntensity::new(0.0),
         rheology: None,
+        porous_zones: Vec::new(),
     }
 }
 pub fn policy() -> CanonicalFluidPolicy {
     CanonicalFluidPolicy {
+        pressure_velocity_coupling: PressureVelocityCoupling::Coupled,
         fixed_point_acceleration: None,
         maximum_outer_iterations: 2000,
         maximum_nonorthogonal_iterations: 8,

@@ -159,3 +159,79 @@ fn retained_symmetry_flux_substitution_is_rejected() {
     r.face_volume_flux_m3_per_s[face] = 1e-9;
     assert!(p.recover(&r).is_err());
 }
+
+// witness: FEA-FLUID-INPUTS-001/boundaries @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel;
+//   coverage: partial; boundary: a closed component bounded by velocity walls and symmetry planes
+//   (a spanwise slab of a driven cavity) takes its pressure level from the authored gauge and
+//   reproduces Couette flow; symmetry planes carry no volume flux.
+#[test]
+fn closed_component_with_symmetry_planes_reproduces_couette_flow() {
+    let mut f = case(3, ReferenceCase::Duct, false);
+    let (mut lid, mut planes) = (Vec::new(), Vec::new());
+    for face in &f.source.boundary_faces {
+        let x = face.centroid_m;
+        let entities = face.provenance.clone();
+        if (x[1] - 1.0).abs() < 1e-12 {
+            lid.extend(entities);
+        } else if x[2].abs() < 1e-12 || (x[2] - 1.0).abs() < 1e-12 {
+            planes.extend(entities);
+        }
+    }
+    // Couette flow u = y between a stationary floor and a lid moving at 1 m/s, with the end
+    // walls moving with the exact profile so the closed component is consistent.
+    let mut constraints = vec![
+        FluidConstraint {
+            constraint_id: "lid".into(),
+            kind: FluidConstraintKind::PrescribedVelocity {
+                target: target("lid", lid.clone()),
+                value: PrescribedValue::Constant([1.0, 0.0, 0.0].map(Velocity::new)),
+            },
+        },
+        FluidConstraint {
+            constraint_id: "spanwise".into(),
+            kind: FluidConstraintKind::Symmetry {
+                target: target("spanwise", planes),
+            },
+        },
+        FluidConstraint {
+            constraint_id: "gauge".into(),
+            kind: FluidConstraintKind::PressureReference {
+                target: target("gauge", lid),
+                value: PrescribedValue::Constant(Pressure::new(0.0)),
+            },
+        },
+    ];
+    let mut by_height = std::collections::BTreeMap::<i64, Vec<_>>::new();
+    for face in &f.source.boundary_faces {
+        let x = face.centroid_m;
+        let interior_side = (x[1] - 1.0).abs() >= 1e-12
+            && x[2].abs() >= 1e-12
+            && (x[2] - 1.0).abs() >= 1e-12;
+        if interior_side {
+            by_height
+                .entry((x[1] * 1e9).round() as i64)
+                .or_default()
+                .extend(face.provenance.clone());
+        }
+    }
+    for (i, (height, entities)) in by_height.into_iter().enumerate() {
+        let y = height as f64 * 1e-9;
+        constraints.push(FluidConstraint {
+            constraint_id: format!("end-{i}"),
+            kind: FluidConstraintKind::PrescribedVelocity {
+                target: target(&format!("end-{i}"), entities),
+                value: PrescribedValue::Constant([y, 0.0, 0.0].map(Velocity::new)),
+            },
+        });
+    }
+    f.constraints = constraints;
+    f.operators = Vec::new();
+    let p = CanonicalFluidProblem::prepare(f.input()).unwrap();
+    let r = p.solve().unwrap();
+    let mut worst = 0.0f64;
+    for (c, u) in f.topology.cells.iter().zip(&r.velocity_m_per_s) {
+        worst = worst.max(norm(sub(*u, [c.centroid_m[1], 0.0, 0.0])));
+    }
+    assert!(worst < 0.05, "Couette error {worst}");
+}

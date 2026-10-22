@@ -106,10 +106,13 @@ impl PressureReferencePlan {
         let mut flux_scale = vec![0.0; components.len()];
         for (i, f) in t.faces.iter().enumerate() {
             if f.neighbor.is_none() && outlets[labels[f.owner]].is_none() {
-                let FaceBoundary::Velocity { value, .. } = b[i] else {
-                    return Err(Error::Invalid("closed pressure component face law"));
+                // Velocity faces carry their prescribed flux; symmetry planes and slip walls
+                // are impermeable.
+                let flux = match b[i] {
+                    FaceBoundary::Velocity { value, .. } => dot(value, f.owner_area_vector_m2),
+                    FaceBoundary::Symmetry { .. } => 0.0,
+                    _ => return Err(Error::Invalid("closed pressure component face law")),
                 };
-                let flux = dot(value, f.owner_area_vector_m2);
                 flux_sum[labels[f.owner]] += flux;
                 flux_scale[labels[f.owner]] += flux.abs();
             }

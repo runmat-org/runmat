@@ -112,4 +112,15 @@ pub struct CfdDomain {
     /// Shear-rate dependent viscosity; absent for a Newtonian fluid.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rheology: Option<super::rheology::GeneralizedNewtonianLaw>,
+    /// Porous zones of the flow: the cell regions each resistance law applies to.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub porous_zones: Vec<PorousZone>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PorousZone {
+    /// Sorted, unique cell regions.
+    pub regions: Vec<runmat_geometry_core::PersistentEntityId>,
+    pub law: super::materials::PorousMediumLaw,
 }

@@ -215,6 +215,18 @@ pub(super) fn evaluate_with_time(
         global_momentum = sub(global_momentum, body);
         global_scale += norm(body);
     }
+    for c in 0..n {
+        if let Some((linear, quadratic)) = p.porous[c] {
+            let drag = scale(
+                u[c],
+                p.topology.cells[c].volume_m3 * (linear + quadratic * norm(u[c])),
+            );
+            independent_cells[c] = add(independent_cells[c], drag);
+            local_scales[c] += norm(drag);
+            global_momentum = add(global_momentum, drag);
+            global_scale += norm(drag);
+        }
+    }
     if let Some(time) = time {
         for c in 0..n {
             let inertia = time.force(p, c, u[c])?;

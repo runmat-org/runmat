@@ -31,7 +31,16 @@ pub(crate) fn memory_bytes() -> io::Result<u64> {
 pub fn meshing_execution_ceilings(
     limits: &runmat_meshing_core::MeshingSizeLimits,
 ) -> runmat_meshing_core::MeshingExecutionCeilings {
-    runmat_meshing_core::MeshingExecutionCeilings::for_host(memory_bytes().unwrap_or(0), limits)
+    meshing_execution_ceilings_for(memory_bytes().unwrap_or(0), limits)
+}
+
+/// Ceilings for a pool that admits `capacity_bytes` of memory: use the pool's own admitted
+/// capacity (one snapshot) so every task the run submits fits the pool.
+pub fn meshing_execution_ceilings_for(
+    capacity_bytes: u64,
+    limits: &runmat_meshing_core::MeshingSizeLimits,
+) -> runmat_meshing_core::MeshingExecutionCeilings {
+    runmat_meshing_core::MeshingExecutionCeilings::for_host(capacity_bytes, limits)
 }
 
 /// Default host budget for staging one study publication: a quarter of the memory this host

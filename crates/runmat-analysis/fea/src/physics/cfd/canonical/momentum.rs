@@ -17,6 +17,9 @@ pub(super) enum MomentumMode {
     Original,
     /// Bounded SIMPLE trial only, never a publishable physical boundary state.
     SolverTrial,
+    /// Unrelaxed operator of the coupled solve's Picard step; trial outlet backflow is
+    /// tolerated as in a SIMPLE trial and never published.
+    Coupled,
 }
 
 #[cfg(test)]
@@ -117,6 +120,16 @@ pub(super) fn assemble_with_time(
                     return Err(Error::Invalid("missing exterior law"))
                 }
             }
+        }
+    }
+    // Porous-zone resistance, implicit in each component: V (μ/K + ½ρC₂|u|), the quadratic
+    // part Picard-lagged on the current speed.
+    for c in 0..n {
+        if let Some((linear, quadratic)) = p.porous[c] {
+            let coefficient =
+                p.topology.cells[c].volume_m3 * (linear + quadratic * norm(u[c]));
+            a.add(c, c, coefficient);
+            diagonal[c] += coefficient;
         }
     }
     if let Some(time) = time {
