@@ -169,6 +169,39 @@ impl AcousticHarmonicSolverResult {
     }
 }
 
+impl AcousticHarmonicSolverResult {
+    /// Whether stored native fields (pressure, particle velocity, intensity, in inventory
+    /// order) carry exactly this result's values, bit for bit, without copying them.
+    pub fn native_fields_match(&self, fields: &[RecoveredField]) -> bool {
+        let matches = |field: &RecoveredField, expected: &mut dyn Iterator<Item = f64>| match &field
+            .storage()
+            .values
+        {
+            AnalysisFieldValues::HostF64(values) => values
+                .iter()
+                .map(|value| value.to_bits())
+                .eq(expected.map(f64::to_bits)),
+            AnalysisFieldValues::DeviceRef(_) => false,
+        };
+        let [pressure, velocity, intensity] = fields else {
+            return false;
+        };
+        matches(
+            pressure,
+            &mut self.pressure_pa().iter().flat_map(|p| [p.real, p.imaginary]),
+        ) && matches(
+            velocity,
+            &mut self
+                .velocity_m_per_s()
+                .iter()
+                .flat_map(|v| (0..3).flat_map(move |axis| [v.real[axis], v.imaginary[axis]])),
+        ) && matches(
+            intensity,
+            &mut self.intensity_w_per_m2().iter().flatten().copied(),
+        )
+    }
+}
+
 /// Native pressure and particle-velocity definitions named by an acoustic recovery request.
 pub fn acoustic_native_field_definitions(
     request: &FieldRecoveryRequest,
