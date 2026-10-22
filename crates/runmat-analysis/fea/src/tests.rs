@@ -5111,8 +5111,7 @@ fn modal_extraction_reduces_a_homogeneous_equation_constraint() {
         StructuralConstraintEquation, StructuralConstraintEquationTerm,
         StructuralConstraintKind, StructuralTranslationDof,
     };
-    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
-    model.sequence.steps = vec![ProcedureStep::structural_modal("modal_1".to_string())];
+    let mut model = fixture_model(FixtureId::ModalLarge);
     let free = crate::run_modal_with_options(&model, ComputeBackend::Cpu, baseline_modal_options())
         .expect("unconstrained-equation modal solve");
     let first = free.mode_shapes[0].as_host_f64().unwrap();

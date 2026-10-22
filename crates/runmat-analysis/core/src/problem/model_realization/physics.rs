@@ -114,7 +114,7 @@ pub(super) fn extend_model_physics(
         source
             .excitations
             .iter()
-            .map(|value| realize_excitation(value, targets))
+            .map(|value| realize_excitation(value, &source.constraints, targets))
             .collect::<Result<Vec<_>, _>>()?,
     );
     target.initial_conditions.extend(
@@ -215,6 +215,7 @@ fn interface_kind(value: &AuthoredInterfaceKind) -> AnalysisInterfaceKind {
 
 fn realize_excitation(
     value: &AuthoredExcitation,
+    constraints: &[crate::AuthoredConstraint],
     targets: &TargetResolver<'_>,
 ) -> Result<ExcitationAction, AnalysisModelRealizationError> {
     let target = match &value.target {
@@ -222,6 +223,25 @@ fn realize_excitation(
             ExcitationTarget::Region(targets.region_target(source, TargetCardinality::OneOrMore)?)
         }
         AuthoredExcitationTarget::WholeModel => ExcitationTarget::WholeModel,
+        AuthoredExcitationTarget::ReferencePoint { constraint_id } => {
+            let point = constraints
+                .iter()
+                .find(|constraint| &constraint.constraint_id == constraint_id)
+                .and_then(|constraint| match &constraint.kind {
+                    crate::AuthoredConstraintKind::StructuralRigidCoupling(coupling)
+                    | crate::AuthoredConstraintKind::StructuralDistributingCoupling(coupling) => {
+                        Some(coupling.reference_point.clone())
+                    }
+                    _ => None,
+                })
+                .ok_or_else(|| {
+                    AnalysisModelRealizationError::InvalidModel(format!(
+                        "excitation `{}` targets the reference point of `{constraint_id}`, which is not a rigid or distributing coupling of this model",
+                        value.excitation_id
+                    ))
+                })?;
+            ExcitationTarget::ReferencePoint(point)
+        }
     };
     let excitation = AnalysisExcitation {
         excitation_id: ExcitationId(value.excitation_id.clone()),

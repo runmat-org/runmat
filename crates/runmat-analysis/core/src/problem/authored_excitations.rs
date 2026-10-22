@@ -76,6 +76,9 @@ mod incident_pressure_tests;
 pub enum AuthoredExcitationTarget {
     Region(AuthoredRegionSource),
     WholeModel,
+    /// The reference point of a rigid or distributing coupling, named by the coupling's
+    /// constraint id; a force or moment there is transmitted through the coupling.
+    ReferencePoint { constraint_id: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -285,8 +288,14 @@ fn validate_excitation(
     }
     let role = match &excitation.target {
         AuthoredExcitationTarget::Region(source) => Some(source.role()),
-        AuthoredExcitationTarget::WholeModel => None,
+        AuthoredExcitationTarget::WholeModel | AuthoredExcitationTarget::ReferencePoint { .. } => {
+            None
+        }
     };
+    let reference_point = matches!(
+        excitation.target,
+        AuthoredExcitationTarget::ReferencePoint { .. }
+    );
     let surface = matches!(role, Some(GeometryRegionRole::Face));
     let volume = matches!(role, Some(GeometryRegionRole::Solid));
     let attachment = matches!(
@@ -294,11 +303,15 @@ fn validate_excitation(
         Some(GeometryRegionRole::Vertex | GeometryRegionRole::Edge | GeometryRegionRole::Face)
     );
     let valid_target = match excitation.kind {
-        AuthoredExcitationKind::Force | AuthoredExcitationKind::Moment => attachment,
+        AuthoredExcitationKind::Force | AuthoredExcitationKind::Moment => {
+            attachment || reference_point
+        }
         AuthoredExcitationKind::BodyForce
         | AuthoredExcitationKind::HeatGeneration
         | AuthoredExcitationKind::ElectricChargeDensity
-        | AuthoredExcitationKind::MagneticVolumeCurrentDensity => volume || role.is_none(),
+        | AuthoredExcitationKind::MagneticVolumeCurrentDensity => {
+            volume || (role.is_none() && !reference_point)
+        }
         AuthoredExcitationKind::TemperatureField => volume,
         _ => surface,
     };
