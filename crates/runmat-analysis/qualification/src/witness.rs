@@ -377,7 +377,12 @@ fn scan_file(
                         source: display.clone(),
                         line: index + 1,
                     };
-                    if !is_test {
+                    // A harness-less integration target (`harness = false`) is one witness: its
+                    // `main` passes or fails as a whole.
+                    let custom_harness = function == "main"
+                        && matches!(target, Target::Integration(_))
+                        && base_modules.is_empty();
+                    if !is_test && !custom_harness {
                         problems.push(Problem {
                             location: location.clone(),
                             message: format!("`{function}` is not a #[test] function"),

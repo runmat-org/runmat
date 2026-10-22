@@ -49,6 +49,10 @@ fn concurrent_step_imports_keep_independent_units_and_physical_properties() {
     });
 }
 
+// witness: FEA-MESH-GEOMETRY-001/geometry_load_units_option @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Declared STEP units preserve physical scale across requested coordinate units; mixed
+//   or missing unit rejection is not asserted here.
 #[test]
 fn declared_step_units_preserve_physical_scale_across_requested_coordinate_units() {
     let unspecified = import_exact_cad(
@@ -117,6 +121,11 @@ impl GeometryEvaluationControl for Unlimited {
     }
 }
 
+// witness: FEA-MESH-GEOMETRY-001/exact_formats @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: A public NIST ACIS STEP part imports with one body, solid, shell, six faces, twelve
+//   edges and eight vertices and kernel mass-property volume equal to the reference within 1e-12;
+//   IGES and BREP and the rest of the corpus are not asserted here.
 #[test]
 fn public_industrial_step_imports_exact_topology_and_mass_properties() {
     let options = ExactCadImportOptions {

@@ -93,7 +93,33 @@ fn run_tests(
         }
     }
     let mut results = BTreeMap::new();
-    for (package, locators) in tests {
+    for (package, all_locators) in tests {
+        // Harness-less integration binaries (`fn main`) are one witness each: run the whole
+        // target and take its exit status.
+        let (custom, locators): (Vec<_>, Vec<_>) =
+            all_locators.into_iter().partition(|l| l.name == "main");
+        for l in &custom {
+            let Target::Integration(target) = &l.target else {
+                continue;
+            };
+            let mut command = Command::new("sh");
+            command.args(["-c", "\"$@\" 2>&1", "sh"]).args(cargo);
+            command.args(["test", "--offline", "-p", package, "--test", target]);
+            command.env("RUST_MIN_STACK", "67108864");
+            eprintln!("running {package} test target {target} as one witness");
+            let output = command.output()?;
+            results.insert(
+                l.describe(),
+                if output.status.success() {
+                    TestResult::Passed
+                } else {
+                    TestResult::Failed("harness-less test target exited nonzero".into())
+                },
+            );
+        }
+        if locators.is_empty() {
+            continue;
+        }
         // One shell merges stderr into stdout so cargo's `Running ...` headers stay ordered
         // with the test lines that follow them.
         let mut command = Command::new("sh");

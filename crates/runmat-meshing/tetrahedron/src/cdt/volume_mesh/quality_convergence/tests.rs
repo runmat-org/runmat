@@ -176,6 +176,11 @@ fn cancellation_and_original_candidate_budget_fail_without_a_mesh() {
     }
 }
 
+// witness: FEA-MESH-DISCRETIZATION-001/volume_quality_convergence @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Exhausted insertion or repair pass budgets fail without publishing a mesh;
+//   convergence on the bracket, heat sink and fork within the authored time budget is not
+//   demonstrated here.
 #[test]
 fn exhausted_insertion_or_repair_pass_budget_fails_without_a_mesh() {
     for exhausted_refinement in [true, false] {

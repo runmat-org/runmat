@@ -77,6 +77,11 @@ fn representative_face(cells: usize) -> ExactFaceMesh {
     }
 }
 
+// witness: FEA-MESH-DISCRETIZATION-001/surface_discretization @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: A dense face of 90,601 nodes and 180,000 triangles has a bounded publication
+//   representation inside the 512 MiB default component memory and round-trips through the record
+//   and global codecs; seams, poles and many trims are not asserted here.
 #[test]
 #[ignore = "representative dense surface publication/resource gate"]
 fn representative_dense_face_publication_fits_default_component_memory() {
