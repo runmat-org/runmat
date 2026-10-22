@@ -224,7 +224,9 @@ impl MagnetostaticSolverResult {
                 "magnetic result belongs to a different workload or topology",
             ));
         }
-        let edges = crate::physics::magnetic::validate_projection_envelope(p).map_err(invalid)?;
+        let edges =
+            crate::physics::magnetic::validate_projection_envelope(p, &compiled.grounded_faces)
+                .map_err(invalid)?;
         if !d
             .response
             .edge_node_identities

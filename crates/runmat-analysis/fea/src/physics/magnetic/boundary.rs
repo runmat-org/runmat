@@ -1,6 +1,6 @@
 use super::MagnetostaticError;
 use crate::topology::{AnalysisProjection, TetrahedralEdgeSpace};
-use runmat_meshing_core::BoundaryFaceRole;
+use runmat_meshing_core::{BoundaryFaceRole, StableDigest};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(super) struct MagneticBoundarySpace {
@@ -11,9 +11,13 @@ pub(super) struct MagneticBoundarySpace {
 const FACES: [[usize; 3]; 4] = [[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]];
 
 impl MagneticBoundarySpace {
+    /// `grounded_faces` hold tangential A = 0; every other exterior face is natural
+    /// (n x H = 0, magnetic insulation). The grounded faces must form one connected surface:
+    /// separate grounded patches would leave a harmonic field the gauge cannot fix.
     pub fn derive(
         projection: &AnalysisProjection,
         edges: &TetrahedralEdgeSpace,
+        grounded_faces: &[StableDigest],
     ) -> Result<Self, MagnetostaticError> {
         // The initial full-grounded envelope is a connected tetrahedral ball.
         // Cavity handles/harmonic cohomology require a different nullspace contract.
@@ -140,15 +144,73 @@ impl MagneticBoundarySpace {
                 "magnetic cohomology is not a tetrahedral ball".into(),
             ));
         }
-        let grounded: BTreeSet<_> = edges
-            .exterior_edge_indices(projection)
-            .map_err(|error| MagnetostaticError::Topology(error.to_string()))?
-            .into_iter()
+        let wanted: BTreeSet<_> = grounded_faces.iter().copied().collect();
+        let mut grounded_triples = Vec::new();
+        for face in &projection.boundary_faces {
+            if !wanted.contains(&face.stable_identity) {
+                continue;
+            }
+            if face.role != BoundaryFaceRole::Exterior {
+                return Err(MagnetostaticError::Unsupported(
+                    "internal magnetic grounding".into(),
+                ));
+            }
+            let mut nodes = [
+                face.node_indices[0],
+                face.node_indices[1],
+                face.node_indices[2],
+            ];
+            nodes.sort_unstable();
+            grounded_triples.push(nodes);
+        }
+        if grounded_triples.is_empty() || grounded_triples.len() != wanted.len() {
+            return Err(MagnetostaticError::Unsupported(
+                "magnetostatics needs magnetic.vector_potential_ground on at least one exterior face"
+                    .into(),
+            ));
+        }
+        let mut by_edge = BTreeMap::<[usize; 2], Vec<usize>>::new();
+        for (index, [a, b, c]) in grounded_triples.iter().copied().enumerate() {
+            for edge in [[a, b], [a, c], [b, c]] {
+                by_edge.entry(edge).or_default().push(index);
+            }
+        }
+        let mut reached = BTreeSet::new();
+        let mut queue = vec![0];
+        while let Some(face) = queue.pop() {
+            if reached.insert(face) {
+                let [a, b, c] = grounded_triples[face];
+                for edge in [[a, b], [a, c], [b, c]] {
+                    queue.extend(&by_edge[&edge]);
+                }
+            }
+        }
+        if reached.len() != grounded_triples.len() {
+            return Err(MagnetostaticError::Unsupported(
+                "the grounded faces must form one connected surface; ground the boundary between separate grounded patches as well".into(),
+            ));
+        }
+        let index_of: BTreeMap<[usize; 2], usize> = edges
+            .edges()
+            .iter()
+            .enumerate()
+            .map(|(index, edge)| {
+                let [a, b] = edge.node_indices;
+                ([a.min(b), a.max(b)], index)
+            })
             .collect();
+        let mut grounded = BTreeSet::new();
+        let mut grounded_nodes = BTreeSet::new();
+        for edge in by_edge.keys() {
+            grounded.insert(*index_of.get(edge).ok_or_else(|| {
+                MagnetostaticError::Topology("grounded face edge absent from edge space".into())
+            })?);
+            grounded_nodes.extend(edge.iter().copied());
+        }
         let free_edges = (0..edges.edges().len())
             .filter(|index| !grounded.contains(index))
             .collect();
-        let gauge_nodes = corner_nodes.difference(&boundary_nodes).copied().collect();
+        let gauge_nodes = corner_nodes.difference(&grounded_nodes).copied().collect();
         Ok(Self {
             free_edges,
             gauge_nodes,

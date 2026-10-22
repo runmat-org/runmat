@@ -29,8 +29,10 @@ displacement, and Joule power density $\sigma|\nabla V|^2$ (or energy density). 
 equals $\sum V_iI_i$ over the terminals (checked on every solve).
 
 **Magnetostatics.** $\nabla\times(\mu^{-1}\nabla\times\mathbf A)=\mathbf J_s$ with tangential
-$\mathbf A=0$ on every exterior face (`magnetic.vector_potential_ground`) and a weak Coulomb gauge on
-every body (`magnetic.coulomb_gauge`, one constraint per body or one covering all bodies). Results:
+$\mathbf A=0$ on grounded faces (`magnetic.vector_potential_ground`, the far field or a flux wall)
+and magnetic insulation, $\mathbf n\times\mathbf H=0$, on every other exterior face (a symmetry
+plane of the current). A weak Coulomb gauge (`magnetic.coulomb_gauge`) fixes the gradient part of
+$\mathbf A$ in the whole field: in air, iron and conductors alike. Results:
 vector potential, flux density $\mathbf B=\nabla\times\mathbf A$ and field intensity, at integration
 points and as element averages.
 
@@ -147,8 +149,9 @@ time-dependent data.
 
 - Steady current flow and electrostatics: at least one prescribed potential on each connected
   conductor.
-- Magnetostatics: `magnetic.vector_potential_ground` on every exterior face, including conductor
-  ends that reach the boundary, and `magnetic.coulomb_gauge` covering every body.
+- Magnetostatics: `magnetic.vector_potential_ground` on one connected set of exterior faces
+  (normally the far field; include the ends of a conductor whose current leaves the model, since
+  current cannot cross an insulated face), and one `magnetic.coulomb_gauge`.
 - Harmonic fields: a grounded far field (`magnetic.vector_potential_ground`). A Coulomb gauge is not
   used: conductivity and permittivity fix the field.
 

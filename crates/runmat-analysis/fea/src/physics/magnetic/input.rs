@@ -11,7 +11,7 @@ use crate::{
     topology::AnalysisProjection,
 };
 use runmat_analysis_core::*;
-use runmat_meshing_core::{BoundaryFaceRole, SolverMeshArtifact};
+use runmat_meshing_core::{BoundaryFaceRole, SolverMeshArtifact, StableDigest};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub fn validate_canonical_input<'a>(
@@ -89,6 +89,8 @@ pub fn validate_canonical_input<'a>(
 
 pub(crate) struct CompiledMagneticInput {
     pub projection: AnalysisProjection,
+    /// Exterior faces with tangential A = 0, sorted; every other exterior face is insulated.
+    pub grounded_faces: Vec<StableDigest>,
     pub volumes: Vec<MagneticVolumeData>,
 }
 
@@ -184,20 +186,16 @@ pub(crate) fn compile_canonical_input(
             }
         }
     }
-    let exterior: BTreeSet<_> = projection
-        .boundary_faces
-        .iter()
-        .filter(|face| face.role == BoundaryFaceRole::Exterior)
-        .map(|face| face.stable_identity)
-        .collect();
-    if ground_faces != exterior {
+    if ground_faces.is_empty() {
         return Err(MagnetostaticError::Unsupported(
-            "magnetostatics grounds the vector potential on every exterior face: add magnetic.vector_potential_ground for the faces that are not yet grounded (including conductor ends that reach the boundary)".into(),
+            "magnetostatics needs magnetic.vector_potential_ground on at least one exterior face (the far field); faces without a ground are magnetically insulated".into(),
         ));
     }
-    if gauged.len() != projection.elements.len() {
+    // The weak Coulomb gauge is a property of the whole field: one authored gauge fixes the
+    // gradient part of A everywhere, in air, iron and conductors alike.
+    if gauged.is_empty() {
         return Err(MagnetostaticError::Unsupported(
-            "the curl-curl operator has no unique vector potential in a body without a gauge: magnetic.coulomb_gauge must cover every body (iron and conductors as well as air)".into(),
+            "the curl-curl operator has no unique vector potential without a gauge: add magnetic.coulomb_gauge".into(),
         ));
     }
     let properties = crate::properties::compile_solid_property_map(model, mesh)
@@ -285,6 +283,7 @@ pub(crate) fn compile_canonical_input(
     }
     Ok(CompiledMagneticInput {
         projection,
+        grounded_faces: ground_faces.into_iter().collect(),
         volumes,
     })
 }
@@ -296,5 +295,10 @@ pub fn solve_canonical_static(
     residual_target: f64,
 ) -> Result<MagnetostaticResponse, MagnetostaticError> {
     let compiled = compile_canonical_input(model, mesh, step_id, residual_target)?;
-    super::solve_full_grounded_volume(&compiled.projection, &compiled.volumes, residual_target)
+    super::solve_grounded_volume(
+        &compiled.projection,
+        &compiled.grounded_faces,
+        &compiled.volumes,
+        residual_target,
+    )
 }
