@@ -60,7 +60,7 @@ fn input(partitioning: PartitioningPolicy) -> FeaResourcePlanningInput {
                 state_profiles_output: PreparedOutputResourceFacts {
                     encoded_payload_bytes_upper_bound: ByteCount(1),
                     transport_closure_bytes_upper_bound: ByteCount(1),
-                    construction_resident_bytes_admission_budget: ByteCount(65_665),
+                    construction_resident_bytes_admission_budget: ByteCount(65_540),
                 },
                 operator: StructuralOperatorResourceDemand {
                     excitation_workspace: Default::default(),

@@ -26,7 +26,7 @@ pub(in crate::planning::resource) fn result_output(
         "modal metadata",
     )?;
     let metadata_resident =
-        runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(
+        runmat_canonical_codec::projected_canonical_encoding_resident_bytes_estimate(
             metadata, 1,
         )
         .ok_or(ResourcePlanningError::Overflow(
@@ -63,7 +63,11 @@ mod tests {
             facts.encoded_payload_bytes_upper_bound.0,
         )
         .unwrap();
-        assert!(generic.construction_resident_bytes_admission_budget.0 > 8 * 1024 * 1024 * 1024);
+        // The generic direct-encoding projection is bounded by three encoded copies.
+        assert!(
+            generic.construction_resident_bytes_admission_budget.0
+                >= 3 * facts.encoded_payload_bytes_upper_bound.0
+        );
         assert!(facts.construction_resident_bytes_admission_budget.0 < 2 * 1024 * 1024 * 1024);
         assert!(
             result_output(values, 257, 3)

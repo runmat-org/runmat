@@ -171,7 +171,7 @@ pub fn build_nonlinear_solid_block_resource_plan(
     let materialization = nonlinear_solid_block_output_construction_bytes(bytes)?;
     let receipt_bytes = crate::execution::NONLINEAR_SOLID_RECEIPT_MAX_ENCODED_BYTES;
     let receipt_materialization =
-        runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(
+        runmat_canonical_codec::projected_canonical_encoding_resident_bytes_estimate(
             receipt_bytes,
             1,
         )

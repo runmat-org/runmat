@@ -3,7 +3,7 @@ use super::*;
 pub(super) fn implicit_resource_plan_input_facts(
 ) -> Result<PreparedInputResourceFacts, ResourcePlanningError> {
     let decoded =
-        runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(
+        runmat_canonical_codec::projected_canonical_typed_decode_resident_bytes_estimate(
             RESOURCE_PLAN_MAX_ENCODED_BYTES,
             1,
         )

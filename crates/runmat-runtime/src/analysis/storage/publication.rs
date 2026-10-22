@@ -453,6 +453,25 @@ impl AnalysisPublicationBuilder {
     }
 }
 
+/// Typed storage of owned in-memory values (or their clones), priced from the serialization
+/// shape without a value tree.
+pub(in crate::analysis) fn typed_resident(
+    value: &impl Serialize,
+    maximum: u64,
+) -> Result<u64, AnalysisPublicationError> {
+    runmat_canonical_codec::profile_typed_resident_bytes(
+        value,
+        CanonicalLimits::new(
+            usize::try_from(maximum).map_err(|_| AnalysisPublicationError::ResourceLimit {
+                message: "publication budget exceeds address space".into(),
+            })?,
+            100_000_000,
+            65_536,
+            64,
+        ),
+    )
+    .map_err(Into::into)
+}
 pub(in crate::analysis) fn resident(
     value: &impl Serialize,
     maximum: u64,

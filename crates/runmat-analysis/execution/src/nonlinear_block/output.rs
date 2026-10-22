@@ -18,9 +18,7 @@ pub(super) fn project(
         )
         .ok()
     } else {
-        runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(
-            bytes, 1,
-        )
+        runmat_canonical_codec::projected_canonical_encoding_resident_bytes_estimate(bytes, 1)
     };
     let materialization = encoding
         .and_then(|n| n.checked_add(output.transport_closure_bytes_upper_bound.0))

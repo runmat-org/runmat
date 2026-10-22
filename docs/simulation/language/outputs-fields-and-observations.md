@@ -39,6 +39,22 @@ output radiated_power = sound_power(analysis.sound, through = geometry.speaker.r
 output intensity = analysis.sound.field.element.acoustic_intensity
 ```
 
+## Sample a field at a point
+
+```fea
+output top_stress = interpolate(
+    analysis.static.field.element.von_mises_stress,
+    at = [100 mm, 50 mm, 100 mm],
+)
+output tip_deflection = interpolate(analysis.static.field.displacement, at = [200 mm, 0 mm, 50 mm])
+```
+
+`interpolate(field, at = point)` returns the field value at one point in model coordinates. For a
+nodal field, RunMat evaluates the shape functions of the element that contains the point. For an
+element field, it returns the native value of the element that contains the point. A point on a
+shared face or edge reads one of the elements that touch it. A point outside the meshed solid is an
+observation error; RunMat does not clamp it to the nearest surface.
+
 This is intentionally separate from rendering. After a run, ordinary RunMat code selects the
 field and plots it:
 
