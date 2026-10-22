@@ -71,6 +71,7 @@ fn repeated_affine_solves_rebind_lifting_and_invalidate_changed_congruence() {
             operator: &operator,
             constraint_matrix: Some(&matrix),
             affine_constraint_reduction: Some(&reduction),
+            planned_reduced_support: None,
         };
         let warm = solve_affine_constraint_system_reusing(
             &view,

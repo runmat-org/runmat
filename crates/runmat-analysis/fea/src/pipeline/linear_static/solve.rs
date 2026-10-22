@@ -15,6 +15,7 @@ pub(super) fn solve_static_system(
     summary: &AssemblySummary,
     options: &LinearStaticSolveOptions,
     admission: Option<&SolverAdmissionResourcePolicy>,
+    planned_reduced_support: Option<&crate::algebra::SparsePattern>,
 ) -> Result<LinearSolveResult, FeaRunError> {
     let algebra_backend = build_backend(options.algebra_backend_kind);
     if options.initial_displacement.as_ref().is_some_and(|values| {
@@ -33,6 +34,7 @@ pub(super) fn solve_static_system(
         options.initial_displacement.as_deref(),
         options.local_execution,
         admission,
+        planned_reduced_support,
     )
     .map_err(|error| {
         if crate::is_fea_cancelled() {
@@ -122,7 +124,7 @@ mod tests {
             vec![1.0; dofs],
         )
         .unwrap();
-        let error = solve_static_system(&summary, &LinearStaticSolveOptions::default(), None)
+        let error = solve_static_system(&summary, &LinearStaticSolveOptions::default(), None, None)
             .expect_err("invalid exact operator must not yield a recoverable static solution");
         assert!(
             matches!(error, FeaRunError::Solve(message) if message.contains("FEA_INVALID_REAL_SYSTEM"))

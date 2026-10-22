@@ -150,7 +150,7 @@ pub(super) fn verify_executed_preassembly(
     constraints: Option<&CanonicalStructuralConstraintPlan>,
     preassembly: &StaticPreassembly,
     summary: &AssemblySummary,
-) -> Result<(), FeaRunError> {
+) -> Result<Option<crate::algebra::SparsePattern>, FeaRunError> {
     if let Some(plan) = preassembly
         .connectors
         .as_ref()
@@ -162,15 +162,18 @@ pub(super) fn verify_executed_preassembly(
             ));
         }
     }
-    if let Some(constraints) = constraints {
-        verify_assembled_structural_storage(
-            model,
-            options.solver_mesh.as_ref(),
-            constraints,
-            summary,
-        )?;
-    }
-    Ok(())
+    constraints
+        .map(|constraints| {
+            verify_assembled_structural_storage(
+                model,
+                options.solver_mesh.as_ref(),
+                constraints,
+                summary,
+            )
+        })
+        .transpose()
+        .map(Option::flatten)
+        .map_err(FeaRunError::from)
 }
 
 pub(super) fn model_has_explicit_structural_elements(model: &AnalysisModel) -> bool {

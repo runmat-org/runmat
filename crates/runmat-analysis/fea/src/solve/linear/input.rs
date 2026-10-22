@@ -21,6 +21,10 @@ pub(crate) struct StructuralLinearSystemView<'a> {
     pub operator: &'a AssembledRealSystem,
     pub constraint_matrix: Option<&'a ResolvedConstraintMatrix>,
     pub affine_constraint_reduction: Option<&'a AffineConstraintReduction>,
+    /// The reduced pattern resource planning analyzed. Affine reduction scatters into exactly
+    /// this pattern, so the proof factorization repeats the planned ordering and the admitted
+    /// envelope bounds the exact work.
+    pub planned_reduced_support: Option<&'a crate::algebra::SparsePattern>,
 }
 
 impl<'a> From<&'a AssemblySummary> for StructuralLinearSystemView<'a> {
@@ -30,6 +34,7 @@ impl<'a> From<&'a AssemblySummary> for StructuralLinearSystemView<'a> {
             operator: &summary.operator,
             constraint_matrix: summary.constraint_matrix.as_ref(),
             affine_constraint_reduction: summary.affine_constraint_reduction.as_ref(),
+            planned_reduced_support: None,
         }
     }
 }

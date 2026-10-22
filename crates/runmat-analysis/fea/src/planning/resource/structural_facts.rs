@@ -190,16 +190,26 @@ pub(super) fn derive_structural_resource_facts(
 
 /// The numerical matrices must fit the exact row/column graph promised by the preassembly
 /// structural planner. Re-derive from authoritative inputs because assembly cannot assert it.
+/// Returns the planned reduced pattern `T' S T` of the planned stiffness graph `S`: the exact
+/// support an admitted affine solve factors, so its ordering and work repeat the plan's.
 pub(crate) fn verify_assembled_structural_storage(
     model: &AnalysisModel,
     mesh: Option<&SolverMeshArtifact>,
     constraints: &CanonicalStructuralConstraintPlan,
     summary: &AssemblySummary,
-) -> Result<(), ResourcePlanningError> {
+) -> Result<Option<crate::algebra::SparsePattern>, ResourcePlanningError> {
     let facts = derive_structural_resource_facts(model, mesh, constraints)?;
     facts
         .symbolic
-        .verify_assembled(summary.operator.operators())
+        .verify_assembled(summary.operator.operators())?;
+    // A constraint matrix without an affine reduction is never solved by affine elimination.
+    let Ok(reduction) = facts.constraint_matrix.affine_reduction() else {
+        return Ok(None);
+    };
+    reduction
+        .reduce_sparse_pattern(facts.symbolic.stiffness_upper_bound())
+        .map(Some)
+        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))
 }
 
 fn resolve_constraint_matrix(
