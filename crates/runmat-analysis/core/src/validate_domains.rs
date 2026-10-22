@@ -212,6 +212,7 @@ mod tests {
             dynamic_viscosity: DynamicViscosity::new(1.81e-5),
             turbulence_intensity: TurbulenceIntensity::new(0.05),
             rheology: None,
+            porous_zones: Vec::new(),
         };
         validate_fluid_domain(&domain).unwrap();
 

@@ -33,10 +33,12 @@ constitutive model applies. A full discretization must satisfy momentum and cont
 mass-balance evidence.
 
 The canonical operator uses owner-oriented face incidence, Newtonian viscous stresses and conservative
-advective fluxes. Correction solves use the shared sparse layer's restarted GMRES: the momentum
-solves with an ILU(0) preconditioner, the pressure correction with smoothed-aggregation algebraic
-multigrid, so the pressure solve keeps its iteration count as the mesh is refined. They act on
-current velocity and pressure fluctuations;
+advective fluxes. Velocity and pressure are solved together: each Picard step linearizes
+convection and viscosity at the current state and solves the whole momentum–continuity system
+with flexible GMRES from the shared sparse layer, preconditioned by a SIMPLE block sweep
+(momentum solves with ILU(0), the Rhie–Chow pressure Laplacian with smoothed-aggregation algebraic
+multigrid). The number of Picard steps stays nearly constant as the mesh is refined. The solve
+acts on current velocity and pressure fluctuations;
 the pressure reference is retained separately, avoiding an absolute-pressure round trip. Acceptance
 checks momentum, continuity, constitutive flux and local/global physical balance.
 

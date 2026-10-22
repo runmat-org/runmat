@@ -53,8 +53,22 @@ fn lower_material(
     validate_authored_shape(declaration, diagnostics);
     let name = values::string_assignment(&declaration.statements, "name")
         .unwrap_or_else(|| declaration.key.name.clone());
-    let fluid = values::block(&declaration.statements, "fluid")
-        .and_then(|statements| fluid_law(declaration, statements, diagnostics));
+    let fluid = match (
+        values::block(&declaration.statements, "fluid"),
+        values::block(&declaration.statements, "porous"),
+    ) {
+        (Some(_), Some(_)) => {
+            error(
+                declaration,
+                "a material is either a fluid or a porous medium the fluid flows through, not both",
+                diagnostics,
+            );
+            None
+        }
+        (Some(statements), None) => fluid_law(declaration, statements, diagnostics),
+        (None, Some(statements)) => porous_law(declaration, statements, diagnostics),
+        (None, None) => None,
+    };
     let mass_density_kg_per_m3 = values::optional_quantity(
         declaration,
         &declaration.statements,
@@ -325,6 +339,10 @@ fn validate_authored_shape(
             ],
         ),
         ("acoustic", &["speed_of_sound", "damping_ratio"]),
+        (
+            "porous",
+            &["law", "permeability", "inertial_coefficient", "porosity"],
+        ),
         (
             "fluid",
             &[
@@ -631,6 +649,67 @@ fn fluid_law(
         return None;
     }
     Some(MaterialFluidModel::GeneralizedNewtonian { law })
+}
+
+/// A porous zone: `darcy` (viscous resistance μ/K) or `darcy_forchheimer` (adds the inertial
+/// resistance ½ρC₂|u|). The flowing fluid is the one assigned to the surrounding fluid regions.
+fn porous_law(
+    declaration: &CheckedFeaDeclaration,
+    statements: &[crate::CheckedFeaStatement],
+    diagnostics: &mut Vec<FeaDiagnostic>,
+) -> Option<MaterialFluidModel> {
+    let law = match values::assignment(statements, "law").map(|value| &value.kind) {
+        Some(crate::CheckedExpressionKind::Enum(name)) => name.clone(),
+        _ => {
+            error(
+                declaration,
+                "porous law must be explicit: darcy or darcy_forchheimer",
+                diagnostics,
+            );
+            return None;
+        }
+    };
+    let permeability_m2 = values::required_quantity(
+        declaration,
+        statements,
+        "permeability",
+        PhysicalDimension::AREA,
+        diagnostics,
+    )?;
+    let inertial_coefficient_per_m = match law.as_str() {
+        "darcy" => {
+            if values::assignment(statements, "inertial_coefficient").is_some() {
+                error(
+                    declaration,
+                    "a darcy porous law has no inertial coefficient; use darcy_forchheimer",
+                    diagnostics,
+                );
+                return None;
+            }
+            0.0
+        }
+        "darcy_forchheimer" => values::required_quantity(
+            declaration,
+            statements,
+            "inertial_coefficient",
+            PhysicalDimension::DIMENSIONLESS
+                .divide(PhysicalDimension::LENGTH)
+                .expect("bounded SI exponent"),
+            diagnostics,
+        )?,
+        other => {
+            error(declaration, format!("unknown porous law `{other}`"), diagnostics);
+            return None;
+        }
+    };
+    let porosity = values::required_ratio(declaration, statements, "porosity", diagnostics)?;
+    Some(MaterialFluidModel::PorousMedium {
+        law: runmat_analysis_core::PorousMediumLaw {
+            permeability_m2,
+            inertial_coefficient_per_m,
+            porosity,
+        },
+    })
 }
 
 /// Shear rate below which a shear-thinning or yield-stress law holds its viscosity constant.

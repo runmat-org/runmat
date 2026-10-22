@@ -17,6 +17,34 @@ pub enum MaterialFluidModel {
     GeneralizedNewtonian {
         law: super::rheology::GeneralizedNewtonianLaw,
     },
+    /// A porous zone the surrounding fluid flows through (filter media, packed bed): its
+    /// resistance, not a second fluid.
+    PorousMedium {
+        law: PorousMediumLaw,
+    },
+}
+
+/// Darcy–Forchheimer resistance of a porous zone, superficial-velocity form: the momentum
+/// sink −(μ/K) u − ½ ρ C₂ |u| u (Darcy when C₂ = 0; with the Navier–Stokes viscous term this is
+/// the Brinkman–Forchheimer extended model).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PorousMediumLaw {
+    pub permeability_m2: f64,
+    pub inertial_coefficient_per_m: f64,
+    pub porosity: f64,
+}
+
+impl PorousMediumLaw {
+    pub fn is_valid(&self) -> bool {
+        self.permeability_m2.is_finite()
+            && self.permeability_m2 > 0.0
+            && self.inertial_coefficient_per_m.is_finite()
+            && self.inertial_coefficient_per_m >= 0.0
+            && self.porosity.is_finite()
+            && self.porosity > 0.0
+            && self.porosity <= 1.0
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -383,6 +411,12 @@ impl MaterialModel {
         let fluid = self
             .fluid
             .ok_or_else(|| self.missing(MaterialCapability::IncompressibleNewtonianFluid))?;
+        if let MaterialFluidModel::PorousMedium { .. } = fluid {
+            return Err(FluidMaterialError::Invalid {
+                material_id: self.material_id.clone(),
+                property: "fluid law (a porous zone is not a flowing fluid)",
+            });
+        }
         if let MaterialFluidModel::GeneralizedNewtonian { law } = fluid {
             let density = self.require_mass_density()?;
             let reference = law.low_shear_viscosity();
