@@ -158,7 +158,7 @@ fn face_names_on_a_cavity_shell_are_read() {
 }
 
 #[test]
-fn imprinted_coincident_faces_become_one_shared_face_with_one_source_identity() {
+fn imprinted_coincident_faces_become_one_shared_face_with_one_source_ordinal() {
     for shared in [false, true] {
         let imported = import("strip-line.step", STRIP_LINE_IMPRINTED, shared).unwrap();
         let mut seen = std::collections::BTreeSet::new();
@@ -167,6 +167,12 @@ fn imprinted_coincident_faces_become_one_shared_face_with_one_source_identity() 
         }
         let faces = imported.topology.faces.iter().map(|face| &face.id).collect::<std::collections::BTreeSet<_>>();
         assert_eq!(seen.len(), imported.source_face_ids.len());
+        // Source face ordinals are contiguous: a face shared by two solids is one source face.
+        assert!(imported
+            .source_face_ids
+            .keys()
+            .copied()
+            .eq(0..imported.source_face_ids.len() as u64));
         assert!(seen.iter().all(|id| faces.contains(id)));
         if shared {
             assert_eq!(imported.topology.solids.len(), 2);
