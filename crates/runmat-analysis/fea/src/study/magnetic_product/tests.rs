@@ -86,12 +86,9 @@ fn post_mesh_ground_gauge_and_material_limits_are_not_inferred() {
         .as_mut()
         .unwrap()
         .resistive_heating_coefficient = 1.0;
-    for changed in [
-        missing_ground,
-        missing_gauge,
-        foreign_ground,
-        coupled_material,
-    ] {
+    // Magnetostatics uses only the permeability; a conductivity law is not an error.
+    assert!(plan_magnetic_study_product(compiled(coupled_material, &mesh), &mesh, policy()).is_ok());
+    for changed in [missing_ground, missing_gauge, foreign_ground] {
         assert!(matches!(
             plan_magnetic_study_product(compiled(changed, &mesh), &mesh, policy()),
             Err(MagneticStudyProductError::Admission(_))

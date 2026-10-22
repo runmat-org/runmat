@@ -27,7 +27,7 @@ mod response;
 mod system;
 pub(crate) use system::validate_retained_consistency;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 pub use authored::{
     compile_canonical_input, grounded_face_identities, harmonic_frequencies,

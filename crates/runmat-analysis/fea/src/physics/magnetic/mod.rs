@@ -87,6 +87,7 @@ pub enum MagnetostaticError {
 pub fn solve_grounded_volume(
     projection: &AnalysisProjection,
     grounded_faces: &[StableDigest],
+    prescribed_potential: &[(StableDigest, [f64; 3])],
     volumes: &[MagneticVolumeData],
     residual_target: f64,
 ) -> Result<MagnetostaticResponse, MagnetostaticError> {
@@ -96,7 +97,12 @@ pub fn solve_grounded_volume(
         ));
     }
     response::solve(
-        assembly::MagneticAssembly::assemble(projection, grounded_faces, volumes)?,
+        assembly::MagneticAssembly::assemble(
+            projection,
+            grounded_faces,
+            prescribed_potential,
+            volumes,
+        )?,
         residual_target,
     )
 }
@@ -107,6 +113,7 @@ pub fn solve_grounded_volume(
 pub fn solve_grounded_volume_with_plan(
     projection: &AnalysisProjection,
     volumes: &[MagneticVolumeData],
+    prescribed_potential: &[(StableDigest, [f64; 3])],
     residual_target: f64,
     plan: &MagneticSystemPlan,
 ) -> Result<MagnetostaticResponse, MagnetostaticError> {
@@ -116,7 +123,12 @@ pub fn solve_grounded_volume_with_plan(
         ));
     }
     response::solve(
-        assembly::MagneticAssembly::assemble_with_plan(projection, volumes, plan)?,
+        assembly::MagneticAssembly::assemble_with_plan(
+            projection,
+            volumes,
+            prescribed_potential,
+            plan,
+        )?,
         residual_target,
     )
 }

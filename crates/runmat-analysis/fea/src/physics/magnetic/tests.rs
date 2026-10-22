@@ -78,7 +78,7 @@ fn square_uniform_current_has_independent_potential_field_and_energy_convergence
     );
     for cells in [1, 2, 4] {
         let (projection, data) = problem(ElementOrder::Tet4, cells, 1.0, 1.0);
-        let result = solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &data, 1e-10).unwrap();
+        let result = solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &[], &data, 1e-10).unwrap();
         let mut potential_error = 0.0;
         let mut field_error = 0.0;
         for sample in &result.samples {
@@ -118,13 +118,13 @@ fn square_uniform_current_has_independent_potential_field_and_energy_convergence
 #[test]
 fn sign_permeability_and_affine_geometry_order_preserve_physical_scaling() {
     let (projection, data) = problem(ElementOrder::Tet4, 2, 1.0, 1.0);
-    let base = solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &data, 1e-10).unwrap();
+    let base = solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &[], &data, 1e-10).unwrap();
     for (order, mu, j) in [
         (ElementOrder::Tet4, 1.25663706212e-6, -2.0),
         (ElementOrder::Tet10, 1.0, 1.0),
     ] {
         let (projection, data) = problem(order, 2, mu, j);
-        let result = solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &data, 1e-10).unwrap();
+        let result = solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &[], &data, 1e-10).unwrap();
         for (sample, expected) in result.samples.iter().zip(&base.samples) {
             for axis in 0..3 {
                 assert!(
@@ -153,11 +153,11 @@ fn sign_permeability_and_affine_geometry_order_preserve_physical_scaling() {
 fn invalid_material_identity_current_and_gauge_source_compatibility_fail_closed() {
     let (projection, mut data) = problem(ElementOrder::Tet4, 2, 1.0, 1.0);
     data[0].permeability_h_per_m = 0.0;
-    assert!(solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &data, 1e-10).is_err());
+    assert!(solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &[], &data, 1e-10).is_err());
     data[0].permeability_h_per_m = 1.0;
-    assert!(solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &data[..data.len() - 1], 1e-10).is_err());
+    assert!(solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &[], &data[..data.len() - 1], 1e-10).is_err());
     data.push(data[0]);
-    assert!(solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &data, 1e-10).is_err());
+    assert!(solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &[], &data, 1e-10).is_err());
     data.pop();
     for element in &mut data {
         element.current_density_a_per_m2 = [0.0; 3];
@@ -175,11 +175,11 @@ fn invalid_material_identity_current_and_gauge_source_compatibility_fail_closed(
         .unwrap();
     data[interior].current_density_a_per_m2 = [1.0, 2.0, 3.0];
     assert!(matches!(
-        solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &data, 1e-10),
+        solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &[], &data, 1e-10),
         Err(MagnetostaticError::IncompatibleCurrent(_))
     ));
     data[interior].current_density_a_per_m2 = [0.0; 3];
-    let zero = solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &data, 1e-10).unwrap();
+    let zero = solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &[], &data, 1e-10).unwrap();
     assert_eq!(zero.magnetic_energy_j, 0.0);
     assert_eq!(zero.source_work_j, 0.0);
     assert!(zero.edge_circulations_wb.iter().all(|&value| value == 0.0));
@@ -197,7 +197,7 @@ fn authored_material_current_ground_and_gauge_compile_into_physical_solve() {
         assert!(result.magnetic_energy_j > 0.0);
         assert!(result.relative_energy_work_error < 1.6e-9);
         let (projection, data) = problem(order, 2, VACUUM_PERMEABILITY_H_PER_M, -2.0);
-        let reference = solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &data, 1e-10).unwrap();
+        let reference = solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &[], &data, 1e-10).unwrap();
         assert!((result.magnetic_energy_j / reference.magnetic_energy_j - 1.0).abs() < 1e-8);
         assert_eq!(result.edge_node_identities, reference.edge_node_identities);
         for (a, b) in result
@@ -271,13 +271,13 @@ fn exact_volume_superposition_zero_conductivity_and_missing_boundary_fail_closed
     let midside = projection.elements[0].node_indices[4];
     projection.nodes[midside].coordinates_m[0] += 0.01;
     assert!(matches!(
-        solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &data, 1e-10),
+        solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &[], &data, 1e-10),
         Err(MagnetostaticError::Unsupported(_))
     ));
     let (mut projection, data) = problem(ElementOrder::Tet4, 2, 1.0, 1.0);
     projection.boundary_faces.pop();
     assert!(matches!(
-        solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &data, 1e-10),
+        solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &[], &data, 1e-10),
         Err(MagnetostaticError::Topology(_))
     ));
 }
@@ -285,7 +285,7 @@ fn exact_volume_superposition_zero_conductivity_and_missing_boundary_fail_closed
 #[test]
 fn recovered_curl_has_shared_face_normal_flux_continuity_and_global_flux_closure() {
     let (projection, data) = problem(ElementOrder::Tet4, 3, 1.0, 1.0);
-    let response = solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &data, 1e-10).unwrap();
+    let response = solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &[], &data, 1e-10).unwrap();
     let field: std::collections::BTreeMap<_, _> = response
         .samples
         .iter()
@@ -359,4 +359,88 @@ fn insulated_faces_and_one_gauge_admit_a_partially_grounded_field() {
             if matches!(m.kind, MagneticConstraintKind::VectorPotentialGround { .. }))
     });
     assert!(solve_canonical_static(&ungrounded, &mesh, "potential", 1e-10).is_err());
+}
+
+#[test]
+fn prescribed_tangential_potential_drives_the_exact_uniform_field() {
+    // Box [0,L]^3 with A = (0, a x / L, 0): B = (0, 0, a / L). A = 0 on x = 0 and on the
+    // y faces (where A is normal), A = (0, a, 0) on x = L, z faces insulated (H is normal).
+    let l = 2.0e-2;
+    let a = 3.0e-4;
+    let lines = crate::physics::maxwell::tests::layered::lines(0.0, l, 3);
+    let mesh = crate::physics::maxwell::tests::layered::mesh(
+        &lines,
+        &lines,
+        &lines,
+        |_| "slab",
+        move |centroid, _normal, _regions| {
+            if centroid[0].abs() < 1e-12 {
+                "x_low".into()
+            } else if (centroid[0] - l).abs() < 1e-12 {
+                "x_high".into()
+            } else if centroid[1].abs() < 1e-12 || (centroid[1] - l).abs() < 1e-12 {
+                "y_side".into()
+            } else {
+                "z_side".into()
+            }
+        },
+    );
+    let mut model = authored_model(0.0);
+    model.constraints.retain(|c| {
+        !matches!(c, AnalysisConstraint::Magnetic(m)
+            if matches!(m.kind, MagneticConstraintKind::VectorPotentialGround { .. }))
+    });
+    for face in ["x_low", "y_side"] {
+        model
+            .constraints
+            .push(AnalysisConstraint::Magnetic(MagneticConstraint {
+                constraint_id: format!("ground_{face}"),
+                kind: MagneticConstraintKind::VectorPotentialGround {
+                    target: RegionTarget::boundary(face),
+                },
+            }));
+    }
+    model.signals.push(PhysicalSignal::MagneticVectorPotential(Signal {
+        signal_id: SignalId("A".into()),
+        shape: SignalShape::Vector3,
+        frame: Some(CoordinateFrame::Global),
+        representation: SignalRepresentation::Constant(SignalValue::Vector3(
+            [0.0, a, 0.0].map(MagneticVectorPotential::new),
+        )),
+        precision: SignalPrecision::Real64,
+        provenance: SignalProvenance::Authored,
+        evidence: SignalApproximationEvidence {
+            max_absolute_error: Some(0.0),
+            max_relative_error: Some(0.0),
+            derivative_max_absolute_error: None,
+            sample_count: 1,
+        },
+    }));
+    model
+        .excitations
+        .push(ExcitationAction::MagneticVectorPotential(AnalysisExcitation {
+            excitation_id: ExcitationId("imposed".into()),
+            target: ExcitationTarget::Region(RegionTarget::boundary("x_high")),
+            frame: CoordinateFrame::Global,
+            direction: None,
+            distribution: ExcitationDistribution::IntensityPerArea,
+            kinematics: ExcitationKinematics::FixedFrame,
+            signal_id: SignalId("A".into()),
+            active_step_ids: vec!["potential".into()],
+            combination_group: None,
+            projection: ProjectionRequirement {
+                preserve_resultant: false,
+                preserve_moment: false,
+                relative_tolerance: 1e-12,
+            },
+        }));
+    if let Some(case) = model.excitation_cases.first_mut() {
+        case.action_ids.push(ExcitationId("imposed".into()));
+    }
+    let response = solve_canonical_static(&model, &mesh, "potential", 1e-10).unwrap();
+    for sample in &response.samples {
+        let b = sample.flux_density_t;
+        assert!((b[2] - a / l).abs() <= 1e-9 * a / l, "{b:?}");
+        assert!(b[0].abs() <= 1e-9 * a / l && b[1].abs() <= 1e-9 * a / l, "{b:?}");
+    }
 }

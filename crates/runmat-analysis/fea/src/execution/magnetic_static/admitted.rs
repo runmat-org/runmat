@@ -62,6 +62,7 @@ impl MagnetostaticWorkload {
         let response = crate::physics::magnetic::solve_grounded_volume_with_plan(
             &input.projection,
             &input.volumes,
+            &input.prescribed_potential,
             self.relative_residual_target,
             &system,
         )

@@ -25,20 +25,24 @@ pub(super) struct MagneticAssembly<'a> {
     pub physical_load: Vec<f64>,
     pub scaled_rhs: Vec<f64>,
     pub permeability_scale: f64,
+    /// Prescribed circulation on every grounded edge (zero where A is grounded at zero).
+    pub grounded_circulation: Vec<f64>,
 }
 
 impl<'a> MagneticAssembly<'a> {
     pub fn assemble(
         projection: &'a AnalysisProjection,
         grounded_faces: &[runmat_meshing_core::StableDigest],
+        prescribed_potential: &[(runmat_meshing_core::StableDigest, [f64; 3])],
         volumes: &[MagneticVolumeData],
     ) -> Result<Self, MagnetostaticError> {
         let plan = MagneticSystemPlan::derive(projection, grounded_faces)?;
-        Self::assemble_with_plan(projection, volumes, &plan)
+        Self::assemble_with_plan(projection, volumes, prescribed_potential, &plan)
     }
     pub fn assemble_with_plan(
         projection: &'a AnalysisProjection,
         volumes: &[MagneticVolumeData],
+        prescribed_potential: &[(runmat_meshing_core::StableDigest, [f64; 3])],
         plan: &MagneticSystemPlan,
     ) -> Result<Self, MagnetostaticError> {
         plan.validate_for(projection)?;
@@ -116,6 +120,9 @@ impl<'a> MagneticAssembly<'a> {
         for (&node, &row) in &gauge_rows {
             gauge_row[node] = Some(row);
         }
+        let grounded_circulation =
+            grounded_circulation(projection, &edge_space, &edge_row, prescribed_potential)?;
+        let lifted = grounded_circulation.iter().any(|value| *value != 0.0);
         let element_count = projection.elements.len();
         let execution = crate::planning::resource::LocalExecutionPlan::serial();
         let operator_error = |e: ElementAssemblyError<MagnetostaticError>| match e {
@@ -154,12 +161,22 @@ impl<'a> MagneticAssembly<'a> {
                         local[i * 6 + j] = moments.curl_curl[i][j] / data.permeability_h_per_m;
                     }
                 }
+                let edges = edge_indices(index)?;
                 for (i, value) in out.vector(0).iter_mut().enumerate() {
                     *value = moments.constant_vector_load[i]
                         .iter()
                         .zip(data.current_density_a_per_m2)
                         .map(|(n, j)| n * j)
                         .sum::<f64>();
+                    // Lift the prescribed tangential potential of grounded edges.
+                    if lifted {
+                        for j in 0..6 {
+                            if edge_row[edges[j]].is_none() {
+                                *value -= moments.curl_curl[i][j] / data.permeability_h_per_m
+                                    * grounded_circulation[edges[j]];
+                            }
+                        }
+                    }
                 }
                 Ok(())
             },
@@ -262,6 +279,31 @@ impl<'a> MagneticAssembly<'a> {
         for (rhs, value) in scaled_rhs.iter_mut().zip(&load) {
             *rhs = permeability_scale * value;
         }
+        // The weak gauge holds the whole field divergence-free: grounded edges with a
+        // prescribed circulation contribute to every gauge row they touch.
+        if lifted {
+            for (index, element) in projection.elements.iter().enumerate() {
+                let edges = edge_indices(index)?;
+                if edges.iter().all(|&edge| grounded_circulation[edge] == 0.0) {
+                    continue;
+                }
+                let moments = edge_space
+                    .element_moments(projection, index)
+                    .map_err(|e| MagnetostaticError::Topology(e.to_string()))?;
+                for i in 0..6 {
+                    if edge_row[edges[i]].is_some() || grounded_circulation[edges[i]] == 0.0 {
+                        continue;
+                    }
+                    for j in 0..4 {
+                        if let Some(row) = gauge_row[element.node_indices[j]] {
+                            scaled_rhs[row] -= moments.gradient_coupling[i][j]
+                                * gauge_scale
+                                * grounded_circulation[edges[i]];
+                        }
+                    }
+                }
+            }
+        }
         Ok(Self {
             projection,
             edge_space,
@@ -276,6 +318,7 @@ impl<'a> MagneticAssembly<'a> {
             physical_load: load,
             scaled_rhs,
             permeability_scale,
+            grounded_circulation,
         })
     }
 }
@@ -311,4 +354,60 @@ pub(super) fn validate_affine_geometry(
         }
     }
     Ok(())
+}
+
+/// Circulation of the prescribed tangential potential along every grounded edge, in the
+/// edge's canonical orientation; edges shared by faces with different values are rejected.
+fn grounded_circulation(
+    projection: &AnalysisProjection,
+    edge_space: &TetrahedralEdgeSpace,
+    edge_row: &[Option<usize>],
+    prescribed: &[(runmat_meshing_core::StableDigest, [f64; 3])],
+) -> Result<Vec<f64>, MagnetostaticError> {
+    let mut circulation = vec![0.0; edge_space.edges().len()];
+    if prescribed.is_empty() {
+        return Ok(circulation);
+    }
+    let index_of: BTreeMap<[usize; 2], usize> = edge_space
+        .edges()
+        .iter()
+        .enumerate()
+        .map(|(index, edge)| {
+            let [a, b] = edge.node_indices;
+            ([a.min(b), a.max(b)], index)
+        })
+        .collect();
+    let values: BTreeMap<_, _> = prescribed.iter().copied().collect();
+    let mut assigned = vec![false; circulation.len()];
+    for face in &projection.boundary_faces {
+        let Some(potential) = values.get(&face.stable_identity) else {
+            continue;
+        };
+        let corners = &face.node_indices[..3];
+        for [a, b] in [[0, 1], [0, 2], [1, 2]] {
+            let (u, v) = (corners[a].min(corners[b]), corners[a].max(corners[b]));
+            let edge = *index_of.get(&[u, v]).ok_or_else(|| {
+                MagnetostaticError::Topology("prescribed face edge absent from edge space".into())
+            })?;
+            if edge_row[edge].is_some() {
+                return Err(MagnetostaticError::Topology(
+                    "a prescribed vector potential edge is not grounded".into(),
+                ));
+            }
+            let [start, end] = edge_space.edges()[edge].node_indices;
+            let (p, q) = (
+                projection.nodes[start].coordinates_m,
+                projection.nodes[end].coordinates_m,
+            );
+            let value: f64 = (0..3).map(|axis| potential[axis] * (q[axis] - p[axis])).sum();
+            if assigned[edge] && (circulation[edge] - value).abs() > 1e-12 * value.abs().max(1e-30) {
+                return Err(MagnetostaticError::InvalidInput(
+                    "faces sharing an edge prescribe different vector potentials".into(),
+                ));
+            }
+            circulation[edge] = value;
+            assigned[edge] = true;
+        }
+    }
+    Ok(circulation)
 }

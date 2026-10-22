@@ -141,6 +141,8 @@ For steady current flow with temperature-dependent conductivity, use an
 - `electric_charge_density` is a volume charge for electrostatics.
 - `magnetic_volume_current_density` is an impressed current density in a body (magnetostatics and
   harmonic fields).
+- `magnetic_vector_potential` holds exterior faces at a known tangential vector potential
+  (magnetostatics), for example an imposed external field; those faces count as grounded.
 
 Use direct `load` syntax for constant data and `signal` plus `excitation` for frequency- or
 time-dependent data.
