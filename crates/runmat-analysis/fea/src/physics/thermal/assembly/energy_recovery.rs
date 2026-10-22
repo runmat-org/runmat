@@ -32,12 +32,27 @@ impl ThermalOperatorAssembly {
         let mut storage_absolute = PowerSum::default();
         let mut applied_absolute = PowerSum::default();
         let mut nodal_reaction = vec![0.0; storage_rate.len()];
+        // Prescribed nodes carry the external reactions. Tie, periodic and jump relations add
+        // equal and opposite internal reactions at their secondary and primary nodes (the
+        // interpolation weights sum to one), so including those nodes leaves the total external
+        // reaction unchanged while every nodal residual stays accounted for.
+        let mut reacting = self
+            .prescribed_temperature_k
+            .iter()
+            .map(Option::is_some)
+            .collect::<Vec<_>>();
+        for relation in &self.relations {
+            reacting[relation.secondary] = true;
+            for &(node, _) in &relation.primaries {
+                reacting[node] = true;
+            }
+        }
         for (node, &power) in storage_rate.iter().enumerate() {
             storage.add(power);
             storage_absolute.add(power.abs());
             applied.add(self.applied_source[node]);
             applied_absolute.add(self.applied_source[node].abs());
-            if self.prescribed_temperature_k[node].is_some() {
+            if reacting[node] {
                 nodal_reaction[node] = self.applied_source[node] - power;
             }
         }
@@ -50,7 +65,7 @@ impl ThermalOperatorAssembly {
             if element
                 .node_indices
                 .iter()
-                .all(|&node| self.prescribed_temperature_k[node].is_none())
+                .all(|&node| !reacting[node])
             {
                 continue;
             }
@@ -58,8 +73,8 @@ impl ThermalOperatorAssembly {
                 .visit_element_quadrature(element, |point| {
                     for (i, &left) in element.node_indices.iter().enumerate() {
                         for (j, &right) in element.node_indices.iter().enumerate().skip(i + 1) {
-                            let left_prescribed = self.prescribed_temperature_k[left].is_some();
-                            let right_prescribed = self.prescribed_temperature_k[right].is_some();
+                            let left_prescribed = reacting[left];
+                            let right_prescribed = reacting[right];
                             if !left_prescribed && !right_prescribed {
                                 continue;
                             }
@@ -118,7 +133,7 @@ impl ThermalOperatorAssembly {
                         boundary_loss.add(power);
                         boundary_absolute.add(power.abs());
                         for (&node, &shape) in face.node_indices.iter().zip(point.shape_values()) {
-                            if self.prescribed_temperature_k[node].is_some() {
+                            if reacting[node] {
                                 nodal_reaction[node] -= shape * power;
                             }
                         }
@@ -140,7 +155,7 @@ impl ThermalOperatorAssembly {
                     boundary_loss.add(form.outward_power_w);
                     boundary_absolute.add(form.absolute_transfer_w);
                     for (local, &node) in face.node_indices.iter().enumerate() {
-                        if self.prescribed_temperature_k[node].is_some() {
+                        if reacting[node] {
                             nodal_reaction[node] -= form.outward_nodal_power_w[local];
                         }
                     }

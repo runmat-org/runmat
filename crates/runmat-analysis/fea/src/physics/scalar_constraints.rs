@@ -105,14 +105,47 @@ pub(crate) fn relations(
     Ok(relations.into_values().collect())
 }
 
+/// The same relations for an increment u = x - x_ref: each offset absorbs the reference
+/// difference between the secondary node and its primaries.
+pub(crate) fn about_reference(
+    relations: &[ScalarNodeRelation],
+    reference: &[f64],
+) -> Vec<ScalarNodeRelation> {
+    relations
+        .iter()
+        .map(|relation| ScalarNodeRelation {
+            offset: relation.offset
+                + relation
+                    .primaries
+                    .iter()
+                    .map(|&(node, weight)| weight * reference[node])
+                    .sum::<f64>()
+                - reference[relation.secondary],
+            ..relation.clone()
+        })
+        .collect()
+}
+
+/// A reduced solve: the full nodal vector and the shared solver's account of it.
+pub(crate) struct ScalarSolve {
+    pub solution: Vec<f64>,
+    /// Relative residual of the reduced system.
+    pub relative_residual: f64,
+    pub iterations: u32,
+    pub method: crate::contracts::SolverMethod,
+    pub preconditioner: crate::contracts::SolverPreconditioner,
+}
+
 /// Solve K u = b on the unknown nodes with `known` values fixed and the relations eliminated.
-/// Returns the full nodal vector and the relative residual of the reduced system.
+/// K is symmetric positive (semi)definite and the reduction K_r = T^T K T keeps it so; the
+/// shared SPD solver chooses sparse Cholesky or preconditioned conjugate gradients by size.
 pub(crate) fn solve(
     stiffness: &RealSparseMatrix,
     rhs: &[f64],
     known: &[Option<f64>],
     relations: &[ScalarNodeRelation],
-) -> Result<(Vec<f64>, f64), String> {
+    relative_tolerance: f64,
+) -> Result<ScalarSolve, String> {
     let count = known.len();
     let by_secondary: BTreeMap<_, _> = relations.iter().map(|r| (r.secondary, r)).collect();
     let mut column = vec![usize::MAX; count];
@@ -146,7 +179,7 @@ pub(crate) fn solve(
     let offsets = pattern.row_offsets();
     let columns = pattern.column_indices();
     let values = stiffness.values();
-    let mut entries = Vec::new();
+    let mut rows = vec![BTreeMap::<usize, f64>::new(); unknowns];
     let mut reduced_rhs = vec![0.0; unknowns];
     for row in 0..count {
         if known[row].is_some() {
@@ -162,19 +195,84 @@ pub(crate) fn solve(
             let (col_terms, constant) = &expansions[col];
             for &(r, wr) in row_terms {
                 for &(c, wc) in col_terms {
-                    entries.push((r, c, wr * value * wc));
+                    *rows[r].entry(c).or_insert(0.0) += wr * value * wc;
                 }
                 reduced_rhs[r] -= wr * value * constant;
             }
         }
     }
-    let solved = crate::solve::sparse_direct::solve_real(unknowns, &entries, &reduced_rhs)
-        .map_err(|error| error.to_string())?;
+    let mut row_offsets = Vec::with_capacity(unknowns + 1);
+    let mut column_indices = Vec::new();
+    let mut reduced_values = Vec::new();
+    row_offsets.push(0u64);
+    for row in rows {
+        for (c, v) in row {
+            column_indices.push(c as u64);
+            reduced_values.push(v);
+        }
+        row_offsets.push(column_indices.len() as u64);
+    }
+    let nnz = reduced_values.len();
+    let reduced = RealSparseMatrix::try_new(
+        crate::algebra::SparsePattern::try_new(
+            unknowns as u64,
+            unknowns as u64,
+            row_offsets,
+            column_indices,
+        )
+        .map_err(|error| format!("reduced pattern: {error:?}"))?,
+        reduced_values,
+        crate::algebra::OperatorRole::Stiffness,
+        crate::algebra::MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+        Vec::new(),
+    )
+    .map_err(|error| format!("reduced operator: {error:?}"))?;
+    use crate::solve::shared_sparse;
+    let strategy = shared_sparse::resolve_spd_strategy(
+        crate::solve::preconditioner::SpdPreconditionerKind::Auto,
+        unknowns,
+        nnz,
+        1,
+        false,
+    );
+    let outcome = shared_sparse::solve_spd(shared_sparse::SpdSolveRequest {
+        matrix: &reduced,
+        rhs: &reduced_rhs,
+        initial_guess: None,
+        relative_tolerance,
+        plan: shared_sparse::ambient_plan(),
+        strategy,
+        block_size: 1,
+        factor: None,
+    });
+    if let Some(failure) = outcome.failure {
+        return Err(failure);
+    }
+    if outcome.cancelled {
+        return Err("reduced scalar solve cancelled".into());
+    }
+    let relative_residual = if outcome.reference_norm > 0.0 {
+        outcome.residual_norm / outcome.reference_norm
+    } else {
+        outcome.residual_norm
+    };
+    if !outcome.converged {
+        return Err(format!(
+            "reduced scalar solve did not reach tolerance {relative_tolerance}: relative residual {relative_residual}"
+        ));
+    }
     let solution = (0..count)
         .map(|node| {
             let (terms, constant) = &expansions[node];
-            constant + terms.iter().map(|&(c, w)| w * solved.solution[c]).sum::<f64>()
+            constant + terms.iter().map(|&(c, w)| w * outcome.solution[c]).sum::<f64>()
         })
         .collect();
-    Ok((solution, solved.relative_residual))
+    let (method, preconditioner) = strategy.provenance();
+    Ok(ScalarSolve {
+        solution,
+        relative_residual,
+        iterations: outcome.iterations,
+        method,
+        preconditioner,
+    })
 }

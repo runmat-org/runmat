@@ -144,31 +144,23 @@ pub(super) fn solve(
         if let Some(operator) = reduced_operator {
         // Periodic relations: eliminate the secondary nodes and solve the reduced system.
         // Relations hold absolute potentials; in increments they gain the reference shift.
-        let relations: Vec<_> = assembly
-            .relations
-            .iter()
-            .map(|relation| {
-                let shift = relation
-                    .primaries
-                    .iter()
-                    .map(|&(node, weight)| weight * reference[node])
-                    .sum::<f64>()
-                    - reference[relation.secondary];
-                crate::physics::scalar_constraints::ScalarNodeRelation {
-                    offset: relation.offset + shift,
-                    ..relation.clone()
-                }
-            })
-            .collect();
+        let relations =
+            crate::physics::scalar_constraints::about_reference(&assembly.relations, &reference);
         let known: Vec<Option<f64>> = assembly
             .prescribed
             .iter()
             .zip(&reference)
             .map(|(value, reference)| value.map(|value| value - reference))
             .collect();
-        let (solution, relative_residual) =
-            crate::physics::scalar_constraints::solve(&operator, &rhs, &known, &relations)
-                .map_err(ElectricalStaticError::Operator)?;
+        let reduced = crate::physics::scalar_constraints::solve(
+            &operator,
+            &rhs,
+            &known,
+            &relations,
+            residual_target,
+        )
+        .map_err(ElectricalStaticError::Operator)?;
+        let (solution, relative_residual) = (reduced.solution, reduced.relative_residual);
         if !relative_residual.is_finite() || relative_residual > residual_target {
             return Err(ElectricalStaticError::Operator(
                 "electrical relative residual target not satisfied".into(),
@@ -178,7 +170,7 @@ pub(super) fn solve(
         drop(proof);
         drop(operators);
         let rhs_norm = rhs.iter().map(|v| v * v).sum::<f64>().sqrt();
-        (solution, relative_residual * rhs_norm, relative_residual, 1)
+        (solution, relative_residual * rhs_norm, relative_residual, reduced.iterations)
     } else {
     let system = AssembledRealSystem::try_new_with_nullspace_evidence(
             operators,

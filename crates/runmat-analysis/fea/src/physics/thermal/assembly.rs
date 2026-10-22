@@ -14,10 +14,12 @@ use crate::{
         RealSparseMatrix,
     },
     excitation::{
-        sample_prescribed_heat_flux, sample_prescribed_temperature, ExcitationSamplePoint,
+        sample_prescribed_heat_flux, sample_prescribed_temperature,
+        sample_prescribed_temperature_difference, ExcitationSamplePoint,
         RealizedExcitationKind, RealizedExcitationTarget, RealizedExcitations,
         ScalarProjectionAccumulator, SpatialIntegrationRule, SpatialProjectionEvidence,
     },
+    physics::scalar_constraints::{self, ScalarNodeRelation, ScalarPairing},
     topology::{AnalysisProjection, ProjectedElement},
 };
 
@@ -48,6 +50,8 @@ pub(crate) struct ThermalOperatorAssembly {
     pub applied_source: Vec<f64>,
     pub source_evidence: Vec<SpatialProjectionEvidence>,
     pub prescribed_temperature_k: Vec<Option<f64>>,
+    /// Tie, periodic and affine-jump relations: each secondary node follows its primaries.
+    pub relations: Vec<ScalarNodeRelation>,
     pub positive_robin_weight: Vec<f64>,
     pub element_conductivity_w_per_mk: Vec<f64>,
     pub element_volumetric_capacity_j_per_m3k: Vec<f64>,
@@ -344,12 +348,58 @@ pub(crate) fn assemble(
     let mut prescribed_temperature_k =
         temperature_field::prescribed_temperatures(&projection, excitations)?;
     let mut positive_robin_weight = vec![0.0; projection.nodes.len()];
+    let identity = runmat_analysis_core::PeriodicTransform::Identity;
+    let mut pairings = Vec::new();
     for constraint in &model.constraints {
         let AnalysisConstraint::Thermal(constraint) = constraint else {
             continue;
         };
-        let ThermalConstraintKind::Prescribed { target, value } = &constraint.kind else {
-            continue;
+        let (target, value) = match &constraint.kind {
+            ThermalConstraintKind::Prescribed { target, value } => (target, value),
+            ThermalConstraintKind::Tie(pair) => {
+                pairings.push(ScalarPairing {
+                    constraint_id: &constraint.constraint_id,
+                    pair,
+                    transform: &identity,
+                    offset: 0.0,
+                });
+                continue;
+            }
+            ThermalConstraintKind::Periodic(periodic) => {
+                pairings.push(ScalarPairing {
+                    constraint_id: &constraint.constraint_id,
+                    pair: &periodic.pair,
+                    transform: &periodic.transform,
+                    offset: 0.0,
+                });
+                continue;
+            }
+            ThermalConstraintKind::AffineJump {
+                periodic,
+                temperature_jump,
+            } => {
+                let jump = sample_prescribed_temperature_difference(
+                    temperature_jump,
+                    &model.signals,
+                    sample,
+                )
+                .map_err(|error| ThermalAssemblyError::SignalRealization {
+                    operator_id: constraint.constraint_id.clone(),
+                    message: error.to_string(),
+                })?;
+                if jump.imaginary != 0.0 || !jump.real.is_finite() {
+                    return Err(ThermalAssemblyError::ComplexBoundary {
+                        operator_id: constraint.constraint_id.clone(),
+                    });
+                }
+                pairings.push(ScalarPairing {
+                    constraint_id: &constraint.constraint_id,
+                    pair: &periodic.pair,
+                    transform: &periodic.transform,
+                    offset: jump.real,
+                });
+                continue;
+            }
         };
         let temperature =
             sample_prescribed_temperature(value, &model.signals, sample).map_err(|error| {
@@ -381,6 +431,17 @@ pub(crate) fn assemble(
                 prescribed_temperature_k[node_index] = Some(temperature.real);
             }
         }
+    }
+
+    let relations = scalar_constraints::relations(mesh, &projection, &pairings)
+        .map_err(ThermalAssemblyError::InvalidProjection)?;
+    if let Some(relation) = relations.iter().find(|relation| {
+        prescribed_temperature_k[relation.secondary].is_some()
+    }) {
+        return Err(ThermalAssemblyError::InvalidProjection(format!(
+            "solver node {} is both prescribed and the secondary of a tie, periodic or jump relation",
+            projection.nodes[relation.secondary].node_id
+        )));
     }
 
     for boundary in &model.boundaries {
@@ -510,6 +571,7 @@ pub(crate) fn assemble(
         applied_source,
         source_evidence,
         prescribed_temperature_k,
+        relations,
         positive_robin_weight,
         element_conductivity_w_per_mk,
         element_volumetric_capacity_j_per_m3k,
