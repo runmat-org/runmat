@@ -12,6 +12,8 @@ pub struct ElectricalStaticResourceDemand {
     /// Additive requested-heap estimate, including the shared bounded coercivity proof.
     pub numerical_reservation_bytes: ByteCount,
     pub solver_admission: SolverAdmissionResourcePolicy,
+    /// The planned solve: sparse Cholesky when true, AMG-preconditioned CG otherwise.
+    pub direct_solve: bool,
     pub inputs: PreparedInputResourceFacts,
     pub result_output: PreparedOutputResourceFacts,
     pub receipt_output: PreparedOutputResourceFacts,
