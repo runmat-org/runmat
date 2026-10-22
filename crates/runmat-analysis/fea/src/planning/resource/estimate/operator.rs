@@ -74,8 +74,9 @@ pub(super) fn build_operator_resource_plan_with_persistent_storage(
         _ => None,
     };
     let (catalog_construction, catalog_transport) = if let Some(output) = catalog {
+        // The catalog is encoded directly, as every published output.
         let materialization =
-            runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(
+            runmat_canonical_codec::projected_canonical_encoding_resident_bytes_estimate(
                 output.encoded_payload_bytes_upper_bound.0,
                 1,
             )

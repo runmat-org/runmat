@@ -157,6 +157,12 @@ fn thermal_volume_and_flux_evidence_match_inventory_and_resident_ceiling() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
         let mesh = canonical_tetrahedron_solver_mesh(order);
         let mut workload = workload();
+        // An authored ceiling with the same canonical integer width as the values set below, so the
+        // workload encoding (and the requirement derived from it) does not change with the value.
+        workload.model.sequence.steps[0]
+            .accuracy
+            .resources
+            .maximum_resident_bytes = u64::from(u32::MAX);
         let projection = crate::topology::AnalysisProjection::derive(&mesh).unwrap();
         let mut flux = workload.model.excitations[0].excitation().clone();
         flux.excitation_id = ExcitationId("flux".into());

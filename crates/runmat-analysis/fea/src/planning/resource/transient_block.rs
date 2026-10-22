@@ -165,7 +165,7 @@ pub fn build_structural_transient_block_resource_plan(
             encoded_payload_bytes: ByteCount(encoded_inputs),
             transport_closure_bytes: ByteCount(encoded_inputs),
             decoded_resident_bytes_admission_budget: ByteCount(
-                runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(encoded_inputs, 3)
+                runmat_canonical_codec::projected_canonical_typed_decode_resident_bytes_estimate(encoded_inputs, 3)
                     .ok_or(ResourcePlanningError::Overflow("transient decoded inputs"))?,
             ),
         },

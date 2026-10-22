@@ -36,6 +36,20 @@ pub fn projected_canonical_encoding_resident_bytes_estimate(
     )
 }
 
+/// Resident estimate for directly decoding canonical payloads of at most `encoded_bytes` into
+/// typed values, before the bytes exist. Each scalar occupies at least one encoded byte and at
+/// most eight typed bytes; each array or string header occupies at least one encoded byte and
+/// one 24-byte collection header; maps decode into inline structs. The validated bytes stay
+/// resident alongside, plus the fixed per-contract allowance.
+pub fn projected_canonical_typed_decode_resident_bytes_estimate(
+    encoded_bytes: u64,
+    contract_count: u64,
+) -> Option<u64> {
+    encoded_bytes.checked_mul(25)?.checked_add(
+        contract_count.checked_mul(CANONICAL_MATERIALIZATION_FIXED_BYTES_PER_CONTRACT)?,
+    )
+}
+
 /// Profiles an existing canonical payload without allocating its value tree, then estimates the
 /// peak of canonical verification plus typed materialization. The estimate counts actual value
 /// nodes, map entries, and string bytes instead of multiplying numeric-array payloads by a generic
@@ -86,7 +100,7 @@ pub fn canonical_chunked_payload_typed_resident_bytes_estimate<'a>(
         })
 }
 
-fn typed_resident_bytes_estimate(
+pub(crate) fn typed_resident_bytes_estimate(
     profile: value::MaterializationProfile,
 ) -> Result<u64, CanonicalCodecError> {
     let overflow = || CanonicalCodecError::resource_limit("typed decode estimate", "byte count overflow");

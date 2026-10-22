@@ -308,6 +308,11 @@ fn deferred_primary_fields_do_not_reserve_unexecuted_dynamic_histories() {
         .accuracy
         .resources
         .maximum_samples = 1_000_000;
+    // An authored memory ceiling: the default is unbounded (machine capacity applies at placement).
+    input.model.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes = 8 << 30;
     for request in &mut input.model.sequence.steps[0].observations {
         if let runmat_analysis_core::ObservationRequest::History(spec) = request {
             spec.sampling = runmat_analysis_core::SamplingPolicy::EveryAcceptedIncrement;

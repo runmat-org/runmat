@@ -45,8 +45,8 @@ study bracket_static {
     output von_mises = analysis.static.field.element.von_mises_stress
     // The clamped countersink edges are stress singularities, so no body-wide stress peak is
     // reported. The corner fillets lie away from the supports and converge under refinement.
-    output fillet_stress = mean(analysis.static.field.node.von_mises_stress, over = geometry.bracket.region.corner_fillets)
-    output fillet_peak_stress = max(analysis.static.field.node.von_mises_stress, over = geometry.bracket.region.corner_fillets)
+    output fillet_stress = mean(analysis.static.field.element.von_mises_stress, over = geometry.bracket.region.corner_fillets)
+    output fillet_peak_stress = max(analysis.static.field.element.von_mises_stress, over = geometry.bracket.region.corner_fillets)
     output support_reaction = resultant(analysis.static.field.node.reaction_force, over = geometry.bracket.region.mounting_holes)
     output peak_displacement = max(magnitude(analysis.static.field.node.displacement), over = geometry.bracket.region.body)
 }

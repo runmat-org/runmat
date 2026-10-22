@@ -226,7 +226,13 @@ fn transient_block_checks_scope_residency_before_its_initial_assembly() {
 
 #[test]
 fn transient_block_rejects_its_own_memory_ceiling_before_initial_assembly() {
-    let (workload, mesh) = direct_scope_case();
+    let (mut workload, mesh) = direct_scope_case();
+    // An authored ceiling with the same canonical integer width as the value set below, so the
+    // workload encoding (and the plan derived from it) does not change with the value.
+    workload.model.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes = u64::from(u32::MAX);
     let scope = prepare_transient_checkpoint_scope(&workload, &mesh, None).unwrap();
     let request = crate::execution::StructuralTransientBlockRequest::new(scope, None, 2).unwrap();
     let block_plan = crate::planning::resource::build_structural_transient_block_resource_plan(
@@ -247,11 +253,15 @@ fn transient_block_rejects_its_own_memory_ceiling_before_initial_assembly() {
         .accuracy
         .resources
         .maximum_resident_bytes = block_plan.request.memory_bytes - 1;
+    // The authored ceiling is part of the workload, so the constrained block has its own scope.
+    let constrained_scope = prepare_transient_checkpoint_scope(&constrained, &mesh, None).unwrap();
+    let constrained_request =
+        crate::execution::StructuralTransientBlockRequest::new(constrained_scope, None, 2).unwrap();
     let error = crate::planning::resource::build_structural_transient_block_resource_plan(
         &constrained,
         &mesh,
         None,
-        &request,
+        &constrained_request,
         None,
         None,
         None,

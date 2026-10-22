@@ -218,7 +218,7 @@ pub(crate) fn build_structural_transient_scope_resource_plan(
         .unwrap_or(0);
     let encoded_inputs = add(input_bytes, modal_input_bytes, "scope encoded inputs")?;
     let decoded_inputs =
-        runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(
+        runmat_canonical_codec::projected_canonical_typed_decode_resident_bytes_estimate(
             encoded_inputs,
             3,
         )
@@ -254,7 +254,7 @@ pub(crate) fn build_structural_transient_scope_resource_plan(
         "transient scope output closure",
     )?;
     let scope_construction_bytes =
-        runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(
+        runmat_canonical_codec::projected_canonical_encoding_resident_bytes_estimate(
             scope_payload_bytes,
             1,
         )
