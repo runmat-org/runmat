@@ -157,6 +157,11 @@ pub fn solve_canonical_modal(
     let properties = crate::properties::compile_solid_property_map(model, mesh)
         .map_err(|error| AcousticHarmonicError::Material(error.to_string()))?;
     let assembly = AcousticAssembly::assemble(projection, &properties, 0.0)?;
+    if assembly.lossy {
+        return Err(AcousticHarmonicError::Unsupported(
+            "material loss in cavity modes (damped modes are complex)".into(),
+        ));
+    }
     let mut released = vec![false; assembly.projection.nodes.len()];
     for constraint in &model.constraints {
         if !step.object_is_active(&StepObjectRef::Constraint(

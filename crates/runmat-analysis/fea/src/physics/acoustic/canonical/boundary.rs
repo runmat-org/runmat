@@ -311,7 +311,12 @@ impl AcousticAssembly {
                 }
             }
         }
-        self.impedance = finish(impedance)?;
+        self.impedance = crate::algebra::RealSparseMatrix::scaled_sum(
+            &[(1.0, &self.volume_admittance), (1.0, &finish(impedance)?)],
+            OperatorRole::Damping,
+            crate::algebra::MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+        )
+        .map_err(|e| AcousticHarmonicError::Operator(e.to_string()))?;
         let boundary_stiffness = finish(boundary_stiffness)?;
         self.stiffness = crate::algebra::RealSparseMatrix::scaled_sum(
             &[(1.0, &self.volume_stiffness), (1.0, &boundary_stiffness)],

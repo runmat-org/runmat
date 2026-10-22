@@ -301,7 +301,7 @@ fn canonical_acoustics_rejects_invalid_frequency_and_material_attenuation() {
         ),
         Err(AcousticHarmonicError::InvalidInput(_))
     ));
-    model.materials[0].acoustic.as_mut().unwrap().damping_ratio = 0.01;
+    model.materials[0].acoustic.as_mut().unwrap().damping_ratio = 1.5;
     assert!(matches!(
         solve_canonical_harmonic(
             &model,
@@ -311,8 +311,85 @@ fn canonical_acoustics_rejects_invalid_frequency_and_material_attenuation() {
             AcousticHarmonicPolicy::default(),
             1e-8,
         ),
-        Err(AcousticHarmonicError::Unsupported(_))
+        Err(AcousticHarmonicError::Material(_))
     ));
+}
+
+/// Complex arithmetic for the closed-form damped standing wave.
+#[derive(Clone, Copy)]
+struct C(f64, f64);
+impl C {
+    fn mul(self, o: C) -> C {
+        C(self.0 * o.0 - self.1 * o.1, self.0 * o.1 + self.1 * o.0)
+    }
+    fn div(self, o: C) -> C {
+        let d = o.0 * o.0 + o.1 * o.1;
+        C((self.0 * o.0 + self.1 * o.1) / d, (self.1 * o.0 - self.0 * o.1) / d)
+    }
+    fn sqrt(self) -> C {
+        let r = self.0.hypot(self.1).sqrt();
+        let t = self.1.atan2(self.0) / 2.0;
+        C(r * t.cos(), r * t.sin())
+    }
+    fn cos(self) -> C {
+        C(self.0.cos() * self.1.cosh(), -self.0.sin() * self.1.sinh())
+    }
+}
+
+// witness: REG-ACOUS-009 (region damping as a complex bulk modulus)
+#[test]
+fn damped_duct_converges_to_the_complex_wavenumber_standing_wave_and_dissipates_its_input() {
+    // Loss factor η = 2ζ: c̃ = c√(1 + iη), k̃ = ω/c̃, p = cos(k̃(1 − x))/cos(k̃).
+    let (zeta, c, f) = (0.05, 2.0, 0.2);
+    let omega = std::f64::consts::TAU * f;
+    let k = C(omega, 0.0).div(C(c, 0.0).mul(C(1.0, 2.0 * zeta).sqrt()));
+    let mut errors = Vec::new();
+    for cells in [2, 4, 8] {
+        let mesh = slab_mesh(cells);
+        let mut model = model();
+        model.materials[0].acoustic.as_mut().unwrap().damping_ratio = zeta;
+        model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+        prescribe(&mut model, RegionTarget::boundary("slab_left"), 1.0);
+        model.boundaries.push(AnalysisBoundary {
+            boundary_id: "rigid".into(),
+            target: RegionTarget::boundary("slab_right"),
+            operator: BoundaryOperator::AcousticRigidWall,
+        });
+        let result = solve_canonical_harmonic(
+            &model,
+            &mesh,
+            "acoustic",
+            Frequency::new(f),
+            AcousticHarmonicPolicy {
+                relative_tolerance: 1e-11,
+                ..Default::default()
+            },
+            1e-8,
+        )
+        .unwrap();
+        let denominator = k.cos();
+        let error = (result
+            .projection
+            .nodes
+            .iter()
+            .zip(&result.pressure_pa)
+            .map(|(node, p)| {
+                let exact = k.mul(C(1.0 - node.coordinates_m[0], 0.0)).cos().div(denominator);
+                (p.real - exact.0).powi(2) + (p.imaginary - exact.1).powi(2)
+            })
+            .sum::<f64>()
+            / result.pressure_pa.len() as f64)
+            .sqrt();
+        errors.push(error);
+        // The driven end supplies exactly the power the lossy air dissipates.
+        assert!(result.mean_impedance_loss_w > 0.0);
+        assert!(result.power_relative_error < 1e-9);
+    }
+    assert!(
+        errors.windows(2).all(|pair| pair[0] / pair[1] > 3.0),
+        "{errors:?}"
+    );
+    assert!(errors[2] < 0.004, "{errors:?}");
 }
 
 #[test]
