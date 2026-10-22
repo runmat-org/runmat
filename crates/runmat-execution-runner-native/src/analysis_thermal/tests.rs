@@ -24,7 +24,7 @@ use runmat_analysis_fea::{
     ComputeBackend,
 };
 use runmat_execution::{
-    task::RetryPolicy, Digest, ExecutionScopeId, PoolId, ProgramEnvironment, ProgramRevision,
+    task::RetryPolicy, Digest, ExecutionScopeId, PoolId, ProgramRevision,
 };
 use runmat_execution_artifact::{
     cache::FilesystemObjectStore, ArtifactAccess, ProgramExecutionResponse,
@@ -126,10 +126,12 @@ fn preparation(order: ElementOrder, transient: bool) -> ThermalStudyPreparation 
             authorization_scope: "native-thermal-study-test".into(),
             encryption_context: digest,
         },
+        // The driver admits a task only on a worker whose runtime matches the program's
+        // environment, so the fixture program carries this build's actual environment.
         program_revision: ProgramRevision::new(
             digest,
             digest,
-            ProgramEnvironment::new(1, 1, digest, digest, "matlab").unwrap(),
+            runmat_core::program_environment(runmat_core::CompatMode::Matlab),
         )
         .unwrap(),
         output_policy: AnalysisOutputPolicy::new(limits.chunk_bytes, limits.inventory).unwrap(),
