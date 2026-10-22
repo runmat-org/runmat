@@ -86,6 +86,12 @@ const FEA_ACOUSTIC_TRANSIENT_001: Requirement = Requirement {
             TRANS,
         ),
         obligation(
+            "pressure_time_history_publication",
+            "An `acoustic transient` run publishes the complete ordered time history (time axis and one pressure snapshot per step including the initial state) as retained fields that are finite, bounded by the authored end time and readable cold, with the prescribed boundary carrying the authored pulse exactly.",
+            EvidenceKind::PublicationIntegrity,
+            TRANS,
+        ),
+        obligation(
             "energy_balance",
             "The transient energy balance (stored plus radiated plus dissipated minus supplied) closes to the declared tolerance, and time-step convergence is demonstrated.",
             EvidenceKind::PhysicalBalance,

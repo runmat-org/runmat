@@ -215,6 +215,24 @@ fn solve_line(line: &Line, frequency: f64, drive: Drive, cells: usize) -> Maxwel
     .unwrap()
 }
 
+// witness: FEA-EM-FREQUENCY-001/skin_effect_reference @
+//   harmonic_maxwell/edge_elements/numerical_kernel; coverage: partial;
+//   boundary: A current-driven conducting strip at t/delta of 0.5, 2 and 4 on 8, 16 and 32 cells:
+//   impedance converges to the closed-form skin-effect solution (error below 2e-3 and refinement
+//   ratio above 3). Strip impedance only; no round conductor and no current-density profile
+//   comparison.
+// witness: FEA-EM-FREQUENCY-001/ac_loss_power @ harmonic_maxwell/edge_elements/numerical_kernel;
+//   coverage: partial;
+//   boundary: On the strip, the Joule loss equals the delivered complex power within 1e-8 and the
+//   Poynting and charge-continuity residuals stay below 1e-8; no multi-body gear or inductor loss.
+// witness: FEA-EM-QUALIFICATION-001/references @ harmonic_maxwell/edge_elements/numerical_kernel;
+//   coverage: partial;
+//   boundary: Independent skin-effect closed form for strip impedance with convergence in mesh size
+//   at three frequencies.
+// witness: FEA-EM-MAXWELL-001/frequency @ harmonic_maxwell/edge_elements/numerical_kernel;
+//   coverage: partial;
+//   boundary: Three frequencies are solved with complex coefficients and each matches its closed
+//   form; composition of several frequencies in one study is not asserted.
 #[test]
 fn current_driven_strip_impedance_converges_to_the_skin_effect_solution() {
     let line = strip();
@@ -253,6 +271,10 @@ fn current_driven_strip_impedance_converges_to_the_skin_effect_solution() {
     }
 }
 
+// witness: FEA-EM-QUALIFICATION-001/references @ harmonic_maxwell/edge_elements/numerical_kernel;
+//   coverage: partial;
+//   boundary: A voltage-driven strip at 1 Hz matches the DC resistance and the low-frequency
+//   inductance.
 #[test]
 fn voltage_drive_and_low_frequency_limit_match_dc_resistance_and_inductance() {
     let line = strip();

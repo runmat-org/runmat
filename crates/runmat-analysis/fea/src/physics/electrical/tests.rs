@@ -440,6 +440,11 @@ fn missing_anchors_conflicts_unsupported_intent_and_invalid_material_fail_closed
     assert!(solve_canonical_static(&bad, &mesh, "potential", 1e-8).is_err());
 }
 
+// witness: FEA-EM-INPUTS-002/scalar_potential_inputs @
+//   electrostatic|electrical_conduction/tet4/numerical_kernel; coverage: partial;
+//   boundary: A terminal_voltage load holds its terminal like a prescribed potential for
+//   electrostatics and steady conduction on a two-cell Tet4 slab; terminal current, charge,
+//   equipotential and floating inputs are not covered.
 #[test]
 fn terminal_voltage_load_holds_its_terminal_like_a_prescribed_potential() {
     for equation in [
