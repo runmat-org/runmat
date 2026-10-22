@@ -463,11 +463,10 @@ fn shape_candidate_never_rewrites_a_sizing_validated_shared_curve() {
         )
         .unwrap()
     };
-    // Outside the curve segment's diametral disk the shape point is inserted. Inside it (and on
-    // the curve itself) it is withdrawn: it never splits the curve, and inserting it would leave
-    // a sliver against the curve.
+    // A shape point never splits the curve: inside its diametral disk it is inserted. Exactly on
+    // the curve it can be neither inserted nor used to split it, so it is withdrawn.
     assert_eq!(classify([0.0, 1.5]), ExactFaceCandidateDisposition::Insert);
-    assert_eq!(classify([0.0, 0.1]), ExactFaceCandidateDisposition::Withdraw);
+    assert_eq!(classify([0.0, 0.1]), ExactFaceCandidateDisposition::Insert);
     assert_eq!(classify([0.0, 0.0]), ExactFaceCandidateDisposition::Withdraw);
 }
 

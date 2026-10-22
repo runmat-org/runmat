@@ -128,12 +128,13 @@ pub(crate) fn classify_with_context(
                     // contract. Face-owned shape refinement may split chart cuts, but it must not
                     // repeatedly rewrite a global curve merely to improve a local triangle angle or
                     // aspect ratio. Geometric-deviation and metric-size candidates remain hard and
-                    // can request an exact-curve split. A shape point inside the curve segment's
-                    // diametral disk is therefore withdrawn rather than inserted: inserted, it makes
-                    // a sliver against the curve whose own repair point lies closer still, and the
-                    // cascade ends with points within roundoff of the curve.
-                    if metric_diametral_disk_contains(candidate.uv, first.uv, second.uv, *metric)
-                        .unwrap_or(true)
+                    // can request an exact-curve split. A shape point exactly on the curve (the
+                    // circumcenter of a right triangle on it) can be neither inserted nor used to
+                    // split the curve, so it is withdrawn; candidate selection keeps shape points
+                    // a minimum metric spacing away from shared curves.
+                    if runmat_meshing_core::predicate::orient2d([first.uv, second.uv, candidate.uv])
+                        .is_ok_and(|sign| sign == runmat_meshing_core::PredicateSign::Zero)
+                        && within_closed_bounds(candidate.uv, first.uv, second.uv)
                     {
                         withdraw = true;
                     }
@@ -220,3 +221,9 @@ pub(crate) fn classify_with_context(
     })
 }
 
+
+fn within_closed_bounds(point: [f64; 2], first: [f64; 2], second: [f64; 2]) -> bool {
+    (0..2).all(|axis| {
+        point[axis] >= first[axis].min(second[axis]) && point[axis] <= first[axis].max(second[axis])
+    })
+}

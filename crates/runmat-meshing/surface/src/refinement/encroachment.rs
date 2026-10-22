@@ -22,7 +22,7 @@ pub(crate) struct ExactFaceCandidateClassifications {
     pub protected_splits: Vec<ExactProtectedSegmentSplit>,
     pub chart_cut_splits: Vec<ExactChartCutSplit>,
     pub insertions: Vec<ExactFaceRefinementCandidate>,
-    /// Shape-only candidates encroaching a shared exact curve; see `ExactFaceCandidateDisposition`.
+    /// Shape-only candidates lying on a shared exact curve; see `ExactFaceCandidateDisposition`.
     pub withdrawn: usize,
 }
 
