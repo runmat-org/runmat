@@ -1,6 +1,6 @@
 # FEA-SHARED-OWNERSHIP-001: Domain boundaries and shared platform interoperability
 
-0 PASS, 0 PARTIAL, 0 FAIL, 44 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 PARTIAL, 2 FAIL, 42 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## domain_ownership
 
@@ -17,7 +17,7 @@ Evidence kind: SemanticRealization. Criterion: Do not add god files. A module th
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | source_check | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | source_check | FAIL | `runmat-analysis-qualification[test:release_checks]::architecture_boundary_check_passes` (crates/runmat-analysis/qualification/tests/release_checks.rs:36) - scripts/development/check-architecture-boundaries.mjs passes: dependency direction, forbidden imports and module-size debt ceilings; it does not review code qua... |
 | shared_infrastructure | canonical_mixed_topology | release_pipeline | OPEN |  |
 
 ## numerical_truth
@@ -35,7 +35,7 @@ Evidence kind: SemanticRealization. Criterion: Keep analysis identity and numeri
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | source_check | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | source_check | FAIL | `runmat-analysis-qualification[test:release_checks]::architecture_boundary_check_enforces_dependency_edges` (crates/runmat-analysis/qualification/tests/release_checks.rs:49) - The same architecture script enforces the dependency edges between the analysis crates and the shared platform; the full edge list in the obligation is not comp... |
 | shared_infrastructure | canonical_mixed_topology | release_pipeline | OPEN |  |
 
 ## shared_dependency_graph

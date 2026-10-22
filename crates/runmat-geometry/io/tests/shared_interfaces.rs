@@ -173,6 +173,11 @@ fn face_names_on_a_cavity_shell_are_read() {
     assert_eq!(named(&imported, PersistentEntityKind::Solid, "Insulator").len(), 1);
 }
 
+// witness: FEA-MESH-GEOMETRY-001/multibody_assembly_import @
+//   shared_infrastructure/mesh_independent/source_check; features: occt-native; coverage:
+//   partial;
+//   boundary: Imprinted coincident faces of an assembly become one shared face with one source
+//   ordinal.
 #[test]
 fn imprinted_coincident_faces_become_one_shared_face_with_one_source_ordinal() {
     for shared in [false, true] {
