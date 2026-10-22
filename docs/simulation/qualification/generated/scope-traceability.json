@@ -494,17 +494,17 @@
     },
     {
       "capability": "Acoustic harmonic outputs (pressure, level) and declared peak",
-      "cells": 5,
+      "cells": 6,
       "fail": 0,
       "id": "SIM-34",
       "maps": [
         "FEA-ACOUSTIC-OUTPUTS-001/sound_pressure_level",
         "FEA-PUBLIC-LANGUAGE-001/output_expression_forms"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:75",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -623,7 +623,7 @@
         "FEA-ACOUSTIC-BOUNDARY-002/*",
         "FEA-ACOUSTIC-COUPLING-001/*"
       ],
-      "partial": 3,
+      "partial": 7,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:83",
       "status": "fail",
@@ -778,7 +778,7 @@
         "FEA-ACOUSTIC-BOUNDARY-002/*",
         "FEA-ACOUSTIC-COUPLING-001/*"
       ],
-      "partial": 3,
+      "partial": 7,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:20",
       "status": "fail",
@@ -963,8 +963,8 @@
     },
     {
       "capability": "Versioned mesh performance and resource SLO with current reports",
-      "cells": 1,
-      "fail": 0,
+      "cells": 2,
+      "fail": 1,
       "id": "REG-MESH-011",
       "maps": [
         "FEA-MESH-EXECUTION-001/performance_slo_and_governance"
@@ -972,13 +972,13 @@
       "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:139",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
       "capability": "Meshing governance validators and release-evidence wiring stay green",
-      "cells": 1,
-      "fail": 0,
+      "cells": 2,
+      "fail": 1,
       "id": "REG-MESH-012",
       "maps": [
         "FEA-MESH-EXECUTION-001/performance_slo_and_governance"
@@ -986,7 +986,7 @@
       "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:140",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -1747,10 +1747,10 @@
       "maps": [
         "FEA-ACOUSTIC-BOUNDARY-002/complex_frequency_dependent_impedance"
       ],
-      "partial": 0,
+      "partial": 2,
       "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:52",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -1775,10 +1775,10 @@
       "maps": [
         "FEA-ACOUSTIC-OUTPUTS-001/intensity_and_sound_power"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:54",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -1803,10 +1803,10 @@
       "maps": [
         "FEA-ACOUSTIC-BOUNDARY-002/region_damping"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:56",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -2165,7 +2165,7 @@
     {
       "capability": "Declarative .fea language, imports, composition and one compiler authority",
       "cells": 140,
-      "fail": 3,
+      "fail": 4,
       "id": "PLAN-LANG",
       "maps": [
         "FEA-AUTHORING-LANGUAGE-002/*",
@@ -2197,7 +2197,7 @@
     {
       "capability": "Domain ownership, code quality and numerical truth rules",
       "cells": 46,
-      "fail": 0,
+      "fail": 2,
       "id": "PLAN-OWN",
       "maps": [
         "FEA-SHARED-OWNERSHIP-001/*",
@@ -2206,7 +2206,7 @@
       "partial": 0,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:90",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -2311,31 +2311,31 @@
     {
       "capability": "Typed observations, outputs and monitors",
       "cells": 61,
-      "fail": 1,
+      "fail": 0,
       "id": "PLAN-OBS",
       "maps": [
         "FEA-SHARED-OBSERVATIONS-001/*",
         "FEA-AUTHORING-OUTPUT-002/*"
       ],
-      "partial": 10,
+      "partial": 11,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2107",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
       "capability": "Placement-independent studies and scheduling",
       "cells": 160,
-      "fail": 1,
+      "fail": 0,
       "id": "PLAN-STUDY",
       "maps": [
         "FEA-SHARED-EXECUTION-001/*",
         "FEA-SHARED-IDENTITY-001/*"
       ],
-      "partial": 7,
+      "partial": 8,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2202",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -2532,7 +2532,7 @@
         "FEA-EM-MAXWELL-001/*",
         "FEA-EM-QUALIFICATION-001/*"
       ],
-      "partial": 28,
+      "partial": 29,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2693",
       "status": "tied",
@@ -2652,17 +2652,17 @@
     {
       "capability": "Shared-memory, distributed assembly and solve",
       "cells": 190,
-      "fail": 1,
+      "fail": 0,
       "id": "PLAN-PARALLEL",
       "maps": [
         "FEA-SHARED-EXECUTION-001/*",
         "FEA-SCALE-PARALLEL-001/parallel_assembly_and_recovery",
         "FEA-SCALE-DISTRIBUTED-001/domain_decomposition"
       ],
-      "partial": 5,
+      "partial": 6,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2807",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -2697,7 +2697,7 @@
     {
       "capability": "Blocking attested evidence in the existing release graph",
       "cells": 6,
-      "fail": 0,
+      "fail": 1,
       "id": "PLAN-CI",
       "maps": [
         "FEA-RELEASE-CI-001/*"
@@ -2705,7 +2705,7 @@
       "partial": 0,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2881",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -3337,8 +3337,8 @@
     },
     {
       "capability": "Corpus, conformance, differential, reliability and integration catalogs",
-      "cells": 4,
-      "fail": 1,
+      "cells": 5,
+      "fail": 2,
       "id": "MESH-CATALOGS",
       "maps": [
         "FEA-MESH-EXECUTION-001/performance_slo_and_governance",
@@ -3804,17 +3804,17 @@
     },
     {
       "capability": "Authored acoustic outputs published from runs",
-      "cells": 21,
+      "cells": 22,
       "fail": 0,
       "id": "AC-T2-OUTPUTS",
       "maps": [
         "FEA-ACOUSTIC-OUTPUTS-001/*",
         "FEA-PUBLIC-LANGUAGE-001/output_expression_forms"
       ],
-      "partial": 0,
+      "partial": 2,
       "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:24",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -3888,10 +3888,10 @@
         "FEA-ACOUSTIC-BOUNDARY-002/spherical_radiation",
         "FEA-ACOUSTIC-OUTPUTS-001/intensity_and_sound_power"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:64",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -3904,10 +3904,10 @@
         "FEA-ACOUSTIC-BOUNDARY-002/region_damping",
         "FEA-ACOUSTIC-OUTPUTS-001/output_arithmetic_across_analyses"
       ],
-      "partial": 0,
+      "partial": 3,
       "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:65",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -4282,7 +4282,7 @@
     },
     {
       "capability": "Structural harmonic cone then acoustic harmonic with spherical radiation and SPL point",
-      "cells": 14,
+      "cells": 15,
       "fail": 0,
       "id": "STUDY-SPEAKER",
       "maps": [
@@ -4291,10 +4291,10 @@
         "FEA-PUBLIC-LANGUAGE-001/output_expression_forms",
         "FEA-PUBLIC-STUDIES-001/website_hero_studies_run"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/website/physics/studies/acoustics/speaker.fea:1",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -4307,15 +4307,15 @@
         "FEA-ACOUSTIC-OUTPUTS-001/output_arithmetic_across_analyses",
         "FEA-PUBLIC-STUDIES-001/website_hero_studies_run"
       ],
-      "partial": 0,
+      "partial": 2,
       "pass": 0,
       "source": "oct-13-2026/website/physics/studies/acoustics/room.fea:1",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
       "capability": "Cold plate CHT study with mass flow, pressure drop and peak temperature",
-      "cells": 18,
+      "cells": 19,
       "fail": 0,
       "id": "STUDY-COLDPLATE",
       "maps": [
@@ -4324,10 +4324,10 @@
         "FEA-PUBLIC-LANGUAGE-001/output_expression_forms",
         "FEA-PUBLIC-STUDIES-001/website_hero_studies_run"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/website/physics/studies/fluid-flow/cold-plate.fea:1",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -4361,7 +4361,7 @@
     },
     {
       "capability": "Carotid pulsatile Carreau study (carotid.step, inflow waveform CSV)",
-      "cells": 21,
+      "cells": 22,
       "fail": 0,
       "id": "STUDY-CAROTID",
       "maps": [
@@ -4369,10 +4369,10 @@
         "FEA-FLUID-BOUNDARY-002/profiles_and_excitations",
         "FEA-PUBLIC-LANGUAGE-001/input_forms"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:83",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -5079,7 +5079,7 @@
     },
     {
       "capability": "Page-shown syntax: TL, sound power, impedance tables, normal velocity from state, pressure drop, buoyancy, carreau and power_law, sampled waveforms, WSS and OSI, species and transport, porous, lubrication family, heat_generation in W, rpm, fractional-power units, mass_flow_rate sweeps",
-      "cells": 4,
+      "cells": 6,
       "fail": 0,
       "id": "SYNTAX-PROPOSALS",
       "maps": [
@@ -5087,10 +5087,10 @@
         "FEA-PUBLIC-LANGUAGE-001/input_forms",
         "FEA-PUBLIC-LANGUAGE-001/unit_and_source_forms"
       ],
-      "partial": 0,
+      "partial": 2,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:24",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     }
   ],

@@ -21,12 +21,8 @@ fn representative_cold_projection_fits_default_component_admission_for_both_orde
 fn projection_case(levels: usize, order: ElementOrder) {
     let (cad, surface, volume) = fixture::refined(levels);
     let mut request = request(order);
-    request.resources.maximum_nodes = 1_000_000;
-    request.resources.maximum_elements = 1_000_000;
-    request.resources.maximum_search_work = 12_000_000_000;
-    request.resources.maximum_memory_bytes = 512 << 20;
-    request.resources.maximum_scratch_bytes = 512 << 20;
-    request.resources.maximum_artifact_bytes = 512 << 20;
+    request.limits.maximum_nodes = 1_000_000;
+    request.limits.maximum_elements = 1_000_000;
     let options = volume_options();
     let bytes = encode_delaunay_volume_mesh(
         &volume,

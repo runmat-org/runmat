@@ -298,6 +298,11 @@ fn admitted_cpu_counts_preserve_complete_point_set_and_independent_validation() 
 /// and the first point below the cap (the seed apex). The last cap point lies on the flat hull
 /// cap, inside the circumcircle of cap faces it does not see; the cells under those faces must
 /// join its cavity.
+// witness: FEA-MESH-DISCRETIZATION-001/volume_conformity @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Regression: a point on a flat hull cap replaces exactly the cells whose circumcircle
+//   contains it in the incremental point-set construction; facet recovery and carving are separate
+//   tests.
 #[test]
 fn a_point_on_a_flat_hull_cap_replaces_the_cells_whose_circumcircle_holds_it() {
     let nodes = include_str!("fixtures/wire_cap_insertion_order.txt")

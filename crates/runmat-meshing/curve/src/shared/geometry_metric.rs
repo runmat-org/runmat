@@ -47,6 +47,29 @@ pub fn derive_curve_geometry_metric(
         request.global_metric,
         surface_quality,
     )?;
+    let shell_solids = topology
+        .solids
+        .iter()
+        .flat_map(|solid| {
+            std::iter::once(&solid.outer_shell_id)
+                .chain(&solid.void_shell_ids)
+                .map(move |shell| (shell.clone(), solid.id.clone()))
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut face_solids = BTreeMap::<
+        runmat_geometry_core::PersistentEntityId,
+        BTreeSet<runmat_geometry_core::PersistentEntityId>,
+    >::new();
+    for shell in &topology.shells {
+        if let Some(solid) = shell_solids.get(&shell.id) {
+            for face_use in &shell.face_uses {
+                face_solids
+                    .entry(face_use.entity_id.clone())
+                    .or_default()
+                    .insert(solid.clone());
+            }
+        }
+    }
     let mut edge_witnesses = Vec::new();
     for edge in &topology.edges {
         if edge.is_degenerate {
@@ -172,6 +195,12 @@ pub fn derive_curve_geometry_metric(
             face_ids: relations
                 .edge_coedges(&edge.id)
                 .map(|coedge| coedge.face_id.clone())
+                .collect(),
+            solid_ids: relations
+                .edge_coedges(&edge.id)
+                .filter_map(|coedge| face_solids.get(&coedge.face_id))
+                .flatten()
+                .cloned()
                 .collect(),
             points_m: witness_points,
         });

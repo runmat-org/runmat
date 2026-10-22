@@ -390,11 +390,8 @@ pub(super) fn coarse_box_request() -> MeshingRequest {
     request.quality.volume.maximum_metric_edge_length = 2.0;
     request.quality.volume.maximum_radius_edge_ratio = 10.0;
     request.quality.volume.minimum_scaled_jacobian = 0.01;
-    request.resources.maximum_nodes = 10_000;
-    request.resources.maximum_elements = 10_000;
-    request.resources.maximum_search_work = 1_000_000;
-    request.resources.maximum_iterations = 1_000_000;
-    request.resources.maximum_wall_time_ms = 180_000;
+    request.limits.maximum_nodes = 10_000;
+    request.limits.maximum_elements = 10_000;
     request
 }
 

@@ -16,6 +16,8 @@ use crate::cdt::{
 
 pub(super) struct ConstraintComponent {
     pub region: PersistentEntityId,
+    /// More than one region, joined by conformal interfaces.
+    pub joined_regions: bool,
     pub constraints: DelaunayConstraints,
     pub global_facet_indices: Vec<u32>,
 }
@@ -23,10 +25,30 @@ pub(super) struct ConstraintComponent {
 pub(super) fn partition_constraints(
     constraints: &DelaunayConstraints,
 ) -> Result<Vec<ConstraintComponent>, DelaunayVolumeMeshError> {
-    let region_components = regions(&constraints.facets)
+    // Regions joined by a conformal interface are one component: meshing them apart lets one
+    // side's segment or facet recovery split the shared boundary where the other side does
+    // not, and the assembled mesh is then not conformal on the interface. Regions that touch
+    // only through contact or not at all stay separate.
+    let mut region_components = regions(&constraints.facets)
         .into_iter()
         .map(|region| BTreeSet::from([region]))
         .collect::<Vec<_>>();
+    for facet in &constraints.facets {
+        let joined = facet_regions(facet);
+        if joined.len() < 2 {
+            continue;
+        }
+        let mut merged = BTreeSet::new();
+        region_components.retain(|component| {
+            if joined.iter().any(|region| component.contains(region)) {
+                merged.extend(component.iter().cloned());
+                false
+            } else {
+                true
+            }
+        });
+        region_components.push(merged);
+    }
     if region_components.is_empty() {
         return Err(super::error(
             DelaunayVolumeMeshStage::Constraints,
@@ -147,6 +169,7 @@ fn build_component(
             .first()
             .expect("region component is nonempty")
             .clone(),
+        joined_regions: regions.len() > 1,
         constraints: DelaunayConstraints {
             nodes,
             segments,

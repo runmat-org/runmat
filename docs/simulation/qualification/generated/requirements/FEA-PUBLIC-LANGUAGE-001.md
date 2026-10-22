@@ -1,6 +1,6 @@
 # FEA-PUBLIC-LANGUAGE-001: Authored language surface the published studies rely on
 
-0 PASS, 3 PARTIAL, 0 FAIL, 12 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 5 PARTIAL, 0 FAIL, 12 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## located_diagnostics
 
@@ -44,7 +44,8 @@ Evidence kind: SemanticRealization. Criterion: Output forms the pages show check
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:acoustic_power_outputs]::sound_power_and_intensity_flux_lower_to_the_same_normal_flux_observation` (crates/runmat-analysis/language/tests/acoustic_power_outputs.rs:47) - sound_power and intensity flux lower to the same normal-flux observation; the other output forms are separate.<br>`runmat-analysis-language[test:acoustic_power_outputs]::flux_rejects_volume_regions_and_scalar_fields` (crates/runmat-analysis/language/tests/acoustic_power_outputs.rs:75) - Flux outputs reject volume regions and scalar fields. |
+| shared_infrastructure | mesh_independent | public_study | OPEN |  |
 
 ## unit_and_source_forms
 
@@ -61,7 +62,8 @@ Evidence kind: SemanticRealization. Criterion: Typed input forms the pages show 
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:impedance_tables]::delany_bazley_and_sampled_impedance_tables_lower_into_their_boundaries` (crates/runmat-analysis/language/tests/impedance_tables.rs:58) - Delany-Bazley and sampled impedance tables lower into their acoustic boundaries; the other input forms (film coefficient, CSV samples, species, porous, lubricat...<br>`runmat-analysis-language[test:impedance_tables]::impedance_tables_reject_unknown_models_quantities_and_unsorted_samples` (crates/runmat-analysis/language/tests/impedance_tables.rs:113) - Impedance tables reject unknown models, wrong quantities and unsorted samples. |
+| shared_infrastructure | mesh_independent | public_study | OPEN |  |
 
 ## browser_check
 

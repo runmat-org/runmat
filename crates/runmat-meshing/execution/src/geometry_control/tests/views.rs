@@ -5,15 +5,16 @@ use runmat_meshing_core::MeshingStageKind;
 
 #[test]
 fn stage_views_share_retention_work_and_rejection_without_reset() {
-    let mut request = crate::serial_tests::request();
-    request.resources.maximum_memory_bytes = 100;
-    request.resources.maximum_search_work = 2;
-    request.resources.maximum_iterations = 2;
+    let mut ceilings = crate::serial_tests::ceilings();
+    let request = crate::serial_tests::request();
+    ceilings.maximum_memory_bytes = 100;
+    ceilings.maximum_search_work = 2;
+    ceilings.maximum_iterations = 2;
     let mut progress = NoopMeshingProgress;
     let stage = MeshingStageControl::new(
         MeshingStageKind::OrderElevation,
         0,
-        &request,
+        &request, ceilings,
         &NeverCancelled,
         &mut progress,
     )

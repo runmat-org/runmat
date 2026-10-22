@@ -163,8 +163,8 @@ pub fn slab_mesh(cell_count: usize) -> SolverMeshArtifact {
         field("faces", FieldTopologyLocation::BoundaryFace, face_ids),
         field("edges", FieldTopologyLocation::BoundaryEdge, Vec::new()),
     ];
-    artifact.resolved_request.resources.maximum_nodes = artifact.topology.nodes.len() as u64;
-    artifact.resolved_request.resources.maximum_elements =
+    artifact.resolved_request.limits.maximum_nodes = artifact.topology.nodes.len() as u64;
+    artifact.resolved_request.limits.maximum_elements =
         artifact.topology.volume_elements.len() as u64;
     artifact.seal_canonical_digest().unwrap();
     artifact
@@ -253,7 +253,7 @@ pub fn quadratic_slab_mesh(cell_count: usize) -> SolverMeshArtifact {
         }
     }
     mesh.resolved_request.element_order = ElementOrder::Tet10;
-    mesh.resolved_request.resources.maximum_nodes = mesh.topology.nodes.len() as u64;
+    mesh.resolved_request.limits.maximum_nodes = mesh.topology.nodes.len() as u64;
     mesh.seal_canonical_digest().unwrap();
     mesh
 }

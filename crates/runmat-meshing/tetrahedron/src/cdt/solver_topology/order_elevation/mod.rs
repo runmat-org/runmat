@@ -25,7 +25,7 @@ pub(super) fn elevate(
     mut topology: SolverMeshTopology,
     options: DelaunaySolverTopologyOptions,
     cancellation: &dyn MeshingCancellationSignal,
-) -> Result<SolverMeshTopology, DelaunaySolverTopologyError> {
+) -> Result<(SolverMeshTopology, runmat_meshing_core::SolverElevationReport), DelaunaySolverTopologyError> {
     let mut jacobian_work = 0_u64;
     let mut candidate_work = 0_u64;
     let evaluation = input.exact_evaluation.ok_or_else(|| {
@@ -52,8 +52,8 @@ pub(super) fn elevate(
     )?;
     let mut invalid_elements = jacobian::invalid_element_indices(
         &topology,
-        input.request.resources.maximum_search_work,
-        input.request.resources.maximum_recursion_depth,
+        jacobian::ELEMENT_SEARCH_WORK,
+        input.request.limits.maximum_recursion_depth,
         options.cancellation_check_interval,
         cancellation,
         jacobian::ValidationWork {
@@ -71,7 +71,7 @@ pub(super) fn elevate(
             jacobian_work,
             "retained certified affine edge geometry without optional shape search"
         );
-        return Ok(topology);
+        return Ok((topology, runmat_meshing_core::SolverElevationReport::default()));
     }
     let optimization_topology = optimization::OptimizationTopology::prepare(
         input,
@@ -109,8 +109,8 @@ pub(super) fn elevate(
         })?;
         invalid_elements = jacobian::invalid_element_indices(
             &topology,
-            input.request.resources.maximum_search_work,
-            input.request.resources.maximum_recursion_depth,
+            jacobian::ELEMENT_SEARCH_WORK,
+            input.request.limits.maximum_recursion_depth,
             options.cancellation_check_interval,
             cancellation,
             jacobian::ValidationWork {
@@ -119,7 +119,7 @@ pub(super) fn elevate(
             },
         )?;
         if invalid_elements.is_empty() {
-            return Ok(topology);
+            return Ok((topology, runmat_meshing_core::SolverElevationReport::default()));
         }
         if moved == 0 {
             let worst_element =
@@ -152,8 +152,8 @@ pub(super) fn elevate(
             if patch_moved > 0 {
                 invalid_elements = jacobian::invalid_element_indices(
                     &topology,
-                    input.request.resources.maximum_search_work,
-                    input.request.resources.maximum_recursion_depth,
+                    jacobian::ELEMENT_SEARCH_WORK,
+                    input.request.limits.maximum_recursion_depth,
                     options.cancellation_check_interval,
                     cancellation,
                     jacobian::ValidationWork {
@@ -162,15 +162,15 @@ pub(super) fn elevate(
                     },
                 )?;
                 if invalid_elements.is_empty() {
-                    return Ok(topology);
+                    return Ok((topology, runmat_meshing_core::SolverElevationReport::default()));
                 }
                 continue;
             }
             let relocated = optimization::relocate_interior_corner(
                 &mut topology,
                 worst_element,
-                input.request.resources.maximum_search_work,
-                input.request.resources.maximum_recursion_depth,
+                jacobian::ELEMENT_SEARCH_WORK,
+                input.request.limits.maximum_recursion_depth,
                 &optimization_topology,
                 evaluation.control,
                 optimization::OptimizationWork {
@@ -189,8 +189,8 @@ pub(super) fn elevate(
             if relocated > 0 {
                 invalid_elements = jacobian::invalid_element_indices(
                     &topology,
-                    input.request.resources.maximum_search_work,
-                    input.request.resources.maximum_recursion_depth,
+                    jacobian::ELEMENT_SEARCH_WORK,
+                    input.request.limits.maximum_recursion_depth,
                     options.cancellation_check_interval,
                     cancellation,
                     jacobian::ValidationWork {
@@ -199,34 +199,134 @@ pub(super) fn elevate(
                     },
                 )?;
                 if invalid_elements.is_empty() {
-                    return Ok(topology);
+                    return Ok((topology, runmat_meshing_core::SolverElevationReport::default()));
                 }
                 continue;
             }
-            return jacobian::validate(
-                &topology,
-                input.request.resources.maximum_search_work,
-                input.request.resources.maximum_recursion_depth,
-                options.cancellation_check_interval,
-                cancellation,
-                jacobian::ValidationWork {
-                    counter: &mut jacobian_work,
-                    storage: super::storage::Storage(Some(evaluation.control)),
-                },
-            )
-            .map(|()| topology);
+            break;
         }
     }
-    Err(error::failure(
-        DelaunaySolverTopologyErrorKind::ResourceLimit,
-        format!(
-            "curved-node optimization did not certify the Tet10 mesh within {} hard sweeps ({} initially invalid elements, {} remaining, {} accepted node movements)",
-            options.maximum_curved_optimization_sweeps,
-            initial_invalid_element_count,
-            invalid_elements.len(),
-            moved_node_count,
-        ),
+    // Curving cannot certify the remaining elements. Their edges go back to straight chords,
+    // which the certified linear mesh already places within the requested chordal deviation;
+    // a straight-sided Tet10 has the linear element's constant positive Jacobian. Straightening
+    // a shared edge can uncurve a neighbor, so repeat until every element certifies (all
+    // straight is the bound).
+    let remaining_after_curving = invalid_elements.len();
+    let mut straightened = 0_u64;
+    let mut straightened_elements = std::collections::BTreeSet::new();
+    let maximum_deviation_m = input.request.quality.surface.maximum_chordal_deviation_m;
+    while !invalid_elements.is_empty() {
+        straightened_elements.extend(invalid_elements.iter().copied());
+        let changed = straighten_element_edges(
+            &mut topology,
+            &invalid_elements,
+            maximum_deviation_m,
+            cancellation,
+        )?;
+        if changed == 0 {
+            return Err(error::failure(
+                DelaunaySolverTopologyErrorKind::InvalidMesh,
+                format!(
+                    "{} Tet10 elements remain uncertified with straight edges ({} initially invalid elements, {} accepted node movements)",
+                    invalid_elements.len(),
+                    initial_invalid_element_count,
+                    moved_node_count,
+                ),
+            ));
+        }
+        straightened += changed;
+        invalid_elements = jacobian::invalid_element_indices(
+            &topology,
+            jacobian::ELEMENT_SEARCH_WORK,
+            input.request.limits.maximum_recursion_depth,
+            options.cancellation_check_interval,
+            cancellation,
+            jacobian::ValidationWork {
+                counter: &mut jacobian_work,
+                storage: super::storage::Storage(Some(evaluation.control)),
+            },
+        )?;
+    }
+    tracing::info!(
+        event_code = "meshing.tet10.straightened_edges",
+        initially_invalid = initial_invalid_element_count,
+        remaining_after_curving,
+        straightened_edges = straightened,
+        moved_node_count,
+        "Tet10 edges that could not be curved validly were kept straight"
+    );
+    Ok((
+        topology,
+        runmat_meshing_core::SolverElevationReport {
+            straightened_elements: straightened_elements.len() as u64,
+            straightened_edges: straightened,
+        },
     ))
+}
+
+/// Moves each curved midside node of the given elements to its edge's chord midpoint. Returns
+/// how many nodes moved.
+/// A boundary midside keeps its exact parameters as the node's foot on its source entity; the
+/// straight node lies off that entity by the chord's sagitta, which must stay within the
+/// requested chordal deviation (checked here for every straightened boundary node).
+fn straighten_element_edges(
+    topology: &mut SolverMeshTopology,
+    elements: &[usize],
+    maximum_deviation_m: f64,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<u64, DelaunaySolverTopologyError> {
+    let index_of = |topology: &SolverMeshTopology, id: u64| {
+        topology
+            .nodes
+            .binary_search_by_key(&id, |node| node.node_id)
+            .map_err(|_| {
+                error::failure(
+                    DelaunaySolverTopologyErrorKind::InvalidMesh,
+                    "Tet10 straightening references an absent node",
+                )
+            })
+    };
+    let mut moved = 0_u64;
+    for &element_index in elements {
+        if cancellation.is_cancelled() {
+            return Err(error::failure(
+                DelaunaySolverTopologyErrorKind::Cancelled,
+                "cancelled",
+            ));
+        }
+        let node_ids = topology.volume_elements[element_index].node_ids.clone();
+        for (local_edge, corners) in TETRAHEDRON_MIDSIDE_EDGE_CORNERS.iter().enumerate() {
+            let [left, right] = [
+                index_of(topology, node_ids[corners[0]])?,
+                index_of(topology, node_ids[corners[1]])?,
+            ];
+            let middle = index_of(topology, node_ids[4 + local_edge])?;
+            let chord = std::array::from_fn(|axis| {
+                0.5 * (topology.nodes[left].coordinates_m[axis]
+                    + topology.nodes[right].coordinates_m[axis])
+            });
+            if topology.nodes[middle].coordinates_m != chord {
+                let curved = topology.nodes[middle].coordinates_m;
+                let sagitta = (0..3)
+                    .map(|axis| (curved[axis] - chord[axis]).powi(2))
+                    .sum::<f64>()
+                    .sqrt();
+                if !topology.nodes[middle].exact_parameters.is_empty()
+                    && !(sagitta <= maximum_deviation_m * (1.0 + 1.0e-9))
+                {
+                    return Err(error::failure(
+                        DelaunaySolverTopologyErrorKind::InvalidMesh,
+                        format!(
+                            "a straight Tet10 boundary edge would leave its exact geometry by {sagitta:e} m, beyond the chordal deviation {maximum_deviation_m:e} m"
+                        ),
+                    ));
+                }
+                topology.nodes[middle].coordinates_m = chord;
+                moved += 1;
+            }
+        }
+    }
+    Ok(moved)
 }
 
 pub(super) fn sorted_edge(mut nodes: [u64; 2]) -> [u64; 2] {

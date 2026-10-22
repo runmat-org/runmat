@@ -266,13 +266,9 @@ fn limits(stage: &PlannedMeshingStage) -> ObjectInventoryLimits {
     // Cache reuse must fit its own envelope; fresh worker acceptance is separate.
     limits.max_total_bytes = limits
         .max_total_bytes
-        .min(stage.host().resolved_request.resources.maximum_memory_bytes / 3);
+        .min(stage.host().ceilings.maximum_memory_bytes / 3);
     limits.max_total_bytes = limits.max_total_bytes.min(
-        stage
-            .host()
-            .resolved_request
-            .resources
-            .maximum_artifact_bytes,
+        stage.host().ceilings.maximum_artifact_bytes,
     );
     limits.max_object_bytes = limits.max_object_bytes.min(limits.max_total_bytes);
     limits

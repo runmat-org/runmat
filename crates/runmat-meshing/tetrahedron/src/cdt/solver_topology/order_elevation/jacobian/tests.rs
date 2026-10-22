@@ -260,7 +260,7 @@ fn exact_jacobian_construction_observes_cancellation_between_terms() {
 }
 
 #[test]
-fn interval_certificate_enforces_work_and_cancellation() {
+fn interval_certificate_bounds_each_element_and_honors_cancellation() {
     let mut work = 0;
     assert_eq!(
         certify_element(
@@ -276,8 +276,10 @@ fn interval_certificate_enforces_work_and_cancellation() {
         )
         .unwrap_err()
         .kind,
-        DelaunaySolverTopologyErrorKind::ResourceLimit
+        // An element that cannot be certified within its own work share is not admitted.
+        DelaunaySolverTopologyErrorKind::InvalidMesh
     );
+    assert!(work > 3, "the element's actual work is charged to the shared counter");
 
     struct Cancelled;
     impl MeshingCancellationSignal for Cancelled {

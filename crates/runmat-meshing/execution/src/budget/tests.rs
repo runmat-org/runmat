@@ -9,12 +9,13 @@ use runmat_meshing_core::NeverCancelled;
 //   resetting usage. This is accounting evidence, not measured RSS or whole study acceptance.
 #[test]
 fn terminal_evidence_retains_shared_usage_after_the_last_algorithm_checkpoint() {
+    let ceilings = crate::serial_tests::ceilings();
     let fixture = crate::task_tests::Fixture::new(MeshingStageKind::SurfaceMesh);
     let mut progress = NoopMeshingProgress;
     let mut control = MeshingStageControl::new(
         MeshingStageKind::SurfaceMesh,
         0,
-        &fixture.request,
+        &fixture.request, ceilings,
         &NeverCancelled,
         &mut progress,
     )

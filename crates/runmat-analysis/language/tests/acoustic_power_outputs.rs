@@ -39,6 +39,10 @@ study response {{
     })
 }
 
+// witness: FEA-PUBLIC-LANGUAGE-001/output_expression_forms @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: sound_power and intensity flux lower to the same normal-flux observation; the other
+//   output forms are separate.
 #[test]
 fn sound_power_and_intensity_flux_lower_to_the_same_normal_flux_observation() {
     for output in [
@@ -64,6 +68,9 @@ fn sound_power_and_intensity_flux_lower_to_the_same_normal_flux_observation() {
     }
 }
 
+// witness: FEA-PUBLIC-LANGUAGE-001/output_expression_forms @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Flux outputs reject volume regions and scalar fields.
 #[test]
 fn flux_rejects_volume_regions_and_scalar_fields() {
     assert!(!check(

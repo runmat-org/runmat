@@ -5,7 +5,7 @@ use crate::{
     CancellationPolicy, CanonicalMeshingContract, CurveQualityTargets, ElementOrder,
     FieldTopologyLocation, FieldTopologyMap, GeometryRevisionRef, GeometryTolerancePolicy,
     InvariantEvidence, MeshNeighbor, MeshRegion, MeshingEvidence, MeshingPartitionDescriptor,
-    MeshingPartitionKind, MeshingQualityTargets, MeshingRequest, MeshingResourceBudget,
+    MeshingPartitionKind, MeshingQualityTargets, MeshingRequest, MeshingSizeLimits, MeshingExecutionCeilings,
     MeshingResourceUsage, MeshingStageEvidence, MeshingStageKind, MetricCombinationRule,
     MetricFieldRequest, MetricTensor3, PersistentEntityId, PersistentEntityKind,
     PlatformBuildIdentity, SolverBoundaryEdge, SolverBoundaryFace, SolverMeshArtifact,
@@ -367,6 +367,7 @@ pub fn canonical_tetrahedron_meshing_evidence(artifact: &SolverMeshArtifact) -> 
         cancellation_checkpoints: 1,
     };
     let evidence = MeshingEvidence {
+        ceilings: FIXTURE_CEILINGS,
         schema_version: MESHING_EVIDENCE_SCHEMA_VERSION,
         geometry: artifact.geometry.clone(),
         resolved_request_digest: artifact
@@ -455,16 +456,10 @@ fn request() -> MeshingRequest {
                 maximum_metric_edge_length: 1.5,
             },
         },
-        resources: MeshingResourceBudget {
+        limits: MeshingSizeLimits {
             maximum_nodes: 100,
             maximum_elements: 100,
-            maximum_memory_bytes: 1_000_000,
-            maximum_scratch_bytes: 1_000_000,
-            maximum_wall_time_ms: 10_000,
-            maximum_artifact_bytes: 1_000_000,
-            maximum_search_work: 10_000,
             maximum_recursion_depth: 32,
-            maximum_iterations: 10_000,
         },
         cancellation: CancellationPolicy {
             maximum_checkpoint_latency_ms: 100,
@@ -511,3 +506,13 @@ mod tests {
             .all(|element| element.node_ids.len() == 10));
     }
 }
+
+/// Execution ceilings the fixture evidence was produced under.
+pub const FIXTURE_CEILINGS: MeshingExecutionCeilings = MeshingExecutionCeilings {
+    maximum_memory_bytes: 1_000_000,
+    maximum_scratch_bytes: 1_000_000,
+    maximum_wall_time_ms: 10_000,
+    maximum_artifact_bytes: 1_000_000,
+    maximum_search_work: 10_000,
+    maximum_iterations: 10_000,
+};

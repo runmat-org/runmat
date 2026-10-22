@@ -40,9 +40,9 @@ fn refine(
         let expected_elements =
             (mesh.topology.volume_elements.len() as u64) * 4_u64.pow(levels as u32);
         let added_nodes = (expected_elements - mesh.topology.volume_elements.len() as u64) / 3;
-        mesh.resolved_request.resources.maximum_nodes =
+        mesh.resolved_request.limits.maximum_nodes =
             mesh.topology.nodes.len() as u64 + added_nodes;
-        mesh.resolved_request.resources.maximum_elements = expected_elements;
+        mesh.resolved_request.limits.maximum_elements = expected_elements;
     }
     for _ in 0..levels {
         let parents = std::mem::take(&mut mesh.topology.volume_elements);

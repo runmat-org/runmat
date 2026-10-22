@@ -220,8 +220,8 @@ pub fn layered_box_mesh(
         field("faces", FieldTopologyLocation::BoundaryFace, face_ids),
         field("edges", FieldTopologyLocation::BoundaryEdge, Vec::new()),
     ];
-    artifact.resolved_request.resources.maximum_nodes = artifact.topology.nodes.len() as u64;
-    artifact.resolved_request.resources.maximum_elements =
+    artifact.resolved_request.limits.maximum_nodes = artifact.topology.nodes.len() as u64;
+    artifact.resolved_request.limits.maximum_elements =
         artifact.topology.volume_elements.len() as u64;
     artifact.seal_canonical_digest().unwrap();
     artifact
