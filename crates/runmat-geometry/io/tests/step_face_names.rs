@@ -9,7 +9,8 @@ use runmat_geometry_io::{import_geometry, GeometryImportOptions};
 const NAMED_FACES: &[u8] = include_bytes!("fixtures/named-faces.step");
 
 // witness: FEA-MESH-GEOMETRY-001/authored_names_survive_to_run @
-//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   shared_infrastructure/mesh_independent/source_check; features: occt-native; coverage:
+//   partial;
 //   boundary: Authored STEP face names become face region names in the imported model.
 #[test]
 fn authored_step_face_names_become_face_region_names() {

@@ -159,7 +159,8 @@ fn exact_boolean_profile_is_qualified_operation_by_operation() {
 }
 
 // witness: FEA-AUTHORING-GEOMETRY-002/exact_geometry_closure @
-//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   shared_infrastructure/mesh_independent/source_check; features: occt-native; coverage:
+//   partial;
 //   boundary: Constructed materialization and result regions share one exact artifact; derived and
 //   generated closure are covered by sibling tests.
 #[test]
@@ -209,7 +210,8 @@ fn constructed_materialization_and_result_regions_share_the_exact_artifact() {
 }
 
 // witness: FEA-AUTHORING-GEOMETRY-002/feature_lineage_inventory @
-//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   shared_infrastructure/mesh_independent/source_check; features: occt-native; coverage:
+//   partial;
 //   boundary: Boolean history projects authored regions onto the final exact topology.
 #[test]
 fn boolean_history_projects_authored_regions_to_the_final_exact_topology() {
@@ -283,7 +285,8 @@ fn boundary_introduced_by_an_instance_follows_its_copies_through_a_subtraction()
 }
 
 // witness: FEA-AUTHORING-GEOMETRY-002/feature_lineage_inventory @
-//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   shared_infrastructure/mesh_independent/source_check; features: occt-native; coverage:
+//   partial;
 //   boundary: Feature lineage merges shared ancestors across boolean branches; the full
 //   per-operation entity inventory and canonical order are not asserted.
 #[test]

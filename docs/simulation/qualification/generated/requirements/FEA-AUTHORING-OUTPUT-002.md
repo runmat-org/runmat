@@ -1,6 +1,6 @@
 # FEA-AUTHORING-OUTPUT-002: Typed source queries, recovery and retained result objects
 
-0 PASS, 1 PARTIAL, 7 FAIL, 5 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 7 PARTIAL, 1 FAIL, 5 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## typed_output_queries
 
@@ -8,7 +8,7 @@ Evidence kind: SemanticRealization. Criterion: Outputs are typed named queries o
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-language[test:outputs]::integration_point_fields_are_typed_output_locations` (crates/runmat-analysis/language/tests/outputs.rs:131) - Integration-point fields are typed output locations; node, element and constraint locations are covered by sibling tests.<br>`runmat-analysis-language[test:outputs]::recovery_is_an_explicit_typed_element_to_node_operation` (crates/runmat-analysis/language/tests/outputs.rs:310) - Recovery is an explicit typed element-to-node operation. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:outputs]::integration_point_fields_are_typed_output_locations` (crates/runmat-analysis/language/tests/outputs.rs:131) - Integration-point fields are typed output locations; node, element and constraint locations are covered by sibling tests.<br>`runmat-analysis-language[test:outputs]::recovery_is_an_explicit_typed_element_to_node_operation` (crates/runmat-analysis/language/tests/outputs.rs:310) - Recovery is an explicit typed element-to-node operation. |
 
 ## shared_query_catalog
 
@@ -24,7 +24,7 @@ Evidence kind: SemanticRealization. Criterion: An extremum is not merely a numbe
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-language[test:studies]::study_outputs_lower_fields_projections_and_attributed_spatial_extrema` (crates/runmat-analysis/language/tests/studies.rs:144) - Spatial extrema lower with their attributed region; tie policy and independent-domain coordinates are not asserted. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:studies]::study_outputs_lower_fields_projections_and_attributed_spatial_extrema` (crates/runmat-analysis/language/tests/studies.rs:144) - Spatial extrema lower with their attributed region; tie policy and independent-domain coordinates are not asserted. |
 
 ## overload_contract
 
@@ -32,7 +32,7 @@ Evidence kind: SemanticRealization. Criterion: The shared catalog owns, for ever
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-language[test:expressions]::expression_checking_preserves_dimensions_and_resolves_catalog_overloads` (crates/runmat-analysis/language/tests/expressions.rs:41) - Expression checking preserves dimensions and resolves catalog overloads; availability and documentation fields of the overload contract are not asserted. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:expressions]::expression_checking_preserves_dimensions_and_resolves_catalog_overloads` (crates/runmat-analysis/language/tests/expressions.rs:41) - Expression checking preserves dimensions and resolves catalog overloads; availability and documentation fields of the overload contract are not asserted. |
 
 ## shared_catalog_lowering
 
@@ -48,7 +48,7 @@ Evidence kind: SemanticRealization. Criterion: The initial output-expression sur
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-language[test:outputs]::projections_and_spatial_reductions_lower_with_exact_dimensions_and_locations` (crates/runmat-analysis/language/tests/outputs.rs:174) - Projections and spatial reductions lower with exact dimensions and locations; the whole closed list is not enumerated. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:outputs]::projections_and_spatial_reductions_lower_with_exact_dimensions_and_locations` (crates/runmat-analysis/language/tests/outputs.rs:174) - Projections and spatial reductions lower with exact dimensions and locations; the whole closed list is not enumerated. |
 
 ## physical_query_dimensions
 
@@ -56,7 +56,7 @@ Evidence kind: SemanticRealization. Criterion: `principal` accepts only a real s
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-language[test:outputs]::projections_and_spatial_reductions_lower_with_exact_dimensions_and_locations` (crates/runmat-analysis/language/tests/outputs.rs:174) - Reductions carry exact output dimensions; principal-stress admission rules are not asserted. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:outputs]::projections_and_spatial_reductions_lower_with_exact_dimensions_and_locations` (crates/runmat-analysis/language/tests/outputs.rs:174) - Reductions carry exact output dimensions; principal-stress admission rules are not asserted. |
 
 ## sampling_and_interpolation
 
@@ -64,7 +64,7 @@ Evidence kind: SemanticRealization. Criterion: Spatial selection, interpolation,
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-language[test:output_histories]::bounded_sampling_interpolation_and_series_reductions_are_typed_end_to_end` (crates/runmat-analysis/language/tests/output_histories.rs:96) - Bounded sampling, interpolation and series reductions are typed end to end. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:output_histories]::bounded_sampling_interpolation_and_series_reductions_are_typed_end_to_end` (crates/runmat-analysis/language/tests/output_histories.rs:96) - Bounded sampling, interpolation and series reductions are typed end to end. |
 
 ## chunked_output_retention
 

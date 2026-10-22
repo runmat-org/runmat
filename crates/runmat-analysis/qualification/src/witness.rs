@@ -54,6 +54,8 @@ pub struct Tag {
     pub obligation: String,
     pub envelopes: Vec<Envelope>,
     pub boundary: String,
+    /// Cargo features the test needs (`; features: a,b` in the tag).
+    pub features: Vec<String>,
     /// The author states these tests discharge the whole criterion for the envelopes.
     pub complete: bool,
     pub test: TestLocator,
@@ -73,6 +75,21 @@ impl std::fmt::Display for Problem {
 
 pub fn repository_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")
+}
+
+/// Split an optional `; features: a,b` field out of a tag's text.
+pub fn split_features(text: &str) -> (String, Vec<String>) {
+    let Some(start) = text.find("; features:") else {
+        return (text.to_string(), Vec::new());
+    };
+    let rest = &text[start + "; features:".len()..];
+    let end = rest.find(';').unwrap_or(rest.len());
+    let features = rest[..end]
+        .split(',')
+        .map(|f| f.trim().to_string())
+        .filter(|f| !f.is_empty())
+        .collect();
+    (format!("{}{}", &text[..start], &rest[end..]), features)
 }
 
 /// Parse the joined text of one tag (after `witness:`).
@@ -390,6 +407,7 @@ fn scan_file(
                     }
                     for (tag_line, text) in pending.drain(..) {
                         let location = format!("{display}:{tag_line}");
+                        let (text, features) = split_features(&text);
                         match parse_tag_text(&text) {
                             Ok((requirement, obligation, envelopes, boundary, complete)) => tags
                                 .push(Tag {
@@ -397,6 +415,7 @@ fn scan_file(
                                     obligation,
                                     envelopes,
                                     boundary,
+                                    features,
                                     complete,
                                     test: locator.clone(),
                                 }),

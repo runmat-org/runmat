@@ -1,6 +1,6 @@
 # FEA-MESH-DISCRETIZATION-001: Valid tetrahedral meshes on exact geometry
 
-0 PASS, 5 PARTIAL, 2 FAIL, 23 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 6 PARTIAL, 1 FAIL, 23 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## curve_discretization
 
@@ -18,7 +18,7 @@ Evidence kind: ResourceAdmission. Criterion: Constructive trimmed-surface triang
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | FAIL | `runmat-meshing-surface[lib]::face_pipeline_tests::publication_scale::representative_dense_face_publication_fits_default_component_memory` (crates/runmat-meshing/surface/src/face_pipeline_tests/publication_scale.rs:87) - A dense face of 90,601 nodes and 180,000 triangles has a bounded publication representation inside the 512 MiB default component memory and round-trips through ... |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-meshing-surface[lib]::face_pipeline_tests::publication_scale::representative_dense_face_publication_fits_default_component_memory` (crates/runmat-meshing/surface/src/face_pipeline_tests/publication_scale.rs:87) - A dense face of 90,601 nodes and 180,000 triangles has a bounded publication representation inside the 512 MiB default component memory and round-trips through ... |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 

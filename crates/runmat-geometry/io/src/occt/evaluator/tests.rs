@@ -546,7 +546,8 @@ fn persistent_entity_names_ignore_compound_child_order_and_are_bounded() {
 }
 
 // witness: FEA-AUTHORING-GEOMETRY-002/persistent_topology @
-//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   shared_infrastructure/mesh_independent/source_check; features: occt-native; coverage:
+//   partial;
 //   boundary: Persistent entity names reject ambiguous coincident topology on the OCCT evaluator;
 //   feature-derived naming across booleans is covered by the feature tests.
 #[test]

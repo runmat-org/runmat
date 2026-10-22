@@ -1,6 +1,6 @@
 # FEA-AUTHORING-COMPILER-002: Compiler passes and host ownership
 
-0 PASS, 1 PARTIAL, 10 FAIL, 47 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 8 PARTIAL, 3 FAIL, 47 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## crate_boundary
 
@@ -168,7 +168,7 @@ Evidence kind: SemanticRealization. Criterion: The compiler requests imported sy
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-language[test:modules]::compiler_rejects_imports_outside_the_declared_source_root` (crates/runmat-analysis/language/tests/modules.rs:109) - An import that escapes the declared source root is rejected with fea.module.invalid_path; cycle and digest retention are covered by sibling tests. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:modules]::compiler_rejects_imports_outside_the_declared_source_root` (crates/runmat-analysis/language/tests/modules.rs:109) - An import that escapes the declared source root is rejected with fea.module.invalid_path; cycle and digest retention are covered by sibling tests. |
 
 ## binding_pass
 
@@ -176,7 +176,7 @@ Evidence kind: SemanticRealization. Criterion: Binding creates distinct namespac
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-language[test:model_physics]::model_physics_rejects_wrong_roles_values_and_composition_conflicts` (crates/runmat-analysis/language/tests/model_physics.rs:11) - Wrong region roles, wrong values and composition conflicts between included models are rejected at binding; namespace and shadowing rules are not enumerated. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:model_physics]::model_physics_rejects_wrong_roles_values_and_composition_conflicts` (crates/runmat-analysis/language/tests/model_physics.rs:11) - Wrong region roles, wrong values and composition conflicts between included models are rejected at binding; namespace and shadowing rules are not enumerated. |
 
 ## type_and_unit_pass
 
@@ -184,7 +184,7 @@ Evidence kind: SemanticRealization. Criterion: Semantic checking resolves input 
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-language[test:programs]::declaration_calls_require_every_typed_model_input` (crates/runmat-analysis/language/tests/programs.rs:150) - Declaration calls must bind every typed model input with the right type; dimensioned-literal and operation-overload checks are covered by other tests. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:programs]::declaration_calls_require_every_typed_model_input` (crates/runmat-analysis/language/tests/programs.rs:150) - Declaration calls must bind every typed model input with the right type; dimensioned-literal and operation-overload checks are covered by other tests. |
 
 ## geometry_lowering
 
@@ -192,7 +192,7 @@ Evidence kind: SemanticRealization. Criterion: Each geometry declaration becomes
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-language[test:programs]::constructed_and_derived_geometry_lower_parameterized_feature_graphs` (crates/runmat-analysis/language/tests/programs.rs:508) - Constructed and derived geometry lower parameterized feature graphs.<br>`runmat-analysis-language[test:programs]::generated_geometry_freezes_function_provenance_and_typed_arguments` (crates/runmat-analysis/language/tests/programs.rs:586) - Generated geometry freezes imported-function provenance and typed arguments; constructed, derived and file-import lowering are other cases. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:programs]::constructed_and_derived_geometry_lower_parameterized_feature_graphs` (crates/runmat-analysis/language/tests/programs.rs:508) - Constructed and derived geometry lower parameterized feature graphs.<br>`runmat-analysis-language[test:programs]::generated_geometry_freezes_function_provenance_and_typed_arguments` (crates/runmat-analysis/language/tests/programs.rs:586) - Generated geometry freezes imported-function provenance and typed arguments; constructed, derived and file-import lowering are other cases. |
 
 ## physical_lowering
 
@@ -200,7 +200,7 @@ Evidence kind: SemanticRealization. Criterion: Materials, assignments, constrain
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-language[test:programs]::material_lowering_rejects_unknown_members_instead_of_dropping_them` (crates/runmat-analysis/language/tests/programs.rs:244) - Material lowering rejects unknown members instead of dropping them; loads, constraints, interfaces and signals lowering are not covered here. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:programs]::material_lowering_rejects_unknown_members_instead_of_dropping_them` (crates/runmat-analysis/language/tests/programs.rs:244) - Material lowering rejects unknown members instead of dropping them; loads, constraints, interfaces and signals lowering are not covered here. |
 
 ## study_and_sweep_lowering
 
@@ -208,7 +208,7 @@ Evidence kind: SemanticRealization. Criterion: The compiler binds model paramete
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-language[test:studies]::study_rejects_mesh_lineage_mismatch_and_out_of_bounds_model_constants` (crates/runmat-analysis/language/tests/studies.rs:298) - Mesh-lineage mismatch and out-of-bounds model constants are rejected when a study binds geometry and mesh; sweep lowering is covered elsewhere. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:studies]::study_rejects_mesh_lineage_mismatch_and_out_of_bounds_model_constants` (crates/runmat-analysis/language/tests/studies.rs:298) - Mesh-lineage mismatch and out-of-bounds model constants are rejected when a study binds geometry and mesh; sweep lowering is covered elsewhere. |
 
 ## output_lowering
 
@@ -216,7 +216,7 @@ Evidence kind: SemanticRealization. Criterion: Operation resolution has already 
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-language[test:studies]::study_outputs_lower_fields_projections_and_attributed_spatial_extrema` (crates/runmat-analysis/language/tests/studies.rs:144) - Outputs lower to fields, projections and attributed spatial extrema; catalog overload identity is covered in the operations tests. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-analysis-language[test:studies]::study_outputs_lower_fields_projections_and_attributed_spatial_extrema` (crates/runmat-analysis/language/tests/studies.rs:144) - Outputs lower to fields, projections and attributed spatial extrema; catalog overload identity is covered in the operations tests. |
 
 ## policy_merge
 

@@ -646,7 +646,8 @@ fn exact_meshing_root_preserves_committed_pool_task_after_encrypted_driver_repla
 }
 
 // witness: FEA-MESH-EXECUTION-001/worker_loss_and_transfer @
-//   shared_infrastructure/canonical_mixed_topology/remote_execution; coverage: partial;
+//   shared_infrastructure/canonical_mixed_topology/remote_execution; features: occt-native;
+//   coverage: partial;
 //   boundary: Exact meshing admission retries and cancels after an actual encrypted driver
 //   replacement.
 #[test]
@@ -673,7 +674,8 @@ fn exact_meshing_admission_deadline_expires_before_replacement_dispatch() {
 }
 
 // witness: FEA-MESH-EXECUTION-001/worker_loss_and_transfer @
-//   shared_infrastructure/canonical_mixed_topology/remote_execution; coverage: partial;
+//   shared_infrastructure/canonical_mixed_topology/remote_execution; features: occt-native;
+//   coverage: partial;
 //   boundary: The retry budget is exhausted after two driver losses; worker-process loss and
 //   transfer resumption are covered by the process-conformance target.
 #[test]

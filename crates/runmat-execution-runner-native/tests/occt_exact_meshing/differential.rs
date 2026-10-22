@@ -12,7 +12,8 @@ const EXPECTED_LINEAR_ENERGY: f64 = 84.0;
 const TOLERANCE: f64 = 1.0e-10;
 
 // witness: FEA-MESH-DISCRETIZATION-001/independent_mesher_differential @
-//   shared_infrastructure/canonical_mixed_topology/native_process; coverage: partial;
+//   shared_infrastructure/canonical_mixed_topology/native_process; features: occt-native;
+//   coverage: partial;
 //   boundary: RunMat and the OCCT incremental mesher agree on box invariants (volume and gradient
 //   energy); box only, no curved or real part.
 #[test]

@@ -106,13 +106,13 @@
     {
       "capability": "Units, entity kinds and hand-offs are checked before meshing; a failing study does not run",
       "cells": 6,
-      "fail": 2,
+      "fail": 1,
       "id": "SIM-08",
       "maps": [
         "FEA-AUTHORING-COMPILER-002/type_and_unit_pass",
         "FEA-AUTHORING-COMPILER-002/check_plan_run"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:37",
       "status": "fail",
@@ -194,13 +194,13 @@
     {
       "capability": "Face picking records the study; examples use readable names",
       "cells": 4,
-      "fail": 2,
+      "fail": 1,
       "id": "SIM-14",
       "maps": [
         "FEA-MESH-GEOMETRY-001/authored_names_survive_to_run",
         "FEA-AUTHORING-GEOMETRY-002/selector_inspection"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:43",
       "status": "fail",
@@ -676,15 +676,15 @@
     {
       "capability": "Convection film coefficient input type",
       "cells": 4,
-      "fail": 2,
+      "fail": 0,
       "id": "SLOT-04",
       "maps": [
         "FEA-THERMAL-PUBLIC-001/film_coefficient_input"
       ],
-      "partial": 0,
+      "partial": 2,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:14",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -852,15 +852,15 @@
     {
       "capability": "Constructive trimmed-surface triangulation with seams, poles and many trims",
       "cells": 3,
-      "fail": 1,
+      "fail": 0,
       "id": "REG-MESH-003",
       "maps": [
         "FEA-MESH-DISCRETIZATION-001/surface_discretization"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:131",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -1291,15 +1291,15 @@
     {
       "capability": "Dense surfaces retained within cache-entry and codec caps",
       "cells": 3,
-      "fail": 1,
+      "fail": 0,
       "id": "REG-TRN-002",
       "maps": [
         "FEA-MESH-DISCRETIZATION-001/surface_discretization"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:162",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -1628,13 +1628,13 @@
     {
       "capability": "Viewport face pick qualified; examples use named selectors",
       "cells": 4,
-      "fail": 2,
+      "fail": 1,
       "id": "REG-WEB-003",
       "maps": [
         "FEA-MESH-GEOMETRY-001/authored_names_survive_to_run",
         "FEA-AUTHORING-GEOMETRY-002/selector_inspection"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:185",
       "status": "fail",
@@ -2165,7 +2165,7 @@
     {
       "capability": "Declarative .fea language, imports, composition and one compiler authority",
       "cells": 140,
-      "fail": 23,
+      "fail": 3,
       "id": "PLAN-LANG",
       "maps": [
         "FEA-AUTHORING-LANGUAGE-002/*",
@@ -2173,7 +2173,7 @@
         "FEA-AUTHORING-CUTOVER-001/*",
         "FEA-AUTHORING-COMPILER-002/*"
       ],
-      "partial": 2,
+      "partial": 22,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:508",
       "status": "fail",
@@ -2182,13 +2182,13 @@
     {
       "capability": "Exact geometry, derivation, persistent topology, AP242 exchange",
       "cells": 67,
-      "fail": 15,
+      "fail": 3,
       "id": "PLAN-GEOM",
       "maps": [
         "FEA-AUTHORING-GEOMETRY-001/*",
         "FEA-AUTHORING-GEOMETRY-002/*"
       ],
-      "partial": 7,
+      "partial": 19,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:563",
       "status": "fail",
@@ -2311,13 +2311,13 @@
     {
       "capability": "Typed observations, outputs and monitors",
       "cells": 61,
-      "fail": 7,
+      "fail": 1,
       "id": "PLAN-OBS",
       "maps": [
         "FEA-SHARED-OBSERVATIONS-001/*",
         "FEA-AUTHORING-OUTPUT-002/*"
       ],
-      "partial": 4,
+      "partial": 10,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2107",
       "status": "fail",
@@ -2369,16 +2369,16 @@
     {
       "capability": "Governed resource admission and chunked artifacts",
       "cells": 72,
-      "fail": 1,
+      "fail": 0,
       "id": "PLAN-RES",
       "maps": [
         "FEA-SHARED-RESOURCES-001/*",
         "FEA-SHARED-IDENTITY-001/*"
       ],
-      "partial": 7,
+      "partial": 8,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2441",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -2887,16 +2887,16 @@
     {
       "capability": "Thermal steady",
       "cells": 26,
-      "fail": 2,
+      "fail": 0,
       "id": "PM-THERMAL-STEADY",
       "maps": [
         "FEA-THERMAL-SOLVE-001/steady",
         "FEA-THERMAL-PUBLIC-001/*"
       ],
-      "partial": 3,
+      "partial": 5,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:37",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -3247,46 +3247,46 @@
     {
       "capability": "Geometry imported, constructed, derived or generated by a function",
       "cells": 6,
-      "fail": 1,
+      "fail": 0,
       "id": "GEOM-WAYS",
       "maps": [
         "FEA-AUTHORING-GEOMETRY-002/geometry_source_forms",
         "FEA-AUTHORING-GEOMETRY-002/generated_geometry"
       ],
-      "partial": 1,
+      "partial": 2,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/geometry-meshing.md:21",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
       "capability": "Typed regions and selectors with cardinality",
       "cells": 4,
-      "fail": 1,
+      "fail": 0,
       "id": "GEOM-REGIONS",
       "maps": [
         "FEA-AUTHORING-GEOMETRY-002/inspected_selector_semantics",
         "FEA-MESH-GEOMETRY-001/selectors_on_constructed_and_cell_regions"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/geometry-meshing.md:30",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
       "capability": "AP242 product, assembly, parameter and material data",
       "cells": 2,
-      "fail": 2,
+      "fail": 0,
       "id": "GEOM-AP242",
       "maps": [
         "FEA-AUTHORING-GEOMETRY-002/ap242_exchange",
         "FEA-AUTHORING-GEOMETRY-002/cad_parameter_admission"
       ],
-      "partial": 0,
+      "partial": 2,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/geometry-meshing.md:34",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -3584,17 +3584,17 @@
     {
       "capability": "geometry, mesh, material, model, study, sweep, execution and import function declarations",
       "cells": 14,
-      "fail": 2,
+      "fail": 0,
       "id": "LANG-DECLS",
       "maps": [
         "FEA-AUTHORING-LANGUAGE-002/declarative_semantics",
         "FEA-AUTHORING-LANGUAGE-002/sweep_identity",
         "FEA-SHARED-EXECUTION-001/optional_typed_placement"
       ],
-      "partial": 0,
+      "partial": 2,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/fea-language.md:15",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -3614,16 +3614,16 @@
     {
       "capability": "Units are part of the type; nothing implicit; typed regions; separate geometry/mesh/material/model/study",
       "cells": 3,
-      "fail": 1,
+      "fail": 0,
       "id": "LANG-UNITS",
       "maps": [
         "FEA-AUTHORING-LANGUAGE-002/typed_expressions",
         "FEA-PUBLIC-LANGUAGE-001/unit_prefixes"
       ],
-      "partial": 1,
+      "partial": 2,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/fea-language.md:131",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -4767,16 +4767,16 @@
     {
       "capability": "Film coefficient sweep with per-case assessment",
       "cells": 8,
-      "fail": 2,
+      "fail": 0,
       "id": "PAGE-THERMAL-SWEEP",
       "maps": [
         "FEA-THERMAL-PUBLIC-001/cooling_requirement_sweep",
         "FEA-THERMAL-PUBLIC-001/film_coefficient_input"
       ],
-      "partial": 0,
+      "partial": 2,
       "pass": 0,
       "source": "oct-13-2026/website/physics/thermal/index.md:10",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {

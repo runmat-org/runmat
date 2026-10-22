@@ -106,17 +106,17 @@ fn run_tests(
     cargo: &[String],
     only: &BTreeSet<String>,
 ) -> Result<BTreeMap<String, TestResult>, Box<dyn std::error::Error>> {
-    let mut tests: BTreeMap<&str, BTreeSet<&TestLocator>> = BTreeMap::new();
+    let mut tests: BTreeMap<(&str, String), BTreeSet<&TestLocator>> = BTreeMap::new();
     for tag in tags {
         if only.is_empty() || only.contains(&tag.test.package) {
             tests
-                .entry(&tag.test.package)
+                .entry((&tag.test.package, tag.features.join(",")))
                 .or_default()
                 .insert(&tag.test);
         }
     }
     let mut results = BTreeMap::new();
-    for (package, all_locators) in tests {
+    for ((package, features), all_locators) in tests {
         // Harness-less integration binaries (`fn main`) are one witness each: run the whole
         // target and take its exit status.
         let (custom, locators): (Vec<_>, Vec<_>) =
@@ -128,6 +128,9 @@ fn run_tests(
             let mut command = Command::new("sh");
             command.args(["-c", "\"$@\" 2>&1", "sh"]).args(cargo);
             command.args(["test", "--offline", "-p", package, "--test", target]);
+            if !features.is_empty() {
+                command.args(["--features", &features]);
+            }
             command.env("RUST_MIN_STACK", "67108864");
             eprintln!("running {package} test target {target} as one witness");
             let output = command.output()?;
@@ -148,6 +151,9 @@ fn run_tests(
         let mut command = Command::new("sh");
         command.args(["-c", "\"$@\" 2>&1", "sh"]).args(cargo);
         command.args(["test", "--offline", "-p", package]);
+        if !features.is_empty() {
+            command.args(["--features", &features]);
+        }
         let mut libs = false;
         let mut integrations = BTreeSet::new();
         for l in &locators {

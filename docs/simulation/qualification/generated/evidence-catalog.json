@@ -1,7 +1,7 @@
 {
   "requirements": [
     {
-      "fail": 14,
+      "fail": 3,
       "id": "FEA-AUTHORING-GEOMETRY-002",
       "obligations": [
         {
@@ -152,16 +152,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Generated geometry freezes imported-function provenance and typed arguments at check.",
                   "line": 586,
                   "name": "generated_geometry_freezes_function_provenance_and_typed_arguments",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/programs.rs",
                   "target": "Integration(\"programs\")"
                 },
@@ -384,16 +382,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "A mesh request binds geometry and lowers its units into canonical settings; the reference-an-existing-mesh alternative is not asserted.",
                   "line": 274,
                   "name": "mesh_request_binds_geometry_and_lowers_units_into_canonical_settings",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/programs.rs",
                   "target": "Integration(\"programs\")"
                 }
@@ -410,16 +406,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Name selectors must match names the inspected source carries; tag and id selector forms are covered elsewhere.",
                   "line": 447,
                   "name": "name_selectors_must_match_names_the_source_carries",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/programs.rs",
                   "target": "Integration(\"programs\")"
                 }
@@ -436,16 +430,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Selection by name resolves only against imported metadata; the interactive view exposure is not covered.",
                   "line": 447,
                   "name": "name_selectors_must_match_names_the_source_carries",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/programs.rs",
                   "target": "Integration(\"programs\")"
                 }
@@ -486,16 +478,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Imported CAD parameters resolve to exact typed source facts; other AP242 content (constraints, associations) is covered by the profile tests.",
                   "line": 17,
                   "name": "imported_cad_parameters_resolve_exact_typed_source_facts",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/ap242_exchange.rs",
                   "target": "Integration(\"ap242_exchange\")"
                 }
@@ -512,16 +502,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Fixture host parameter metadata: wrong dimensions/unqualified write rejection only; no CAD kernel regeneration.",
                   "line": 78,
                   "name": "imported_cad_parameters_reject_wrong_dimensions_and_unqualified_writes",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/ap242_exchange.rs",
                   "target": "Integration(\"ap242_exchange\")"
                 }
@@ -538,16 +526,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Source regeneration fails at check without a qualified write capability; the qualified success path is not exercised.",
                   "line": 114,
                   "name": "source_regeneration_fails_during_checking_without_qualified_write_capability",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/ap242_exchange.rs",
                   "target": "Integration(\"ap242_exchange\")"
                 }
@@ -564,16 +550,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "CAD material adoption is explicit, typed and provenance-bearing; mapping to every constitutive law is not covered.",
                   "line": 198,
                   "name": "cad_material_adoption_is_explicit_typed_and_provenance_bearing",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/ap242_exchange.rs",
                   "target": "Integration(\"ap242_exchange\")"
                 }
@@ -614,16 +598,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Adopted properties retain provenance; entity ids, document references and uncertainty are not all asserted.",
                   "line": 198,
                   "name": "cad_material_adoption_is_explicit_typed_and_provenance_bearing",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/ap242_exchange.rs",
                   "target": "Integration(\"ap242_exchange\")"
                 }
@@ -692,16 +674,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Parameterized model assignments remain strongly typed; section, layup and orientation forms are not covered.",
                   "line": 84,
                   "name": "parameterized_model_assignments_remain_strongly_typed",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/models.rs",
                   "target": "Integration(\"models\")"
                 }
@@ -732,16 +712,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Property roles and composite ownership fail closed; gaps, overlaps and stale revisions across a whole mesh are checked in the properties requirement.",
                   "line": 267,
                   "name": "property_roles_and_composite_ownership_fail_closed",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/models.rs",
                   "target": "Integration(\"models\")"
                 }
@@ -754,13 +732,13 @@
         }
       ],
       "open": 26,
-      "partial": 7,
+      "partial": 18,
       "pass": 0,
       "tagged": 0,
       "title": "Exact geometry, persistent topology and engineering exchange"
     },
     {
-      "fail": 7,
+      "fail": 1,
       "id": "FEA-AUTHORING-OUTPUT-002",
       "obligations": [
         {
@@ -769,16 +747,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Integration-point fields are typed output locations; node, element and constraint locations are covered by sibling tests.",
                   "line": 131,
                   "name": "integration_point_fields_are_typed_output_locations",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/outputs.rs",
                   "target": "Integration(\"outputs\")"
                 },
@@ -787,9 +763,7 @@
                   "line": 310,
                   "name": "recovery_is_an_explicit_typed_element_to_node_operation",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/outputs.rs",
                   "target": "Integration(\"outputs\")"
                 }
@@ -832,16 +806,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Spatial extrema lower with their attributed region; tie policy and independent-domain coordinates are not asserted.",
                   "line": 144,
                   "name": "study_outputs_lower_fields_projections_and_attributed_spatial_extrema",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/studies.rs",
                   "target": "Integration(\"studies\")"
                 }
@@ -858,16 +830,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Expression checking preserves dimensions and resolves catalog overloads; availability and documentation fields of the overload contract are not asserted.",
                   "line": 41,
                   "name": "expression_checking_preserves_dimensions_and_resolves_catalog_overloads",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/expressions.rs",
                   "target": "Integration(\"expressions\")"
                 }
@@ -908,16 +878,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Projections and spatial reductions lower with exact dimensions and locations; the whole closed list is not enumerated.",
                   "line": 174,
                   "name": "projections_and_spatial_reductions_lower_with_exact_dimensions_and_locations",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/outputs.rs",
                   "target": "Integration(\"outputs\")"
                 }
@@ -934,16 +902,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Reductions carry exact output dimensions; principal-stress admission rules are not asserted.",
                   "line": 174,
                   "name": "projections_and_spatial_reductions_lower_with_exact_dimensions_and_locations",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/outputs.rs",
                   "target": "Integration(\"outputs\")"
                 }
@@ -960,16 +926,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Bounded sampling, interpolation and series reductions are typed end to end.",
                   "line": 96,
                   "name": "bounded_sampling_interpolation_and_series_reductions_are_typed_end_to_end",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/output_histories.rs",
                   "target": "Integration(\"output_histories\")"
                 }
@@ -1024,13 +988,13 @@
         }
       ],
       "open": 5,
-      "partial": 1,
+      "partial": 7,
       "pass": 0,
       "tagged": 0,
       "title": "Typed source queries, recovery and retained result objects"
     },
     {
-      "fail": 12,
+      "fail": 0,
       "id": "FEA-AUTHORING-LANGUAGE-002",
       "obligations": [
         {
@@ -1053,16 +1017,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "A transient procedure with no start_time is rejected with a located procedure diagnostic and no study is produced, so physical defaults are not invented; covers the transient requiredness case only, not every declaration kind or the three principles as a whole.",
                   "line": 419,
                   "name": "procedure_requiredness_rejects_hidden_physical_defaults",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/studies.rs",
                   "target": "Integration(\"studies\")"
                 }
@@ -1079,16 +1041,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Imported geometry, mesh and model keep their defining module identity through study resolution; function and package import forms and scope shadowing rules are not covered.",
                   "line": 261,
                   "name": "study_preserves_the_defining_module_of_imported_declarations",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/studies.rs",
                   "target": "Integration(\"studies\")"
                 }
@@ -1105,16 +1065,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "One required procedure member (start_time) is enforced for structural transient; the full required/optional member table for all declaration kinds is not exercised.",
                   "line": 419,
                   "name": "procedure_requiredness_rejects_hidden_physical_defaults",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/studies.rs",
                   "target": "Integration(\"studies\")"
                 }
@@ -1131,16 +1089,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "A study without any formulation setting checks and realizes; the presence of no setting is asserted, remote and sweep non-implication are not.",
                   "line": 43,
                   "name": "study_has_no_formulation_setting",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/studies.rs",
                   "target": "Integration(\"studies\")"
                 }
@@ -1157,16 +1113,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Included models and material assignments retain their qualified source modules across imports; the full list of model members is not exercised.",
                   "line": 11,
                   "name": "model_composition_and_material_assignments_retain_qualified_sources",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/models.rs",
                   "target": "Integration(\"models\")"
                 },
@@ -1175,9 +1129,7 @@
                   "line": 117,
                   "name": "model_composition_rejects_cycles_and_conflicting_assignments",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/models.rs",
                   "target": "Integration(\"models\")"
                 }
@@ -1194,16 +1146,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "A response spectrum is a typed model-owned input retaining the complete solver policy (combination rules, mass truncation, rigid response); procedure references through the bound model are covered by sibling tests only.",
                   "line": 25,
                   "name": "response_spectrum_is_typed_and_retains_complete_solver_policy",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/spectral_inputs.rs",
                   "target": "Integration(\"spectral_inputs\")"
                 }
@@ -1220,16 +1170,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Constructed geometry source with local/default quantity typing and one node-displacement output; source checking only.",
                   "line": 11,
                   "name": "compiler_checks_inputs_defaults_locals_and_outputs_as_one_program",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/programs.rs",
                   "target": "Integration(\"programs\")"
                 },
@@ -1238,9 +1186,7 @@
                   "line": 93,
                   "name": "compiler_rejects_wrong_input_defaults_and_duplicate_outputs",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/programs.rs",
                   "target": "Integration(\"programs\")"
                 }
@@ -1257,16 +1203,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "A modal analysis retaining a basis feeds a modal transient through a named state reference lowered into the canonical sequence; other state kinds and the study-as-runnable-root rule are not covered.",
                   "line": 359,
                   "name": "study_lowers_typed_modal_state_flow_into_the_canonical_sequence",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/studies.rs",
                   "target": "Integration(\"studies\")"
                 }
@@ -1283,16 +1227,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "An imported .m generator binds source and typed sampling (range, rate, interpolation, extrapolation, tolerance) with typed arguments; capture provenance and effect policy are not asserted here.",
                   "line": 84,
                   "name": "generated_signal_binds_imported_source_and_typed_sampling",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/signals.rs",
                   "target": "Integration(\"signals\")"
                 }
@@ -1309,16 +1251,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Unknown or physics-incompatible initial state is rejected at study check; the closed initial-condition kind list is not enumerated.",
                   "line": 222,
                   "name": "studies_reject_unknown_or_physics_incompatible_initial_state",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/initial_conditions.rs",
                   "target": "Integration(\"initial_conditions\")"
                 }
@@ -1335,16 +1275,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Axis sweeps expand product and zip with stable named case identities; independence of identity from source order and the placement envelopes are not covered.",
                   "line": 54,
                   "name": "axis_sweeps_expand_product_and_zip_with_stable_case_identities",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/sweeps.rs",
                   "target": "Integration(\"sweeps\")"
                 }
@@ -1389,16 +1327,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "A typed execution policy is inherited by a sweep; CLI and project default precedence is not covered.",
                   "line": 34,
                   "name": "execution_policy_is_typed_and_inherited_by_a_sweep",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/execution_policies.rs",
                   "target": "Integration(\"execution_policies\")"
                 },
@@ -1407,9 +1343,7 @@
                   "line": 144,
                   "name": "execution_policy_rejects_contradictions_and_invalid_limits",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/execution_policies.rs",
                   "target": "Integration(\"execution_policies\")"
                 }
@@ -1595,13 +1529,13 @@
         }
       ],
       "open": 19,
-      "partial": 1,
+      "partial": 13,
       "pass": 0,
       "tagged": 0,
       "title": "Declarative source semantics and product tooling"
     },
     {
-      "fail": 10,
+      "fail": 3,
       "id": "FEA-AUTHORING-COMPILER-002",
       "obligations": [
         {
@@ -1912,16 +1846,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "An import that escapes the declared source root is rejected with fea.module.invalid_path; cycle and digest retention are covered by sibling tests.",
                   "line": 109,
                   "name": "compiler_rejects_imports_outside_the_declared_source_root",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/modules.rs",
                   "target": "Integration(\"modules\")"
                 }
@@ -1938,16 +1870,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Wrong region roles, wrong values and composition conflicts between included models are rejected at binding; namespace and shadowing rules are not enumerated.",
                   "line": 11,
                   "name": "model_physics_rejects_wrong_roles_values_and_composition_conflicts",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/model_physics.rs",
                   "target": "Integration(\"model_physics\")"
                 }
@@ -1964,16 +1894,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Declaration calls must bind every typed model input with the right type; dimensioned-literal and operation-overload checks are covered by other tests.",
                   "line": 150,
                   "name": "declaration_calls_require_every_typed_model_input",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/programs.rs",
                   "target": "Integration(\"programs\")"
                 }
@@ -1990,16 +1918,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Constructed and derived geometry lower parameterized feature graphs.",
                   "line": 508,
                   "name": "constructed_and_derived_geometry_lower_parameterized_feature_graphs",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/programs.rs",
                   "target": "Integration(\"programs\")"
                 },
@@ -2008,9 +1934,7 @@
                   "line": 586,
                   "name": "generated_geometry_freezes_function_provenance_and_typed_arguments",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/programs.rs",
                   "target": "Integration(\"programs\")"
                 }
@@ -2027,16 +1951,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Material lowering rejects unknown members instead of dropping them; loads, constraints, interfaces and signals lowering are not covered here.",
                   "line": 244,
                   "name": "material_lowering_rejects_unknown_members_instead_of_dropping_them",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/programs.rs",
                   "target": "Integration(\"programs\")"
                 }
@@ -2053,16 +1975,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Mesh-lineage mismatch and out-of-bounds model constants are rejected when a study binds geometry and mesh; sweep lowering is covered elsewhere.",
                   "line": 298,
                   "name": "study_rejects_mesh_lineage_mismatch_and_out_of_bounds_model_constants",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/studies.rs",
                   "target": "Integration(\"studies\")"
                 }
@@ -2079,16 +1999,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Outputs lower to fields, projections and attributed spatial extrema; catalog overload identity is covered in the operations tests.",
                   "line": 144,
                   "name": "study_outputs_lower_fields_projections_and_attributed_spatial_extrema",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/studies.rs",
                   "target": "Integration(\"studies\")"
                 }
@@ -2127,7 +2045,7 @@
                   "name": "seeded_setup_faults_are_rejected_before_meshing",
                   "package": "runmat",
                   "result": {
-                    "failed": "test not found in cargo test run"
+                    "failed": "test failed"
                   },
                   "source": "crates/runmat-cli/tests/fea_seeded_faults.rs",
                   "target": "Integration(\"fea_seeded_faults\")"
@@ -2475,13 +2393,13 @@
         }
       ],
       "open": 47,
-      "partial": 1,
+      "partial": 8,
       "pass": 0,
       "tagged": 0,
       "title": "Compiler passes and host ownership"
     },
     {
-      "fail": 1,
+      "fail": 0,
       "id": "FEA-AUTHORING-COMPOSITION-001",
       "obligations": [
         {
@@ -2532,16 +2450,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Mock host checks three-module transitive imports, explicit model/function binding and symbol-use provenance; no geometry execution, numerical result or remote equivalence.",
                   "line": 11,
                   "name": "compiler_loads_transitive_modules_and_binds_explicit_symbols",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/modules.rs",
                   "target": "Integration(\"modules\")"
                 },
@@ -2550,9 +2466,7 @@
                   "line": 66,
                   "name": "compiler_reports_cycles_duplicates_and_missing_exports",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/modules.rs",
                   "target": "Integration(\"modules\")"
                 }
@@ -2635,13 +2549,13 @@
         }
       ],
       "open": 14,
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "tagged": 0,
       "title": "Typed declarative authoring and explicit composition"
     },
     {
-      "fail": 1,
+      "fail": 0,
       "id": "FEA-AUTHORING-GEOMETRY-001",
       "obligations": [
         {
@@ -2692,16 +2606,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Compiler checks source alias versus persistent-id selectors remain distinct typed values; no native CAD feature history, regeneration or AP242 export evidence.",
                   "line": 11,
                   "name": "imported_source_aliases_and_persistent_ids_remain_distinct",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/geometry_features.rs",
                   "target": "Integration(\"geometry_features\")"
                 }
@@ -2826,7 +2738,7 @@
         }
       ],
       "open": 19,
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "tagged": 0,
       "title": "Immutable exact geometry and truthful engineering exchange"
@@ -9884,7 +9796,7 @@
       "title": "Layered identity and closed chunked numerical artifacts"
     },
     {
-      "fail": 1,
+      "fail": 0,
       "id": "FEA-SHARED-RESOURCES-001",
       "obligations": [
         {
@@ -10706,7 +10618,7 @@
               "execution": "numerical_kernel",
               "formulation": "shared_infrastructure",
               "mesh": "canonical_mixed_topology",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Immutable sparse clones share support and numeric values; cold decoding preserves exact wire identity and rejects malformed shape. Transformed operators, solver workspaces and native heap measurements remain separate obligations.",
@@ -10758,9 +10670,7 @@
                   "line": 91,
                   "name": "tetrahedron_changes_invalidate_volume_and_preserve_upstream",
                   "package": "runmat-execution-runner-native",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-execution-runner-native/tests/meshing_fingerprint.rs",
                   "target": "Integration(\"meshing_fingerprint\")"
                 },
@@ -10769,9 +10679,7 @@
                   "line": 106,
                   "name": "transitive_math_adapter_and_configuration_changes_invalidate_consumers",
                   "package": "runmat-execution-runner-native",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-execution-runner-native/tests/meshing_fingerprint.rs",
                   "target": "Integration(\"meshing_fingerprint\")"
                 },
@@ -10780,9 +10688,7 @@
                   "line": 166,
                   "name": "nested_source_target_directory_invalidates_both_stage_fingerprints",
                   "package": "runmat-execution-runner-native",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-execution-runner-native/tests/meshing_fingerprint.rs",
                   "target": "Integration(\"meshing_fingerprint\")"
                 },
@@ -10791,9 +10697,7 @@
                   "line": 188,
                   "name": "package_output_changes_preserve_both_stage_fingerprints",
                   "package": "runmat-execution-runner-native",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-execution-runner-native/tests/meshing_fingerprint.rs",
                   "target": "Integration(\"meshing_fingerprint\")"
                 },
@@ -10802,9 +10706,7 @@
                   "line": 238,
                   "name": "linked_source_disables_reuse_instead_of_omitting_implementation",
                   "package": "runmat-execution-runner-native",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-execution-runner-native/tests/meshing_fingerprint.rs",
                   "target": "Integration(\"meshing_fingerprint\")"
                 },
@@ -10813,9 +10715,7 @@
                   "line": 252,
                   "name": "non_rust_package_inputs_invalidate_both_stage_fingerprints",
                   "package": "runmat-execution-runner-native",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-execution-runner-native/tests/meshing_fingerprint.rs",
                   "target": "Integration(\"meshing_fingerprint\")"
                 },
@@ -10824,9 +10724,7 @@
                   "line": 271,
                   "name": "nested_unrelated_package_does_not_become_a_dependency_by_directory_layout",
                   "package": "runmat-execution-runner-native",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-execution-runner-native/tests/meshing_fingerprint.rs",
                   "target": "Integration(\"meshing_fingerprint\")"
                 },
@@ -12717,7 +12615,7 @@
         }
       ],
       "open": 50,
-      "partial": 5,
+      "partial": 6,
       "pass": 0,
       "tagged": 0,
       "title": "Governed resource admission and scalable FEA lifecycles"
@@ -28692,7 +28590,7 @@
                   "name": "acoustic::response::rigid_cube_cavity_modes_match_rectangular_room_frequencies",
                   "package": "runmat",
                   "result": {
-                    "failed": "test not found in cargo test run"
+                    "failed": "test failed"
                   },
                   "source": "crates/runmat-cli/tests/typed_fea_geometry_cli/acoustic/response.rs",
                   "target": "Integration(\"typed_fea_geometry_cli\")"
@@ -28784,7 +28682,7 @@
                   "name": "acoustic::response::rigid_cube_cavity_modes_match_rectangular_room_frequencies",
                   "package": "runmat",
                   "result": {
-                    "failed": "test not found in cargo test run"
+                    "failed": "test failed"
                   },
                   "source": "crates/runmat-cli/tests/typed_fea_geometry_cli/acoustic/response.rs",
                   "target": "Integration(\"typed_fea_geometry_cli\")"
@@ -28877,7 +28775,7 @@
                   "name": "acoustic::response::pressure_transient_publishes_its_complete_time_history",
                   "package": "runmat",
                   "result": {
-                    "failed": "test not found in cargo test run"
+                    "failed": "test failed"
                   },
                   "source": "crates/runmat-cli/tests/typed_fea_geometry_cli/acoustic/response.rs",
                   "target": "Integration(\"typed_fea_geometry_cli\")"
@@ -32513,7 +32411,7 @@
       "title": "Exact CAD import of real parts and assemblies"
     },
     {
-      "fail": 2,
+      "fail": 1,
       "id": "FEA-MESH-DISCRETIZATION-001",
       "obligations": [
         {
@@ -32569,16 +32467,14 @@
               "execution": "numerical_kernel",
               "formulation": "shared_infrastructure",
               "mesh": "canonical_mixed_topology",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "A dense face of 90,601 nodes and 180,000 triangles has a bounded publication representation inside the 512 MiB default component memory and round-trips through the record and global codecs; seams, poles and many trims are not asserted here.",
                   "line": 87,
                   "name": "face_pipeline_tests::publication_scale::representative_dense_face_publication_fits_default_component_memory",
                   "package": "runmat-meshing-surface",
-                  "result": {
-                    "failed": "not passed: ignored, representative dense surface publication/resource gate"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-meshing/surface/src/face_pipeline_tests/publication_scale.rs",
                   "target": "Library"
                 }
@@ -32899,7 +32795,7 @@
         }
       ],
       "open": 23,
-      "partial": 5,
+      "partial": 6,
       "pass": 0,
       "tagged": 0,
       "title": "Valid tetrahedral meshes on exact geometry"
@@ -34284,7 +34180,7 @@
                   "name": "a_study_gives_identical_results_across_runs_workers_and_threads",
                   "package": "runmat",
                   "result": {
-                    "failed": "test not found in cargo test run"
+                    "failed": "test failed"
                   },
                   "source": "crates/runmat-cli/tests/fea_determinism.rs",
                   "target": "Integration(\"fea_determinism\")"
@@ -35094,7 +34990,7 @@
                   "name": "a_study_gives_identical_results_across_runs_workers_and_threads",
                   "package": "runmat",
                   "result": {
-                    "failed": "test not found in cargo test run"
+                    "failed": "test failed"
                   },
                   "source": "crates/runmat-cli/tests/fea_determinism.rs",
                   "target": "Integration(\"fea_determinism\")"
@@ -37793,7 +37689,7 @@
       "title": "Structural capabilities the page claims"
     },
     {
-      "fail": 2,
+      "fail": 0,
       "id": "FEA-THERMAL-PUBLIC-001",
       "obligations": [
         {
@@ -37802,16 +37698,14 @@
               "execution": "numerical_kernel",
               "formulation": "thermal_steady",
               "mesh": "tet4",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Film-coefficient and emissivity inputs realize per bound sweep case at the language layer; no solve is run.",
                   "line": 289,
                   "name": "film_coefficient_and_emissivity_inputs_realize_per_bound_case",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/study_realization.rs",
                   "target": "Integration(\"study_realization\")"
                 },
@@ -37820,9 +37714,7 @@
                   "line": 406,
                   "name": "film_coefficient_input_rejects_a_mismatched_quantity",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/study_realization.rs",
                   "target": "Integration(\"study_realization\")"
                 }
@@ -37839,16 +37731,14 @@
               "execution": "numerical_kernel",
               "formulation": "thermal_steady",
               "mesh": "tet10",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Film-coefficient and emissivity inputs realize per bound sweep case at the language layer; no solve is run.",
                   "line": 289,
                   "name": "film_coefficient_and_emissivity_inputs_realize_per_bound_case",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/study_realization.rs",
                   "target": "Integration(\"study_realization\")"
                 },
@@ -37857,9 +37747,7 @@
                   "line": 406,
                   "name": "film_coefficient_input_rejects_a_mismatched_quantity",
                   "package": "runmat-analysis-language",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-analysis/language/tests/study_realization.rs",
                   "target": "Integration(\"study_realization\")"
                 }
@@ -38057,7 +37945,7 @@
         }
       ],
       "open": 21,
-      "partial": 1,
+      "partial": 3,
       "pass": 0,
       "tagged": 0,
       "title": "Thermal studies the pages run"
@@ -38067,9 +37955,9 @@
   "tests_run": true,
   "totals": {
     "cells": 3677,
-    "fail": 71,
+    "fail": 29,
     "open": 3338,
-    "partial": 268,
+    "partial": 310,
     "pass": 0,
     "tagged": 0
   }
