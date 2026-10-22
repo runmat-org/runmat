@@ -28,7 +28,9 @@ const POST_PROCESS_CPU_MILLICORES: u32 = 1_000;
 const POST_PROCESS_WALL_MILLISECONDS: u64 = 3_600_000;
 const POST_PROCESS_FIXED_MEMORY_BYTES: u64 = 16 * 1024 * 1024;
 const POST_PROCESS_FIXED_SCRATCH_BYTES: u64 = 8 * 1024 * 1024;
-const POST_PROCESS_MAXIMUM_RESIDENT_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+/// Post-processing phases carry no authored memory ceiling; placement admits them against the
+/// machine-capacity authority like every other phase.
+const POST_PROCESS_MAXIMUM_RESIDENT_BYTES: u64 = u64::MAX;
 const DERIVED_OUTPUT_RECORD_OVERHEAD_BYTES: u64 = 64 * 1024;
 const CANONICAL_NUMERIC_BYTES_UPPER_BOUND: u64 = 9;
 

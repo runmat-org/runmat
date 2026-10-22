@@ -22,6 +22,20 @@ pub fn projected_canonical_materialization_resident_bytes_estimate(
         )
 }
 
+/// Resident estimate for directly encoding an owned value whose encoded size is bounded by
+/// `encoded_bytes`. The direct encoder reserves the output once and builds no value tree; it
+/// holds at most out-of-order child buffers (copies of bytes that also reach the output) and
+/// the sorted keys of live maps (also encoded bytes). Output, held buffers and key metadata are
+/// each bounded by the encoded size, plus the fixed per-contract allowance.
+pub fn projected_canonical_encoding_resident_bytes_estimate(
+    encoded_bytes: u64,
+    contract_count: u64,
+) -> Option<u64> {
+    encoded_bytes.checked_mul(3)?.checked_add(
+        contract_count.checked_mul(CANONICAL_MATERIALIZATION_FIXED_BYTES_PER_CONTRACT)?,
+    )
+}
+
 /// Profiles an existing canonical payload without allocating its value tree, then estimates the
 /// peak of canonical verification plus typed materialization. The estimate counts actual value
 /// nodes, map entries, and string bytes instead of multiplying numeric-array payloads by a generic
@@ -54,6 +68,27 @@ pub fn canonical_value_typed_resident_bytes_estimate(
     control: &dyn crate::CanonicalCodecControl,
 ) -> Result<u64, CanonicalCodecError> {
     let (profile, _) = crate::value::value_profile(value, control)?;
+    typed_resident_bytes_estimate(profile)
+}
+
+/// Typed direct-decode estimate of a chunked canonical payload (envelope included), with the
+/// encoded bytes the decoder validates in place. Decoding builds typed collections directly and
+/// never a value tree.
+pub fn canonical_chunked_payload_typed_resident_bytes_estimate<'a>(
+    chunks: impl IntoIterator<Item = &'a [u8]>,
+    control: &dyn crate::CanonicalCodecControl,
+) -> Result<u64, CanonicalCodecError> {
+    let (profile, encoded_bytes) = crate::value::chunked_profile(chunks, control)?;
+    typed_resident_bytes_estimate(profile)?
+        .checked_add(encoded_bytes)
+        .ok_or_else(|| {
+            CanonicalCodecError::resource_limit("typed decode estimate", "byte count overflow")
+        })
+}
+
+fn typed_resident_bytes_estimate(
+    profile: value::MaterializationProfile,
+) -> Result<u64, CanonicalCodecError> {
     let overflow = || CanonicalCodecError::resource_limit("typed decode estimate", "byte count overflow");
     let scalars = profile
         .value_nodes

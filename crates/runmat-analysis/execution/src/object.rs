@@ -233,7 +233,8 @@ pub fn prepared_input_resource_facts_from_refs<'a>(
                 .iter()
                 .try_fold(total, |partition_total, partition| {
                     let chunks = input.partition_chunks(partition.logical_identity)?;
-                    let estimate = runmat_canonical_codec::canonical_chunked_payload_materialization_resident_bytes_estimate(
+                    // Inputs decode directly into typed values; no value tree is built.
+                    let estimate = runmat_canonical_codec::canonical_chunked_payload_typed_resident_bytes_estimate(
                         chunks.iter().map(|object| object.bytes.as_slice()), &ResourceProfileControl,
                     )
                     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
