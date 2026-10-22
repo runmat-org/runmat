@@ -199,7 +199,7 @@ impl<'a> ConjugateHeatProblem<'a> {
             &self.system.dirichlet,
             self.input.policy,
         )?;
-        let (temperature_k, second) = self.system.dofs.split(&values)?;
+        let (temperature_k, second) = self.system.dofs.split(&values).map_err(ConjugateHeatError::InvalidDetail)?;
         let evidence = evidence::evaluate(&self.input, &self.system, &values, None)?;
         if !evidence.accepted(self.input.policy.linear_relative_tolerance) {
             return Err(ConjugateHeatError::InvalidDetail(format!(
@@ -228,7 +228,8 @@ impl<'a> ConjugateHeatProblem<'a> {
         let previous = self.system.dofs.join(
             &departure.temperature_k,
             &departure.interface_second_side_temperature_k,
-        )?;
+        )
+        .map_err(ConjugateHeatError::InvalidDetail)?;
         let effective = RealSparseMatrix::scaled_sum(
             &[
                 (1.0, &self.system.full),
@@ -269,7 +270,7 @@ impl<'a> ConjugateHeatProblem<'a> {
             &self.system.dirichlet,
             self.input.policy,
         )?;
-        let (temperature_k, second) = self.system.dofs.split(&values)?;
+        let (temperature_k, second) = self.system.dofs.split(&values).map_err(ConjugateHeatError::InvalidDetail)?;
         let evidence = evidence::evaluate(
             &self.input,
             &self.system,
@@ -300,11 +301,13 @@ impl<'a> ConjugateHeatProblem<'a> {
         let previous = self.system.dofs.join(
             &departure.temperature_k,
             &departure.interface_second_side_temperature_k,
-        )?;
+        )
+        .map_err(ConjugateHeatError::InvalidDetail)?;
         let values = self.system.dofs.join(
             &original.temperature_k,
             &original.interface_second_side_temperature_k,
-        )?;
+        )
+        .map_err(ConjugateHeatError::InvalidDetail)?;
         let evidence = evidence::evaluate(
             &self.input,
             &self.system,
@@ -336,7 +339,8 @@ impl<'a> ConjugateHeatProblem<'a> {
         let values = self.system.dofs.join(
             &original.temperature_k,
             &original.interface_second_side_temperature_k,
-        )?;
+        )
+        .map_err(ConjugateHeatError::InvalidDetail)?;
         if original.linear_iterations > MAXIMUM_REFINEMENT_STEPS {
             return Err(ConjugateHeatError::Invalid(
                 "retained linear iteration count",

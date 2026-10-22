@@ -11,3 +11,4 @@ pub mod maxwell;
 pub(crate) mod scalar_constraints;
 pub mod structural;
 pub mod thermal;
+pub(crate) mod thermal_interface;

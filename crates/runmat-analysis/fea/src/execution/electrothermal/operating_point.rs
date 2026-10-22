@@ -140,10 +140,15 @@ fn operating_point(
     let last = completion
         .thermal
         .temperature_snapshots
-        .last()
-        .and_then(|snapshot| snapshot.as_host_f64())
+        .len()
+        .checked_sub(1)
         .ok_or_else(|| AnalysisExecutionError::Invalid("electrothermal thermal history is empty".into()))?;
-    let element_temperature_k = element_temperatures(&projection, last)?;
+    let element_temperature_k = super::coupled::element_temperatures_of_snapshot(
+        &projection,
+        &completion.thermal_workload.model.interfaces,
+        &completion.thermal,
+        last,
+    )?;
     let sample = completion.electrical.last().ok_or_else(|| {
         AnalysisExecutionError::Invalid("electrothermal conduction history is empty".into())
     })?;

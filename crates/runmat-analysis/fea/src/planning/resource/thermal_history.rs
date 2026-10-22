@@ -15,12 +15,35 @@ pub struct ThermalHistoryResourceFacts {
 }
 
 impl ThermalHistoryResourceFacts {
+    /// A finite-conductance thermal interface also retains its second side's temperature at
+    /// each interface node (bounded here by every node of a conformal interface face).
     pub fn derive(
         mesh: &SolverMeshArtifact,
         schedule: &ThermalSolveSchedule,
+        interfaces: &[runmat_analysis_core::AnalysisInterface],
     ) -> Result<Self, ResourcePlanningError> {
+        let conductance = interfaces.iter().any(|interface| {
+            matches!(
+                &interface.kind,
+                runmat_analysis_core::AnalysisInterfaceKind::ConjugateHeatTransfer(model)
+                    if !matches!(model.transfer, runmat_analysis_core::ThermalInterfaceTransfer::Perfect)
+            )
+        });
+        let interface_nodes = if conductance {
+            mesh.topology
+                .boundary_faces
+                .iter()
+                .filter(|face| {
+                    face.role == runmat_meshing_core::BoundaryFaceRole::ConformalInterface
+                })
+                .flat_map(|face| face.node_ids.iter().copied())
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+        } else {
+            0
+        };
         Self::from_counts(
-            mesh.topology.nodes.len(),
+            mesh.topology.nodes.len() + interface_nodes,
             mesh.topology.volume_elements.len(),
             schedule.sample_count(),
         )
@@ -62,7 +85,7 @@ impl ThermalHistoryResourceFacts {
             .ok_or(ResourcePlanningError::Overflow(
                 "thermal retained field bytes",
             ))?;
-        // Four typed fields per sample, including conversion-time Vec headers and field IDs.
+        // Four typed fields per sample (five with a conductance interface), including conversion-time Vec headers and field IDs.
         // Additional arrays coexist: schedule points/events, result time points/residuals,
         // six-scalar energy balance, and optional observation coordinates. Reserve S slots
         // even when a particular array contains only S-1 or zero entries.
@@ -72,7 +95,7 @@ impl ThermalHistoryResourceFacts {
             + std::mem::size_of::<crate::results::field::RecoveredFieldSample>())
             as u64;
         let retained_metadata_bytes = samples
-            .checked_mul(4 * FIELD_METADATA_BYTES + sample_arrays)
+            .checked_mul(5 * FIELD_METADATA_BYTES + sample_arrays)
             .ok_or(ResourcePlanningError::Overflow("thermal history metadata"))?;
         Ok(Self {
             samples: Count(samples),

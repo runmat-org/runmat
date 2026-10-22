@@ -344,6 +344,11 @@ pub fn fea_thermal_temperature_field_id(snapshot_index: usize) -> String {
     format!("thermal.temperature.{snapshot_index}")
 }
 
+/// Second-side temperature at the nodes of finite-conductance thermal interfaces.
+pub fn fea_thermal_interface_temperature_field_id(snapshot_index: usize) -> String {
+    format!("thermal.interface_second_side_temperature.{snapshot_index}")
+}
+
 pub fn fea_thermal_temperature_gradient_field_id(snapshot_index: usize) -> String {
     format!("thermal.temperature_gradient.{snapshot_index}")
 }

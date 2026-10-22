@@ -56,7 +56,7 @@ fn disconnected_bodies_have_independent_exact_steady_equilibria_and_require_each
                 assemble(
                     model,
                     &mesh,
-                    crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+                    crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
                         .unwrap()
                         .support(),
                     &RealizedExcitations::default(),
@@ -137,7 +137,7 @@ fn component_reference_preserves_dirichlet_contrasts_within_a_connected_body() {
         let mut assembly = assemble(
             &model,
             &mesh,
-            crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+            crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh, &[])
                 .unwrap()
                 .support(),
             &RealizedExcitations::default(),
