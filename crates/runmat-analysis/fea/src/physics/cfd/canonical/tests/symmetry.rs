@@ -160,7 +160,8 @@ fn retained_symmetry_flux_substitution_is_rejected() {
     assert!(p.recover(&r).is_err());
 }
 
-// witness: FEA-FLUID-INPUTS-001/boundaries @ incompressible_laminar_steady/tet4/numerical_kernel;
+// witness: FEA-FLUID-INPUTS-001/boundaries @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel;
 //   coverage: partial; boundary: a closed component bounded by velocity walls and symmetry planes
 //   (a spanwise slab of a driven cavity) takes its pressure level from the authored gauge and
 //   reproduces Couette flow; symmetry planes carry no volume flux.
