@@ -6,6 +6,7 @@ geometry bracket {
     region body : solid { select id "solid_000001"; expect exactly_one }
     region top_face : face { select name "Top face"; expect exactly_one }
     region mounting_holes : face { select name "Mounting holes"; expect one_or_more }
+    region corner_fillets : face { select name "Corner fillets"; expect one_or_more }
 }
 
 mesh bracket on geometry.bracket {
@@ -42,6 +43,10 @@ study bracket_static {
     analysis static { structural static {} }
     output displacement = analysis.static.field.node.displacement
     output von_mises = analysis.static.field.element.von_mises_stress
-    output peak_stress = max(analysis.static.field.element.von_mises_stress, over = geometry.bracket.region.body)
+    // The clamped countersink edges are stress singularities, so no body-wide stress peak is
+    // reported. The corner fillets lie away from the supports and converge under refinement.
+    output fillet_stress = mean(analysis.static.field.node.von_mises_stress, over = geometry.bracket.region.corner_fillets)
+    output fillet_peak_stress = max(analysis.static.field.node.von_mises_stress, over = geometry.bracket.region.corner_fillets)
+    output support_reaction = resultant(analysis.static.field.node.reaction_force, over = geometry.bracket.region.mounting_holes)
     output peak_displacement = max(magnitude(analysis.static.field.node.displacement), over = geometry.bracket.region.body)
 }
