@@ -37,6 +37,7 @@ impl FeaThermalRunResult {
             producer: self.producer,
             ordered_node_ids: &self.ordered_node_ids,
             ordered_element_ids: &self.ordered_element_ids,
+            interface_node_ids: &self.interface_node_ids,
             initial_state: &self.initial_state,
         }
     }
@@ -168,6 +169,7 @@ pub(super) struct ThermalResultMetadata<'a> {
     pub producer: super::StepIdentity,
     pub ordered_node_ids: &'a [u64],
     pub ordered_element_ids: &'a [u64],
+    pub interface_node_ids: &'a [u64],
     pub initial_state: &'a crate::ThermalInitialStateEvidence,
 }
 impl ThermalResultMetadata<'_> {

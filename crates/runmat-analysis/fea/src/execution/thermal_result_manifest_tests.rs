@@ -33,7 +33,7 @@ fn manifest_retains_identity_without_histories_and_rejects_malformed_catalogs() 
         let field_ids = manifest
             .fields
             .iter()
-            .map(|entries| entries.each_ref().map(|entry| entry.field))
+            .map(|entries| entries.iter().map(|entry| entry.field).collect::<Vec<_>>())
             .collect::<Vec<_>>();
         let expected_content = encode_contract(
             b"runmat-thermal-solver-result/v1\0",
@@ -53,6 +53,7 @@ fn manifest_retains_identity_without_histories_and_rejects_malformed_catalogs() 
                 &result.ordered_element_ids,
                 &result.initial_state,
                 &result.nonlinear_evidence,
+                &result.interface_node_ids,
             ),
             CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64),
         )
@@ -75,6 +76,7 @@ fn manifest_retains_identity_without_histories_and_rejects_malformed_catalogs() 
             result.ordered_element_ids.len(),
             result.time_points_s.len(),
             result.residual_norms.len(),
+            result.interface_node_ids.len(),
         )
         .unwrap();
         let initial_shape =
@@ -133,6 +135,7 @@ fn manifest_retains_identity_without_histories_and_rejects_malformed_catalogs() 
         let facts = crate::planning::resource::ThermalManifestCatalogResourceFacts::derive(
             &canonical_tetrahedron_solver_mesh(order),
             &schedule,
+            0,
         )
         .unwrap();
         let actual = runmat_canonical_codec::profile_serialized(&manifest.fields, LIMITS).unwrap();

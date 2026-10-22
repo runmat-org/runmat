@@ -174,3 +174,42 @@ fn perfect_contact_shares_the_interface_temperature() {
         assert!((value - expected).abs() < 1e-7 * HOT, "y={y} {value} vs {expected}");
     }
 }
+
+#[test]
+fn published_state_and_element_means_read_each_side_of_the_joint() {
+    // The manifest and the published state carry the second side's interface temperature, and
+    // element means taken from the state use each body's own side: a linear field's element
+    // mean is its value at the centroid.
+    let mesh = mesh();
+    let input = workload(
+        &mesh,
+        ThermalInterfaceTransfer::Conductance(HeatTransferCoefficient::new(500.0)),
+    );
+    let result = input.execute(&mesh).unwrap();
+    let manifest = crate::execution::ThermalSolverResultManifest::from_result(&result).unwrap();
+    assert_eq!(manifest.interface_node_ids, result.interface_node_ids);
+    assert!(manifest.fields.iter().all(|fields| fields.len() == 5));
+    let state =
+        crate::execution::CanonicalSemanticState::from_thermal_result(&input.model, &mesh, &result)
+            .unwrap();
+    let payload = state.payload.thermal().unwrap();
+    assert_eq!(payload.interface_node_ids, result.interface_node_ids);
+    let (elements, _) = crate::execution::conduction_operating_temperatures(
+        payload,
+        &mesh,
+        &input.model.interfaces,
+        false,
+    )
+    .unwrap();
+    let q = (HOT - COLD) / (SPLIT / K_LOWER + 1.0 / 500.0 + (1.0 - SPLIT) / K_UPPER);
+    let projection = crate::topology::AnalysisProjection::derive(&mesh).unwrap();
+    for (element, value) in projection.elements.iter().zip(elements) {
+        let y = element.centroid_m[1];
+        let expected = if element.region_id.source_topology_id == "lower" {
+            HOT - q * y / K_LOWER
+        } else {
+            COLD + q * (1.0 - y) / K_UPPER
+        };
+        assert!((value - expected).abs() < 1e-7 * HOT, "y={y} {value} vs {expected}");
+    }
+}

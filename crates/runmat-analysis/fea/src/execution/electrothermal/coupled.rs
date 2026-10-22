@@ -229,29 +229,13 @@ pub fn element_temperatures_of_snapshot(
         .get(index)
         .and_then(|snapshot| snapshot.as_host_f64())
         .ok_or_else(|| invalid("thermal interface snapshot is not host data"))?;
-    let (plans, dofs) = crate::physics::thermal_interface::solid_conduction(projection, interfaces)
-        .map_err(invalid)?;
-    if dofs.second().len() != thermal.interface_node_ids.len()
-        || dofs
-            .second()
-            .iter()
-            .zip(&thermal.interface_node_ids)
-            .any(|(&(node, _), &id)| projection.nodes[node].node_id != id)
-    {
-        return Err(invalid("thermal interface nodes differ from the declared interfaces"));
-    }
-    let values = dofs
-        .join(
-            nodal,
-            &dofs
-                .second()
-                .iter()
-                .zip(second)
-                .map(|(&(node, _), &value)| (node, value))
-                .collect::<Vec<_>>(),
-        )
-        .map_err(invalid)?;
-    element_temperatures(&dofs.split_projection(projection, &plans), &values)
+    let second = thermal
+        .interface_node_ids
+        .iter()
+        .copied()
+        .zip(second.iter().copied())
+        .collect::<Vec<_>>();
+    super::operating_point::side_element_temperatures(projection, interfaces, nodal, &second)
 }
 
 /// Element mean temperatures from nodal values (volume average with the element's shape

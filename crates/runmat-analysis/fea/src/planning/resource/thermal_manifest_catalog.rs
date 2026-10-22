@@ -22,21 +22,23 @@ impl ThermalManifestCatalogResourceFacts {
     pub fn derive(
         mesh: &SolverMeshArtifact,
         schedule: &ThermalSolveSchedule,
+        interface_nodes: usize,
     ) -> Result<Self, ResourcePlanningError> {
         let samples = schedule.sample_count();
         let ordinal = samples.checked_sub(1).ok_or_else(|| {
             ResourcePlanningError::Invalid("thermal catalog requires samples".into())
         })?;
-        let definitions = (0..4)
-            .map(|index| history_fields::snapshot_definition(index, ordinal))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
-        let counts = [
+        let entities = history_fields::snapshot_entities(
             mesh.topology.nodes.len(),
             mesh.topology.volume_elements.len(),
-            mesh.topology.volume_elements.len(),
-            mesh.topology.volume_elements.len(),
-        ];
+            interface_nodes,
+        );
+        let definitions = entities
+            .iter()
+            .map(|&(index, _)| history_fields::snapshot_definition(index, ordinal))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+        let counts = entities.iter().map(|&(_, count)| count).collect::<Vec<_>>();
         let catalog = RecoveredFieldArtifactEntry::profile_sampled_catalog_shape(
             &definitions,
             &counts,
@@ -54,7 +56,16 @@ impl ThermalManifestCatalogResourceFacts {
                 "thermal catalog partition count",
             ))?;
         let validation_scratch_bytes = vector_bytes::<RecoveredFieldPartitionIdentity>(partitions)?;
-        let field_identity_bytes = vector_bytes::<[RecoveredFieldIdentity; 4]>(samples)?;
+        let field_identity_bytes = vector_bytes::<Vec<RecoveredFieldIdentity>>(samples)?
+            .0
+            .checked_add(
+                vector_bytes::<RecoveredFieldIdentity>(counts.len())?
+                    .0
+                    .checked_mul(samples as u64)
+                    .ok_or(ResourcePlanningError::Overflow("thermal catalog identities"))?,
+            )
+            .map(ByteCount)
+            .ok_or(ResourcePlanningError::Overflow("thermal catalog identities"))?;
         Ok(Self {
             catalog,
             validation_scratch_bytes,

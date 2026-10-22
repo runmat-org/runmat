@@ -22,11 +22,51 @@ pub struct CanonicalThermalStatePayload {
     pub reference_temperature_k: f64,
     pub sample_time_s: f64,
     pub maximum_relative_linear_residual: f64,
+    /// Mesh nodes of finite-conductance thermal interfaces; `temperature` holds the first
+    /// side's temperature there and `interface_temperature` the second side's.
+    #[serde(default)]
+    pub interface_node_ids: Vec<u64>,
+    #[serde(default)]
+    pub interface_temperature: Option<AnalysisField>,
 }
 
 impl CanonicalThermalStatePayload {
+    /// (interface node id, second side's temperature) pairs; empty without a
+    /// finite-conductance interface.
+    pub fn interface_temperature_by_node(&self) -> AnalysisExecutionResult<Vec<(u64, f64)>> {
+        let Some(field) = &self.interface_temperature else {
+            return Ok(Vec::new());
+        };
+        let values = field.as_host_f64().ok_or_else(|| {
+            AnalysisExecutionError::Invalid("thermal interface state must be host-backed".into())
+        })?;
+        Ok(self
+            .interface_node_ids
+            .iter()
+            .copied()
+            .zip(values.iter().copied())
+            .collect())
+    }
+
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         validate_portable_fields(std::slice::from_ref(&self.temperature))?;
+        match &self.interface_temperature {
+            None if self.interface_node_ids.is_empty() => {}
+            Some(field)
+                if !self.interface_node_ids.is_empty()
+                    && field.shape == vec![self.interface_node_ids.len()]
+                    && field
+                        .as_host_f64()
+                        .is_some_and(|values| values.iter().all(|value| *value > 0.0)) =>
+            {
+                validate_portable_fields(std::slice::from_ref(field))?;
+            }
+            _ => {
+                return Err(AnalysisExecutionError::Invalid(
+                    "thermal state interface temperatures do not match their nodes".into(),
+                ))
+            }
+        }
         let values = self.temperature.as_host_f64().ok_or_else(|| {
             AnalysisExecutionError::Invalid("thermal semantic state must be host-backed".into())
         })?;
@@ -165,6 +205,8 @@ impl CanonicalSemanticState {
                 .iter()
                 .copied()
                 .fold(0.0_f64, f64::max),
+            interface_node_ids: result.interface_node_ids.clone(),
+            interface_temperature: result.interface_temperature_snapshots.get(terminal_index).cloned(),
         };
         Self::new(CanonicalSemanticStateInput {
             producer: request.producer,
@@ -493,7 +535,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            bound.nodal_temperature_k,
+            bound.temperature.nodal_temperature_k,
             source
                 .payload
                 .thermal()

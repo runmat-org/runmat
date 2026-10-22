@@ -9,7 +9,7 @@ use serde::Serialize;
 // Tuple order is part of numerical identity. Generic borrowed/repeated inventories preserve that
 // same wire authority without building hypothetical histories for resource admission.
 #[derive(Serialize)]
-pub(in crate::execution) struct IdentitySerialization<'a, T, F, R, E, N, L, I, H>(
+pub(in crate::execution) struct IdentitySerialization<'a, T, F, R, E, N, L, I, H, J>(
     pub ThermalNumericalIntentIdentity,
     pub &'a AnalysisRunIdentity,
     pub T,
@@ -24,6 +24,7 @@ pub(in crate::execution) struct IdentitySerialization<'a, T, F, R, E, N, L, I, H
     pub L,
     pub I,
     pub H,
+    pub J,
 );
 
 impl ThermalResultMetadata<'_> {
@@ -46,6 +47,7 @@ impl ThermalResultMetadata<'_> {
             self.ordered_element_ids,
             self.initial_state,
             self.nonlinear_evidence,
+            self.interface_node_ids,
         )
     }
 
@@ -65,14 +67,16 @@ impl ThermalResultMetadata<'_> {
 }
 
 pub(in crate::execution) struct ManifestFieldIdentities<'a>(
-    pub &'a [[crate::results::field::RecoveredFieldArtifactEntry; 4]],
+    pub &'a [Vec<crate::results::field::RecoveredFieldArtifactEntry>],
 );
 impl Serialize for ManifestFieldIdentities<'_> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeSeq;
         let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
         for entries in self.0 {
-            sequence.serialize_element(&entries.each_ref().map(|entry| entry.field))?;
+            sequence.serialize_element(
+                &entries.iter().map(|entry| entry.field).collect::<Vec<_>>(),
+            )?;
         }
         sequence.end()
     }

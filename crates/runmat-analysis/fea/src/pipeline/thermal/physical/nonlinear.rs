@@ -66,17 +66,22 @@ pub(super) fn add_count(total: &mut u32, count: u32) -> Result<(), FeaRunError> 
 }
 
 pub(super) fn solve(input: NonlinearSolveInput<'_>) -> Result<NonlinearOutcome, FeaRunError> {
-    if !input.assembly.relations.is_empty() {
-        return Err(FeaRunError::Assembly(
-            "thermal radiation with tie, periodic or temperature-jump constraints needs the reduced Newton residual, which the radiation route does not yet form".into(),
-        ));
-    }
+    use crate::physics::scalar_constraints;
+    // Tie, periodic and jump relations: the iterate satisfies them exactly, each correction
+    // solves the reduced Newton system (so it keeps them satisfied) and convergence and the
+    // line search measure the reduced residual T^T r, where the relation reactions cancel.
+    let relations = scalar_constraints::about_reference(
+        &input.assembly.relations,
+        input.reference_temperature_k,
+    );
+    let correction_relations = scalar_constraints::homogeneous(&relations);
     let mut current = input.initial_departure_k.to_vec();
     for (node, prescribed) in input.assembly.prescribed_temperature_k.iter().enumerate() {
         if let Some(value) = prescribed {
             current[node] = value - input.reference_temperature_k[node];
         }
     }
+    scalar_constraints::enforce(&mut current, &relations);
     let evaluate = |temperature: &[f64]| {
         input.assembly.nonlinear_residual(
             input.model,
@@ -88,7 +93,8 @@ pub(super) fn solve(input: NonlinearSolveInput<'_>) -> Result<NonlinearOutcome, 
         )
     };
     let free_norm = |residual: &[f64]| {
-        norm(residual.iter().enumerate().filter_map(|(node, value)| {
+        let reduced = scalar_constraints::reduce_residual(residual, &relations);
+        norm(reduced.iter().enumerate().filter_map(|(node, value)| {
             input.assembly.prescribed_temperature_k[node]
                 .is_none()
                 .then_some(*value)
@@ -134,7 +140,7 @@ pub(super) fn solve(input: NonlinearSolveInput<'_>) -> Result<NonlinearOutcome, 
             &input.facts.operators,
             linear_target,
             None,
-            &[],
+            &correction_relations,
         )?;
         maximum_linear_residual = maximum_linear_residual.max(linear_residual(&correction)?);
         add_count(&mut host_sync_count, correction.host_sync_count)?;

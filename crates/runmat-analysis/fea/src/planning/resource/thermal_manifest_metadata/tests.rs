@@ -134,12 +134,12 @@ fn profile_composition_checks_overflow_without_partial_update() {
 
 #[test]
 fn scalar_inventory_profiles_grow_with_all_retained_axes() {
-    let base = ThermalSolverResultManifest::scalar_inventory_profile(4, 1, 3, 2).unwrap();
+    let base = ThermalSolverResultManifest::scalar_inventory_profile(4, 1, 3, 2, 0).unwrap();
     for (nodes, elements, samples, solves) in
         [(40, 1, 3, 2), (4, 10, 3, 2), (4, 1, 30, 2), (4, 1, 3, 20)]
     {
         let grown =
-            ThermalSolverResultManifest::scalar_inventory_profile(nodes, elements, samples, solves)
+            ThermalSolverResultManifest::scalar_inventory_profile(nodes, elements, samples, solves, 0)
                 .unwrap();
         assert!(grown.encoded_bytes_upper_bound > base.encoded_bytes_upper_bound);
         assert!(
