@@ -2916,7 +2916,7 @@ fn evaluation_rejects_plan_targets_rebound_to_another_topology_entity() {
 }
 
 // witness: FEA-SHARED-OBSERVATIONS-001/governed_observation_corpus @
-//   linear_structural/tet4/numerical_kernel; coverage: partial;
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
 //   boundary: A point sample of an element field returns the native value of the element that
 //   contains the point (not a centroid match), with that element as its entity, on a
 //   three-element Tet4 mesh. Tet10 and path samples of element fields are not exercised.
