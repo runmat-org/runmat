@@ -120,9 +120,9 @@ impl<'a> ClassificationIndex<'a> {
             let mut expected = [&interface.side_a_region_id, &interface.side_b_region_id];
             expected.sort();
             if !regions.iter().eq(expected) {
-                return Err(invalid(
-                    "conformal interface facet does not bind both exact interface regions",
-                ));
+                return Err(invalid(format!(
+                    "conformal interface facet on {source_face_id:?} does not bind both exact interface regions: facet regions {regions:?}, interface regions {expected:?}"
+                )));
             }
             return Ok(ProjectedFaceClass {
                 source_face_id,
