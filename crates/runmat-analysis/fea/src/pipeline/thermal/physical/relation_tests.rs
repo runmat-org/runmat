@@ -36,6 +36,11 @@ fn convective_left(input: &mut crate::execution::ThermalWorkload, ambient_k: f64
     });
 }
 
+// witness: FEA-THERMAL-DOMAIN-001/constraints @ thermal_steady/tet4|tet10/numerical_kernel;
+//   coverage: partial;
+//   boundary: A periodic cell with a 20 K temperature jump and a convective left face reproduces T
+//   = 300 + 20 x exactly (within 1e-8 relative) on linear and quadratic meshes, with energy-balance
+//   residuals within target; tied and affine relations beyond one periodic pair are not covered.
 #[test]
 fn temperature_jump_carries_a_linear_profile_through_a_periodic_cell() {
     // The right face sits 20 K above the left one, which exchanges heat with a 300 K film.
@@ -67,6 +72,9 @@ fn temperature_jump_carries_a_linear_profile_through_a_periodic_cell() {
     }
 }
 
+// witness: FEA-THERMAL-DOMAIN-001/constraints @ thermal_steady/tet4|tet10/numerical_kernel;
+//   coverage: partial;
+//   boundary: A source-free periodic cell settles at the film ambient temperature.
 #[test]
 fn periodic_cell_without_sources_settles_at_the_film_ambient() {
     // No source acts and the right face follows the left one, so the left film holds the

@@ -46,6 +46,14 @@ fn law(program: &CheckedFeaProgram, model: &str) -> AcousticImpedanceLaw {
         .expect("impedance law boundary")
 }
 
+// witness: FEA-PUBLIC-LANGUAGE-001/input_forms @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Delany-Bazley and sampled impedance tables lower into their acoustic boundaries; the
+//   other input forms (film coefficient, CSV samples, species, porous, lubrication) are separate.
+// witness: FEA-ACOUSTIC-BOUNDARY-002/complex_frequency_dependent_impedance @
+//   acoustic_harmonic/tet4|tet10/numerical_kernel; coverage: partial;
+//   boundary: Language lowering of Delany-Bazley and sampled impedance tables only; no solve
+//   against the closed-form absorption.
 #[test]
 fn delany_bazley_and_sampled_impedance_tables_lower_into_their_boundaries() {
     let source = format!(
@@ -98,6 +106,9 @@ model measured_wall {{
     );
 }
 
+// witness: FEA-PUBLIC-LANGUAGE-001/input_forms @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Impedance tables reject unknown models, wrong quantities and unsorted samples.
 #[test]
 fn impedance_tables_reject_unknown_models_quantities_and_unsorted_samples() {
     for table in [

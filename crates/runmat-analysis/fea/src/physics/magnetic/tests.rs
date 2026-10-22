@@ -375,6 +375,11 @@ fn insulated_faces_and_one_gauge_admit_a_partially_grounded_field() {
     assert!(solve_canonical_static(&ungrounded, &mesh, "potential", 1e-10).is_err());
 }
 
+// witness: FEA-EM-INPUT-001/magnetic_constraints @ magnetostatic/tet4/numerical_kernel; coverage:
+//   partial;
+//   boundary: A prescribed tangential vector potential on one face with grounds and insulated sides
+//   drives the exact uniform flux density A = (0, a x/L, 0); gauge, periodic and phase-shifted
+//   relations are not covered.
 #[test]
 fn prescribed_tangential_potential_drives_the_exact_uniform_field() {
     // Box [0,L]^3 with A = (0, a x / L, 0): B = (0, 0, a / L). A = 0 on x = 0 and on the

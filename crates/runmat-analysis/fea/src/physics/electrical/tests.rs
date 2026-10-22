@@ -633,6 +633,11 @@ fn face_current_density_injects_its_normal_flux() {
     assert_relative(left.outward_flux, 4.0 * area, 1e-8);
 }
 
+// witness: FEA-EM-INPUT-001/scalar_constraints @ electrostatic/tet4/numerical_kernel; coverage:
+//   partial;
+//   boundary: A charged slab with a translation-periodic right face matches the same slab grounded
+//   on both faces to 1e-8, and the grounded face carries the full flux; terminal voltage, floating
+//   and integral-current constraints are separate tests.
 #[test]
 fn periodic_faces_share_their_potential() {
     // A charged slab grounded on both faces, against the same slab grounded on the left and
