@@ -380,6 +380,31 @@ pub(super) fn solve_with_time(
                 .copied()
                 .fold(0.0, f64::max),
         ];
+        let worst_cell = residual
+            .cell_momentum_relative
+            .iter()
+            .enumerate()
+            .fold((0, 0.0f64), |acc, (c, r)| if *r > acc.1 { (c, *r) } else { acc });
+        tracing::debug!(
+            target: "runmat_fea::fluid::coupled",
+            iteration,
+            linear = report.iterations,
+            momentum = last[0],
+            continuity = last[1],
+            global_momentum = last[3],
+            worst_cell = worst_cell.0,
+            worst_cell_relative = worst_cell.1,
+            worst_cell_centroid = ?p.topology.cells[worst_cell.0].centroid_m,
+            worst_cell_boundaries = ?p
+                .topology
+                .faces
+                .iter()
+                .enumerate()
+                .filter(|(_, f)| f.owner == worst_cell.0 && f.neighbor.is_none())
+                .map(|(i, _)| boundary_kind(&p.boundaries[i]))
+                .collect::<Vec<_>>(),
+            "coupled fluid Picard step"
+        );
         if residual.accepted(p.policy.physical_relative_tolerance) {
             let pressure_pa = pressure_values
                 .iter()
@@ -416,4 +441,14 @@ pub(super) fn solve_with_time(
         global_momentum_relative: last[3],
         maximum_cell_momentum_relative: last[4],
     })
+}
+
+fn boundary_kind(boundary: &super::boundary::FaceBoundary<'_>) -> &'static str {
+    match boundary {
+        super::boundary::FaceBoundary::Interior => "interior",
+        super::boundary::FaceBoundary::Velocity { moving_wall: true, .. } => "moving_wall",
+        super::boundary::FaceBoundary::Velocity { .. } => "velocity",
+        super::boundary::FaceBoundary::PressureOutlet { .. } => "outlet",
+        super::boundary::FaceBoundary::Symmetry { .. } => "symmetry",
+    }
 }
