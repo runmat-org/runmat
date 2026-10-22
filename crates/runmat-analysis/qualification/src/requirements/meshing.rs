@@ -23,6 +23,14 @@ const PUBLIC: &[Envelope] = cells!(
     [MeshOrder::CanonicalMixedTopology],
     [ExecutionEnvelope::PublicStudy]
 );
+const GOV: &[Envelope] = cells!(
+    [Formulation::SharedInfrastructure],
+    [MeshOrder::CanonicalMixedTopology],
+    [
+        ExecutionEnvelope::SourceCheck,
+        ExecutionEnvelope::PublicStudy
+    ]
+);
 const WORKERS: &[Envelope] = cells!(
     [Formulation::SharedInfrastructure],
     [MeshOrder::CanonicalMixedTopology],
@@ -270,7 +278,7 @@ const FEA_MESH_EXECUTION_001: Requirement = Requirement {
             "performance_slo_and_governance",
             "A versioned performance and resource SLO covers the corpus parts, current reports are regenerated each release, and the meshing governance validators (corpus, conformance, differential, reliability, release evidence) pass.",
             EvidenceKind::PerformanceMeasurement,
-            PUBLIC,
+            GOV,
         ),
     ],
 };
