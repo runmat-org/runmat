@@ -107,7 +107,9 @@ fn manifest_catalog_is_admitted_with_checked_retained_and_validation_costs() {
     workload.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes = required - catalog;
+        .maximum_resident_bytes = required - 1;
+    // The catalog is part of that complete requirement.
+    assert!(catalog > 0 && catalog < required);
     let outcome = workload.execute(&mesh);
     assert!(
         matches!(&outcome, Err(crate::FeaRunError::Resource(

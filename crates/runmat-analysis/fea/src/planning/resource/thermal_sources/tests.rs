@@ -245,7 +245,8 @@ fn thermal_volume_and_flux_evidence_match_inventory_and_resident_ceiling() {
         workload.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes = total - source.reservation_bytes().unwrap().0;
+            .maximum_resident_bytes = total - 1;
+        assert!(source.reservation_bytes().unwrap().0 > 0);
         assert!(
             matches!(workload.execute(&mesh), Err(crate::FeaRunError::Resource(ResourcePlanningError::AccuracyCeiling { required, .. }))
             if required == total)
