@@ -1,6 +1,6 @@
 # FEA-SHARED-EXTENSIONS-001: Truthful future derivative and compiled-law seams
 
-0 PASS, 0 FAIL, 8 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 PARTIAL, 0 FAIL, 8 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## truthful_derivative_and_compiled_law_capabilities
 

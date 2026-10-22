@@ -1,6 +1,6 @@
 # FEA-COUPLING-INTERFACE-001: Typed physical interfaces and conservative transfers
 
-0 PASS, 0 FAIL, 12 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 PARTIAL, 0 FAIL, 12 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## identity
 

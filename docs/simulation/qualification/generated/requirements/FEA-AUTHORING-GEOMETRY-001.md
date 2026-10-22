@@ -1,6 +1,6 @@
 # FEA-AUTHORING-GEOMETRY-001: Immutable exact geometry and truthful engineering exchange
 
-1 PASS, 0 FAIL, 35 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 PARTIAL, 1 FAIL, 19 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## immutable_sources
 
@@ -9,14 +9,10 @@ Evidence kind: SemanticRealization. Criterion: The `.fea` language supports four
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
 | shared_infrastructure | mesh_independent | source_check | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
 
 ## persistent_topology
 
@@ -24,15 +20,11 @@ Evidence kind: SemanticRealization. Criterion: The bounded native provider must 
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | PASS | `runmat-analysis-language[test:geometry_features]::imported_source_aliases_and_persistent_ids_remain_distinct` (crates/runmat-analysis/language/tests/geometry_features.rs:11) - Compiler checks source alias versus persistent-id selectors remain distinct typed values; no native CAD feature history, regeneration or AP242 export evidence. |
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
+| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-language[test:geometry_features]::imported_source_aliases_and_persistent_ids_remain_distinct` (crates/runmat-analysis/language/tests/geometry_features.rs:11) - Compiler checks source alias versus persistent-id selectors remain distinct typed values; no native CAD feature history, regeneration or AP242 export evidence. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
 
 ## qualified_properties
 
@@ -41,14 +33,10 @@ Evidence kind: SemanticRealization. Criterion: RunMat-generated geometry follows
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
 | shared_infrastructure | mesh_independent | source_check | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
 
 ## truthful_exchange
 
@@ -57,12 +45,8 @@ Evidence kind: SemanticRealization. Criterion: Imported engineering properties a
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
 | shared_infrastructure | mesh_independent | source_check | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
 

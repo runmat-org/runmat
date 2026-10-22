@@ -1,6 +1,6 @@
 # FEA-DYNAMICS-PRESTRESS-001: Validated prestressed base states and stability perturbation
 
-1 PASS, 0 FAIL, 111 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 3 PARTIAL, 0 FAIL, 109 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## complete_base_operator
 
@@ -8,7 +8,7 @@ Evidence kind: IndependentReference. Criterion: Consume only a complete, converg
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| prestressed_structural | tet4 | numerical_kernel | PASS | `runmat-analysis-fea[lib]::tests::prestressed_frequency::prestressed_direct_harmonic_uses_the_exact_tangent_and_rejects_state_substitution` (crates/runmat-analysis/fea/src/tests/prestressed_frequency.rs:175) - Fixed direct entry fixture compares preload response ordering and residual, canonical result roundtrip, and substituted topology rejection. No independent buckl... |
+| prestressed_structural | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::tests::prestressed_frequency::prestressed_direct_harmonic_uses_the_exact_tangent_and_rejects_state_substitution` (crates/runmat-analysis/fea/src/tests/prestressed_frequency.rs:175) - Fixed direct entry fixture compares preload response ordering and residual, canonical result roundtrip, and substituted topology rejection. No independent buckl... |
 | prestressed_structural | tet10 | numerical_kernel | OPEN |  |
 | prestressed_structural | beam | numerical_kernel | OPEN |  |
 | prestressed_structural | shell | numerical_kernel | OPEN |  |
@@ -22,7 +22,7 @@ Evidence kind: IndependentReference. Criterion: Consume only a complete, converg
 | prestressed_structural | canonical_mixed_topology | parallel_cpu | OPEN |  |
 | prestressed_structural | canonical_mixed_topology | domain_decomposed | OPEN |  |
 | prestressed_structural | canonical_mixed_topology | claimed_accelerator | OPEN |  |
-| structural_stability | tet4 | numerical_kernel | OPEN |  |
+| structural_stability | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::tests::physical_preload_publishes_signed_load_linear_geometric_stiffness` (crates/runmat-analysis/fea/src/tests.rs:1919) - A physical preload publishes a signed-load linear geometric stiffness on a Tet4 fixture. |
 | structural_stability | tet10 | numerical_kernel | OPEN |  |
 | structural_stability | beam | numerical_kernel | OPEN |  |
 | structural_stability | shell | numerical_kernel | OPEN |  |
@@ -127,7 +127,7 @@ Evidence kind: IndependentReference. Criterion: Evidence includes column and fra
 | prestressed_structural | canonical_mixed_topology | parallel_cpu | OPEN |  |
 | prestressed_structural | canonical_mixed_topology | domain_decomposed | OPEN |  |
 | prestressed_structural | canonical_mixed_topology | claimed_accelerator | OPEN |  |
-| structural_stability | tet4 | numerical_kernel | OPEN |  |
+| structural_stability | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::tests::physical_compressive_preload_buckling_has_exact_residual_and_inverse_load_scaling` (crates/runmat-analysis/fea/src/tests.rs:2012) - A single-tetrahedron compressive preload buckling problem has an exact residual and load factors that scale inversely with load; column and frame buckling, mesh... |
 | structural_stability | tet10 | numerical_kernel | OPEN |  |
 | structural_stability | beam | numerical_kernel | OPEN |  |
 | structural_stability | shell | numerical_kernel | OPEN |  |

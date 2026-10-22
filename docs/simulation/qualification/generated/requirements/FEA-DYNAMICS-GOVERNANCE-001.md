@@ -1,6 +1,6 @@
 # FEA-DYNAMICS-GOVERNANCE-001: Governed dynamic procedures, checkpoints and distributed evidence
 
-0 PASS, 0 FAIL, 135 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 2 PARTIAL, 0 FAIL, 133 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## modal_preload_buckling
 
@@ -9,7 +9,7 @@ Evidence kind: ExecutionEquivalence. Criterion: Complete modal analysis on physi
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
 | linear_structural_dynamics | mesh_independent | numerical_kernel | OPEN |  |
-| linear_structural_dynamics | tet4 | numerical_kernel | OPEN |  |
+| linear_structural_dynamics | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::tests::physical_compressive_preload_buckling_has_exact_residual_and_inverse_load_scaling` (crates/runmat-analysis/fea/src/tests.rs:2012) - Single-tetrahedron preload buckling with exact residual and inverse load scaling. |
 | linear_structural_dynamics | tet10 | numerical_kernel | OPEN |  |
 | linear_structural_dynamics | beam | numerical_kernel | OPEN |  |
 | linear_structural_dynamics | shell | numerical_kernel | OPEN |  |
@@ -185,7 +185,7 @@ Evidence kind: ExecutionEquivalence. Criterion: Durable and remote restart prese
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
 | linear_structural_dynamics | mesh_independent | numerical_kernel | OPEN |  |
-| linear_structural_dynamics | tet4 | numerical_kernel | OPEN |  |
+| linear_structural_dynamics | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::tests::transient_physical::modal_support_motion_matches_direct_physics_and_restarts_exactly` (crates/runmat-analysis/fea/src/tests/transient_physical.rs:487) - Modal support motion matches direct physics and restarts exactly; durable and remote restart are not covered. |
 | linear_structural_dynamics | tet10 | numerical_kernel | OPEN |  |
 | linear_structural_dynamics | beam | numerical_kernel | OPEN |  |
 | linear_structural_dynamics | shell | numerical_kernel | OPEN |  |

@@ -1,6 +1,6 @@
 # FEA-SCALE-SIZE-001: Millions of degrees of freedom at stated time and memory
 
-0 PASS, 0 FAIL, 94 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 PARTIAL, 0 FAIL, 94 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## million_dof_public_study
 

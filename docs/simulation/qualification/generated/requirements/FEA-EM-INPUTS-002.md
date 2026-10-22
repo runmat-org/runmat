@@ -1,6 +1,6 @@
 # FEA-EM-INPUTS-002: Every declared electromagnetic input runs
 
-0 PASS, 0 FAIL, 12 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 2 PARTIAL, 0 FAIL, 10 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## scalar_potential_inputs
 
@@ -8,11 +8,11 @@ Evidence kind: PhysicalBalance. Criterion: terminal_voltage, electric current te
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| electrostatic | tet4 | numerical_kernel | OPEN |  |
+| electrostatic | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::electrical::tests::terminal_voltage_load_holds_its_terminal_like_a_prescribed_potential` (crates/runmat-analysis/fea/src/physics/electrical/tests.rs:449) - A terminal_voltage load holds its terminal like a prescribed potential for electrostatics and steady conduction on a two-cell Tet4 slab; terminal current, charg... |
 | electrostatic | tet4 | public_study | OPEN |  |
 | electrostatic | tet10 | numerical_kernel | OPEN |  |
 | electrostatic | tet10 | public_study | OPEN |  |
-| electrical_conduction | tet4 | numerical_kernel | OPEN |  |
+| electrical_conduction | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::electrical::tests::terminal_voltage_load_holds_its_terminal_like_a_prescribed_potential` (crates/runmat-analysis/fea/src/physics/electrical/tests.rs:449) - A terminal_voltage load holds its terminal like a prescribed potential for electrostatics and steady conduction on a two-cell Tet4 slab; terminal current, charg... |
 | electrical_conduction | tet4 | public_study | OPEN |  |
 | electrical_conduction | tet10 | numerical_kernel | OPEN |  |
 | electrical_conduction | tet10 | public_study | OPEN |  |

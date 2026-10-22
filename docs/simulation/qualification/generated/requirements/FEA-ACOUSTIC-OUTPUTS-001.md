@@ -1,6 +1,6 @@
 # FEA-ACOUSTIC-OUTPUTS-001: Sound pressure level, transmission loss, intensity and power
 
-0 PASS, 0 FAIL, 20 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 PARTIAL, 0 FAIL, 20 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## sound_pressure_level
 

@@ -1,6 +1,6 @@
 # FEA-STRUCTURAL-PUBLIC-001: Structural capabilities the page claims
 
-0 PASS, 0 FAIL, 100 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 PARTIAL, 0 FAIL, 100 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## shells_and_beams_run
 

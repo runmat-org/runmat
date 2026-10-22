@@ -1,6 +1,6 @@
 # FEA-FLUID-PHYSICS-001: Free surface, rotating frames, lubrication, electrokinetics, particles, compressibility and reduced dimensions
 
-0 PASS, 0 FAIL, 26 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 PARTIAL, 0 FAIL, 26 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## free_surface_two_phase
 

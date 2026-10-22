@@ -1,6 +1,6 @@
 # FEA-SHARED-BASELINE-001: Exact pre-solve admission and truthful realization identity
 
-1 PASS, 0 FAIL, 23 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 2 PARTIAL, 0 FAIL, 22 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## pre_solve_formulation_receipts
 
@@ -23,7 +23,7 @@ Evidence kind: SemanticRealization. Criterion: Replace the conflated profile/run
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::admission::structural::tests::modal_response_spectrum_has_a_distinct_admitted_temporal_realization` (crates/runmat-analysis/fea/src/admission/structural.rs:451) - Modal response spectrum has a distinct admitted temporal realization. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
@@ -38,7 +38,7 @@ Evidence kind: SemanticRealization. Criterion: Admission either returns a regist
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PASS | `runmat-analysis-fea[lib]::admission::tests::persisted_identity_is_revalidated_and_cannot_forge_production` (crates/runmat-analysis/fea/src/admission/tests.rs:377) - Thermal-transient identity cold decode revalidates and rejects fields outside the registry identity; no end-to-end publication proof. |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::admission::tests::incompatible_exact_axis_is_rejected_before_admission` (crates/runmat-analysis/fea/src/admission/tests.rs:319) - An incompatible exact axis is rejected before admission.<br>`runmat-analysis-fea[lib]::admission::tests::unsupported_identity_and_solution_space_are_typed_rejections` (crates/runmat-analysis/fea/src/admission/tests.rs:347) - Unsupported identity and solution space are typed rejections.<br>`runmat-analysis-fea[lib]::admission::tests::persisted_identity_is_revalidated_and_cannot_forge_production` (crates/runmat-analysis/fea/src/admission/tests.rs:383) - Thermal-transient identity cold decode revalidates and rejects fields outside the registry identity; no end-to-end publication proof. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |

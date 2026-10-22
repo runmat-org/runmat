@@ -1,6 +1,6 @@
 # FEA-THERMAL-ACCURACY-001: Independent thermal references and refinement qualification
 
-2 PASS, 1 FAIL, 11 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 2 PARTIAL, 1 FAIL, 11 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## references
 
@@ -30,8 +30,8 @@ Evidence kind: TemporalConvergence. Criterion: Demonstrate temporal convergence 
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| thermal_transient | tet4 | public_study | PASS | `runmat-analysis-fea[lib]::execution::thermal_workload::tests::initial_fields::continuum::uniform_ramp_heating_has_continuum_backward_euler_time_convergence` (crates/runmat-analysis/fea/src/execution/thermal_workload/tests/initial_fields/continuum.rs:19) - Both-order uniform ramp heating, independent continuum error and energy law; no nonuniform mesh convergence credit. |
-| thermal_transient | tet10 | public_study | PASS | `runmat-analysis-fea[lib]::execution::thermal_workload::tests::initial_fields::continuum::uniform_ramp_heating_has_continuum_backward_euler_time_convergence` (crates/runmat-analysis/fea/src/execution/thermal_workload/tests/initial_fields/continuum.rs:19) - Both-order uniform ramp heating, independent continuum error and energy law; no nonuniform mesh convergence credit. |
+| thermal_transient | tet4 | public_study | PARTIAL | `runmat-analysis-fea[lib]::execution::thermal_workload::tests::initial_fields::continuum::uniform_ramp_heating_has_continuum_backward_euler_time_convergence` (crates/runmat-analysis/fea/src/execution/thermal_workload/tests/initial_fields/continuum.rs:19) - Both-order uniform ramp heating, independent continuum error and energy law; no nonuniform mesh convergence credit. |
+| thermal_transient | tet10 | public_study | PARTIAL | `runmat-analysis-fea[lib]::execution::thermal_workload::tests::initial_fields::continuum::uniform_ramp_heating_has_continuum_backward_euler_time_convergence` (crates/runmat-analysis/fea/src/execution/thermal_workload/tests/initial_fields/continuum.rs:19) - Both-order uniform ramp heating, independent continuum error and energy law; no nonuniform mesh convergence credit. |
 
 ## gate
 

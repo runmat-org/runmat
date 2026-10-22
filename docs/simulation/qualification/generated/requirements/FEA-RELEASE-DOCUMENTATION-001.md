@@ -1,6 +1,6 @@
 # FEA-RELEASE-DOCUMENTATION-001: Runnable exact public documentation and limitations
 
-0 PASS, 0 FAIL, 24 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 PARTIAL, 0 FAIL, 6 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## exact_physical_and_typed_contract_docs
 
@@ -8,14 +8,8 @@ Evidence kind: PublicationIntegrity. Criterion: Each formulation must document: 
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | release_pipeline | OPEN |  |
+| shared_infrastructure | mesh_independent | source_check | OPEN |  |
 
 ## numerical_execution_and_limitations_docs
 
@@ -23,14 +17,8 @@ Evidence kind: PublicationIntegrity. Criterion: partition-local observation eval
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | release_pipeline | OPEN |  |
+| shared_infrastructure | mesh_independent | source_check | OPEN |  |
 
 ## checked_language_guides_and_future_envelopes
 
@@ -38,12 +26,6 @@ Evidence kind: PublicationIntegrity. Criterion: Optimization, sensitivity analys
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | release_pipeline | OPEN |  |
+| shared_infrastructure | mesh_independent | source_check | OPEN |  |
 

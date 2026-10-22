@@ -1,6 +1,6 @@
 # FEA-COUPLING-ELECTROTHERMAL-002: Two-way and transient Joule and AC-loss heating
 
-0 PASS, 0 FAIL, 24 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 1 PARTIAL, 0 FAIL, 23 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## two_way_conductivity_feedback
 
@@ -10,7 +10,7 @@ Evidence kind: IndependentReference. Criterion: `electrothermal steady` with sig
 |---|---|---|---|---|
 | electrothermal | tet4 | numerical_kernel | OPEN |  |
 | electrothermal | tet4 | public_study | OPEN |  |
-| electrothermal | tet10 | numerical_kernel | OPEN |  |
+| electrothermal | tet10 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::execution::electrothermal::tests::coupled::two_way_joule_heating_matches_the_closed_form_bar` (crates/runmat-analysis/fea/src/execution/electrothermal/tests/coupled.rs:108) - Two-way coupled steady Joule heating on a Tet10 bar with temperature-dependent resistivity iterates at least three sweeps; temperature matches the closed-form c... |
 | electrothermal | tet10 | public_study | OPEN |  |
 | electrothermal | edge_elements | numerical_kernel | OPEN |  |
 | electrothermal | edge_elements | public_study | OPEN |  |

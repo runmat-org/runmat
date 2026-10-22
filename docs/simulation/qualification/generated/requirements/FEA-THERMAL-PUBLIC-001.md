@@ -1,6 +1,6 @@
 # FEA-THERMAL-PUBLIC-001: Thermal studies the pages run
 
-0 PASS, 0 FAIL, 24 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 1 PARTIAL, 2 FAIL, 21 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## film_coefficient_input
 
@@ -8,9 +8,9 @@ Evidence kind: PhysicalBalance. Criterion: A convection film coefficient is a ty
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| thermal_steady | tet4 | numerical_kernel | OPEN |  |
+| thermal_steady | tet4 | numerical_kernel | FAIL | `runmat-analysis-language[test:study_realization]::film_coefficient_and_emissivity_inputs_realize_per_bound_case` (crates/runmat-analysis/language/tests/study_realization.rs:289) - Film-coefficient and emissivity inputs realize per bound sweep case at the language layer; no solve is run.<br>`runmat-analysis-language[test:study_realization]::film_coefficient_input_rejects_a_mismatched_quantity` (crates/runmat-analysis/language/tests/study_realization.rs:406) - A film-coefficient input rejects a mismatched quantity. |
 | thermal_steady | tet4 | public_study | OPEN |  |
-| thermal_steady | tet10 | numerical_kernel | OPEN |  |
+| thermal_steady | tet10 | numerical_kernel | FAIL | `runmat-analysis-language[test:study_realization]::film_coefficient_and_emissivity_inputs_realize_per_bound_case` (crates/runmat-analysis/language/tests/study_realization.rs:289) - Film-coefficient and emissivity inputs realize per bound sweep case at the language layer; no solve is run.<br>`runmat-analysis-language[test:study_realization]::film_coefficient_input_rejects_a_mismatched_quantity` (crates/runmat-analysis/language/tests/study_realization.rs:406) - A film-coefficient input rejects a mismatched quantity. |
 | thermal_steady | tet10 | public_study | OPEN |  |
 
 ## radiation_to_ambient
@@ -19,7 +19,7 @@ Evidence kind: IndependentReference. Criterion: Gray surface-to-ambient radiatio
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| thermal_steady | tet4 | numerical_kernel | OPEN |  |
+| thermal_steady | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::thermal::assembly::tests::radiation::exact_steady_slab_radiation_residual_tangent_and_prescribed_power_match_continuum` (crates/runmat-analysis/fea/src/physics/thermal/assembly/tests/radiation.rs:37) - A Tet4 slab with a gray surface matches the Stefan-Boltzmann law with emissivity 0.8 at 350 K surface against a 300 K ambient; convection on the same face and t... |
 | thermal_steady | tet4 | public_study | OPEN |  |
 | thermal_steady | tet10 | numerical_kernel | OPEN |  |
 | thermal_steady | tet10 | public_study | OPEN |  |

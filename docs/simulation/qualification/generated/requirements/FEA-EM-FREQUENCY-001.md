@@ -1,6 +1,6 @@
 # FEA-EM-FREQUENCY-001: Multi-frequency harmonic electromagnetics and fields
 
-0 PASS, 0 FAIL, 8 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 2 PARTIAL, 0 FAIL, 6 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## multi_frequency_study
 
@@ -17,7 +17,7 @@ Evidence kind: IndependentReference. Criterion: Conductor current density and AC
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| harmonic_maxwell | edge_elements | numerical_kernel | OPEN |  |
+| harmonic_maxwell | edge_elements | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::maxwell::tests::terminal::current_driven_strip_impedance_converges_to_the_skin_effect_solution` (crates/runmat-analysis/fea/src/physics/maxwell/tests/terminal.rs:237) - A current-driven conducting strip at t/delta of 0.5, 2 and 4 on 8, 16 and 32 cells: impedance converges to the closed-form skin-effect solution (error below 2e-... |
 | harmonic_maxwell | edge_elements | public_study | OPEN |  |
 
 ## air_truncation
@@ -35,6 +35,6 @@ Evidence kind: PhysicalBalance. Criterion: Cycle-averaged loss in a body (the in
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| harmonic_maxwell | edge_elements | numerical_kernel | OPEN |  |
+| harmonic_maxwell | edge_elements | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::maxwell::tests::terminal::current_driven_strip_impedance_converges_to_the_skin_effect_solution` (crates/runmat-analysis/fea/src/physics/maxwell/tests/terminal.rs:237) - On the strip, the Joule loss equals the delivered complex power within 1e-8 and the Poynting and charge-continuity residuals stay below 1e-8; no multi-body gear... |
 | harmonic_maxwell | edge_elements | public_study | OPEN |  |
 

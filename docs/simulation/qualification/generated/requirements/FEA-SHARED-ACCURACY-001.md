@@ -1,6 +1,6 @@
 # FEA-SHARED-ACCURACY-001: Typed numerical accuracy acceptance and bounded refinement
 
-0 PASS, 0 FAIL, 24 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 2 PARTIAL, 0 FAIL, 22 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## dimensioned_targets_and_contributions
 
@@ -8,7 +8,7 @@ Evidence kind: AccuracyAcceptance. Criterion: A converged algebraic solve is not
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::adaptation::solved_source::tests::original_both_order_static_results_retain_typed_convergence_and_scalar_observations` (crates/runmat-analysis/fea/src/adaptation/solved_source/tests.rs:15) - Original static results retain typed convergence and scalar observations for both element orders. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
@@ -23,7 +23,7 @@ Evidence kind: AccuracyAcceptance. Criterion: Each contribution retains its own 
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::results::accuracy::tests::production_accuracy_failure_produces_a_blocking_gate` (crates/runmat-analysis/fea/src/results/accuracy/tests.rs:32) - Scalar residual criterion failure remains blocking through a typed accuracy artifact; no complete governed family corpus, release attestation or public receipt ...<br>`runmat-analysis-fea[lib]::results::accuracy::tests::mandatory_evidence_governs_status_and_production_publication` (crates/runmat-analysis/fea/src/results/accuracy/tests.rs:66) - Mandatory evidence governs status and publication.<br>`runmat-analysis-fea[lib]::results::accuracy::tests::missing_mandatory_evidence_is_indeterminate_and_blocks_by_default` (crates/runmat-analysis/fea/src/results/accuracy/tests.rs:87) - Missing mandatory evidence is indeterminate and blocks publication by default. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |

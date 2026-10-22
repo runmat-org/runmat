@@ -1,6 +1,6 @@
 # FEA-FLUID-OUTPUTS-001: Flow outputs engineers ask for
 
-0 PASS, 0 FAIL, 52 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 PARTIAL, 0 FAIL, 52 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## forces_and_coefficients
 

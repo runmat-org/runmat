@@ -1,6 +1,6 @@
 # FEA-AUTHORING-LANGUAGE-002: Declarative source semantics and product tooling
 
-2 PASS, 0 FAIL, 30 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 1 PARTIAL, 12 FAIL, 19 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## language_scope
 
@@ -16,7 +16,7 @@ Evidence kind: SemanticRealization. Criterion: 1. **Physical meaning is visible.
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | OPEN |  |
+| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-language[test:studies]::procedure_requiredness_rejects_hidden_physical_defaults` (crates/runmat-analysis/language/tests/studies.rs:419) - A transient procedure with no start_time is rejected with a located procedure diagnostic and no study is produced, so physical defaults are not invented; covers... |
 
 ## imports_and_scopes
 
@@ -24,7 +24,7 @@ Evidence kind: SemanticRealization. Criterion: A file is a module and may contai
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | OPEN |  |
+| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-language[test:studies]::study_preserves_the_defining_module_of_imported_declarations` (crates/runmat-analysis/language/tests/studies.rs:261) - Imported geometry, mesh and model keep their defining module identity through study resolution; function and package import forms and scope shadowing rules are ... |
 
 ## declaration_requiredness
 
@@ -32,7 +32,7 @@ Evidence kind: SemanticRealization. Criterion: | Declaration | Purpose | Require
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | OPEN |  |
+| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-language[test:studies]::procedure_requiredness_rejects_hidden_physical_defaults` (crates/runmat-analysis/language/tests/studies.rs:419) - One required procedure member (start_time) is enforced for structural transient; the full required/optional member table for all declaration kinds is not exerci... |
 
 ## formulation_admission
 
@@ -40,7 +40,7 @@ Evidence kind: SemanticRealization. Criterion: A minimal standalone study implie
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | OPEN |  |
+| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-language[test:studies]::study_has_no_formulation_setting` (crates/runmat-analysis/language/tests/studies.rs:43) - A study without any formulation setting checks and realizes; the presence of no setting is asserted, remote and sweep non-implication are not. |
 
 ## model_composition
 
@@ -48,7 +48,7 @@ Evidence kind: SemanticRealization. Criterion: A `model` owns reusable physical 
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | OPEN |  |
+| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-language[test:models]::model_composition_and_material_assignments_retain_qualified_sources` (crates/runmat-analysis/language/tests/models.rs:11) - Included models and material assignments retain their qualified source modules across imports; the full list of model members is not exercised.<br>`runmat-analysis-language[test:models]::model_composition_rejects_cycles_and_conflicting_assignments` (crates/runmat-analysis/language/tests/models.rs:117) - Composition cycles and conflicting assignments are rejected. |
 
 ## spectral_inputs
 
@@ -56,7 +56,7 @@ Evidence kind: SemanticRealization. Criterion: Spectral environments are named m
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | OPEN |  |
+| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-language[test:spectral_inputs]::response_spectrum_is_typed_and_retains_complete_solver_policy` (crates/runmat-analysis/language/tests/spectral_inputs.rs:25) - A response spectrum is a typed model-owned input retaining the complete solver policy (combination rules, mass truncation, rigid response); procedure references... |
 
 ## typed_expressions
 
@@ -64,7 +64,7 @@ Evidence kind: SemanticRealization. Criterion: Inputs are immutable, strongly ty
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | PASS | `runmat-analysis-language[test:programs]::compiler_checks_inputs_defaults_locals_and_outputs_as_one_program` (crates/runmat-analysis/language/tests/programs.rs:11) - Constructed geometry source with local/default quantity typing and one node-displacement output; source checking only.<br>`runmat-analysis-language[test:programs]::compiler_rejects_wrong_input_defaults_and_duplicate_outputs` (crates/runmat-analysis/language/tests/programs.rs:93) - Wrong dimension and duplicate-output diagnostic fixtures, not all invalid contracts. |
+| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-language[test:programs]::compiler_checks_inputs_defaults_locals_and_outputs_as_one_program` (crates/runmat-analysis/language/tests/programs.rs:11) - Constructed geometry source with local/default quantity typing and one node-displacement output; source checking only.<br>`runmat-analysis-language[test:programs]::compiler_rejects_wrong_input_defaults_and_duplicate_outputs` (crates/runmat-analysis/language/tests/programs.rs:93) - Wrong dimension and duplicate-output diagnostic fixtures, not all invalid contracts. |
 
 ## semantic_state_flow
 
@@ -72,7 +72,7 @@ Evidence kind: SemanticRealization. Criterion: A study binds one model instance 
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | OPEN |  |
+| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-language[test:studies]::study_lowers_typed_modal_state_flow_into_the_canonical_sequence` (crates/runmat-analysis/language/tests/studies.rs:359) - A modal analysis retaining a basis feeds a modal transient through a named state reference lowered into the canonical sequence; other state kinds and the study-... |
 
 ## frozen_function_inputs
 
@@ -80,7 +80,7 @@ Evidence kind: SemanticRealization. Criterion: An imported `.m` function is a so
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | OPEN |  |
+| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-language[test:signals]::generated_signal_binds_imported_source_and_typed_sampling` (crates/runmat-analysis/language/tests/signals.rs:84) - An imported .m generator binds source and typed sampling (range, rate, interpolation, extrapolation, tolerance) with typed arguments; capture provenance and eff... |
 
 ## initial_conditions
 
@@ -88,7 +88,7 @@ Evidence kind: SemanticRealization. Criterion: Initial conditions describe physi
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | OPEN |  |
+| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-language[test:initial_conditions]::studies_reject_unknown_or_physics_incompatible_initial_state` (crates/runmat-analysis/language/tests/initial_conditions.rs:222) - Unknown or physics-incompatible initial state is rejected at study check; the closed initial-condition kind list is not enumerated. |
 
 ## sweep_identity
 
@@ -96,7 +96,7 @@ Evidence kind: SemanticRealization. Criterion: A sweep is optional and wraps a p
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | OPEN |  |
+| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-language[test:sweeps]::axis_sweeps_expand_product_and_zip_with_stable_case_identities` (crates/runmat-analysis/language/tests/sweeps.rs:54) - Axis sweeps expand product and zip with stable named case identities; independence of identity from source order and the placement envelopes are not covered. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
@@ -108,7 +108,7 @@ Evidence kind: SemanticRealization. Criterion: Execution policy is optional. Wit
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | OPEN |  |
+| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-analysis-language[test:execution_policies]::execution_policy_is_typed_and_inherited_by_a_sweep` (crates/runmat-analysis/language/tests/execution_policies.rs:34) - A typed execution policy is inherited by a sweep; CLI and project default precedence is not covered.<br>`runmat-analysis-language[test:execution_policies]::execution_policy_rejects_contradictions_and_invalid_limits` (crates/runmat-analysis/language/tests/execution_policies.rs:144) - Contradictory or out-of-range policy members are rejected. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
@@ -120,7 +120,7 @@ Evidence kind: SemanticRealization. Criterion: The concrete grammar will be froz
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | PASS | `runmat-parser[lib]::fea::tests::parses_representative_language_surface` (crates/runmat-parser/src/fea/tests.rs:66) - Representative declarations, spans and imports only; no complete grammar or semantics proof.<br>`runmat-parser[lib]::fea::tests::formatter_is_canonical_and_idempotent` (crates/runmat-parser/src/fea/tests.rs:272) - One formatter fixture and second formatting equality; no complete recovery or adversarial grammar credit. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-parser[lib]::fea::tests::parses_representative_language_surface` (crates/runmat-parser/src/fea/tests.rs:66) - Representative declarations, spans and imports only; no complete grammar or semantics proof.<br>`runmat-parser[lib]::fea::tests::formatter_is_canonical_and_idempotent` (crates/runmat-parser/src/fea/tests.rs:272) - One formatter fixture and second formatting equality; no complete recovery or adversarial grammar credit. |
 
 ## compiler_and_editor_ownership
 

@@ -104,7 +104,11 @@ pub fn cells(
                 } else if results.is_none() {
                     Verdict::Tagged
                 } else if tests.iter().all(|t| t.result == Some(TestResult::Passed)) {
-                    Verdict::Pass
+                    if tests.iter().any(|t| t.complete) {
+                        Verdict::Pass
+                    } else {
+                        Verdict::Partial
+                    }
                 } else {
                     Verdict::Fail
                 };

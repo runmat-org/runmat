@@ -1,6 +1,6 @@
 # FEA-MESH-REALPARTS-001: Real parts mesh with a published success rate
 
-0 PASS, 0 FAIL, 6 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 PARTIAL, 0 FAIL, 6 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## corpus_success_rate
 

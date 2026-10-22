@@ -1,6 +1,6 @@
 # FEA-RELEASE-CI-001: Blocking attested evidence in the existing release graph
 
-0 PASS, 0 FAIL, 24 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 PARTIAL, 0 FAIL, 6 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## preserved_existing_release_graph
 
@@ -8,14 +8,8 @@ Evidence kind: PublicationIntegrity. Criterion: Treat the current `origin/dev` C
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | release_pipeline | OPEN |  |
+| shared_infrastructure | mesh_independent | source_check | OPEN |  |
 
 ## complete_cross_family_corpus
 
@@ -23,14 +17,8 @@ Evidence kind: PublicationIntegrity. Criterion: Run the complete governed family
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | release_pipeline | OPEN |  |
+| shared_infrastructure | mesh_independent | source_check | OPEN |  |
 
 ## attested_release_and_publication_rejection
 
@@ -38,12 +26,6 @@ Evidence kind: PublicationIntegrity. Criterion: No full field is gathered merely
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | release_pipeline | OPEN |  |
+| shared_infrastructure | mesh_independent | source_check | OPEN |  |
 

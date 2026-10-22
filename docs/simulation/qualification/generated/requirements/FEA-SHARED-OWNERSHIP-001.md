@@ -1,6 +1,6 @@
 # FEA-SHARED-OWNERSHIP-001: Domain boundaries and shared platform interoperability
 
-0 PASS, 0 FAIL, 176 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 PARTIAL, 0 FAIL, 44 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## domain_ownership
 
@@ -8,14 +8,8 @@ Evidence kind: SemanticRealization. Criterion: Meshing owns geometric and physic
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | source_check | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | release_pipeline | OPEN |  |
 
 ## code_quality
 
@@ -23,14 +17,8 @@ Evidence kind: SemanticRealization. Criterion: Do not add god files. A module th
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | source_check | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | release_pipeline | OPEN |  |
 
 ## numerical_truth
 
@@ -38,14 +26,8 @@ Evidence kind: SemanticRealization. Criterion: A deterministic output is not evi
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | source_check | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | release_pipeline | OPEN |  |
 
 ## bridge_dependency_boundary
 
@@ -53,14 +35,8 @@ Evidence kind: SemanticRealization. Criterion: Keep analysis identity and numeri
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | source_check | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | release_pipeline | OPEN |  |
 
 ## shared_dependency_graph
 
@@ -68,14 +44,8 @@ Evidence kind: SemanticRealization. Criterion: This lets us move runtime-owned a
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | source_check | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | release_pipeline | OPEN |  |
 
 ## extraction_policy
 
@@ -83,14 +53,8 @@ Evidence kind: SemanticRealization. Criterion: Reuse means extending the existin
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | source_check | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | release_pipeline | OPEN |  |
 
 ## public_platform_convergence
 
@@ -98,14 +62,8 @@ Evidence kind: SemanticRealization. Criterion: FEA development overlaps a broad 
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | source_check | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | release_pipeline | OPEN |  |
 
 ## platform_capability_ownership
 
@@ -113,14 +71,8 @@ Evidence kind: SemanticRealization. Criterion: Before remote, distributed, or GP
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | source_check | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | release_pipeline | OPEN |  |
 
 ## interoperable_public_storage
 
@@ -128,14 +80,8 @@ Evidence kind: SemanticRealization. Criterion: A direct pre-`dev` integration is
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | source_check | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | release_pipeline | OPEN |  |
 
 ## platform_fact_ownership
 
@@ -143,14 +89,8 @@ Evidence kind: SemanticRealization. Criterion: FEA uses the RunMat type system d
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | source_check | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | release_pipeline | OPEN |  |
 
 ## explicit_value_adapters
 
@@ -158,14 +98,8 @@ Evidence kind: SemanticRealization. Criterion: The compiler and runtime should t
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | source_check | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | release_pipeline | OPEN |  |
 
 ## shared_execution_authorities
 
@@ -173,14 +107,8 @@ Evidence kind: SemanticRealization. Criterion: The current public baseline and t
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | source_check | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | release_pipeline | OPEN |  |
 
 ## bulk_collective_contract
 
@@ -188,14 +116,8 @@ Evidence kind: SemanticRealization. Criterion: The existing language-level colle
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | source_check | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | release_pipeline | OPEN |  |
 
 ## authored_intent_only
 
@@ -203,14 +125,8 @@ Evidence kind: SemanticRealization. Criterion: This crate owns authored intent o
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | source_check | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | release_pipeline | OPEN |  |
 
 ## numerical_domain_owners
 
@@ -218,14 +134,8 @@ Evidence kind: SemanticRealization. Criterion: There must not be both `pipeline`
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | source_check | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | release_pipeline | OPEN |  |
 
 ## portable_bridge_only
 
@@ -233,14 +143,8 @@ Evidence kind: SemanticRealization. Criterion: This crate is only the portable a
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | source_check | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | release_pipeline | OPEN |  |
 
 ## runtime_adaptation_only
 
@@ -248,14 +152,8 @@ Evidence kind: SemanticRealization. Criterion: `analysis/mod.rs` should become a
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | source_check | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | release_pipeline | OPEN |  |
 
 ## native_generic_lifecycle
 
@@ -263,14 +161,8 @@ Evidence kind: SemanticRealization. Criterion: The existing generic driver, dura
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | source_check | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | release_pipeline | OPEN |  |
 
 ## shared_cli_placement
 
@@ -278,14 +170,8 @@ Evidence kind: SemanticRealization. Criterion: `execution_target.rs` owns the sh
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | source_check | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | release_pipeline | OPEN |  |
 
 ## content_blind_presentation
 
@@ -293,14 +179,8 @@ Evidence kind: SemanticRealization. Criterion: Desktop FEA orchestration consume
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | source_check | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | release_pipeline | OPEN |  |
 
 ## platform_value_fact_contract
 
@@ -308,14 +188,8 @@ Evidence kind: SemanticRealization. Criterion: Numeric class and domain; Reuse `
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | source_check | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | release_pipeline | OPEN |  |
 
 ## exact_transfer_and_evaluation_owners
 
@@ -323,12 +197,6 @@ Evidence kind: SemanticRealization. Criterion: `topology/transfer_geometry.rs`; 
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | source_check | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | release_pipeline | OPEN |  |
 

@@ -1,6 +1,6 @@
 # FEA-COUPLING-CHT-001: Thermal/fluid conjugate heat transfer
 
-0 PASS, 0 FAIL, 3 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 PARTIAL, 0 FAIL, 3 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## interface
 

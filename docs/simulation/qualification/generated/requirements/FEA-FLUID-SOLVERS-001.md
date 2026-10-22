@@ -1,6 +1,6 @@
 # FEA-FLUID-SOLVERS-001: Robust, scalable and accurate laminar flow solvers
 
-0 PASS, 0 FAIL, 36 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 PARTIAL, 0 FAIL, 36 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## coupled_newton_continuation
 

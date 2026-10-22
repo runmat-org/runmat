@@ -1,6 +1,6 @@
 # FEA-RELEASE-SCOPE-001: Complete supported surface and dependency promotion
 
-0 PASS, 0 FAIL, 6 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 PARTIAL, 0 FAIL, 6 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## supported_surface
 

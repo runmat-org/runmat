@@ -1,6 +1,6 @@
 # FEA-COUPLING-FSI-001: Dynamics/fluid interaction with stable conservative ALE execution
 
-0 PASS, 0 FAIL, 9 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 PARTIAL, 0 FAIL, 9 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## interface
 

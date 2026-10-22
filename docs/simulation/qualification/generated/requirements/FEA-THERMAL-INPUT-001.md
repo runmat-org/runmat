@@ -1,6 +1,6 @@
 # FEA-THERMAL-INPUT-001: Exact thermal boundaries and shared excitation realization
 
-2 PASS, 0 FAIL, 10 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 4 PARTIAL, 0 FAIL, 8 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## boundaries
 
@@ -8,9 +8,9 @@ Evidence kind: IndependentReference. Criterion: Resolve exact face targets and i
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| thermal_steady | tet4 | numerical_kernel | PASS | `runmat-analysis-fea[lib]::physics::thermal::assembly::tests::radiation::exact_steady_slab_radiation_residual_tangent_and_prescribed_power_match_continuum` (crates/runmat-analysis/fea/src/physics/thermal/assembly/tests/radiation.rs:32) - Tet4 slab exact gray-surface law, finite-difference tangent and physical power; does not cover arbitrary enclosure radiation. |
-| thermal_steady | tet10 | numerical_kernel | OPEN |  |
-| thermal_transient | tet4 | numerical_kernel | PASS | `runmat-analysis-fea[lib]::physics::thermal::assembly::tests::signals::time_signals_drive_prescribed_temperature_flux_and_ambient_temperature` (crates/runmat-analysis/fea/src/physics/thermal/assembly/tests/signals.rs:69) - Tet4 assembly samples prescribed temperature, flux and ambient-time signals; no generated/field-artifact equivalence credit. |
+| thermal_steady | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::thermal::assembly::tests::numerical::exact_face_flux_and_convection_preserve_integrated_power_and_ambient_state` (crates/runmat-analysis/fea/src/physics/thermal/assembly/tests/numerical.rs:221) - Exact face flux and convection preserve integrated power and the ambient state on a Tet4 fixture.<br>`runmat-analysis-fea[lib]::physics::thermal::assembly::tests::radiation::exact_steady_slab_radiation_residual_tangent_and_prescribed_power_match_continuum` (crates/runmat-analysis/fea/src/physics/thermal/assembly/tests/radiation.rs:37) - Tet4 slab exact gray-surface law, finite-difference tangent and physical power; does not cover arbitrary enclosure radiation.<br>`runmat-analysis-fea[lib]::physics::thermal::assembly::tests::target_resolution::thermal_boundaries_use_resolved_entities_instead_of_authored_aliases` (crates/runmat-analysis/fea/src/physics/thermal/assembly/tests/target_resolution.rs:9) - Prescribed temperature and heat flux apply to the bound resolved boundary entity, not to the entity named by a deliberately wrong alias, for both element orders... |
+| thermal_steady | tet10 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::thermal::assembly::tests::target_resolution::thermal_boundaries_use_resolved_entities_instead_of_authored_aliases` (crates/runmat-analysis/fea/src/physics/thermal/assembly/tests/target_resolution.rs:9) - Prescribed temperature and heat flux apply to the bound resolved boundary entity, not to the entity named by a deliberately wrong alias, for both element orders... |
+| thermal_transient | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::thermal::assembly::tests::signals::time_signals_drive_prescribed_temperature_flux_and_ambient_temperature` (crates/runmat-analysis/fea/src/physics/thermal/assembly/tests/signals.rs:69) - Tet4 assembly samples prescribed temperature, flux and ambient-time signals; no generated/field-artifact equivalence credit. |
 | thermal_transient | tet10 | numerical_kernel | OPEN |  |
 
 ## histories
@@ -32,6 +32,6 @@ Evidence kind: ExecutionEquivalence. Criterion: Explicit, generated and field-ar
 |---|---|---|---|---|
 | thermal_steady | tet4 | public_study | OPEN |  |
 | thermal_steady | tet10 | public_study | OPEN |  |
-| thermal_transient | tet4 | public_study | OPEN |  |
+| thermal_transient | tet4 | public_study | PARTIAL | `runmat-execution-runner-native[lib]::typed_fea::thermal_signals::checked_named_thermal_inputs_match_tables_and_independent_source_boundary_energy` (crates/runmat-execution-runner-native/src/typed_fea/tests/thermal_signals.rs:89) - A linear-order transient with function-generated heating and initial temperature checks and runs through the typed study path and matches tables and an independ... |
 | thermal_transient | tet10 | public_study | OPEN |  |
 

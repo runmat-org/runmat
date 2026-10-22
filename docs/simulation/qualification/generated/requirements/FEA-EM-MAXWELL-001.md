@@ -1,6 +1,6 @@
 # FEA-EM-MAXWELL-001: Integrated harmonic edge-element Maxwell analysis
 
-0 PASS, 0 FAIL, 3 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 1 PARTIAL, 0 FAIL, 2 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## basis
 
@@ -16,7 +16,7 @@ Evidence kind: ExecutionEquivalence. Criterion: Support complex coefficients and
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| harmonic_maxwell | edge_elements | numerical_kernel | OPEN |  |
+| harmonic_maxwell | edge_elements | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::maxwell::tests::terminal::current_driven_strip_impedance_converges_to_the_skin_effect_solution` (crates/runmat-analysis/fea/src/physics/maxwell/tests/terminal.rs:237) - Three frequencies are solved with complex coefficients and each matches its closed form; composition of several frequencies in one study is not asserted. |
 
 ## reconstruction
 

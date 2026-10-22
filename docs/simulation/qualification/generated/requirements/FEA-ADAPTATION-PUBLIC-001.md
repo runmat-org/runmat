@@ -1,6 +1,6 @@
 # FEA-ADAPTATION-PUBLIC-001: Adaptive analysis from the language and CLI
 
-0 PASS, 0 FAIL, 4 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 PARTIAL, 0 FAIL, 4 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## adaptive_study_authoring
 

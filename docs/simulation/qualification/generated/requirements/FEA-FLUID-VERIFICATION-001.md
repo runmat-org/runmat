@@ -1,6 +1,6 @@
 # FEA-FLUID-VERIFICATION-001: Published flow verification suite
 
-0 PASS, 0 FAIL, 8 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 PARTIAL, 0 FAIL, 8 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## benchmark_suite_publication
 

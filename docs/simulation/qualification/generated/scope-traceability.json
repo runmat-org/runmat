@@ -3,14 +3,15 @@
     {
       "capability": "Published example studies run end to end from the public command",
       "cells": 1,
-      "fail": 0,
+      "fail": 1,
       "id": "SIM-01",
       "maps": [
         "FEA-PUBLIC-STUDIES-001/docs_examples_run"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:30",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -22,6 +23,7 @@
         "FEA-PUBLIC-VALIDATION-001/no_maturity_surface",
         "FEA-RELEASE-SCOPE-001/supported_surface"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:31",
       "status": "open",
@@ -36,6 +38,7 @@
         "FEA-PUBLIC-STUDIES-001/each_family_runs_local_and_remote",
         "FEA-SCALE-DISTRIBUTED-001/remote_whole_study_every_family"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:32",
       "status": "open",
@@ -50,6 +53,7 @@
         "FEA-PUBLIC-STUDIES-001/chained_and_coupled_studies_run",
         "FEA-COUPLING-CHAIN-001/thermal_to_prestress_to_modal"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:33",
       "status": "open",
@@ -63,6 +67,7 @@
       "maps": [
         "FEA-MESH-REALPARTS-001/corpus_success_rate"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:34",
       "status": "open",
@@ -77,6 +82,7 @@
         "FEA-SCALE-SIZE-001/million_dof_public_study",
         "FEA-SCALE-SIZE-001/published_size_and_time_per_example"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:35",
       "status": "open",
@@ -84,13 +90,14 @@
     },
     {
       "capability": "Results are validated against named benchmarks per physics, misses included",
-      "cells": 9,
+      "cells": 3,
       "fail": 0,
       "id": "SIM-07",
       "maps": [
         "FEA-PUBLIC-VALIDATION-001/published_benchmark_tables",
         "FEA-RELEASE-EVIDENCE-001/independent_governed_formulation_corpus"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:36",
       "status": "open",
@@ -99,15 +106,16 @@
     {
       "capability": "Units, entity kinds and hand-offs are checked before meshing; a failing study does not run",
       "cells": 6,
-      "fail": 0,
+      "fail": 2,
       "id": "SIM-08",
       "maps": [
         "FEA-AUTHORING-COMPILER-002/type_and_unit_pass",
         "FEA-AUTHORING-COMPILER-002/check_plan_run"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:37",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -119,6 +127,7 @@
         "FEA-SCALE-DISTRIBUTED-001/remote_whole_study_every_family",
         "external (product): hosted self-serve offering and billing for remote solves"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:38",
       "status": "open",
@@ -132,6 +141,7 @@
       "maps": [
         "external (product): pricing and plan gating"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:39",
       "status": "external",
@@ -146,9 +156,10 @@
         "FEA-PUBLIC-RESULTS-001/verdicts_and_reassess",
         "FEA-SHARED-ACCURACY-001/mandatory_acceptance_states"
       ],
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:40",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -159,6 +170,7 @@
       "maps": [
         "FEA-AUTHORING-COMPILER-002/desktop_and_agent_adapters"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:41",
       "status": "open",
@@ -173,6 +185,7 @@
         "FEA-AUTHORING-COMPILER-002/desktop_and_agent_adapters",
         "FEA-AUTHORING-LANGUAGE-002/generated_agent_context"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:42",
       "status": "open",
@@ -181,15 +194,16 @@
     {
       "capability": "Face picking records the study; examples use readable names",
       "cells": 4,
-      "fail": 0,
+      "fail": 2,
       "id": "SIM-14",
       "maps": [
         "FEA-MESH-GEOMETRY-001/authored_names_survive_to_run",
         "FEA-AUTHORING-GEOMETRY-002/selector_inspection"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:43",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -200,6 +214,7 @@
       "maps": [
         "FEA-PUBLIC-RESULTS-001/closed_form_beside_field"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:44",
       "status": "open",
@@ -214,9 +229,10 @@
         "FEA-STRUCTURAL-PUBLIC-001/contact_example",
         "FEA-NONLINEAR-GOVERNANCE-001/operator_constitutive_contact"
       ],
+      "partial": 2,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:45",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -227,6 +243,7 @@
       "maps": [
         "external (release): licensing headers and crate metadata"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:46",
       "status": "external",
@@ -240,6 +257,7 @@
       "maps": [
         "external (product): MCP tool catalog and host availability"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:47",
       "status": "external",
@@ -255,6 +273,7 @@
         "FEA-COUPLING-FSI-001/*",
         "FEA-COUPLING-FSI-002/*"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:55",
       "status": "open",
@@ -262,8 +281,8 @@
     },
     {
       "capability": "Large deformation, adaptive analysis, acoustic modal and transient, transient or compressible flow",
-      "cells": 40,
-      "fail": 0,
+      "cells": 44,
+      "fail": 3,
       "id": "SIM-20",
       "maps": [
         "FEA-STRUCTURAL-PUBLIC-001/large_deformation",
@@ -274,9 +293,10 @@
         "FEA-FLUID-PHYSICS-001/compressible_and_networks",
         "excluded: turbulent flow and fatigue (owner 2026-10-21 and 2026-10-20)"
       ],
+      "partial": 3,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:56",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -289,6 +309,7 @@
         "FEA-EM-TRANSIENT-001/*",
         "excluded: antennas, waveguide ports and motors (outside the plan, SIM-21, owner 2026-10-20)"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:57",
       "status": "open",
@@ -303,6 +324,7 @@
         "FEA-MESH-DISCRETIZATION-001/sizing_controls",
         "excluded: hexahedral, wedge and pyramid elements and prism boundary layers (owner 2026-10-20: hex dropped; no claim)"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:58",
       "status": "open",
@@ -317,6 +339,7 @@
         "FEA-SCALE-PARALLEL-001/strong_scaling_table",
         "FEA-SCALE-DISTRIBUTED-001/domain_decomposition"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:59",
       "status": "open",
@@ -325,15 +348,16 @@
     {
       "capability": "Deterministic: same study, same result",
       "cells": 24,
-      "fail": 0,
+      "fail": 2,
       "id": "SIM-24",
       "maps": [
         "FEA-PUBLIC-RESULTS-001/result_digest_determinism",
         "FEA-SCALE-PARALLEL-001/thread_count_determinism"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:65",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -345,35 +369,38 @@
         "FEA-STRUCTURAL-PUBLIC-001/plasticity_example",
         "FEA-NONLINEAR-OPERATOR-001/point_state_constitutive_laws"
       ],
+      "partial": 2,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:66",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
       "capability": "Located check diagnostics",
       "cells": 2,
-      "fail": 0,
+      "fail": 1,
       "id": "SIM-26",
       "maps": [
         "FEA-PUBLIC-LANGUAGE-001/located_diagnostics"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:67",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
       "capability": "Default load case",
       "cells": 2,
-      "fail": 0,
+      "fail": 1,
       "id": "SIM-27",
       "maps": [
         "FEA-PUBLIC-LANGUAGE-001/default_load_case"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:68",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -384,6 +411,7 @@
       "maps": [
         "FEA-PUBLIC-RESULTS-001/scripts_run_and_read"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:69",
       "status": "open",
@@ -398,6 +426,7 @@
         "FEA-PUBLIC-LANGUAGE-001/matlab_generated_signals",
         "FEA-PUBLIC-STUDIES-001/transient_structural_runs"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:70",
       "status": "open",
@@ -412,6 +441,7 @@
         "FEA-SCALE-DISTRIBUTED-001/sweep_and_frequency_fanout",
         "FEA-MESH-EXECUTION-001/worker_batches"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:71",
       "status": "open",
@@ -425,9 +455,10 @@
       "maps": [
         "FEA-THERMAL-PUBLIC-001/radiation_to_ambient"
       ],
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:72",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -439,9 +470,10 @@
         "FEA-COUPLING-ELECTROTHERMAL-002/two_way_conductivity_feedback",
         "FEA-COUPLING-ELECTROTHERMAL-002/transient_electrothermal"
       ],
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:73",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -454,9 +486,10 @@
         "FEA-EM-OUTPUTS-001/vector_field_publication",
         "FEA-EM-MAXWELL-001/frequency"
       ],
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:74",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -468,6 +501,7 @@
         "FEA-ACOUSTIC-OUTPUTS-001/sound_pressure_level",
         "FEA-PUBLIC-LANGUAGE-001/output_expression_forms"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:75",
       "status": "open",
@@ -481,6 +515,7 @@
       "maps": [
         "FEA-PUBLIC-STUDIES-001/buckling_and_random_at_practical_size"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:76",
       "status": "open",
@@ -495,6 +530,7 @@
         "FEA-PUBLIC-VALIDATION-001/published_benchmark_tables",
         "FEA-PUBLIC-STUDIES-001/published_conduction_energy_gate"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:77",
       "status": "open",
@@ -502,16 +538,17 @@
     },
     {
       "capability": "Acoustic cavity modes and transient pressure run from a .fea study",
-      "cells": 20,
-      "fail": 0,
+      "cells": 24,
+      "fail": 3,
       "id": "SIM-37",
       "maps": [
         "FEA-ACOUSTIC-MODAL-001/*",
         "FEA-ACOUSTIC-TRANSIENT-001/*"
       ],
+      "partial": 3,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:78",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -523,7 +560,8 @@
         "FEA-FLUID-SOLVERS-001/second_order_time",
         "FEA-FLUID-TRANSIENT-001/*"
       ],
-      "pass": 4,
+      "partial": 4,
+      "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:79",
       "status": "tied",
       "tagged": 0
@@ -536,6 +574,7 @@
       "maps": [
         "FEA-STRUCTURAL-PUBLIC-001/shells_and_beams_run"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:80",
       "status": "open",
@@ -551,6 +590,7 @@
         "FEA-COUPLING-FSI-002/two_way_ale",
         "FEA-FLUID-HEAT-001/two_way_cht"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:81",
       "status": "open",
@@ -565,6 +605,7 @@
         "FEA-STRUCTURAL-PUBLIC-001/large_deformation",
         "FEA-NONLINEAR-OPERATOR-001/kinematics_tangent_newton"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:82",
       "status": "open",
@@ -572,8 +613,8 @@
     },
     {
       "capability": "Acoustics: harmonic, modal, transient, SPL, impedance, TL, intensity, structure-borne",
-      "cells": 68,
-      "fail": 0,
+      "cells": 72,
+      "fail": 3,
       "id": "SIM-42",
       "maps": [
         "FEA-ACOUSTIC-MODAL-001/*",
@@ -582,9 +623,10 @@
         "FEA-ACOUSTIC-BOUNDARY-002/*",
         "FEA-ACOUSTIC-COUPLING-001/*"
       ],
+      "partial": 3,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:83",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -596,6 +638,7 @@
         "FEA-THERMAL-PUBLIC-001/heat_sink_balance",
         "FEA-MESH-REALPARTS-001/original_study_meshes"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:11",
       "status": "open",
@@ -610,35 +653,38 @@
         "FEA-MESH-REALPARTS-001/original_study_meshes",
         "FEA-MESH-DISCRETIZATION-001/tet10_elevation"
       ],
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:12",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
       "capability": "Authored face names in STEP examples resolve at run",
       "cells": 3,
-      "fail": 0,
+      "fail": 1,
       "id": "SLOT-03",
       "maps": [
         "FEA-MESH-GEOMETRY-001/authored_names_survive_to_run"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:13",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
       "capability": "Convection film coefficient input type",
       "cells": 4,
-      "fail": 0,
+      "fail": 2,
       "id": "SLOT-04",
       "maps": [
         "FEA-THERMAL-PUBLIC-001/film_coefficient_input"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:14",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -652,9 +698,10 @@
         "FEA-THERMAL-PUBLIC-001/radiation_to_ambient",
         "FEA-STRUCTURAL-PUBLIC-001/large_deformation"
       ],
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:15",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -665,6 +712,7 @@
       "maps": [
         "FEA-COUPLING-CHAIN-001/thermal_to_prestress_to_modal"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:16",
       "status": "open",
@@ -672,13 +720,14 @@
     },
     {
       "capability": "Docs export carries builtin references; US spelling in guides",
-      "cells": 9,
+      "cells": 3,
       "fail": 0,
       "id": "SLOT-07",
       "maps": [
         "FEA-RELEASE-DOCUMENTATION-001/exact_physical_and_typed_contract_docs",
         "FEA-PUBLIC-VALIDATION-001/status_and_docs_match_code"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:17",
       "status": "open",
@@ -687,7 +736,7 @@
     {
       "capability": "Electromagnetic studies runnable: multi-body STEP, named faces, AC loss into heat, multi-frequency, magnetostatics",
       "cells": 21,
-      "fail": 0,
+      "fail": 2,
       "id": "SLOT-08",
       "maps": [
         "FEA-MESH-GEOMETRY-001/multibody_assembly_import",
@@ -697,9 +746,10 @@
         "FEA-EM-MAXWELL-001/*",
         "FEA-EM-MAGNETOSTATIC-001/*"
       ],
-      "pass": 3,
+      "partial": 4,
+      "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:18",
-      "status": "tied",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -710,6 +760,7 @@
       "maps": [
         "FEA-PUBLIC-RESULTS-001/saved_scene_capture"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:19",
       "status": "open",
@@ -717,8 +768,8 @@
     },
     {
       "capability": "Acoustics studies runnable and run",
-      "cells": 68,
-      "fail": 0,
+      "cells": 72,
+      "fail": 3,
       "id": "SLOT-10",
       "maps": [
         "FEA-ACOUSTIC-MODAL-001/*",
@@ -727,9 +778,10 @@
         "FEA-ACOUSTIC-BOUNDARY-002/*",
         "FEA-ACOUSTIC-COUPLING-001/*"
       ],
+      "partial": 3,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:20",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -742,9 +794,10 @@
         "FEA-EM-NONLINEAR-001/*",
         "FEA-EM-INPUTS-002/*"
       ],
+      "partial": 2,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:21",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -762,6 +815,7 @@
         "FEA-FLUID-VERIFICATION-001/*",
         "FEA-SCALE-SIZE-001/fluid_performance_targets"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:22",
       "status": "open",
@@ -770,14 +824,15 @@
     {
       "capability": "Exact STEP/IGES/BREP import keeps topology and mass properties",
       "cells": 3,
-      "fail": 0,
+      "fail": 1,
       "id": "REG-MESH-001",
       "maps": [
         "FEA-MESH-GEOMETRY-001/exact_formats"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:129",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -788,22 +843,24 @@
       "maps": [
         "FEA-MESH-DISCRETIZATION-001/curve_discretization"
       ],
+      "partial": 1,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:130",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
       "capability": "Constructive trimmed-surface triangulation with seams, poles and many trims",
       "cells": 3,
-      "fail": 0,
+      "fail": 1,
       "id": "REG-MESH-003",
       "maps": [
         "FEA-MESH-DISCRETIZATION-001/surface_discretization"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:131",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -814,9 +871,10 @@
       "maps": [
         "FEA-MESH-DISCRETIZATION-001/volume_conformity"
       ],
+      "partial": 1,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:132",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -827,9 +885,10 @@
       "maps": [
         "FEA-MESH-DISCRETIZATION-001/volume_quality_convergence"
       ],
+      "partial": 1,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:133",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -840,9 +899,10 @@
       "maps": [
         "FEA-MESH-DISCRETIZATION-001/tet10_elevation"
       ],
+      "partial": 1,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:134",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -853,6 +913,7 @@
       "maps": [
         "FEA-MESH-DISCRETIZATION-001/sizing_controls"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:135",
       "status": "open",
@@ -866,9 +927,10 @@
       "maps": [
         "FEA-MESH-EXECUTION-001/budgets_and_cancellation"
       ],
+      "partial": 1,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:136",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -879,6 +941,7 @@
       "maps": [
         "FEA-MESH-EXECUTION-001/determinism_across_layouts_and_platforms"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:137",
       "status": "open",
@@ -887,14 +950,15 @@
     {
       "capability": "Differential agreement with an independent mesher",
       "cells": 3,
-      "fail": 0,
+      "fail": 1,
       "id": "REG-MESH-010",
       "maps": [
         "FEA-MESH-DISCRETIZATION-001/independent_mesher_differential"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:138",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -905,6 +969,7 @@
       "maps": [
         "FEA-MESH-EXECUTION-001/performance_slo_and_governance"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:139",
       "status": "open",
@@ -918,6 +983,7 @@
       "maps": [
         "FEA-MESH-EXECUTION-001/performance_slo_and_governance"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:140",
       "status": "open",
@@ -925,13 +991,14 @@
     },
     {
       "capability": "One meshing path; legacy and boundary policy enforced",
-      "cells": 16,
+      "cells": 10,
       "fail": 0,
       "id": "REG-MESH-013",
       "maps": [
         "FEA-RELEASE-ENGINEERING-001/coherent_reviewed_and_verified_slices",
         "FEA-SHARED-AUTHORITIES-001/single_authority_exit_invariants"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:141",
       "status": "open",
@@ -945,6 +1012,7 @@
       "maps": [
         "FEA-MESH-DISCRETIZATION-001/solver_relevant_acceptance"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:142",
       "status": "open",
@@ -958,9 +1026,10 @@
       "maps": [
         "FEA-MESH-EXECUTION-001/bounded_publication_and_cold_materialization"
       ],
+      "partial": 1,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:143",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -971,6 +1040,7 @@
       "maps": [
         "FEA-MESH-REALPARTS-001/corpus_success_rate"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:144",
       "status": "open",
@@ -985,6 +1055,7 @@
         "FEA-MESH-REALPARTS-001/mesh_command_defaults",
         "FEA-MESH-REALPARTS-001/original_study_meshes"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:145",
       "status": "open",
@@ -999,6 +1070,7 @@
         "FEA-MESH-REALPARTS-001/original_study_meshes",
         "FEA-THERMAL-PUBLIC-001/heat_sink_balance"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:146",
       "status": "open",
@@ -1012,6 +1084,7 @@
       "maps": [
         "FEA-MESH-REALPARTS-001/original_study_meshes"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:147",
       "status": "open",
@@ -1026,6 +1099,7 @@
         "FEA-MESH-REALPARTS-001/twisted_and_curved_hero_parts",
         "FEA-MESH-REALPARTS-001/website_fixture_parts_mesh"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:148",
       "status": "open",
@@ -1039,6 +1113,7 @@
       "maps": [
         "FEA-MESH-EXECUTION-001/worker_batches"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:149",
       "status": "open",
@@ -1052,6 +1127,7 @@
       "maps": [
         "FEA-MESH-EXECUTION-001/backend_equivalence"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:150",
       "status": "open",
@@ -1060,27 +1136,29 @@
     {
       "capability": "Worker loss retries with fencing; resumable encrypted transfer",
       "cells": 3,
-      "fail": 0,
+      "fail": 1,
       "id": "REG-DMESH-003",
       "maps": [
         "FEA-MESH-EXECUTION-001/worker_loss_and_transfer"
       ],
+      "partial": 2,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:151",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
       "capability": "Durable supervisor restart and cancellation",
       "cells": 3,
-      "fail": 0,
+      "fail": 1,
       "id": "REG-DMESH-004",
       "maps": [
         "FEA-MESH-EXECUTION-001/worker_loss_and_transfer"
       ],
+      "partial": 2,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:152",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -1091,6 +1169,7 @@
       "maps": [
         "FEA-MESH-EXECUTION-001/partitioned_volume_cdt"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:153",
       "status": "open",
@@ -1104,6 +1183,7 @@
       "maps": [
         "FEA-MESH-EXECUTION-001/single_scheduler_and_browser_policy"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:154",
       "status": "open",
@@ -1117,6 +1197,7 @@
       "maps": [
         "FEA-MESH-EXECUTION-001/single_scheduler_and_browser_policy"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:155",
       "status": "open",
@@ -1130,7 +1211,8 @@
       "maps": [
         "FEA-SHARED-RESOURCES-001/machine_cpu_execution"
       ],
-      "pass": 1,
+      "partial": 1,
+      "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:156",
       "status": "tied",
       "tagged": 0
@@ -1143,6 +1225,7 @@
       "maps": [
         "FEA-SCALE-SIZE-001/whole_task_resource_measurement"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:157",
       "status": "open",
@@ -1156,6 +1239,7 @@
       "maps": [
         "FEA-SCALE-SIZE-001/whole_task_resource_measurement"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:158",
       "status": "open",
@@ -1169,9 +1253,10 @@
       "maps": [
         "FEA-MESH-DISCRETIZATION-001/volume_quality_convergence"
       ],
+      "partial": 1,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:159",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -1183,6 +1268,7 @@
         "FEA-SCALE-SIZE-001/whole_task_resource_measurement",
         "FEA-PUBLIC-STUDIES-001/buckling_and_random_at_practical_size"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:160",
       "status": "open",
@@ -1196,22 +1282,24 @@
       "maps": [
         "FEA-MESH-EXECUTION-001/bounded_publication_and_cold_materialization"
       ],
+      "partial": 1,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:161",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
       "capability": "Dense surfaces retained within cache-entry and codec caps",
       "cells": 3,
-      "fail": 0,
+      "fail": 1,
       "id": "REG-TRN-002",
       "maps": [
         "FEA-MESH-DISCRETIZATION-001/surface_discretization"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:162",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -1222,9 +1310,10 @@
       "maps": [
         "FEA-SHARED-IDENTITY-001/closed_chunked_numerical_objects"
       ],
+      "partial": 1,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:163",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -1235,6 +1324,7 @@
       "maps": [
         "FEA-PUBLIC-RESULTS-001/cold_reopen_of_results"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:164",
       "status": "open",
@@ -1248,6 +1338,7 @@
       "maps": [
         "FEA-PUBLIC-RESULTS-001/scripts_run_and_read"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:165",
       "status": "open",
@@ -1261,6 +1352,7 @@
       "maps": [
         "FEA-PUBLIC-RESULTS-001/repeated_eigenvalue_modes"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:166",
       "status": "open",
@@ -1269,14 +1361,15 @@
     {
       "capability": "Same study gives identical result digests across runs and worker counts",
       "cells": 1,
-      "fail": 0,
+      "fail": 1,
       "id": "REG-RCR-004",
       "maps": [
         "FEA-PUBLIC-RESULTS-001/result_digest_determinism"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:167",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -1287,6 +1380,7 @@
       "maps": [
         "FEA-PUBLIC-RESULTS-001/saved_scene_capture"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:168",
       "status": "open",
@@ -1300,6 +1394,7 @@
       "maps": [
         "FEA-PUBLIC-RESULTS-001/saved_scene_capture"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:169",
       "status": "open",
@@ -1313,6 +1408,7 @@
       "maps": [
         "external (plotting): runtime-defects.md plotting and figures section (26 rows), not an FEA physics obligation"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:170",
       "status": "external",
@@ -1320,12 +1416,13 @@
     },
     {
       "capability": "Deterministic requirements export with exact criteria and no pass flags",
-      "cells": 8,
+      "cells": 2,
       "fail": 0,
       "id": "REG-DOC-001",
       "maps": [
         "FEA-RELEASE-DOCUMENTATION-001/exact_physical_and_typed_contract_docs"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:171",
       "status": "open",
@@ -1340,19 +1437,21 @@
         "FEA-RELEASE-REGISTER-001/register_integrity",
         "FEA-RELEASE-REGISTER-001/witness_tags_valid"
       ],
-      "pass": 2,
+      "partial": 2,
+      "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:172",
-      "status": "pass",
+      "status": "tied",
       "tagged": 0
     },
     {
       "capability": "Every documentation example checks",
-      "cells": 8,
+      "cells": 2,
       "fail": 0,
       "id": "REG-DOC-003",
       "maps": [
         "FEA-RELEASE-DOCUMENTATION-001/checked_language_guides_and_future_envelopes"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:173",
       "status": "open",
@@ -1366,6 +1465,7 @@
       "maps": [
         "FEA-PUBLIC-VALIDATION-001/guides_published_with_runs"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:174",
       "status": "open",
@@ -1379,6 +1479,7 @@
       "maps": [
         "FEA-PUBLIC-VALIDATION-001/status_and_docs_match_code"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:175",
       "status": "open",
@@ -1392,6 +1493,7 @@
       "maps": [
         "FEA-AUTHORING-COMPILER-002/desktop_and_agent_adapters"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:176",
       "status": "open",
@@ -1405,6 +1507,7 @@
       "maps": [
         "FEA-PUBLIC-VALIDATION-001/status_and_docs_match_code"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:209",
       "status": "open",
@@ -1418,6 +1521,7 @@
       "maps": [
         "FEA-MESH-REALPARTS-001/mesh_command_defaults"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:177",
       "status": "open",
@@ -1426,40 +1530,43 @@
     {
       "capability": "Every published example runs end to end via `runmat fea run`",
       "cells": 1,
-      "fail": 0,
+      "fail": 1,
       "id": "REG-CLI-002",
       "maps": [
         "FEA-PUBLIC-STUDIES-001/docs_examples_run"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:178",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
       "capability": "`.fea` diagnostics are located with no cascade",
       "cells": 2,
-      "fail": 0,
+      "fail": 1,
       "id": "REG-CLI-003",
       "maps": [
         "FEA-PUBLIC-LANGUAGE-001/located_diagnostics"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:179",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
       "capability": "A load without load_case goes into a default case",
       "cells": 2,
-      "fail": 0,
+      "fail": 1,
       "id": "REG-CLI-004",
       "maps": [
         "FEA-PUBLIC-LANGUAGE-001/default_load_case"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:180",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -1470,6 +1577,7 @@
       "maps": [
         "FEA-PUBLIC-STUDIES-001/chained_and_coupled_studies_run"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:181",
       "status": "open",
@@ -1483,6 +1591,7 @@
       "maps": [
         "FEA-PUBLIC-STUDIES-001/transient_structural_runs"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:182",
       "status": "open",
@@ -1496,6 +1605,7 @@
       "maps": [
         "FEA-PUBLIC-VALIDATION-001/published_benchmark_tables"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:183",
       "status": "open",
@@ -1509,6 +1619,7 @@
       "maps": [
         "FEA-PUBLIC-RESULTS-001/closed_form_beside_field"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:184",
       "status": "open",
@@ -1517,15 +1628,16 @@
     {
       "capability": "Viewport face pick qualified; examples use named selectors",
       "cells": 4,
-      "fail": 0,
+      "fail": 2,
       "id": "REG-WEB-003",
       "maps": [
         "FEA-MESH-GEOMETRY-001/authored_names_survive_to_run",
         "FEA-AUTHORING-GEOMETRY-002/selector_inspection"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:185",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -1536,6 +1648,7 @@
       "maps": [
         "FEA-SCALE-SIZE-001/published_size_and_time_per_example"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:186",
       "status": "open",
@@ -1549,6 +1662,7 @@
       "maps": [
         "FEA-PUBLIC-RESULTS-001/verdicts_and_reassess"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:187",
       "status": "open",
@@ -1563,6 +1677,7 @@
         "FEA-PUBLIC-RESULTS-001/scripts_run_and_read",
         "FEA-PUBLIC-LANGUAGE-001/matlab_generated_signals"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:188",
       "status": "open",
@@ -1571,27 +1686,29 @@
     {
       "capability": "Acoustic cavity modal analysis",
       "cells": 12,
-      "fail": 0,
+      "fail": 2,
       "id": "REG-ACOUS-001",
       "maps": [
         "FEA-ACOUSTIC-MODAL-001/*"
       ],
+      "partial": 3,
       "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:48",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
       "capability": "Acoustic transient with energy balance",
-      "cells": 8,
-      "fail": 0,
+      "cells": 12,
+      "fail": 1,
       "id": "REG-ACOUS-002",
       "maps": [
         "FEA-ACOUSTIC-TRANSIENT-001/*"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:49",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -1602,6 +1719,7 @@
       "maps": [
         "FEA-ACOUSTIC-OUTPUTS-001/sound_pressure_level"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:50",
       "status": "open",
@@ -1615,6 +1733,7 @@
       "maps": [
         "FEA-ACOUSTIC-BOUNDARY-002/spherical_radiation"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:51",
       "status": "open",
@@ -1628,6 +1747,7 @@
       "maps": [
         "FEA-ACOUSTIC-BOUNDARY-002/complex_frequency_dependent_impedance"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:52",
       "status": "open",
@@ -1641,6 +1761,7 @@
       "maps": [
         "FEA-ACOUSTIC-OUTPUTS-001/transmission_and_insertion_loss"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:53",
       "status": "open",
@@ -1654,6 +1775,7 @@
       "maps": [
         "FEA-ACOUSTIC-OUTPUTS-001/intensity_and_sound_power"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:54",
       "status": "open",
@@ -1667,6 +1789,7 @@
       "maps": [
         "FEA-ACOUSTIC-COUPLING-001/*"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:55",
       "status": "open",
@@ -1680,6 +1803,7 @@
       "maps": [
         "FEA-ACOUSTIC-BOUNDARY-002/region_damping"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:56",
       "status": "open",
@@ -1693,6 +1817,7 @@
       "maps": [
         "FEA-EM-TRANSIENT-001/*"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:205",
       "status": "open",
@@ -1706,6 +1831,7 @@
       "maps": [
         "FEA-EM-NONLINEAR-001/*"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:206",
       "status": "open",
@@ -1719,9 +1845,10 @@
       "maps": [
         "FEA-EM-INPUTS-002/*"
       ],
+      "partial": 2,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:207",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -1733,6 +1860,7 @@
         "FEA-FLUID-SOLVERS-001/coupled_newton_continuation",
         "FEA-FLUID-SOLVERS-001/residual_history"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:54",
       "status": "open",
@@ -1746,6 +1874,7 @@
       "maps": [
         "FEA-FLUID-SOLVERS-001/block_linear_solvers"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:55",
       "status": "open",
@@ -1759,6 +1888,7 @@
       "maps": [
         "FEA-FLUID-SOLVERS-001/second_order_time"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:56",
       "status": "open",
@@ -1772,6 +1902,7 @@
       "maps": [
         "FEA-FLUID-SOLVERS-001/accurate_discretization"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:57",
       "status": "open",
@@ -1787,6 +1918,7 @@
         "FEA-SCALE-PARALLEL-001/strong_scaling_table",
         "FEA-SCALE-DISTRIBUTED-001/domain_decomposition"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:58",
       "status": "open",
@@ -1800,6 +1932,7 @@
       "maps": [
         "FEA-FLUID-BOUNDARY-002/*"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:59",
       "status": "open",
@@ -1813,6 +1946,7 @@
       "maps": [
         "FEA-FLUID-HEAT-001/*"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:60",
       "status": "open",
@@ -1826,6 +1960,7 @@
       "maps": [
         "FEA-FLUID-HEAT-001/low_mach_variable_density"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:61",
       "status": "open",
@@ -1839,6 +1974,7 @@
       "maps": [
         "FEA-FLUID-MATERIALS-001/generalized_newtonian"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:62",
       "status": "open",
@@ -1852,6 +1988,7 @@
       "maps": [
         "FEA-FLUID-MATERIALS-001/viscoelastic"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:63",
       "status": "open",
@@ -1865,6 +2002,7 @@
       "maps": [
         "FEA-FLUID-MATERIALS-001/porous_zones"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:64",
       "status": "open",
@@ -1878,6 +2016,7 @@
       "maps": [
         "FEA-FLUID-MATERIALS-001/species_and_scalars"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:65",
       "status": "open",
@@ -1891,6 +2030,7 @@
       "maps": [
         "FEA-FLUID-PHYSICS-001/free_surface_two_phase"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:66",
       "status": "open",
@@ -1904,6 +2044,7 @@
       "maps": [
         "FEA-FLUID-PHYSICS-001/rotating_frames_and_sliding_mesh"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:67",
       "status": "open",
@@ -1917,6 +2058,7 @@
       "maps": [
         "FEA-FLUID-PHYSICS-001/thin_film_lubrication"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:68",
       "status": "open",
@@ -1930,6 +2072,7 @@
       "maps": [
         "FEA-FLUID-PHYSICS-001/electrokinetics"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:69",
       "status": "open",
@@ -1943,6 +2086,7 @@
       "maps": [
         "FEA-FLUID-PHYSICS-001/particle_tracing"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:70",
       "status": "open",
@@ -1956,6 +2100,7 @@
       "maps": [
         "FEA-COUPLING-FSI-002/*"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:71",
       "status": "open",
@@ -1969,6 +2114,7 @@
       "maps": [
         "FEA-FLUID-OUTPUTS-001/*"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:72",
       "status": "open",
@@ -1982,6 +2128,7 @@
       "maps": [
         "FEA-FLUID-PHYSICS-001/two_dimensional_and_axisymmetric"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:73",
       "status": "open",
@@ -1995,6 +2142,7 @@
       "maps": [
         "FEA-FLUID-PHYSICS-001/compressible_and_networks"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:74",
       "status": "open",
@@ -2008,6 +2156,7 @@
       "maps": [
         "FEA-FLUID-VERIFICATION-001/*"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:75",
       "status": "open",
@@ -2015,8 +2164,8 @@
     },
     {
       "capability": "Declarative .fea language, imports, composition and one compiler authority",
-      "cells": 180,
-      "fail": 0,
+      "cells": 140,
+      "fail": 23,
       "id": "PLAN-LANG",
       "maps": [
         "FEA-AUTHORING-LANGUAGE-002/*",
@@ -2024,34 +2173,37 @@
         "FEA-AUTHORING-CUTOVER-001/*",
         "FEA-AUTHORING-COMPILER-002/*"
       ],
-      "pass": 4,
+      "partial": 2,
+      "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:508",
-      "status": "tied",
+      "status": "fail",
       "tagged": 0
     },
     {
       "capability": "Exact geometry, derivation, persistent topology, AP242 exchange",
-      "cells": 83,
-      "fail": 0,
+      "cells": 67,
+      "fail": 15,
       "id": "PLAN-GEOM",
       "maps": [
         "FEA-AUTHORING-GEOMETRY-001/*",
         "FEA-AUTHORING-GEOMETRY-002/*"
       ],
-      "pass": 2,
+      "partial": 7,
+      "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:563",
-      "status": "tied",
+      "status": "fail",
       "tagged": 0
     },
     {
       "capability": "Domain ownership, code quality and numerical truth rules",
-      "cells": 184,
+      "cells": 46,
       "fail": 0,
       "id": "PLAN-OWN",
       "maps": [
         "FEA-SHARED-OWNERSHIP-001/*",
         "FEA-RELEASE-ENGINEERING-001/*"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:90",
       "status": "open",
@@ -2066,19 +2218,21 @@
         "FEA-SHARED-BASELINE-001/*",
         "FEA-SHARED-AUTHORITIES-001/*"
       ],
-      "pass": 1,
+      "partial": 3,
+      "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:135",
       "status": "tied",
       "tagged": 0
     },
     {
       "capability": "Preserved public platform lineage and qualification gates",
-      "cells": 16,
+      "cells": 4,
       "fail": 0,
       "id": "PLAN-PLATFORM",
       "maps": [
         "FEA-RELEASE-PLATFORM-001/*"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:275",
       "status": "open",
@@ -2092,7 +2246,8 @@
       "maps": [
         "FEA-SHARED-TOPOLOGY-001/*"
       ],
-      "pass": 2,
+      "partial": 2,
+      "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:1117",
       "status": "tied",
       "tagged": 0
@@ -2105,7 +2260,8 @@
       "maps": [
         "FEA-SHARED-PROPERTIES-001/*"
       ],
-      "pass": 1,
+      "partial": 9,
+      "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:1156",
       "status": "tied",
       "tagged": 0
@@ -2118,7 +2274,8 @@
       "maps": [
         "FEA-SHARED-CONSTRAINTS-001/*"
       ],
-      "pass": 1,
+      "partial": 6,
+      "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:1335",
       "status": "tied",
       "tagged": 0
@@ -2131,7 +2288,8 @@
       "maps": [
         "FEA-SHARED-EXCITATION-001/*"
       ],
-      "pass": 1,
+      "partial": 5,
+      "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:1781",
       "status": "tied",
       "tagged": 0
@@ -2144,37 +2302,40 @@
       "maps": [
         "FEA-SHARED-SEQUENCES-001/*"
       ],
+      "partial": 4,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2023",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
       "capability": "Typed observations, outputs and monitors",
       "cells": 61,
-      "fail": 0,
+      "fail": 7,
       "id": "PLAN-OBS",
       "maps": [
         "FEA-SHARED-OBSERVATIONS-001/*",
         "FEA-AUTHORING-OUTPUT-002/*"
       ],
-      "pass": 2,
+      "partial": 4,
+      "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2107",
-      "status": "tied",
+      "status": "fail",
       "tagged": 0
     },
     {
       "capability": "Placement-independent studies and scheduling",
       "cells": 160,
-      "fail": 0,
+      "fail": 1,
       "id": "PLAN-STUDY",
       "maps": [
         "FEA-SHARED-EXECUTION-001/*",
         "FEA-SHARED-IDENTITY-001/*"
       ],
+      "partial": 7,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2202",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -2185,9 +2346,10 @@
       "maps": [
         "FEA-SHARED-OPERATORS-001/*"
       ],
+      "partial": 3,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2309",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -2198,7 +2360,8 @@
       "maps": [
         "FEA-SHARED-ACCELERATORS-001/*"
       ],
-      "pass": 1,
+      "partial": 2,
+      "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2369",
       "status": "tied",
       "tagged": 0
@@ -2206,15 +2369,16 @@
     {
       "capability": "Governed resource admission and chunked artifacts",
       "cells": 72,
-      "fail": 0,
+      "fail": 1,
       "id": "PLAN-RES",
       "maps": [
         "FEA-SHARED-RESOURCES-001/*",
         "FEA-SHARED-IDENTITY-001/*"
       ],
-      "pass": 6,
+      "partial": 7,
+      "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2441",
-      "status": "tied",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -2225,9 +2389,10 @@
       "maps": [
         "FEA-SHARED-ACCURACY-001/*"
       ],
+      "partial": 2,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2493",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -2238,6 +2403,7 @@
       "maps": [
         "FEA-SHARED-EXTENSIONS-001/*"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2545",
       "status": "open",
@@ -2256,7 +2422,8 @@
         "FEA-STRUCTURAL-CONSTRAINT-001/*",
         "FEA-STRUCTURAL-EXECUTION-001/*"
       ],
-      "pass": 3,
+      "partial": 23,
+      "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2571",
       "status": "tied",
       "tagged": 0
@@ -2269,7 +2436,8 @@
       "maps": [
         "FEA-DYNAMICS-MODAL-001/*"
       ],
-      "pass": 1,
+      "partial": 3,
+      "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2610",
       "status": "tied",
       "tagged": 0
@@ -2282,7 +2450,8 @@
       "maps": [
         "FEA-DYNAMICS-PRESTRESS-001/*"
       ],
-      "pass": 1,
+      "partial": 3,
+      "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2623",
       "status": "tied",
       "tagged": 0
@@ -2296,7 +2465,8 @@
         "FEA-DYNAMICS-RESPONSE-001/*",
         "FEA-DYNAMICS-GOVERNANCE-001/*"
       ],
-      "pass": 2,
+      "partial": 10,
+      "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2637",
       "status": "tied",
       "tagged": 0
@@ -2311,7 +2481,8 @@
         "FEA-NONLINEAR-OPERATOR-001/*",
         "FEA-NONLINEAR-GOVERNANCE-001/*"
       ],
-      "pass": 22,
+      "partial": 29,
+      "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2654",
       "status": "fail",
       "tagged": 0
@@ -2324,7 +2495,8 @@
       "maps": [
         "FEA-CONTACT-OPERATOR-001/*"
       ],
-      "pass": 1,
+      "partial": 11,
+      "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:1678",
       "status": "tied",
       "tagged": 0
@@ -2342,7 +2514,8 @@
         "FEA-THERMAL-ACCURACY-001/*",
         "FEA-THERMAL-EXECUTION-001/*"
       ],
-      "pass": 21,
+      "partial": 23,
+      "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2680",
       "status": "fail",
       "tagged": 0
@@ -2350,7 +2523,7 @@
     {
       "capability": "Electrostatic, conduction, magnetostatic and harmonic Maxwell",
       "cells": 104,
-      "fail": 3,
+      "fail": 0,
       "id": "PLAN-EM",
       "maps": [
         "FEA-EM-SCALAR-001/*",
@@ -2359,9 +2532,10 @@
         "FEA-EM-MAXWELL-001/*",
         "FEA-EM-QUALIFICATION-001/*"
       ],
-      "pass": 23,
+      "partial": 28,
+      "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2693",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -2377,7 +2551,8 @@
         "FEA-ACOUSTIC-ACCURACY-001/*",
         "FEA-ACOUSTIC-EXECUTION-001/*"
       ],
-      "pass": 20,
+      "partial": 20,
+      "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2719",
       "status": "fail",
       "tagged": 0
@@ -2385,7 +2560,7 @@
     {
       "capability": "Laminar incompressible flow base",
       "cells": 159,
-      "fail": 0,
+      "fail": 1,
       "id": "PLAN-CFD",
       "maps": [
         "FEA-FLUID-TOPOLOGY-001/*",
@@ -2396,9 +2571,10 @@
         "FEA-FLUID-ACCURACY-001/*",
         "FEA-FLUID-EXECUTION-001/*"
       ],
-      "pass": 21,
+      "partial": 21,
+      "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2731",
-      "status": "tied",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -2409,7 +2585,8 @@
       "maps": [
         "FEA-COUPLING-THERMOELASTIC-001/*"
       ],
-      "pass": 2,
+      "partial": 2,
+      "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2746",
       "status": "tied",
       "tagged": 0
@@ -2422,7 +2599,8 @@
       "maps": [
         "FEA-COUPLING-ELECTROTHERMAL-001/*"
       ],
-      "pass": 4,
+      "partial": 4,
+      "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2754",
       "status": "tied",
       "tagged": 0
@@ -2436,6 +2614,7 @@
         "FEA-COUPLING-CHT-001/*",
         "FEA-COUPLING-INTERFACE-001/*"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2762",
       "status": "open",
@@ -2449,6 +2628,7 @@
       "maps": [
         "FEA-COUPLING-FSI-001/*"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2771",
       "status": "open",
@@ -2463,7 +2643,8 @@
         "FEA-ADAPTATION-LOOP-001/*",
         "FEA-ADAPTATION-GOVERNANCE-001/*"
       ],
-      "pass": 3,
+      "partial": 6,
+      "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2780",
       "status": "tied",
       "tagged": 0
@@ -2471,30 +2652,32 @@
     {
       "capability": "Shared-memory, distributed assembly and solve",
       "cells": 190,
-      "fail": 0,
+      "fail": 1,
       "id": "PLAN-PARALLEL",
       "maps": [
         "FEA-SHARED-EXECUTION-001/*",
         "FEA-SCALE-PARALLEL-001/parallel_assembly_and_recovery",
         "FEA-SCALE-DISTRIBUTED-001/domain_decomposition"
       ],
+      "partial": 5,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2807",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
       "capability": "Verification evidence per formulation",
-      "cells": 48,
+      "cells": 12,
       "fail": 0,
       "id": "PLAN-EVIDENCE",
       "maps": [
         "FEA-RELEASE-EVIDENCE-001/*",
         "FEA-RELEASE-COMPLETION-001/*"
       ],
-      "pass": 1,
+      "partial": 0,
+      "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2850",
-      "status": "tied",
+      "status": "open",
       "tagged": 0
     },
     {
@@ -2505,6 +2688,7 @@
       "maps": [
         "excluded: maturity concept removed (owner 2026-10-20)"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2870",
       "status": "excluded",
@@ -2512,12 +2696,13 @@
     },
     {
       "capability": "Blocking attested evidence in the existing release graph",
-      "cells": 24,
+      "cells": 6,
       "fail": 0,
       "id": "PLAN-CI",
       "maps": [
         "FEA-RELEASE-CI-001/*"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2881",
       "status": "open",
@@ -2525,12 +2710,13 @@
     },
     {
       "capability": "Runnable exact documentation and limitations",
-      "cells": 24,
+      "cells": 6,
       "fail": 0,
       "id": "PLAN-DOCS",
       "maps": [
         "FEA-RELEASE-DOCUMENTATION-001/*"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:2899",
       "status": "open",
@@ -2544,6 +2730,7 @@
       "maps": [
         "FEA-RELEASE-SCOPE-001/*"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:40",
       "status": "open",
@@ -2558,7 +2745,8 @@
         "FEA-STRUCTURAL-SOLID-001/*",
         "FEA-STRUCTURAL-PUBLIC-001/hand_calculation_references"
       ],
-      "pass": 1,
+      "partial": 7,
+      "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:27",
       "status": "tied",
       "tagged": 0
@@ -2571,7 +2759,8 @@
       "maps": [
         "FEA-DYNAMICS-MODAL-001/*"
       ],
-      "pass": 1,
+      "partial": 3,
+      "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:28",
       "status": "tied",
       "tagged": 0
@@ -2585,7 +2774,8 @@
         "FEA-DYNAMICS-PRESTRESS-001/*",
         "FEA-STRUCTURAL-PUBLIC-001/result_publication_defects"
       ],
-      "pass": 1,
+      "partial": 3,
+      "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:29",
       "status": "tied",
       "tagged": 0
@@ -2599,7 +2789,8 @@
         "FEA-DYNAMICS-RESPONSE-001/*",
         "FEA-PUBLIC-STUDIES-001/transient_structural_runs"
       ],
-      "pass": 2,
+      "partial": 8,
+      "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:30",
       "status": "tied",
       "tagged": 0
@@ -2612,7 +2803,8 @@
       "maps": [
         "FEA-DYNAMICS-RESPONSE-001/*"
       ],
-      "pass": 2,
+      "partial": 8,
+      "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:31",
       "status": "tied",
       "tagged": 0
@@ -2627,7 +2819,8 @@
         "FEA-STRUCTURAL-PUBLIC-001/vibration_qualification",
         "FEA-PUBLIC-STUDIES-001/buckling_and_random_at_practical_size"
       ],
-      "pass": 1,
+      "partial": 1,
+      "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:32",
       "status": "tied",
       "tagged": 0
@@ -2640,7 +2833,8 @@
       "maps": [
         "FEA-DYNAMICS-PRESTRESS-001/*"
       ],
-      "pass": 1,
+      "partial": 3,
+      "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:33",
       "status": "tied",
       "tagged": 0
@@ -2654,6 +2848,7 @@
         "FEA-NONLINEAR-OPERATOR-001/*",
         "FEA-STRUCTURAL-PUBLIC-001/plasticity_example"
       ],
+      "partial": 5,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:34",
       "status": "fail",
@@ -2668,6 +2863,7 @@
         "FEA-NONLINEAR-OPERATOR-001/kinematics_tangent_newton",
         "FEA-STRUCTURAL-PUBLIC-001/large_deformation"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:35",
       "status": "open",
@@ -2682,7 +2878,8 @@
         "FEA-CONTACT-OPERATOR-001/*",
         "FEA-STRUCTURAL-PUBLIC-001/contact_example"
       ],
-      "pass": 1,
+      "partial": 11,
+      "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:36",
       "status": "tied",
       "tagged": 0
@@ -2690,15 +2887,16 @@
     {
       "capability": "Thermal steady",
       "cells": 26,
-      "fail": 0,
+      "fail": 2,
       "id": "PM-THERMAL-STEADY",
       "maps": [
         "FEA-THERMAL-SOLVE-001/steady",
         "FEA-THERMAL-PUBLIC-001/*"
       ],
-      "pass": 2,
+      "partial": 3,
+      "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:37",
-      "status": "tied",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -2710,7 +2908,8 @@
         "FEA-THERMAL-SOLVE-001/transient",
         "FEA-THERMAL-PUBLIC-001/power_cycle_transient"
       ],
-      "pass": 2,
+      "partial": 2,
+      "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:38",
       "status": "tied",
       "tagged": 0
@@ -2724,7 +2923,8 @@
         "FEA-COUPLING-THERMOELASTIC-001/*",
         "FEA-COUPLING-CHAIN-001/*"
       ],
-      "pass": 2,
+      "partial": 2,
+      "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:39",
       "status": "tied",
       "tagged": 0
@@ -2738,7 +2938,8 @@
         "FEA-EM-SCALAR-001/*",
         "FEA-EM-INPUTS-002/scalar_potential_inputs"
       ],
-      "pass": 8,
+      "partial": 10,
+      "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:40",
       "status": "tied",
       "tagged": 0
@@ -2752,7 +2953,8 @@
         "FEA-EM-SCALAR-001/*",
         "FEA-EM-OUTPUTS-001/terminal_quantities"
       ],
-      "pass": 8,
+      "partial": 8,
+      "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:41",
       "status": "tied",
       "tagged": 0
@@ -2766,7 +2968,8 @@
         "FEA-EM-MAGNETOSTATIC-001/*",
         "FEA-EM-INPUTS-002/magnetic_inputs"
       ],
-      "pass": 3,
+      "partial": 3,
+      "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:42",
       "status": "tied",
       "tagged": 0
@@ -2780,9 +2983,10 @@
         "FEA-EM-MAXWELL-001/*",
         "FEA-EM-FREQUENCY-001/*"
       ],
+      "partial": 3,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:43",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -2794,7 +2998,8 @@
         "FEA-COUPLING-ELECTROTHERMAL-001/*",
         "FEA-COUPLING-ELECTROTHERMAL-002/*"
       ],
-      "pass": 4,
+      "partial": 5,
+      "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:44",
       "status": "tied",
       "tagged": 0
@@ -2810,23 +3015,25 @@
         "FEA-ACOUSTIC-SOURCE-001/*",
         "FEA-ACOUSTIC-NUMERICS-001/*"
       ],
-      "pass": 17,
+      "partial": 17,
+      "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:45",
       "status": "fail",
       "tagged": 0
     },
     {
       "capability": "Acoustic modal and transient",
-      "cells": 20,
-      "fail": 0,
+      "cells": 24,
+      "fail": 3,
       "id": "PM-ACOUSTIC-MT",
       "maps": [
         "FEA-ACOUSTIC-MODAL-001/*",
         "FEA-ACOUSTIC-TRANSIENT-001/*"
       ],
+      "partial": 3,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:46",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -2838,7 +3045,8 @@
         "FEA-FLUID-EQUATIONS-001/*",
         "FEA-FLUID-ACCURACY-001/steady_references"
       ],
-      "pass": 5,
+      "partial": 5,
+      "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:47",
       "status": "tied",
       "tagged": 0
@@ -2852,7 +3060,8 @@
         "FEA-FLUID-TRANSIENT-001/*",
         "FEA-FLUID-SOLVERS-001/second_order_time"
       ],
-      "pass": 4,
+      "partial": 4,
+      "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:48",
       "status": "tied",
       "tagged": 0
@@ -2866,6 +3075,7 @@
         "FEA-COUPLING-CHT-001/*",
         "FEA-FLUID-HEAT-001/two_way_cht"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:49",
       "status": "open",
@@ -2880,6 +3090,7 @@
         "FEA-COUPLING-FSI-001/*",
         "FEA-COUPLING-FSI-002/*"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:50",
       "status": "open",
@@ -2894,9 +3105,10 @@
         "FEA-ADAPTATION-LOOP-001/*",
         "FEA-ADAPTATION-PUBLIC-001/*"
       ],
+      "partial": 3,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:51",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -2909,6 +3121,7 @@
         "FEA-EM-TRANSIENT-001/*",
         "excluded: turbulence, piezoelectricity and fracture (owner)"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:52",
       "status": "open",
@@ -2926,7 +3139,8 @@
         "FEA-EM-MAXWELL-001/basis",
         "FEA-FLUID-TOPOLOGY-001/*"
       ],
-      "pass": 7,
+      "partial": 14,
+      "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:71",
       "status": "tied",
       "tagged": 0
@@ -2939,6 +3153,7 @@
       "maps": [
         "excluded: owner 2026-10-20 dropped hexahedral meshing; no claim on the site"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/physics-matrix.md:81",
       "status": "excluded",
@@ -2953,9 +3168,10 @@
         "FEA-SHARED-OPERATORS-001/*",
         "FEA-SCALE-PARALLEL-001/parallel_solve"
       ],
+      "partial": 3,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/solvers-and-scale.md:12",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -2966,7 +3182,8 @@
       "maps": [
         "FEA-SHARED-ACCELERATORS-001/*"
       ],
-      "pass": 1,
+      "partial": 2,
+      "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/solvers-and-scale.md:7",
       "status": "tied",
       "tagged": 0
@@ -2979,6 +3196,7 @@
       "maps": [
         "FEA-SCALE-DISTRIBUTED-001/*"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/solvers-and-scale.md:65",
       "status": "open",
@@ -2992,6 +3210,7 @@
       "maps": [
         "FEA-SCALE-SIZE-001/published_size_and_time_per_example"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/solvers-and-scale.md:30",
       "status": "open",
@@ -2999,70 +3218,75 @@
     },
     {
       "capability": "Every pipeline uses the thread plan and speeds up",
-      "cells": 115,
-      "fail": 0,
+      "cells": 116,
+      "fail": 1,
       "id": "SCALE-PARALLEL",
       "maps": [
         "FEA-SCALE-PARALLEL-001/*"
       ],
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/solvers-and-scale.md:53",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
       "capability": "STEP, IGES, BREP exact; tessellated formats view-only",
       "cells": 3,
-      "fail": 0,
+      "fail": 1,
       "id": "GEOM-FORMATS",
       "maps": [
         "FEA-MESH-GEOMETRY-001/exact_formats"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/geometry-meshing.md:7",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
       "capability": "Geometry imported, constructed, derived or generated by a function",
       "cells": 6,
-      "fail": 0,
+      "fail": 1,
       "id": "GEOM-WAYS",
       "maps": [
         "FEA-AUTHORING-GEOMETRY-002/geometry_source_forms",
         "FEA-AUTHORING-GEOMETRY-002/generated_geometry"
       ],
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/geometry-meshing.md:21",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
       "capability": "Typed regions and selectors with cardinality",
       "cells": 4,
-      "fail": 0,
+      "fail": 1,
       "id": "GEOM-REGIONS",
       "maps": [
         "FEA-AUTHORING-GEOMETRY-002/inspected_selector_semantics",
         "FEA-MESH-GEOMETRY-001/selectors_on_constructed_and_cell_regions"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/geometry-meshing.md:30",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
       "capability": "AP242 product, assembly, parameter and material data",
       "cells": 2,
-      "fail": 0,
+      "fail": 2,
       "id": "GEOM-AP242",
       "maps": [
         "FEA-AUTHORING-GEOMETRY-002/ap242_exchange",
         "FEA-AUTHORING-GEOMETRY-002/cad_parameter_admission"
       ],
-      "pass": 1,
+      "partial": 0,
+      "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/geometry-meshing.md:34",
-      "status": "tied",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -3074,9 +3298,10 @@
         "FEA-MESH-DISCRETIZATION-001/mesh_evidence_artifact",
         "FEA-MESH-EXECUTION-001/determinism_across_layouts_and_platforms"
       ],
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/geometry-meshing.md:53",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -3090,9 +3315,10 @@
         "FEA-MESH-EXECUTION-001/budgets_and_cancellation",
         "FEA-MESH-EXECUTION-001/worker_batches"
       ],
+      "partial": 3,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/geometry-meshing.md:71",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -3103,6 +3329,7 @@
       "maps": [
         "FEA-MESH-DISCRETIZATION-001/sizing_controls"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/geometry-meshing.md:85",
       "status": "open",
@@ -3111,25 +3338,27 @@
     {
       "capability": "Corpus, conformance, differential, reliability and integration catalogs",
       "cells": 4,
-      "fail": 0,
+      "fail": 1,
       "id": "MESH-CATALOGS",
       "maps": [
         "FEA-MESH-EXECUTION-001/performance_slo_and_governance",
         "FEA-MESH-DISCRETIZATION-001/independent_mesher_differential"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/geometry-meshing.md:93",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
       "capability": "Analytic, manufactured, refinement, balance and independent-discrete evidence per family",
-      "cells": 8,
+      "cells": 2,
       "fail": 0,
       "id": "VER-EVIDENCE",
       "maps": [
         "FEA-RELEASE-EVIDENCE-001/independent_governed_formulation_corpus"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/verification.md:11",
       "status": "open",
@@ -3145,6 +3374,7 @@
         "FEA-DYNAMICS-RESPONSE-001/references",
         "FEA-ADAPTATION-LOOP-001/family_estimator_canonical_order"
       ],
+      "partial": 4,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/verification.md:40",
       "status": "fail",
@@ -3158,6 +3388,7 @@
       "maps": [
         "FEA-STRUCTURAL-PUBLIC-001/independent_structural_references"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/verification.md:50",
       "status": "open",
@@ -3171,6 +3402,7 @@
       "maps": [
         "excluded: maturity concept removed (owner 2026-10-20)"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/verification.md:54",
       "status": "excluded",
@@ -3185,6 +3417,7 @@
         "FEA-PUBLIC-VALIDATION-001/open_solver_comparison",
         "FEA-PUBLIC-VALIDATION-001/published_benchmark_tables"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/verification.md:82",
       "status": "open",
@@ -3200,6 +3433,7 @@
         "FEA-SCALE-DISTRIBUTED-001/remote_whole_study_every_family",
         "FEA-ADAPTATION-PUBLIC-001/*"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/launch-scope-vs-reality.md:14",
       "status": "open",
@@ -3214,6 +3448,7 @@
         "FEA-SCALE-SIZE-001/usage_reports_and_failure_classification",
         "FEA-SCALE-DISTRIBUTED-001/checkpoint_and_mid_phase_restart"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/launch-scope-vs-reality.md:52",
       "status": "open",
@@ -3227,6 +3462,7 @@
       "maps": [
         "FEA-PUBLIC-VALIDATION-001/guide_per_family"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/launch-scope-vs-reality.md:53",
       "status": "open",
@@ -3240,6 +3476,7 @@
       "maps": [
         "FEA-STRUCTURAL-PUBLIC-001/result_publication_defects"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/launch-scope-vs-reality.md:46",
       "status": "open",
@@ -3253,6 +3490,7 @@
       "maps": [
         "FEA-PUBLIC-RESULTS-001/provenance_recorded"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/website-proof-points.md:22",
       "status": "open",
@@ -3266,6 +3504,7 @@
       "maps": [
         "FEA-PUBLIC-LANGUAGE-001/browser_check"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/website-proof-points.md:25",
       "status": "open",
@@ -3279,6 +3518,7 @@
       "maps": [
         "FEA-PUBLIC-RESULTS-001/desktop_study_surface"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/website-proof-points.md:26",
       "status": "open",
@@ -3292,9 +3532,10 @@
       "maps": [
         "FEA-MESH-DISCRETIZATION-001/mesh_evidence_artifact"
       ],
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/website-proof-points.md:20",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -3305,7 +3546,8 @@
       "maps": [
         "FEA-SHARED-BASELINE-001/decode_revalidation_and_proxy_rejection"
       ],
-      "pass": 1,
+      "partial": 1,
+      "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/website-proof-points.md:21",
       "status": "tied",
       "tagged": 0
@@ -3319,6 +3561,7 @@
         "FEA-STRUCTURAL-PUBLIC-001/hand_calculation_references",
         "FEA-MESH-DISCRETIZATION-001/solver_relevant_acceptance"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/website-proof-points.md:32",
       "status": "open",
@@ -3327,29 +3570,31 @@
     {
       "capability": "Two-body STEP assembly study",
       "cells": 3,
-      "fail": 0,
+      "fail": 1,
       "id": "PROOF-ASSEMBLY",
       "maps": [
         "FEA-MESH-GEOMETRY-001/multibody_assembly_import"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/website-proof-points.md:36",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
       "capability": "geometry, mesh, material, model, study, sweep, execution and import function declarations",
       "cells": 14,
-      "fail": 0,
+      "fail": 2,
       "id": "LANG-DECLS",
       "maps": [
         "FEA-AUTHORING-LANGUAGE-002/declarative_semantics",
         "FEA-AUTHORING-LANGUAGE-002/sweep_identity",
         "FEA-SHARED-EXECUTION-001/optional_typed_placement"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/fea-language.md:15",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -3360,6 +3605,7 @@
       "maps": [
         "excluded: maturity concept removed (owner 2026-10-20)"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/fea-language.md:136",
       "status": "excluded",
@@ -3368,15 +3614,16 @@
     {
       "capability": "Units are part of the type; nothing implicit; typed regions; separate geometry/mesh/material/model/study",
       "cells": 3,
-      "fail": 0,
+      "fail": 1,
       "id": "LANG-UNITS",
       "maps": [
         "FEA-AUTHORING-LANGUAGE-002/typed_expressions",
         "FEA-PUBLIC-LANGUAGE-001/unit_prefixes"
       ],
-      "pass": 1,
+      "partial": 1,
+      "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/fea-language.md:131",
-      "status": "tied",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -3387,6 +3634,7 @@
       "maps": [
         "FEA-PUBLIC-VALIDATION-001/no_maturity_surface"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "/Users/nallana/.claude/jobs/b8482b6b/tmp/QUAL_RULES.md:48",
       "status": "open",
@@ -3394,17 +3642,18 @@
     },
     {
       "capability": "Every physics saturates all cores and scales across a cluster; remote for every family; domain decomposition",
-      "cells": 256,
-      "fail": 0,
+      "cells": 257,
+      "fail": 1,
       "id": "OWNER-SCALE",
       "maps": [
         "FEA-SCALE-PARALLEL-001/*",
         "FEA-SCALE-DISTRIBUTED-001/*",
         "FEA-SCALE-SIZE-001/million_dof_public_study"
       ],
+      "partial": 1,
       "pass": 0,
       "source": "/Users/nallana/.claude/jobs/b8482b6b/tmp/QUAL_RULES.md:53",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -3416,6 +3665,7 @@
         "FEA-MESH-REALPARTS-001/corpus_success_rate",
         "FEA-MESH-DISCRETIZATION-001/sizing_controls"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "/Users/nallana/.claude/jobs/b8482b6b/tmp/QUAL_RULES.md:101",
       "status": "open",
@@ -3424,15 +3674,16 @@
     {
       "capability": "STEP names and multi-body import",
       "cells": 6,
-      "fail": 0,
+      "fail": 2,
       "id": "OWNER-STEP-NAMES",
       "maps": [
         "FEA-MESH-GEOMETRY-001/authored_names_survive_to_run",
         "FEA-MESH-GEOMETRY-001/multibody_assembly_import"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "/Users/nallana/.claude/jobs/b8482b6b/tmp/QUAL_RULES.md:36",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -3444,9 +3695,10 @@
         "FEA-SCALE-PARALLEL-001/parallel_solve",
         "FEA-SHARED-OPERATORS-001/*"
       ],
+      "partial": 3,
       "pass": 0,
       "source": "/Users/nallana/.claude/jobs/b8482b6b/tmp/QUAL_RULES.md:54",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -3457,9 +3709,10 @@
       "maps": [
         "FEA-RELEASE-REGISTER-001/*"
       ],
-      "pass": 4,
+      "partial": 4,
+      "pass": 0,
       "source": "/Users/nallana/.claude/jobs/b8482b6b/tmp/QUAL_RULES.md:1",
-      "status": "pass",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -3471,7 +3724,8 @@
         "FEA-ACOUSTIC-OPERATOR-001/*",
         "FEA-ACOUSTIC-EXECUTION-001/*"
       ],
-      "pass": 6,
+      "partial": 6,
+      "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:13",
       "status": "tied",
       "tagged": 0
@@ -3485,7 +3739,8 @@
         "FEA-ACOUSTIC-EXECUTION-001/inventory",
         "FEA-ACOUSTIC-OUTPUTS-001/frequency_set_generation"
       ],
-      "pass": 2,
+      "partial": 2,
+      "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:14",
       "status": "tied",
       "tagged": 0
@@ -3498,7 +3753,8 @@
       "maps": [
         "FEA-ACOUSTIC-NUMERICS-001/*"
       ],
-      "pass": 5,
+      "partial": 5,
+      "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:15",
       "status": "tied",
       "tagged": 0
@@ -3511,7 +3767,8 @@
       "maps": [
         "FEA-ACOUSTIC-BOUNDARY-001/*"
       ],
-      "pass": 5,
+      "partial": 5,
+      "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:16",
       "status": "fail",
       "tagged": 0
@@ -3524,7 +3781,8 @@
       "maps": [
         "FEA-ACOUSTIC-SOURCE-001/*"
       ],
-      "pass": 4,
+      "partial": 4,
+      "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:17",
       "status": "tied",
       "tagged": 0
@@ -3538,7 +3796,8 @@
         "FEA-ACOUSTIC-OPERATOR-001/regions",
         "FEA-ACOUSTIC-NUMERICS-001/*"
       ],
-      "pass": 7,
+      "partial": 7,
+      "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:18",
       "status": "tied",
       "tagged": 0
@@ -3552,6 +3811,7 @@
         "FEA-ACOUSTIC-OUTPUTS-001/*",
         "FEA-PUBLIC-LANGUAGE-001/output_expression_forms"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:24",
       "status": "open",
@@ -3567,7 +3827,8 @@
         "FEA-ACOUSTIC-EXECUTION-001/*",
         "FEA-ACOUSTIC-NUMERICS-001/*"
       ],
-      "pass": 8,
+      "partial": 8,
+      "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:32",
       "status": "fail",
       "tagged": 0
@@ -3580,6 +3841,7 @@
       "maps": [
         "excluded: owner 2026-10-21"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:40",
       "status": "excluded",
@@ -3595,6 +3857,7 @@
         "FEA-ACOUSTIC-OUTPUTS-001/frequency_set_generation",
         "FEA-PUBLIC-RESULTS-001/saved_scene_capture"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:62",
       "status": "open",
@@ -3603,15 +3866,16 @@
     {
       "capability": "Cabin modes with mode snapshots",
       "cells": 14,
-      "fail": 0,
+      "fail": 2,
       "id": "AC-PAGE-CABIN",
       "maps": [
         "FEA-ACOUSTIC-MODAL-001/*",
         "FEA-PUBLIC-RESULTS-001/saved_scene_capture"
       ],
+      "partial": 3,
       "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:63",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -3624,6 +3888,7 @@
         "FEA-ACOUSTIC-BOUNDARY-002/spherical_radiation",
         "FEA-ACOUSTIC-OUTPUTS-001/intensity_and_sound_power"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:64",
       "status": "open",
@@ -3639,6 +3904,7 @@
         "FEA-ACOUSTIC-BOUNDARY-002/region_damping",
         "FEA-ACOUSTIC-OUTPUTS-001/output_arithmetic_across_analyses"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:65",
       "status": "open",
@@ -3652,6 +3918,7 @@
       "maps": [
         "FEA-ACOUSTIC-BOUNDARY-002/bloch_band_gap"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:66",
       "status": "open",
@@ -3666,6 +3933,7 @@
         "FEA-PUBLIC-STUDIES-001/parameter_sweeps_with_assessments",
         "FEA-ACOUSTIC-OUTPUTS-001/frequency_set_generation"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:67",
       "status": "open",
@@ -3679,6 +3947,7 @@
       "maps": [
         "FEA-MESH-REALPARTS-001/wavelength_and_feature_size_checks"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/acoustics/end-state.md:68",
       "status": "open",
@@ -3692,7 +3961,8 @@
       "maps": [
         "FEA-FLUID-TOPOLOGY-001/*"
       ],
-      "pass": 4,
+      "partial": 4,
+      "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:11",
       "status": "tied",
       "tagged": 0
@@ -3705,7 +3975,8 @@
       "maps": [
         "FEA-FLUID-EQUATIONS-001/*"
       ],
-      "pass": 4,
+      "partial": 4,
+      "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:12",
       "status": "tied",
       "tagged": 0
@@ -3719,7 +3990,8 @@
         "FEA-FLUID-TRANSIENT-001/*",
         "FEA-FLUID-EXECUTION-001/resources"
       ],
-      "pass": 5,
+      "partial": 5,
+      "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:16",
       "status": "tied",
       "tagged": 0
@@ -3733,7 +4005,8 @@
         "FEA-FLUID-INPUTS-001/*",
         "FEA-FLUID-BOUNDARY-002/*"
       ],
-      "pass": 3,
+      "partial": 4,
+      "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:17",
       "status": "tied",
       "tagged": 0
@@ -3747,6 +4020,7 @@
         "FEA-COUPLING-CHT-001/*",
         "FEA-FLUID-HEAT-001/two_way_cht"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:19",
       "status": "open",
@@ -3761,6 +4035,7 @@
         "FEA-COUPLING-FSI-001/*",
         "FEA-COUPLING-FSI-002/*"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:20",
       "status": "open",
@@ -3775,7 +4050,8 @@
         "FEA-FLUID-RECOVERY-001/*",
         "FEA-FLUID-OUTPUTS-001/*"
       ],
-      "pass": 2,
+      "partial": 2,
+      "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:22",
       "status": "tied",
       "tagged": 0
@@ -3790,6 +4066,7 @@
         "FEA-FLUID-OUTPUTS-001/wall_shear_stress_fields",
         "FEA-FLUID-SOLVERS-001/residual_history"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:23",
       "status": "open",
@@ -3804,6 +4081,7 @@
         "FEA-FLUID-SOLVERS-001/block_linear_solvers",
         "FEA-SCALE-PARALLEL-001/parallel_solve"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:24",
       "status": "open",
@@ -3818,6 +4096,7 @@
         "FEA-SCALE-SIZE-001/fluid_performance_targets",
         "FEA-SCALE-SIZE-001/million_dof_public_study"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:27",
       "status": "open",
@@ -3832,7 +4111,8 @@
         "FEA-FLUID-ACCURACY-001/*",
         "FEA-FLUID-VERIFICATION-001/*"
       ],
-      "pass": 2,
+      "partial": 2,
+      "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:28",
       "status": "tied",
       "tagged": 0
@@ -3845,6 +4125,7 @@
       "maps": [
         "FEA-FLUID-BOUNDARY-002/*"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:18",
       "status": "open",
@@ -3858,6 +4139,7 @@
       "maps": [
         "excluded: owner 2026-10-21 (no RANS, LES or DES for now); the site does not mention turbulence"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:50",
       "status": "excluded",
@@ -3873,6 +4155,7 @@
         "FEA-FLUID-OUTPUTS-001/pressure_drop_and_flow_rate",
         "FEA-FLUID-OUTPUTS-001/vorticity_and_streamlines"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:81",
       "status": "open",
@@ -3886,6 +4169,7 @@
       "maps": [
         "FEA-FLUID-HEAT-001/natural_convection"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:82",
       "status": "open",
@@ -3902,6 +4186,7 @@
         "FEA-FLUID-OUTPUTS-001/wall_shear_stress_fields",
         "FEA-FLUID-SOLVERS-001/second_order_time"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:83",
       "status": "open",
@@ -3916,6 +4201,7 @@
         "FEA-FLUID-MATERIALS-001/generalized_newtonian",
         "FEA-FLUID-MATERIALS-001/species_and_scalars"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:84",
       "status": "open",
@@ -3929,6 +4215,7 @@
       "maps": [
         "FEA-FLUID-PHYSICS-001/thin_film_lubrication"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:85",
       "status": "open",
@@ -3942,6 +4229,7 @@
       "maps": [
         "FEA-FLUID-MATERIALS-001/porous_zones"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:86",
       "status": "open",
@@ -3955,6 +4243,7 @@
       "maps": [
         "FEA-PUBLIC-STUDIES-001/parameter_sweeps_with_assessments"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:87",
       "status": "open",
@@ -3970,6 +4259,7 @@
         "FEA-ACOUSTIC-OUTPUTS-001/frequency_set_generation",
         "FEA-PUBLIC-STUDIES-001/website_hero_studies_run"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/studies/acoustics/muffler.fea:1",
       "status": "open",
@@ -3978,15 +4268,16 @@
     {
       "capability": "Cabin acoustic modal study with headliner impedance",
       "cells": 13,
-      "fail": 0,
+      "fail": 2,
       "id": "STUDY-CABIN",
       "maps": [
         "FEA-ACOUSTIC-MODAL-001/*",
         "FEA-PUBLIC-STUDIES-001/website_hero_studies_run"
       ],
+      "partial": 3,
       "pass": 0,
       "source": "oct-13-2026/website/physics/studies/acoustics/cabin-modes.fea:1",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -4000,6 +4291,7 @@
         "FEA-PUBLIC-LANGUAGE-001/output_expression_forms",
         "FEA-PUBLIC-STUDIES-001/website_hero_studies_run"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/studies/acoustics/speaker.fea:1",
       "status": "open",
@@ -4015,6 +4307,7 @@
         "FEA-ACOUSTIC-OUTPUTS-001/output_arithmetic_across_analyses",
         "FEA-PUBLIC-STUDIES-001/website_hero_studies_run"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/studies/acoustics/room.fea:1",
       "status": "open",
@@ -4031,6 +4324,7 @@
         "FEA-PUBLIC-LANGUAGE-001/output_expression_forms",
         "FEA-PUBLIC-STUDIES-001/website_hero_studies_run"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/studies/fluid-flow/cold-plate.fea:1",
       "status": "open",
@@ -4044,6 +4338,7 @@
       "maps": [
         "FEA-PUBLIC-STUDIES-001/parameter_sweeps_with_assessments"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/studies/fluid-flow/cold-plate-sweep.fea:1",
       "status": "open",
@@ -4058,6 +4353,7 @@
         "FEA-FLUID-HEAT-001/natural_convection",
         "FEA-MESH-REALPARTS-001/website_fixture_parts_mesh"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:82",
       "status": "open",
@@ -4073,6 +4369,7 @@
         "FEA-FLUID-BOUNDARY-002/profiles_and_excitations",
         "FEA-PUBLIC-LANGUAGE-001/input_forms"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:83",
       "status": "open",
@@ -4087,6 +4384,7 @@
         "FEA-FLUID-MATERIALS-001/species_and_scalars",
         "FEA-FLUID-MATERIALS-001/generalized_newtonian"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:84",
       "status": "open",
@@ -4100,6 +4398,7 @@
       "maps": [
         "FEA-FLUID-PHYSICS-001/thin_film_lubrication"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:85",
       "status": "open",
@@ -4113,6 +4412,7 @@
       "maps": [
         "FEA-FLUID-MATERIALS-001/porous_zones"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/fluid-flow/end-state.md:86",
       "status": "open",
@@ -4121,16 +4421,17 @@
     {
       "capability": "Induction hardening: multi-body gear, inductor and air; harmonic at 3, 10 and 30 kHz; loss into a 3 s transient heat step",
       "cells": 17,
-      "fail": 0,
+      "fail": 1,
       "id": "STUDY-INDUCTION",
       "maps": [
         "FEA-MESH-GEOMETRY-001/multibody_assembly_import",
         "FEA-EM-FREQUENCY-001/*",
         "FEA-COUPLING-ELECTROTHERMAL-002/ac_loss_into_transient_heat"
       ],
+      "partial": 2,
       "pass": 0,
       "source": "oct-13-2026/website/physics/studies/electromagnetic/induction-hardening.fea:1",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -4142,9 +4443,10 @@
         "FEA-EM-OUTPUTS-001/terminal_quantities",
         "FEA-COUPLING-ELECTROTHERMAL-002/two_way_conductivity_feedback"
       ],
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/website/physics/studies/electromagnetic/ev-busbar.fea:1",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -4156,6 +4458,7 @@
         "FEA-EM-NONLINEAR-001/saturating_toroid_reference",
         "FEA-EM-OUTPUTS-001/vector_field_publication"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/studies/electromagnetic/current-sensor.fea:1",
       "status": "open",
@@ -4170,9 +4473,10 @@
         "FEA-EM-OUTPUTS-001/terminal_quantities",
         "FEA-EM-INPUTS-002/scalar_potential_inputs"
       ],
+      "partial": 2,
       "pass": 0,
       "source": "oct-13-2026/website/physics/studies/electromagnetic/hv-electrode.fea:1",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -4183,6 +4487,7 @@
       "maps": [
         "FEA-STRUCTURAL-PUBLIC-001/hand_calculation_references"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/studies/cantilever-fine.fea:1",
       "status": "open",
@@ -4197,6 +4502,7 @@
         "FEA-STRUCTURAL-PUBLIC-001/hand_calculation_references",
         "FEA-PUBLIC-RESULTS-001/repeated_eigenvalue_modes"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/studies/beam-modes.fea:1",
       "status": "open",
@@ -4210,6 +4516,7 @@
       "maps": [
         "FEA-PUBLIC-STUDIES-001/buckling_and_random_at_practical_size"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/studies/buckling.fea:1",
       "status": "open",
@@ -4224,6 +4531,7 @@
         "FEA-PUBLIC-STUDIES-001/buckling_and_random_at_practical_size",
         "FEA-STRUCTURAL-PUBLIC-001/vibration_qualification"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/studies/random.fea:1",
       "status": "open",
@@ -4238,6 +4546,7 @@
         "FEA-THERMAL-PUBLIC-001/heat_sink_balance",
         "FEA-MESH-DISCRETIZATION-001/sizing_controls"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/studies/heatsink-steady.fea:1",
       "status": "open",
@@ -4251,6 +4560,7 @@
       "maps": [
         "FEA-PUBLIC-STUDIES-001/published_conduction_energy_gate"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/studies/steady-conduction.fea:1",
       "status": "open",
@@ -4264,6 +4574,7 @@
       "maps": [
         "FEA-COUPLING-CHAIN-001/thermomechanical_references"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/studies/heated-static.fea:1",
       "status": "open",
@@ -4278,6 +4589,7 @@
         "FEA-FLUID-OUTPUTS-001/pressure_drop_and_flow_rate",
         "FEA-PUBLIC-STUDIES-001/website_hero_studies_run"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/studies/fluid-duct.fea:1",
       "status": "open",
@@ -4292,7 +4604,8 @@
         "FEA-ACOUSTIC-NUMERICS-001/duct",
         "FEA-PUBLIC-STUDIES-001/website_hero_studies_run"
       ],
-      "pass": 1,
+      "partial": 1,
+      "pass": 0,
       "source": "oct-13-2026/website/physics/studies/acoustic-duct.fea:1",
       "status": "tied",
       "tagged": 0
@@ -4305,6 +4618,7 @@
       "maps": [
         "FEA-PUBLIC-STUDIES-001/bracket_static_study"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/runs.md:60",
       "status": "open",
@@ -4322,7 +4636,8 @@
         "FEA-DYNAMICS-RESPONSE-001/*",
         "FEA-NONLINEAR-OPERATOR-001/*"
       ],
-      "pass": 5,
+      "partial": 26,
+      "pass": 0,
       "source": "oct-13-2026/website/physics/structural/index.md:22",
       "status": "fail",
       "tagged": 0
@@ -4335,6 +4650,7 @@
       "maps": [
         "FEA-STRUCTURAL-PUBLIC-001/load_inventory_runs"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/structural/index.md:23",
       "status": "open",
@@ -4350,9 +4666,10 @@
         "FEA-STRUCTURAL-CONSTRAINT-001/*",
         "FEA-STRUCTURAL-PUBLIC-001/contact_example"
       ],
+      "partial": 8,
       "pass": 0,
       "source": "oct-13-2026/website/physics/structural/index.md:24",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -4366,7 +4683,8 @@
         "FEA-STRUCTURAL-PUBLIC-001/shells_and_beams_run",
         "FEA-STRUCTURAL-SOLID-001/damping_body_loads"
       ],
-      "pass": 2,
+      "partial": 6,
+      "pass": 0,
       "source": "oct-13-2026/website/physics/structural/index.md:25",
       "status": "tied",
       "tagged": 0
@@ -4381,9 +4699,10 @@
         "FEA-PUBLIC-RESULTS-001/scripts_run_and_read",
         "FEA-STRUCTURAL-SOLID-001/material_recovery"
       ],
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/website/physics/structural/index.md:26",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -4394,6 +4713,7 @@
       "maps": [
         "FEA-STRUCTURAL-PUBLIC-001/connection_inventory_runs"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/structural/index.md:27",
       "status": "open",
@@ -4409,6 +4729,7 @@
         "FEA-STRUCTURAL-PUBLIC-001/shells_and_beams_run",
         "excluded: hexahedral meshing and fatigue (owner 2026-10-20)"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/structural/index.md:55",
       "status": "open",
@@ -4422,6 +4743,7 @@
       "maps": [
         "FEA-STRUCTURAL-PUBLIC-001/vibration_qualification"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/structural/index.md:50",
       "status": "open",
@@ -4430,29 +4752,31 @@
     {
       "capability": "Heat sink hero with named faces and convection",
       "cells": 7,
-      "fail": 0,
+      "fail": 1,
       "id": "PAGE-THERMAL-HERO",
       "maps": [
         "FEA-THERMAL-PUBLIC-001/heat_sink_balance",
         "FEA-MESH-GEOMETRY-001/authored_names_survive_to_run"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/thermal/index.md:7",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
       "capability": "Film coefficient sweep with per-case assessment",
       "cells": 8,
-      "fail": 0,
+      "fail": 2,
       "id": "PAGE-THERMAL-SWEEP",
       "maps": [
         "FEA-THERMAL-PUBLIC-001/cooling_requirement_sweep",
         "FEA-THERMAL-PUBLIC-001/film_coefficient_input"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/thermal/index.md:10",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -4465,9 +4789,10 @@
         "FEA-PUBLIC-LANGUAGE-001/unit_prefixes",
         "excluded: view-factor radiation (outside the plan, not mentioned on the site)"
       ],
+      "partial": 2,
       "pass": 0,
       "source": "oct-13-2026/website/physics/thermal/index.md:12",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -4479,9 +4804,10 @@
         "FEA-EM-FREQUENCY-001/*",
         "FEA-COUPLING-ELECTROTHERMAL-002/ac_loss_into_transient_heat"
       ],
+      "partial": 2,
       "pass": 0,
       "source": "oct-13-2026/website/physics/electromagnetic/index.md:7",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -4494,9 +4820,10 @@
         "FEA-EM-NONLINEAR-001/*",
         "FEA-EM-INPUTS-002/*"
       ],
+      "partial": 2,
       "pass": 0,
       "source": "oct-13-2026/website/physics/electromagnetic/index.md:9",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -4509,9 +4836,10 @@
         "FEA-COUPLING-ELECTROTHERMAL-002/*",
         "excluded: antennas and motors (outside the plan, SIM-21)"
       ],
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/website/physics/electromagnetic/index.md:10",
-      "status": "open",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -4522,6 +4850,7 @@
       "maps": [
         "FEA-PUBLIC-RESULTS-001/saved_scene_capture"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/electromagnetic/index.md:18",
       "status": "open",
@@ -4530,7 +4859,7 @@
     {
       "capability": "DEF-280 to DEF-284: STEP names, touching bodies, units option, AC loss into heat, lenient check",
       "cells": 17,
-      "fail": 0,
+      "fail": 3,
       "id": "PAGE-EM-DEFECTS",
       "maps": [
         "FEA-MESH-GEOMETRY-001/authored_names_survive_to_run",
@@ -4539,9 +4868,10 @@
         "FEA-COUPLING-ELECTROTHERMAL-002/ac_loss_into_transient_heat",
         "FEA-PUBLIC-LANGUAGE-001/check_matches_run"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/electromagnetic/index.md:14",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -4556,6 +4886,7 @@
         "FEA-ACOUSTIC-OUTPUTS-001/sound_pressure_level",
         "FEA-PUBLIC-STUDIES-001/published_conduction_energy_gate"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/runs.md:70",
       "status": "open",
@@ -4569,6 +4900,7 @@
       "maps": [
         "FEA-PUBLIC-RESULTS-001/scripts_run_and_read"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/runs.md:15",
       "status": "open",
@@ -4582,6 +4914,7 @@
       "maps": [
         "FEA-PUBLIC-RESULTS-001/saved_scene_capture"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/runs.md:45",
       "status": "open",
@@ -4596,6 +4929,7 @@
         "FEA-PUBLIC-VALIDATION-001/published_benchmark_tables",
         "FEA-PUBLIC-STUDIES-001/website_hero_studies_run"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/website/physics/runs.md:36",
       "status": "open",
@@ -4610,6 +4944,7 @@
         "FEA-MESH-REALPARTS-001/original_study_meshes",
         "FEA-PUBLIC-RESULTS-001/verdicts_and_reassess"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/evidence.md:7",
       "status": "open",
@@ -4618,14 +4953,15 @@
     {
       "capability": "Seeded-fault table: twenty setup faults caught before solve",
       "cells": 5,
-      "fail": 0,
+      "fail": 1,
       "id": "EVD-03",
       "maps": [
         "FEA-AUTHORING-COMPILER-002/check_plan_run"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/evidence.md:9",
-      "status": "open",
+      "status": "fail",
       "tagged": 0
     },
     {
@@ -4637,6 +4973,7 @@
         "FEA-PUBLIC-VALIDATION-001/open_solver_comparison",
         "FEA-PUBLIC-VALIDATION-001/published_benchmark_tables"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/evidence.md:10",
       "status": "open",
@@ -4650,6 +4987,7 @@
       "maps": [
         "FEA-PUBLIC-RESULTS-001/verdicts_and_reassess"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/evidence.md:12",
       "status": "open",
@@ -4663,6 +5001,7 @@
       "maps": [
         "FEA-SCALE-PARALLEL-001/strong_scaling_table"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/evidence.md:15",
       "status": "open",
@@ -4676,6 +5015,7 @@
       "maps": [
         "FEA-SCALE-SIZE-001/usage_reports_and_failure_classification"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/evidence.md:22",
       "status": "open",
@@ -4689,6 +5029,7 @@
       "maps": [
         "excluded: only if copy makes the comparison; none planned (EVD-04 uses open solvers and closed forms)"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/evidence.md:21",
       "status": "excluded",
@@ -4702,6 +5043,7 @@
       "maps": [
         "FEA-PUBLIC-VALIDATION-001/status_and_docs_match_code"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/docs-drift.md:1",
       "status": "open",
@@ -4715,6 +5057,7 @@
       "maps": [
         "FEA-MESH-GEOMETRY-001/curved_import_validation_budget"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/runtime-defects.md:332",
       "status": "open",
@@ -4728,6 +5071,7 @@
       "maps": [
         "FEA-MESH-DISCRETIZATION-001/analytic_surface_coverage"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/runtime-defects.md:333",
       "status": "open",
@@ -4743,6 +5087,7 @@
         "FEA-PUBLIC-LANGUAGE-001/input_forms",
         "FEA-PUBLIC-LANGUAGE-001/unit_and_source_forms"
       ],
+      "partial": 0,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:24",
       "status": "open",

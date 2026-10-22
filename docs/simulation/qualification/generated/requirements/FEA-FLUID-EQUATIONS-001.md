@@ -1,6 +1,6 @@
 # FEA-FLUID-EQUATIONS-001: Original incompressible laminar mass and momentum equations
 
-4 PASS, 0 FAIL, 20 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 4 PARTIAL, 0 FAIL, 20 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## flux
 
@@ -8,7 +8,7 @@ Evidence kind: PhysicalBalance. Criterion: Evaluate one original oriented owner-
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| incompressible_laminar_steady | canonical_tetrahedra | numerical_kernel | PASS | `runmat-analysis-fea[lib]::physics::cfd::canonical::tests::affine_skew_face_velocity_and_nonzero_convection_are_consistent` (crates/runmat-analysis/fea/src/physics/cfd/canonical/tests.rs:87) - Independent affine skew-face flux and integrated nonzero advection; no general nonlinear field-convergence credit. |
+| incompressible_laminar_steady | canonical_tetrahedra | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::cfd::canonical::tests::affine_skew_face_velocity_and_nonzero_convection_are_consistent` (crates/runmat-analysis/fea/src/physics/cfd/canonical/tests.rs:90) - Independent affine skew-face flux and integrated nonzero advection; no general nonlinear field-convergence credit. |
 | incompressible_laminar_transient | canonical_tetrahedra | numerical_kernel | OPEN |  |
 | incompressible_laminar_steady | canonical_tetrahedra | native_process | OPEN |  |
 | incompressible_laminar_transient | canonical_tetrahedra | native_process | OPEN |  |
@@ -23,7 +23,7 @@ Evidence kind: PhysicalBalance. Criterion: Pressure-velocity coupling solves ori
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| incompressible_laminar_steady | canonical_tetrahedra | numerical_kernel | PASS | `runmat-analysis-fea[lib]::physics::cfd::canonical::tests::closed_reference::closed_gauge_admission_rejects_missing_duplicate_outlet_and_incompatible_flux` (crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/closed_reference.rs:78) - Closed gauge/reference and net flux rejection; not full pressure-velocity envelope proof. |
+| incompressible_laminar_steady | canonical_tetrahedra | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::cfd::canonical::tests::closed_reference::closed_gauge_admission_rejects_missing_duplicate_outlet_and_incompatible_flux` (crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/closed_reference.rs:78) - Closed gauge/reference and net flux rejection; not full pressure-velocity envelope proof. |
 | incompressible_laminar_transient | canonical_tetrahedra | numerical_kernel | OPEN |  |
 | incompressible_laminar_steady | canonical_tetrahedra | native_process | OPEN |  |
 | incompressible_laminar_transient | canonical_tetrahedra | native_process | OPEN |  |
@@ -38,9 +38,9 @@ Evidence kind: OriginalStateComparison. Criterion: Keep original reference-relat
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| incompressible_laminar_steady | canonical_tetrahedra | numerical_kernel | PASS | `runmat-analysis-fea[lib]::physics::cfd::canonical::tests::pressure_reference::original_fluctuation_survives_absolute_rounding_fresh_solve_and_cold_recovery` (crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/pressure_reference.rs:57) - Fourier duct scaling and two gauges retain bitwise original velocity/fluctuation/flux with and without acceleration; cold JSON replay only. |
+| incompressible_laminar_steady | canonical_tetrahedra | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::cfd::canonical::tests::pressure_reference::independent_uniform_translation_is_balanced_at_both_pressure_references` (crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/pressure_reference.rs:13) - A uniform translation is balanced at both pressure references.<br>`runmat-analysis-fea[lib]::physics::cfd::canonical::tests::pressure_reference::original_fluctuation_survives_absolute_rounding_fresh_solve_and_cold_recovery` (crates/runmat-analysis/fea/src/physics/cfd/canonical/tests/pressure_reference.rs:60) - Fourier duct scaling and two gauges retain bitwise original velocity/fluctuation/flux with and without acceleration; cold JSON replay only. |
 | incompressible_laminar_transient | canonical_tetrahedra | numerical_kernel | OPEN |  |
-| incompressible_laminar_steady | canonical_tetrahedra | native_process | PASS | `runmat-execution-runner-native[lib]::analysis_kernel::fluid_steady::tests::pressure_state::native_pressure_projection_preserves_original_governing_state` (crates/runmat-execution-runner-native/src/analysis_kernel/fluid_steady/tests/pressure_state.rs:9) - Native result/receipt preserves original governing fields under gauge shift; not distributed algebra or producer-death transient evidence. |
+| incompressible_laminar_steady | canonical_tetrahedra | native_process | PARTIAL | `runmat-execution-runner-native[lib]::analysis_kernel::fluid_steady::tests::pressure_state::native_pressure_projection_preserves_original_governing_state` (crates/runmat-execution-runner-native/src/analysis_kernel/fluid_steady/tests/pressure_state.rs:9) - Native result/receipt preserves original governing fields under gauge shift; not distributed algebra or producer-death transient evidence. |
 | incompressible_laminar_transient | canonical_tetrahedra | native_process | OPEN |  |
 | incompressible_laminar_steady | canonical_tetrahedra | public_study | OPEN |  |
 | incompressible_laminar_transient | canonical_tetrahedra | public_study | OPEN |  |

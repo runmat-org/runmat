@@ -1,6 +1,6 @@
 # FEA-COUPLING-CHAIN-001: Chained thermal-structural studies
 
-0 PASS, 0 FAIL, 24 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 PARTIAL, 0 FAIL, 24 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## thermal_to_prestress_to_modal
 

@@ -1,6 +1,6 @@
 # FEA-FLUID-HEAT-001: Heat in the fluid: forced and natural convection, CHT and low-Mach flow
 
-0 PASS, 0 FAIL, 24 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 PARTIAL, 0 FAIL, 24 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## forced_convection
 

@@ -1,6 +1,6 @@
 # FEA-SHARED-AUTHORITIES-001: One shared topology, numerical and property authority
 
-0 PASS, 0 FAIL, 24 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 1 PARTIAL, 0 FAIL, 23 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## shared_topology_property_and_constraint_preparation
 
@@ -8,7 +8,7 @@ Evidence kind: SemanticRealization. Criterion: Implement and test the shared ana
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::constraints::compilation::preparation::tests::preparation_composes_shared_inventories_and_preserves_original_dispatch` (crates/runmat-analysis/fea/src/constraints/compilation/preparation/tests.rs:16) - Preparation composes shared inventories and preserves original dispatch. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |

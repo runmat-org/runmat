@@ -1,6 +1,6 @@
 # FEA-ACOUSTIC-BOUNDARY-002: Radiation, frequency-dependent impedance and air damping
 
-0 PASS, 0 FAIL, 20 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 PARTIAL, 0 FAIL, 20 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## spherical_radiation
 

@@ -1,6 +1,6 @@
 # FEA-SHARED-OPERATORS-001: Canonical sparse operators and compatible prepared solves
 
-0 PASS, 0 FAIL, 48 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 3 PARTIAL, 0 FAIL, 45 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## mathematics_and_execution_boundary
 
@@ -23,7 +23,7 @@ Evidence kind: IndependentReference. Criterion: Every assembled or matrix-free o
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::constraints::algebra::tests::sparse_reduction_matches_dense_lifting_and_preserves_operator_properties` (crates/runmat-analysis/fea/src/constraints/algebra.rs:636) - Sparse reduction matches dense lifting and preserves operator properties. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
@@ -68,7 +68,7 @@ Evidence kind: IndependentReference. Criterion: Solver selection is based on dec
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::solve::krylov::envelope::tests::invalid_policy_is_rejected_by_solver_before_any_operator_or_reduction` (crates/runmat-analysis/fea/src/solve/krylov/envelope.rs:182) - An invalid policy is rejected before any operator or reduction.<br>`runmat-analysis-fea[lib]::solve::linear::tests::noncoercive_operator_is_rejected_before_preconditioner_setup` (crates/runmat-analysis/fea/src/solve/linear/tests.rs:361) - A noncoercive operator is rejected before preconditioner setup. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
@@ -83,7 +83,7 @@ Evidence kind: SemanticRealization. Criterion: Real SPD; CG with validated diago
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::solve::general::tests::independent_nonsymmetric_and_indefinite_references_preserve_general_operator` (crates/runmat-analysis/fea/src/solve/general/tests.rs:25) - Independent nonsymmetric and indefinite references preserve the general operator path; SPD and complex cases are covered by sibling tests. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |

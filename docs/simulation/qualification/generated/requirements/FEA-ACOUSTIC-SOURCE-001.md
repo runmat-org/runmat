@@ -1,6 +1,6 @@
 # FEA-ACOUSTIC-SOURCE-001: Shared complex source spectra with conserved realization
 
-4 PASS, 0 FAIL, 2 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 4 PARTIAL, 0 FAIL, 2 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## resultant
 
@@ -8,8 +8,8 @@ Evidence kind: PhysicalBalance. Criterion: Total volume flow preserves the autho
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| acoustic_harmonic | tet4 | numerical_kernel | PASS | `runmat-analysis-fea[lib]::physics::acoustic::canonical::tests::volume_velocity::total_volume_flow_area_phase_rotation_and_power_refine_against_continuum` (crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/volume_velocity.rs:81) - Area scaling, complex phase and independent flow/power refinement on slab fixtures. |
-| acoustic_harmonic | tet10 | numerical_kernel | PASS | `runmat-analysis-fea[lib]::physics::acoustic::canonical::tests::volume_velocity::total_volume_flow_area_phase_rotation_and_power_refine_against_continuum` (crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/volume_velocity.rs:81) - Area scaling, complex phase and independent flow/power refinement on slab fixtures. |
+| acoustic_harmonic | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::acoustic::canonical::tests::volume_velocity::total_volume_flow_area_phase_rotation_and_power_refine_against_continuum` (crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/volume_velocity.rs:78) - Area scaling, complex phase and independent flow/power refinement on slab fixtures. |
+| acoustic_harmonic | tet10 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::acoustic::canonical::tests::volume_velocity::total_volume_flow_area_phase_rotation_and_power_refine_against_continuum` (crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/volume_velocity.rs:78) - Area scaling, complex phase and independent flow/power refinement on slab fixtures. |
 
 ## incident
 
@@ -17,8 +17,8 @@ Evidence kind: SpatialConvergence. Criterion: Incident/reflected/transmitted pre
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| acoustic_harmonic | tet4 | numerical_kernel | PASS | `runmat-analysis-fea[lib]::physics::acoustic::canonical::tests::incident::incoming_pressure_reflection_transmission_and_net_power_refine` (crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/incident.rs:40) - Planar incident/impedance fixture, phase and net-power refinement only. |
-| acoustic_harmonic | tet10 | numerical_kernel | PASS | `runmat-analysis-fea[lib]::physics::acoustic::canonical::tests::incident::incoming_pressure_reflection_transmission_and_net_power_refine` (crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/incident.rs:40) - Planar incident/impedance fixture, phase and net-power refinement only. |
+| acoustic_harmonic | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::acoustic::canonical::tests::incident::incoming_pressure_reflection_transmission_and_net_power_refine` (crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/incident.rs:37) - Planar incident/impedance fixture, phase and net-power refinement only. |
+| acoustic_harmonic | tet10 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::acoustic::canonical::tests::incident::incoming_pressure_reflection_transmission_and_net_power_refine` (crates/runmat-analysis/fea/src/physics/acoustic/canonical/tests/incident.rs:37) - Planar incident/impedance fixture, phase and net-power refinement only. |
 
 ## spectra
 

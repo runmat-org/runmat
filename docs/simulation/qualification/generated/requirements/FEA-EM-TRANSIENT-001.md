@@ -1,6 +1,6 @@
 # FEA-EM-TRANSIENT-001: Transient electromagnetics
 
-0 PASS, 0 FAIL, 6 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 PARTIAL, 0 FAIL, 6 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## step_current_diffusion
 

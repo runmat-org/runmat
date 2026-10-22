@@ -1,6 +1,6 @@
 # FEA-PUBLIC-VALIDATION-001: Validation published, docs true, no maturity surface
 
-0 PASS, 0 FAIL, 7 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 PARTIAL, 0 FAIL, 7 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## published_benchmark_tables
 

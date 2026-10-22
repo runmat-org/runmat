@@ -1,6 +1,6 @@
 # FEA-ACOUSTIC-COUPLING-001: One-way structure-borne sound
 
-0 PASS, 0 FAIL, 8 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 PARTIAL, 0 FAIL, 8 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## structural_velocity_drives_air
 

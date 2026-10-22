@@ -1,6 +1,6 @@
 # FEA-FLUID-BOUNDARY-002: Complete fluid boundary and excitation set
 
-0 PASS, 0 FAIL, 36 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 PARTIAL, 0 FAIL, 36 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## profiles_and_excitations
 

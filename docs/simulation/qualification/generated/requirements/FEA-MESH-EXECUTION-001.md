@@ -1,6 +1,6 @@
 # FEA-MESH-EXECUTION-001: Deterministic, distributed and bounded meshing
 
-0 PASS, 0 FAIL, 22 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 4 PARTIAL, 1 FAIL, 17 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## worker_batches
 
@@ -44,9 +44,9 @@ Evidence kind: ProcessLifecycle. Criterion: Worker loss retries once with fencin
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | native_process | PARTIAL | `runmat-execution-runner-native[test:meshing_process_conformance]::main` (crates/runmat-execution-runner-native/tests/meshing_process_conformance.rs:251) - The whole harness-less meshing process-conformance target (worker child processes, progress, cancellation, remote conformance and remote recovery) exits success... |
+| shared_infrastructure | canonical_mixed_topology | durable | PARTIAL | `runmat-execution-runner-native[lib]::supervisor::tests::detached_job_survives_supervisor_reopen_and_submission_is_idempotent` (crates/runmat-execution-runner-native/src/supervisor/tests.rs:82) - A detached job survives supervisor reopen and idempotent resubmission; meshing stages are not the workload here.<br>`runmat-execution-runner-native[lib]::supervisor::tests::cancellation_is_durable_and_corrupt_metadata_recovers_indeterminate` (crates/runmat-execution-runner-native/src/supervisor/tests.rs:144) - Cancellation is durable and corrupt metadata recovers as indeterminate. |
+| shared_infrastructure | canonical_mixed_topology | remote_execution | FAIL | `runmat-execution-runner-native[lib]::remote::driver_replacement_tests::exact_meshing_admission_retries_and_cancels_after_encrypted_driver_replacement` (crates/runmat-execution-runner-native/src/remote/driver_replacement_tests.rs:653) - Exact meshing admission retries and cancels after an actual encrypted driver replacement.<br>`runmat-execution-runner-native[lib]::remote::driver_replacement_tests::exact_meshing_admission_exhausts_retry_budget_after_two_driver_losses` (crates/runmat-execution-runner-native/src/remote/driver_replacement_tests.rs:680) - The retry budget is exhausted after two driver losses; worker-process loss and transfer resumption are covered by the process-conformance target.<br>`runmat-execution-runner-native[lib]::remote::pool_objects::tests::remote_meshing_catalog_bounds_actual_files_and_preserves_content_identity` (crates/runmat-execution-runner-native/src/remote/pool_objects/tests.rs:135) - The remote meshing object catalog bounds actual files and preserves content identity. |
 
 ## determinism_across_layouts_and_platforms
 
@@ -64,7 +64,7 @@ Evidence kind: ResourceAdmission. Criterion: Element, memory, scratch, search, r
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-meshing-execution[lib]::serial_tests::serial_stage_reports_typed_cancellation_and_search_budget_failures` (crates/runmat-meshing/execution/src/serial_tests.rs:810) - A serial stage reports typed cancellation and search-budget failures.<br>`runmat-meshing-tetrahedron[lib]::cdt::insertion::tests::insertion_enforces_search_budgets_and_cancellation` (crates/runmat-meshing/tetrahedron/src/cdt/insertion/tests.rs:370) - Volume insertion enforces search budgets and cancellation. |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 
@@ -74,7 +74,7 @@ Evidence kind: PublicationIntegrity. Criterion: Mesh publication and cold materi
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PARTIAL | `runmat-meshing-tetrahedron[lib]::cdt::volume_mesh::codec::admission::tests::cold_current_and_legacy_decode_admit_before_materialization_and_release_on_failure` (crates/runmat-meshing/tetrahedron/src/cdt/volume_mesh/codec/admission/tests.rs:11) - Cold volume decode admits before materializing and releases on failure; million-element scale is not asserted here. |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 

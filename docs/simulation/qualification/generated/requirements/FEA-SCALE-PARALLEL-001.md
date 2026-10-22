@@ -1,6 +1,6 @@
 # FEA-SCALE-PARALLEL-001: Every family saturates the machine through one thread plan
 
-0 PASS, 0 FAIL, 115 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 1 PARTIAL, 1 FAIL, 114 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## one_thread_plan_authority
 
@@ -92,13 +92,21 @@ Evidence kind: ExecutionEquivalence. Criterion: Direct (Cholesky, LDLT, LU), Kry
 | incompressible_laminar_steady | canonical_tetrahedra | parallel_cpu | OPEN |  |
 | incompressible_laminar_transient | canonical_tetrahedra | parallel_cpu | OPEN |  |
 
+## shared_parallel_kernels
+
+Evidence kind: ExecutionEquivalence. Criterion: The shared parallel kernels under every family agree with their serial references: element assembly into the sparse pattern is bit-identical to the serial loop at 1, 2, 3, 7 and 16 threads; scoped Krylov solves equal the serial solution and reject nested execution; pooled CSR products preserve serial bits and output shape.
+
+| Formulation | Mesh | Execution | Status | Tests (boundary) |
+|---|---|---|---|---|
+| shared_infrastructure | canonical_mixed_topology | parallel_cpu | PARTIAL | `runmat-analysis-fea[lib]::algebra::element_assembly::tests::assembly_is_bitwise_identical_to_the_serial_element_loop_for_every_thread_count` (crates/runmat-analysis/fea/src/algebra/element_assembly/tests.rs:134) - Element assembly is bit-identical to the serial loop at 1, 2, 3, 7 and 16 threads on a synthetic 3,000-element map; no family operator is assembled here.<br>`runmat-analysis-fea[lib]::algebra::reference::persistent_pool_tests::installed_pool_csr_rows_preserve_serial_bits_and_output_shape` (crates/runmat-analysis/fea/src/algebra/reference.rs:532) - Pooled CSR matrix-vector rows preserve serial bits at 2 and 4 threads on a 2,048-row matrix.<br>`runmat-analysis-fea[lib]::solve::linear::tests::scoped_pcg_matches_serial_and_rejects_nested_execution` (crates/runmat-analysis/fea/src/solve/linear/tests.rs:283) - A scoped PCG on a two-unknown SPD system equals the serial solution and repeats exactly; nested scoped execution is rejected. Tiny system, one preconditioner.<br>`runmat-sparse-solvers[lib]::ordering::tests::nested_dissection_is_a_valid_deterministic_permutation` (crates/runmat-sparse-solvers/src/ordering/tests.rs:13) - Nested-dissection ordering of a 20x20x20 Poisson problem is a valid permutation, identical across runs and at 4 threads. |
+
 ## thread_count_determinism
 
 Evidence kind: ExecutionEquivalence. Criterion: The same study yields identical result digests, or differences within the stated tolerance, across 1, 2, 4 and all admitted threads.
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| linear_structural | canonical_tetrahedra | parallel_cpu | OPEN |  |
+| linear_structural | canonical_tetrahedra | parallel_cpu | FAIL | `runmat[test:fea_determinism]::a_study_gives_identical_results_across_runs_workers_and_threads` (crates/runmat-cli/tests/fea_determinism.rs:114) - The loaded static box study gives bit-identical state digests and assessed values at 1, 4 and 8 total threads through the public command; other families are not... |
 | modal_structural | canonical_tetrahedra | parallel_cpu | OPEN |  |
 | linear_structural_dynamics | canonical_tetrahedra | parallel_cpu | OPEN |  |
 | structural_stability | canonical_tetrahedra | parallel_cpu | OPEN |  |

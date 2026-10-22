@@ -24,6 +24,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut cargo = vec!["cargo".to_string()];
     let mut only: BTreeSet<String> = BTreeSet::new();
     let mut run = true;
+    let mut reuse: Option<PathBuf> = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -40,6 +41,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 only.insert(args.next().ok_or("--package needs a name")?);
             }
             "--no-run" => run = false,
+            "--reuse" => {
+                reuse = Some(PathBuf::from(
+                    args.next().ok_or("--reuse needs a catalog json")?,
+                ))
+            }
             other => return Err(format!("unknown argument {other}").into()),
         }
     }
@@ -53,7 +59,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("invalid witness tags; fix them before reporting".into());
     }
     let results = if run {
-        Some(run_tests(&tags, &cargo, &only)?)
+        // `--reuse` keeps the results of an earlier catalog for tests whose locator is
+        // unchanged and runs only the tests it has no result for.
+        let mut known = BTreeMap::new();
+        if let Some(path) = &reuse {
+            known = load_results(path)?;
+        }
+        let missing: Vec<Tag> = tags
+            .iter()
+            .filter(|t| !known.contains_key(&t.test.describe()))
+            .cloned()
+            .collect();
+        let mut fresh = if missing.is_empty() {
+            BTreeMap::new()
+        } else {
+            run_tests(&missing, &cargo, &only)?
+        };
+        known.append(&mut fresh);
+        Some(known)
     } else {
         None
     };
@@ -141,7 +164,8 @@ fn run_tests(
         for t in &integrations {
             command.args(["--test", t]);
         }
-        command.arg("--").arg("--exact");
+        command.arg("--no-fail-fast");
+        command.arg("--").args(["--exact", "--include-ignored"]);
         let names: BTreeSet<&str> = locators.iter().map(|l| l.name.as_str()).collect();
         command.args(&names);
         command.env("RUST_MIN_STACK", "67108864");
@@ -429,4 +453,38 @@ fn write_scope(dir: &std::path::Path, all: &[Cell]) -> Result<(), Box<dyn std::e
     fs::write(dir.join("scope-traceability.json"), bytes)?;
     let _ = TraceStatus::Open;
     Ok(())
+}
+
+fn load_results(
+    path: &std::path::Path,
+) -> Result<BTreeMap<String, TestResult>, Box<dyn std::error::Error>> {
+    let value: serde_json::Value = serde_json::from_slice(&fs::read(path)?)?;
+    let mut out = BTreeMap::new();
+    for requirement in value["requirements"].as_array().into_iter().flatten() {
+        for obligation in requirement["obligations"].as_array().into_iter().flatten() {
+            for cell in obligation["cells"].as_array().into_iter().flatten() {
+                for test in cell["tests"].as_array().into_iter().flatten() {
+                    let target = test["target"].as_str().unwrap_or("");
+                    let target = match target.strip_prefix("Integration(\"") {
+                        Some(rest) => format!("test:{}", rest.trim_end_matches("\")")),
+                        None => "lib".to_string(),
+                    };
+                    let key = format!(
+                        "{}[{}]::{}",
+                        test["package"].as_str().unwrap_or(""),
+                        target,
+                        test["name"].as_str().unwrap_or("")
+                    );
+                    match &test["result"] {
+                        serde_json::Value::String(s) if s == "passed" => {
+                            out.insert(key, TestResult::Passed);
+                        }
+                        // Failures are never reused: they are run again.
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+    Ok(out)
 }

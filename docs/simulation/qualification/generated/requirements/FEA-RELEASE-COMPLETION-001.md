@@ -1,6 +1,6 @@
 # FEA-RELEASE-COMPLETION-001: Per-formulation complete acceptance
 
-1 PASS, 0 FAIL, 23 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 PARTIAL, 0 FAIL, 6 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## exact_admitted_physics_and_upstream_state
 
@@ -8,14 +8,8 @@ Evidence kind: PublicationIntegrity. Criterion: A formulation is complete only w
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | release_pipeline | OPEN |  |
+| shared_infrastructure | mesh_independent | source_check | OPEN |  |
 
 ## truthful_fields_operators_and_accuracy
 
@@ -23,14 +17,8 @@ Evidence kind: PublicationIntegrity. Criterion: Its discrete formulation is impl
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | PASS | `runmat-analysis-fea[lib]::results::accuracy::tests::production_accuracy_failure_produces_a_blocking_gate` (crates/runmat-analysis/fea/src/results/accuracy/tests.rs:32) - Scalar residual criterion failure remains blocking through a typed accuracy artifact; no complete governed family corpus, release attestation or public receipt ... |
-| shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | release_pipeline | OPEN |  |
+| shared_infrastructure | mesh_independent | source_check | OPEN |  |
 
 ## supported_execution_resources_and_release_evidence
 
@@ -38,12 +26,6 @@ Evidence kind: PublicationIntegrity. Criterion: Signal interpolation and excitat
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | release_pipeline | OPEN |  |
+| shared_infrastructure | mesh_independent | source_check | OPEN |  |
 

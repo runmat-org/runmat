@@ -1,6 +1,6 @@
 # FEA-NONLINEAR-GOVERNANCE-001: Converged nonlinear states, supported laws and independent qualification
 
-0 PASS, 0 FAIL, 50 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 2 PARTIAL, 0 FAIL, 48 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## operator_constitutive_contact
 
@@ -8,8 +8,8 @@ Evidence kind: AccuracyAcceptance. Criterion: Implement nonlinear state, residua
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| nonlinear_structural | tet4 | numerical_kernel | OPEN |  |
-| nonlinear_structural | tet10 | numerical_kernel | OPEN |  |
+| nonlinear_structural | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::solve::nonlinear::solid::tests::contact::energy::opening_releases_stored_tangential_energy_without_inventing_friction_heat` (crates/runmat-analysis/fea/src/solve/nonlinear/solid/tests/contact/energy.rs:65) - A coupled solid contact solve releases stored tangential energy on opening for both orders; constitutive plasticity is covered in the operator requirement. |
+| nonlinear_structural | tet10 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::solve::nonlinear::solid::tests::contact::energy::opening_releases_stored_tangential_energy_without_inventing_friction_heat` (crates/runmat-analysis/fea/src/solve/nonlinear/solid/tests/contact/energy.rs:65) - A coupled solid contact solve releases stored tangential energy on opening for both orders; constitutive plasticity is covered in the operator requirement. |
 | nonlinear_structural | tet4 | public_study | OPEN |  |
 | nonlinear_structural | tet10 | public_study | OPEN |  |
 | nonlinear_structural | canonical_mixed_topology | native_process | OPEN |  |

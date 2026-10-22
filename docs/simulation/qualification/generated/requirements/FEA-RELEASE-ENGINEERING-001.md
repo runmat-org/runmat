@@ -1,6 +1,6 @@
 # FEA-RELEASE-ENGINEERING-001: Coherent tested modular implementation slices
 
-0 PASS, 0 FAIL, 8 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 PARTIAL, 0 FAIL, 2 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## coherent_reviewed_and_verified_slices
 
@@ -8,12 +8,6 @@ Evidence kind: PublicationIntegrity. Criterion: For each implementation slice: R
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | remote_execution | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | parallel_cpu | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | domain_decomposed | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | claimed_accelerator | OPEN |  |
+| shared_infrastructure | canonical_mixed_topology | release_pipeline | OPEN |  |
+| shared_infrastructure | mesh_independent | source_check | OPEN |  |
 

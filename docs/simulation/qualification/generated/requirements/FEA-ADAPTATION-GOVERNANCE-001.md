@@ -1,6 +1,6 @@
 # FEA-ADAPTATION-GOVERNANCE-001: Accuracy-driven adaptation, persistent constraints and durable lineage
 
-3 PASS, 0 FAIL, 47 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 3 PARTIAL, 0 FAIL, 47 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## family_transfer_constraints
 
@@ -8,8 +8,8 @@ Evidence kind: AccuracyAcceptance. Criterion: Compose adaptive loops for each fo
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| adaptive_analysis | tet4 | numerical_kernel | PASS | `runmat-analysis-fea[lib]::adaptation::iteration::tests::constraint_lineage::persistent_clamp_rebuilds_new_midside_constraints_without_numeric_node_aliases` (crates/runmat-analysis/fea/src/adaptation/iteration/tests/constraint_lineage.rs:20) - Real Tet4 to Tet10 persistent face clamp rebuilds9 to18 rows, retains entity identity and rejects foreign/missing lineage. No reaction/state transfer or adaptiv... |
-| adaptive_analysis | tet10 | numerical_kernel | PASS | `runmat-analysis-fea[lib]::adaptation::iteration::tests::constraint_lineage::persistent_clamp_rebuilds_new_midside_constraints_without_numeric_node_aliases` (crates/runmat-analysis/fea/src/adaptation/iteration/tests/constraint_lineage.rs:20) - Real Tet4 to Tet10 persistent face clamp rebuilds9 to18 rows, retains entity identity and rejects foreign/missing lineage. No reaction/state transfer or adaptiv... |
+| adaptive_analysis | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::adaptation::iteration::tests::constraint_lineage::persistent_clamp_rebuilds_new_midside_constraints_without_numeric_node_aliases` (crates/runmat-analysis/fea/src/adaptation/iteration/tests/constraint_lineage.rs:24) - Real Tet4 to Tet10 persistent face clamp rebuilds9 to18 rows, retains entity identity and rejects foreign/missing lineage. No reaction/state transfer or adaptiv... |
+| adaptive_analysis | tet10 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::adaptation::iteration::tests::constraint_lineage::persistent_clamp_rebuilds_new_midside_constraints_without_numeric_node_aliases` (crates/runmat-analysis/fea/src/adaptation/iteration/tests/constraint_lineage.rs:24) - Real Tet4 to Tet10 persistent face clamp rebuilds9 to18 rows, retains entity identity and rejects foreign/missing lineage. No reaction/state transfer or adaptiv... |
 | adaptive_analysis | tet4 | public_study | OPEN |  |
 | adaptive_analysis | tet10 | public_study | OPEN |  |
 | adaptive_analysis | canonical_mixed_topology | native_process | OPEN |  |
@@ -25,7 +25,7 @@ Evidence kind: AccuracyAcceptance. Criterion: Integrate adaptation graphs with d
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| adaptive_analysis | tet4 | numerical_kernel | PASS | `runmat-analysis-fea[lib]::adaptation::iteration::tests::governed::iteration_binds_canonical_solver_mesh_lineage_transfer_and_evidence` (crates/runmat-analysis/fea/src/adaptation/iteration/tests/governed.rs:95) - Canonical adaptation records use constructed converged solver facts and quantities, real mesh refinement/transfer fixtures; rejects missing/indeterminate eviden... |
+| adaptive_analysis | tet4 | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::adaptation::iteration::tests::governed::iteration_binds_canonical_solver_mesh_lineage_transfer_and_evidence` (crates/runmat-analysis/fea/src/adaptation/iteration/tests/governed.rs:95) - Canonical adaptation records use constructed converged solver facts and quantities, real mesh refinement/transfer fixtures; rejects missing/indeterminate eviden... |
 | adaptive_analysis | tet10 | numerical_kernel | OPEN |  |
 | adaptive_analysis | tet4 | public_study | OPEN |  |
 | adaptive_analysis | tet10 | public_study | OPEN |  |

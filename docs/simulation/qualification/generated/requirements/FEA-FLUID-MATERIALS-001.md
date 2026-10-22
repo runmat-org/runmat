@@ -1,6 +1,6 @@
 # FEA-FLUID-MATERIALS-001: Rheology, porous media and species transport
 
-0 PASS, 0 FAIL, 16 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 PARTIAL, 0 FAIL, 16 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## generalized_newtonian
 

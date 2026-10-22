@@ -1,6 +1,6 @@
 # FEA-SCALE-DISTRIBUTED-001: Remote and cooperative execution for every family
 
-0 PASS, 0 FAIL, 118 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 0 PARTIAL, 0 FAIL, 118 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## remote_whole_study_every_family
 

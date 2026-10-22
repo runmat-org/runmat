@@ -1,6 +1,6 @@
 # FEA-THERMAL-EXECUTION-001: Governed thermal studies, persistence and execution evidence
 
-4 PASS, 0 FAIL, 84 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 4 PARTIAL, 0 FAIL, 84 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## admission
 
@@ -10,8 +10,8 @@ Evidence kind: ResourceAdmission. Criterion: Admit source/initial-field realizat
 |---|---|---|---|---|
 | thermal_steady | tet4 | public_study | OPEN |  |
 | thermal_steady | tet10 | public_study | OPEN |  |
-| thermal_transient | tet4 | public_study | PASS | `runmat-analysis-fea[lib]::planning::resource::thermal_preassembly::tests::field_construction_scratch_is_composed_before_assembly` (crates/runmat-analysis/fea/src/planning/resource/thermal_preassembly/tests.rs:30) - Both-order initial-field construction scratch contributes to the preassembly ceiling; no measured RSS or whole native pipeline evidence. |
-| thermal_transient | tet10 | public_study | PASS | `runmat-analysis-fea[lib]::planning::resource::thermal_preassembly::tests::field_construction_scratch_is_composed_before_assembly` (crates/runmat-analysis/fea/src/planning/resource/thermal_preassembly/tests.rs:30) - Both-order initial-field construction scratch contributes to the preassembly ceiling; no measured RSS or whole native pipeline evidence. |
+| thermal_transient | tet4 | public_study | PARTIAL | `runmat-analysis-fea[lib]::planning::resource::thermal_preassembly::tests::field_construction_scratch_is_composed_before_assembly` (crates/runmat-analysis/fea/src/planning/resource/thermal_preassembly/tests.rs:30) - Both-order initial-field construction scratch contributes to the preassembly ceiling; no measured RSS or whole native pipeline evidence. |
+| thermal_transient | tet10 | public_study | PARTIAL | `runmat-analysis-fea[lib]::planning::resource::thermal_preassembly::tests::field_construction_scratch_is_composed_before_assembly` (crates/runmat-analysis/fea/src/planning/resource/thermal_preassembly/tests.rs:30) - Both-order initial-field construction scratch contributes to the preassembly ceiling; no measured RSS or whole native pipeline evidence. |
 | thermal_steady | tet4 | native_process | OPEN |  |
 | thermal_steady | tet10 | native_process | OPEN |  |
 | thermal_transient | tet4 | native_process | OPEN |  |
@@ -84,8 +84,8 @@ Evidence kind: PublicationIntegrity. Criterion: Classify standalone thermal oper
 | thermal_transient | tet10 | public_study | OPEN |  |
 | thermal_steady | tet4 | native_process | OPEN |  |
 | thermal_steady | tet10 | native_process | OPEN |  |
-| thermal_transient | tet4 | native_process | PASS | `runmat-execution-runner-native[lib]::analysis_kernel::thermal::tests::native_thermal_serial_transport_import_and_terminal_state_round_trip` (crates/runmat-execution-runner-native/src/analysis_kernel/thermal/tests.rs:76) - Both-order serial native artifact import and semantic terminal state roundtrip; no producer-death, remote, partitioned or GPU credit. |
-| thermal_transient | tet10 | native_process | PASS | `runmat-execution-runner-native[lib]::analysis_kernel::thermal::tests::native_thermal_serial_transport_import_and_terminal_state_round_trip` (crates/runmat-execution-runner-native/src/analysis_kernel/thermal/tests.rs:76) - Both-order serial native artifact import and semantic terminal state roundtrip; no producer-death, remote, partitioned or GPU credit. |
+| thermal_transient | tet4 | native_process | PARTIAL | `runmat-execution-runner-native[lib]::analysis_kernel::thermal::tests::native_thermal_serial_transport_import_and_terminal_state_round_trip` (crates/runmat-execution-runner-native/src/analysis_kernel/thermal/tests.rs:76) - Both-order serial native artifact import and semantic terminal state roundtrip; no producer-death, remote, partitioned or GPU credit. |
+| thermal_transient | tet10 | native_process | PARTIAL | `runmat-execution-runner-native[lib]::analysis_kernel::thermal::tests::native_thermal_serial_transport_import_and_terminal_state_round_trip` (crates/runmat-execution-runner-native/src/analysis_kernel/thermal/tests.rs:76) - Both-order serial native artifact import and semantic terminal state roundtrip; no producer-death, remote, partitioned or GPU credit. |
 | thermal_steady | tet4 | durable | OPEN |  |
 | thermal_steady | tet10 | durable | OPEN |  |
 | thermal_transient | tet4 | durable | OPEN |  |

@@ -1,6 +1,6 @@
 # FEA-FLUID-ACCURACY-001: Independent flow benchmark and convergence acceptance
 
-2 PASS, 0 FAIL, 6 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 2 PARTIAL, 0 FAIL, 6 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## steady_references
 
@@ -8,7 +8,7 @@ Evidence kind: IndependentReference. Criterion: Validate Poiseuille and Couette 
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| incompressible_laminar_steady | canonical_tetrahedra | numerical_kernel | PASS | `runmat-analysis-fea[lib]::physics::cfd::canonical::tests::affine_couette_uses_original_geometry_and_balanced_physical_fields` (crates/runmat-analysis/fea/src/physics/cfd/canonical/tests.rs:150) - Independent affine Couette velocity, wall shear and original balance; not cavity/backward-facing step. |
+| incompressible_laminar_steady | canonical_tetrahedra | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::cfd::canonical::tests::affine_couette_uses_original_geometry_and_balanced_physical_fields` (crates/runmat-analysis/fea/src/physics/cfd/canonical/tests.rs:153) - Independent affine Couette velocity, wall shear and original balance; not cavity/backward-facing step. |
 
 ## spatial
 
@@ -16,7 +16,7 @@ Evidence kind: SpatialConvergence. Criterion: Demonstrate spatial convergence an
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| incompressible_laminar_steady | canonical_tetrahedra | numerical_kernel | PASS | `runmat-analysis-fea[lib]::physics::cfd::canonical::tests::rectangular_duct_compares_fourier_reference_with_controlled_tail` (crates/runmat-analysis/fea/src/physics/cfd/canonical/tests.rs:259) - Controlled-tail non-affine Fourier duct: velocity, flow and wall shear refinement; not pressure/cavity/backward-facing-step envelope. |
+| incompressible_laminar_steady | canonical_tetrahedra | numerical_kernel | PARTIAL | `runmat-analysis-fea[lib]::physics::cfd::canonical::tests::rectangular_duct_compares_fourier_reference_with_controlled_tail` (crates/runmat-analysis/fea/src/physics/cfd/canonical/tests.rs:262) - Controlled-tail non-affine Fourier duct: velocity, flow and wall shear refinement; not pressure/cavity/backward-facing-step envelope. |
 
 ## acceptance
 
