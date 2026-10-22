@@ -74,10 +74,16 @@ pub(super) fn solve(
     let saddle_action =
         spmv(&assembled.saddle, &solution).map_err(|e| MagnetostaticError::Operator(e.into()))?;
     let rhs_norm = norm(&assembled.scaled_rhs);
+    // Gauge rows carry the lifted prescribed potential on their right-hand side.
+    let gauge_defect: Vec<f64> = saddle_action[free_count..]
+        .iter()
+        .zip(&assembled.scaled_rhs[free_count..])
+        .map(|(action, rhs)| action - rhs)
+        .collect();
     let gauge_residual = if rhs_norm > 0.0 {
-        norm(&saddle_action[free_count..]) / rhs_norm
+        norm(&gauge_defect) / rhs_norm
     } else {
-        norm(&saddle_action[free_count..])
+        norm(&gauge_defect)
     };
     if !physical_residual.is_finite()
         || !gauge_residual.is_finite()
@@ -88,7 +94,7 @@ pub(super) fn solve(
             "physical={physical_residual:e}, gauge={gauge_residual:e}"
         )));
     }
-    let mut edge_circulations = vec![0.0; assembled.edge_space.edges().len()];
+    let mut edge_circulations = assembled.grounded_circulation.clone();
     for (&edge, &value) in assembled.boundary.free_edges.iter().zip(free) {
         edge_circulations[edge] = value;
     }
@@ -150,6 +156,41 @@ pub(super) fn solve(
         }
         samples.extend(element_samples);
     }
+    // A prescribed boundary potential does work through its reaction:
+    // 2 W = integral(J . A) + sum over grounded edges g_e (K a - f)_e.
+    let mut boundary_work = 0.0;
+    if assembled.grounded_circulation.iter().any(|value| *value != 0.0) {
+        for (index, data) in assembled.volumes.iter().enumerate() {
+            let indices = assembled.edge_space.element_edge_indices(index).unwrap();
+            if indices
+                .iter()
+                .all(|&edge| assembled.grounded_circulation[edge] == 0.0)
+            {
+                continue;
+            }
+            let moments = assembled
+                .edge_space
+                .element_moments(assembled.projection, index)
+                .map_err(|e| MagnetostaticError::Topology(e.to_string()))?;
+            for i in 0..6 {
+                let prescribed = assembled.grounded_circulation[indices[i]];
+                if prescribed == 0.0 {
+                    continue;
+                }
+                let action: f64 = (0..6)
+                    .map(|j| moments.curl_curl[i][j] / data.permeability_h_per_m
+                        * edge_circulations[indices[j]])
+                    .sum();
+                let load: f64 = moments.constant_vector_load[i]
+                    .iter()
+                    .zip(data.current_density_a_per_m2)
+                    .map(|(n, j)| n * j)
+                    .sum();
+                boundary_work += prescribed * (action - load);
+            }
+        }
+    }
+    let work = work + boundary_work;
     let scale = (2.0 * energy).abs().max(work.abs());
     let closure = if scale > 0.0 {
         (2.0 * energy - work).abs() / scale

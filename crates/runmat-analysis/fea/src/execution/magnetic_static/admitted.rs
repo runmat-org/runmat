@@ -49,16 +49,20 @@ impl MagnetostaticWorkload {
             self.relative_residual_target,
         )
         .map_err(invalid)?;
-        let system = crate::physics::magnetic::MagneticSystemPlan::derive(&input.projection)
+        let system = crate::physics::magnetic::MagneticSystemPlan::derive(
+            &input.projection,
+            &input.grounded_faces,
+        )
             .map_err(invalid)?;
         if system.identity().map_err(invalid)? != demand.system_plan_identity {
             return Err(invalid(
                 "magnetic assembly support differs from admitted plan",
             ));
         }
-        let response = crate::physics::magnetic::solve_full_grounded_volume_with_plan(
+        let response = crate::physics::magnetic::solve_grounded_volume_with_plan(
             &input.projection,
             &input.volumes,
+            &input.prescribed_potential,
             self.relative_residual_target,
             &system,
         )

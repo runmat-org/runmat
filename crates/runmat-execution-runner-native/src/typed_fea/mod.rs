@@ -259,8 +259,7 @@ pub async fn execute_checked_fea_locally(
             };
             let available = std::thread::available_parallelism().map_or(1, usize::from);
             let concurrency = available.min(frequencies.len()).max(1);
-            let groups = futures::stream::iter(frequencies.into_iter().enumerate().map(
-                |(index, frequency)| {
+            let run_group = |(index, frequency): (usize, f64)| {
                     let case = if frequency.is_nan() {
                         study.clone()
                     } else {
@@ -296,12 +295,21 @@ pub async fn execute_checked_fea_locally(
                         };
                         (index, cases)
                     }
-                },
-            ))
-            .buffer_unordered(concurrency)
-            .collect::<Vec<_>>()
-            .await;
-            let mut groups = groups;
+            };
+            // Every frequency shares one geometry and mesh. The first case meshes and fills the
+            // accepted-stage meshing cache; the remaining frequencies then reuse that mesh
+            // instead of each meshing the same geometry at the same time.
+            let mut indexed = frequencies.into_iter().enumerate();
+            let mut groups = Vec::new();
+            if let Some(first) = indexed.next() {
+                groups.push(run_group(first).await);
+            }
+            groups.extend(
+                futures::stream::iter(indexed.map(run_group))
+                    .buffer_unordered(concurrency)
+                    .collect::<Vec<_>>()
+                    .await,
+            );
             groups.sort_by_key(|(index, _)| *index);
             Ok(LocalFeaExecution::Sweep {
                 sweep_id,

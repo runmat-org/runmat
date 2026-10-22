@@ -22,6 +22,8 @@ pub(crate) struct ExactFaceCandidateClassifications {
     pub protected_splits: Vec<ExactProtectedSegmentSplit>,
     pub chart_cut_splits: Vec<ExactChartCutSplit>,
     pub insertions: Vec<ExactFaceRefinementCandidate>,
+    /// Shape-only candidates lying on a shared exact curve; see `ExactFaceCandidateDisposition`.
+    pub withdrawn: usize,
 }
 
 pub fn classify_exact_face_refinement_candidate(
@@ -71,6 +73,8 @@ pub(crate) fn classify_exact_face_refinement_candidate_in_parameterization(
         )))
     } else if classifications.insertions.len() == 1 {
         Ok(ExactFaceCandidateDisposition::Insert)
+    } else if classifications.withdrawn == 1 {
+        Ok(ExactFaceCandidateDisposition::Withdraw)
     } else {
         Err(invalid(
             &pslg.source_face_id,

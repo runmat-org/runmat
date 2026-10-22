@@ -1,8 +1,8 @@
 use super::ThermalStudyPlanningError;
 use crate::{
     excitation::{
-        realize_step_excitations, sample_prescribed_heat_flux, sample_prescribed_temperature,
-        ExcitationSamplePoint, RealizedExcitationKind,
+        realize_step_excitations, sample_prescribed_heat_flux, sample_prescribed_temperature, sample_prescribed_temperature_difference,
+        ExcitationSamplePoint, RealizedExcitationKind, RealizedExcitationTarget,
     },
     execution::{ThermalSolveSchedule, ThermalWorkload},
     ThermalProcedureControl,
@@ -75,6 +75,26 @@ pub(super) fn validate(
                 }
                 continue;
             }
+            if let RealizedExcitationKind::AmbientTemperature(value) = action.kind {
+                // The ambient of a convection or radiation boundary on the same faces.
+                let RealizedExcitationTarget::Region(target) = &action.target else {
+                    return Err(invalid("ambient temperature needs a face region"));
+                };
+                if !model.boundaries.iter().any(|boundary| {
+                    boundary.target.region_id == target.region_id
+                        && matches!(
+                            boundary.operator,
+                            BoundaryOperator::ThermalConvection { .. }
+                                | BoundaryOperator::ThermalRadiation { .. }
+                        )
+                }) {
+                    return Err(invalid(
+                        "ambient temperature needs a thermal.convection or thermal.radiation boundary on the same faces",
+                    ));
+                }
+                real(value.real, value.imaginary)?;
+                continue;
+            }
             let value = match action.kind {
                 RealizedExcitationKind::HeatGeneration(value)
                 | RealizedExcitationKind::HeatFlux(value)
@@ -95,13 +115,20 @@ pub(super) fn validate(
                 }
                 return Err(invalid("nonthermal constraint in standalone thermal study"));
             };
-            let ThermalConstraintKind::Prescribed { value, .. } = &constraint.kind else {
-                return Err(invalid(
-                    "thermal operator does not support this constraint kind",
-                ));
+            let value = match &constraint.kind {
+                ThermalConstraintKind::Prescribed { value, .. } => {
+                    sample_prescribed_temperature(value, &model.signals, sample).map_err(invalid)?
+                }
+                ThermalConstraintKind::AffineJump {
+                    temperature_jump, ..
+                } => sample_prescribed_temperature_difference(
+                    temperature_jump,
+                    &model.signals,
+                    sample,
+                )
+                .map_err(invalid)?,
+                ThermalConstraintKind::Tie(_) | ThermalConstraintKind::Periodic(_) => continue,
             };
-            let value =
-                sample_prescribed_temperature(value, &model.signals, sample).map_err(invalid)?;
             real(value.real, value.imaginary)?;
         }
         for boundary in &model.boundaries {

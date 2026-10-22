@@ -96,7 +96,7 @@ pub(in crate::refinement::insertion) fn validate_candidates(
         segments.visit_bounds_with_checkpoint(query, &mut |entry| {
             let endpoints = pslg.segments[entry.payload].vertex_indices.map(|index| pslg.vertices[index as usize].uv);
             match orient2d([endpoints[0], endpoints[1], candidate.uv]) {
-                Ok(PredicateSign::Zero) if within_segment_bounds(candidate.uv, endpoints) => failure = Some(invalid(pslg, "refinement candidate lies on a protected segment and requires a curve split")),
+                Ok(PredicateSign::Zero) if within_segment_bounds(candidate.uv, endpoints) => failure = Some(invalid(pslg, &format!("{:?} refinement candidate {:?} lies on protected segment {:?} ({:?}) and requires a curve split; source triangle {:?}", candidate.reason, candidate.uv, endpoints, pslg.segments[entry.payload].source, candidate.triangle.vertex_indices.map(|index| (index, pslg.vertices[index as usize].uv, pslg.vertices[index as usize].node_id))))),
                 Err(_) => failure = Some(invalid(pslg, "refinement candidate has invalid predicate input")),
                 _ => {}
             }

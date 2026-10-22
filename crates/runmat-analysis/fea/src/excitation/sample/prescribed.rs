@@ -5,7 +5,7 @@ use super::{
 };
 use runmat_analysis_core::{
     ElectricCurrent, ElectricPotential, HeatFlux, PhysicalSignal, PrescribedValue, Pressure, Signal, Temperature,
-    Velocity,
+    TemperatureDifference, Velocity,
 };
 
 pub(crate) fn sample_prescribed_velocity(
@@ -81,6 +81,23 @@ pub(crate) fn sample_prescribed_temperature(
             _ => None,
         },
         |temperature| temperature.kelvin,
+    )
+}
+
+pub(crate) fn sample_prescribed_temperature_difference(
+    value: &PrescribedValue<TemperatureDifference>,
+    signals: &[PhysicalSignal],
+    sample: ExcitationSamplePoint<'_>,
+) -> Result<ComplexScalar, RealizationError> {
+    sample_prescribed_scalar(
+        value,
+        signals,
+        sample,
+        |signal| match signal {
+            PhysicalSignal::TemperatureDifference(signal) => Some(signal),
+            _ => None,
+        },
+        |difference| difference.kelvin,
     )
 }
 

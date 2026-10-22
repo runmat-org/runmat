@@ -134,12 +134,14 @@ void append_exact_topology(OcctExactShapePayload& result,
   std::uint64_t source_face_index = static_cast<std::uint64_t>(result.faces.size());
   for (TopExp_Explorer explorer(root, TopAbs_FACE); explorer.More(); explorer.Next()) {
     check_cancelled(options);
-    const std::uint64_t current_source_face_index = source_face_index++;
     const TopoDS_Face face = TopoDS::Face(explorer.Current());
     const std::uint64_t face_key = shape_key(shape_set, face, "face");
+    // A face shared by two solids is visited once per use; it is one source face, and source
+    // face ordinals stay contiguous.
     if (!face_keys.insert(face_key).second) {
       continue;
     }
+    const std::uint64_t current_source_face_index = source_face_index++;
     BRepAdaptor_Surface surface(face, Standard_False);
     const bool periodic_u = surface.IsUPeriodic();
     const bool periodic_v = surface.IsVPeriodic();

@@ -16,11 +16,24 @@ use crate::topology::AnalysisProjection;
 pub(crate) use input::compile_canonical_input;
 pub(crate) fn validate_projection_envelope(
     projection: &AnalysisProjection,
+    grounded_faces: &[StableDigest],
 ) -> Result<crate::topology::TetrahedralEdgeSpace, MagnetostaticError> {
-    Ok(validated_spaces(projection)?.0)
+    Ok(validated_spaces(projection, grounded_faces)?.0)
+}
+/// Every exterior face of the projection, the fully grounded boundary.
+pub fn exterior_face_identities(projection: &AnalysisProjection) -> Vec<StableDigest> {
+    let mut faces: Vec<_> = projection
+        .boundary_faces
+        .iter()
+        .filter(|face| face.role == runmat_meshing_core::BoundaryFaceRole::Exterior)
+        .map(|face| face.stable_identity)
+        .collect();
+    faces.sort_unstable();
+    faces
 }
 fn validated_spaces(
     projection: &AnalysisProjection,
+    grounded_faces: &[StableDigest],
 ) -> Result<
     (
         crate::topology::TetrahedralEdgeSpace,
@@ -30,7 +43,7 @@ fn validated_spaces(
 > {
     let edges = crate::topology::TetrahedralEdgeSpace::derive(projection)
         .map_err(|e| MagnetostaticError::Topology(e.to_string()))?;
-    let boundary = boundary::MagneticBoundarySpace::derive(projection, &edges)?;
+    let boundary = boundary::MagneticBoundarySpace::derive(projection, &edges, grounded_faces)?;
     assembly::validate_affine_geometry(projection)?;
     Ok((edges, boundary))
 }
@@ -67,14 +80,14 @@ pub enum MagnetostaticError {
     NotConverged(String),
 }
 
-/// Numerical kernel with explicitly full-exterior tangential A=0.
-/// This does not silently infer authored boundary policy: authored execution must
-/// separately compile and prove this boundary/gauge contract before calling it.
-/// Lowest-order edges are used on affine Tet4/Tet10 geometry. General curved
-/// geometry remains closed until rational form quadrature convergence is governed.
-/// Production, native lifecycle, resource admission and restart are not advertised.
-pub fn solve_full_grounded_volume(
+/// Numerical kernel with tangential A = 0 on `grounded_faces` (one connected exterior
+/// surface) and magnetic insulation (n x H = 0) on every other exterior face. This does not
+/// infer authored boundary policy: authored execution compiles the grounds before calling it.
+/// Lowest-order edges are used on affine Tet4/Tet10 geometry.
+pub fn solve_grounded_volume(
     projection: &AnalysisProjection,
+    grounded_faces: &[StableDigest],
+    prescribed_potential: &[(StableDigest, [f64; 3])],
     volumes: &[MagneticVolumeData],
     residual_target: f64,
 ) -> Result<MagnetostaticResponse, MagnetostaticError> {
@@ -84,7 +97,12 @@ pub fn solve_full_grounded_volume(
         ));
     }
     response::solve(
-        assembly::MagneticAssembly::assemble(projection, volumes)?,
+        assembly::MagneticAssembly::assemble(
+            projection,
+            grounded_faces,
+            prescribed_potential,
+            volumes,
+        )?,
         residual_target,
     )
 }
@@ -92,9 +110,10 @@ pub fn solve_full_grounded_volume(
 /// Execute the same kernel using exact precomputed sparse support.
 /// The plan is revalidated against canonical topology before physical assembly;
 /// it does not authorize scheduler placement, publication or production execution.
-pub fn solve_full_grounded_volume_with_plan(
+pub fn solve_grounded_volume_with_plan(
     projection: &AnalysisProjection,
     volumes: &[MagneticVolumeData],
+    prescribed_potential: &[(StableDigest, [f64; 3])],
     residual_target: f64,
     plan: &MagneticSystemPlan,
 ) -> Result<MagnetostaticResponse, MagnetostaticError> {
@@ -104,7 +123,12 @@ pub fn solve_full_grounded_volume_with_plan(
         ));
     }
     response::solve(
-        assembly::MagneticAssembly::assemble_with_plan(projection, volumes, plan)?,
+        assembly::MagneticAssembly::assemble_with_plan(
+            projection,
+            volumes,
+            prescribed_potential,
+            plan,
+        )?,
         residual_target,
     )
 }

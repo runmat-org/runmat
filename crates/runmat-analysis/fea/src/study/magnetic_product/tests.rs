@@ -68,7 +68,10 @@ fn post_mesh_ground_gauge_and_material_limits_are_not_inferred() {
     let mesh = mesh(ElementOrder::Tet4, 2);
     let model = authored_model(1.0);
     let mut missing_ground = model.clone();
-    missing_ground.constraints.remove(0);
+    missing_ground.constraints.retain(|c| {
+        !matches!(c, AnalysisConstraint::Magnetic(m)
+            if matches!(m.kind, MagneticConstraintKind::VectorPotentialGround { .. }))
+    });
     let mut missing_gauge = model.clone();
     missing_gauge.constraints.pop();
     let mut foreign_ground = model.clone();
@@ -83,12 +86,9 @@ fn post_mesh_ground_gauge_and_material_limits_are_not_inferred() {
         .as_mut()
         .unwrap()
         .resistive_heating_coefficient = 1.0;
-    for changed in [
-        missing_ground,
-        missing_gauge,
-        foreign_ground,
-        coupled_material,
-    ] {
+    // Magnetostatics uses only the permeability; a conductivity law is not an error.
+    assert!(plan_magnetic_study_product(compiled(coupled_material, &mesh), &mesh, policy()).is_ok());
+    for changed in [missing_ground, missing_gauge, foreign_ground] {
         assert!(matches!(
             plan_magnetic_study_product(compiled(changed, &mesh), &mesh, policy()),
             Err(MagneticStudyProductError::Admission(_))

@@ -1,6 +1,6 @@
 use super::*;
 use crate::physics::magnetic::{
-    solve_full_grounded_volume, solve_full_grounded_volume_with_plan, MagneticVolumeData,
+    solve_grounded_volume, solve_grounded_volume_with_plan, MagneticVolumeData,
 };
 use crate::topology::test_meshes::{quadratic_slab_mesh, slab_mesh};
 
@@ -8,7 +8,7 @@ use crate::topology::test_meshes::{quadratic_slab_mesh, slab_mesh};
 fn magnetic_system_plan_roundtrip_has_exact_symmetric_support_and_no_gauge_block() {
     for mesh in [slab_mesh(2), quadratic_slab_mesh(2)] {
         let projection = AnalysisProjection::derive(&mesh).unwrap();
-        let plan = MagneticSystemPlan::derive(&projection).unwrap();
+        let plan = MagneticSystemPlan::derive(&projection, &crate::physics::magnetic::exterior_face_identities(&projection)).unwrap();
         let bytes = plan.canonical_bytes().unwrap();
         let reopened = MagneticSystemPlan::from_canonical_bytes(&bytes).unwrap();
         assert_eq!(plan, reopened);
@@ -43,11 +43,11 @@ fn magnetic_system_plan_roundtrip_has_exact_symmetric_support_and_no_gauge_block
                 })
                 .collect();
             let explicit =
-                solve_full_grounded_volume_with_plan(&projection, &volumes, 1e-10, &reopened)
+                solve_grounded_volume_with_plan(&projection, &volumes, &[], 1e-10, &reopened)
                     .unwrap();
-            let automatic = solve_full_grounded_volume(&projection, &volumes, 1e-10).unwrap();
+            let automatic = solve_grounded_volume(&projection, &crate::physics::magnetic::exterior_face_identities(&projection), &[], &volumes, 1e-10).unwrap();
             assert_eq!(explicit, automatic);
-            assert_eq!(plan, MagneticSystemPlan::derive(&projection).unwrap());
+            assert_eq!(plan, MagneticSystemPlan::derive(&projection, &crate::physics::magnetic::exterior_face_identities(&projection)).unwrap());
         }
     }
 }
@@ -55,7 +55,7 @@ fn magnetic_system_plan_roundtrip_has_exact_symmetric_support_and_no_gauge_block
 #[test]
 fn magnetic_system_plan_rejects_foreign_mesh_and_spliced_support_before_physical_assembly() {
     let projection = AnalysisProjection::derive(&slab_mesh(2)).unwrap();
-    let plan = MagneticSystemPlan::derive(&projection).unwrap();
+    let plan = MagneticSystemPlan::derive(&projection, &crate::physics::magnetic::exterior_face_identities(&projection)).unwrap();
     for mesh in [slab_mesh(1), quadratic_slab_mesh(2)] {
         assert!(plan
             .validate_for(&AnalysisProjection::derive(&mesh).unwrap())
@@ -83,7 +83,7 @@ fn magnetic_system_plan_rejects_foreign_mesh_and_spliced_support_before_physical
         assert!(mutation.validate_for(&projection).is_err());
         // Empty laws would fail input later; exact-support rejection must occur first.
         let error =
-            solve_full_grounded_volume_with_plan(&projection, &[], 1e-10, &mutation).unwrap_err();
+            solve_grounded_volume_with_plan(&projection, &[], &[], 1e-10, &mutation).unwrap_err();
         assert!(error
             .to_string()
             .contains("exact canonical magnetic support"));

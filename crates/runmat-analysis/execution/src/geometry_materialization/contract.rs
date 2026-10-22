@@ -269,9 +269,9 @@ impl GeometryMaterializationOutput {
                 || identity.kind != PersistentEntityKind::Face
                 || !face_identities.insert(identity)
             {
-                return Err(AnalysisBridgeError::Invalid(
-                    "geometry materialization face identity map is malformed".into(),
-                ));
+                return Err(AnalysisBridgeError::Invalid(format!(
+                    "geometry materialization face identity map is malformed at ordinal {ordinal} (expected {expected_ordinal}): {identity:?}"
+                )));
             }
             identity
                 .validate()

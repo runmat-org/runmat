@@ -115,6 +115,34 @@ pub(crate) fn validate_face_delaunay_topology(
             "Delaunay topology does not reference every PSLG vertex",
         ));
     }
+    // The triangulation covers the convex hull: its boundary never turns clockwise.
+    let mut boundary_next = std::collections::BTreeMap::new();
+    for triangle in &triangulation.triangles {
+        let [a, b, c] = triangle.vertex_indices;
+        for [from, to] in [[a, b], [b, c], [c, a]] {
+            let mut key = [from, to];
+            key.sort_unstable();
+            if edges.get(&key).is_some_and(|uses| uses.len() == 1) {
+                boundary_next.insert(from, to);
+            }
+        }
+    }
+    for (&a, &b) in &boundary_next {
+        let Some(&c) = boundary_next.get(&b) else {
+            continue;
+        };
+        predicate_count = consume_predicate(pslg, predicate_count, options)?;
+        if orient2d([a, b, c].map(|index| pslg.vertices[index as usize].uv))
+            .map_err(|error| invalid_predicate(pslg, error))?
+            == PredicateSign::Negative
+        {
+            return Err(invalid(
+                pslg,
+                ExactFaceDelaunayErrorKind::InvalidTopology,
+                format!("Delaunay boundary turns inward at vertex {b}; the convex hull is not covered"),
+            ));
+        }
+    }
     for (edge, uses) in edges {
         check_cancelled(cancellation, pslg, "surface Delaunay validation cancelled")?;
         if uses.len() > 2 {
