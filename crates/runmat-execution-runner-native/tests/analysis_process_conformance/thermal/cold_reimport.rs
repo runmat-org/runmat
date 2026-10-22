@@ -273,7 +273,7 @@ fn assert_foreign_contexts(cold: &MemoryStore, completed: &CompletedThermalStudy
     foreign_model.product.workload = plan_thermal_step_with_fields(
         &foreign_model.product.compiled,
         completed.workload.step_id.as_str(),
-        policy,
+        policy.clone(),
         completed.workload.initial_fields.clone(),
     )
     .unwrap();
@@ -285,7 +285,7 @@ fn assert_foreign_contexts(cold: &MemoryStore, completed: &CompletedThermalStudy
     if completed.preparation().scope == ThermalStudyScope::SelectedStep {
         let mut foreign_step = completed.preparation();
         foreign_step.product.workload =
-            plan_thermal_step(&foreign_step.product.compiled, "unselected_heat", policy).unwrap();
+            plan_thermal_step(&foreign_step.product.compiled, "unselected_heat", policy.clone()).unwrap();
         assert!(
             import_thermal_study_completion(
                 cold,

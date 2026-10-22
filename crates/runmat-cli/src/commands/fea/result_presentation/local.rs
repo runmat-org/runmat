@@ -51,6 +51,7 @@ pub(in super::super) fn completed_summary(
                 })?,
         }),
         CompletedFeaStudyResult::AcousticResponse(result) => Ok(LocalRunSummary {
+            thermal_energy_balance: None,
             assessment_summary: publication.into(),
             root_id: root_id.into(),
             procedure: match result.completion.workload.solver {
