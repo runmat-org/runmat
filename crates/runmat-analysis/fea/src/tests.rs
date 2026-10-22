@@ -5111,64 +5111,50 @@ fn modal_extraction_reduces_a_homogeneous_equation_constraint() {
         StructuralConstraintEquation, StructuralConstraintEquationTerm,
         StructuralConstraintKind, StructuralTranslationDof,
     };
-    let mut model = fixture_model(FixtureId::ModalLarge);
-    let free = crate::run_modal_with_options(&model, ComputeBackend::Cpu, baseline_modal_options())
-        .expect("unconstrained-equation modal solve");
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.sequence.steps = vec![ProcedureStep::structural_modal("modal")];
+    let mesh = single_tetrahedron_solver_mesh_with_order_for_model(&model, ElementOrder::Tet10);
+    let options = || ModalSolveOptions {
+        truncation: ModalTruncationPolicy::requested(3),
+        solver_mesh: Some(mesh.clone()),
+        ..baseline_modal_options()
+    };
+    let free = crate::run_modal_with_options(&model, ComputeBackend::Cpu, options())
+        .expect("modal solve without the equation");
+    // Mode shapes follow canonical mesh node order; tie the axial motion of the two free nodes
+    // that move most differently in the first mode.
     let first = free.mode_shapes[0].as_host_f64().unwrap();
     let nodes = free.mode_shapes[0].shape[0];
-    // Tie, in the component that varies most in the first mode, the two nodes that move most
-    // differently.
-    let (component, dof) = [
-        (0, StructuralTranslationDof::Ux),
-        (1, StructuralTranslationDof::Uy),
-        (2, StructuralTranslationDof::Uz),
-    ]
-    .into_iter()
-    .max_by(|(a, _), (b, _)| {
-        let spread = |c: usize| {
-            let values = (0..nodes).map(|n| first[n * 3 + c]);
-            values.clone().fold(f64::MIN, f64::max) - values.fold(f64::MAX, f64::min)
-        };
-        spread(*a).total_cmp(&spread(*b))
-    })
-    .unwrap();
-    let (left, right) = {
-        let value = |node: usize| first[node * 3 + component];
-        let max = (0..nodes).max_by(|a, b| value(*a).total_cmp(&value(*b))).unwrap();
-        let min = (0..nodes).min_by(|a, b| value(*a).total_cmp(&value(*b))).unwrap();
-        (max, min)
+    assert_eq!(nodes, mesh.topology.nodes.len());
+    let ux = |node: usize| first[node * 3];
+    let left = (0..nodes).max_by(|a, b| ux(*a).total_cmp(&ux(*b))).unwrap();
+    let right = (0..nodes).min_by(|a, b| ux(*a).total_cmp(&ux(*b))).unwrap();
+    assert!(ux(left) - ux(right) > 0.0);
+    let term = |node: usize, coefficient: f64| StructuralConstraintEquationTerm {
+        target: RegionTarget::point(format!("node:{}", mesh.topology.nodes[node].node_id)),
+        dof: StructuralTranslationDof::Ux,
+        coefficient,
     };
-    assert_ne!(left, right);
     model
         .constraints
         .push(AnalysisConstraint::Structural(StructuralConstraint {
             constraint_id: "axial_tie".into(),
             frame: CoordinateFrame::Global,
             kind: StructuralConstraintKind::Equation(StructuralConstraintEquation {
-                terms: vec![
-                    StructuralConstraintEquationTerm {
-                        target: RegionTarget::point(format!("node:{}", left + 1)),
-                        dof,
-                        coefficient: 1.0,
-                    },
-                    StructuralConstraintEquationTerm {
-                        target: RegionTarget::point(format!("node:{}", right + 1)),
-                        dof,
-                        coefficient: -1.0,
-                    },
-                ],
+                terms: vec![term(left, 1.0), term(right, -1.0)],
                 right_hand_side: Displacement::new(0.0),
             }),
         }));
-    let tied = crate::run_modal_with_options(&model, ComputeBackend::Cpu, baseline_modal_options())
+    let tied = crate::run_modal_with_options(&model, ComputeBackend::Cpu, options())
         .expect("modal extraction admits a homogeneous equation constraint");
     // Every mode satisfies the constraint, and a constraint can only raise each frequency.
     for mode in &tied.mode_shapes {
         let shape = mode.as_host_f64().unwrap();
         let scale = shape.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
-        assert!((shape[left * 3 + component] - shape[right * 3 + component]).abs() <= 1.0e-9 * scale);
+        assert!((shape[left * 3] - shape[right * 3]).abs() <= 1.0e-9 * scale);
     }
     for (constrained, unconstrained) in tied.frequencies_hz().iter().zip(free.frequencies_hz()) {
         assert!(*constrained >= unconstrained * (1.0 - 1.0e-9));
     }
+    assert!(tied.frequencies_hz()[0] > free.frequencies_hz()[0] * (1.0 + 1.0e-6));
 }
