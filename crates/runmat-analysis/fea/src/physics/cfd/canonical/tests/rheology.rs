@@ -10,7 +10,10 @@ fn power_law_velocity(y: f64, consistency: f64, index: f64, force: f64) -> f64 {
     index / (index + 1.0) * (force / consistency).powf(1.0 / index) * (h.powf(e) - (y - h).abs().powf(e))
 }
 
-// witness: REG-FLUID-009 (generalized-Newtonian rheology: power-law channel profile)
+// witness: FEA-FLUID-MATERIALS-001/generalized_newtonian @ generalized_newtonian_flow/tet4/numerical_kernel;
+//   coverage: partial; boundary: shear-thinning power-law (n = 0.5) channel converges to the closed-form
+//   profile; Carreau, Cross and yield-stress laws, temperature dependence and the
+//   shear-rate/apparent-viscosity fields are not asserted here.
 #[test]
 fn shear_thinning_power_law_channel_converges_to_the_closed_form_profile() {
     let (consistency, index) = (1.0, 0.5);
