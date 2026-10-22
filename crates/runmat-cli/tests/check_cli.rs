@@ -1005,6 +1005,11 @@ fn fea_check_prints_located_diagnostics_like_m_files() {
     );
 }
 
+// witness: FEA-SHARED-EXECUTION-001/logical_study_identity @
+//   shared_infrastructure/canonical_mixed_topology/native_process; coverage: partial;
+//   boundary: Two executions of one random-response study from a script keep one definition run
+//   id, publish distinct attempts, and the definition id resolves to the latest attempt. Remote
+//   placement and retry attempts inside one execution are not exercised.
 #[test]
 fn a_script_running_the_same_study_twice_publishes_two_attempts() {
     let temp = TempDir::new().unwrap();

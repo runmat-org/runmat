@@ -5127,6 +5127,11 @@ fn component_peak(values: &[f64], component: usize) -> f64 {
         .fold(0.0_f64, f64::max)
 }
 
+// witness: FEA-STRUCTURAL-CONSTRAINT-001/distributing_ties_equations @
+//   linear_structural/tet10/numerical_kernel; coverage: partial;
+//   boundary: A homogeneous two-term multipoint equation reduces the modal operator of one Tet10
+//   solid: every extracted mode satisfies the equation and no frequency drops. Distributing
+//   couplings, ties and nonhomogeneous equations in modal extraction are not exercised.
 #[test]
 fn modal_extraction_reduces_a_homogeneous_equation_constraint() {
     use runmat_analysis_core::{
