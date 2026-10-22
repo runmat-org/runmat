@@ -15,6 +15,8 @@ pub(super) struct EdgeWitness {
     pub edge_id: PersistentEntityId,
     pub endpoint_ids: BTreeSet<PersistentEntityId>,
     pub face_ids: BTreeSet<PersistentEntityId>,
+    /// Solids bounded by the edge's faces; empty for sheet geometry.
+    pub solid_ids: BTreeSet<PersistentEntityId>,
     pub points_m: Vec<[f64; 3]>,
 }
 
@@ -112,7 +114,13 @@ pub(super) fn derive_proximity_contributions(
                 }
             }
             if minimum == 0.0 {
-                if source == MetricSourceKind::Contact {
+                // Edges of separate bodies that touch (a part seated in a recess, stacked
+                // blocks) coincide; that is contact, with no gap to resolve. Within one body,
+                // coincident nonincident edges are a topology defect.
+                let separate_bodies = !left.solid_ids.is_empty()
+                    && !right.solid_ids.is_empty()
+                    && left.solid_ids.is_disjoint(&right.solid_ids);
+                if source == MetricSourceKind::Contact || separate_bodies {
                     continue;
                 }
                 return Err(SharedCurveError::new(
@@ -294,6 +302,27 @@ mod tests {
     }
 
     #[test]
+    fn coincident_edges_of_separate_bodies_are_contact_and_of_one_body_a_defect() {
+        let mut left = witness(1, 0.0);
+        let mut right = witness(2, 0.0);
+        left.solid_ids.insert(id(PersistentEntityKind::Solid, 21));
+        right.solid_ids.insert(id(PersistentEntityKind::Solid, 22));
+        let derive = |left: EdgeWitness, right: EdgeWitness| {
+            derive_proximity_contributions(
+                vec![left, right],
+                &ContactProximityPairs::default(),
+                MetricTensor3::isotropic_length_m(1.0).unwrap(),
+                1.0,
+                &Control,
+            )
+        };
+        // A part seated against another (the speaker cone in the air's recess): no gap.
+        assert!(derive(left.clone(), right.clone()).unwrap().is_empty());
+        right.solid_ids = left.solid_ids.clone();
+        assert!(derive(left, right).is_err());
+    }
+
+    #[test]
     fn authored_face_pair_emits_contact_constraints() {
         let mut left = witness(1, 0.0);
         let mut right = witness(2, 0.2);
@@ -396,6 +425,7 @@ mod tests {
             edge_id: id(PersistentEntityKind::Edge, seed),
             endpoint_ids: BTreeSet::from([id(PersistentEntityKind::Vertex, seed)]),
             face_ids: BTreeSet::new(),
+            solid_ids: BTreeSet::new(),
             points_m: vec![[x, 0.0, 0.0]],
         }
     }
