@@ -535,6 +535,9 @@ operation_id!(OperationLoweringId);
 mod tests {
     use super::*;
 
+    // witness: FEA-AUTHORING-OUTPUT-002/shared_query_catalog @
+    //   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+    //   boundary: Output operations are one shared public identity with FEA overloads.
     #[test]
     fn output_operations_are_one_shared_public_identity_with_fea_overloads() {
         let extension = output_operation_extension();

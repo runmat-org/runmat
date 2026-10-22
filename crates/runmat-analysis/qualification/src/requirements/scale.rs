@@ -177,6 +177,11 @@ const DURABLE: &[Envelope] = cells!(
     [MeshOrder::CanonicalTetrahedra],
     [ExecutionEnvelope::Durable]
 );
+const SHAREDPAR: &[Envelope] = cells!(
+    [Formulation::SharedInfrastructure],
+    [MeshOrder::CanonicalMixedTopology],
+    [ExecutionEnvelope::ParallelCpu]
+);
 const SHARED: &[Envelope] = cells!(
     [Formulation::SharedInfrastructure],
     [MeshOrder::CanonicalMixedTopology],
@@ -219,6 +224,12 @@ const FEA_SCALE_PARALLEL_001: Requirement = Requirement {
             "Direct (Cholesky, LDLT, LU), Krylov, AMG and block-eigen solves of the family run in parallel on the shared sparse layer and reproduce the serial solution and residual history within tolerance.",
             EvidenceKind::ExecutionEquivalence,
             PAR,
+        ),
+        obligation(
+            "shared_parallel_kernels",
+            "The shared parallel kernels under every family agree with their serial references: element assembly into the sparse pattern is bit-identical to the serial loop at 1, 2, 3, 7 and 16 threads; scoped Krylov solves equal the serial solution and reject nested execution; pooled CSR products preserve serial bits and output shape.",
+            EvidenceKind::ExecutionEquivalence,
+            SHAREDPAR,
         ),
         obligation(
             "thread_count_determinism",

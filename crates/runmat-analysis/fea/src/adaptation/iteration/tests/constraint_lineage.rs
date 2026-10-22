@@ -16,6 +16,10 @@ use runmat_meshing_core::{
 //   boundary: Real Tet4 to Tet10 persistent face clamp rebuilds9 to18 rows, retains entity identity
 //   and rejects foreign/missing lineage. No reaction/state transfer or adaptive solve convergence
 //   claim.
+// witness: FEA-SHARED-CONSTRAINTS-001/recovery_after_adaptation @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: A persistent clamp rebuilds new midside constraints without numeric node aliases
+//   after refinement.
 #[test]
 fn persistent_clamp_rebuilds_new_midside_constraints_without_numeric_node_aliases() {
     let mut source = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);

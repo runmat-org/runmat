@@ -9,6 +9,9 @@ use runmat_analysis_core::{
 };
 use runmat_meshing_core::ElementOrder;
 
+// witness: FEA-SHARED-AUTHORITIES-001/shared_topology_property_and_constraint_preparation @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Preparation composes shared inventories and preserves original dispatch.
 #[test]
 fn preparation_composes_shared_inventories_and_preserves_original_dispatch() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {

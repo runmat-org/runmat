@@ -2326,6 +2326,10 @@ mod tests {
         assert!(solve.converged, "{:?}", solve.diagnostics);
     }
 
+    // witness: FEA-SHARED-PROPERTIES-001/material_bearing_roles @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+    //   boundary: Solver-mesh material regions select the assigned solid materials; beam, shell and
+    //   cell roles are not covered by this test.
     #[test]
     fn solver_mesh_material_regions_select_assigned_solid_materials() {
         let mut soft_model = fixture_model(FixtureId::CantileverLinearStatic);

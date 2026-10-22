@@ -17,6 +17,10 @@ fn matrix(values: [[f64; 3]; 3], scale: f64) -> RealSparseMatrix {
 fn policy() -> GeneralSolvePolicy {
     GeneralSolvePolicy::bounded(1e-10)
 }
+// witness: FEA-SHARED-OPERATORS-001/operator_algorithm_contract @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Independent nonsymmetric and indefinite references preserve the general operator
+//   path; SPD and complex cases are covered by sibling tests.
 #[test]
 fn independent_nonsymmetric_and_indefinite_references_preserve_general_operator() {
     for entries in [

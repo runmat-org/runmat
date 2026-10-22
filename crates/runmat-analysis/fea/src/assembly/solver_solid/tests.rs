@@ -224,6 +224,10 @@ fn multi_material_assembly_rejects_an_unassigned_mesh_region() {
     ));
 }
 
+// witness: FEA-SHARED-PROPERTIES-001/unique_constitutive_coverage @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Solid material coverage rejects overlap, stale revision and wrong role at assembly;
+//   beam, shell and composite coverage are separate.
 #[test]
 fn solid_material_coverage_rejects_overlap_stale_and_wrong_role() {
     let artifact = artifact(ElementOrder::Tet4);

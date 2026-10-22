@@ -637,6 +637,9 @@ fn prescribed_constraint(
     })
 }
 
+// witness: FEA-SHARED-CONSTRAINTS-001/canonical_plan_and_affine_reduction @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: A general equation compiles to one canonical sparse row.
 #[test]
 fn general_equation_compiles_to_one_canonical_sparse_row() {
     let (mut model, mesh) = model_and_mesh();
@@ -682,6 +685,10 @@ fn general_equation_compiles_to_one_canonical_sparse_row() {
     assert_eq!(matrix.right_hand_side, vec![0.01]);
 }
 
+// witness: FEA-SHARED-CONSTRAINTS-001/compatible_enforcement @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: A dense global equation selects multiplier enforcement before any affine fill; direct
+//   elimination and penalty selection are separate cases.
 #[test]
 fn dense_global_equation_selects_multiplier_enforcement_before_affine_fill() {
     let constraint = equation_constraint("global", 1, 2, 0.0);
@@ -780,6 +787,9 @@ mod curved_normals;
 #[path = "tests/normal_solve.rs"]
 mod normal_solve;
 
+// witness: FEA-SHARED-CONSTRAINTS-001/canonical_plan_and_affine_reduction @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: A canonical solid solve enforces an affine equation and recovers reactions.
 #[test]
 fn canonical_solid_solve_enforces_affine_equation_and_recovers_reactions() {
     let (mut model, mesh) = model_and_mesh();
@@ -1457,6 +1467,9 @@ fn transient_direct_prescription_refinement_is_scale_consistent() {
     }
 }
 
+// witness: FEA-SHARED-CONSTRAINTS-001/nonlinear_inequality_state @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Nonlinear accepted states preserve complete constraint kinematics.
 #[test]
 fn nonlinear_accepted_states_preserve_complete_constraint_kinematics() {
     for lifting in [0.0, 0.001] {

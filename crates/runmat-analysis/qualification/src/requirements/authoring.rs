@@ -5,16 +5,14 @@ mod compiler;
 mod geometry;
 mod language;
 mod outputs;
+/// Authoring is compiled source: the same checked study must result at source check and
+/// reach every placement unchanged. Numerical-kernel, thread, domain-decomposition and
+/// accelerator envelopes do not apply to source semantics.
 const ALL: &[Envelope] = &[
     envelope(
         Formulation::SharedInfrastructure,
         MeshOrder::MeshIndependent,
         ExecutionEnvelope::SourceCheck,
-    ),
-    envelope(
-        Formulation::SharedInfrastructure,
-        MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::NumericalKernel,
     ),
     envelope(
         Formulation::SharedInfrastructure,
@@ -35,21 +33,6 @@ const ALL: &[Envelope] = &[
         Formulation::SharedInfrastructure,
         MeshOrder::CanonicalMixedTopology,
         ExecutionEnvelope::RemoteExecution,
-    ),
-    envelope(
-        Formulation::SharedInfrastructure,
-        MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::ParallelCpu,
-    ),
-    envelope(
-        Formulation::SharedInfrastructure,
-        MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::DomainDecomposed,
-    ),
-    envelope(
-        Formulation::SharedInfrastructure,
-        MeshOrder::CanonicalMixedTopology,
-        ExecutionEnvelope::ClaimedAccelerator,
     ),
 ];
 const FEA_AUTHORING_COMPOSITION_001: Requirement = Requirement {

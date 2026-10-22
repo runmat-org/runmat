@@ -101,6 +101,10 @@ fn compiler_reports_cycles_duplicates_and_missing_exports() {
     assert!(!program.is_valid());
 }
 
+// witness: FEA-AUTHORING-COMPILER-002/module_graph_pass @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: An import that escapes the declared source root is rejected with
+//   fea.module.invalid_path; cycle and digest retention are covered by sibling tests.
 #[test]
 fn compiler_rejects_imports_outside_the_declared_source_root() {
     let host = TestHost::default();

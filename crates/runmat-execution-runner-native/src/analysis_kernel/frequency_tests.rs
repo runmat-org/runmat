@@ -463,6 +463,11 @@ fn execute_frequency(
     (result, recovered)
 }
 
+// witness: FEA-SHARED-EXECUTION-001/deterministic_independent_fanout @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: A two-frequency native fan-out and fan-in publishes samples in authored order with
+//   recovered fields per frequency; order independence under reversed completion is in the sibling
+//   response-spectrum test.
 #[test]
 fn native_frequency_fanout_and_fanin_are_portable_and_order_independent() {
     let (workload, mesh) = direct_fixture();
