@@ -462,7 +462,7 @@ impl<'a> CanonicalFluidProblem<'a> {
 }
 
 const INPUT_IDENTITY_LIMITS: runmat_canonical_codec::CanonicalLimits =
-    runmat_canonical_codec::CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65536, 32);
+    runmat_canonical_codec::CanonicalLimits::new(1 << 44, 1 << 36, 65536, 32);
 
 fn identity<T: Serialize>(domain: &'static str, value: &T) -> Result<Digest, CanonicalFluidError> {
     runmat_canonical_codec::encode_contract(
