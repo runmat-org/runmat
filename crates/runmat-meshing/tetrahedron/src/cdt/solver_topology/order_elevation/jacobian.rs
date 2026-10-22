@@ -79,7 +79,7 @@ pub(super) fn validate_elements(
         let coordinates = element_coordinates_from_topology(element, topology)?;
         certify_element(
             coordinates,
-            maximum_search_work,
+            element_search_limit(maximum_search_work, topology.volume_elements.len()),
             maximum_recursion_depth,
             cancellation_check_interval,
             cancellation,
@@ -112,7 +112,7 @@ pub(super) fn invalid_element_indices<'storage>(
         let coordinates = element_coordinates_from_topology(element, topology)?;
         match certify_element(
             coordinates,
-            maximum_search_work,
+            element_search_limit(maximum_search_work, topology.volume_elements.len()),
             maximum_recursion_depth,
             cancellation_check_interval,
             cancellation,
@@ -264,6 +264,19 @@ fn margin_checkpoint(
     Ok(())
 }
 
+/// Smallest subdivision work any one element may spend, whatever the mesh size: enough to
+/// bisect a curved element's reference cell to several levels near a vanishing Jacobian.
+const MINIMUM_ELEMENT_SEARCH_WORK: u64 = 1 << 16;
+
+/// Certification work is charged per element. Each element gets an equal share of the request's
+/// search-work budget (at least `MINIMUM_ELEMENT_SEARCH_WORK`), so the total scales with the mesh
+/// and one hard element cannot exhaust the work of all the others or of repeated passes. An
+/// element that cannot be certified within its share is not admitted, like one with a
+/// nonpositive Jacobian, and goes to repair.
+fn element_search_limit(maximum_search_work: u64, element_count: usize) -> u64 {
+    (maximum_search_work / (element_count.max(1) as u64)).max(MINIMUM_ELEMENT_SEARCH_WORK)
+}
+
 fn certify_element(
     coordinates: [[f64; 3]; 10],
     maximum_search_work: u64,
@@ -281,7 +294,40 @@ fn certify_element(
             .as_ref()
             .map(|scope| scope as &dyn runmat_geometry_core::GeometryEvaluationControl),
     );
-    let work = work.counter;
+    let total_work = work.counter;
+    let mut element_work = 0_u64;
+    let result = certify_element_within(
+        coordinates,
+        maximum_search_work,
+        maximum_recursion_depth,
+        cancellation,
+        &storage,
+        &mut element_work,
+        cancellation_check_interval,
+    );
+    *total_work = total_work.saturating_add(element_work);
+    match result {
+        Err(failure)
+            if failure.kind == DelaunaySolverTopologyErrorKind::ResourceLimit
+                && element_work > maximum_search_work =>
+        {
+            Err(invalid(format!(
+                "Tet10 isoparametric Jacobian could not be certified positive within the element's search work of {maximum_search_work}"
+            )))
+        }
+        result => result,
+    }
+}
+
+fn certify_element_within(
+    coordinates: [[f64; 3]; 10],
+    maximum_search_work: u64,
+    maximum_recursion_depth: u32,
+    cancellation: &dyn MeshingCancellationSignal,
+    storage: &Storage<'_>,
+    work: &mut u64,
+    cancellation_check_interval: u64,
+) -> Result<(), DelaunaySolverTopologyError> {
     if cancellation_check_interval == 0 {
         return Err(error::failure(
             DelaunaySolverTopologyErrorKind::InvalidOptions,
