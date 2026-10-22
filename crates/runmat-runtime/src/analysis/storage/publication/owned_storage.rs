@@ -75,6 +75,12 @@ mod tests {
         assert_eq!(builder.preparation_resident_bytes, 30);
     }
 
+    // witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+    //   boundary: Two independently reserved temporary owners coexist with original input under a fixed
+    //   ceiling. Failed growth preserves charges; consuming each reservation releases only that owner.
+    //   Component bookkeeping only, without original fork completion, measured RSS or whole-task peak
+    //   qualification.
     #[test]
     fn independent_owner_phases_remain_charged_until_each_owner_is_released() {
         let mut builder =

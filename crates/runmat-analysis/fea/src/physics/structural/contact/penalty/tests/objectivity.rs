@@ -1,6 +1,9 @@
 use super::*;
 use crate::topology::BoundarySurface;
 use runmat_meshing_core::BoundaryTriangleOrder;
+// witness: FEA-CONTACT-OPERATOR-001/references @ penalty_coulomb_contact/tet4/numerical_kernel;
+//   boundary: Tri3 contact frame and penalty friction point-law proper-rotation objectivity; no
+//   global Hertz, sliding body, action-reaction or mesh/penalty convergence credit.
 #[test]
 fn material_attached_frame_and_point_traction_are_objective_under_proper_rotation() {
     let original = [[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [0.0, 1.0, 0.0]];

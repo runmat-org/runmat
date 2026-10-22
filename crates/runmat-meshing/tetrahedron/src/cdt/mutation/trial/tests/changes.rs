@@ -1,5 +1,13 @@
 use super::*;
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Transaction edge-loss candidates match an independent nine-edge inventory with equal
+//   checkpoint work across one and 64 disconnected neighborhoods. Nested rejection coalesces to no
+//   candidates, inner commit remains visible to its outer trial, checkpoint rejection propagates,
+//   and outer rollback restores the original topology. Recovery queue bookkeeping, arbitrary
+//   feature density, complete native admission and measured study performance remain separate
+//   gates.
 #[test]
 fn changed_edge_candidates_are_local_and_nested_rollback_coalesces() {
     let expected = BTreeSet::from([

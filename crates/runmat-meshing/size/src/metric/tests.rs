@@ -171,6 +171,11 @@ fn uniform_resolution_is_entity_independent_and_scoped_requests_cannot_claim_it(
     assert!(ResolvedMetricField::new(&request).is_err());
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Up to4096 applicable scopes preserve every source count while repeated physical
+//   tensors leave density unchanged, for diagonal and non-diagonal inputs. This finite component
+//   family does not qualify arbitrary spatial metric fields or complete CAD/study cost.
 #[test]
 fn topology_multiplicity_preserves_density_and_all_constraint_provenance() {
     for tensor in [
@@ -220,6 +225,11 @@ fn topology_multiplicity_preserves_density_and_all_constraint_provenance() {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Diagonal maxima with equal cross terms and conservative sums for distinct
+//   noncommuting tensors preserve sampled directional constraints and exact duplicate identity.
+//   This is not a minimum-volume anisotropic intersection or an arbitrary floating-point proof.
 #[test]
 fn tensor_intersection_preserves_each_direction_and_equal_cross_terms() {
     let a = MetricTensor3 {
@@ -267,6 +277,11 @@ fn tensor_intersection_preserves_each_direction_and_equal_cross_terms() {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Compact scope lookup matches exhaustive incident selection across source groups and
+//   sparse incident sets. This preserves canonical selection; whole-stage allocation, cancellation
+//   and native scaling require separate evidence.
 #[test]
 fn compact_scope_index_matches_exhaustive_incident_selection() {
     let unit = MetricTensor3::isotropic_length_m(1.0).unwrap();

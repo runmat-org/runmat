@@ -1,6 +1,11 @@
 use super::*;
 use crate::constraints::CanonicalStructuralConstraintPlan;
 
+// witness: FEA-SHARED-CONSTRAINTS-001/canonical_plan_and_affine_reduction @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Prepared structural constraint fixtures compare original canonical plans and bytes at
+//   the exact requested workspace boundary and reject one byte below; no cross-family enforcement
+//   or whole-task memory proof.
 #[test]
 fn exact_caller_boundary_preserves_original_plan_across_all_compiler_routes() {
     for (name, model, mesh) in crate::constraints::compilation_tests::cases() {

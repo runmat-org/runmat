@@ -19,6 +19,12 @@ fn persisted_identity_rejects_same_length_changes_truncation_and_growth() {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Both element orders preserve the complete canonical mesh/evidence pair and scalar
+//   summary through consuming persistence and independent cold decode. This checks handoff
+//   semantics; source ownership and separate physical-footprint measurements are required to
+//   establish peak-memory scaling.
 #[test]
 fn consuming_persistence_preserves_complete_canonical_pair_and_summary() {
     let directory = tempfile::tempdir().unwrap();

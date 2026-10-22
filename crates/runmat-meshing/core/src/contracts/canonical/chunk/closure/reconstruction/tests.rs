@@ -1,6 +1,13 @@
 use super::*;
 use crate::{build_chunked_stage_payload, MeshingChunkMediaType, MeshingChunkPolicy};
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Across the tested chunk sizes and fragmented multi-stream records, preflight equals
+//   the actual output buffer capacities, admission denial stops reconstruction, and altered content
+//   identity rejects. This finite record-reconstruction check excludes imported typed metadata,
+//   constructor output, publication metadata, allocator overhead and whole-task memory
+//   qualification.
 #[test]
 fn fragmented_reconstruction_reserves_exact_output_and_preserves_closure() {
     for chunk_bytes in [512, 4096, 65536] {

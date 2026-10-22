@@ -5,6 +5,13 @@ use crate::cdt::volume_sliver::{
     admission, insertion, reconnection, relocation, work::OptimizationWork,
 };
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: One interior-sliver fixture compares reconnection, fixed-star relocation and
+//   insertion selection against complete canonical search, including mutation sequence, topology
+//   and every quality record. Uniform and scoped face sizing are both exercised. This does not
+//   establish arbitrary mesh equivalence, deletion/retriangulation locality, measured native demand
+//   or accepted study results.
 #[test]
 fn working_searches_match_canonical_candidate_selection_and_full_quality() {
     check_searches(false);
@@ -244,6 +251,12 @@ fn constrained_working_insertion_uses_exact_changed_quality_and_rolls_back() {
     assert_eq!(actual, expected);
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: One scoped interior-sliver treatment compares final topology, all quality records and
+//   the mutation sequence with the complete canonical orchestration oracle. Complete
+//   deletion/retriangulation locality, native resource peaks and guide-study qualification require
+//   separate evidence.
 #[test]
 fn scoped_treatment_matches_complete_canonical_oracle() {
     let (topology, provenance) = interior_sliver_fixture();

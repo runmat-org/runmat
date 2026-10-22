@@ -3,6 +3,10 @@ pub mod support;
 use runmat_analysis_language::*;
 use support::{source_module, TestHost};
 
+// witness: FEA-AUTHORING-GEOMETRY-001/persistent_topology @
+//   shared_infrastructure/mesh_independent/source_check;
+//   boundary: Compiler checks source alias versus persistent-id selectors remain distinct typed
+//   values; no native CAD feature history, regeneration or AP242 export evidence.
 #[test]
 fn imported_source_aliases_and_persistent_ids_remain_distinct() {
     let source = r#"

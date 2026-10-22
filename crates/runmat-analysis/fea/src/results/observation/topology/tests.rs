@@ -3,6 +3,11 @@ use crate::results::field::VolumeFieldSamplingRule;
 use runmat_meshing_core::fixtures::{canonical_tetrahedron_solver_mesh, slab_mesh};
 use runmat_meshing_core::ElementOrder;
 
+// witness: FEA-SHARED-OBSERVATIONS-001/quantity_location_and_cost_contract @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Tet4/Tet10 sampled topology retains original four/fifteen-point rule identities,
+//   positions, edge IDs and integration indices and rejects mismatched topology/count; no
+//   recovered-value convergence or global distributed reduction.
 #[test]
 fn sampled_observation_topology_retains_each_original_rule_order_and_identity() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {

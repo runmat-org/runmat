@@ -35,6 +35,10 @@ fn check(source: &str) -> CheckedFeaProgram {
     })
 }
 
+// witness: FEA-AUTHORING-LANGUAGE-002/formulation_admission @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: A study without any formulation setting checks and realizes; the presence of no
+//   setting is asserted, remote and sweep non-implication are not.
 #[test]
 fn study_has_no_formulation_setting() {
     let study = |setting: &str| {
@@ -128,6 +132,14 @@ study response {{
     ));
 }
 
+// witness: FEA-AUTHORING-COMPILER-002/output_lowering @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Outputs lower to fields, projections and attributed spatial extrema; catalog overload
+//   identity is covered in the operations tests.
+// witness: FEA-AUTHORING-OUTPUT-002/attributed_extrema @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Spatial extrema lower with their attributed region; tie policy and independent-domain
+//   coordinates are not asserted.
 #[test]
 fn study_outputs_lower_fields_projections_and_attributed_spatial_extrema() {
     let source = r#"
@@ -241,6 +253,10 @@ study response {{
     assert!(program.studies.is_empty());
 }
 
+// witness: FEA-AUTHORING-LANGUAGE-002/imports_and_scopes @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Imported geometry, mesh and model keep their defining module identity through study
+//   resolution; function and package import forms and scope shadowing rules are not covered.
 #[test]
 fn study_preserves_the_defining_module_of_imported_declarations() {
     let library = format!("{PART_AND_MESH}\nmodel structure {{\n}}\n");
@@ -274,6 +290,10 @@ study response {
     assert_eq!(study.model.model.module_path, "project/library.fea");
 }
 
+// witness: FEA-AUTHORING-COMPILER-002/study_and_sweep_lowering @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Mesh-lineage mismatch and out-of-bounds model constants are rejected when a study
+//   binds geometry and mesh; sweep lowering is covered elsewhere.
 #[test]
 fn study_rejects_mesh_lineage_mismatch_and_out_of_bounds_model_constants() {
     let source = r#"
@@ -330,6 +350,11 @@ study response {
     assert!(program.studies.is_empty());
 }
 
+// witness: FEA-AUTHORING-LANGUAGE-002/semantic_state_flow @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: A modal analysis retaining a basis feeds a modal transient through a named state
+//   reference lowered into the canonical sequence; other state kinds and the study-as-runnable-root
+//   rule are not covered.
 #[test]
 fn study_lowers_typed_modal_state_flow_into_the_canonical_sequence() {
     let source = format!(
@@ -380,6 +405,16 @@ study response {{
     assert_eq!(sequence.transitions[0].state_id.0, "basis");
 }
 
+// witness: FEA-AUTHORING-LANGUAGE-002/declarative_semantics @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: A transient procedure with no start_time is rejected with a located procedure
+//   diagnostic and no study is produced, so physical defaults are not invented; covers the
+//   transient requiredness case only, not every declaration kind or the three principles as a
+//   whole.
+// witness: FEA-AUTHORING-LANGUAGE-002/declaration_requiredness @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: One required procedure member (start_time) is enforced for structural transient; the
+//   full required/optional member table for all declaration kinds is not exercised.
 #[test]
 fn procedure_requiredness_rejects_hidden_physical_defaults() {
     let source = format!(

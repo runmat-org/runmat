@@ -41,6 +41,11 @@ impl GeometryEvaluationControl for Budget {
             .expect("balanced curve codec ownership");
     }
 }
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Curve and partition encoders preserve original canonical bytes, reject denied
+//   workspace before byte production, retain actual output capacity, and release temporary storage.
+//   The fixture does not establish native execution or arbitrary CAD capacity.
 #[test]
 fn admitted_curve_and_partition_encoders_preserve_bytes_and_release_storage() {
     let (_, topology, _) = runmat_geometry_fixtures::exact_circle();

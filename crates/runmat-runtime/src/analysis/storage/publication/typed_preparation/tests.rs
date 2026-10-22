@@ -11,6 +11,11 @@ fn typed_original_and_copy_reservations_accumulate_without_reusing_the_ceiling()
     assert_eq!(builder.preparation_resident_bytes, 13);
     assert!(builder.store.runs.read().unwrap().is_empty());
 }
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A retained numeric history separately reserves original/copy storage and JSON
+//   projection; an insufficient ceiling rejects before the materializing serialization and leaves
+//   staged output empty. No complete-family inventory, native study or measured peak claim.
 #[test]
 fn retained_manifest_projection_requires_original_reservation_and_rejects_before_materialization() {
     use std::sync::atomic::{AtomicUsize, Ordering};

@@ -128,6 +128,9 @@ fn reference(scope: &str, bytes: &[u8], identity: &[u8]) -> ValueRef {
     }
 }
 
+// witness: FEA-MESH-EXECUTION-001/worker_loss_and_transfer @
+//   shared_infrastructure/canonical_mixed_topology/remote_execution; coverage: partial;
+//   boundary: The remote meshing object catalog bounds actual files and preserves content identity.
 #[test]
 fn remote_meshing_catalog_bounds_actual_files_and_preserves_content_identity() {
     use runmat_execution_artifact::ArtifactError;

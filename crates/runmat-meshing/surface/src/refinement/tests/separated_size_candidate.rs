@@ -1,5 +1,10 @@
 use super::*;
 
+// witness: FEA-SHARED-RESOURCES-001/governed_path_equivalence @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A size-refinement midpoint close to a nonincident vertex is replaced by a bounded
+//   separated point in the same triangle before boundary classification. An infeasible spacing
+//   request remains rejected; original final quality checks still apply.
 #[test]
 fn size_refinement_separates_the_midpoint_from_a_nonincident_node() {
     let mut geometry = geometry([2.0, 1.0, 1.0], 0.5, 1.0, 0.0, 0.0);
@@ -58,6 +63,11 @@ fn size_refinement_separates_the_midpoint_from_a_nonincident_node() {
     .is_none());
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Candidate separation observes cancellation inside the original node inventory,
+//   retains only one best candidate, and propagates a typed failure before mutation. This component
+//   check does not measure arbitrary CAD throughput.
 #[test]
 fn separated_candidate_observes_cancellation_inside_the_node_inventory() {
     use std::sync::atomic::{AtomicUsize, Ordering};

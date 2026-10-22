@@ -76,6 +76,11 @@ mod tests {
         SpatialPredicatePoint,
     };
 
+    // witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+    //   boundary: Outward sphere enclosure retains sampled exact-predicate interior and boundary points
+    //   across scales. Exact recovery predicates retain authority. Component enclosure evidence does
+    //   not qualify a complete mesh or original heat study.
     #[test]
     fn sphere_pruning_preserves_exact_boundary_and_interior_across_scales() {
         for scale in [1e-100, 1e-8, 1.0, 1e100] {

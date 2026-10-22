@@ -3,6 +3,12 @@ use crate::cdt::volume_quality::tests::{metric_contexts, metric_request, topolog
 use runmat_meshing_core::NeverCancelled;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+// witness: FEA-SHARED-RESOURCES-001/governed_path_equivalence @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Consuming quality-cell transfer polls cancellation during movement and rejects a
+//   lower cell-inventory limit before output allocation. It verifies this local ownership
+//   transition; it does not establish durable publication, distributed equivalence, whole-study
+//   memory bounds or throughput scaling.
 #[test]
 fn consumed_cells_poll_mid_transfer_and_reject_lower_inventory_limits() {
     let topology = topology();

@@ -69,6 +69,10 @@ fn two_cells() -> AnalysisProjection {
     source
 }
 
+// witness: FEA-FLUID-TOPOLOGY-001/inventory @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel;
+//   boundary: Two affine Tet4 cells; oriented surface closure, volume and original face mapping. No
+//   skew/curved mesh envelope proof.
 #[test]
 fn exact_two_cell_geometry_is_conservative_and_retains_original_boundary_mapping() {
     let source = two_cells();
@@ -126,6 +130,9 @@ fn refined_cube_exact_volume_and_both_affine_orders_have_closed_faces() {
     }
 }
 
+// witness: FEA-FLUID-TOPOLOGY-001/geometry @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel;
+//   boundary: Two-cell source access reordering, not execution placement equivalence.
 #[test]
 fn stable_cell_face_physics_is_invariant_to_reordered_source_access_indices() {
     let source = two_cells();
@@ -186,6 +193,9 @@ fn rigid_rotation_tiny_scale_and_translation_preserve_vector_geometry() {
     assert!(geometry::length(sum) < 1e-25);
 }
 
+// witness: FEA-FLUID-TOPOLOGY-001/quality @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel;
+//   boundary: Selected malformed source cases only, not complete quality-envelope convergence.
 #[test]
 fn rejects_nonmanifold_missing_boundary_inversion_curvature_and_mutated_record() {
     let mut source = two_cells();
@@ -219,6 +229,10 @@ fn rejects_nonmanifold_missing_boundary_inversion_curvature_and_mutated_record()
     );
 }
 
+// witness: FEA-FLUID-TOPOLOGY-001/budget @
+//   incompressible_laminar_steady/canonical_tetrahedra/numerical_kernel;
+//   boundary: Exact finite-volume construction counts and one-below limits; requested bytes are not
+//   RSS.
 #[test]
 fn exact_admission_bounds_succeed_and_each_one_below_rejects() {
     let source = two_cells();

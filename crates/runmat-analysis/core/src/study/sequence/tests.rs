@@ -21,6 +21,9 @@ fn static_electrical_template_is_direct_and_publishes_static_state() {
     );
 }
 
+// witness: FEA-SHARED-IDENTITY-001/distinct_identity_layers @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Excitation selection changes solver identity and round-trips distinctly.
 #[test]
 fn excitation_selection_changes_solver_identity_and_roundtrips_distinctly() {
     let original = ProcedureStep::structural_static("response");

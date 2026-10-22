@@ -1,5 +1,10 @@
 use super::*;
 
+// witness: FEA-SHARED-RESOURCES-001/governed_path_equivalence @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Solver projection validates the original volume against its original derived metric
+//   while preserving the authored request. Substitution with the authored base metric rejects. This
+//   kernel check does not establish whole native execution or a physical accuracy envelope.
 #[test]
 fn projection_preserves_the_original_volume_metric_without_rewriting_the_authored_request() {
     let (exact_topology, exact_surface) = crate::cdt::constraints::tests::tetrahedron();

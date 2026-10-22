@@ -306,6 +306,10 @@ mod tests {
         assert!(completions.1.is_ok());
     }
 
+    // witness: FEA-SHARED-EXECUTION-001/collective_failure_and_epoch_fencing @
+    //   shared_infrastructure/canonical_mixed_topology/domain_decomposed; coverage: partial;
+    //   boundary: A collective request submitted after a rank failure is fenced and fails with the
+    //   original reason; the gang then completes a later barrier. In-process broker only.
     #[test]
     fn failure_before_submission_fences_a_late_collective_request() {
         let broker = ProcessCollectiveBroker::default();

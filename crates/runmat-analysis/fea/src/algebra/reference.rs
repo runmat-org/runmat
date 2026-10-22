@@ -521,6 +521,13 @@ mod tests {
 mod persistent_pool_tests {
     use super::*;
     use crate::algebra::{MatrixProperties, OperatorRole, RealSparseAssembler};
+    // witness: FEA-SCALE-PARALLEL-001/shared_parallel_kernels @
+    //   shared_infrastructure/canonical_mixed_topology/parallel_cpu; coverage: partial;
+    //   boundary: Pooled CSR matrix-vector rows preserve serial bits at 2 and 4 threads on a 2,048-row
+    //   matrix.
+    // witness: FEA-SHARED-EXECUTION-001/serial_reference_and_equivalence_policy @
+    //   shared_infrastructure/canonical_mixed_topology/parallel_cpu; coverage: partial;
+    //   boundary: Pooled CSR products equal the serial reference bitwise.
     #[test]
     fn installed_pool_csr_rows_preserve_serial_bits_and_output_shape() {
         let mut assembler =

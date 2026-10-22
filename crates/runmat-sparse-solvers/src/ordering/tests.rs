@@ -1,6 +1,14 @@
 use super::*;
 use crate::testutil::poisson3d;
 
+// witness: FEA-SCALE-PARALLEL-001/shared_parallel_kernels @
+//   shared_infrastructure/canonical_mixed_topology/parallel_cpu; coverage: partial;
+//   boundary: Nested-dissection ordering of a 20x20x20 Poisson problem is a valid permutation,
+//   identical across runs and at 4 threads.
+// witness: FEA-SHARED-EXECUTION-001/deterministic_parallel_boundaries @
+//   shared_infrastructure/canonical_mixed_topology/parallel_cpu; coverage: partial;
+//   boundary: Fill-reducing ordering is deterministic across thread counts; assembly and solve
+//   boundaries are covered by the sibling tests.
 #[test]
 fn nested_dissection_is_a_valid_deterministic_permutation() {
     let a = poisson3d::<f64>(20, 20, 20);

@@ -48,6 +48,10 @@ fn observation() -> ObservationRequest {
     })
 }
 
+// witness: FEA-FLUID-EXECUTION-001/publication @
+//   incompressible_laminar_steady/canonical_tetrahedra/durable;
+//   boundary: Native durable complete-state/observation chain rejects missing mandatory spatial
+//   evidence; not a qualified convergence certificate.
 #[test]
 fn original_native_fluid_observation_complete_state_and_accuracy_cold_chain() {
     for (workload, mesh, original) in [

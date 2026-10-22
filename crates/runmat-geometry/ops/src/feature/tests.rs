@@ -148,6 +148,10 @@ fn live_artifact_bound_releases_unreferenced_intermediate_results() {
     assert_eq!(plan.resource_bounds.maximum_live_artifacts, 2);
 }
 
+// witness: FEA-AUTHORING-GEOMETRY-002/bounded_feature_graph @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Unsupported operations and provider bounds fail before execution; the full bounded
+//   operation set is not enumerated.
 #[test]
 fn unsupported_operations_and_provider_bounds_fail_before_execution() {
     let parameters = resolve_geometry_parameters(&[], &BTreeMap::new()).unwrap();
@@ -415,6 +419,10 @@ fn cyclic_parameter_expressions_fail_closed() {
     ));
 }
 
+// witness: FEA-AUTHORING-GEOMETRY-002/geometry_source_forms @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: A derived geometry requires the exact declared source revision; the closed-form check
+//   that imported, constructed and generated forms are mutually exclusive is not asserted here.
 #[test]
 fn derived_geometry_requires_the_exact_declared_source() {
     let source_ref = GeometryDefinitionRef {
@@ -466,6 +474,10 @@ fn derived_geometry_requires_the_exact_declared_source() {
     assert_eq!(materialized.geometry, "result(source)");
 }
 
+// witness: FEA-AUTHORING-GEOMETRY-002/generated_geometry @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: Generated geometry receives resolved arguments at the provider boundary;
+//   materialization of the function result is covered by the OCCT tests.
 #[test]
 fn generated_geometry_receives_resolved_arguments() {
     let definition = GeometryDefinition {

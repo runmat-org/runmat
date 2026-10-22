@@ -323,6 +323,10 @@ mod tests {
         }
     }
 
+    // witness: FEA-STRUCTURAL-BEAM-001/physical_beam_mixed_dofs @
+    //   linear_structural/beam/numerical_kernel;
+    //   boundary: One oblique beam frame transformation orthonormality only; no mixed-model or global
+    //   beam benchmark claim.
     #[test]
     fn beam_transformation_is_block_orthonormal() {
         let frame = BeamElementGeometry {

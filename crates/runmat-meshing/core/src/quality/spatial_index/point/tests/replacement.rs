@@ -16,6 +16,12 @@ impl Clone for Counted {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Interior replacement in 1,024- and 65,536-point inventories copies one 32-point
+//   payload page while the original index stays intact. This excludes relocation outside retained
+//   routing bounds, complete mesh mutation, measured whole-task demand and arbitrary native model
+//   scale.
 #[test]
 fn interior_point_replacement_copies_one_page_and_preserves_the_original_index() {
     let mut work = Vec::new();

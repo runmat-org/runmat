@@ -16,6 +16,11 @@ fn check(source: &str) -> CheckedFeaProgram {
     })
 }
 
+// witness: FEA-AUTHORING-LANGUAGE-002/spectral_inputs @
+//   shared_infrastructure/mesh_independent/source_check; coverage: partial;
+//   boundary: A response spectrum is a typed model-owned input retaining the complete solver policy
+//   (combination rules, mass truncation, rigid response); procedure references through the bound
+//   model are covered by sibling tests only.
 #[test]
 fn response_spectrum_is_typed_and_retains_complete_solver_policy() {
     let program = check(

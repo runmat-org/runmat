@@ -289,6 +289,10 @@ fn projection_retains_chart_aware_exact_surface_parameters() {
     )));
 }
 
+// witness: FEA-MESH-DISCRETIZATION-001/tet10_elevation @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: Tet10 elevation is deterministic and shares exact boundary midpoints; the
+//   scaled-Jacobian floor on thin or curved real parts is not asserted.
 #[test]
 fn deterministic_tet10_elevation_shares_exact_boundary_midpoints() {
     let (exact_topology, exact_surface) = crate::cdt::constraints::tests::tetrahedron();

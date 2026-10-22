@@ -55,6 +55,13 @@ fn reference(
         .collect()
 }
 
+// witness: FEA-SHARED-RESOURCES-001/shared_immutable_inventories @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: One-, eight- and 257-vertex paths with reversed identity order, anisotropy and tied
+//   sources compare every resulting metric and evidence count with independent full-graph
+//   relaxation at grading ratios one, 1.2, two and the finite overflow boundary. This supports the
+//   shared indexed grading representation, not full physical mesh admission, native memory or
+//   arbitrary input scale.
 #[test]
 fn indexed_grading_matches_independent_propagation_and_preserves_metadata() {
     for count in [1, 8, 257] {
@@ -111,6 +118,13 @@ fn indexed_grading_rejects_malformed_support_without_mutation() {
     grade_indexed_metric_evaluations(1.2, &[] as &[u32], &[0], &[], &mut empty).unwrap();
 }
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A 4,097-vertex star uses non-Clone identities and preserves every original
+//   active-source allocation while indexed grading matches independent whole-graph relaxation
+//   exactly. Scratch support consists of CSR indices, scalar caps and ranked indices. This
+//   establishes neither measured allocator demand nor native study memory, cancellation, arbitrary
+//   topology mutation locality or whole-task scaling.
 #[test]
 fn indexed_grading_handles_high_valence_without_identity_or_metadata_copies() {
     #[derive(PartialEq, Eq, PartialOrd, Ord)]
@@ -187,6 +201,12 @@ fn closed_grading_bounds_preserve_values_and_still_reject_invalid_support() {
     assert_eq!(constant, original);
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A positive tensor scaling preserves every directional ratio while reaching the
+//   original finest-length cap, and repeated grading is unchanged. Isotropic cap realization
+//   remains exact. This component case does not establish spatial adaptation, arbitrary
+//   floating-point dominance or whole-study throughput.
 #[test]
 fn anisotropic_grading_preserves_directional_ratios_and_is_idempotent() {
     let mut values = vec![evaluation(0.125), evaluation(1.0)];

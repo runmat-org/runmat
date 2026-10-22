@@ -58,6 +58,12 @@ fn deleting_a_free_vertex_can_retain_an_unchanged_boundary_target() {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Changed-star collapse preparation agrees exactly with the former complete-map oracle,
+//   including accepted conforming candidates, identity permutations and0/64/4096 unrelated cells.
+//   Complete candidate reconstruction and independent final validation remain global; no
+//   whole-relocation locality or native runtime claim is made.
 #[test]
 fn local_collapse_plan_matches_complete_reference_across_unrelated_inventory() {
     let mut admitted = 0;

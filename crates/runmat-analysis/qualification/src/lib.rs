@@ -1,8 +1,9 @@
-//! FEA acceptance obligations and discoverable witnesses, not production physics.
-//! Register integrity never certifies that a witness passed or proves its claims.
+//! FEA acceptance obligations (the register) and the scanner for witness tags declared at
+//! tests. Register integrity never certifies that a witness passed; the evidence report runs them.
 #[cfg(feature = "docs-export")]
 pub mod export;
 pub mod requirement;
+pub mod witness;
 mod requirements;
 
 pub fn requirements() -> impl Iterator<Item = &'static requirement::Requirement> {
@@ -11,9 +12,8 @@ pub fn requirements() -> impl Iterator<Item = &'static requirement::Requirement>
 
 /// Deterministic tab-separated discovery inventory. No row represents a passed gate.
 /// Tabs, newlines, carriage returns and backslashes inside fields are escaped.
-/// Required envelopes and claims are separate so partial linkage cannot imply proof.
+/// Witnesses are declared at tests (see `witness`) and appear in the evidence report.
 pub fn write_inventory(mut output: impl std::io::Write) -> std::io::Result<()> {
-    use requirement::WitnessLocator;
     fn row(out: &mut impl std::io::Write, fields: &[&str]) -> std::io::Result<()> {
         for (index, field) in fields.iter().enumerate() {
             if index != 0 {
@@ -35,7 +35,6 @@ pub fn write_inventory(mut output: impl std::io::Write) -> std::io::Result<()> {
         out.write_all(b"\n")
     }
     row(&mut output, &["inventory", "1", "discovery_only"])?;
-    let mut witnesses = std::collections::BTreeSet::new();
     for requirement in requirements() {
         row(
             &mut output,
@@ -78,50 +77,8 @@ pub fn write_inventory(mut output: impl std::io::Write) -> std::io::Result<()> {
                 )?;
             }
         }
-        for witness in requirement.witnesses {
-            if witnesses.insert(witness.id) {
-                match witness.locator {
-                    WitnessLocator::CargoTest {
-                        package,
-                        target,
-                        name,
-                        source,
-                    } => row(
-                        &mut output,
-                        &[
-                            "witness",
-                            witness.id,
-                            "cargo",
-                            package,
-                            &format!("{:?}", target),
-                            name,
-                            source,
-                        ],
-                    )?,
-                    WitnessLocator::GovernanceCheck { source, check } => row(
-                        &mut output,
-                        &["witness", witness.id, "governance", source, check],
-                    )?,
-                }
-            }
-            for claim in witness.claims {
-                for envelope in claim.envelopes {
-                    row(
-                        &mut output,
-                        &[
-                            "claim",
-                            requirement.id,
-                            claim.obligation,
-                            witness.id,
-                            &format!("{:?}", envelope.formulation),
-                            &format!("{:?}", envelope.mesh),
-                            &format!("{:?}", envelope.execution),
-                            claim.boundary,
-                        ],
-                    )?;
-                }
-            }
-        }
     }
     Ok(())
 }
+pub mod catalog;
+pub mod scope;

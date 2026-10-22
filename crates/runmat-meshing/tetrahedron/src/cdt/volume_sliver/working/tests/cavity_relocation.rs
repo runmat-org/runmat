@@ -3,10 +3,23 @@
 use super::*;
 use crate::cdt::mutation::CavityRelocation;
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: An interior point crosses its old star in a joint point/cavity transaction.
+//   Independent canonical construction checks the complete result; failed replacement and dropped
+//   trials restore point/quality state, and a single grouped seed replays through current
+//   admission. All retained points participate. This local transaction witness is not whole-model
+//   convergence or measured memory evidence.
 #[test]
 fn joint_cavity_relocation_crosses_the_old_star_and_replays_atomically() {
     check_joint_relocation(false);
 }
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Neighboring interior points share one point/cavity transaction and one replay record.
+//   A canonical construction independently checks resulting connectivity and complete quality;
+//   failed and dropped candidates restore the original state. This checks transaction authority,
+//   not whole-model convergence or throughput.
 #[test]
 fn neighboring_points_move_and_replay_in_one_atomic_cavity_transaction() {
     check_joint_relocation(true);

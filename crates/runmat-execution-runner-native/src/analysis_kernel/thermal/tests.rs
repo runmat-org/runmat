@@ -69,6 +69,9 @@ fn task(order: ElementOrder, chunk: usize) -> (ThermalWorkload, PreparedThermalT
     (workload, prepared)
 }
 
+// witness: FEA-THERMAL-EXECUTION-001/publication @ thermal_transient/tet4|tet10/native_process;
+//   boundary: Both-order serial native artifact import and semantic terminal state roundtrip; no
+//   producer-death, remote, partitioned or GPU credit.
 #[test]
 fn native_thermal_serial_transport_import_and_terminal_state_round_trip() {
     use runmat_analysis_execution::{

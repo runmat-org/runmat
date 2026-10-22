@@ -33,6 +33,12 @@ fn exhaustive(boundary: &BTreeSet<[u32; 3]>, target: [u32; 2]) -> Vec<[u32; 4]> 
     created
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Every target and original cell order agrees with an independent exhaustive
+//   boundary-face definition on three-, four- and seven-cell stars, including reversed target
+//   endpoints. This proves the tested topological proposal inventory; exact orientation, embedded
+//   cavity coverage, barriers and physical admission remain independent caller checks.
 #[test]
 fn boundary_links_match_every_exhaustive_target_and_original_cell_order() {
     for count in [3, 4, 7] {
@@ -73,6 +79,13 @@ fn boundary_links_match_every_exhaustive_target_and_original_cell_order() {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: On closed eight- and 128-cell stars, shared boundary incidence generates the complete
+//   lexical target inventory and original cavity coverage with exactly eight checkpoints per
+//   original cell, and three candidate cells per original cell across all targets. This bounded
+//   valence series does not qualify arbitrary nonmanifold boundaries, complete recovery or native
+//   whole-task memory.
 #[test]
 fn high_valence_boundary_links_have_linear_candidate_work_and_preserve_coverage() {
     for count in [8, 128] {
@@ -106,6 +119,12 @@ fn high_valence_boundary_links_have_linear_candidate_work_and_preserve_coverage(
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Every construction and fixed-target query checkpoint rejects without changing the
+//   original boundary or retained query inventory; retry recovers the complete original cells. This
+//   pure reconnection component check does not establish worker cancellation, numerical acceptance
+//   or complete resource admission.
 #[test]
 fn every_boundary_link_checkpoint_rejects_without_changing_source_or_queries() {
     let boundary = local_tetrahedron_boundary_faces(&star(8));

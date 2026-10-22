@@ -1,6 +1,12 @@
 use super::*;
 use crate::{fixtures::canonical_tetrahedron_solver_mesh, CanonicalMeshingContract, ElementOrder};
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Tet4/Tet10 fixtures reserve unused node and nested provenance string capacity. The
+//   typed storage inventory counts that growth while canonical bytes remain identical. Excludes
+//   allocator bookkeeping, other owner copies, staging admission, measured peak and whole-study
+//   scaling.
 #[test]
 fn unused_nested_capacities_are_counted_without_changing_canonical_identity() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {

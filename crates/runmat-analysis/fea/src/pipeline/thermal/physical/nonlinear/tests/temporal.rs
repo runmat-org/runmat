@@ -1,6 +1,10 @@
 //! Independent continuum cooling with all recovered field metrics retained.
 use super::*;
 
+// witness: FEA-THERMAL-SOLVE-001/transient @ thermal_transient/tet4|tet10/public_study;
+//   boundary: Tet4/Tet10 manufactured radiating cooling, 8/16/32 steps, first-order
+//   temperature/gradient/flux/storage and power closure; not temperature-dependent conductivity
+//   coverage.
 #[test]
 fn manufactured_continuum_cooling_retains_first_order_backward_euler_and_power_closure() {
     for quadratic in [false, true] {

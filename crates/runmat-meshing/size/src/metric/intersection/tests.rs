@@ -9,6 +9,12 @@ use std::collections::BTreeSet;
 fn quadratic(m: MetricTensor3, [x, y, z]: [f64; 3]) -> f64 {
     m.xx * x * x + m.yy * y * y + m.zz * z * z + 2. * (m.xy * x * y + m.xz * x * z + m.yz * y * z)
 }
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Nine,33 and4097 noncommuting constraints share a source-count-independent
+//   positive-subspace envelope; independent directional inequalities check each input and the
+//   common normal. Dominating original tensors remain exact. This is numerical sizing construction
+//   evidence, not an interval certificate, spatial localization or native CAD acceptance.
 #[test]
 fn thousands_of_noncommuting_sources_do_not_multiply_density_or_refine_the_common_normal() {
     let base = MetricTensor3::isotropic_length_m(1.).unwrap();

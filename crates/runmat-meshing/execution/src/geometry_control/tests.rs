@@ -59,6 +59,11 @@ pub(crate) fn bounded_control(limit: u64) -> MeshingGeometryEvaluationControl<'s
     )
 }
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Repeated transient reservations preserve the high water mark without accumulating
+//   released storage. Retained decoded storage remains charged and overlapping excess is rejected.
+//   This verifies admission accounting, not allocator RSS or a whole-study envelope.
 #[test]
 fn repeated_temporary_storage_preserves_peak_and_retained_result_budget() {
     use runmat_geometry_core::GeometryAllocationReservation;
@@ -78,6 +83,10 @@ fn repeated_temporary_storage_preserves_peak_and_retained_result_budget() {
     assert!(GeometryAllocationReservation::new(&control, 51).is_err());
 }
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Error returns and unwinding release temporary reservations without erasing peak
+//   evidence. Other non-scoped allocations remain conservatively retained.
 #[test]
 fn temporary_reservations_release_on_error_and_unwind() {
     use runmat_geometry_core::GeometryAllocationReservation;
@@ -97,6 +106,10 @@ fn temporary_reservations_release_on_error_and_unwind() {
     assert_eq!(control.usage().allocation_bytes, 100);
 }
 
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Simultaneous reservations share one ceiling and preserve the high water mark after
+//   both workers release storage. This bounds the reservation authority, not total process memory.
 #[test]
 fn concurrent_reservations_share_one_ceiling_without_losing_peak() {
     use runmat_geometry_core::GeometryAllocationReservation;

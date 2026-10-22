@@ -80,6 +80,11 @@ fn check_every_face(topology: &TopologyMutation) {
     }
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: Maintained mutable face owners and immutable smallest-star queries match exhaustive
+//   cell membership, including absent faces, vertex orderings, checked cavity commit and rollback.
+//   Does not prove geometric acceptance by owner lookup alone or whole native recovery termination.
 #[test]
 fn exact_face_owners_match_exhaustive_inventory_through_commit_and_rollback() {
     let mut topology = fan(8);
@@ -133,6 +138,11 @@ fn exact_face_owners_match_exhaustive_inventory_through_commit_and_rollback() {
     check_every_face(&topology);
 }
 
+// witness: FEA-SHARED-RESOURCES-001/bounded_local_search @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel;
+//   boundary: A maintained interior-face query uses three checkpoints across 4/64-cell endpoint
+//   stars, returns both original owners and rejects/retries at every query checkpoint. Excludes
+//   face-index construction/update work, arbitrary mesh admission and whole-task timing/memory.
 #[test]
 fn maintained_face_query_work_is_independent_of_endpoint_valence_and_cancellable() {
     let mut costs = Vec::new();
