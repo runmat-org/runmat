@@ -102,12 +102,12 @@ pub(super) fn resolve_reduction_target(
                     enforce_cardinality(region.cardinality, indices.clone().count(), spec)?;
                     volume_target(selected_indices(indices, maximum)?, projection)
                 }
+                // An element field on a boundary reads each face's owning element: its trace on
+                // the surface is piecewise constant, weighted by face area.
                 (EntityDimension::Face, ExpectedTopology::BoundaryFace)
                     if materialized_field_location(spec) == FieldLocation::Node
                         || (materialized_field_location(spec) == FieldLocation::Element
-                            && spec.reduction.as_ref().is_some_and(|reduction| {
-                                reduction.spatial == SpatialReduction::NormalFlux
-                            })) =>
+                            && field_domain == RecoveredFieldEntityDomain::VolumeElements) =>
                 {
                     let indices = matching_faces(region, projection);
                     enforce_cardinality(region.cardinality, indices.clone().count(), spec)?;
@@ -125,7 +125,7 @@ pub(super) fn resolve_reduction_target(
                 }
                 _ => Err(target_error(
                     spec,
-                    "reductions support admitted volumes and nodal fields on admitted boundaries",
+                    "reductions support admitted volumes, and nodal or volume-element fields on admitted boundaries",
                 )),
             }
         }
