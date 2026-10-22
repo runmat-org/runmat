@@ -123,6 +123,7 @@ where
         host.workload.stage,
         host.workload.partition.partition_index,
         &host.resolved_request,
+        host.ceilings,
         cancellation,
         progress,
     )?;
@@ -298,7 +299,7 @@ fn effective_limits(
     }
     limits.max_total_bytes = limits
         .max_total_bytes
-        .min(host.resolved_request.resources.maximum_artifact_bytes);
+        .min(host.resources().maximum_artifact_bytes);
     limits.max_object_bytes = limits.max_object_bytes.min(limits.max_total_bytes);
     Ok(limits)
 }
@@ -309,7 +310,7 @@ fn effective_chunk_policy(
 ) -> Result<MeshingChunkPolicy, MeshingSerialExecutionError> {
     policy.maximum_total_encoded_bytes = policy
         .maximum_total_encoded_bytes
-        .min(host.resolved_request.resources.maximum_artifact_bytes);
+        .min(host.resources().maximum_artifact_bytes);
     if policy.maximum_chunk_bytes > policy.maximum_total_encoded_bytes {
         policy.maximum_chunk_bytes = policy.maximum_total_encoded_bytes;
     }

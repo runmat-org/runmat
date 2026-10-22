@@ -276,8 +276,6 @@ fn interval_certificate_bounds_each_element_and_honors_cancellation() {
         DelaunaySolverTopologyErrorKind::InvalidMesh
     );
     assert!(work > 3, "the element's actual work is charged to the shared counter");
-    assert_eq!(element_search_limit(1_000_000_000, 10), 100_000_000);
-    assert_eq!(element_search_limit(1_000_000_000, 1_000_000), MINIMUM_ELEMENT_SEARCH_WORK);
 
     struct Cancelled;
     impl MeshingCancellationSignal for Cancelled {

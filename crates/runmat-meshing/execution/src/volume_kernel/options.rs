@@ -6,17 +6,21 @@ use runmat_meshing_tetrahedron::cdt::DelaunayVolumeMeshOptions;
 // honor the default one-second checkpoint contract without forcing every inner iteration through
 // the shared checkpoint lock.
 const MAXIMUM_NATIVE_VOLUME_WORK_BETWEEN_CHECKS: u64 = 32;
+pub(super) const VOLUME_ALGORITHM_SEARCH: u64 = 1_000_000_000;
+const VOLUME_ALGORITHM_ITERATIONS: u64 = 1_000_000_000;
 
 pub(crate) fn volume_options(request: &MeshingRequest) -> DelaunayVolumeMeshOptions {
-    let resources = request.resources;
-    let requested_check_interval = resources
-        .maximum_search_work
+    // Size limits come from the request; search and iteration bounds are properties of the
+    // volume algorithms, independent of the run's execution ceilings, so the same request meshes
+    // identically on every host.
+    let resources = request.limits;
+    let requested_check_interval = VOLUME_ALGORITHM_SEARCH
         .min(request.cancellation.maximum_work_units_between_checks)
         .clamp(1, MAXIMUM_NATIVE_VOLUME_WORK_BETWEEN_CHECKS);
     let node_limit = resources.maximum_nodes.min(u64::from(u32::MAX));
     let element_limit = resources.maximum_elements.min(u64::from(u32::MAX));
-    let search_limit = resources.maximum_search_work.max(1);
-    let iteration_limit = resources.maximum_iterations.max(1);
+    let search_limit = VOLUME_ALGORITHM_SEARCH;
+    let iteration_limit = VOLUME_ALGORITHM_ITERATIONS;
 
     let mut options = DelaunayVolumeMeshOptions::default();
     let constraint_check_interval = requested_check_interval.min(

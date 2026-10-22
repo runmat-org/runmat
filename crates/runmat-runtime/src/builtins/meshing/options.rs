@@ -39,7 +39,7 @@ pub(super) fn parse_settings(args: &[Value]) -> BuiltinResult<MeshingRequestSett
                     }
             }
             "maximumelements" => {
-                settings.resources.maximum_elements = exact_positive_u64(GENERATE_NAME, &pair[1])?
+                settings.limits.maximum_elements = exact_positive_u64(GENERATE_NAME, &pair[1])?
             }
             "seed" => settings.deterministic_seed = exact_u64(GENERATE_NAME, &pair[1])?,
             other => {
@@ -207,7 +207,7 @@ mod tests {
             Value::Int(runmat_value::IntValue::U64(42)),
         ])
         .expect("valid generation controls");
-        assert_eq!(settings.resources.maximum_elements, u64::MAX);
+        assert_eq!(settings.limits.maximum_elements, u64::MAX);
         assert_eq!(settings.deterministic_seed, 42);
     }
 

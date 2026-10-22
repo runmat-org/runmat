@@ -115,6 +115,7 @@ fn stored_metric_must_fit_its_admitted_inventory_and_embedded_identity() {
 
 #[test]
 fn repeated_metric_encoding_releases_temporary_storage() {
+    let ceilings = runmat_meshing_core::MeshingExecutionCeilings::PORTABLE_DEFAULT;
     use crate::MeshingGeometryEvaluationControl;
     use runmat_meshing_core::{MeshingRequestSettings, NeverCancelled};
     use std::{sync::atomic::AtomicU64, time::Instant};
@@ -128,7 +129,7 @@ fn repeated_metric_encoding_releases_temporary_storage() {
         Arc::new(crate::checkpoint_clock::CheckpointClock::new(now)),
         Arc::new(AtomicU64::new(0)),
         Arc::new(AtomicU64::new(0)),
-        &settings.resources,
+        &runmat_meshing_core::MeshingResourceBudget::new(settings.limits, ceilings),
         &settings.cancellation,
     );
     let store: Arc<dyn MeshingSubtaskCacheStore> = Arc::new(Store::default());
@@ -148,6 +149,7 @@ fn repeated_metric_encoding_releases_temporary_storage() {
 
 #[test]
 fn fresh_and_cold_metric_retention_excludes_preparation_scratch() {
+    let ceilings = runmat_meshing_core::MeshingExecutionCeilings::PORTABLE_DEFAULT;
     use crate::MeshingGeometryEvaluationControl;
     use runmat_meshing_core::{MeshingRequestSettings, NeverCancelled};
     use std::{sync::atomic::AtomicU64, time::Instant};
@@ -165,7 +167,7 @@ fn fresh_and_cold_metric_retention_excludes_preparation_scratch() {
             Arc::new(crate::checkpoint_clock::CheckpointClock::new(now)),
             Arc::new(AtomicU64::new(0)),
             Arc::new(AtomicU64::new(0)),
-            &settings.resources,
+            &runmat_meshing_core::MeshingResourceBudget::new(settings.limits, ceilings),
             &settings.cancellation,
         );
         let provider = PreparedMetricProvider::new(CountingProvider(Arc::clone(&count)))

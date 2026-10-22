@@ -25,6 +25,15 @@ pub(crate) fn memory_bytes() -> io::Result<u64> {
     }
 }
 
+/// Execution ceilings for one local meshing run: sized from the memory this host admits for work
+/// (the same authority as publication staging and the thread plan) and from the requested mesh
+/// size. They bound whether the run completes, never what it produces.
+pub fn meshing_execution_ceilings(
+    limits: &runmat_meshing_core::MeshingSizeLimits,
+) -> runmat_meshing_core::MeshingExecutionCeilings {
+    runmat_meshing_core::MeshingExecutionCeilings::for_host(memory_bytes().unwrap_or(0), limits)
+}
+
 /// Default host budget for staging one study publication: a quarter of the memory this host
 /// admits for work, at least 1 GiB. An explicitly configured budget takes precedence.
 pub fn publication_staging_bytes() -> u64 {

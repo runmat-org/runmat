@@ -69,7 +69,7 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactCurveStageKer
             &control,
             &invocation.host.resolved_request,
         )?;
-        if invocation.host.resolved_request.resources.maximum_nodes < 2 {
+        if invocation.host.resolved_request.limits.maximum_nodes < 2 {
             return Err(curve_failure(
                 MeshingFailureCategory::NodeBudgetExceeded,
                 None,
@@ -172,9 +172,9 @@ pub(super) fn curve_options(host: &crate::MeshingHostWorkload) -> SharedCurveDis
                 .maximum_metric_edge_length
                 .min(runmat_meshing_core::MetricTensor3::NORMALIZED_TARGET_LENGTH),
         },
-        maximum_nodes_per_edge: request.resources.maximum_nodes.min(u64::from(u32::MAX)) as u32,
+        maximum_nodes_per_edge: request.limits.maximum_nodes.min(u64::from(u32::MAX)) as u32,
         maximum_subdivision_depth: request
-            .resources
+            .limits
             .maximum_recursion_depth
             .min(u32::from(u16::MAX)) as u16,
         geometry_absolute_error_m: numerical_error_m,

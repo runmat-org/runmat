@@ -12,13 +12,14 @@ fn records(bytes: usize) -> Vec<MeshingChunkStream> {
 }
 #[test]
 fn publication_releases_kernel_scratch_and_drops_record_charge_at_last_use() {
-    let mut request = crate::serial_tests::request();
-    request.resources.maximum_memory_bytes = 200;
+    let mut ceilings = crate::serial_tests::ceilings();
+    let request = crate::serial_tests::request();
+    ceilings.maximum_memory_bytes = 200;
     let mut progress = NoopMeshingProgress;
     let mut stage = MeshingStageControl::new(
         MeshingStageKind::SurfaceMesh,
         0,
-        &request,
+        &request, ceilings,
         &NeverCancelled,
         &mut progress,
     )
@@ -47,12 +48,13 @@ fn publication_releases_kernel_scratch_and_drops_record_charge_at_last_use() {
 }
 #[test]
 fn unadmitted_record_transfer_rejects_and_keeps_ownership_until_error_cleanup() {
+    let ceilings = crate::serial_tests::ceilings();
     let request = crate::serial_tests::request();
     let mut progress = NoopMeshingProgress;
     let mut stage = MeshingStageControl::new(
         MeshingStageKind::SurfaceMesh,
         0,
-        &request,
+        &request, ceilings,
         &NeverCancelled,
         &mut progress,
     )
@@ -76,12 +78,13 @@ fn unadmitted_record_transfer_rejects_and_keeps_ownership_until_error_cleanup() 
 }
 #[test]
 fn surviving_kernel_view_preserves_its_own_storage_but_new_views_use_publication_owner() {
+    let ceilings = crate::serial_tests::ceilings();
     let request = crate::serial_tests::request();
     let mut progress = NoopMeshingProgress;
     let mut stage = MeshingStageControl::new(
         MeshingStageKind::SurfaceMesh,
         0,
-        &request,
+        &request, ceilings,
         &NeverCancelled,
         &mut progress,
     )

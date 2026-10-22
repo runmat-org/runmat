@@ -59,16 +59,10 @@ pub(super) fn request() -> MeshingRequest {
                 maximum_metric_edge_length: 1.5,
             },
         },
-        resources: MeshingResourceBudget {
+        limits: MeshingSizeLimits {
             maximum_nodes: 100,
             maximum_elements: 100,
-            maximum_memory_bytes: 1_000_000,
-            maximum_scratch_bytes: 1_000_000,
-            maximum_wall_time_ms: 10_000,
-            maximum_artifact_bytes: 1_000_000,
-            maximum_search_work: 10_000,
             maximum_recursion_depth: 32,
-            maximum_iterations: 10_000,
         },
         cancellation: CancellationPolicy {
             maximum_checkpoint_latency_ms: 100,
@@ -202,6 +196,7 @@ pub(super) fn artifact() -> SolverMeshArtifact {
 pub(super) fn evidence(artifact: &SolverMeshArtifact) -> MeshingEvidence {
     MeshingEvidence {
         schema_version: MESHING_EVIDENCE_SCHEMA_VERSION,
+        ceilings: runmat_meshing_core::MeshingExecutionCeilings::PORTABLE_DEFAULT,
         geometry: artifact.geometry.clone(),
         resolved_request_digest: artifact.resolved_request.canonical_digest().unwrap(),
         artifact_digest: artifact.canonical_digest,

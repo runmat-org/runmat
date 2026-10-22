@@ -76,9 +76,9 @@ impl ExactVolumeKernel {
         )?;
         let surface_options = ExactSurfaceJoinOptions {
             coordinate_tolerance_m: invocation.host.resolved_request.tolerance.absolute_floor_m,
-            maximum_nodes: invocation.host.resolved_request.resources.maximum_nodes,
-            maximum_triangles: invocation.host.resolved_request.resources.maximum_elements,
-            maximum_boundary_segments: invocation.host.resolved_request.resources.maximum_elements,
+            maximum_nodes: invocation.host.resolved_request.limits.maximum_nodes,
+            maximum_triangles: invocation.host.resolved_request.limits.maximum_elements,
+            maximum_boundary_segments: invocation.host.resolved_request.limits.maximum_elements,
         };
         let surface_codec = crate::codec_control::CodecControl::new(&reconstruction);
         let surface = decode_published_exact_surface_mesh_admitted(

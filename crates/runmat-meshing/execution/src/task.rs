@@ -123,10 +123,10 @@ pub fn build_task_submission(
     }
     let resources = ResourceRequest {
         cpu_millicores: context.cpu_millicores,
-        memory_bytes: resolved_request.resources.maximum_memory_bytes,
-        scratch_bytes: resolved_request.resources.maximum_scratch_bytes,
-        max_wall_millis: resolved_request.resources.maximum_wall_time_ms,
-        max_artifact_bytes: resolved_request.resources.maximum_artifact_bytes,
+        memory_bytes: host.ceilings.maximum_memory_bytes,
+        scratch_bytes: host.ceilings.maximum_scratch_bytes,
+        max_wall_millis: host.ceilings.maximum_wall_time_ms,
+        max_artifact_bytes: host.ceilings.maximum_artifact_bytes,
         max_egress_bytes: context.maximum_egress_bytes,
         max_relay_bytes: context.maximum_relay_bytes,
         accelerators: Vec::new(),

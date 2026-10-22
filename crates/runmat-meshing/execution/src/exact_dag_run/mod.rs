@@ -31,6 +31,8 @@ pub struct MeshingRunEvidenceContext {
 pub struct ExactMeshingDagRun<'a> {
     pub geometry: &'a PreparedExactGeometryInput,
     pub request: MeshingRequest,
+    /// Execution ceilings for this run (outside the request identity).
+    pub ceilings: runmat_meshing_core::MeshingExecutionCeilings,
     pub artifact_access: ArtifactAccess,
     pub capability_cohort: Option<String>,
     pub program_revision: ProgramRevision,
@@ -175,6 +177,7 @@ pub async fn execute_exact_meshing_dag_async<E: ExactMeshingDagExecutor>(
     let planner = ExactMeshingDagPlanner::new(
         run.geometry,
         run.request.clone(),
+        run.ceilings,
         run.artifact_access.clone(),
         run.capability_cohort.clone(),
     )?;

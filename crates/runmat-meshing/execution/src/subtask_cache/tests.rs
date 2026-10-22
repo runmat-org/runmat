@@ -71,6 +71,7 @@ impl MeshingSubtaskCacheStore for Store {
 }
 #[test]
 fn original_faces_reuse_across_partition_layouts_with_complete_boundary_identity() {
+    let ceilings = runmat_meshing_core::MeshingExecutionCeilings::PORTABLE_DEFAULT;
     let (document, topology, registry) = runmat_geometry_fixtures::exact_tetrahedron();
     let geometry = crate::prepare_exact_geometry_objects(
         document,
@@ -89,7 +90,7 @@ fn original_faces_reuse_across_partition_layouts_with_complete_boundary_identity
         Arc::new(crate::checkpoint_clock::CheckpointClock::new(now)),
         Arc::new(AtomicU64::new(0)),
         Arc::new(AtomicU64::new(0)),
-        &settings.resources,
+        &runmat_meshing_core::MeshingResourceBudget::new(settings.limits, ceilings),
         &settings.cancellation,
     );
     let evaluator = PortableMeshingEvaluatorProvider

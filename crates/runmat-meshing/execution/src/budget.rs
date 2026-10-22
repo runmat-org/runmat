@@ -46,6 +46,7 @@ pub struct MeshingStageControl<'a> {
     stage: MeshingStageKind,
     partition_index: u32,
     request: &'a MeshingRequest,
+    budget: runmat_meshing_core::MeshingResourceBudget,
     cancellation: &'a dyn MeshingCancellationSignal,
     progress: &'a mut dyn MeshingProgressSink,
     started: Instant,
@@ -64,6 +65,7 @@ impl<'a> MeshingStageControl<'a> {
         stage: MeshingStageKind,
         partition_index: u32,
         request: &'a MeshingRequest,
+        ceilings: runmat_meshing_core::MeshingExecutionCeilings,
         cancellation: &'a dyn MeshingCancellationSignal,
         progress: &'a mut dyn MeshingProgressSink,
     ) -> Result<Self, Box<MeshingFailure>> {
@@ -80,6 +82,7 @@ impl<'a> MeshingStageControl<'a> {
             stage,
             partition_index,
             request,
+            budget: runmat_meshing_core::MeshingResourceBudget::new(request.limits, ceilings),
             cancellation,
             progress,
             started: now,
@@ -105,7 +108,7 @@ impl<'a> MeshingStageControl<'a> {
             Arc::clone(&self.last_checkpoint_at),
             Arc::clone(&self.maximum_observed_checkpoint_latency_ms),
             Arc::clone(&self.last_checkpoint_search_work),
-            &self.request.resources,
+            &self.budget,
             &self.request.cancellation,
         )
         .with_usage(Arc::clone(&self.geometry_usage))
@@ -123,7 +126,7 @@ impl<'a> MeshingStageControl<'a> {
                 None,
             ));
         }
-        if elapsed_millis(self.started, now) > self.request.resources.maximum_wall_time_ms {
+        if elapsed_millis(self.started, now) > self.budget.maximum_wall_time_ms {
             return Err(failure(
                 self.stage,
                 MeshingFailureCategory::TimeBudgetExceeded,
@@ -131,7 +134,7 @@ impl<'a> MeshingStageControl<'a> {
                 Some((
                     "wall_time_ms",
                     elapsed_millis(self.started, now),
-                    self.request.resources.maximum_wall_time_ms,
+                    self.budget.maximum_wall_time_ms,
                 )),
             ));
         }
@@ -336,7 +339,7 @@ impl<'a> MeshingStageControl<'a> {
         checkpoint: &MeshingStageCheckpoint,
         elapsed_ms: u64,
     ) -> Result<(), Box<MeshingFailure>> {
-        let budget = &self.request.resources;
+        let budget = &self.budget;
         for (category, name, achieved, maximum, remediation) in [
             (
                 MeshingFailureCategory::NodeBudgetExceeded,

@@ -36,32 +36,6 @@ pub(super) struct ValidationWork<'storage, 'work> {
     pub storage: Storage<'storage>,
 }
 
-pub(super) fn validate(
-    topology: &SolverMeshTopology,
-    maximum_search_work: u64,
-    maximum_recursion_depth: u32,
-    cancellation_check_interval: u64,
-    cancellation: &dyn MeshingCancellationSignal,
-    work: ValidationWork<'_, '_>,
-) -> Result<(), DelaunaySolverTopologyError> {
-    if cancellation_check_interval == 0 {
-        return Err(error::failure(
-            DelaunaySolverTopologyErrorKind::InvalidOptions,
-            "Tet10 Jacobian cancellation-check interval must be greater than zero",
-        ));
-    }
-    let element_indices = 0..topology.volume_elements.len();
-    validate_elements(
-        topology,
-        element_indices,
-        maximum_search_work,
-        maximum_recursion_depth,
-        cancellation_check_interval,
-        cancellation,
-        work,
-    )
-}
-
 pub(super) fn validate_elements(
     topology: &SolverMeshTopology,
     element_indices: impl IntoIterator<Item = usize>,
@@ -79,7 +53,7 @@ pub(super) fn validate_elements(
         let coordinates = element_coordinates_from_topology(element, topology)?;
         certify_element(
             coordinates,
-            element_search_limit(maximum_search_work, topology.volume_elements.len()),
+            maximum_search_work,
             maximum_recursion_depth,
             cancellation_check_interval,
             cancellation,
@@ -112,7 +86,7 @@ pub(super) fn invalid_element_indices<'storage>(
         let coordinates = element_coordinates_from_topology(element, topology)?;
         match certify_element(
             coordinates,
-            element_search_limit(maximum_search_work, topology.volume_elements.len()),
+            maximum_search_work,
             maximum_recursion_depth,
             cancellation_check_interval,
             cancellation,
@@ -264,18 +238,11 @@ fn margin_checkpoint(
     Ok(())
 }
 
-/// Smallest subdivision work any one element may spend, whatever the mesh size: enough to
-/// bisect a curved element's reference cell to several levels near a vanishing Jacobian.
-const MINIMUM_ELEMENT_SEARCH_WORK: u64 = 1 << 16;
-
-/// Certification work is charged per element. Each element gets an equal share of the request's
-/// search-work budget (at least `MINIMUM_ELEMENT_SEARCH_WORK`), so the total scales with the mesh
-/// and one hard element cannot exhaust the work of all the others or of repeated passes. An
-/// element that cannot be certified within its share is not admitted, like one with a
-/// nonpositive Jacobian, and goes to repair.
-fn element_search_limit(maximum_search_work: u64, element_count: usize) -> u64 {
-    (maximum_search_work / (element_count.max(1) as u64)).max(MINIMUM_ELEMENT_SEARCH_WORK)
-}
+/// Subdivision work one element may spend to certify its Jacobian. Certification is charged per
+/// element, so total work scales with the mesh and one hard element cannot exhaust the others'.
+/// It is a property of the algorithm, not of the machine: an element that cannot be certified
+/// within it is not admitted (and goes to repair) on every host alike.
+pub(super) const ELEMENT_SEARCH_WORK: u64 = 1 << 16;
 
 fn certify_element(
     coordinates: [[f64; 3]; 10],

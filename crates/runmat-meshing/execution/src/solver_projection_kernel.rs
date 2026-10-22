@@ -161,6 +161,7 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactSolverProject
             invocation.control,
             "solver topology construction and validation",
         )?;
+        let elevation = topology.elevation_report();
         let projection = topology
             .into_projection(invocation.host.stage_identity.geometry.clone())
             .map_err(|error| {
@@ -248,6 +249,11 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactSolverProject
                     control.usage().allocation_bytes,
                 ),
                 ("solver_nodes".into(), node_count),
+                (
+                    "tet10_straightened_elements".into(),
+                    elevation.straightened_elements,
+                ),
+                ("tet10_straightened_edges".into(), elevation.straightened_edges),
                 ("solver_volume_elements".into(), element_count),
                 (
                     "solver_boundary_faces".into(),
@@ -396,12 +402,12 @@ impl<'a> SolverProjectionSources<'a> {
             &self.geometry.topology,
             ExactSurfaceJoinOptions {
                 coordinate_tolerance_m: invocation.host.resolved_request.tolerance.absolute_floor_m,
-                maximum_nodes: invocation.host.resolved_request.resources.maximum_nodes,
-                maximum_triangles: invocation.host.resolved_request.resources.maximum_elements,
+                maximum_nodes: invocation.host.resolved_request.limits.maximum_nodes,
+                maximum_triangles: invocation.host.resolved_request.limits.maximum_elements,
                 maximum_boundary_segments: invocation
                     .host
                     .resolved_request
-                    .resources
+                    .limits
                     .maximum_elements,
             },
             &codec,
@@ -473,17 +479,20 @@ impl<'a> SolverProjectionSources<'a> {
     }
 }
 
+/// Algorithm bounds for curved-node optimization. They are properties of the algorithm, not of
+/// the machine: the same request produces the same mesh under any execution ceiling.
+const CURVED_OPTIMIZATION_CANDIDATES: u64 = 1_000_000_000;
+const CURVED_OPTIMIZATION_ROUNDS: u32 = 1_000_000_000;
+
 fn solver_options(request: &runmat_meshing_core::MeshingRequest) -> DelaunaySolverTopologyOptions {
-    let resources = request.resources;
+    let limits = request.limits;
     DelaunaySolverTopologyOptions {
-        maximum_boundary_faces: resources.maximum_elements.saturating_mul(4),
-        maximum_boundary_edges: resources.maximum_elements.saturating_mul(6),
-        maximum_curved_optimization_candidates: resources.maximum_search_work,
-        maximum_curved_optimization_rounds: resources.maximum_iterations.min(u64::from(u32::MAX))
-            as u32,
+        maximum_boundary_faces: limits.maximum_elements.saturating_mul(4),
+        maximum_boundary_edges: limits.maximum_elements.saturating_mul(6),
+        maximum_curved_optimization_candidates: CURVED_OPTIMIZATION_CANDIDATES,
+        maximum_curved_optimization_rounds: CURVED_OPTIMIZATION_ROUNDS,
         maximum_curved_optimization_sweeps: DelaunaySolverTopologyOptions::default()
-            .maximum_curved_optimization_sweeps
-            .min(resources.maximum_iterations.min(u64::from(u32::MAX)) as u32),
+            .maximum_curved_optimization_sweeps,
         trim_boundary_tolerance_uv: 1.0e-10,
         cancellation_check_interval: request
             .cancellation

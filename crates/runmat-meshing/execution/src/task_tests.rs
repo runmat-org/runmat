@@ -13,7 +13,7 @@ use runmat_meshing_core::{
     AlgorithmVersionSet, CancellationPolicy, CanonicalMeshingContract, CurveQualityTargets,
     ElementOrder, GeometryRevisionRef, GeometryTolerancePolicy, MeshingCapabilityRequirement,
     MeshingInputKind, MeshingInputRef, MeshingPartitionDescriptor, MeshingPartitionKind,
-    MeshingQualityTargets, MeshingRequest, MeshingResourceBudget, MeshingStageIdentity,
+    MeshingQualityTargets, MeshingRequest, MeshingSizeLimits, MeshingStageIdentity,
     MeshingStageKind, MeshingWorkloadRequest, MetricCombinationRule, MetricFieldRequest,
     MetricTensor3, StableDigest, SurfaceQualityTargets, VolumeQualityTargets,
     MESHING_IDENTITY_SCHEMA_VERSION, MESHING_REQUEST_SCHEMA_VERSION,
@@ -84,6 +84,7 @@ fn exact_dag_worker_inventory_covers_every_stage_family() {
 
 #[test]
 fn task_projection_binds_identity_inputs_resources_and_capabilities() {
+    let ceilings = ceilings();
     let fixture = Fixture::new(MeshingStageKind::SurfaceMesh);
     let submission = fixture.submit(MeshingTaskEffectPolicy::ContentAddressedPure {
         maximum_attempts: 3,
@@ -93,19 +94,19 @@ fn task_projection_binds_identity_inputs_resources_and_capabilities() {
     assert_eq!(submission.request.inputs.len(), 2);
     assert_eq!(
         submission.request.resources.memory_bytes,
-        fixture.request.resources.maximum_memory_bytes
+        ceilings.maximum_memory_bytes
     );
     assert_eq!(
         submission.request.resources.scratch_bytes,
-        fixture.request.resources.maximum_scratch_bytes
+        ceilings.maximum_scratch_bytes
     );
     assert_eq!(
         submission.request.resources.max_wall_millis,
-        fixture.request.resources.maximum_wall_time_ms
+        ceilings.maximum_wall_time_ms
     );
     assert_eq!(
         submission.request.resources.max_artifact_bytes,
-        fixture.request.resources.maximum_artifact_bytes
+        ceilings.maximum_artifact_bytes
     );
     assert_eq!(
         submission.request.retry,
@@ -159,7 +160,7 @@ fn logical_partition_task_is_placement_independent_within_a_scope() {
 fn mismatched_request_input_or_authority_fails_closed() {
     let fixture = Fixture::new(MeshingStageKind::SurfaceMesh);
     let mut wrong_request = fixture.request.clone();
-    wrong_request.resources.maximum_memory_bytes += 1;
+    wrong_request.limits.maximum_nodes += 1;
     assert!(build_task_submission(
         &fixture.host_with_request(wrong_request),
         &fixture.program(fixture.program_inputs()),
@@ -535,6 +536,7 @@ impl Fixture {
             workload: self.workload.clone(),
             stage_identity: self.identity.clone(),
             resolved_request: self.request.clone(),
+            ceilings: ceilings(),
             artifact_access: self.context.artifact_access.clone(),
             geometry_document: self.geometry_document.clone(),
         }
@@ -718,16 +720,10 @@ fn request() -> MeshingRequest {
                 maximum_metric_edge_length: 1.5,
             },
         },
-        resources: MeshingResourceBudget {
+        limits: MeshingSizeLimits {
             maximum_nodes: 100,
             maximum_elements: 100,
-            maximum_memory_bytes: 4_000_000,
-            maximum_scratch_bytes: 4_000_000,
-            maximum_wall_time_ms: 10_000,
-            maximum_artifact_bytes: 2_000_000,
-            maximum_search_work: 10_000,
             maximum_recursion_depth: 32,
-            maximum_iterations: 10_000,
         },
         cancellation: CancellationPolicy {
             maximum_checkpoint_latency_ms: 100,
@@ -752,5 +748,17 @@ fn stage_input(digest: StableDigest) -> MeshingInputRef {
     MeshingInputRef {
         kind: MeshingInputKind::StageArtifact,
         digest,
+    }
+}
+
+/// Execution ceilings of the task test fixture.
+pub(crate) fn ceilings() -> runmat_meshing_core::MeshingExecutionCeilings {
+    runmat_meshing_core::MeshingExecutionCeilings {
+        maximum_memory_bytes: 4_000_000,
+        maximum_scratch_bytes: 4_000_000,
+        maximum_wall_time_ms: 10_000,
+        maximum_artifact_bytes: 2_000_000,
+        maximum_search_work: 10_000,
+        maximum_iterations: 10_000,
     }
 }

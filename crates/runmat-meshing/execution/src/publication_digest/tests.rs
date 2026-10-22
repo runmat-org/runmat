@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[test]
 fn streamed_publication_digest_matches_original_framing() {
+    let ceilings = crate::serial_tests::ceilings();
     let streams = [
         MeshingChunkStream {
             media_type: MeshingChunkMediaType::SurfacePartitions,
@@ -35,7 +36,7 @@ fn streamed_publication_digest_matches_original_framing() {
     let mut control = MeshingStageControl::new(
         MeshingStageKind::SurfaceMesh,
         0,
-        &request,
+        &request, ceilings,
         &NeverCancelled,
         &mut progress,
     )
@@ -70,12 +71,13 @@ fn publication_hash_preserves_one_shot_typed_cancellation() {
         }
     }
     let request = request();
+    let ceilings = crate::serial_tests::ceilings();
     let pulse = Pulse(AtomicUsize::new(0));
     let mut progress = NoopMeshingProgress;
     let mut control = MeshingStageControl::new(
         MeshingStageKind::SurfaceMesh,
         0,
-        &request,
+        &request, ceilings,
         &pulse,
         &mut progress,
     )
