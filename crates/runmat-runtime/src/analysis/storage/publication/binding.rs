@@ -111,6 +111,83 @@ impl access::FilesystemAccess<'_> {
         }
         self.reserve(run_id, RunBinding::Study { publication })
     }
+    /// Each committed attempt leaves an immutable marker under its definition run id, so earlier
+    /// attempts stay listed and addressable after a rerun.
+    pub(super) fn record_run_attempt(
+        &self,
+        run_id: &str,
+        publication: Digest,
+    ) -> Result<(), AnalysisPublicationError> {
+        let Some((definition, _)) = crate::analysis::split_attempt_run_id(run_id) else {
+            return Ok(());
+        };
+        let directory = self.root.join("run-attempts");
+        self.ensure_owned_directory(&directory, "run attempts")?;
+        let directory = directory.join(definition);
+        self.ensure_owned_directory(&directory, "definition run attempts")?;
+        let bytes = serde_json::to_vec(&RunBinding::Study { publication })
+            .map_err(|e| e.to_string())?;
+        match self
+            .atomic_create_new(directory.join(format!("{run_id}.json")), &bytes)
+            .map_err(AnalysisPublicationError::from_io)?
+        {
+            AtomicCreateResult::Published { .. } => Ok(()),
+            AtomicCreateResult::Existing(existing) if existing == bytes => Ok(()),
+            AtomicCreateResult::Existing(_) => Err("run attempt marker collision".into()),
+        }
+    }
+    /// Committed attempts of a definition run id, oldest first. Attempts whose publication was
+    /// reclaimed are omitted.
+    pub(in crate::analysis::storage) fn run_attempts(
+        &self,
+        definition_run_id: &str,
+    ) -> Result<Vec<String>, AnalysisPublicationError> {
+        validate_run_id_token(definition_run_id)?;
+        let directory = self.root.join("run-attempts").join(definition_run_id);
+        if !self.owned_directory_exists(&self.root, "analysis artifact root")?
+            || !self.owned_directory_exists(&self.root.join("run-attempts"), "run attempts")?
+            || !self.owned_directory_exists(&directory, "definition run attempts")?
+        {
+            return Ok(Vec::new());
+        }
+        let entries = self
+            .fs_read_dir(&directory)
+            .map_err(AnalysisPublicationError::from_io)?;
+        let _directory_reservation = self.retain_directory(&entries)?;
+        let mut attempts = Vec::new();
+        for entry in entries {
+            let id = entry
+                .path()
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .ok_or("run attempt marker filename invalid")?
+                .to_owned();
+            if entry.file_type() != FsFileType::File
+                || crate::analysis::split_attempt_run_id(&id).map(|(base, _)| base)
+                    != Some(definition_run_id)
+            {
+                return Err("run attempt marker is not an attempt of its definition".into());
+            }
+            if matches!(self.read_binding(&id)?, Some(RunBinding::Study { .. })) {
+                attempts.push(id);
+            }
+        }
+        attempts.sort();
+        Ok(attempts)
+    }
+    /// A definition run id resolves to its latest committed attempt; any other id is itself.
+    pub(in crate::analysis::storage) fn resolve_run_attempt(
+        &self,
+        run_id: &str,
+    ) -> Result<String, AnalysisPublicationError> {
+        if self.read_binding(run_id)?.is_some() {
+            return Ok(run_id.to_owned());
+        }
+        Ok(self
+            .run_attempts(run_id)?
+            .pop()
+            .unwrap_or_else(|| run_id.to_owned()))
+    }
     pub(in crate::analysis::storage) fn publication_record_path(
         &self,
         run_id: &str,

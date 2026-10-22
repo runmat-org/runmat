@@ -41,6 +41,8 @@ pub(in super::super) fn completed_summary(
                 .iter()
                 .map(|step| step.run_id.clone())
                 .collect(),
+            definition_run_ids: Vec::new(),
+            attempt_run_ids: Vec::new(),
             result_manifest_artifact_path: publication
                 .result_manifest_artifact_path
                 .clone()
@@ -77,6 +79,8 @@ pub(in super::super) fn completed_summary(
                 .iter()
                 .map(|step| step.run_id.clone())
                 .collect(),
+            definition_run_ids: Vec::new(),
+            attempt_run_ids: Vec::new(),
             result_manifest_artifact_path: publication
                 .result_manifest_artifact_path
                 .clone()
@@ -104,6 +108,8 @@ pub(in super::super) fn completed_summary(
                 .iter()
                 .map(|step| step.run_id.clone())
                 .collect(),
+            definition_run_ids: Vec::new(),
+            attempt_run_ids: Vec::new(),
             result_manifest_artifact_path: publication
                 .result_manifest_artifact_path
                 .clone()
@@ -131,6 +137,8 @@ pub(in super::super) fn completed_summary(
                 .iter()
                 .map(|step| step.run_id.clone())
                 .collect(),
+            definition_run_ids: Vec::new(),
+            attempt_run_ids: Vec::new(),
             result_manifest_artifact_path: publication
                 .result_manifest_artifact_path
                 .clone()
@@ -158,6 +166,8 @@ pub(in super::super) fn completed_summary(
                 .iter()
                 .map(|step| step.run_id.clone())
                 .collect(),
+            definition_run_ids: Vec::new(),
+            attempt_run_ids: Vec::new(),
             result_manifest_artifact_path: publication
                 .result_manifest_artifact_path
                 .clone()
@@ -185,6 +195,8 @@ pub(in super::super) fn completed_summary(
                 .iter()
                 .map(|step| step.run_id.clone())
                 .collect(),
+            definition_run_ids: Vec::new(),
+            attempt_run_ids: Vec::new(),
             result_manifest_artifact_path: publication
                 .result_manifest_artifact_path
                 .clone()
@@ -212,6 +224,8 @@ pub(in super::super) fn completed_summary(
                 .iter()
                 .map(|step| step.run_id.clone())
                 .collect(),
+            definition_run_ids: Vec::new(),
+            attempt_run_ids: Vec::new(),
             result_manifest_artifact_path: publication
                 .result_manifest_artifact_path
                 .clone()
@@ -249,6 +263,8 @@ pub(in super::super) fn completed_summary(
                 .iter()
                 .map(|step| step.run_id.clone())
                 .collect(),
+            definition_run_ids: Vec::new(),
+            attempt_run_ids: Vec::new(),
             result_manifest_artifact_path: publication
                 .result_manifest_artifact_path
                 .clone()
