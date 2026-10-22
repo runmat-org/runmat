@@ -82,8 +82,10 @@ impl Default for CanonicalFluidPolicy {
             pressure_relaxation: 0.25,
             linear_relative_tolerance: 1e-8,
             physical_relative_tolerance: 1e-8,
-            maximum_resident_bytes: 1024 * 1024 * 1024,
-            maximum_operator_work: 1_000_000_000_000,
+            // No fixed size caps: the step's authored resource budget (accuracy resources)
+            // bounds resident memory, and the execution envelope bounds time.
+            maximum_resident_bytes: u64::MAX,
+            maximum_operator_work: u64::MAX,
             maximum_authority_items: 1_000_000,
         }
     }

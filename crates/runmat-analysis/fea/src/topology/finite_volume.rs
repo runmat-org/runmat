@@ -22,14 +22,16 @@ pub struct FiniteVolumeProjectionPolicy {
     pub max_traversal_operations: usize,
 }
 
+/// No fixed size caps by default: derivation memory is charged to the calling phase's
+/// resident admission, which the authored resource budget bounds.
 impl Default for FiniteVolumeProjectionPolicy {
     fn default() -> Self {
         Self {
-            max_cells: 1_000_000,
-            max_face_incidences: 4_000_000,
-            max_boundary_faces: 4_000_000,
-            max_scratch_bytes: 1024 * 1024 * 1024,
-            max_traversal_operations: 1_000_000_000,
+            max_cells: usize::MAX,
+            max_face_incidences: usize::MAX,
+            max_boundary_faces: usize::MAX,
+            max_scratch_bytes: usize::MAX,
+            max_traversal_operations: usize::MAX,
         }
     }
 }
