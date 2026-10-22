@@ -20,6 +20,7 @@ impl ThermalFieldConstructionResourceFacts {
     pub fn derive(
         mesh: &SolverMeshArtifact,
         schedule: &ThermalSolveSchedule,
+        interface_nodes: usize,
     ) -> Result<Self, ResourcePlanningError> {
         let ordinal = schedule.sample_count().checked_sub(1).ok_or_else(|| {
             ResourcePlanningError::Invalid("thermal field construction requires samples".into())
@@ -28,15 +29,11 @@ impl ThermalFieldConstructionResourceFacts {
             largest_identity_materialization_bytes: ByteCount(0),
             largest_partition_construction_bytes: ByteCount(0),
         };
-        for (index, entities) in [
+        for (index, entities) in history_fields::snapshot_entities(
             mesh.topology.nodes.len(),
             mesh.topology.volume_elements.len(),
-            mesh.topology.volume_elements.len(),
-            mesh.topology.volume_elements.len(),
-        ]
-        .into_iter()
-        .enumerate()
-        {
+            interface_nodes,
+        ) {
             // Last ordinal has the longest decimal suffix. Float profile width is value-independent.
             let definition =
                 history_fields::snapshot_definition(index, ordinal).map_err(invalid)?;

@@ -478,6 +478,7 @@ async fn execute_study_cases(
             runmat_analysis_fea::execution::conduction_operating_temperatures(
                 state,
                 &thermal.mesh,
+                &thermal.completion.compiled.model.interfaces,
                 transient,
             )
             .map_err(|error| error.to_string())?;

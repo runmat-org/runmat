@@ -18,6 +18,20 @@ pub(crate) fn sample(
     }
 }
 
+/// (snapshot index, entity count) of every published thermal history: nodal temperature, the
+/// three element histories, then the second-side interface temperature when present.
+pub(crate) fn snapshot_entities(
+    nodes: usize,
+    elements: usize,
+    interface_nodes: usize,
+) -> Vec<(usize, usize)> {
+    let mut entities = vec![(0, nodes), (1, elements), (2, elements), (3, elements)];
+    if interface_nodes > 0 {
+        entities.push((INTERFACE, interface_nodes));
+    }
+    entities
+}
+
 /// Same ordinal-derived field definition used by publication and preassembly profiling.
 pub(crate) fn snapshot_definition(
     index: usize,
@@ -25,12 +39,14 @@ pub(crate) fn snapshot_definition(
 ) -> Result<RecoveredFieldDefinition, RecoveredFieldError> {
     let template = TEMPLATES
         .get(index)
+        .or((index == INTERFACE).then_some(&INTERFACE_TEMPLATE))
         .ok_or(RecoveredFieldError::StorageShapeMismatch)?;
     let ids = [
         crate::contracts::fea_thermal_temperature_field_id,
         crate::contracts::fea_thermal_temperature_gradient_field_id,
         crate::contracts::fea_thermal_heat_flux_field_id,
         crate::contracts::fea_thermal_energy_storage_rate_field_id,
+        crate::contracts::fea_thermal_interface_temperature_field_id,
     ];
     RecoveredFieldDefinition::new_derived(
         ids[index](ordinal),
@@ -42,6 +58,25 @@ pub(crate) fn snapshot_definition(
         crate::results::field::RecoveredFieldDerivation::Native,
     )
 }
+
+/// Snapshot index of the second-side interface temperature, published after the four primary
+/// histories when the study has a finite-conductance thermal interface.
+pub(crate) const INTERFACE: usize = 4;
+
+/// Second side's temperature at the nodes of finite-conductance interfaces (a node subset).
+static INTERFACE_TEMPLATE: (
+    &str,
+    ObservationQuantity,
+    FieldLocation,
+    RecoveredFieldEntityDomain,
+    ObservationValueShape,
+) = (
+    "thermal.interface_second_side_temperature",
+    ObservationQuantity::Temperature,
+    FieldLocation::Node,
+    RecoveredFieldEntityDomain::Nodes,
+    ObservationValueShape::Scalar,
+);
 
 static TEMPLATES: [(
     &str,
@@ -130,6 +165,7 @@ mod tests {
                 assert!(peak < old_peak);
             }
         }
-        assert!(snapshot_definition(4, 0).is_err());
+        assert!(snapshot_definition(INTERFACE, 0).is_ok());
+        assert!(snapshot_definition(INTERFACE + 1, 0).is_err());
     }
 }

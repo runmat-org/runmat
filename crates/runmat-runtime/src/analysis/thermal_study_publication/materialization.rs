@@ -27,7 +27,7 @@ pub(in crate::analysis) fn admit(
         crate::analysis::structural_study::lifecycle::accuracy_completion::classify_accuracy(
             &completed.accuracy,
         );
-    let mut histories: [Vec<runmat_analysis_core::AnalysisField>; 4] =
+    let mut histories: [Vec<runmat_analysis_core::AnalysisField>; 5] =
         std::array::from_fn(|_| Vec::new());
     for entries in &manifest.fields {
         for (kind, entry) in entries.iter().enumerate() {
@@ -55,10 +55,10 @@ pub(in crate::analysis) fn admit(
                 entry.definition.clone(),
                 entry.sample,
                 partitions,
-                if kind == 0 {
-                    manifest.ordered_node_ids.len()
-                } else {
-                    manifest.ordered_element_ids.len()
+                match kind {
+                    0 => manifest.ordered_node_ids.len(),
+                    4 => manifest.interface_node_ids.len(),
+                    _ => manifest.ordered_element_ids.len(),
                 },
             )
             .map_err(|error| error.to_string())?
@@ -85,7 +85,7 @@ pub(in crate::analysis) fn admit(
         quality_policy: contracts::format_quality_policy(options.quality_policy),
         fallback_events: Vec::new(),
     };
-    let [temperature_snapshots, temperature_gradient_snapshots, heat_flux_snapshots, energy_storage_rate_snapshots] =
+    let [temperature_snapshots, temperature_gradient_snapshots, heat_flux_snapshots, energy_storage_rate_snapshots, interface_temperature_snapshots] =
         histories;
     let result = AnalysisRunResult {
         observation_scalars: Vec::new(),
@@ -101,6 +101,8 @@ pub(in crate::analysis) fn admit(
             temperature_gradient_snapshots,
             heat_flux_snapshots,
             energy_storage_rate_snapshots,
+            interface_node_ids: manifest.interface_node_ids.clone(),
+            interface_temperature_snapshots,
             residual_norms: manifest.residual_norms.clone(),
             reference_temperature_k: manifest.reference_temperature_k,
             initial_state: manifest.initial_state.clone(),

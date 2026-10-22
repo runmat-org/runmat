@@ -78,15 +78,11 @@ impl PreparedThermalSolve<'_> {
         let ordinal = samples
             .checked_sub(1)
             .ok_or_else(|| FeaRunError::InvalidModel("thermal output requires samples".into()))?;
-        for (index, entities) in [
+        for (index, entities) in crate::physics::thermal::history_fields::snapshot_entities(
             self.mesh.topology.nodes.len(),
             self.mesh.topology.volume_elements.len(),
-            self.mesh.topology.volume_elements.len(),
-            self.mesh.topology.volume_elements.len(),
-        ]
-        .into_iter()
-        .enumerate()
-        {
+            self.facts.history.interface_nodes,
+        ) {
             let definition =
                 crate::physics::thermal::history_fields::snapshot_definition(index, ordinal)
                     .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;

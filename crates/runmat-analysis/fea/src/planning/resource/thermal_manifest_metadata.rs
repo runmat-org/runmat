@@ -26,6 +26,7 @@ impl ThermalManifestMetadataResourceFacts {
         metadata: &ThermalMetadataResourceFacts,
         sources: &ThermalSourceEvidenceResourceFacts,
         catalog: &ThermalManifestCatalogResourceFacts,
+        interface_nodes: usize,
     ) -> Result<Self, ResourcePlanningError> {
         let wrapper = ThermalSolverResultManifest::wrapper_profile(identity)
             .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
@@ -34,6 +35,7 @@ impl ThermalManifestMetadataResourceFacts {
             mesh.topology.volume_elements.len(),
             schedule.sample_count(),
             schedule.solve_count(),
+            interface_nodes,
         )
         .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
         let mut complete_header = wrapper;
@@ -65,6 +67,7 @@ impl ThermalManifestMetadataResourceFacts {
             mesh.topology.volume_elements.len(),
             schedule.sample_count(),
             schedule.solve_count(),
+            interface_nodes,
         )
         .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
         add(&mut numerical_identity, metadata.initial_state, 1)?;

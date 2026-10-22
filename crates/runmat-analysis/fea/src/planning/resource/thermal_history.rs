@@ -6,6 +6,9 @@ use runmat_meshing_core::SolverMeshArtifact;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ThermalHistoryResourceFacts {
     pub samples: Count,
+    /// Upper bound on the nodes of finite-conductance interfaces whose second side's
+    /// temperature is retained (zero without such an interface).
+    pub interface_nodes: usize,
     pub temperature_values: Count,
     pub recovered_element_values: Count,
     pub retained_field_bytes: ByteCount,
@@ -42,11 +45,13 @@ impl ThermalHistoryResourceFacts {
         } else {
             0
         };
-        Self::from_counts(
+        let mut facts = Self::from_counts(
             mesh.topology.nodes.len() + interface_nodes,
             mesh.topology.volume_elements.len(),
             schedule.sample_count(),
-        )
+        )?;
+        facts.interface_nodes = interface_nodes;
+        Ok(facts)
     }
 
     fn from_counts(
@@ -99,6 +104,7 @@ impl ThermalHistoryResourceFacts {
             .ok_or(ResourcePlanningError::Overflow("thermal history metadata"))?;
         Ok(Self {
             samples: Count(samples),
+            interface_nodes: 0,
             temperature_values: Count(temperature_values),
             recovered_element_values: Count(recovered_element_values),
             retained_field_bytes: ByteCount(retained_field_bytes),

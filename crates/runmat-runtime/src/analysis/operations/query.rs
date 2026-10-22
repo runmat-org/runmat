@@ -44,6 +44,7 @@ macro_rules! visit_analysis_result_fields {
                 $($borrow)* thermal.temperature_gradient_snapshots,
                 $($borrow)* thermal.heat_flux_snapshots,
                 $($borrow)* thermal.energy_storage_rate_snapshots,
+                $($borrow)* thermal.interface_temperature_snapshots,
             ] {
                 for field in fields {
                     $visit(field);
