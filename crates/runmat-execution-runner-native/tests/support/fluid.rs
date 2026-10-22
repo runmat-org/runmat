@@ -111,6 +111,7 @@ pub fn workload(nonzero: bool, reference_pa: f64) -> (FluidSteadyWorkload, Solve
         model,
         step_id: ProcedureStepId("steady".into()),
         policy: CanonicalFluidPolicy {
+            pressure_velocity_coupling: Default::default(),
             fixed_point_acceleration: None,
             maximum_outer_iterations: 200,
             maximum_nonorthogonal_iterations: 4,
