@@ -108,6 +108,25 @@ pub struct ResourceUsageAttempt {
     /// Exact, independently rederived plan that governed this scheduler attempt.
     pub plan: FeaResourcePlanIdentity,
     pub resources: ResourceAccounting,
+    /// Memory capacity of the machine (placed worker) that ran the attempt; zero if unrecorded.
+    #[serde(default)]
+    pub machine_memory_bytes: u64,
+    /// Effective resident-memory ceiling of the attempt: min(authored ceiling, machine memory),
+    /// or the authored ceiling when the machine recorded none. Rederived by the evidence.
+    #[serde(default)]
+    pub effective_memory_ceiling_bytes: u64,
+}
+
+impl ResourceUsageAttempt {
+    /// The effective ceiling under the plan's authored accuracy ceiling.
+    pub fn effective_memory_ceiling(&self, plan: &FeaResourcePlan) -> u64 {
+        let authored = plan.input.accuracy_ceiling.maximum_resident_bytes;
+        if self.machine_memory_bytes == 0 {
+            authored
+        } else {
+            authored.min(self.machine_memory_bytes)
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -228,7 +247,7 @@ impl ResourceUsageEvidence {
             ));
         }
         let mut overruns = Vec::new();
-        for attempt in &attempts {
+        for attempt in &mut attempts {
             attempt
                 .resources
                 .validate()
@@ -245,6 +264,12 @@ impl ResourceUsageEvidence {
             if !allocation_matches_plan(&attempt.resources.allocation, &plan.request) {
                 return Err(ResourcePlanningError::Invalid(
                     "resource usage attempt allocation differs from its plan".into(),
+                ));
+            }
+            attempt.effective_memory_ceiling_bytes = attempt.effective_memory_ceiling(plan);
+            if attempt.resources.allocation.memory_bytes > attempt.effective_memory_ceiling_bytes {
+                return Err(ResourcePlanningError::Invalid(
+                    "resource usage attempt allocation exceeds its effective memory ceiling".into(),
                 ));
             }
             let attempt_summary = ResourceAccountingSummary::aggregate(

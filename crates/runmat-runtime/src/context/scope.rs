@@ -677,6 +677,7 @@ mod tests {
             backend: runmat_execution::PoolBackend::LocalProcesses,
             resources: ResourceAssignment {
                 accelerator_leases: vec![lease],
+                memory_capacity_bytes: 0,
             },
         };
 

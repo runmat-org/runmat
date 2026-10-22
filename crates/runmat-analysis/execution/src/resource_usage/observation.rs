@@ -289,6 +289,7 @@ mod acceleration_resource_tests {
                 )
                 .unwrap(),
             ],
+            memory_capacity_bytes: 0,
         };
         let exact =
             ResourceAccounting::for_assigned_interval(request.clone(), &assignment, 1, 0, 0, 0)

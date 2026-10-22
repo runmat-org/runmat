@@ -123,6 +123,8 @@ fn fixture(
                 0,
             )
             .unwrap(),
+            machine_memory_bytes: 0,
+            effective_memory_ceiling_bytes: 0,
         })
         .collect::<Vec<_>>();
     let usage = record_resource_usage(

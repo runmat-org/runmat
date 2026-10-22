@@ -91,6 +91,11 @@ impl ResourceInventory {
 #[serde(deny_unknown_fields)]
 pub struct ResourceAssignment {
     pub accelerator_leases: Vec<AcceleratorDeviceLease>,
+    /// Memory inventory of the worker the attempt was placed on: the machine side of the
+    /// effective resident-memory ceiling, min(authored ceiling, machine capacity). Zero when the
+    /// placement recorded none.
+    #[serde(default)]
+    pub memory_capacity_bytes: u64,
 }
 
 impl ResourceAssignment {

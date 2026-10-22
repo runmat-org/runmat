@@ -85,10 +85,26 @@ impl Driver {
             ordinal_bytes.as_slice(),
             fence.as_slice(),
         ]);
+        // The machine capacity an attempt may use is its worker's memory, bounded by its pool.
+        let memory_capacity_bytes = self
+            .snapshot
+            .pools
+            .get(&task.submission.request.pool_id)
+            .and_then(|pool| {
+                pool.workers.get(&placement.worker_id).map(|worker| {
+                    worker
+                        .spec
+                        .resources
+                        .memory_bytes
+                        .min(pool.spec.resource_limit.memory_bytes)
+                })
+            })
+            .ok_or(RunnerError::UnknownWorker(placement.worker_id))?;
         let resource_assignment = scheduler::assignment_for(
             attempt_id,
             self.snapshot.driver_fence,
             &placement.accelerator_devices,
+            memory_capacity_bytes,
         )?;
         let request = AttemptRequest {
             id: attempt_id,

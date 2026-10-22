@@ -62,6 +62,7 @@ pub fn assignment_for(
     attempt_id: AttemptId,
     fencing_token: u64,
     devices: &[AcceleratorDevice],
+    memory_capacity_bytes: u64,
 ) -> RunnerResult<ResourceAssignment> {
     if fencing_token == 0 {
         return Err(RunnerError::Invalid(
@@ -73,7 +74,10 @@ pub fn assignment_for(
         .map(|device| AcceleratorDeviceLease::for_attempt(attempt_id, fencing_token, device))
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| RunnerError::Invalid(error.to_string()))?;
-    let assignment = ResourceAssignment { accelerator_leases };
+    let assignment = ResourceAssignment {
+        accelerator_leases,
+        memory_capacity_bytes,
+    };
     assignment
         .validate()
         .map_err(|error| RunnerError::Invalid(error.to_string()))?;

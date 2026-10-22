@@ -421,6 +421,7 @@ fn planned_attempt(
             worker_id: WorkerId::derive(&[b"response-spectrum-test-worker"]),
             resources: ResourceAccounting::for_reserved_interval(plan.request.clone(), 1, 0, 0, 0)
                 .unwrap(),
+            memory_capacity_bytes: 0,
         },
     }
 }

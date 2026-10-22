@@ -375,6 +375,8 @@ pub(super) fn execute(solved: &SolvedPipeline, recovered: &RecoveredPipeline) ->
             0,
         )
         .unwrap(),
+        machine_memory_bytes: 0,
+        effective_memory_ceiling_bytes: 0,
     };
     let artifact_objects = prepare_kernel_output(&assembly_outputs[0]);
     let manifest = runmat_analysis_fea::results::observation::ObservationArtifactManifest::from_canonical_bytes(
@@ -435,6 +437,8 @@ fn executed_attempt(
         plan: plan.identity,
         resources: ResourceAccounting::for_reserved_interval(plan.request.clone(), 1, 0, 0, 0)
             .unwrap(),
+        machine_memory_bytes: 0,
+        effective_memory_ceiling_bytes: 0,
     }
 }
 
