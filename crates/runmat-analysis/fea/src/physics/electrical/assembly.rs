@@ -71,11 +71,8 @@ impl ElectricalAssembly {
             let electrical = material.electrical.as_ref().ok_or_else(|| {
                 ElectricalStaticError::Material("missing electrical constitutive model".into())
             })?;
-            if !electrical.conductivity_frequency_response.is_empty() {
-                return Err(ElectricalStaticError::Unsupported(
-                    "frequency-dependent conductivity in a static analysis".into(),
-                ));
-            }
+            // A frequency response table describes the material in harmonic analyses; a
+            // static (DC) solve uses the reference values.
             // A standalone static solve has no temperature field: conductivity is the
             // material's value at its reference temperature. Coupled electrothermal solves
             // pass the conductivity evaluated at each element's temperature.

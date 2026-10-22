@@ -210,15 +210,8 @@ pub(crate) fn compile_canonical_input(
             .electrical
             .as_ref()
             .ok_or_else(|| MagnetostaticError::InvalidInput("missing permeability law".into()))?;
-        // No frequency/thermal/conductive coefficient is silently interpreted as
-        // a magnetic constitutive law. Linear isotropic permeability is explicit.
-        if !law.conductivity_frequency_response.is_empty()
-            || law.resistive_heating_coefficient != 0.0
-        {
-            return Err(MagnetostaticError::Unsupported(
-                "frequency/thermal magnetic material dependence".into(),
-            ));
-        }
+        // Magnetostatics uses only the permeability; a material's conductivity laws
+        // (temperature or frequency dependence) belong to the analyses that use conductivity.
         volumes.push(MagneticVolumeData {
             element_identity: element.stable_identity,
             permeability_h_per_m: VACUUM_PERMEABILITY_H_PER_M * law.relative_permeability,
