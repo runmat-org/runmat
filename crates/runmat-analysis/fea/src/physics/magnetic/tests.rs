@@ -347,6 +347,9 @@ fn recovered_curl_has_shared_face_normal_flux_continuity_and_global_flux_closure
     assert!(net.abs() <= 1e-12 * absolute);
 }
 
+// witness: FEA-EM-INPUT-001/magnetic_constraints @ magnetostatic/tet4/numerical_kernel; coverage: partial;
+//   boundary: A partially grounded boundary with insulated faces and one gauge is admitted and its
+//   energy rises against the fully grounded case; a boundary without ground is rejected; Tet4 only.
 #[test]
 fn insulated_faces_and_one_gauge_admit_a_partially_grounded_field() {
     // The fixture current runs parallel to the slab's left face. Insulating that face
@@ -375,6 +378,9 @@ fn insulated_faces_and_one_gauge_admit_a_partially_grounded_field() {
     assert!(solve_canonical_static(&ungrounded, &mesh, "potential", 1e-10).is_err());
 }
 
+// witness: FEA-EM-INPUT-001/magnetic_constraints @ magnetostatic/tet4/numerical_kernel; coverage: partial;
+//   boundary: A prescribed tangential vector potential on grounded faces reproduces the exact
+//   uniform flux density with gauge and energy-work closure on a Tet4 box.
 #[test]
 fn prescribed_tangential_potential_drives_the_exact_uniform_field() {
     // Box [0,L]^3 with A = (0, a x / L, 0): B = (0, 0, a / L). A = 0 on x = 0 and on the

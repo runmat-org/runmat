@@ -105,6 +105,43 @@ pub(crate) fn relations(
     Ok(relations.into_values().collect())
 }
 
+/// Sets every secondary node from its primaries (primaries are never secondaries).
+pub(crate) fn enforce(values: &mut [f64], relations: &[ScalarNodeRelation]) {
+    for relation in relations {
+        values[relation.secondary] = relation.offset
+            + relation
+                .primaries
+                .iter()
+                .map(|&(node, weight)| weight * values[node])
+                .sum::<f64>();
+    }
+}
+
+/// The residual of the reduced equations, T^T r, in full node order: each secondary node's
+/// residual moves to its primaries with the relation weights, and the secondary entry is zero.
+pub(crate) fn reduce_residual(residual: &[f64], relations: &[ScalarNodeRelation]) -> Vec<f64> {
+    let mut reduced = residual.to_vec();
+    for relation in relations {
+        let moved = residual[relation.secondary];
+        for &(node, weight) in &relation.primaries {
+            reduced[node] += weight * moved;
+        }
+        reduced[relation.secondary] = 0.0;
+    }
+    reduced
+}
+
+/// Relations of a correction that keeps already satisfied relations satisfied.
+pub(crate) fn homogeneous(relations: &[ScalarNodeRelation]) -> Vec<ScalarNodeRelation> {
+    relations
+        .iter()
+        .map(|relation| ScalarNodeRelation {
+            offset: 0.0,
+            ..relation.clone()
+        })
+        .collect()
+}
+
 /// The same relations for an increment u = x - x_ref: each offset absorbs the reference
 /// difference between the secondary node and its primaries.
 pub(crate) fn about_reference(

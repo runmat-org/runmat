@@ -1,13 +1,14 @@
 geometry frame {
     file = "./geometry/portal-frame.step"
     units = mm
-    region ground : edge { select id "edge_000001"; expect exactly_one }
+    // Source aliases follow the importer's persistent topology order, not the STEP entity order.
+    region girder : edge { select id "edge_000001"; expect exactly_one }
     region right_column : edge { select id "edge_000002"; expect exactly_one }
-    region girder : edge { select id "edge_000003"; expect exactly_one }
-    region left_column : edge { select id "edge_000004"; expect exactly_one }
-    region left_base : vertex { select id "vertex_000001"; expect exactly_one }
-    region right_base : vertex { select id "vertex_000002"; expect exactly_one }
-    region left_top : vertex { select id "vertex_000004"; expect exactly_one }
+    region left_column : edge { select id "edge_000003"; expect exactly_one }
+    region ground : edge { select id "edge_000004"; expect exactly_one }
+    region left_top : vertex { select id "vertex_000001"; expect exactly_one }
+    region left_base : vertex { select id "vertex_000002"; expect exactly_one }
+    region right_base : vertex { select id "vertex_000003"; expect exactly_one }
 }
 
 mesh frame on geometry.frame {

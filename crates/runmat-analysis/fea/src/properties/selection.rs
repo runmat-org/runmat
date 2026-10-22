@@ -1,6 +1,6 @@
 //! Borrowed outputs of the single property-owner selector. Profiling and materialization consume
 //! these same records; neither consumer is allowed to select a different constitutive owner.
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
 use runmat_analysis_core::{
     BeamSectionModel, HomogeneousShellSectionModel, LaminatePlyModel, LaminateShellSectionModel,
@@ -240,6 +240,17 @@ pub(super) struct OwnedProperties {
     pub beams: BTreeMap<StableDigest, CompiledBeamProperty>,
     pub shells: BTreeMap<StableDigest, CompiledShellProperty>,
     pub audit: Vec<CompiledPropertyAudit>,
+    /// One shared owner per selected source material, keyed by its address in the model.
+    shared_materials: std::collections::HashMap<usize, Arc<MaterialModel>>,
+}
+
+impl OwnedProperties {
+    fn shared_material(&mut self, material: &MaterialModel) -> Arc<MaterialModel> {
+        self.shared_materials
+            .entry(material as *const MaterialModel as usize)
+            .or_insert_with(|| Arc::new(material.clone()))
+            .clone()
+    }
 }
 
 impl SelectedProperty<'_> {
@@ -263,6 +274,7 @@ impl SelectedProperty<'_> {
                 assignment_index,
                 assignment,
             } => {
+                let material = output.shared_material(material);
                 let owners = if is_cell {
                     &mut output.cells
                 } else {
@@ -273,7 +285,7 @@ impl SelectedProperty<'_> {
                     CompiledElementMaterial {
                         element_id,
                         element_identity: identity,
-                        material: material.clone(),
+                        material,
                     },
                 );
                 output

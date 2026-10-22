@@ -257,6 +257,8 @@ pub(super) fn execute_thermal_with_options(
             temperature_gradient_snapshots: thermal_run.temperature_gradient_snapshots,
             heat_flux_snapshots: thermal_run.heat_flux_snapshots,
             energy_storage_rate_snapshots: thermal_run.energy_storage_rate_snapshots,
+            interface_node_ids: thermal_run.interface_node_ids,
+            interface_temperature_snapshots: thermal_run.interface_temperature_snapshots,
             residual_norms: thermal_run.residual_norms,
             reference_temperature_k: thermal_run.reference_temperature_k,
             initial_state: thermal_run.initial_state,

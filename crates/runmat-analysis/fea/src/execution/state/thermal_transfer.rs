@@ -20,10 +20,53 @@ use crate::properties::compile_structural_property_map;
 #[derive(Clone, Debug, PartialEq)]
 pub struct BoundThermalStateTransfer {
     pub transition: CanonicalStateTransition,
-    pub nodal_temperature_k: Vec<f64>,
+    pub temperature: SolvedTemperatureField,
     pub reference_temperature_k: f64,
     pub source_time_s: f64,
 }
+
+/// A solved temperature field on the receiving mesh. Nodes of a finite-conductance thermal
+/// interface carry two temperatures; the elements of the interface's second side read the
+/// second one.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SolvedTemperatureField {
+    /// Mesh node order; the first side's temperature at interface nodes.
+    pub nodal_temperature_k: Vec<f64>,
+    /// Second-side dofs and their temperatures (after the mesh nodes), when interfaces split
+    /// nodes.
+    sides: Option<(crate::physics::thermal_interface::InterfaceDofs, Vec<f64>)>,
+}
+
+impl SolvedTemperatureField {
+    pub fn nodal(nodal_temperature_k: Vec<f64>) -> Self {
+        Self {
+            nodal_temperature_k,
+            sides: None,
+        }
+    }
+
+    /// The temperature an element reads at one of its nodes (mesh element and node order).
+    pub fn at(&self, element: usize, node: usize) -> f64 {
+        match &self.sides {
+            Some((dofs, values)) => values[dofs.dof(element, node)],
+            None => self.nodal_temperature_k[node],
+        }
+    }
+
+    pub fn node_count(&self) -> usize {
+        self.nodal_temperature_k.len()
+    }
+
+    pub fn all_positive_finite(&self) -> bool {
+        let finite = |value: &f64| value.is_finite() && *value > 0.0;
+        self.nodal_temperature_k.iter().all(finite)
+            && self
+                .sides
+                .as_ref()
+                .is_none_or(|(_, values)| values.iter().all(finite))
+    }
+}
+
 
 impl BoundThermalStateTransfer {
     pub fn bind(
@@ -116,6 +159,45 @@ impl BoundThermalStateTransfer {
                 })
             })
             .collect::<AnalysisExecutionResult<Vec<_>>>()?;
+        let interface = source_payload.interface_temperature_by_node()?;
+        let temperature = if interface.is_empty() {
+            SolvedTemperatureField::nodal(nodal_temperature_k)
+        } else {
+            let projection = crate::topology::AnalysisProjection::derive(target_mesh)
+                .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+            let (_, dofs) = crate::physics::thermal_interface::solid_conduction(
+                &projection,
+                &model.interfaces,
+            )
+            .map_err(AnalysisExecutionError::Invalid)?;
+            if dofs.second().len() != interface.len()
+                || dofs
+                    .second()
+                    .iter()
+                    .zip(&interface)
+                    .any(|(&(node, _), &(id, _))| projection.nodes[node].node_id != id)
+            {
+                return Err(AnalysisExecutionError::Invalid(
+                    "thermal state interface nodes differ from the receiving model's interfaces"
+                        .into(),
+                ));
+            }
+            let values = dofs
+                .join(
+                    &nodal_temperature_k,
+                    &dofs
+                        .second()
+                        .iter()
+                        .zip(&interface)
+                        .map(|(&(node, _), &(_, value))| (node, value))
+                        .collect::<Vec<_>>(),
+                )
+                .map_err(AnalysisExecutionError::Invalid)?;
+            SolvedTemperatureField {
+                nodal_temperature_k,
+                sides: Some((dofs, values)),
+            }
+        };
         let properties =
             compile_structural_property_map(model, Some(target_mesh)).map_err(|error| {
                 AnalysisExecutionError::Invalid(format!(
@@ -129,7 +211,7 @@ impl BoundThermalStateTransfer {
         // physical load integration and recovery data; never construct a second unused copy.
         Ok(Self {
             transition,
-            nodal_temperature_k,
+            temperature,
             reference_temperature_k,
             source_time_s: source_payload.sample_time_s,
         })

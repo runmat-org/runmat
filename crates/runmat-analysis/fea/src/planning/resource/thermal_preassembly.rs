@@ -141,8 +141,10 @@ impl ThermalPreassemblyResourceFacts {
         };
         let realization = ThermalRealizationResourceFacts::derive(model, step)?;
         let metadata = ThermalMetadataResourceFacts::derive(model, step, schedule)?;
-        let field_construction = ThermalFieldConstructionResourceFacts::derive(mesh, schedule)?;
-        let manifest_catalog = ThermalManifestCatalogResourceFacts::derive(mesh, schedule)?;
+        let field_construction =
+            ThermalFieldConstructionResourceFacts::derive(mesh, schedule, history.interface_nodes)?;
+        let manifest_catalog =
+            ThermalManifestCatalogResourceFacts::derive(mesh, schedule, history.interface_nodes)?;
         let manifest_metadata = ThermalManifestMetadataResourceFacts::derive(
             identity,
             mesh,
@@ -150,10 +152,11 @@ impl ThermalPreassemblyResourceFacts {
             &metadata,
             &sources,
             &manifest_catalog,
+            history.interface_nodes,
         )?;
         let catalog_bytes = manifest_catalog.reservation_bytes()?.0;
         let manifest_retained = ThermalManifestRetainedResourceFacts::derive(
-            model, step, mesh, schedule, identity, &metadata, &sources,
+            model, step, mesh, schedule, identity, &metadata, &sources, history.interface_nodes,
         )?;
         let retained_bytes = manifest_retained.reservation_bytes()?.0;
         let base = component_bytes(

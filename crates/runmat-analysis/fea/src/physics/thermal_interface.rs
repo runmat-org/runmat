@@ -140,8 +140,8 @@ pub(crate) fn solid_conduction(
 
 /// Temperature degrees of freedom: one per node, plus a second, side-owned one at every node of
 /// a finite-conductance interface, used by the elements of the interface's second side.
-#[derive(Clone, Debug)]
-pub(crate) struct InterfaceDofs {
+#[derive(Clone, Debug, PartialEq)]
+pub struct InterfaceDofs {
     nodes: usize,
     /// (projection node, second-side dof), sorted by node.
     second: Vec<(usize, usize)>,

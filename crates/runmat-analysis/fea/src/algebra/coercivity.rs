@@ -159,7 +159,13 @@ impl CoercivityCertificate {
                 let column = matrix.pattern().column(entry);
                 let value = matrix.values()[entry];
                 let transpose = matrix.get(column, row);
-                let symmetry_scale = value.abs().max(transpose.abs()).max(1.0);
+                // An entry of a symmetric positive operator is bounded by sqrt(a_ii a_jj); the
+                // roundoff of an assembled or reduced entry scales with that bound, not with the
+                // entry, which cancellation can make arbitrarily small.
+                let symmetry_scale = value
+                    .abs()
+                    .max(transpose.abs())
+                    .max((diagonal[row] * diagonal[column]).sqrt());
                 if (value - transpose).abs() > symmetry_scale * SYMMETRY_RELATIVE_TOLERANCE {
                     return Err(CoercivityError::AsymmetricValues);
                 }
@@ -433,6 +439,14 @@ mod tests {
             CoercivityCertificate::prove(&indefinite).map(|(c, _)| c),
             Err(CoercivityError::NonPositivePivot { .. })
         ));
+    }
+
+    #[test]
+    fn roundoff_asymmetry_is_measured_against_the_coupled_diagonals() {
+        // A reduced coupling entry that cancels to almost zero keeps the roundoff of the
+        // 1e11-scale terms it was formed from; that is not an asymmetric operator.
+        let reduced = matrix([[4.0e11, 1.0e-6, 0.0], [-1.0e-6, 4.0e11, 0.0], [0.0, 0.0, 1.0]]);
+        assert!(CoercivityCertificate::prove(&reduced).is_ok());
     }
 
     #[test]

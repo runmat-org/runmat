@@ -445,6 +445,9 @@ fn missing_anchors_conflicts_unsupported_intent_and_invalid_material_fail_closed
 //   boundary: A terminal_voltage load holds its terminal like a prescribed potential for
 //   electrostatics and steady conduction on a two-cell Tet4 slab; terminal current, charge,
 //   equipotential and floating inputs are not covered.
+// witness: FEA-EM-INPUT-001/excitation @ electrostatic/tet4/numerical_kernel, electrical_conduction/tet4/numerical_kernel; coverage: partial;
+//   boundary: A constant terminal-voltage signal on a face reproduces the prescribed-potential
+//   field exactly on a Tet4 slab; no time history, phasor or Tet10 case.
 #[test]
 fn terminal_voltage_load_holds_its_terminal_like_a_prescribed_potential() {
     for equation in [
@@ -504,6 +507,9 @@ fn terminal_voltage_load_holds_its_terminal_like_a_prescribed_potential() {
     }
 }
 
+// witness: FEA-EM-INPUT-001/scalar_constraints @ electrical_conduction/tet4/numerical_kernel; coverage: partial;
+//   boundary: Integral-current and floating terminals solved by superposition reach the common
+//   potential and current balance of a Tet4 conduction slab; no electrostatic charge case.
 #[test]
 fn integral_current_and_floating_terminals_find_their_common_potential() {
     let mesh = mesh(ElementOrder::Tet4, 2);
@@ -572,6 +578,9 @@ fn integral_current_and_floating_terminals_find_their_common_potential() {
     assert!(response.potential_v.iter().all(|v| (v - 3.0).abs() < 1e-8));
 }
 
+// witness: FEA-EM-INPUT-001/excitation @ electrical_conduction/tet4/numerical_kernel; coverage: partial;
+//   boundary: A face current density realizes its integrated normal current as the grounded
+//   terminal's outward flux on a Tet4 slab; no time history or Tet10 case.
 #[test]
 fn face_current_density_injects_its_normal_flux() {
     let mesh = mesh(ElementOrder::Tet4, 2);
@@ -633,6 +642,9 @@ fn face_current_density_injects_its_normal_flux() {
     assert_relative(left.outward_flux, 4.0 * area, 1e-8);
 }
 
+// witness: FEA-EM-INPUT-001/scalar_constraints @ electrostatic/tet4/numerical_kernel; coverage: partial;
+//   boundary: Translation-periodic faces by Galerkin elimination reproduce the both-faces-grounded
+//   charged-slab field and pass all charge flux to the grounded face; Tet4 only.
 #[test]
 fn periodic_faces_share_their_potential() {
     // A charged slab grounded on both faces, against the same slab grounded on the left and

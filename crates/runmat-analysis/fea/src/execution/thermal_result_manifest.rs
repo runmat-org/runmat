@@ -41,7 +41,12 @@ pub struct ThermalSolverResultManifest {
     pub energy_balances: Vec<crate::contracts::ThermalEnergyBalance>,
     pub reference_temperature_k: f64,
     pub initial_state: ThermalInitialStateEvidence,
-    pub fields: Vec<[RecoveredFieldArtifactEntry; 4]>,
+    /// Mesh nodes of finite-conductance thermal interfaces (empty without one).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub interface_node_ids: Vec<u64>,
+    /// Per sample: temperature, gradient, flux, storage rate, then the second-side interface
+    /// temperature when `interface_node_ids` is not empty.
+    pub fields: Vec<Vec<RecoveredFieldArtifactEntry>>,
 }
 
 fn invalid(error: impl std::fmt::Display) -> AnalysisExecutionError {
@@ -60,7 +65,9 @@ impl ThermalSolverResultManifest {
             &result.temperature_gradient_snapshots,
             &result.heat_flux_snapshots,
             &result.energy_storage_rate_snapshots,
+            &result.interface_temperature_snapshots,
         ];
+        let count = if result.interface_node_ids.is_empty() { 4 } else { 5 };
         let mut fields = Vec::with_capacity(result.time_points_s.len());
         for (ordinal, &time) in result.time_points_s.iter().enumerate() {
             let entry = |index: usize| -> AnalysisExecutionResult<_> {
@@ -80,11 +87,16 @@ impl ThermalSolverResultManifest {
                     partitions,
                 })
             };
-            fields.push([entry(0)?, entry(1)?, entry(2)?, entry(3)?]);
+            fields.push((0..count).map(entry).collect::<AnalysisExecutionResult<Vec<_>>>()?);
         }
-        let identity = result.metadata().identity(
-            super::thermal_result::identity::ManifestFieldIdentities(&fields),
-        )?;
+        let identity =
+            result
+                .metadata()
+                .identity(super::thermal_result::identity::FieldIdentities {
+                    samples: &fields,
+                    interface_node_ids: &result.interface_node_ids,
+                    identities: super::thermal_result::identity::manifest_entry_identities,
+                })?;
         let run = &result.run;
         let manifest = Self {
             schema_version: 1,
@@ -123,6 +135,7 @@ impl ThermalSolverResultManifest {
             energy_balances: result.energy_balances.clone(),
             reference_temperature_k: result.reference_temperature_k,
             initial_state: result.initial_state.clone(),
+            interface_node_ids: result.interface_node_ids.clone(),
             fields,
         };
         manifest.validate()?;
@@ -177,7 +190,11 @@ impl ThermalSolverResultManifest {
         identities
             .try_reserve_exact(partition_count)
             .map_err(|_| invalid("partition identity scratch allocation failed"))?;
+        let field_count = if self.interface_node_ids.is_empty() { 4 } else { 5 };
         for (ordinal, entries) in self.fields.iter().enumerate() {
+            if entries.len() != field_count {
+                return Err(invalid("thermal sample has the wrong field inventory"));
+            }
             for (index, entry) in entries.iter().enumerate() {
                 if entry.definition != definition(index, ordinal)?
                     || entry.sample
@@ -190,10 +207,12 @@ impl ThermalSolverResultManifest {
                         "field definition or sample differs from thermal history",
                     ));
                 }
-                let count = if index == 0 {
-                    self.ordered_node_ids.len()
-                } else {
-                    self.ordered_element_ids.len()
+                let count = match index {
+                    0 => self.ordered_node_ids.len(),
+                    crate::physics::thermal::history_fields::INTERFACE => {
+                        self.interface_node_ids.len()
+                    }
+                    _ => self.ordered_element_ids.len(),
                 };
                 let mut next = 0usize;
                 for (position, partition) in entry.partitions.iter().enumerate() {
@@ -222,9 +241,11 @@ impl ThermalSolverResultManifest {
         drop(identities);
         if self
             .metadata()
-            .identity(super::thermal_result::identity::ManifestFieldIdentities(
-                &self.fields,
-            ))?
+            .identity(super::thermal_result::identity::FieldIdentities {
+                samples: &self.fields,
+                interface_node_ids: &self.interface_node_ids,
+                identities: super::thermal_result::identity::manifest_entry_identities,
+            })?
             != self.identity
         {
             return Err(invalid("numerical identity does not converge"));
@@ -240,6 +261,20 @@ impl ThermalSolverResultManifest {
             .last()
             .map(|fields| &fields[0])
             .ok_or_else(|| invalid("missing terminal temperature"))
+    }
+
+    /// The terminal temperature and, with a finite-conductance interface, the terminal
+    /// second-side interface temperature: the fields a published thermal state carries.
+    pub fn terminal_state_fields(&self) -> AnalysisExecutionResult<Vec<&RecoveredFieldArtifactEntry>> {
+        let last = self
+            .fields
+            .last()
+            .ok_or_else(|| invalid("missing terminal temperature"))?;
+        let mut fields = vec![&last[0]];
+        if let Some(interface) = last.get(crate::physics::thermal::history_fields::INTERFACE) {
+            fields.push(interface);
+        }
+        Ok(fields)
     }
     pub fn canonical_bytes(&self) -> AnalysisExecutionResult<Vec<u8>> {
         self.validate()?;
@@ -276,33 +311,52 @@ impl ThermalSolverResultManifest {
         Ok(())
     }
 
+    /// `partitions` covers `terminal_state_fields` in order.
     pub fn publish_terminal(
         &self,
         request: &SemanticStatePublicationRequest,
         partitions: Vec<RecoveredFieldPartition>,
     ) -> AnalysisExecutionResult<CanonicalSemanticState> {
         self.validate_publication_request(request)?;
-        let entry = self.terminal_temperature()?;
-        if partitions.len() != entry.partitions.len()
-            || partitions.iter().zip(&entry.partitions).any(|(p, d)| {
-                p.identity != d.partition
-                    || p.source_indices.first() != Some(&d.first_source_index)
-                    || p.source_indices.len() != d.entity_count
-            })
+        let entries = self.terminal_state_fields()?;
+        let expected = entries.iter().map(|entry| entry.partitions.len()).sum::<usize>();
+        if partitions.len() != expected
+            || partitions
+                .iter()
+                .zip(entries.iter().flat_map(|entry| entry.partitions.iter()))
+                .any(|(p, d)| {
+                    p.identity != d.partition
+                        || p.source_indices.first() != Some(&d.first_source_index)
+                        || p.source_indices.len() != d.entity_count
+                })
         {
             return Err(invalid(
                 "terminal partition inventory differs from manifest",
             ));
         }
-        let temperature = reconstruct_recovered_field(
-            entry.field,
-            entry.definition.clone(),
-            entry.sample,
-            partitions,
-            self.ordered_node_ids.len(),
-        )
-        .map_err(invalid)?
-        .into_storage();
+        let mut partitions = partitions.into_iter();
+        let mut fields = Vec::with_capacity(entries.len());
+        for (index, entry) in entries.iter().enumerate() {
+            let taken = partitions.by_ref().take(entry.partitions.len()).collect();
+            fields.push(
+                reconstruct_recovered_field(
+                    entry.field,
+                    entry.definition.clone(),
+                    entry.sample,
+                    taken,
+                    if index == 0 {
+                        self.ordered_node_ids.len()
+                    } else {
+                        self.interface_node_ids.len()
+                    },
+                )
+                .map_err(invalid)?
+                .into_storage(),
+            );
+        }
+        let mut fields = fields.into_iter();
+        let temperature = fields.next().ok_or_else(|| invalid("missing terminal temperature"))?;
+        let interface_temperature = fields.next();
         CanonicalSemanticState::new(CanonicalSemanticStateInput {
             producer: request.producer,
             declaration: request.declaration.clone(),
@@ -319,6 +373,8 @@ impl ThermalSolverResultManifest {
                         .iter()
                         .copied()
                         .fold(0.0_f64, f64::max),
+                    interface_node_ids: self.interface_node_ids.clone(),
+                    interface_temperature,
                 }),
             },
         })

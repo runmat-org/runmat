@@ -19,6 +19,10 @@ pub(super) fn contextual_reference_type(path: &[String]) -> Option<FeaType> {
         // The containing study resolves these against its bound model closure during
         // procedure lowering, including unknown/ambiguous-name diagnostics.
         [namespace, _] if namespace == "load_case" => Some(FeaType::LoadCase),
+        // A coupling's reference point as a force or moment target; model realization binds it.
+        [namespace, _, member] if namespace == "constraint" && member == "reference_point" => {
+            Some(FeaType::Unknown)
+        }
         [analysis, _, state, _] if analysis == "analysis" && state == "state" => {
             Some(FeaType::Unknown)
         }

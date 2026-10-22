@@ -165,6 +165,9 @@ pub(in crate::analysis::storage) fn commit(
         evictions,
     )
     .map_err(|e| e.with_publication(receipt.clone()))?;
+    for id in prepared.runs.keys() {
+        store.record_run_attempt(id, identity)?;
+    }
     Ok(receipt)
 }
 pub(in crate::analysis::storage) fn load(

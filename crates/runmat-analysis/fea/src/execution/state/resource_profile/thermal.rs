@@ -28,6 +28,8 @@ struct ThermalState<'a, T: Serialize> {
     reference_temperature_k: f64,
     sample_time_s: f64,
     maximum_relative_linear_residual: f64,
+    interface_node_ids: &'a [u64],
+    interface_temperature: Option<T>,
 }
 
 /// Profile only the state encoding/materialization, without reading numerical partitions.
@@ -51,6 +53,16 @@ pub(super) fn profile(
     // are lazy serialization input, not a fabricated published state or a numerical buffer.
     let values = RepeatedTemperatures(count);
     let temperature = AnalysisField::host_f64_serialization(definition.field_id(), &shape, &values);
+    let interface_fields = manifest.terminal_state_fields()?;
+    let interface_values = RepeatedTemperatures(manifest.interface_node_ids.len());
+    let interface_shape = [manifest.interface_node_ids.len()];
+    let interface_temperature = interface_fields.get(1).map(|entry| {
+        AnalysisField::host_f64_serialization(
+            entry.definition.field_id(),
+            &interface_shape,
+            &interface_values,
+        )
+    });
     let payload = ThermalPayload {
         kind: "thermal",
         state: ThermalState {
@@ -67,6 +79,8 @@ pub(super) fn profile(
                 .iter()
                 .copied()
                 .fold(0.0_f64, f64::max),
+            interface_node_ids: &manifest.interface_node_ids,
+            interface_temperature,
         },
     };
     super::profile_state_payload(request, &payload)
