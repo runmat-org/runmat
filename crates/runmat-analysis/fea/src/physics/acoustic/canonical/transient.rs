@@ -202,6 +202,16 @@ pub fn solve_canonical_transient(
             "frequency-domain loss factor in a time-domain acoustic solve".into(),
         ));
     }
+    if model.boundaries.iter().any(|boundary| {
+        matches!(
+            boundary.operator,
+            runmat_analysis_core::BoundaryOperator::AcousticImpedanceLaw { .. }
+        )
+    }) {
+        return Err(AcousticHarmonicError::Unsupported(
+            "frequency-dependent impedance law in a time-domain acoustic solve".into(),
+        ));
+    }
     let n = assembly.projection.nodes.len();
     let sample =
         |assembly: AcousticAssembly, time: f64| sample_sources(assembly, model, step, time);

@@ -90,6 +90,11 @@ pub(super) fn boundary_summary(
                 impedance_boundary_count += 1;
                 impedance_sum += impedance.pascal_seconds_per_meter.max(1.0);
             }
+            // A law has no single value; it is counted at the medium's characteristic impedance.
+            BoundaryOperator::AcousticImpedanceLaw { .. } => {
+                impedance_boundary_count += 1;
+                impedance_sum += characteristic_impedance_pa_s_per_m.max(1.0);
+            }
             _ => {}
         }
     }

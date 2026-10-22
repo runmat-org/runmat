@@ -598,3 +598,80 @@ fn pressure_velocity_overlap_is_rejected_in_both_authored_orders() {
     }
 }
 mod periodic;
+
+// witness: REG-ACOUS-005 (complex, frequency-dependent impedance)
+#[test]
+fn complex_impedance_termination_converges_to_the_two_wave_duct_solution() {
+    // p(0) = 1, p(L) = Z v_n(L), iωρ v = −∂p/∂x: p = A e^{−ikx} + B e^{ikx}.
+    let (rho, c, f) = (3.0, 2.0, 0.2);
+    let omega = std::f64::consts::TAU * f;
+    let k = omega / c;
+    let (r, x) = (rho * c * 0.6, -rho * c * 0.8);
+    let z = C(r, x);
+    let e = |phase: f64| C(phase.cos(), phase.sin());
+    // At x = 1: p = A e⁻ + B e⁺, p' = −ik A e⁻ + ik B e⁺, and p + Z p'/(iωρ) = 0.
+    // With A + B = 1: A (e⁻ − (Z k/(ωρ)) e⁻) + B (e⁺ + (Z k/(ωρ)) e⁺) = 0.
+    let zk = z.mul(C(k / (omega * rho), 0.0));
+    let (em, ep) = (e(-k), e(k));
+    let a_coefficient = em.mul(C(1.0 - zk.0, -zk.1));
+    let b_coefficient = ep.mul(C(1.0 + zk.0, zk.1));
+    // A = b/(b − a), B = −a/(b − a)
+    let denominator = C(b_coefficient.0 - a_coefficient.0, b_coefficient.1 - a_coefficient.1);
+    let a = b_coefficient.div(denominator);
+    let b = C(-a_coefficient.0, -a_coefficient.1).div(denominator);
+    let exact = |position: f64| {
+        let left = a.mul(e(-k * position));
+        let right = b.mul(e(k * position));
+        C(left.0 + right.0, left.1 + right.1)
+    };
+    let mut errors = Vec::new();
+    for cells in [2, 4, 8] {
+        let mesh = slab_mesh(cells);
+        let mut model = model();
+        model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
+        prescribe(&mut model, RegionTarget::boundary("slab_left"), 1.0);
+        model.boundaries.push(AnalysisBoundary {
+            boundary_id: "lined_end".into(),
+            target: RegionTarget::boundary("slab_right"),
+            operator: BoundaryOperator::AcousticImpedanceLaw {
+                law: runmat_analysis_core::AcousticImpedanceLaw::Table {
+                    frequencies_hz: vec![0.1, 0.3],
+                    resistance_pa_s_per_m: vec![r, r],
+                    reactance_pa_s_per_m: vec![x, x],
+                },
+            },
+        });
+        let result = solve_canonical_harmonic(
+            &model,
+            &mesh,
+            "acoustic",
+            Frequency::new(f),
+            AcousticHarmonicPolicy {
+                relative_tolerance: 1e-11,
+                ..Default::default()
+            },
+            1e-8,
+        )
+        .unwrap();
+        let error = (result
+            .projection
+            .nodes
+            .iter()
+            .zip(&result.pressure_pa)
+            .map(|(node, p)| {
+                let exact = exact(node.coordinates_m[0]);
+                (p.real - exact.0).powi(2) + (p.imaginary - exact.1).powi(2)
+            })
+            .sum::<f64>()
+            / result.pressure_pa.len() as f64)
+            .sqrt();
+        errors.push(error);
+        assert!(result.mean_impedance_loss_w > 0.0);
+        assert!(result.power_relative_error < 1e-9);
+    }
+    assert!(
+        errors.windows(2).all(|pair| pair[0] / pair[1] > 3.0),
+        "{errors:?}"
+    );
+    assert!(errors[2] < 0.004, "{errors:?}");
+}

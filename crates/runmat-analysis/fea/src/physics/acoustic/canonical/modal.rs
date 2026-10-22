@@ -136,6 +136,7 @@ pub fn solve_canonical_modal(
         match boundary.operator {
             BoundaryOperator::AcousticRigidWall => {}
             BoundaryOperator::AcousticImpedance { .. }
+            | BoundaryOperator::AcousticImpedanceLaw { .. }
             | BoundaryOperator::AcousticRadiation
             | BoundaryOperator::AcousticSphericalRadiation { .. } => {
                 return Err(AcousticHarmonicError::Unsupported(
