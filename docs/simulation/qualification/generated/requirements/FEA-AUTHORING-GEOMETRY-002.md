@@ -1,6 +1,6 @@
 # FEA-AUTHORING-GEOMETRY-002: Exact geometry, persistent topology and engineering exchange
 
-0 PASS, 18 PARTIAL, 3 FAIL, 26 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 21 PARTIAL, 0 FAIL, 26 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## geometry_source_forms
 
@@ -60,7 +60,7 @@ Evidence kind: SemanticRealization. Criterion: Feature-derived selection must so
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-geometry-io[lib]::occt::evaluator::tests::persistent_entity_names_reject_ambiguous_coincident_topology` (crates/runmat-geometry/io/src/occt/evaluator/tests.rs:553) - Persistent entity names reject ambiguous coincident topology on the OCCT evaluator; feature-derived naming across booleans is covered by the feature tests. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-geometry-io[lib]::occt::evaluator::tests::persistent_entity_names_reject_ambiguous_coincident_topology` (crates/runmat-geometry/io/src/occt/evaluator/tests.rs:554) - Persistent entity names reject ambiguous coincident topology on the OCCT evaluator; feature-derived naming across booleans is covered by the feature tests. |
 
 ## feature_lineage_inventory
 
@@ -68,7 +68,7 @@ Evidence kind: SemanticRealization. Criterion: Every feature result publishes th
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-geometry-io[lib]::occt::feature_tests::boolean_history_projects_authored_regions_to_the_final_exact_topology` (crates/runmat-geometry/io/src/occt/feature_tests.rs:215) - Boolean history projects authored regions onto the final exact topology.<br>`runmat-geometry-io[lib]::occt::feature_tests::feature_lineage_merges_shared_ancestors_across_boolean_branches` (crates/runmat-geometry/io/src/occt/feature_tests.rs:290) - Feature lineage merges shared ancestors across boolean branches; the full per-operation entity inventory and canonical order are not asserted. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-geometry-io[lib]::occt::feature_tests::boolean_history_projects_authored_regions_to_the_final_exact_topology` (crates/runmat-geometry/io/src/occt/feature_tests.rs:217) - Boolean history projects authored regions onto the final exact topology.<br>`runmat-geometry-io[lib]::occt::feature_tests::feature_lineage_merges_shared_ancestors_across_boolean_branches` (crates/runmat-geometry/io/src/occt/feature_tests.rs:293) - Feature lineage merges shared ancestors across boolean branches; the full per-operation entity inventory and canonical order are not asserted. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |
@@ -80,7 +80,7 @@ Evidence kind: SemanticRealization. Criterion: Imported, constructed, derived, a
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| shared_infrastructure | mesh_independent | source_check | FAIL | `runmat-geometry-io[lib]::occt::feature_tests::constructed_materialization_and_result_regions_share_the_exact_artifact` (crates/runmat-geometry/io/src/occt/feature_tests.rs:166) - Constructed materialization and result regions share one exact artifact; derived and generated closure are covered by sibling tests. |
+| shared_infrastructure | mesh_independent | source_check | PARTIAL | `runmat-geometry-io[lib]::occt::feature_tests::constructed_materialization_and_result_regions_share_the_exact_artifact` (crates/runmat-geometry/io/src/occt/feature_tests.rs:167) - Constructed materialization and result regions share one exact artifact; derived and generated closure are covered by sibling tests. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | native_process | OPEN |  |
 | shared_infrastructure | canonical_mixed_topology | durable | OPEN |  |

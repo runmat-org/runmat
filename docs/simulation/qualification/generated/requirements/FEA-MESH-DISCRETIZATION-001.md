@@ -99,6 +99,6 @@ Evidence kind: IndependentReference. Criterion: A differential comparison agains
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
 | shared_infrastructure | canonical_mixed_topology | numerical_kernel | OPEN |  |
-| shared_infrastructure | canonical_mixed_topology | native_process | FAIL | `runmat-execution-runner-native[test:occt_exact_meshing]::differential::runmat_and_independent_meshers_agree_on_box_invariants` (crates/runmat-execution-runner-native/tests/occt_exact_meshing/differential.rs:19) - RunMat and the OCCT incremental mesher agree on box invariants (volume and gradient energy); box only, no curved or real part. |
+| shared_infrastructure | canonical_mixed_topology | native_process | FAIL | `runmat-execution-runner-native[test:occt_exact_meshing]::differential::runmat_and_independent_meshers_agree_on_box_invariants` (crates/runmat-execution-runner-native/tests/occt_exact_meshing/differential.rs:20) - RunMat and the OCCT incremental mesher agree on box invariants (volume and gradient energy); box only, no curved or real part. |
 | shared_infrastructure | canonical_mixed_topology | public_study | OPEN |  |
 

@@ -1,7 +1,7 @@
 {
   "requirements": [
     {
-      "fail": 3,
+      "fail": 0,
       "id": "FEA-AUTHORING-GEOMETRY-002",
       "obligations": [
         {
@@ -213,16 +213,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Persistent entity names reject ambiguous coincident topology on the OCCT evaluator; feature-derived naming across booleans is covered by the feature tests.",
-                  "line": 553,
+                  "line": 554,
                   "name": "occt::evaluator::tests::persistent_entity_names_reject_ambiguous_coincident_topology",
                   "package": "runmat-geometry-io",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-geometry/io/src/occt/evaluator/tests.rs",
                   "target": "Library"
                 }
@@ -239,27 +237,23 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Boolean history projects authored regions onto the final exact topology.",
-                  "line": 215,
+                  "line": 217,
                   "name": "occt::feature_tests::boolean_history_projects_authored_regions_to_the_final_exact_topology",
                   "package": "runmat-geometry-io",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-geometry/io/src/occt/feature_tests.rs",
                   "target": "Library"
                 },
                 {
                   "boundary": "Feature lineage merges shared ancestors across boolean branches; the full per-operation entity inventory and canonical order are not asserted.",
-                  "line": 290,
+                  "line": 293,
                   "name": "occt::feature_tests::feature_lineage_merges_shared_ancestors_across_boolean_branches",
                   "package": "runmat-geometry-io",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-geometry/io/src/occt/feature_tests.rs",
                   "target": "Library"
                 }
@@ -304,16 +298,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Constructed materialization and result regions share one exact artifact; derived and generated closure are covered by sibling tests.",
-                  "line": 166,
+                  "line": 167,
                   "name": "occt::feature_tests::constructed_materialization_and_result_regions_share_the_exact_artifact",
                   "package": "runmat-geometry-io",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-geometry/io/src/occt/feature_tests.rs",
                   "target": "Library"
                 }
@@ -732,7 +724,7 @@
         }
       ],
       "open": 26,
-      "partial": 18,
+      "partial": 21,
       "pass": 0,
       "tagged": 0,
       "title": "Exact geometry, persistent topology and engineering exchange"
@@ -32162,7 +32154,7 @@
       "title": "Fluid loads on structures and two-way FSI"
     },
     {
-      "fail": 4,
+      "fail": 0,
       "id": "FEA-MESH-GEOMETRY-001",
       "obligations": [
         {
@@ -32171,16 +32163,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "A public NIST ACIS STEP part imports with one body, solid, shell, six faces, twelve edges and eight vertices and kernel mass-property volume equal to the reference within 1e-12; IGES and BREP and the rest of the corpus are not asserted here.",
-                  "line": 130,
+                  "line": 132,
                   "name": "public_industrial_step_imports_exact_topology_and_mass_properties",
                   "package": "runmat-geometry-io",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-geometry/io/tests/external_cad_corpus.rs",
                   "target": "Integration(\"external_cad_corpus\")"
                 }
@@ -32211,27 +32201,23 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "A part-in-air assembly imports as two named solids; with shared interfaces it yields six interface faces, keeps the names Part, Air, Outer boundary and the part's face name on the shared face, and builds its closure.",
-                  "line": 70,
+                  "line": 72,
                   "name": "separate_parts_stay_independent_unless_interfaces_are_shared",
                   "package": "runmat-geometry-io",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-geometry/io/tests/shared_interfaces.rs",
                   "target": "Integration(\"shared_interfaces\")"
                 },
                 {
                   "boundary": "A General Fuse compound imports with its shared faces and solid names.",
-                  "line": 133,
+                  "line": 136,
                   "name": "a_general_fuse_compound_imports_with_its_shared_faces_and_solid_names",
                   "package": "runmat-geometry-io",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-geometry/io/tests/shared_interfaces.rs",
                   "target": "Integration(\"shared_interfaces\")"
                 }
@@ -32262,27 +32248,23 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Authored face names (Fixed end, Loaded end) and a solid name (Bar) reach the exact model and are stable under file rename and reimport; resolution at check and at run through the CLI is not asserted.",
-                  "line": 53,
+                  "line": 54,
                   "name": "authored_face_and_body_names_reach_the_exact_model",
                   "package": "runmat-geometry-io",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-geometry/io/tests/shared_interfaces.rs",
                   "target": "Integration(\"shared_interfaces\")"
                 },
                 {
                   "boundary": "Authored STEP face names become face region names in the imported model.",
-                  "line": 15,
+                  "line": 16,
                   "name": "authored_step_face_names_become_face_region_names",
                   "package": "runmat-geometry-io",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-geometry/io/tests/step_face_names.rs",
                   "target": "Integration(\"step_face_names\")"
                 }
@@ -32369,16 +32351,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Declared STEP units preserve physical scale across requested coordinate units; mixed or missing unit rejection is not asserted here.",
-                  "line": 57,
+                  "line": 58,
                   "name": "declared_step_units_preserve_physical_scale_across_requested_coordinate_units",
                   "package": "runmat-geometry-io",
-                  "result": {
-                    "failed": "test not found in cargo test run"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-geometry/io/tests/external_cad_corpus.rs",
                   "target": "Integration(\"external_cad_corpus\")"
                 }
@@ -32405,7 +32385,7 @@
         }
       ],
       "open": 14,
-      "partial": 0,
+      "partial": 4,
       "pass": 0,
       "tagged": 0,
       "title": "Exact CAD import of real parts and assemblies"
@@ -32770,11 +32750,11 @@
               "tests": [
                 {
                   "boundary": "RunMat and the OCCT incremental mesher agree on box invariants (volume and gradient energy); box only, no curved or real part.",
-                  "line": 19,
+                  "line": 20,
                   "name": "differential::runmat_and_independent_meshers_agree_on_box_invariants",
                   "package": "runmat-execution-runner-native",
                   "result": {
-                    "failed": "test not found in cargo test run"
+                    "failed": "test failed"
                   },
                   "source": "crates/runmat-execution-runner-native/tests/occt_exact_meshing/differential.rs",
                   "target": "Integration(\"occt_exact_meshing\")"
@@ -33036,22 +33016,22 @@
               "tests": [
                 {
                   "boundary": "Exact meshing admission retries and cancels after an actual encrypted driver replacement.",
-                  "line": 653,
+                  "line": 654,
                   "name": "remote::driver_replacement_tests::exact_meshing_admission_retries_and_cancels_after_encrypted_driver_replacement",
                   "package": "runmat-execution-runner-native",
                   "result": {
-                    "failed": "test not found in cargo test run"
+                    "failed": "test failed"
                   },
                   "source": "crates/runmat-execution-runner-native/src/remote/driver_replacement_tests.rs",
                   "target": "Library"
                 },
                 {
                   "boundary": "The retry budget is exhausted after two driver losses; worker-process loss and transfer resumption are covered by the process-conformance target.",
-                  "line": 680,
+                  "line": 682,
                   "name": "remote::driver_replacement_tests::exact_meshing_admission_exhausts_retry_budget_after_two_driver_losses",
                   "package": "runmat-execution-runner-native",
                   "result": {
-                    "failed": "test not found in cargo test run"
+                    "failed": "test failed"
                   },
                   "source": "crates/runmat-execution-runner-native/src/remote/driver_replacement_tests.rs",
                   "target": "Library"
@@ -33817,7 +33797,7 @@
       "title": "Published studies run from the public command"
     },
     {
-      "fail": 2,
+      "fail": 0,
       "id": "FEA-PUBLIC-LANGUAGE-001",
       "obligations": [
         {
@@ -33826,16 +33806,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "Checking a study with a force given as a traction prints error[fea.semantic.model], the file:line:col arrow, the source line, a caret underline labeled with the expected unit (Pa) and the checked summary, with no cascade error; leading-indent trimming and the JSON form are not asserted here.",
                   "line": 917,
                   "name": "fea_check_prints_located_diagnostics_like_m_files",
                   "package": "runmat",
-                  "result": {
-                    "failed": "test failed"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-cli/tests/check_cli.rs",
                   "target": "Integration(\"check_cli\")"
                 }
@@ -33859,16 +33837,14 @@
               "execution": "source_check",
               "formulation": "shared_infrastructure",
               "mesh": "mesh_independent",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "The same file with the unit corrected and no load_case checks cleanly, so the load joins the default case; multiple loads with an explicit case set are not compared.",
                   "line": 917,
                   "name": "fea_check_prints_located_diagnostics_like_m_files",
                   "package": "runmat",
-                  "result": {
-                    "failed": "test failed"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-cli/tests/check_cli.rs",
                   "target": "Integration(\"check_cli\")"
                 }
@@ -34024,13 +34000,13 @@
         }
       ],
       "open": 12,
-      "partial": 1,
+      "partial": 3,
       "pass": 0,
       "tagged": 0,
       "title": "Authored language surface the published studies rely on"
     },
     {
-      "fail": 1,
+      "fail": 0,
       "id": "FEA-PUBLIC-RESULTS-001",
       "obligations": [
         {
@@ -34172,16 +34148,14 @@
               "execution": "public_study",
               "formulation": "shared_infrastructure",
               "mesh": "canonical_mixed_topology",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "A loaded structural static study run through the CLI repeatedly and with explicit worker and thread counts (1x1, 4x1, 2x4) gives identical mesh identity, solver-state content digests and assessed scalar bits; one study, one platform.",
                   "line": 114,
                   "name": "a_study_gives_identical_results_across_runs_workers_and_threads",
                   "package": "runmat",
-                  "result": {
-                    "failed": "test failed"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-cli/tests/fea_determinism.rs",
                   "target": "Integration(\"fea_determinism\")"
                 }
@@ -34194,7 +34168,7 @@
         }
       ],
       "open": 11,
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "tagged": 0,
       "title": "Results readable, verdicted and viewable"
@@ -34418,7 +34392,7 @@
       "title": "The register defines done and maintains itself"
     },
     {
-      "fail": 1,
+      "fail": 0,
       "id": "FEA-SCALE-PARALLEL-001",
       "obligations": [
         {
@@ -34982,16 +34956,14 @@
               "execution": "parallel_cpu",
               "formulation": "linear_structural",
               "mesh": "canonical_tetrahedra",
-              "status": "FAIL",
+              "status": "PARTIAL",
               "tests": [
                 {
                   "boundary": "The loaded static box study gives bit-identical state digests and assessed values at 1, 4 and 8 total threads through the public command; other families are not run.",
                   "line": 114,
                   "name": "a_study_gives_identical_results_across_runs_workers_and_threads",
                   "package": "runmat",
-                  "result": {
-                    "failed": "test failed"
-                  },
+                  "result": "passed",
                   "source": "crates/runmat-cli/tests/fea_determinism.rs",
                   "target": "Integration(\"fea_determinism\")"
                 }
@@ -35326,7 +35298,7 @@
         }
       ],
       "open": 114,
-      "partial": 1,
+      "partial": 2,
       "pass": 0,
       "tagged": 0,
       "title": "Every family saturates the machine through one thread plan"
@@ -37955,9 +37927,9 @@
   "tests_run": true,
   "totals": {
     "cells": 3677,
-    "fail": 29,
+    "fail": 18,
     "open": 3338,
-    "partial": 310,
+    "partial": 321,
     "pass": 0,
     "tagged": 0
   }

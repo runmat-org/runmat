@@ -1,6 +1,6 @@
 # FEA-SCALE-PARALLEL-001: Every family saturates the machine through one thread plan
 
-0 PASS, 1 PARTIAL, 1 FAIL, 114 OPEN, 0 TAGGED. Generated; do not edit.
+0 PASS, 2 PARTIAL, 0 FAIL, 114 OPEN, 0 TAGGED. Generated; do not edit.
 
 ## one_thread_plan_authority
 
@@ -106,7 +106,7 @@ Evidence kind: ExecutionEquivalence. Criterion: The same study yields identical 
 
 | Formulation | Mesh | Execution | Status | Tests (boundary) |
 |---|---|---|---|---|
-| linear_structural | canonical_tetrahedra | parallel_cpu | FAIL | `runmat[test:fea_determinism]::a_study_gives_identical_results_across_runs_workers_and_threads` (crates/runmat-cli/tests/fea_determinism.rs:114) - The loaded static box study gives bit-identical state digests and assessed values at 1, 4 and 8 total threads through the public command; other families are not... |
+| linear_structural | canonical_tetrahedra | parallel_cpu | PARTIAL | `runmat[test:fea_determinism]::a_study_gives_identical_results_across_runs_workers_and_threads` (crates/runmat-cli/tests/fea_determinism.rs:114) - The loaded static box study gives bit-identical state digests and assessed values at 1, 4 and 8 total threads through the public command; other families are not... |
 | modal_structural | canonical_tetrahedra | parallel_cpu | OPEN |  |
 | linear_structural_dynamics | canonical_tetrahedra | parallel_cpu | OPEN |  |
 | structural_stability | canonical_tetrahedra | parallel_cpu | OPEN |  |

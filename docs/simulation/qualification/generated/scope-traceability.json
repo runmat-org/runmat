@@ -194,16 +194,16 @@
     {
       "capability": "Face picking records the study; examples use readable names",
       "cells": 4,
-      "fail": 1,
+      "fail": 0,
       "id": "SIM-14",
       "maps": [
         "FEA-MESH-GEOMETRY-001/authored_names_survive_to_run",
         "FEA-AUTHORING-GEOMETRY-002/selector_inspection"
       ],
-      "partial": 1,
+      "partial": 2,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:43",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -348,16 +348,16 @@
     {
       "capability": "Deterministic: same study, same result",
       "cells": 24,
-      "fail": 2,
+      "fail": 0,
       "id": "SIM-24",
       "maps": [
         "FEA-PUBLIC-RESULTS-001/result_digest_determinism",
         "FEA-SCALE-PARALLEL-001/thread_count_determinism"
       ],
-      "partial": 0,
+      "partial": 2,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:65",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -378,29 +378,29 @@
     {
       "capability": "Located check diagnostics",
       "cells": 2,
-      "fail": 1,
+      "fail": 0,
       "id": "SIM-26",
       "maps": [
         "FEA-PUBLIC-LANGUAGE-001/located_diagnostics"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:67",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
       "capability": "Default load case",
       "cells": 2,
-      "fail": 1,
+      "fail": 0,
       "id": "SIM-27",
       "maps": [
         "FEA-PUBLIC-LANGUAGE-001/default_load_case"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:68",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -662,15 +662,15 @@
     {
       "capability": "Authored face names in STEP examples resolve at run",
       "cells": 3,
-      "fail": 1,
+      "fail": 0,
       "id": "SLOT-03",
       "maps": [
         "FEA-MESH-GEOMETRY-001/authored_names_survive_to_run"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:13",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -736,7 +736,7 @@
     {
       "capability": "Electromagnetic studies runnable: multi-body STEP, named faces, AC loss into heat, multi-frequency, magnetostatics",
       "cells": 21,
-      "fail": 2,
+      "fail": 0,
       "id": "SLOT-08",
       "maps": [
         "FEA-MESH-GEOMETRY-001/multibody_assembly_import",
@@ -746,10 +746,10 @@
         "FEA-EM-MAXWELL-001/*",
         "FEA-EM-MAGNETOSTATIC-001/*"
       ],
-      "partial": 4,
+      "partial": 6,
       "pass": 0,
       "source": "oct-13-2026/distilled/14-claim-dependencies/simulation.md:18",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -824,15 +824,15 @@
     {
       "capability": "Exact STEP/IGES/BREP import keeps topology and mass properties",
       "cells": 3,
-      "fail": 1,
+      "fail": 0,
       "id": "REG-MESH-001",
       "maps": [
         "FEA-MESH-GEOMETRY-001/exact_formats"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:129",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -1361,15 +1361,15 @@
     {
       "capability": "Same study gives identical result digests across runs and worker counts",
       "cells": 1,
-      "fail": 1,
+      "fail": 0,
       "id": "REG-RCR-004",
       "maps": [
         "FEA-PUBLIC-RESULTS-001/result_digest_determinism"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:167",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -1544,29 +1544,29 @@
     {
       "capability": "`.fea` diagnostics are located with no cascade",
       "cells": 2,
-      "fail": 1,
+      "fail": 0,
       "id": "REG-CLI-003",
       "maps": [
         "FEA-PUBLIC-LANGUAGE-001/located_diagnostics"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:179",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
       "capability": "A load without load_case goes into a default case",
       "cells": 2,
-      "fail": 1,
+      "fail": 0,
       "id": "REG-CLI-004",
       "maps": [
         "FEA-PUBLIC-LANGUAGE-001/default_load_case"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:180",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -1628,16 +1628,16 @@
     {
       "capability": "Viewport face pick qualified; examples use named selectors",
       "cells": 4,
-      "fail": 1,
+      "fail": 0,
       "id": "REG-WEB-003",
       "maps": [
         "FEA-MESH-GEOMETRY-001/authored_names_survive_to_run",
         "FEA-AUTHORING-GEOMETRY-002/selector_inspection"
       ],
-      "partial": 1,
+      "partial": 2,
       "pass": 0,
       "source": "FEA_REQUIREMENTS_REGISTER.md:185",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -2182,16 +2182,16 @@
     {
       "capability": "Exact geometry, derivation, persistent topology, AP242 exchange",
       "cells": 67,
-      "fail": 3,
+      "fail": 0,
       "id": "PLAN-GEOM",
       "maps": [
         "FEA-AUTHORING-GEOMETRY-001/*",
         "FEA-AUTHORING-GEOMETRY-002/*"
       ],
-      "partial": 19,
+      "partial": 22,
       "pass": 0,
       "source": "FEA_PLAN_TO_COMPLETION.md:563",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -3219,29 +3219,29 @@
     {
       "capability": "Every pipeline uses the thread plan and speeds up",
       "cells": 116,
-      "fail": 1,
+      "fail": 0,
       "id": "SCALE-PARALLEL",
       "maps": [
         "FEA-SCALE-PARALLEL-001/*"
       ],
-      "partial": 1,
+      "partial": 2,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/solvers-and-scale.md:53",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
       "capability": "STEP, IGES, BREP exact; tessellated formats view-only",
       "cells": 3,
-      "fail": 1,
+      "fail": 0,
       "id": "GEOM-FORMATS",
       "maps": [
         "FEA-MESH-GEOMETRY-001/exact_formats"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/geometry-meshing.md:7",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -3570,15 +3570,15 @@
     {
       "capability": "Two-body STEP assembly study",
       "cells": 3,
-      "fail": 1,
+      "fail": 0,
       "id": "PROOF-ASSEMBLY",
       "maps": [
         "FEA-MESH-GEOMETRY-001/multibody_assembly_import"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/distilled/04-fea/website-proof-points.md:36",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -3643,17 +3643,17 @@
     {
       "capability": "Every physics saturates all cores and scales across a cluster; remote for every family; domain decomposition",
       "cells": 257,
-      "fail": 1,
+      "fail": 0,
       "id": "OWNER-SCALE",
       "maps": [
         "FEA-SCALE-PARALLEL-001/*",
         "FEA-SCALE-DISTRIBUTED-001/*",
         "FEA-SCALE-SIZE-001/million_dof_public_study"
       ],
-      "partial": 1,
+      "partial": 2,
       "pass": 0,
       "source": "/Users/nallana/.claude/jobs/b8482b6b/tmp/QUAL_RULES.md:53",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -3674,16 +3674,16 @@
     {
       "capability": "STEP names and multi-body import",
       "cells": 6,
-      "fail": 2,
+      "fail": 0,
       "id": "OWNER-STEP-NAMES",
       "maps": [
         "FEA-MESH-GEOMETRY-001/authored_names_survive_to_run",
         "FEA-MESH-GEOMETRY-001/multibody_assembly_import"
       ],
-      "partial": 0,
+      "partial": 2,
       "pass": 0,
       "source": "/Users/nallana/.claude/jobs/b8482b6b/tmp/QUAL_RULES.md:36",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -4421,17 +4421,17 @@
     {
       "capability": "Induction hardening: multi-body gear, inductor and air; harmonic at 3, 10 and 30 kHz; loss into a 3 s transient heat step",
       "cells": 17,
-      "fail": 1,
+      "fail": 0,
       "id": "STUDY-INDUCTION",
       "maps": [
         "FEA-MESH-GEOMETRY-001/multibody_assembly_import",
         "FEA-EM-FREQUENCY-001/*",
         "FEA-COUPLING-ELECTROTHERMAL-002/ac_loss_into_transient_heat"
       ],
-      "partial": 2,
+      "partial": 3,
       "pass": 0,
       "source": "oct-13-2026/website/physics/studies/electromagnetic/induction-hardening.fea:1",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -4752,16 +4752,16 @@
     {
       "capability": "Heat sink hero with named faces and convection",
       "cells": 7,
-      "fail": 1,
+      "fail": 0,
       "id": "PAGE-THERMAL-HERO",
       "maps": [
         "FEA-THERMAL-PUBLIC-001/heat_sink_balance",
         "FEA-MESH-GEOMETRY-001/authored_names_survive_to_run"
       ],
-      "partial": 0,
+      "partial": 1,
       "pass": 0,
       "source": "oct-13-2026/website/physics/thermal/index.md:7",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
@@ -4859,7 +4859,7 @@
     {
       "capability": "DEF-280 to DEF-284: STEP names, touching bodies, units option, AC loss into heat, lenient check",
       "cells": 17,
-      "fail": 3,
+      "fail": 0,
       "id": "PAGE-EM-DEFECTS",
       "maps": [
         "FEA-MESH-GEOMETRY-001/authored_names_survive_to_run",
@@ -4868,10 +4868,10 @@
         "FEA-COUPLING-ELECTROTHERMAL-002/ac_loss_into_transient_heat",
         "FEA-PUBLIC-LANGUAGE-001/check_matches_run"
       ],
-      "partial": 0,
+      "partial": 3,
       "pass": 0,
       "source": "oct-13-2026/website/physics/electromagnetic/index.md:14",
-      "status": "fail",
+      "status": "tied",
       "tagged": 0
     },
     {
