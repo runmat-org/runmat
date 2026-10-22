@@ -41,11 +41,12 @@ pub struct ElectricalChargeSources {
 }
 
 pub(crate) fn kind(model: &AnalysisModel) -> CanonicalElectricalSource {
-    if model
-        .excitations
-        .iter()
-        .any(|action| matches!(action, ExcitationAction::ElectricCurrent(_)))
-    {
+    if model.excitations.iter().any(|action| {
+        matches!(
+            action,
+            ExcitationAction::ElectricCurrent(_) | ExcitationAction::CurrentDensity(_)
+        )
+    }) {
         CanonicalElectricalSource::BoundaryCurrent
     } else if model
         .excitations
@@ -89,6 +90,10 @@ pub(crate) fn assemble(
             continue;
         }
         if source_kind == CanonicalElectricalSource::BoundaryCurrent {
+            if let RealizedExcitationKind::CurrentDensity(value) = load.kind {
+                add_boundary_current_density(load, value, projection, &mut source)?;
+                continue;
+            }
             let RealizedExcitationKind::ElectricCurrent(value) = load.kind else {
                 return Err(ElectricalStaticError::Unsupported(
                     "terminal current cannot be combined with volume charge".into(),
@@ -263,6 +268,90 @@ fn add_boundary_current(
     if !evidence.accepted {
         return Err(ElectricalStaticError::Operator(
             "terminal current projection conservation failed".into(),
+        ));
+    }
+    source.projection_evidence.push(evidence);
+    Ok(())
+}
+
+/// A current density J on terminal faces injects the normal flux -J.n (n outward) at every
+/// quadrature point; the injected current is its integral over the faces.
+fn add_boundary_current_density(
+    load: &crate::excitation::RealizedExcitation,
+    value: crate::excitation::ComplexVector3,
+    projection: &AnalysisProjection,
+    source: &mut ElectricalChargeSources,
+) -> Result<(), ElectricalStaticError> {
+    if value.imaginary != [0.0; 3]
+        || value.real.iter().any(|v| !v.is_finite())
+        || load.policy.kinematics != ExcitationKinematics::FixedFrame
+        || load.policy.frame != CoordinateFrame::Global
+        || load.policy.projection.preserve_moment
+    {
+        return Err(ElectricalStaticError::Unsupported(
+            "current density requires a finite real global-frame vector".into(),
+        ));
+    }
+    let RealizedExcitationTarget::Region(target) = &load.target else {
+        return Err(ElectricalStaticError::Boundary(
+            "current density requires a face region".into(),
+        ));
+    };
+    if target.entity_dimension != EntityDimension::Face {
+        return Err(ElectricalStaticError::Boundary(
+            "current density requires a face region".into(),
+        ));
+    }
+    let faces = projection
+        .boundary_faces_for_target(target)
+        .collect::<Vec<_>>();
+    if faces.is_empty() {
+        return Err(ElectricalStaticError::Boundary(format!(
+            "current density {} matches no boundary face",
+            load.excitation_id.0
+        )));
+    }
+    let mut evidence = ScalarProjectionAccumulator::new(
+        load,
+        projection,
+        SpatialIntegrationRule::BoundaryDunavantSeven,
+        faces.len(),
+    )
+    .map_err(|e| ElectricalStaticError::Operator(e.to_string()))?;
+    let mut injected = 0.0;
+    for face in &faces {
+        if face.role != runmat_meshing_core::BoundaryFaceRole::Exterior || !(face.area_m2 > 0.0) {
+            return Err(ElectricalStaticError::Boundary(
+                "current density requires exterior faces".into(),
+            ));
+        }
+        let normal = face.oriented_area_vector_m2.map(|a| a / face.area_m2);
+        let flux = -(value.real[0] * normal[0] + value.real[1] * normal[1] + value.real[2] * normal[2]);
+        injected += flux * face.area_m2;
+    }
+    evidence.add_requested(injected, 0.0);
+    source.integrated_source += injected;
+    source.absolute_source += injected.abs();
+    for face in faces {
+        let normal = face.oriented_area_vector_m2.map(|a| a / face.area_m2);
+        let flux = -(value.real[0] * normal[0] + value.real[1] * normal[1] + value.real[2] * normal[2]);
+        projection
+            .visit_boundary_quadrature(face, |point| {
+                for (i, &node) in face.node_indices.iter().enumerate() {
+                    let nodal = flux * point.area_weight_m2 * point.shape_values()[i];
+                    source.nodal_source[node] += nodal;
+                    evidence.add_projected(node, nodal, 0.0);
+                }
+            })
+            .map_err(|e| ElectricalStaticError::Topology(e.to_string()))?;
+    }
+    let evidence = evidence.finish();
+    evidence
+        .validate()
+        .map_err(|e| ElectricalStaticError::Operator(e.to_string()))?;
+    if !evidence.accepted {
+        return Err(ElectricalStaticError::Operator(
+            "current density projection conservation failed".into(),
         ));
     }
     source.projection_evidence.push(evidence);

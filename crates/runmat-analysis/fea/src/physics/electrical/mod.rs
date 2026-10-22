@@ -229,6 +229,7 @@ pub(crate) fn validate_canonical_input<'a>(
                     | runmat_analysis_core::ExcitationAction::ElectricCurrent(_)
                     | runmat_analysis_core::ExcitationAction::TerminalVoltage(_)
                     | runmat_analysis_core::ExcitationAction::ElectricCharge(_)
+                    | runmat_analysis_core::ExcitationAction::CurrentDensity(_)
             )
         })
     {
@@ -244,7 +245,11 @@ pub(crate) fn validate_canonical_input<'a>(
         model.excitations.iter().any(|action| {
             matches!(
                 (current, action),
-                (true, runmat_analysis_core::ExcitationAction::ElectricCurrent(_))
+                (
+                    true,
+                    runmat_analysis_core::ExcitationAction::ElectricCurrent(_)
+                        | runmat_analysis_core::ExcitationAction::CurrentDensity(_)
+                )
                     | (
                         false,
                         runmat_analysis_core::ExcitationAction::ElectricChargeDensity(_)
