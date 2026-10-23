@@ -57,12 +57,17 @@ pub(super) fn assert_original_evidence(prepared: &PreparedAccuracy) {
             prepared.host.output_policy.chunk_bytes(),
             limits,
         )
-        .unwrap();
+        .ok()?;
+        // A counterfeit report larger than the admitted output envelope is rejected by the
+        // executing host before import; one that fits is rejected by import.
         AnalysisHostResponse::completed(&prepared.host, &completed)
-            .unwrap()
-            .program_response()
+            .ok()
+            .map(|response| response.program_response())
     };
-    let response = run(original.clone(), &mut store);
+    let rejected = |response: Option<_>, store: &MemoryObjects| {
+        response.is_none_or(|response| import_accuracy(store, response, prepared, limits).is_err())
+    };
+    let response = run(original.clone(), &mut store).expect("original evidence fits its plan");
     import_accuracy(&store, response.clone(), prepared, limits).unwrap();
     for mutation in 0..3 {
         let mut evidence = original.clone();
@@ -98,7 +103,7 @@ pub(super) fn assert_original_evidence(prepared: &PreparedAccuracy) {
         .unwrap();
         // Report identity, report status, gate and transport hashes are all recomputed correctly.
         let forged = run(evidence, &mut store);
-        assert!(import_accuracy(&store, forged, prepared, limits).is_err());
+        assert!(rejected(forged, &store));
     }
     for criterion in prepared.request.plan.criteria.iter().filter(|criterion| {
         !original.iter().any(|e| {
@@ -151,7 +156,7 @@ pub(super) fn assert_original_evidence(prepared: &PreparedAccuracy) {
             );
         }
         let forged = run(evidence, &mut store);
-        assert!(import_accuracy(&store, forged, prepared, limits).is_err());
+        assert!(rejected(forged, &store));
     }
     let mut bad = PreparedAccuracy {
         request: prepared.request.clone(),

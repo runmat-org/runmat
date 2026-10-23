@@ -21,10 +21,26 @@ const LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 4_000_000
 fn invalid(error: impl std::fmt::Display) -> AnalysisExecutionError {
     AnalysisExecutionError::Invalid(format!("observation publication: {error}"))
 }
+/// Catalogs grow with the observed mesh and samples, so codec bounds follow the content:
+/// encoding is bounded by the profiled size of the owned value, decoding by the received bytes
+/// (every collection item occupies at least one encoded byte). Never below the fixed floor.
+fn content_limits(bytes: usize) -> CanonicalLimits {
+    CanonicalLimits::new(
+        bytes.max(LIMITS.maximum_encoded_bytes),
+        bytes.max(LIMITS.maximum_collection_items),
+        LIMITS.maximum_string_bytes,
+        LIMITS.maximum_nesting_depth,
+    )
+}
+fn encode_scaled<T: Serialize>(domain: &str, value: &T) -> AnalysisExecutionResult<Vec<u8>> {
+    let profile = runmat_canonical_codec::profile_canonical_encoding(value, content_limits(usize::MAX))
+        .map_err(invalid)?;
+    let bytes = usize::try_from(profile.encoded_bytes_upper_bound)
+        .map_err(|_| invalid("catalog exceeds the address space"))?;
+    encode_contract(PREFIX, domain, value, content_limits(bytes)).map_err(invalid)
+}
 fn digest<T: Serialize>(domain: &str, value: &T) -> AnalysisExecutionResult<Digest> {
-    encode_contract(PREFIX, domain, value, LIMITS)
-        .map(Digest::sha256)
-        .map_err(invalid)
+    encode_scaled(domain, value).map(Digest::sha256)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -331,9 +347,9 @@ impl ObservationPublicationCatalog {
     }
     pub fn canonical_bytes(&self) -> AnalysisExecutionResult<Vec<u8>> {
         self.validate()?;
-        encode_contract(PREFIX, "catalog", self, LIMITS).map_err(invalid)
+        encode_scaled("catalog", self)
     }
     pub fn from_canonical_bytes(bytes: &[u8]) -> AnalysisExecutionResult<Self> {
-        decode_contract(PREFIX, "catalog", bytes, LIMITS).map_err(invalid)
+        decode_contract(PREFIX, "catalog", bytes, content_limits(bytes.len())).map_err(invalid)
     }
 }

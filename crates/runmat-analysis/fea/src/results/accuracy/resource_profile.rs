@@ -67,8 +67,7 @@ pub fn accuracy_evaluation_resource_profile(
     // produces gives the exact size. The shape projection remains a floor for workspace sizing.
     let exact = evaluate_accuracy_artifact(request, evidence.to_vec())
         .and_then(|artifact| artifact.canonical_bytes())
-        .map(|bytes| bytes.len() as u64)
-        .unwrap_or(0);
+        .map(|bytes| bytes.len() as u64)?;
     Ok(AccuracyEvaluationResourceProfile {
         workspace_bytes_upper_bound: workspace,
         output_encoded_bytes_upper_bound: output.encoded_bytes_upper_bound.max(exact),
