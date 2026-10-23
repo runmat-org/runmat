@@ -6,7 +6,7 @@ use runmat_analysis_execution::{
     NonlinearSolidBlockPreparation, PreparedNonlinearSolidBlockTask,
 };
 use runmat_analysis_fea::execution::NonlinearSolidBlockReference;
-use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
+use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::{object::ObjectInventoryLimits, ArtifactAccess};
 use runmat_meshing_core::fixtures::slab_mesh;
 mod cancellation;
@@ -39,7 +39,9 @@ fn prepare(
         program_revision: ProgramRevision::new(
             digest,
             digest,
-            ProgramEnvironment::new(1, 1, digest, digest, "matlab").unwrap(),
+            // The task runs on a pool worker whose host identity is this binary's program
+            // environment (test_support::host_inventory); the program uses the same one.
+            runmat_core::program_environment(runmat_core::CompatMode::Matlab),
         )
         .unwrap(),
         artifact_access: ArtifactAccess {
