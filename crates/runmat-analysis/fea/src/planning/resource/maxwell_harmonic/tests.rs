@@ -7,11 +7,11 @@ fn actual_wire_decode_budget_is_checked_without_demanding_maximum_width_profile(
     let w = workload();
     let m = fixtures::slab_mesh(2);
     let mut f = facts(&w, &m);
-    let exact = runmat_canonical_codec::canonical_payload_materialization_resident_bytes_estimate(
+    let exact = runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(
         &w.canonical_bytes().unwrap(),
     )
     .unwrap()
-        + runmat_canonical_codec::canonical_payload_materialization_resident_bytes_estimate(
+        + runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(
             &m.canonical_encode().unwrap(),
         )
         .unwrap();

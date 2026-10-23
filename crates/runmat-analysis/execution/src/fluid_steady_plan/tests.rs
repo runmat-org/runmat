@@ -408,7 +408,11 @@ fn fluid_accuracy_context_binds_the_authored_accuracy_plan() {
             identity,
             &bytes,
             1024,
-            ObjectNamespace::InputValue,
+            if kind == AnalysisNumericalObjectKind::SolverResult {
+                ObjectNamespace::ResultValue
+            } else {
+                ObjectNamespace::InputValue
+            },
             task.output_policy.inventory_limits(),
         )
         .unwrap()
