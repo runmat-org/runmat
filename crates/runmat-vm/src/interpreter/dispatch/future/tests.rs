@@ -1,5 +1,28 @@
 use super::*;
 
+struct ManagedControl(runmat_runtime::context::host_effect::ManagedHostEffectLedger);
+
+impl runmat_runtime::context::RuntimeParallelService for ManagedControl {
+    fn supports(&self, _: runmat_runtime::context::ParallelCapability) -> bool {
+        false
+    }
+
+    fn placement_resources(&self) -> runmat_runtime::context::RuntimeParallelResources {
+        let snapshot = self.0.snapshot();
+        runmat_runtime::context::RuntimeParallelResources {
+            memory_available_bytes: Some(snapshot.free_bytes()),
+            epoch: snapshot.epoch,
+            ..Default::default()
+        }
+    }
+
+    fn managed_host_effect_ledger(
+        &self,
+    ) -> Option<runmat_runtime::context::host_effect::ManagedHostEffectLedger> {
+        Some(self.0.clone())
+    }
+}
+
 #[test]
 fn immediate_instructions_run_only_when_polled_without_boxing() {
     let instruction = Instr::LoadConst(7.0);
@@ -115,4 +138,189 @@ fn immediate_instructions_run_only_when_polled_without_boxing() {
             stack_depth: stack.len(),
         }]
     );
+
+    // The actual selected prepared handler admits its concrete future before
+    // touching the target state, and retains that claim until Box retirement.
+    for capacity in [0, 1 << 20] {
+        let ledger = runmat_runtime::context::host_effect::ManagedHostEffectLedger::new(capacity);
+        execution.runtime = execution.runtime.clone().with_service_ports(
+            runmat_runtime::context::RuntimeServicePorts::default()
+                .with_parallel(std::rc::Rc::new(ManagedControl(ledger.clone()))),
+        );
+        let instruction = Instr::BeginOutputAssignment { target_count: 1 };
+        let mut future = immediate_future!(&instruction);
+        let mut context = Context::from_waker(std::task::Waker::noop());
+        if capacity == 0 {
+            assert!(matches!(
+                future.state,
+                InstructionDispatchFutureState::Ready(_)
+            ));
+            let Poll::Ready(Err(error)) = Pin::new(&mut future).poll(&mut context) else {
+                panic!("zero-capacity selected future must be rejected");
+            };
+            let mut cause: &(dyn std::error::Error + 'static) = &error;
+            loop {
+                if let Some(allocation) = cause.downcast_ref::<
+                    runmat_runtime::context::host_allocation::HostAllocationError,
+                >() {
+                    assert!(allocation.is_capacity_denial());
+                    break;
+                }
+                cause = cause.source().expect("original future admission cause");
+            }
+            drop(future);
+            assert_eq!(sequence.expected_output_targets, None);
+        } else {
+            assert!(matches!(
+                future.state,
+                InstructionDispatchFutureState::StackMutation(_)
+            ));
+            assert!(ledger.snapshot().live_reserved_bytes > 0);
+            drop(future);
+            assert_eq!(sequence.expected_output_targets, None);
+            assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+
+            let mut future = immediate_future!(&instruction);
+            assert!(matches!(
+                Pin::new(&mut future).poll(&mut context),
+                Poll::Ready(Ok(Some(DispatchHandled::Generic(
+                    DispatchDecision::FallThrough
+                ))))
+            ));
+            assert!(ledger.snapshot().live_reserved_bytes > 0);
+            drop(future);
+            assert_eq!(sequence.expected_output_targets, Some(1));
+        }
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    }
+
+    // Each additional always-fall-through family chooses the exact admitted
+    // owner before even invalid/absent operands or display/name effects run.
+    for instruction in [
+        Instr::CreateFunctionHandle("unpolled_handle".into()),
+        Instr::Index(1),
+        Instr::EmitStackTop {
+            label: crate::bytecode::EmitLabel::Ans,
+        },
+        Instr::CreateRange(false),
+    ] {
+        for capacity in [0, 1 << 20] {
+            let ledger =
+                runmat_runtime::context::host_effect::ManagedHostEffectLedger::new(capacity);
+            execution.runtime = execution.runtime.clone().with_service_ports(
+                runmat_runtime::context::RuntimeServicePorts::default()
+                    .with_parallel(std::rc::Rc::new(ManagedControl(ledger.clone()))),
+            );
+            let mut future = immediate_future!(&instruction);
+            if capacity == 0 {
+                assert!(matches!(
+                    future.state,
+                    InstructionDispatchFutureState::Ready(_)
+                ));
+                let mut context = Context::from_waker(std::task::Waker::noop());
+                assert!(matches!(
+                    Pin::new(&mut future).poll(&mut context),
+                    Poll::Ready(Err(_))
+                ));
+            } else {
+                assert!(matches!(
+                    future.state,
+                    InstructionDispatchFutureState::StackMutation(_)
+                ));
+                assert!(ledger.snapshot().live_reserved_bytes > 0);
+            }
+            drop(future);
+            assert_eq!(stack.as_slice(), &[Value::Num(7.0)]);
+            assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+            assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+        }
+    }
+
+    // Logical, call and parallel selectors admit their original concrete
+    // control future before operands or callee/task effects can be entered.
+    for instruction in [
+        Instr::AndAnd(17),
+        Instr::CallBuiltinMulti("disp".into(), 1, 0),
+        Instr::Await,
+    ] {
+        for capacity in [0, 1 << 20] {
+            let ledger =
+                runmat_runtime::context::host_effect::ManagedHostEffectLedger::new(capacity);
+            execution.runtime = execution.runtime.clone().with_service_ports(
+                runmat_runtime::context::RuntimeServicePorts::default()
+                    .with_parallel(std::rc::Rc::new(ManagedControl(ledger.clone()))),
+            );
+            let mut future = immediate_future!(&instruction);
+            if capacity == 0 {
+                assert!(matches!(
+                    future.state,
+                    InstructionDispatchFutureState::Ready(_)
+                ));
+                let mut context = Context::from_waker(std::task::Waker::noop());
+                assert!(matches!(
+                    Pin::new(&mut future).poll(&mut context),
+                    Poll::Ready(Err(_))
+                ));
+            } else {
+                assert!(matches!(
+                    future.state,
+                    InstructionDispatchFutureState::Control(_)
+                ));
+                assert!(ledger.snapshot().live_reserved_bytes > 0);
+            }
+            drop(future);
+            assert_eq!(stack.as_slice(), &[Value::Num(7.0)]);
+            assert_eq!(pc, 0);
+            assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+            assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+        }
+    }
+}
+
+#[test]
+fn control_completions_preserve_all_outcomes_without_root_backing_in_finite_context() {
+    use runmat_runtime::context::{RuntimeContext, RuntimeServicePorts};
+    use runmat_runtime::execution::RuntimeExecutionService;
+    use std::rc::Rc;
+    fn key(value: Option<&DispatchHandled>) -> (u8, u8) {
+        let (kind, decision) = match value {
+            None => return (0, 0),
+            Some(DispatchHandled::Generic(decision)) => (1, decision),
+            Some(DispatchHandled::ReturnValue(decision)) => (2, decision),
+            Some(DispatchHandled::Return(decision)) => (3, decision),
+        };
+        (
+            kind,
+            match decision {
+                DispatchDecision::ContinueLoop => 1,
+                DispatchDecision::FallThrough => 2,
+                DispatchDecision::Return => 3,
+            },
+        )
+    }
+    let ledger = runmat_runtime::context::host_effect::ManagedHostEffectLedger::new(0);
+    let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new())).with_service_ports(
+        RuntimeServicePorts::default().with_parallel(Rc::new(ManagedControl(ledger.clone()))),
+    );
+    let _active = runtime.enter();
+    for value in [
+        None,
+        Some(DispatchHandled::Generic(DispatchDecision::ContinueLoop)),
+        Some(DispatchHandled::Generic(DispatchDecision::FallThrough)),
+        Some(DispatchHandled::Generic(DispatchDecision::Return)),
+        Some(DispatchHandled::ReturnValue(DispatchDecision::ContinueLoop)),
+        Some(DispatchHandled::ReturnValue(DispatchDecision::FallThrough)),
+        Some(DispatchHandled::ReturnValue(DispatchDecision::Return)),
+        Some(DispatchHandled::Return(DispatchDecision::ContinueLoop)),
+        Some(DispatchHandled::Return(DispatchDecision::FallThrough)),
+        Some(DispatchHandled::Return(DispatchDecision::Return)),
+    ] {
+        let expected = key(value.as_ref());
+        let rooted = control::root_control(Ok(value)).unwrap();
+        let actual = rooted.map_or((0, 0), |value| value.with_owned(|value| key(Some(&value))));
+        assert_eq!(actual, expected);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    }
 }

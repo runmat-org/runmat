@@ -1,16 +1,17 @@
 //! Shared runtime dispatch over already-validated indexing plans.
 
-use runmat_value::{LogicalArray, StringArray, Tensor, Value};
+use runmat_value::{Tensor, Value};
 
 use super::plan::IndexPlan;
 use crate::runtime_error::semantic_error;
 use crate::RuntimeError;
 
+mod character;
+mod logical;
+pub(in crate::indexing) mod primitive_output;
 mod scalar;
-use scalar::{
-    assign_cell, assign_char, assign_logical, grow_string_array, integer_scalar_tensor, read_cell,
-    read_char, read_logical, read_scalar_struct, shape_error,
-};
+pub(in crate::indexing) mod text;
+use scalar::{assign_cell, integer_scalar_tensor, read_cell, read_scalar_struct, shape_error};
 
 #[cfg(test)]
 mod tests;
@@ -60,36 +61,62 @@ pub fn numeric_scalar_tensor(value: Value) -> Result<Tensor, RuntimeError> {
     }
 }
 
+pub fn numeric_scalar_tensor_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    value: Value,
+) -> Result<Tensor, RuntimeError> {
+    let scalar = match value {
+        Value::Num(value) => runmat_value::NumericScalar::F64(value),
+        Value::Int(value) => value.into(),
+        _ => return Err(invalid_base()),
+    };
+    let shape = super::plan::admission::shape(context, 2, |_| Ok(1))?;
+    super::read_slice::payload::output::real(context, scalar.numeric_dtype(), shape, |output| {
+        output.set(0, scalar)
+    })
+}
+
 pub fn read_with_plan(value: Value, plan: &IndexPlan) -> Result<Value, RuntimeError> {
+    let context = crate::context::legacy::active();
+    read_with_plan_in_context(context.as_ref(), value, plan)
+}
+
+pub fn read_with_plan_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    value: Value,
+    plan: &IndexPlan,
+) -> Result<Value, RuntimeError> {
     match value {
-        Value::Tensor(value) => super::read_slice::read_tensor_slice_from_plan(&value, plan),
+        Value::Tensor(value) => {
+            super::read_slice::read_tensor_slice_from_plan_in_context(context, &value, plan)
+        }
         Value::ComplexTensor(value) => {
-            super::read_slice::read_complex_slice_from_plan(&value, plan)
+            super::read_slice::read_complex_slice_from_plan_in_context(context, &value, plan)
         }
-        Value::SparseTensor(value) => super::read_slice::read_sparse_slice_from_plan(&value, plan),
-        Value::GpuTensor(value) => super::read_slice::read_gpu_slice_from_plan(&value, plan),
-        Value::StringArray(value) => super::read_slice::gather_string_slice(&value, plan),
-        Value::LogicalArray(value) => read_logical(&value, plan),
-        Value::CharArray(value) => read_char(&value, plan),
-        Value::Cell(value) => read_cell(value, plan),
-        Value::Struct(value) => read_scalar_struct(value, plan),
-        Value::StructArray(value) => super::structure::read_with_plan(&value, plan),
+        Value::SparseTensor(value) => {
+            super::read_slice::read_sparse_slice_from_plan_in_context(context, &value, plan)
+        }
+        Value::GpuTensor(value) => {
+            super::read_slice::read_gpu_slice_from_plan_in_context(context, &value, plan)
+        }
+        Value::StringArray(value) => text::read(context, value.data(), plan),
+        Value::LogicalArray(value) => logical::read(context, &value.data, plan),
+        Value::CharArray(value) => character::read(context, &value, plan),
+        Value::Cell(value) => read_cell(context, value, plan),
+        Value::Struct(value) => read_scalar_struct(context, value, plan),
+        Value::StructArray(value) => {
+            super::structure::read_with_plan_in_context(context, &value, plan)
+        }
         value @ (Value::Object(_) | Value::HandleObject(_) | Value::ObjectArray(_)) => {
-            super::object::read_with_plan(&value, plan)
+            super::object::read_with_plan_in_context(context, &value, plan)
         }
-        value @ (Value::Num(_) | Value::Int(_)) => {
-            read_with_plan(Value::Tensor(numeric_scalar_tensor(value)?), plan)
-        }
-        Value::Bool(value) => read_logical(
-            &LogicalArray::new(vec![u8::from(value)], vec![1, 1]).map_err(shape_error)?,
+        value @ (Value::Num(_) | Value::Int(_)) => read_with_plan_in_context(
+            context,
+            Value::Tensor(numeric_scalar_tensor_in_context(context, value)?),
             plan,
         ),
-        Value::String(value) => read_with_plan(
-            Value::StringArray(
-                StringArray::from_texts_unbounded(vec![value], vec![1, 1]).map_err(shape_error)?,
-            ),
-            plan,
-        ),
+        Value::Bool(value) => logical::read(context, &[u8::from(value)], plan),
+        Value::String(value) => text::read(context, std::slice::from_ref(&value), plan),
         _ => Err(invalid_base()),
     }
 }
@@ -99,51 +126,47 @@ pub async fn assign_with_plan(
     plan: &IndexPlan,
     rhs: Value,
 ) -> Result<Value, RuntimeError> {
+    let context = crate::context::legacy::active();
+    assign_with_plan_in_context(context.as_ref(), value, plan, rhs).await
+}
+
+pub async fn assign_with_plan_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    value: Value,
+    plan: &IndexPlan,
+    rhs: Value,
+) -> Result<Value, RuntimeError> {
     match value {
         Value::Tensor(value) => {
-            super::write_slice::assign_tensor_with_plan(value, plan, &rhs).await
+            super::write_slice::assign_tensor_with_plan_in_context(context, value, plan, &rhs).await
         }
         Value::ComplexTensor(value) => {
-            super::write_slice::assign_complex_with_plan(value, plan, &rhs).await
+            super::write_slice::assign_complex_with_plan_in_context(context, value, plan, &rhs)
+                .await
         }
         Value::SparseTensor(value) => {
-            super::write_slice::assign_sparse_with_plan(value, plan, &rhs).await
+            super::write_slice::assign_sparse_with_plan_in_context(context, value, plan, &rhs).await
         }
         Value::GpuTensor(value) => {
-            super::write_slice::assign_gpu_slice_with_plan(&value, plan, &rhs).await
+            super::write_slice::assign_gpu_slice_with_plan_in_context(context, &value, plan, &rhs)
+                .await
         }
-        Value::StringArray(mut value) => {
-            grow_string_array(&mut value, &plan.base_shape)?;
-            let rhs = super::write_slice::build_string_rhs_view(&rhs, &plan.selection_lengths)?;
-            super::write_slice::scatter_string_with_plan(&mut value, plan, &rhs)?;
-            Ok(Value::StringArray(value))
-        }
-        Value::LogicalArray(value) => assign_logical(value, plan, &rhs),
-        Value::CharArray(value) => assign_char(value, plan, &rhs),
-        Value::Cell(value) => assign_cell(value, plan, &rhs),
+        Value::StringArray(value) => text::assign(context, value, plan, &rhs),
+        Value::LogicalArray(value) => logical::assign(context, value, plan, &rhs),
+        Value::CharArray(value) => character::assign(context, value, plan, &rhs),
+        Value::Cell(value) => assign_cell(context, value, plan, &rhs),
         value @ (Value::Struct(_) | Value::StructArray(_)) => {
-            super::structure::assign_with_plan(value, plan, rhs, false)
+            super::structure::assign_with_plan_in_context(context, value, plan, rhs)
         }
         value @ (Value::Object(_) | Value::HandleObject(_) | Value::ObjectArray(_)) => {
-            super::object::assign_with_plan(value, plan, rhs, false)
+            super::object::assign_with_plan_in_context(context, value, plan, rhs)
         }
         value @ (Value::Num(_) | Value::Int(_)) => {
-            let value = numeric_scalar_tensor(value)?;
-            super::write_slice::assign_tensor_with_plan(value, plan, &rhs).await
+            let value = numeric_scalar_tensor_in_context(context, value)?;
+            super::write_slice::assign_tensor_with_plan_in_context(context, value, plan, &rhs).await
         }
-        Value::Bool(value) => assign_logical(
-            LogicalArray::new(vec![u8::from(value)], vec![1, 1]).map_err(shape_error)?,
-            plan,
-            &rhs,
-        ),
-        Value::String(value) => {
-            let mut value =
-                StringArray::from_texts_unbounded(vec![value], vec![1, 1]).map_err(shape_error)?;
-            grow_string_array(&mut value, &plan.base_shape)?;
-            let rhs = super::write_slice::build_string_rhs_view(&rhs, &plan.selection_lengths)?;
-            super::write_slice::scatter_string_with_plan(&mut value, plan, &rhs)?;
-            Ok(Value::StringArray(value))
-        }
+        Value::Bool(value) => logical::assign_bool(context, value, plan, &rhs),
+        Value::String(value) => text::assign_scalar(context, value, plan, &rhs),
         _ => Err(invalid_base()),
     }
 }
@@ -158,7 +181,7 @@ pub async fn mutate_with_plan(
     mutation: runmat_types::PlaceMutationKind,
 ) -> Result<Value, RuntimeError> {
     if mutation != runmat_types::PlaceMutationKind::Delete {
-        return assign_with_plan(value, plan, rhs).await;
+        return assign_with_plan_in_context(context, value, plan, rhs).await;
     }
     match value {
         value @ (Value::Num(_) | Value::Int(_)) => {
@@ -169,36 +192,20 @@ pub async fn mutate_with_plan(
             super::write_slice::delete_complex_with_plan(value, plan, &rhs)
         }
         Value::SparseTensor(value) => {
-            super::write_slice::delete_sparse_with_plan(value, plan, &rhs)
+            super::write_slice::delete_sparse_with_plan_in_context(context, value, plan, &rhs)
         }
         Value::GpuTensor(value) => {
-            super::write_slice::delete_gpu_slice_with_plan(&value, plan, &rhs).await
+            super::write_slice::delete_gpu_slice_with_plan_in_context(context, &value, plan, &rhs)
+                .await
         }
         Value::Cell(value) => {
-            let indices = plan
-                .indices
-                .iter()
-                .map(|index| {
-                    usize::try_from(*index)
-                        .ok()
-                        .and_then(|index| index.checked_add(1))
-                        .ok_or_else(|| {
-                            semantic_error(
-                                "IndexOutOfBounds",
-                                "cell index exceeds the supported range",
-                            )
-                        })
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            crate::object::cell::assign_cell_paren_linear_indices_with_policy_in_context(
-                context, value, &indices, &rhs, true,
-            )
+            crate::object::cell::delete_cell_with_plan_in_context(context, value, plan, &rhs)
         }
         value @ (Value::Struct(_) | Value::StructArray(_)) => {
-            super::structure::assign_with_plan(value, plan, rhs, true)
+            super::structure::delete_with_plan_in_context(context, value, plan, &rhs)
         }
         value @ (Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_)) => {
-            super::object::assign_with_plan(value, plan, rhs, true)
+            super::object::delete_with_plan_in_context(context, value, plan, &rhs)
         }
         Value::LogicalArray(value) => {
             super::write_slice::delete_logical_with_plan(context, value, plan, &rhs).await

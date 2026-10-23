@@ -89,7 +89,6 @@ fn failure_cleanup_runs_once_and_does_not_unwind_through_sender() {
     use std::sync::{atomic::AtomicBool, Weak};
     #[derive(Debug)]
     struct Claim(Arc<AtomicBool>);
-    impl RetainedHostAllocationClaim for Claim {}
     impl Drop for Claim {
         fn drop(&mut self) {
             assert!(

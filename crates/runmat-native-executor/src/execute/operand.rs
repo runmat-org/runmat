@@ -1,7 +1,6 @@
 use runmat_mir::{MirConstant, MirOperand, MirRvalue};
 use runmat_runtime::execution::RootedValueLease;
 use runmat_runtime::native::NativeValueRef;
-use runmat_runtime::sequence::ResolveValueSequence;
 use runmat_value::Value;
 
 fn sequence_resolution_context(
@@ -153,16 +152,13 @@ pub(super) fn evaluate_rvalue(
                     .map(|value| state.arena.insert(value))
                     .collect());
             }
-            values.with_owned_sequence(|sequence| {
-                let values = sequence.resolve(
+            Ok(values
+                .resolve_values(
                     *sequence_use,
                     sequence_resolution_context(*sequence_use, requested_outputs),
-                )?;
-                Ok(super::call_suspension::own_output_storage(values)?
-                    .into_iter()
-                    .map(|value| state.arena.insert(value))
-                    .collect())
-            })
+                )?
+                .map(|value| state.arena.insert(value))
+                .collect())
         }
         MirRvalue::DynamicMember {
             base,
@@ -222,16 +218,13 @@ pub(super) fn evaluate_rvalue(
                     .map(|value| state.arena.insert(value))
                     .collect());
             }
-            values.with_owned_sequence(|sequence| {
-                let values = sequence.resolve(
+            Ok(values
+                .resolve_values(
                     *sequence_use,
                     sequence_resolution_context(*sequence_use, requested_outputs),
-                )?;
-                Ok(super::call_suspension::own_output_storage(values)?
-                    .into_iter()
-                    .map(|value| state.arena.insert(value))
-                    .collect())
-            })
+                )?
+                .map(|value| state.arena.insert(value))
+                .collect())
         }
         MirRvalue::WorkspaceFirstStaticProperty {
             workspace_name,

@@ -1,15 +1,15 @@
-use super::ObjectDispatchContext;
+use super::Request;
 use runmat_runtime::RuntimeError;
 
-pub(super) async fn dispatch(
-    instr: &crate::bytecode::Instr,
-    stack: &mut crate::interpreter::stack::InterpreterStack,
-    sequence_register: &mut super::super::SequenceState,
-    context: ObjectDispatchContext<'_>,
-) -> Result<bool, RuntimeError> {
+#[inline(never)]
+pub(super) async fn move_captured_sequence(request: Request<'_>) -> Result<bool, RuntimeError> {
+    let Request {
+        instruction: instr,
+        sequence_register,
+        context,
+        ..
+    } = request;
     use crate::bytecode::Instr;
-    use runmat_runtime::call::arguments::MaterializedExpansionSource as Source;
-    use runmat_runtime::execution::RootedValueLease;
     let runtime = context.runtime;
     sequence_register.validate_capture_context(runtime)?;
     match instr {
@@ -20,14 +20,68 @@ pub(super) async fn dispatch(
             sequence_register.move_capture(*source_slot, *destination_slot)?;
             Ok(true)
         }
+        _ => Ok(false),
+    }
+}
+
+#[inline(never)]
+pub(super) async fn capture_call_output_sequence(
+    request: Request<'_>,
+) -> Result<bool, RuntimeError> {
+    let Request {
+        instruction: instr,
+        sequence_register,
+        context,
+        ..
+    } = request;
+    use crate::bytecode::Instr;
+    let runtime = context.runtime;
+    sequence_register.validate_capture_context(runtime)?;
+    match instr {
         Instr::CaptureCallOutputSequence => {
             sequence_register.capture_call_outputs()?;
             Ok(true)
         }
+        _ => Ok(false),
+    }
+}
+
+#[inline(never)]
+pub(super) async fn capture_scalar_sequence(request: Request<'_>) -> Result<bool, RuntimeError> {
+    let Request {
+        instruction: instr,
+        stack,
+        sequence_register,
+        context,
+        ..
+    } = request;
+    use crate::bytecode::Instr;
+    let runtime = context.runtime;
+    sequence_register.validate_capture_context(runtime)?;
+    match instr {
         Instr::CaptureScalarSequence => {
             sequence_register.capture_scalar_top(stack)?;
             Ok(true)
         }
+        _ => Ok(false),
+    }
+}
+
+#[inline(never)]
+pub(super) async fn capture_member_sequence(request: Request<'_>) -> Result<bool, RuntimeError> {
+    let Request {
+        instruction: instr,
+        stack,
+        sequence_register,
+        context,
+        ..
+    } = request;
+    use crate::bytecode::Instr;
+    use runmat_runtime::call::arguments::MaterializedExpansionSource as Source;
+    use runmat_runtime::execution::RootedValueLease;
+    let runtime = context.runtime;
+    sequence_register.validate_capture_context(runtime)?;
+    match instr {
         Instr::CaptureMemberSequence {
             member,
             sequence_slot,
@@ -46,6 +100,27 @@ pub(super) async fn dispatch(
             sequence_register.capture_rooted(*sequence_slot, stack, values)?;
             Ok(true)
         }
+        _ => Ok(false),
+    }
+}
+
+#[inline(never)]
+pub(super) async fn capture_member_dynamic_sequence(
+    request: Request<'_>,
+) -> Result<bool, RuntimeError> {
+    let Request {
+        instruction: instr,
+        stack,
+        sequence_register,
+        context,
+        ..
+    } = request;
+    use crate::bytecode::Instr;
+    use runmat_runtime::call::arguments::MaterializedExpansionSource as Source;
+    use runmat_runtime::execution::RootedValueLease;
+    let runtime = context.runtime;
+    sequence_register.validate_capture_context(runtime)?;
+    match instr {
         Instr::CaptureMemberDynamicSequence { sequence_slot } => {
             let member = pop(stack)?;
             let base = pop(stack)?;
@@ -61,6 +136,27 @@ pub(super) async fn dispatch(
             sequence_register.capture_rooted(*sequence_slot, stack, values)?;
             Ok(true)
         }
+        _ => Ok(false),
+    }
+}
+
+#[inline(never)]
+pub(super) async fn capture_cell_contents_sequence(
+    request: Request<'_>,
+) -> Result<bool, RuntimeError> {
+    let Request {
+        instruction: instr,
+        stack,
+        sequence_register,
+        context,
+        ..
+    } = request;
+    use crate::bytecode::Instr;
+    use runmat_runtime::call::arguments::MaterializedExpansionSource as Source;
+    use runmat_runtime::execution::RootedValueLease;
+    let runtime = context.runtime;
+    sequence_register.validate_capture_context(runtime)?;
+    match instr {
         Instr::CaptureCellContentsSequence {
             sequence_slot,
             num_indices,
@@ -90,6 +186,27 @@ pub(super) async fn dispatch(
             sequence_register.capture_rooted(*sequence_slot, stack, values)?;
             Ok(true)
         }
+        _ => Ok(false),
+    }
+}
+
+#[inline(never)]
+pub(super) async fn capture_returned_outputs_sequence(
+    request: Request<'_>,
+) -> Result<bool, RuntimeError> {
+    let Request {
+        instruction: instr,
+        stack,
+        sequence_register,
+        context,
+        ..
+    } = request;
+    use crate::bytecode::Instr;
+    use runmat_runtime::call::arguments::MaterializedExpansionSource as Source;
+    use runmat_runtime::execution::RootedValueLease;
+    let runtime = context.runtime;
+    sequence_register.validate_capture_context(runtime)?;
+    match instr {
         Instr::CaptureReturnedOutputsSequence { sequence_slot } => {
             let value = pop(stack)?;
             let _roots = RootedValueLease::for_value_slices_in_context(

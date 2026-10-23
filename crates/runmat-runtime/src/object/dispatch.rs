@@ -861,16 +861,6 @@ fn require_single(sequence: RootedValueSequence) -> Result<RootedValue, RuntimeE
     sequence.try_into_single()
 }
 
-fn build_cell_array_with_shape(
-    values: Vec<Value>,
-    rows: usize,
-    cols: usize,
-    context: &str,
-) -> Result<runmat_value::CellArray, RuntimeError> {
-    runmat_value::CellArray::new(values, rows, cols)
-        .map_err(|error| semantic_error("ShapeMismatch", format!("{context}: {error}")))
-}
-
 fn retain_owned_arguments(
     runtime: Option<&crate::context::RuntimeContext>,
     args: Vec<Value>,

@@ -1,5 +1,7 @@
 use super::*;
-use crate::execute::region::observation::test_support::observed_state;
+use crate::execute::region::observation::test_support::{
+    observed_state, observed_state_with_retirement,
+};
 use crate::region::placement_test_support::Probe;
 use runmat_runtime::native::{NativeCall, NativeExit, NativeHostStatus};
 use runmat_value::{HandleRef, Value};
@@ -10,10 +12,11 @@ unsafe extern "C" fn failed_entry(_: *mut NativeCall, _: *mut NativeExit) -> Nat
 }
 
 #[test]
-fn failed_entry_reports_before_retained_invocation_is_dropped() {
+fn failed_entry_retires_observation_before_retained_invocation_is_dropped() {
     let probe = Rc::new(Probe::default());
+    let retired = Rc::new(std::cell::Cell::new(0));
     let mut invocation = NativeInvocation::new(
-        observed_state(&probe),
+        observed_state_with_retirement(&probe, retired.clone()),
         failed_entry,
         vec![],
         0,
@@ -22,10 +25,11 @@ fn failed_entry_reports_before_retained_invocation_is_dropped() {
     );
     assert!(invocation.advance().is_err());
     assert!(invocation.active.is_none());
-    assert_eq!(probe.feedback.borrow().len(), 1);
-    assert!(!probe.feedback.borrow()[0].succeeded);
+    assert_eq!(retired.get(), 1);
+    assert!(probe.feedback.borrow().is_empty());
     drop(invocation);
-    assert_eq!(probe.feedback.borrow().len(), 1);
+    assert_eq!(retired.get(), 1);
+    assert!(probe.feedback.borrow().is_empty());
 }
 
 unsafe extern "C" fn one_result_entry(

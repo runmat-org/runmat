@@ -242,7 +242,7 @@ fn selected_symbolic_and_foreign_parentheses_keep_their_existing_owners() {
     use runmat_types::{ForeignAffinity, ForeignLifetime, ForeignOwnership, ForeignTypeIdentity};
     use runmat_value::{ForeignRef, ForeignResourceKey, SymbolicExpr};
 
-    let path = |components| {
+    let path = |components: Vec<ObjectIndexComponent>| {
         ObjectSubscriptPath::new(vec![
             ObjectSubscript::braces(ObjectIndexSelector::IndexValues {
                 components: runmat_value::ExactArrayStorage::shared_unbounded(vec![Value::Num(
@@ -250,7 +250,9 @@ fn selected_symbolic_and_foreign_parentheses_keep_their_existing_owners() {
                 )
                 .into()]),
             }),
-            ObjectSubscript::parentheses(ObjectIndexSelector::IndexValues { components }),
+            ObjectSubscript::parentheses(ObjectIndexSelector::IndexValues {
+                components: components.into(),
+            }),
         ])
         .expect("selected item path")
     };

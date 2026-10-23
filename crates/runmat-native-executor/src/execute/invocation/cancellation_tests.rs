@@ -1,6 +1,6 @@
 use super::*;
 use crate::execute::call_suspension::{
-    scope_completion, CallCompletion, PendingCall, TerminatorCompletion,
+    admit_completion_with, CallCompletion, PendingCall, TerminatorCompletion,
 };
 use crate::execute::region::observation::test_support::observed_state;
 use crate::region::placement_test_support::Probe;
@@ -31,16 +31,26 @@ struct PendingProbe {
     ready: Rc<Cell<bool>>,
     on_drop: Option<Box<dyn Fn()>>,
     terminator_completion: bool,
+    terminator_payload: Option<(
+        runmat_runtime::context::RuntimeContext,
+        crate::execute::call_suspension::payload::PayloadReservation,
+    )>,
 }
 impl Future for PendingProbe {
     type Output = NativeExecutorResult<CallCompletion>;
-    fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
         self.polls.set(self.polls.get() + 1);
         if self.ready.get() {
             if self.terminator_completion {
-                Poll::Ready(Ok(CallCompletion::Terminator(Box::new(
+                let (runtime, payload) = self
+                    .terminator_payload
+                    .take()
+                    .expect("prepared terminator payload");
+                Poll::Ready(crate::execute::call_suspension::terminator::completion(
+                    &runtime,
+                    payload,
                     TerminatorCompletion::BranchTruth(true),
-                ))))
+                ))
             } else {
                 Poll::Ready(Ok(CallCompletion::RootedArguments(
                     runmat_runtime::execution::RootedValues::new(vec![])
@@ -72,7 +82,7 @@ unsafe extern "C" fn completed_entry(
     NativeHostStatus::OK
 }
 
-fn invocation(source: &CancellationSource, work: PendingProbe) -> NativeInvocation {
+fn invocation(source: &CancellationSource, mut work: PendingProbe) -> NativeInvocation {
     let mut state = observed_state(&Rc::new(Probe::default()));
     state.runtime = state
         .runtime
@@ -82,7 +92,13 @@ fn invocation(source: &CancellationSource, work: PendingProbe) -> NativeInvocati
         .function
         .expected_sites
         .push(state.function.blocks[0].terminator.site.clone());
-    let future = scope_completion(&state, Box::pin(state.runtime.scope(work)));
+    let runtime = state.runtime.clone();
+    if work.terminator_completion {
+        let payload =
+            crate::execute::call_suspension::terminator::prepare_payload(&runtime).unwrap();
+        work.terminator_payload = Some((runtime.clone(), payload));
+    }
+    let future = admit_completion_with(&state, move || runtime.scope(work)).unwrap();
     state.pending_call = Some(PendingCall {
         continuation: 1,
         generation: 1,
@@ -96,7 +112,7 @@ fn invocation(source: &CancellationSource, work: PendingProbe) -> NativeInvocati
         },
         embedded: None,
         retained_roots: Vec::new(),
-        future: crate::execute::call_suspension::PendingCompletionFuture::Ordinary(future),
+        future,
     });
     NativeInvocation::new(
         state,
@@ -126,6 +142,7 @@ fn work() -> ProbeFixture {
             ready: ready.clone(),
             on_drop: None,
             terminator_completion: false,
+            terminator_payload: None,
         },
         polls,
         drops,

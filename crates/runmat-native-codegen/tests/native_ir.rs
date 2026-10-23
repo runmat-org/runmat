@@ -428,7 +428,7 @@ fn phased_fixed_destination_mir() -> MirAssembly {
         phase(runmat_mir::MirFixedPreparationPhase::EvaluateSelector {
             path_step: 0,
             component: Some(0),
-            region: runmat_mir::MirCallArgumentRegion {
+            region: Box::new(runmat_mir::MirCallArgumentRegion {
                 steps: Vec::new(),
                 argument: runmat_mir::MirCallArg::Expansion(
                     runmat_mir::MirExpansionSource::Member {
@@ -437,7 +437,7 @@ fn phased_fixed_destination_mir() -> MirAssembly {
                     },
                 ),
                 span,
-            },
+            }),
             destination: runmat_mir::MirFixedSelectorDestination::Sequence(
                 runmat_mir::MirSequenceLocalId(0),
             ),
@@ -492,30 +492,41 @@ fn fixed_selector_scalar_phase_defines_only_its_typed_frame_output() {
         kind: MirLocalKind::Temporary,
         span: Span { start: 0, end: 8 },
     });
+    // Canonical fixed preparation is selected for an expanding target. Keep
+    // that CSL receipt and add the scalar selector beside it, rather than
+    // forging a scalar-only target that the ordinary Assign owner handles.
+    let mut scalar_phase = body.blocks[0].statements[3].clone();
+    let MirStmtKind::PrepareFixedAssignment(phase) = &mut scalar_phase.kind else {
+        unreachable!()
+    };
+    let runmat_mir::MirFixedPreparationPhase::EvaluateSelector {
+        component,
+        region,
+        destination,
+        ..
+    } = &mut phase.phase
+    else {
+        unreachable!()
+    };
+    *component = Some(1);
+    region.argument =
+        runmat_mir::MirCallArg::Single(MirOperand::Constant(MirConstant::Number("1".into())));
+    *destination = runmat_mir::MirFixedSelectorDestination::Scalar(MirLocalId(1));
+    body.blocks[0].statements.insert(4, scalar_phase);
     for statement in &mut body.blocks[0].statements {
         let preparation = match &mut statement.kind {
-            MirStmtKind::PrepareFixedAssignment(phase) => {
-                if let runmat_mir::MirFixedPreparationPhase::EvaluateSelector {
-                    region,
-                    destination,
-                    ..
-                } = &mut phase.phase
-                {
-                    region.argument = runmat_mir::MirCallArg::Single(MirOperand::Constant(
-                        MirConstant::Number("1".into()),
-                    ));
-                    *destination = runmat_mir::MirFixedSelectorDestination::Scalar(MirLocalId(1));
-                }
-                &mut phase.assignment
-            }
+            MirStmtKind::PrepareFixedAssignment(phase) => &mut phase.assignment,
             MirStmtKind::PreparedAssign { preparation, .. } => preparation,
             _ => continue,
         };
         let MirPlace::Index(_, indexing) = &mut preparation.mutation.place else {
             unreachable!()
         };
-        indexing.components[0] =
-            runmat_mir::MirIndexComponent::Expr(MirOperand::Local(MirLocalId(1)));
+        indexing
+            .components
+            .push(runmat_mir::MirIndexComponent::Expr(MirOperand::Local(
+                MirLocalId(1),
+            )));
     }
     let native = lower(&mir);
     native.verify().unwrap();
@@ -554,6 +565,12 @@ fn fixed_selector_receipt_and_phase_cursor_survive_normal_await() {
         kind: MirLocalKind::Temporary,
         span,
     });
+    body.locals.push(MirLocal {
+        id: MirLocalId(2),
+        binding: None,
+        kind: MirLocalKind::Temporary,
+        span,
+    });
     let mut final_selector = body.blocks[0].statements[3].clone();
     let MirStmtKind::PrepareFixedAssignment(prefix) = &mut body.blocks[0].statements[3].kind else {
         unreachable!()
@@ -584,7 +601,7 @@ fn fixed_selector_receipt_and_phase_cursor_survive_normal_await() {
             phase: runmat_mir::MirFixedPreparationPhase::EvaluateSelector {
                 path_step: 0,
                 component: Some(0),
-                region: runmat_mir::MirCallArgumentRegion {
+                region: Box::new(runmat_mir::MirCallArgumentRegion {
                     steps: vec![runmat_mir::MirExpressionStep::Let {
                         local: MirLocalId(2),
                         value: MirRvalue::Future {
@@ -597,7 +614,7 @@ fn fixed_selector_receipt_and_phase_cursor_survive_normal_await() {
                     }],
                     argument: runmat_mir::MirCallArg::Single(MirOperand::Local(MirLocalId(2))),
                     span,
-                },
+                }),
                 destination: runmat_mir::MirFixedSelectorDestination::Scalar(MirLocalId(1)),
             },
         }),
@@ -821,7 +838,16 @@ fn lower_with_bindings(
 
 #[test]
 fn native_ir_binds_requirements_and_sites_to_admitted_analysis_contracts() {
-    let mir = function(vec![assignment(1)]);
+    let mir = function(vec![
+        assignment(1),
+        MirStmt {
+            kind: MirStmtKind::WorkspaceEffect {
+                effect: WorkspaceEffect::CreatesBinding,
+                bindings: vec![MirLocalId(0)],
+            },
+            span: Span { start: 2, end: 3 },
+        },
+    ]);
     let analysis = runmat_mir::analysis::analyze_assembly(&mir);
     let admitted_manifest = manifest(&analysis);
     let mut duplicated = analysis.clone();
@@ -864,11 +890,19 @@ fn native_ir_binds_requirements_and_sites_to_admitted_analysis_contracts() {
     );
 
     let mut self_consistent_forgery = original.clone();
-    self_consistent_forgery.functions[0].operation_contracts[0]
+    // Forge an already effectful site so its canonical safepoint and epoch
+    // shape remain intact. Adding effects to a pure Use is structurally invalid
+    // before the independent analysis-projection check can be exercised.
+    let effectful = self_consistent_forgery.functions[0]
+        .operation_contracts
+        .iter()
+        .position(|contract| !contract.effects.0.is_empty())
+        .expect("fixture contains an admitted workspace-effect site");
+    self_consistent_forgery.functions[0].operation_contracts[effectful]
         .effects
         .0
         .insert(runmat_types::EffectKind::Unknown);
-    let forged_site = self_consistent_forgery.functions[0].operation_contracts[0]
+    let forged_site = self_consistent_forgery.functions[0].operation_contracts[effectful]
         .site
         .clone();
     self_consistent_forgery.functions[0].blocks[0]
@@ -1734,7 +1768,7 @@ fn verifier_rejects_omission_stale_effect_state_and_abi_drift() {
     omitted.functions[0].blocks[0].instructions.drain(0..2);
     assert_eq!(
         omitted.verify().unwrap_err().code,
-        "native.ir.construct_coverage"
+        "native.ir.operation_contract_coverage"
     );
 
     let mut stale = assembly.clone();
@@ -2220,7 +2254,9 @@ fn canonical_construct_taxonomy_is_complete_unique_and_serializable() {
     assert!(all.contains(&runmat_mir::MirConstructKind::CaptureSequence));
     assert!(all.contains(&runmat_mir::MirConstructKind::SequenceAssign));
     assert!(all.contains(&runmat_mir::MirConstructKind::WorkspaceFirstStaticProperty));
-    assert_eq!(all.len(), 59);
+    assert_eq!(all.len(), 61);
+    assert!(all.contains(&runmat_mir::MirConstructKind::PrepareFixedAssignment));
+    assert!(all.contains(&runmat_mir::MirConstructKind::PreparedAssign));
     assert_eq!(
         all.iter()
             .copied()

@@ -49,6 +49,24 @@ impl Drop for CancelOnDrop {
     }
 }
 
+/// Keep semantic catch authority inside the original admitted concrete body,
+/// before it is erased or queued. The quote includes this unboxed wrapper,
+/// and only the original Rc is retained, not a copied exception payload.
+fn admit_catch_scoped_native_continuation_with<T, F>(
+    runtime: &RuntimeContext,
+    make_future: impl FnOnce() -> F,
+) -> Result<RuntimeContinuationFuture<'static, T>, RuntimeError>
+where
+    T: 'static,
+    F: Future<Output = Result<T, RuntimeError>> + 'static,
+{
+    let selected = runtime.clone();
+    let catch = runtime.active_catch_exception_shared();
+    crate::execution::rooted_continuation::admit_native_continuation_with(runtime, move || {
+        selected.scope_active_catch_unboxed_shared(catch, make_future())
+    })
+}
+
 /// Retain already-owned inputs until the child finishes or its ticket is
 /// cancelled. The helper does not copy a workspace or open a second driver.
 pub fn run_native_continuation<T, F>(
@@ -78,8 +96,7 @@ where
     F: Future<Output = Result<T, RuntimeError>> + 'static,
 {
     let selected = runtime.clone();
-    let admitted =
-        crate::execution::rooted_continuation::admit_native_continuation_with(runtime, make_future);
+    let admitted = admit_catch_scoped_native_continuation_with(runtime, make_future);
     match admitted {
         Ok(future) => Either::Left(async move {
             run_native_continuation_with_roots(&selected, placement, Some(roots), future).await
@@ -102,10 +119,9 @@ where
     F: Future<Output = Result<T, RuntimeError>> + 'static,
 {
     let selected = runtime.clone();
-    let admitted = crate::execution::rooted_continuation::admit_native_continuation_with(
-        runtime,
-        move || async move { consume(arguments).await },
-    );
+    let admitted = admit_catch_scoped_native_continuation_with(runtime, move || async move {
+        consume(arguments).await
+    });
     match admitted {
         Ok(future) => Either::Left(async move {
             run_native_continuation_with_roots(&selected, placement, None, future).await
@@ -145,7 +161,23 @@ where
 /// retain their existing direct completion path. A configured but idle task
 /// host is also direct: queueing there would wait for a driver that the caller
 /// is not running.
-pub async fn run_selected_callback_continuation<T, F>(
+pub fn run_selected_callback_continuation<'a, T, F>(
+    runtime: &'a RuntimeContext,
+    future: F,
+) -> impl Future<Output = Result<T, RuntimeError>> + 'a
+where
+    T: 'static,
+    F: Future<Output = Result<T, RuntimeError>> + 'static,
+{
+    // A selected semantic callback can be polled as a sibling after its
+    // caller's lexical catch has unwound. Keep that exact Rc (or an explicit
+    // mask) inside the original concrete callback owner, including on drop.
+    let future =
+        runtime.scope_active_catch_unboxed_shared(runtime.active_catch_exception_shared(), future);
+    run_catch_scoped_selected_callback_continuation(runtime, future)
+}
+
+async fn run_catch_scoped_selected_callback_continuation<T, F>(
     runtime: &RuntimeContext,
     future: F,
 ) -> Result<T, RuntimeError>
@@ -181,13 +213,10 @@ where
     F: Future<Output = Result<T, RuntimeError>> + 'static,
 {
     let selected = runtime.clone();
-    match crate::execution::rooted_continuation::admit_native_continuation_with(
-        runtime,
-        make_future,
-    ) {
-        Ok(future) => {
-            Either::Left(async move { run_selected_callback_continuation(&selected, future).await })
-        }
+    match admit_catch_scoped_native_continuation_with(runtime, make_future) {
+        Ok(future) => Either::Left(async move {
+            run_catch_scoped_selected_callback_continuation(&selected, future).await
+        }),
         Err(error) => Either::Right(std::future::ready(Err(error))),
     }
 }
@@ -387,11 +416,25 @@ mod tests {
         let observed = Rc::clone(&polls);
         let result = host()
             .block_on(supervisor.drive_until(async {
-                let result = run_native_continuation(&child, second, roots(), async move {
+                let exception = Rc::new(runmat_value::MException::new(
+                    "RunMat:nativeCaller".into(),
+                    "native caller".into(),
+                ));
+                let guard = child.enter_active_catch_shared(Some(exception.clone()));
+                let callback_runtime = child.clone();
+                let completion = run_native_continuation(&child, second, roots(), async move {
+                    assert!(Rc::ptr_eq(
+                        &callback_runtime
+                            .active_catch_exception_shared()
+                            .expect("inherit native caller catch"),
+                        &exception,
+                    ));
                     observed.set(observed.get() + 1);
                     Ok::<_, RuntimeError>(11)
-                })
-                .await;
+                });
+                drop(guard);
+                let result = completion.await;
+                assert!(child.active_catch_exception_shared().is_none());
                 assert_eq!(polls.get(), 1);
                 result
             }))
@@ -410,13 +453,26 @@ mod tests {
         let observed = Rc::clone(&polls);
         let result = host()
             .block_on(supervisor.drive_until(async {
+                let exception = Rc::new(runmat_value::MException::new(
+                    "RunMat:callbackCaller".into(),
+                    "callback caller".into(),
+                ));
+                let guard = base.enter_active_catch_shared(Some(exception.clone()));
+                let callback_runtime = base.clone();
                 let mut completion = Box::pin(run_selected_callback_continuation_with(
                     &base,
                     move || async move {
+                        assert!(Rc::ptr_eq(
+                            &callback_runtime
+                                .active_catch_exception_shared()
+                                .expect("inherit selected callback catch"),
+                            &exception,
+                        ));
                         observed.set(observed.get() + 1);
                         Ok::<_, RuntimeError>(17)
                     },
                 ));
+                drop(guard);
                 let first_poll = futures::future::poll_fn(|cx| {
                     std::task::Poll::Ready(completion.as_mut().poll(cx))
                 })
@@ -473,12 +529,13 @@ mod tests {
         let ports = RuntimeServicePorts::default()
             .with_local_tasks(supervisor.submission_port(base.local_identity()));
         let base = base.with_service_ports(ports);
-        let expected: Rc<crate::user_functions::BoundFunctionInvoker> = Rc::new(|_, _, _, _, _| {
-            Box::pin(async {
-                crate::execution::RootedValueSequence::new(runmat_value::ValueSequence::empty())
-                    .map_err(|error| error.into_runtime_error())
-            })
-        });
+        let expected: Rc<crate::user_functions::BoundFunctionInvoker> =
+            Rc::new(|runtime, _, _, _, _| {
+                crate::execution::admit_executable_sequence_with(&runtime, move || async move {
+                    crate::execution::RootedValueSequence::new(runmat_value::ValueSequence::empty())
+                        .map_err(|error| error.into_runtime_error())
+                })
+            });
         let parent = base.clone();
         let selected = Rc::clone(&expected);
         let result = host()

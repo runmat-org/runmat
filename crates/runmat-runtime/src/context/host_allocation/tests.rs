@@ -55,6 +55,9 @@ impl RuntimeParallelService for ManagedParallel {
 
 struct UnmanagedFinite;
 
+#[path = "tests/sparse_indexing.rs"]
+mod sparse_indexing;
+
 impl RuntimeParallelService for UnmanagedFinite {
     fn supports(&self, _: ParallelCapability) -> bool {
         false

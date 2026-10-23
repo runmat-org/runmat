@@ -21,10 +21,3 @@ pub(super) fn invalid_base() -> RuntimeError {
         "value does not support this subscript",
     )
 }
-
-pub(super) fn single_value_error() -> RuntimeError {
-    semantic_error(
-        "CommaSeparatedListRequiresSingleValue",
-        "chained indexing requires one value",
-    )
-}

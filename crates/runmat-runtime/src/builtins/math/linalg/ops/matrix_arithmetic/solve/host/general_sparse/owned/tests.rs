@@ -5,7 +5,7 @@ use crate::context::host_allocation::{HostAllocationError, HostAllocationPlan};
 use crate::context::host_effect::ManagedHostEffectLedger;
 use crate::context::{
     ParallelCapability, RuntimeContext, RuntimeParallelResources, RuntimeParallelService,
-    RuntimeServiceFuture, RuntimeServicePorts,
+    RuntimeServicePorts,
 };
 use crate::execution::{
     ExecutionServiceError, OwnedCpuJob, RuntimeBlockingCpuService, RuntimeExecutionService,
@@ -35,10 +35,19 @@ impl RuntimeParallelService for Parallel {
 #[derive(Default)]
 struct InlineCpu(Cell<usize>);
 impl RuntimeBlockingCpuService for InlineCpu {
-    fn submit(&self, job: OwnedCpuJob) -> RuntimeServiceFuture<Result<(), ExecutionServiceError>> {
+    fn submit(
+        &self,
+        runtime: Option<&RuntimeContext>,
+        job: OwnedCpuJob,
+    ) -> crate::execution::OwnedCpuSubmission {
+        let submitted = crate::execution::admit_optional_hostcall_with(
+            runtime,
+            ExecutionServiceError::HostAllocation,
+            || async { Ok(()) },
+        )?;
         self.0.set(self.0.get() + 1);
-        job();
-        Box::pin(async { Ok(()) })
+        job.run();
+        Ok(submitted)
     }
 }
 fn context(ledger: &ManagedHostEffectLedger, service: Rc<InlineCpu>) -> RuntimeContext {

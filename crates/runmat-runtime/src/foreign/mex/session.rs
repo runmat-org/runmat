@@ -248,47 +248,50 @@ impl MexRuntimeSession {
         resolution: MexResolutionScope,
     ) -> Rc<crate::user_functions::NativeNameObserver> {
         let owner = Rc::clone(self);
-        Rc::new(move |name| {
+        Rc::new(move |runtime, name| {
             let owner = Rc::clone(&owner);
-            Box::pin(async move {
-                let selection = match resolution {
-                    MexResolutionScope::SearchPath => {
-                        owner.observe_name(&name).await.map_err(|error| {
-                            error.into_identified_runtime_error(
-                                "MEX function resolution",
-                                "RunMat:FunctionResolution",
-                            )
-                        })?
-                    }
-                    MexResolutionScope::InstalledOnly => owner.observe_installed_name(&name),
-                };
-                Ok(selection.map(|selection| match selection {
-                    MexNameSelection::Installed {
-                        path,
-                        identity,
-                        interop,
-                    } => crate::user_functions::NativeNameFact {
-                        path,
-                        origin: None,
-                        installed: true,
-                        installed_artifact: Some(
-                            crate::user_functions::InstalledNativeArtifactFact {
-                                identity,
-                                interop,
-                            },
-                        ),
-                    },
-                    MexNameSelection::SearchPath(candidate) => {
-                        let (path, origin) = candidate.into_parts();
-                        crate::user_functions::NativeNameFact {
-                            path,
-                            origin: Some(origin),
-                            installed: false,
-                            installed_artifact: None,
+            crate::user_functions::admit_native_name_observation_with(
+                &runtime,
+                move || async move {
+                    let selection = match resolution {
+                        MexResolutionScope::SearchPath => {
+                            owner.observe_name(&name).await.map_err(|error| {
+                                error.into_identified_runtime_error(
+                                    "MEX function resolution",
+                                    "RunMat:FunctionResolution",
+                                )
+                            })?
                         }
-                    }
-                }))
-            })
+                        MexResolutionScope::InstalledOnly => owner.observe_installed_name(&name),
+                    };
+                    Ok(selection.map(|selection| match selection {
+                        MexNameSelection::Installed {
+                            path,
+                            identity,
+                            interop,
+                        } => crate::user_functions::NativeNameFact {
+                            path,
+                            origin: None,
+                            installed: true,
+                            installed_artifact: Some(
+                                crate::user_functions::InstalledNativeArtifactFact {
+                                    identity,
+                                    interop,
+                                },
+                            ),
+                        },
+                        MexNameSelection::SearchPath(candidate) => {
+                            let (path, origin) = candidate.into_parts();
+                            crate::user_functions::NativeNameFact {
+                                path,
+                                origin: Some(origin),
+                                installed: false,
+                                installed_artifact: None,
+                            }
+                        }
+                    }))
+                },
+            )
         })
     }
 

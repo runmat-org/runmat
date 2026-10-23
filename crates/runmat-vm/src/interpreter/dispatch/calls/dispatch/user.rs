@@ -7,10 +7,10 @@
 
 use super::*;
 
-#[path = "user/ordinary.rs"]
-mod ordinary;
 #[path = "user/nested.rs"]
 mod nested;
+#[path = "user/ordinary.rs"]
+mod ordinary;
 
 pub(super) fn dispatch<'a>(ctx: CallDispatchContext<'a>) -> CallFuture<'a> {
     match ctx.instr {
@@ -26,10 +26,12 @@ pub(super) fn dispatch<'a>(ctx: CallDispatchContext<'a>) -> CallFuture<'a> {
 
 #[inline(never)]
 fn suspend_ordinary(ctx: CallDispatchContext<'_>) -> CallFuture<'_> {
-    Box::pin(ordinary::dispatch(ctx))
+    let context = ctx.context;
+    control::admit(&context.runtime, move || ordinary::dispatch(ctx))
 }
 
 #[inline(never)]
 fn suspend_nested(ctx: CallDispatchContext<'_>) -> CallFuture<'_> {
-    Box::pin(nested::dispatch(ctx))
+    let context = ctx.context;
+    control::admit(&context.runtime, move || nested::dispatch(ctx))
 }

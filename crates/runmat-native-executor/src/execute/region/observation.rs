@@ -82,12 +82,12 @@ impl GenericRegionObservation {
     }
 }
 
-pub(in crate::execute) fn host_operand<'a>(
-    state: &'a HostState,
+pub(in crate::execute) fn host_operand(
+    state: &HostState,
     site: NativeSiteRequest,
     operator: runmat_types::OperatorKind,
     operand: usize,
-) -> NativeExecutorResult<Option<&'a runmat_value::Value>> {
+) -> NativeExecutorResult<Option<&runmat_value::Value>> {
     let Some(host) = state
         .region_observation
         .as_ref()

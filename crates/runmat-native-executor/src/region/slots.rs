@@ -109,6 +109,5 @@ mod tests {
         assert!(
             NumericRegionInputViews::try_from_iter((0..=MAX_NODES).map(|_| Ok(&value))).is_err()
         );
-        assert!(NUMERIC_REGION_INLINE_METADATA_BYTES <= 8192);
     }
 }

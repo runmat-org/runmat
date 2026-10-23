@@ -53,13 +53,17 @@ pub use read::{
 #[path = "resolve/static.rs"]
 mod static_member;
 pub use static_member::load_static_member;
+#[path = "resolve/member_scope.rs"]
+mod member_scope;
 #[path = "resolve/store.rs"]
 mod store;
-pub(crate) use store::store_member_text_with_context;
+pub(crate) use member_scope::{ContextualMemberScope, MemberStoreScope, OrdinaryMemberScope};
 use store::store_member_with_context;
 pub use store::{store_member, store_member_dynamic, store_member_in_context};
+pub(crate) use store::{store_member_text_with_context, store_member_text_with_scope};
 #[path = "resolve/store_sequence.rs"]
 mod store_sequence;
+pub(crate) use store_sequence::store_member_sequence_values_with_scope;
 pub use store_sequence::{
     member_sequence_cardinality, store_member_dynamic_traced,
     store_member_dynamic_traced_in_context, store_member_sequence_traced,

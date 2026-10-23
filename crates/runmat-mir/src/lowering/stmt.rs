@@ -209,7 +209,7 @@ pub(crate) fn lower_stmt_with_replacements(
     })
 }
 
-pub(super) fn assignment_target_expands(target: &runmat_hir::HirPlace) -> bool {
+pub(super) fn assignment_target_requires_preparation(target: &runmat_hir::HirPlace) -> bool {
     fn indexed(indexing: &runmat_hir::IndexingSemantics) -> bool {
         indexing.components.iter().any(|component| {
             matches!(component,
@@ -225,14 +225,30 @@ pub(super) fn assignment_target_expands(target: &runmat_hir::HirPlace) -> bool {
             _ => false,
         }
     }
-    match target {
+    let expands = match target {
         runmat_hir::HirPlace::Index(base, indexing)
         | runmat_hir::HirPlace::IndexCell(base, indexing) => indexed(indexing) || expression(base),
         runmat_hir::HirPlace::Member(base, _) | runmat_hir::HirPlace::MemberDynamic(base, _) => {
             expression(base)
         }
         runmat_hir::HirPlace::Binding(_) => false,
+    };
+    fn depth(value: &HirExpr) -> usize {
+        match &value.kind {
+            HirExprKind::Index(base, _)
+            | HirExprKind::Member { base, .. }
+            | HirExprKind::MemberDynamic { base, .. } => depth(base) + 1,
+            _ => 0,
+        }
     }
+    let prefix_depth = match target {
+        runmat_hir::HirPlace::Index(base, _)
+        | runmat_hir::HirPlace::IndexCell(base, _)
+        | runmat_hir::HirPlace::Member(base, _)
+        | runmat_hir::HirPlace::MemberDynamic(base, _) => depth(base),
+        runmat_hir::HirPlace::Binding(_) => 0,
+    };
+    expands || prefix_depth != 0
 }
 
 pub(super) fn prepare_expanding_assignment(

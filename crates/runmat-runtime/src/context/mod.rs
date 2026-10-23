@@ -89,7 +89,10 @@ pub use callable_artifacts::{
 pub use capability::{RuntimeCapability, RuntimeCapabilityError};
 pub use catch::{ActiveCatchFuture, ActiveCatchGuard, UnboxedActiveCatchFuture};
 pub use cleanup_lifecycle::RuntimeLifecycleHost;
-pub use current_class_product::{CurrentClassProductResolution, CurrentClassProductResolver};
+pub use current_class_product::{
+    admit_current_class_product_with, CurrentClassProductFuture, CurrentClassProductResolution,
+    CurrentClassProductResolver,
+};
 pub use graphics_callbacks::{
     GraphicsBoundCallbackResponder, GraphicsCallbackDisposition, GraphicsCallbackDriveError,
     GraphicsCallbackHandler, GraphicsCallbackHostEvent, GraphicsCallbackHostFailure,

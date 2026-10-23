@@ -158,7 +158,6 @@ fn store_member_updates_inherited_static_property_owner_slot() {
         Value::ClassRef(child_name.clone().into()),
         "version".to_string(),
         Value::Num(9.0),
-        false,
         None,
         |_old, _new| {},
     ))
@@ -290,7 +289,6 @@ fn store_member_uses_inherited_subsasgn_for_missing_property() {
         Value::Object(ObjectInstance::new(child_name)),
         "missing".to_string(),
         Value::Num(13.0),
-        false,
         None,
         |_old, _new| {},
     ))

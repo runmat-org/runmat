@@ -680,6 +680,37 @@ pub fn call_feval_sequence_async_with_outputs_in_context<'a>(
     )
 }
 
+/// Invoke a callback without replacing the caller's admitted argument storage.
+/// The target registration is retained when this future is constructed.
+pub fn call_feval_retained_sequence_async_with_outputs_in_context<'a>(
+    runtime: &'a crate::context::RuntimeContext,
+    func_value: Value,
+    args: crate::call::BuiltinArguments,
+    requested_outputs: usize,
+) -> impl std::future::Future<Output = Result<crate::execution::RootedValueSequence, RuntimeError>> + 'a
+{
+    let invocation = runmat_value::validate_output_count(requested_outputs)
+        .map_err(crate::sequence::sequence_error_to_runtime)
+        .map(|()| {
+            crate::call::feval::invoke_retained(
+                Some(runtime),
+                func_value,
+                args,
+                requested_outputs,
+                None,
+            )
+        });
+    async move {
+        let invocation = invocation?;
+        runtime
+            .scope(async {
+                let _guard = crate::output_count::push_output_count(Some(requested_outputs))?;
+                invocation.await
+            })
+            .await
+    }
+}
+
 pub fn call_feval_sequence_async_with_outputs_and_callsite_in_context<'a>(
     runtime: &'a crate::context::RuntimeContext,
     func_value: Value,

@@ -552,7 +552,7 @@ fn execute_terminator(
                     super::call_suspension::TerminatorReadyStage::ForCapture(iterator),
                     None,
                 )) => {
-                    state.start_for_loop(block, body.target, *iterator);
+                    state.start_for_loop(block, body.target, iterator);
                 }
                 Some((super::call_suspension::TerminatorReadyStage::ForNext(next), None)) => {
                     if let Some(reference) = next {

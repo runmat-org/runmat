@@ -1,8 +1,8 @@
+use super::resident::gather_dispatch_value_in_context as gather_selector_in_context;
 use crate::indexing::plan::total_len_from_shape;
 use crate::runtime_error::semantic_error as mex;
 use crate::{
     builtins::common::{shape::is_scalar_shape, tensor},
-    dispatcher::gather_if_needed_async,
     RuntimeError,
 };
 use runmat_value::{
@@ -227,7 +227,7 @@ pub async fn index_scalar_from_value(value: &Value) -> VmResult<Option<IndexScal
     let context = crate::context::legacy::active();
     index_scalar_from_value_in_context(context.as_ref(), value).await
 }
-pub(super) async fn index_scalar_from_value_in_context(
+pub async fn index_scalar_from_value_in_context(
     context: Option<&crate::context::RuntimeContext>,
     value: &Value,
 ) -> VmResult<Option<IndexScalar>> {
@@ -238,9 +238,7 @@ pub(super) async fn index_scalar_from_value_in_context(
             return Ok(None);
         }
         let gathered = owner
-            .await_stage(crate::dispatcher::gather_if_needed_in_context_async(
-                value, context,
-            ))
+            .await_stage(gather_selector_in_context(value, context))
             .await??;
         return Ok(index_scalar_from_host_value(&gathered));
     }
@@ -255,14 +253,6 @@ fn checked_positive_index(scalar: IndexScalar, upper_bound: Option<usize>) -> Vm
         return Err(mex("IndexOutOfBounds", "Index out of bounds"));
     }
     Ok(index)
-}
-
-pub(crate) fn numeric_tensor_indices(
-    tensor: &Tensor,
-    upper_bound: Option<usize>,
-) -> VmResult<ExactArrayStorage<usize>> {
-    let context = crate::context::legacy::active();
-    numeric_tensor_indices_in_context(context.as_ref(), tensor, upper_bound)
 }
 
 pub(super) fn numeric_tensor_indices_in_context(
@@ -295,7 +285,8 @@ pub(super) fn numeric_tensor_indices_in_context(
 
 pub async fn materialize_index_value(value: &Value) -> VmResult<Value> {
     if matches!(value, Value::GpuTensor(_)) {
-        return gather_if_needed_async(value)
+        let context = crate::context::legacy::active();
+        return gather_selector_in_context(value, context.as_ref())
             .await
             .map_err(map_index_gather_error);
     }
@@ -308,7 +299,7 @@ pub(super) async fn materialize_index_value_in_context<'a>(
 ) -> VmResult<Cow<'a, Value>> {
     crate::indexing::plan::admission::checkpoint(context)?;
     if matches!(value, Value::GpuTensor(_)) {
-        crate::dispatcher::gather_if_needed_in_context_async(value, context)
+        gather_selector_in_context(value, context)
             .await
             .map(Cow::Owned)
     } else {
@@ -316,13 +307,6 @@ pub(super) async fn materialize_index_value_in_context<'a>(
     }
 }
 
-pub(crate) fn logical_indices_linear(
-    array: &LogicalArray,
-    total_len: usize,
-) -> VmResult<ExactArrayStorage<usize>> {
-    let context = crate::context::legacy::active();
-    logical_indices_linear_in_context(context.as_ref(), array, total_len)
-}
 pub(super) fn logical_indices_linear_in_context(
     context: Option<&crate::context::RuntimeContext>,
     array: &LogicalArray,
@@ -370,9 +354,7 @@ async fn indices_from_value_linear_in_context(
     let owner = crate::indexing::plan::admission::Owner::new(context)?;
     if matches!(value, Value::GpuTensor(_)) {
         let gathered = owner
-            .await_stage(crate::dispatcher::gather_if_needed_in_context_async(
-                value, context,
-            ))
+            .await_stage(gather_selector_in_context(value, context))
             .await??;
         return indices_from_host_value_linear_in_context(context, &gathered, total_len);
     }
@@ -388,9 +370,7 @@ async fn selector_from_value_dim_with_bounds(
     let owner = crate::indexing::plan::admission::Owner::new(context)?;
     if matches!(value, Value::GpuTensor(_)) {
         let gathered = owner
-            .await_stage(crate::dispatcher::gather_if_needed_in_context_async(
-                value, context,
-            ))
+            .await_stage(gather_selector_in_context(value, context))
             .await??;
         return selector_from_host_value_dim(context, &gathered, dim_len, require_in_bounds);
     }
@@ -527,9 +507,7 @@ async fn materialize_used_numeric<'a>(
         })?;
         let value = if let Value::GpuTensor(handle) = value {
             let result = owner
-                .await_stage(crate::dispatcher::gather_if_needed_in_context_async(
-                    value, context,
-                ))
+                .await_stage(gather_selector_in_context(value, context))
                 .await?;
             let gathered = if linear || total_len_from_shape(handle.shape()) != 1 {
                 result.map_err(map_index_gather_error)?

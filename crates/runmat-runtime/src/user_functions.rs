@@ -14,11 +14,15 @@ use std::sync::Arc;
 pub mod test_support;
 
 pub type UserFunctionFuture =
+    crate::execution::RuntimeContinuationFuture<'static, crate::execution::RootedValueSequence>;
+/// Legacy embedding callbacks own an opaque allocation. It is not a managed
+/// concrete-future grant and may only be called through the unbounded adapter.
+pub type UnscopedUserFunctionFuture =
     Pin<Box<dyn Future<Output = Result<crate::execution::RootedValueSequence, RuntimeError>>>>;
 /// A missing pre-effect target returns the exact argument owner to the next
 /// resolution tier. A selected target is terminal even for zero outputs.
 /// Host selectors may return `Continue` only before invocation effects and
-/// must return the original argument vector, not a replacement or a clone.
+/// must return the original rooted argument owner, not a replacement or a clone.
 /// After selection, retirement, cancellation and invocation errors are `Break`.
 pub type DynamicFunctionLoadAttempt = ControlFlow<
     Result<crate::execution::RootedValueSequence, RuntimeError>,
@@ -28,24 +32,34 @@ pub(crate) type CallableAttempt = ControlFlow<
     Result<crate::execution::RootedValueSequence, RuntimeError>,
     crate::call::RootedFunctionArguments,
 >;
-pub type DynamicFunctionLoadFuture = Pin<Box<dyn Future<Output = DynamicFunctionLoadAttempt>>>;
-pub type DynamicFunctionClearFuture = Pin<Box<dyn Future<Output = Result<(), RuntimeError>>>>;
+pub type DynamicFunctionLoadCompletion =
+    ControlFlow<crate::execution::RootedValueSequence, crate::call::RootedFunctionArguments>;
+pub type DynamicFunctionLoadFuture =
+    crate::execution::RuntimeContinuationFuture<'static, DynamicFunctionLoadCompletion>;
+pub type DynamicFunctionClearFuture = crate::execution::RuntimeContinuationFuture<'static, ()>;
+
+#[path = "user_functions/dynamic_load.rs"]
+mod dynamic_load;
+pub use dynamic_load::await_dynamic_function_load;
 pub type FunctionInvoker = dyn Fn(
     Option<crate::context::RuntimeContext>,
     usize,
     crate::call::RootedFunctionArguments,
     usize,
-) -> UserFunctionFuture;
+) -> Result<UserFunctionFuture, RuntimeError>;
 /// Compatibility entrypoint for an embedding callback without a selected
 /// RuntimeContext. It cannot mint foreign reentry authority.
-pub type UnscopedFunctionInvoker = dyn Fn(usize, &[Value], usize) -> UserFunctionFuture;
+pub type UnscopedFunctionInvoker = dyn Fn(usize, &[Value], usize) -> UnscopedUserFunctionFuture;
+/// Selected exact-definition execution retains its original admitted allocation.
+/// Admission failure is terminal and does not fall through to another invoker.
+pub type BoundFunctionFuture = UserFunctionFuture;
 pub type BoundFunctionInvoker = dyn Fn(
     crate::context::RuntimeContext,
     runmat_value::BoundFunctionBinding,
     crate::call::RootedFunctionArguments,
     usize,
     Option<runmat_value::LexicalEnvironment>,
-) -> UserFunctionFuture;
+) -> Result<BoundFunctionFuture, RuntimeError>;
 #[derive(Debug)]
 pub struct ExternalFunctionCall {
     pub function: usize,
@@ -53,18 +67,29 @@ pub struct ExternalFunctionCall {
     pub arguments: crate::call::RootedFunctionArguments,
     pub requested_outputs: usize,
 }
-pub type ExternalFunctionInvoker =
-    dyn Fn(Option<crate::context::RuntimeContext>, ExternalFunctionCall) -> UserFunctionFuture;
-pub type UnscopedExternalFunctionInvoker = dyn Fn(ExternalFunctionCall) -> UserFunctionFuture;
-pub type LexicalFunctionFuture = Pin<
+pub type ExternalFunctionInvoker = dyn Fn(
+    Option<crate::context::RuntimeContext>,
+    ExternalFunctionCall,
+) -> Result<UserFunctionFuture, RuntimeError>;
+pub type UnscopedExternalFunctionInvoker =
+    dyn Fn(ExternalFunctionCall) -> UnscopedUserFunctionFuture;
+pub type LexicalFunctionFuture = crate::execution::RuntimeContinuationFuture<
+    'static,
+    crate::call::lexical::RootedLexicalCallResult,
+>;
+pub type UnscopedLexicalFunctionFuture = Pin<
     Box<dyn Future<Output = Result<crate::call::lexical::RootedLexicalCallResult, RuntimeError>>>,
 >;
 pub type LexicalFunctionInvoker = dyn Fn(
     Option<crate::context::RuntimeContext>,
     crate::call::lexical::LexicalCall,
-) -> LexicalFunctionFuture;
+) -> Result<LexicalFunctionFuture, RuntimeError>;
 pub type UnscopedLexicalFunctionInvoker =
-    dyn Fn(crate::call::lexical::LexicalCall) -> LexicalFunctionFuture;
+    dyn Fn(crate::call::lexical::LexicalCall) -> UnscopedLexicalFunctionFuture;
+
+#[path = "user_functions/future_owner.rs"]
+mod future_owner;
+pub use future_owner::{admit_lexical_function_with, admit_user_function_with};
 pub type FunctionResolver = dyn Fn(&str) -> Option<usize> + Send + Sync;
 /// The active source owner's private-name target. A current publication needs
 /// no lease; a retained selection carries its exact definition authority.
@@ -121,9 +146,18 @@ impl SemanticNameCandidate {
 pub type SemanticNameCandidates = dyn Fn(&str) -> Vec<SemanticNameCandidate> + Send + Sync;
 /// A read-only view of the native loader's selected name. The executable
 /// loader remains the owner of installed-module and platform-suffix policy.
-pub type NativeNameObserverFuture =
-    Pin<Box<dyn Future<Output = Result<Option<NativeNameFact>, crate::RuntimeError>>>>;
-pub type NativeNameObserver = dyn Fn(String) -> NativeNameObserverFuture;
+pub type NativeNameObserverFuture = crate::execution::RuntimeContinuationFuture<
+    'static,
+    crate::execution::RootedResult<Option<NativeNameFact>>,
+>;
+pub type NativeNameObserver = dyn Fn(
+    crate::context::RuntimeContext,
+    String,
+) -> Result<NativeNameObserverFuture, RuntimeError>;
+
+#[path = "user_functions/native_observation.rs"]
+mod native_observation;
+pub use native_observation::{admit_native_name_observation_with, await_native_name_observation};
 
 /// Trusted selected-host resolution and invocation. An absent target follows
 /// the same original-owner, pre-effect contract as [`DynamicFunctionLoadAttempt`].
@@ -132,7 +166,7 @@ pub type SelectedNativeInvoker = dyn Fn(
     String,
     crate::call::RootedFunctionArguments,
     usize,
-) -> DynamicFunctionLoadFuture;
+) -> Result<DynamicFunctionLoadFuture, RuntimeError>;
 
 /// Native resolution is either session-owned or confined to a selected
 /// product. A selected product without a grant cannot use the session owner.
@@ -164,8 +198,12 @@ impl SelectedNativeRoute {
         Self { observer, invoker }
     }
 
-    pub fn observe(&self, name: String) -> NativeNameObserverFuture {
-        (self.observer)(name)
+    pub async fn observe(
+        &self,
+        runtime: crate::context::RuntimeContext,
+        name: String,
+    ) -> Result<Option<NativeNameFact>, RuntimeError> {
+        await_native_name_observation((self.observer)(runtime, name)).await
     }
 
     pub fn invoke(
@@ -174,7 +212,7 @@ impl SelectedNativeRoute {
         name: String,
         arguments: crate::call::RootedFunctionArguments,
         requested_outputs: usize,
-    ) -> DynamicFunctionLoadFuture {
+    ) -> Result<DynamicFunctionLoadFuture, RuntimeError> {
         (self.invoker)(runtime, name, arguments, requested_outputs)
     }
 }
@@ -226,7 +264,7 @@ pub type DynamicFunctionLoader = dyn Fn(
     usize,
     DynamicFunctionLoadPhase,
     Option<crate::callsite::CallsiteInfo>,
-) -> DynamicFunctionLoadFuture;
+) -> Result<DynamicFunctionLoadFuture, RuntimeError>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DynamicFunctionClearRequest {
@@ -247,12 +285,12 @@ pub enum DynamicFunctionRefreshRequest {
 pub type DynamicFunctionRefresher = dyn Fn(
     crate::context::RuntimeContext,
     DynamicFunctionRefreshRequest,
-) -> DynamicFunctionClearFuture;
+) -> Result<DynamicFunctionClearFuture, RuntimeError>;
 
 pub type DynamicFunctionClearer = dyn Fn(
     crate::context::RuntimeContext,
     DynamicFunctionClearRequest,
-) -> DynamicFunctionClearFuture;
+) -> Result<DynamicFunctionClearFuture, RuntimeError>;
 
 #[path = "user_functions/call_dispatch.rs"]
 mod call_dispatch;

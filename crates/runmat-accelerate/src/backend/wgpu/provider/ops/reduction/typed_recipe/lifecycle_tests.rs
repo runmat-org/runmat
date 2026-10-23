@@ -13,13 +13,10 @@ use runmat_accelerate_api::{
     reduction::{ReductionSelection, ReductionStrategy, ReductionSubmission},
     AccelProvider, GpuHandleProvenance, GpuTensorHandle, GpuTensorLayout, GpuTensorStorage,
     HostNumericDataOwned, HostNumericDataView, HostNumericTensorView, ProviderLayout,
-    ProviderPrecision, ProviderTypedReductionWorkload, TransposeInfo,
+    ProviderPrecision, ProviderTypedReductionWorkload, TransposeInfo, WgpuBufferOwner,
 };
 use runmat_value::{Tensor, Value};
-use std::{
-    collections::HashMap,
-    sync::{Arc, Weak},
-};
+use std::{collections::HashMap, sync::Weak};
 
 #[derive(Default)]
 struct Trace {
@@ -30,12 +27,12 @@ struct Trace {
 }
 impl ReductionObserver for Trace {
     fn output_acquired(&mut self, output: &runmat_accelerate_api::WgpuBufferOwner) -> Result<()> {
-        self.output = Some(Arc::downgrade(output));
+        self.output = Some(WgpuBufferOwner::downgrade(output));
         Ok(())
     }
 
     fn partial_acquired(&mut self, partial: &runmat_accelerate_api::WgpuBufferOwner) -> Result<()> {
-        self.partial = Some(Arc::downgrade(partial));
+        self.partial = Some(WgpuBufferOwner::downgrade(partial));
         Ok(())
     }
 
@@ -342,7 +339,7 @@ fn same_class_transpose_binds_the_source_buffer_and_uses_checked_strides() {
     let admitted = provider
         .admit_reduction_recipe(&submission)
         .expect("provider authenticates transpose owner");
-    assert!(Arc::ptr_eq(&source, &admitted[0]));
+    assert!(WgpuBufferOwner::ptr_eq(&source, &admitted[0]));
     drop(admitted);
     let before = provider.allocations.record_count().unwrap();
     let output = provider

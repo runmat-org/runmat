@@ -6,7 +6,9 @@ use crate::runtime_error::semantic_error;
 use crate::RuntimeError;
 use runmat_value::Value;
 
+mod creation;
 mod structural;
+pub use creation::assignment_container_in_context;
 use structural::read_step;
 mod assignment;
 mod conversion;
@@ -30,13 +32,35 @@ pub enum AssignmentStepSpec {
 #[derive(Debug, Clone)]
 pub(super) enum PreparedAssignmentStep {
     Member(runmat_value::Utf8Text),
-    InitializingMember(runmat_value::Utf8Text),
+    InitializingMember {
+        member: runmat_value::Utf8Text,
+        intent: runmat_types::AssignmentChildCreation,
+        origin: ReceiverCreationOrigin,
+    },
     Parentheses {
         plan: IndexPlan,
         selector_values:
             runmat_value::ExactArrayStorage<crate::object::indexing::ObjectIndexComponent>,
     },
+    InitializingParentheses {
+        plan: IndexPlan,
+        selector_values:
+            runmat_value::ExactArrayStorage<crate::object::indexing::ObjectIndexComponent>,
+    },
     Braces(runmat_value::ExactArrayStorage<crate::object::indexing::ObjectIndexComponent>),
+    InitializingCellContents {
+        positions: runmat_value::ExactArrayStorage<usize>,
+        intent: runmat_types::AssignmentChildCreation,
+    },
+}
+
+/// Private provenance of a selected structural receiver, never inferred from
+/// an empty numeric field's payload. Only canonical projection geometry mints
+/// the new-row variant; it does not authorize conversion of an existing row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ReceiverCreationOrigin {
+    Existing,
+    NewStructureElement,
 }
 
 #[derive(Debug)]
@@ -82,7 +106,8 @@ pub struct SequenceDestinationBuilder {
     object_suffix: Option<ObjectSuffixBuilder>,
     selector_roots: ControlVec<RootedValueLease>,
     control: DestinationControl,
-    initialize_members: bool,
+    assignment_creation: runmat_types::AssignmentCreationPolicy,
+    current_origin: ReceiverCreationOrigin,
 }
 
 impl SequenceDestinationBuilder {
@@ -124,7 +149,8 @@ impl SequenceDestinationBuilder {
             object_suffix: None,
             selector_roots: control.vector(),
             control,
-            initialize_members: false,
+            assignment_creation: runmat_types::AssignmentCreationPolicy::ExistingOnly,
+            current_origin: ReceiverCreationOrigin::Existing,
         })
     }
 
@@ -171,7 +197,7 @@ impl SequenceDestinationBuilder {
         mut self,
         creation: runmat_types::AssignmentCreationPolicy,
     ) -> Self {
-        self.initialize_members = creation != runmat_types::AssignmentCreationPolicy::ExistingOnly;
+        self.assignment_creation = creation;
         self
     }
 
@@ -188,8 +214,13 @@ impl SequenceDestinationBuilder {
         step: AssignmentStepSpec,
         caller_function_name: Option<&str>,
     ) -> Result<(), RuntimeError> {
-        self.push_step_with_context(None, step, caller_function_name)
-            .await
+        self.push_step_with_context(
+            None,
+            step,
+            runmat_types::AssignmentChildCreation::ScalarStructure,
+            caller_function_name,
+        )
+        .await
     }
 
     pub async fn push_step_in_context(
@@ -198,7 +229,25 @@ impl SequenceDestinationBuilder {
         step: AssignmentStepSpec,
         caller_function_name: Option<&str>,
     ) -> Result<(), RuntimeError> {
-        self.push_step_with_context(Some(context), step, caller_function_name)
+        self.push_step_with_context(
+            Some(context),
+            step,
+            runmat_types::AssignmentChildCreation::ScalarStructure,
+            caller_function_name,
+        )
+        .await
+    }
+
+    /// A canonical fixed-path suffix supplies the missing child's exact
+    /// container before the next selector (and its contextual end) executes.
+    pub async fn push_assignment_step_in_context(
+        &mut self,
+        context: &crate::context::RuntimeContext,
+        step: AssignmentStepSpec,
+        child_creation: runmat_types::AssignmentChildCreation,
+        caller_function_name: Option<&str>,
+    ) -> Result<(), RuntimeError> {
+        self.push_step_with_context(Some(context), step, child_creation, caller_function_name)
             .await
     }
 
@@ -206,6 +255,7 @@ impl SequenceDestinationBuilder {
         &mut self,
         context: Option<&crate::context::RuntimeContext>,
         step: AssignmentStepSpec,
+        child_creation: runmat_types::AssignmentChildCreation,
         caller_function_name: Option<&str>,
     ) -> Result<(), RuntimeError> {
         self.control.reserve(context, &mut self.selector_roots, 1)?;
@@ -245,13 +295,37 @@ impl SequenceDestinationBuilder {
             return Ok(());
         }
         self.control.reserve(context, &mut self.steps, 1)?;
+        let intent =
+            if self.assignment_creation == runmat_types::AssignmentCreationPolicy::ExistingOnly {
+                runmat_types::AssignmentChildCreation::ExistingOnly
+            } else {
+                child_creation
+            };
         let step = structural::prepare_step_with_initialization(
             context,
             &self.current,
             step,
-            self.initialize_members,
+            intent,
+            self.current_origin,
         )
         .await?;
+        let next_origin = match &step {
+            PreparedAssignmentStep::InitializingParentheses { plan, .. } => {
+                use crate::aggregate::structure::operations::{
+                    selected_structure_element, SelectedStructureElement,
+                };
+                match selected_structure_element(&self.current, plan)? {
+                    SelectedStructureElement::New => ReceiverCreationOrigin::NewStructureElement,
+                    SelectedStructureElement::Existing(0)
+                        if self.current_origin == ReceiverCreationOrigin::NewStructureElement =>
+                    {
+                        self.current_origin
+                    }
+                    _ => ReceiverCreationOrigin::Existing,
+                }
+            }
+            _ => ReceiverCreationOrigin::Existing,
+        };
         self.current = read_step(
             context,
             self.current.value().clone(),
@@ -259,25 +333,27 @@ impl SequenceDestinationBuilder {
             caller_function_name,
         )
         .await?;
+        self.current_origin = next_origin;
         self.control.reserve(context, &mut self.steps, 0)?;
         self.steps.push(step);
         self.selector_roots.push(step_roots);
         Ok(())
     }
 
-    pub async fn finish(
+    pub fn finish(
         self,
         endpoint: SequenceEndpointSpec,
-    ) -> Result<PreparedSequenceDestination, RuntimeError> {
-        self.finish_with_context(None, endpoint).await
+    ) -> impl std::future::Future<Output = Result<PreparedSequenceDestination, RuntimeError>> {
+        self.finish_with_context(None, endpoint)
     }
 
-    pub async fn finish_in_context(
+    pub fn finish_in_context<'a>(
         self,
-        context: &crate::context::RuntimeContext,
+        context: &'a crate::context::RuntimeContext,
         endpoint: SequenceEndpointSpec,
-    ) -> Result<PreparedSequenceDestination, RuntimeError> {
-        self.finish_with_context(Some(context), endpoint).await
+    ) -> impl std::future::Future<Output = Result<PreparedSequenceDestination, RuntimeError>> + 'a
+    {
+        self.finish_with_context(Some(context), endpoint)
     }
 
     async fn finish_with_context(

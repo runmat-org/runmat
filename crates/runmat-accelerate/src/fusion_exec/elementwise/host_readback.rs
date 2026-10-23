@@ -23,7 +23,7 @@ const _: () = assert!(
     std::mem::size_of::<[(ValueId, usize); runmat_runtime::numeric_region::MAX_NODES]>() <= 4096
 );
 
-pub(super) struct Admission {
+pub(in crate::fusion_exec) struct Admission {
     pub plan: CpuReadbackPlan,
     pub resources: CpuHostResources,
     pub program: crate::fusion::semantics::ResolvedProgram,

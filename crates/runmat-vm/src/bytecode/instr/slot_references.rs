@@ -290,8 +290,8 @@ impl Instr {
             | Instr::BeginOutputAssignment { .. }
             | Instr::PrepareFixedOutputTarget
             | Instr::PrepareDiscardOutputTarget
-            | Instr::PrepareMemberPathStep(..)
-            | Instr::PrepareDynamicMemberPathStep
+            | Instr::PrepareMemberPathStep { .. }
+            | Instr::PrepareDynamicMemberPathStep { .. }
             | Instr::BeginPreparedIndexSelectors { .. }
             | Instr::LoadPreparedIndexEnd { .. }
             | Instr::BeginContextualIndexSelectors { .. }

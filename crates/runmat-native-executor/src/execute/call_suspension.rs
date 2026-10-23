@@ -1,5 +1,4 @@
 use std::future::Future;
-use std::pin::Pin;
 
 use runmat_runtime::execution::{RootedValue, RootedValueSequence, RootedValues};
 use runmat_runtime::native::{NativeSiteRequest, NativeValueRef};
@@ -15,6 +14,7 @@ mod arguments;
 #[cfg(test)]
 mod catch_scope_tests;
 pub(super) mod numeric_region;
+pub(super) mod payload;
 mod prepared;
 mod publication;
 mod rooted;
@@ -26,21 +26,26 @@ mod sequence_read;
 mod short_circuit_truth;
 mod statement_output;
 mod subscript;
-mod terminator;
+pub(super) mod terminator;
 pub(super) use arguments::{begin_expanded_call_arguments, take_completed_expanded_call_arguments};
 pub(super) use prepared::{begin_prepared_receiver, take_completed_prepared_receiver};
 pub(super) use publication::publish;
-use rooted::{adopt_rooted_arguments, adopt_rooted_sequence};
+pub(super) use rooted::begin_selected_sequence;
+use rooted::{adopt_rooted_arguments, adopt_rooted_sequence, adopt_selected_sequence};
 pub(super) use rooted::{
     begin_lexical_call, begin_rooted_arguments, begin_rooted_sequence,
     begin_rooted_sequence_with_roots,
 };
 pub(in crate::execute) use semantic_operation::{
-    begin_semantic_operation, begin_semantic_value_operation, settle_completed_semantic_values,
+    begin_admitted_semantic_operation_with, begin_semantic_operation,
+    begin_semantic_value_operation, settle_completed_semantic_values,
     take_completed_semantic_operation, take_completed_semantic_value_operation,
     SemanticOperationKind,
 };
-pub(super) use sequence::{begin_sequence_stage, take_completed_sequence_stage, SequenceStage};
+pub(super) use sequence::{
+    begin_sequence_end_stage, begin_sequence_stage, take_completed_sequence_stage,
+    SequenceEndAdmission, SequenceStage,
+};
 pub(super) use sequence_read::{
     begin_sequence_read, take_completed_sequence_read, SequenceReadStage,
 };
@@ -50,57 +55,46 @@ pub(super) use short_circuit_truth::{
 };
 pub(super) use statement_output::{begin_statement_output, take_completed_statement_output};
 pub(super) use subscript::take_completed_subscript_path;
+#[cfg(test)]
+pub(super) use terminator::TerminatorCompletion;
 pub(super) use terminator::{
     begin_branch_truth, begin_for_capture, begin_for_next, begin_switch_equality,
-    begin_switch_truth, take_completed_terminator, TerminatorCompletion, TerminatorReady,
-    TerminatorReadyStage,
+    begin_switch_truth, take_completed_terminator, TerminatorReady, TerminatorReadyStage,
 };
 
-pub(super) type CompletionFuture =
-    Pin<Box<dyn Future<Output = NativeExecutorResult<CallCompletion>> + 'static>>;
+pub(super) type PendingCompletionFuture = runmat_runtime::execution::RuntimeContinuationFuture<
+    'static,
+    CallCompletion,
+    NativeExecutorError,
+>;
 
-/// Preserve ordinary hostcall scoping separately from an admitted continuation.
-/// Neither variant adds a heap boundary or claims the other's authority.
-pub(super) enum PendingCompletionFuture {
-    Ordinary(CompletionFuture),
-    Admitted(
-        runmat_runtime::execution::RuntimeContinuationFuture<
-            'static,
-            CallCompletion,
-            NativeExecutorError,
-        >,
-    ),
-}
-
-impl PendingCompletionFuture {
-    pub(super) fn as_mut(&mut self) -> Pin<&mut Self> {
-        Pin::new(self)
-    }
-}
-
-impl Future for PendingCompletionFuture {
-    type Output = NativeExecutorResult<CallCompletion>;
-
-    fn poll(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        match self.get_mut() {
-            Self::Ordinary(future) => future.as_mut().poll(cx),
-            Self::Admitted(future) => future.as_mut().poll(cx),
-        }
-    }
-}
-
-pub(super) fn scope_completion(
+/// The selected concrete body and its catch scope share the original single
+/// continuation allocation. No already-erased child is admitted as its pointer.
+pub(super) fn admit_completion_with<F>(
     state: &HostState,
-    future: impl Future<Output = NativeExecutorResult<CallCompletion>> + 'static,
-) -> CompletionFuture {
-    Box::pin(
-        state
-            .runtime
-            .scope_active_catch_shared(state.active_catch_exception(), future),
-    )
+    make_future: impl FnOnce() -> F,
+) -> NativeExecutorResult<PendingCompletionFuture>
+where
+    F: Future<Output = NativeExecutorResult<CallCompletion>> + 'static,
+{
+    let runtime = state.runtime.clone();
+    let catch = state.active_catch_exception();
+    admit_completion_in_context_with(&runtime, catch, make_future)
+}
+
+/// Prepared context permits an owned-stage transfer to occur only after
+/// admission invokes the factory, without borrowing HostState into the future.
+pub(super) fn admit_completion_in_context_with<F>(
+    runtime: &runmat_runtime::context::RuntimeContext,
+    catch: Option<std::rc::Rc<runmat_value::MException>>,
+    make_future: impl FnOnce() -> F,
+) -> NativeExecutorResult<PendingCompletionFuture>
+where
+    F: Future<Output = NativeExecutorResult<CallCompletion>> + 'static,
+{
+    runmat_runtime::execution::admit_native_hostcall_with_contextual_error(runtime, || {
+        runtime.scope_active_catch_unboxed_shared(catch, make_future())
+    })
 }
 
 pub(super) enum CallCompletion {
@@ -111,6 +105,7 @@ pub(super) enum CallCompletion {
         requested_outputs: usize,
     },
     RootedArguments(RootedValues),
+    SelectedSequence(RootedValueSequence),
     RootedExpandedCallArguments(RootedValues),
     Lexical {
         result: runmat_runtime::call::lexical::RootedLexicalCallResult,
@@ -124,11 +119,13 @@ pub(super) enum CallCompletion {
         stage: SequenceReadStage,
         sequence: RootedValueSequence,
     },
-    PreparedReceiver(Box<runmat_runtime::object::protocol::PreparedSubscriptReceiver>),
+    PreparedReceiver(
+        payload::PayloadBox<runmat_runtime::object::protocol::PreparedSubscriptReceiver>,
+    ),
     SequenceStage(SequenceStage),
     ShortCircuitTruth(ShortCircuitTruthReady),
     StatementOutput,
-    Terminator(Box<TerminatorCompletion>),
+    Terminator(payload::PayloadBox<terminator::PendingTerminator>),
 }
 
 pub(super) struct PendingCall {
@@ -165,14 +162,14 @@ pub(super) enum CompletedPayload {
     ExpandedCallArguments(Vec<NativeValueRef>),
     SequenceRead(SequenceReadStage),
     PreparedReceiver {
-        prepared: Box<runmat_runtime::object::protocol::PreparedSubscriptReceiver>,
+        prepared: payload::PayloadBox<runmat_runtime::object::protocol::PreparedSubscriptReceiver>,
         receiver: NativeValueRef,
     },
     SequenceStage(SequenceStage),
     ShortCircuitTruth(ShortCircuitTruthReady),
     StatementOutput,
     SemanticOperation(SemanticOperationKind),
-    Terminator(Box<TerminatorReady>),
+    Terminator(payload::PayloadBox<TerminatorReady>),
 }
 
 pub(super) fn own_output_storage(
@@ -376,11 +373,14 @@ pub(super) async fn complete(
     let payload = match completion {
         Ok(CallCompletion::Terminator(stage)) if stage.is_for_next() => {
             let reconciliation = state.reconcile_external_workspace();
-            let restored = stage.restore_for_next(state);
+            let restored = stage.into_inner().restore_for_next(state);
             reconciliation?;
-            let next = restored?.map_err(NativeExecutorError::from)?;
+            let (next, reservation) = restored?;
+            let next = next.map_err(NativeExecutorError::from)?;
             let next = next.map(|value| value.with_owned(|value| state.arena.insert(value)));
-            CompletedPayload::Terminator(Box::new(TerminatorReady::for_next(next)))
+            CompletedPayload::Terminator(
+                reservation.allocate(&state.runtime, TerminatorReady::for_next(next))?,
+            )
         }
         completion => {
             let completion =
@@ -400,6 +400,9 @@ pub(super) async fn complete(
                 )?),
                 CallCompletion::RootedArguments(arguments) => {
                     CompletedPayload::Values(adopt_rooted_arguments(state, arguments)?)
+                }
+                CallCompletion::SelectedSequence(sequence) => {
+                    CompletedPayload::Values(adopt_selected_sequence(state, sequence)?)
                 }
                 CallCompletion::RootedExpandedCallArguments(arguments) => {
                     CompletedPayload::ExpandedCallArguments(adopt_rooted_arguments(
@@ -440,7 +443,7 @@ pub(super) async fn complete(
                 }
                 CallCompletion::StatementOutput => CompletedPayload::StatementOutput,
                 CallCompletion::Terminator(stage) => {
-                    CompletedPayload::Terminator(Box::new(stage.finish()?))
+                    CompletedPayload::Terminator(stage.into_inner().finish(&state.runtime)?)
                 }
             }
         }

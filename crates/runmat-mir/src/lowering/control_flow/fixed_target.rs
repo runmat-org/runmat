@@ -128,8 +128,10 @@ impl ControlFlowBuilder {
                         } => MirFixedPreparationPhase::EvaluateSelector {
                             path_step: *path_step,
                             component: *component,
-                            region: crate::lowering::expr::contextual_end_argument_region(
-                                env.ctx, *offset, *span,
+                            region: Box::new(
+                                crate::lowering::expr::contextual_end_argument_region(
+                                    env.ctx, *offset, *span,
+                                ),
                             ),
                             destination: *destination,
                         },

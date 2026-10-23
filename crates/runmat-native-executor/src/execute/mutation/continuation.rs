@@ -77,30 +77,18 @@ pub(super) fn assignment_root_for_place(
     let root = place.root_local().ok_or_else(|| {
         NativeExecutorError::Host("assignment root is not a canonical Native local".into())
     })?;
-    if creation != AssignmentCreationPolicy::ExistingOnly
-        && matches!(
-            place.first_root_step(),
-            Some(runmat_mir::MirRootStep::Index(IndexKind::Brace))
-        )
-    {
-        return state
+    match place.assignment_root_creation(creation) {
+        runmat_mir::SequenceRootCreation::Ordinary(policy) => state.assignment_root(root.0, policy),
+        intent @ runmat_mir::SequenceRootCreation::OrdinaryContainer(_) => state
+            .sequence_root(root.0, intent)
+            .map(|(value, _seed)| value),
+        runmat_mir::SequenceRootCreation::OrdinaryCell => state
             .sequence_root(root.0, runmat_mir::SequenceRootCreation::EmptyCell)
-            .map(|(value, _retained_seed)| value);
+            .map(|(value, _retained_seed)| value),
+        _ => Err(NativeExecutorError::Host(
+            "ordinary assignment has no canonical root creation recipe".into(),
+        )),
     }
-    let root_creation = if creation == AssignmentCreationPolicy::ExistingOnly {
-        creation
-    } else {
-        match place.first_root_step() {
-            Some(runmat_mir::MirRootStep::Member) => {
-                AssignmentCreationPolicy::CreateStructFieldPath
-            }
-            Some(runmat_mir::MirRootStep::Index(IndexKind::Paren)) => {
-                AssignmentCreationPolicy::CreateArrayByIndex
-            }
-            _ => AssignmentCreationPolicy::ExistingOnly,
-        }
-    };
-    state.assignment_root(root.0, root_creation)
 }
 
 /// Capture the actual current arena generation, not a new reference to a
@@ -115,13 +103,18 @@ pub(super) fn assignment_root_reference_for_place(
     let root = place.root_local().ok_or_else(|| {
         NativeExecutorError::Host("assignment root is not a canonical Native local".into())
     })?;
-    let value = if creation != AssignmentCreationPolicy::ExistingOnly
-        && matches!(
-            place.first_root_step(),
-            Some(runmat_mir::MirRootStep::Index(IndexKind::Brace))
-        ) {
-        let (value, seed) =
-            state.sequence_root(root.0, runmat_mir::SequenceRootCreation::EmptyCell)?;
+    let recipe = place.assignment_root_creation(creation);
+    let value = if matches!(
+        recipe,
+        runmat_mir::SequenceRootCreation::OrdinaryCell
+            | runmat_mir::SequenceRootCreation::OrdinaryContainer(_)
+    ) {
+        let recipe = if recipe == runmat_mir::SequenceRootCreation::OrdinaryCell {
+            runmat_mir::SequenceRootCreation::EmptyCell
+        } else {
+            recipe
+        };
+        let (value, seed) = state.sequence_root(root.0, recipe)?;
         if let Some(seed) = seed {
             return Ok(seed);
         }
@@ -333,7 +326,7 @@ impl PendingAssign {
                 let segment = self.segments.last().ok_or_else(|| {
                     NativeExecutorError::Host("nonlocal assignment has no place segment".into())
                 })?;
-                let value = write_step(state, current, segment, rhs, self.delete, allow_init)?;
+                let value = write_step(state, current, segment, rhs, self.delete)?;
                 (state.arena.insert(value), Phase::Writeback)
             }
             Phase::Writeback => {
@@ -341,7 +334,7 @@ impl PendingAssign {
                     return Ok(true);
                 };
                 let parent_value = state.arena.get(*parent)?.clone();
-                let updated = write_step(state, parent_value, segment, current, false, true)?;
+                let updated = write_step(state, parent_value, segment, current, false)?;
                 self.parents.pop();
                 (state.arena.insert(updated), Phase::Writeback)
             }
@@ -373,12 +366,13 @@ fn field_name(state: &mut HostState, segment: &PlaceSegment) -> NativeExecutorRe
     }
 }
 
-fn member_call(
+fn member_call<F>(
     state: &mut HostState,
-    future: std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<RootedValueSequence, RuntimeError>> + 'static>,
-    >,
-) -> NativeExecutorResult<Value> {
+    make_future: impl FnOnce() -> F,
+) -> NativeExecutorResult<Value>
+where
+    F: std::future::Future<Output = Result<RootedValueSequence, RuntimeError>> + 'static,
+{
     let embedded = state.enter_embedded_call()?;
     let result = (|| {
         if let Some(mut values) =
@@ -394,7 +388,7 @@ fn member_call(
         let mut values = super::super::call_suspension::begin_rooted_sequence(
             state,
             embedded.clone(),
-            future,
+            make_future,
             1,
         )?;
         if values.len() != 1 {
@@ -436,21 +430,18 @@ fn read_step(
     let field = field_name(state, segment)?;
     let runtime = state.runtime.clone();
     let caller = state.function.name.clone();
-    member_call(
-        state,
-        Box::pin(async move {
-            let value = runtime
-                .scope(runmat_runtime::object::resolve::load_member_with_context(
-                    Some(&runtime),
-                    base,
-                    field,
-                    allow_init,
-                    Some(&caller),
-                ))
-                .await?;
-            single_member_sequence(value).map_err(|error| *error)
-        }),
-    )
+    member_call(state, move || async move {
+        let value = runtime
+            .scope(runmat_runtime::object::resolve::load_member_with_context(
+                Some(&runtime),
+                base,
+                field,
+                allow_init,
+                Some(&caller),
+            ))
+            .await?;
+        single_member_sequence(value).map_err(|error| *error)
+    })
 }
 
 fn write_step(
@@ -459,7 +450,6 @@ fn write_step(
     segment: &PlaceSegment,
     rhs: Value,
     delete: bool,
-    allow_init: bool,
 ) -> NativeExecutorResult<Value> {
     if let PlaceSegment::Index(indexing) = segment {
         return super::super::indexing::assign(state, base, indexing, rhs, delete);
@@ -467,24 +457,20 @@ fn write_step(
     let field = field_name(state, segment)?;
     let runtime = state.runtime.clone();
     let caller = state.function.name.clone();
-    member_call(
-        state,
-        Box::pin(async move {
-            let value = runtime
-                .scope(
-                    runmat_runtime::object::resolve::store_member_traced_in_context(
-                        &runtime,
-                        base,
-                        field,
-                        rhs,
-                        allow_init,
-                        Some(&caller),
-                    ),
-                )
-                .await?;
-            single_member_sequence(value).map_err(|error| *error)
-        }),
-    )
+    member_call(state, move || async move {
+        let value = runtime
+            .scope(
+                runmat_runtime::object::resolve::store_member_traced_in_context(
+                    &runtime,
+                    base,
+                    field,
+                    rhs,
+                    Some(&caller),
+                ),
+            )
+            .await?;
+        single_member_sequence(value).map_err(|error| *error)
+    })
 }
 
 pub(super) fn assign(

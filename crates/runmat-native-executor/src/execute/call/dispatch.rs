@@ -192,14 +192,16 @@ fn dispatch_lexical(
     };
     let _call_roots = runmat_runtime::execution::RootedValueLease::for_traced(&lexical_call)
         .map_err(|error| error.into_runtime_error())?;
-    let future = runmat_runtime::callsite::with_function_input_callsite(
-        Some(input_callsite),
-        invoker(Some(runtime), lexical_call),
-    );
-    let future = Box::pin(async move {
-        let _call_roots = _call_roots;
-        future.await?
-    });
+    let mut future = invoker(Some(runtime.clone()), lexical_call)?;
+    let future =
+        runmat_runtime::execution::admit_rooted_result_with(&runtime, move || async move {
+            let _call_roots = _call_roots;
+            runmat_runtime::callsite::with_function_input_callsite_pinned(
+                Some(input_callsite),
+                future.as_mut(),
+            )
+            .await?
+        })?;
     super::super::call_suspension::begin_lexical_call(
         state,
         embedded.cloned(),

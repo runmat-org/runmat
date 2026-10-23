@@ -100,7 +100,7 @@ where
         generation,
         embedded,
         retained_roots: Vec::new(),
-        future: crate::execute::call_suspension::PendingCompletionFuture::Admitted(future),
+        future,
     });
     Err(NativeExecutorError::CallSuspended)
 }

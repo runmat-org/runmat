@@ -673,6 +673,11 @@ fn statement_form_renders_bar_chart_without_value() {
 fn statement_form_noops_without_plot_core() {
     let _requested = crate::output_context::push_output_count(0).expect("output-count scope");
     let image = tensor(vec![0.0, 1.0], vec![1, 2], NumericDType::U8);
-    let out = block_on(imhist_builtin(None, Value::Tensor(image), vec![])).unwrap();
+    let out = block_on(imhist_builtin(
+        None,
+        Value::Tensor(image),
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    ))
+    .unwrap();
     assert_eq!(out, Value::output_list(Vec::new()));
 }

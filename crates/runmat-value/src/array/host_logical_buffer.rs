@@ -98,6 +98,14 @@ impl HostLogicalBuffer {
         self
     }
 
+    /// Borrow fixed-length unique storage without COW or allocation. Shared
+    /// owners refuse; adopted exact storage keeps its original receipt.
+    pub fn try_as_mut_slice_unique(&mut self) -> Option<&mut [u8]> {
+        self.storage
+            .try_get_mut_unique()
+            .map(HostData::as_mut_slice)
+    }
+
     pub fn drain<R>(&mut self, range: R) -> std::vec::Drain<'_, u8>
     where
         R: std::ops::RangeBounds<usize>,

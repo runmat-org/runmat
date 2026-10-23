@@ -17241,9 +17241,12 @@ fn forced_generic_native_executable_lane_preserves_error_identity_and_source_spa
         panic!("native failure must be runtime semantic error");
     };
     assert_eq!(native.identifier(), established.identifier());
-    assert!(
-        established.span.is_none(),
-        "record the current established executable-invocation baseline"
+    assert_eq!(established.identifier(), Some("RunMat:IndexOutOfBounds"));
+    // Both executable lanes retain the source statement that performed the
+    // failed selection, not the enclosing call or a stale interpreter PC.
+    assert_eq!(
+        established.span.as_ref().map(|span| span.offset()),
+        Some(45)
     );
     assert_eq!(native.span.as_ref().map(|span| span.offset()), Some(45));
     assert!(!native.context.call_frames.is_empty());
@@ -17397,8 +17400,27 @@ fn forced_generic_native_rethrow_shorthand_preserves_lexical_catch() {
     assert_eq!(native, established);
     assert_single_output(
         &native,
-        runmat_value::Value::String("RunMat:IndexOutOfBounds".into()),
+        runmat_value::Value::CharArray(runmat_value::CharArray::new_row("RunMat:IndexOutOfBounds")),
     );
+    for control in [
+        InvocationControl::default(),
+        InvocationControl::default().force_generic_native(),
+    ] {
+        let error = block_on(session.invoke_executable(
+            &unit,
+            ProcedureInvocation {
+                target: ProcedureTarget::Function("callbackRethrow".into()),
+                arguments: crate::ProcedureArguments::Source(Vec::new()),
+                requested_outputs: 1,
+            },
+            &control,
+        ))
+        .expect_err("the prior invocation's catch must not escape into a later callback");
+        let RunError::Runtime(error) = error else {
+            panic!("missing active catch must remain a runtime error");
+        };
+        assert_eq!(error.identifier(), Some("RunMat:rethrow:NoActiveCatch"));
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -17486,7 +17508,9 @@ fn forced_generic_native_executable_lane_matches_async_suspension_resume() {
         &native,
         &[
             runmat_value::Value::Num(7.0),
-            runmat_value::Value::String("RunMat:IndexOutOfBounds".into()),
+            runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+                "RunMat:IndexOutOfBounds",
+            )),
         ],
     );
 }

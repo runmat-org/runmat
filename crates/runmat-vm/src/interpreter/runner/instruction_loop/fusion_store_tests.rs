@@ -22,6 +22,14 @@ fn supplied_final_only_span_with_stores_reaches_ordinary_vm_before_fusion_execut
     use runmat_accelerate::fusion::FusionPlan;
     use runmat_runtime::context::RuntimeInvocationArity;
 
+    assert!(
+        matches!(
+            accel_fusion::FusionAttemptError::from(RuntimeError::from("admission denied")),
+            accel_fusion::FusionAttemptError::Terminal(_)
+        ),
+        "continuation admission failure cannot authorize bytecode replay"
+    );
+
     let source = r#"
         imgs = ones(2,4,5,'single');
         mu = single(mean(imgs,[2 3],'native'));

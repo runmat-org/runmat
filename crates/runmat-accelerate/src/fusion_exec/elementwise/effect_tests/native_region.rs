@@ -57,58 +57,41 @@ impl RuntimePlacementService for GraphProbe {
 }
 
 fn runtime(probe: &Rc<GraphProbe>) -> RuntimeContext {
+    // Preserve the existing producer's precise structural decline diagnostic
+    // on an unexpected Native outcome; route assertions below remain strict.
+    let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("off"))
+        .is_test(true)
+        .try_init();
     RuntimeContext::new(Rc::new(
         runmat_runtime::execution::RuntimeExecutionService::new(),
     ))
     .with_service_ports(RuntimeServicePorts::default().with_placement(probe.clone()))
 }
 
-fn assert_composed_graph(probe: &GraphProbe) {
+fn assert_provider_graph(probe: &GraphProbe) {
     let kinds = probe.kinds.borrow();
     // This fixture has no physical WGPU queue-tail capability; the original
     // provider-delegating source route cannot mint completion observations.
-    assert!(kinds.contains(&ExecutionCandidateKind::SpecializedNativeCpu));
-    assert!(kinds.contains(&ExecutionCandidateKind::VectorizedNativeCpu));
+    assert!(!kinds.contains(&ExecutionCandidateKind::SpecializedNativeCpu));
+    // These physical lifecycle cases use broadcast shapes unsupported by
+    // the equal-shape vectorized evaluator, not an invented CPU price.
+    assert!(!kinds.contains(&ExecutionCandidateKind::VectorizedNativeCpu));
     assert!(kinds.contains(&ExecutionCandidateKind::ProviderFusion));
     assert!(!kinds.contains(&ExecutionCandidateKind::SharedRuntime));
+    assert!(!kinds.contains(&ExecutionCandidateKind::OriginalNativeRegion));
 }
 
-fn request(runtime: &RuntimeContext) -> NativeNumericRegionRequest {
-    let program = NumericRegionProgram {
-        nodes: vec![
-            NumericRegionNode::Input(0),
-            NumericRegionNode::Input(1),
-            NumericRegionNode::Binary {
-                operation: NumericBinaryOperation::Add,
-                left: 0,
-                right: 1,
-            },
-        ],
-        outputs: vec![2],
-    };
+fn request(runtime: &RuntimeContext, source_host: bool) -> NativeNumericRegionRequest {
     let left = Value::Tensor(runmat_value::Tensor::new(vec![1.0, 2.0], vec![2]).unwrap());
     let right = Value::Tensor(runmat_value::Tensor::new(vec![3.0, 4.0], vec![2]).unwrap());
-    NativeNumericRegionRequest::capture_verified(
-        runtime,
-        runmat_types::RegionId {
-            function: runmat_types::ProgramFunctionId(0),
-            ordinal: 0,
-        },
-        runmat_runtime::native::NativeSiteRequest {
-            function: 0,
-            block: 0,
-            position: 0,
-            phase: runmat_runtime::native::NativeSitePhase::RVALUE,
-            ordinal: 0,
-            reserved: 0,
-        },
-        &program,
-        &[&left, &right],
-    )
-    .unwrap()
-    .unwrap()
-    .with_native_operation_sites([site()])
-    .unwrap()
+    request_values(runtime, &left, &right, source_host)
+}
+
+fn provider_broadcast_request(runtime: &RuntimeContext) -> NativeNumericRegionRequest {
+    let left = Value::Tensor(runmat_value::Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap());
+    let right = Value::Tensor(runmat_value::Tensor::new(vec![3.0, 4.0, 5.0], vec![1, 3]).unwrap());
+    assert!(runmat_runtime::numeric_region::workload(&[&left, &right]).is_none());
+    request_values(runtime, &left, &right, false)
 }
 
 fn site() -> runmat_runtime::native::NativeSiteRequest {
@@ -131,7 +114,7 @@ fn native_adapter_reaches_existing_provider_and_does_not_replay_late_upload_fail
         let _selected = ThreadProviderGuard::set(Some(provider));
         let probe = Rc::new(GraphProbe::default());
         let runtime = runtime(&probe);
-        let request = request(&runtime);
+        let request = provider_broadcast_request(&runtime);
         let error = match futures::executor::block_on(
             crate::native_auto::AdmittedAcceleration
                 .execute_numeric_region(runtime, request)
@@ -143,7 +126,7 @@ fn native_adapter_reaches_existing_provider_and_does_not_replay_late_upload_fail
         assert_eq!(provider.uploads.load(Ordering::SeqCst), 2);
         assert_eq!(provider.dispatches.load(Ordering::SeqCst), 0);
         assert!(std::error::Error::source(&error).is_some());
-        assert_composed_graph(&probe);
+        assert_provider_graph(&probe);
         for probe in provider.probes.lock().unwrap().iter() {
             assert_eq!(probe.retirements(), 1);
         }
@@ -161,17 +144,17 @@ fn native_adapter_pending_drop_retires_staged_inputs_and_unpolled_drop_does_no_w
         let probe = Rc::new(GraphProbe::default());
         let runtime = runtime(&probe);
         let unpolled = crate::native_auto::AdmittedAcceleration
-            .execute_numeric_region(runtime.clone(), request(&runtime))
+            .execute_numeric_region(runtime.clone(), provider_broadcast_request(&runtime))
             .unwrap();
         drop(unpolled);
         assert_eq!(provider.uploads.load(Ordering::SeqCst), 0);
         let mut future = crate::native_auto::AdmittedAcceleration
-            .execute_numeric_region(runtime.clone(), request(&runtime))
+            .execute_numeric_region(runtime.clone(), provider_broadcast_request(&runtime))
             .unwrap();
         let mut context = std::task::Context::from_waker(std::task::Waker::noop());
         assert!(future.as_mut().poll(&mut context).is_pending());
         assert_eq!(provider.uploads.load(Ordering::SeqCst), 2);
-        assert_composed_graph(&probe);
+        assert_provider_graph(&probe);
         drop(future);
         assert_eq!(provider.dispatches.load(Ordering::SeqCst), 0);
         for probe in provider.probes.lock().unwrap().iter() {
@@ -184,27 +167,54 @@ fn native_adapter_pending_drop_retires_staged_inputs_and_unpolled_drop_does_no_w
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn native_cpu_wins_same_region_comparison_without_provider_work() {
     runmat_gc::gc_test_context(|| {
-        let provider = FailingProvider::new(usize::MAX);
-        let _selected = ThreadProviderGuard::set(Some(provider));
-        let probe = Rc::new(GraphProbe::default());
-        let runtime = runtime(&probe);
-        let outcome = futures::executor::block_on(
-            crate::native_auto::AdmittedAcceleration
-                .execute_numeric_region(runtime.clone(), request(&runtime))
-                .unwrap(),
-        )
-        .unwrap();
-        assert!(matches!(
-            outcome,
-            NativeNumericRegionOutcome::NativeCpu {
-                kind:
-                    runmat_runtime::numeric_region::service::NativeNumericRegionCpuKind::Vectorized,
-                ..
+        for (quote_outputs, source_host) in [(true, true), (false, true), (true, false)] {
+            let provider = FailingProvider::new(usize::MAX);
+            provider
+                .quote_outputs
+                .store(quote_outputs, Ordering::SeqCst);
+            let _selected = ThreadProviderGuard::set(Some(provider));
+            let probe = Rc::new(GraphProbe::default());
+            let runtime = runtime(&probe);
+            let outcome = futures::executor::block_on(
+                crate::native_auto::AdmittedAcceleration
+                    .execute_numeric_region(runtime.clone(), request(&runtime, source_host))
+                    .unwrap(),
+            )
+            .unwrap();
+            let NativeNumericRegionOutcome::NativeCpu { kind, host, .. } = outcome else {
+                panic!("legal Native CPU selection without provider work");
+            };
+            if !source_host {
+                // This real public capture lacks source-host operation sites.
+                // Its independently quoted vectorized execution is therefore
+                // the only complete host alternative and must actually win.
+                assert_eq!(
+                    kind,
+                    runmat_runtime::numeric_region::service::NativeNumericRegionCpuKind::Vectorized
+                );
+                assert!(host.is_none());
+            } else if kind
+                == runmat_runtime::numeric_region::service::NativeNumericRegionCpuKind::Generic
+            {
+                assert!(
+                    host.is_some(),
+                    "explored source-host route retains its real owner"
+                );
             }
-        ));
-        assert_composed_graph(&probe);
-        assert_eq!(provider.uploads.load(Ordering::SeqCst), 0);
-        assert_eq!(provider.dispatches.load(Ordering::SeqCst), 0);
+            let kinds = probe.kinds.borrow();
+            assert!(kinds.contains(&ExecutionCandidateKind::VectorizedNativeCpu));
+            assert_eq!(
+                kinds.contains(&ExecutionCandidateKind::SpecializedNativeCpu),
+                source_host
+            );
+            assert_eq!(
+                kinds.contains(&ExecutionCandidateKind::ProviderFusion),
+                quote_outputs
+            );
+            assert!(!kinds.contains(&ExecutionCandidateKind::OriginalNativeRegion));
+            assert_eq!(provider.uploads.load(Ordering::SeqCst), 0);
+            assert_eq!(provider.dispatches.load(Ordering::SeqCst), 0);
+        }
     });
 }
 
@@ -212,6 +222,7 @@ fn request_values(
     runtime: &RuntimeContext,
     left: &Value,
     right: &Value,
+    source_host: bool,
 ) -> NativeNumericRegionRequest {
     let program = NumericRegionProgram {
         nodes: vec![
@@ -225,7 +236,7 @@ fn request_values(
         ],
         outputs: vec![2],
     };
-    NativeNumericRegionRequest::capture_verified(
+    let request = NativeNumericRegionRequest::capture_verified(
         runtime,
         runmat_types::RegionId {
             function: runmat_types::ProgramFunctionId(0),
@@ -243,16 +254,21 @@ fn request_values(
         &[left, right],
     )
     .unwrap()
-    .unwrap()
-    .with_native_operation_sites([site()])
-    .unwrap()
+    .unwrap();
+    if source_host {
+        request.with_native_operation_sites([site()]).unwrap()
+    } else {
+        request
+    }
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn native_single_broadcast_reaches_existing_typed_provider_without_f64_cpu_conversion() {
     runmat_gc::gc_test_context(|| {
-        let provider = FailingProvider::with_abi(usize::MAX, ProviderPrecision::F32, true);
+        // Exercise the explicit Single ABI on an F64-default provider, rather
+        // than the already-valid default F32 compatibility dispatch.
+        let provider = FailingProvider::with_abi(usize::MAX, ProviderPrecision::F64, true);
         provider.native_quote_ns.store(1, Ordering::SeqCst);
         provider.successful_fusion.store(true, Ordering::SeqCst);
         let _selected = ThreadProviderGuard::set(Some(provider));
@@ -264,7 +280,10 @@ fn native_single_broadcast_reaches_existing_typed_provider_without_f64_cpu_conve
             Value::Tensor(runmat_value::Tensor::from_f32(vec![3.0, 4.0, 5.0], vec![1, 3]).unwrap());
         let outcome = futures::executor::block_on(
             crate::native_auto::AdmittedAcceleration
-                .execute_numeric_region(runtime.clone(), request_values(&runtime, &left, &right))
+                .execute_numeric_region(
+                    runtime.clone(),
+                    request_values(&runtime, &left, &right, false),
+                )
                 .unwrap(),
         )
         .unwrap();
@@ -326,7 +345,7 @@ fn native_explicit_resident_floating_inputs_keep_owner_class_intent_and_do_not_u
                 crate::native_auto::AdmittedAcceleration
                     .execute_numeric_region(
                         runtime.clone(),
-                        request_values(&runtime, &left, &right),
+                        request_values(&runtime, &left, &right, true),
                     )
                     .unwrap(),
             )
@@ -354,69 +373,85 @@ fn native_explicit_resident_floating_inputs_keep_owner_class_intent_and_do_not_u
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn native_source_host_single_broadcast_executes_canonical_recipe_and_confirms_exactly_once() {
     runmat_gc::gc_test_context(|| {
-        let provider = FailingProvider::with_abi(usize::MAX, ProviderPrecision::F32, true);
-        provider.native_quote_ns.store(100_000, Ordering::SeqCst);
-        let _selected = ThreadProviderGuard::set(Some(provider));
-        let probe = Rc::new(GraphProbe::default());
-        let runtime = runtime(&probe);
-        let left = Value::Tensor(runmat_value::Tensor::from_f32(vec![1., 2.], vec![2, 1]).unwrap());
-        let right_input =
-            Value::Tensor(runmat_value::Tensor::from_f32(vec![3., 4., 5.], vec![1, 3]).unwrap());
-        let outcome = futures::executor::block_on(
-            crate::native_auto::AdmittedAcceleration
-                .execute_numeric_region(
-                    runtime.clone(),
-                    request_values(&runtime, &left, &right_input),
-                )
-                .unwrap(),
-        )
-        .unwrap();
-        let NativeNumericRegionOutcome::NativeCpu {
-            kind: runmat_runtime::numeric_region::service::NativeNumericRegionCpuKind::Generic,
-            right,
-            host: Some(host),
-            observation,
-        } = outcome
-        else {
-            panic!("real source-host candidate")
-        };
-        assert!(probe
-            .kinds
-            .borrow()
-            .contains(&ExecutionCandidateKind::SpecializedNativeCpu));
-        assert!(!probe
-            .kinds
-            .borrow()
-            .contains(&ExecutionCandidateKind::VectorizedNativeCpu));
-        let route = host.route().clone();
-        route
-            .begin(&runtime, site(), runmat_types::OperatorKind::Add)
+        for shader_unavailable in [false, true] {
+            let provider = FailingProvider::with_abi(usize::MAX, ProviderPrecision::F32, true);
+            provider.native_quote_ns.store(100_000, Ordering::SeqCst);
+            let _selected = ThreadProviderGuard::set(Some(provider));
+            let probe = Rc::new(GraphProbe::default());
+            let runtime = runtime(&probe);
+            let left =
+                Value::Tensor(runmat_value::Tensor::from_f32(vec![1., 2.], vec![2, 1]).unwrap());
+            // Mixed Double scalar arithmetic computes in Double before Single
+            // publication: an F32 shader is genuinely unavailable, but the same
+            // canonical Native source-host operation remains executable.
+            let right_input = if shader_unavailable {
+                Value::Num(0.25)
+            } else {
+                Value::Tensor(runmat_value::Tensor::from_f32(vec![3., 4., 5.], vec![1, 3]).unwrap())
+            };
+            let outcome = futures::executor::block_on(
+                crate::native_auto::AdmittedAcceleration
+                    .execute_numeric_region(
+                        runtime.clone(),
+                        request_values(&runtime, &left, &right_input, true),
+                    )
+                    .unwrap(),
+            )
             .unwrap();
-        let scoped = runtime.clone().with_native_region_host_route(route.clone());
-        let output = futures::executor::block_on(runmat_runtime::call_builtin_async_in_context(
-            &scoped,
-            "plus",
-            &[
-                host.input(0).unwrap().clone(),
-                host.input(1).unwrap().clone(),
-            ],
-        ))
-        .unwrap();
-        let Value::Tensor(output) = output.value() else {
-            panic!("single numerical host output")
-        };
-        assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F32);
-        assert_eq!(output.shape(), &[2, 3]);
-        assert_eq!(output.as_f32_slice().unwrap(), &[4., 5., 5., 6., 6., 7.]);
-        route.finish(site()).unwrap();
-        assert!(route.complete(&runtime));
-        if let Some(observation) = observation {
-            observation.finish(&runtime, right, true);
+            let NativeNumericRegionOutcome::NativeCpu {
+                kind: runmat_runtime::numeric_region::service::NativeNumericRegionCpuKind::Generic,
+                right,
+                host: Some(host),
+                observation,
+            } = outcome
+            else {
+                panic!("real source-host candidate")
+            };
+            assert!(probe
+                .kinds
+                .borrow()
+                .contains(&ExecutionCandidateKind::SpecializedNativeCpu));
+            assert!(!probe
+                .kinds
+                .borrow()
+                .contains(&ExecutionCandidateKind::VectorizedNativeCpu));
+            let route = host.route().clone();
+            route
+                .begin(&runtime, site(), runmat_types::OperatorKind::Add)
+                .unwrap();
+            let scoped = runtime.clone().with_native_region_host_route(route.clone());
+            let output =
+                futures::executor::block_on(runmat_runtime::call_builtin_async_in_context(
+                    &scoped,
+                    "plus",
+                    &[
+                        host.input(0).unwrap().clone(),
+                        host.input(1).unwrap().clone(),
+                    ],
+                ))
+                .unwrap();
+            let Value::Tensor(output) = output.value() else {
+                panic!("single numerical host output")
+            };
+            assert_eq!(output.numeric_dtype(), runmat_value::NumericDType::F32);
+            if shader_unavailable {
+                assert_eq!(output.shape(), &[2, 1]);
+                assert_eq!(output.as_f32_slice().unwrap(), &[1.25, 2.25]);
+            } else {
+                assert_eq!(output.shape(), &[2, 3]);
+                assert_eq!(output.as_f32_slice().unwrap(), &[4., 5., 5., 6., 6., 7.]);
+            }
+            route.finish(site()).unwrap();
+            assert!(route.complete(&runtime));
+            if let Some(observation) = observation {
+                observation.finish(&runtime, right, true);
+            }
+            assert!(route.finish(site()).is_err());
+            assert_eq!(provider.uploads.load(Ordering::SeqCst), 0);
+            assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+            assert_eq!(provider.typed_dispatches.load(Ordering::SeqCst), 0);
+            assert_eq!(provider.dispatches.load(Ordering::SeqCst), 0);
         }
-        assert!(route.finish(site()).is_err());
-        assert_eq!(provider.uploads.load(Ordering::SeqCst), 0);
-        assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
-        assert_eq!(provider.typed_dispatches.load(Ordering::SeqCst), 0);
     });
 }
 
@@ -453,12 +488,13 @@ fn native_automatic_resident_host_route_uses_one_private_exact_readback_without_
             let left = Value::GpuTensor(handle.clone());
             let right_input = Value::GpuTensor(handle.clone());
             let probe = Rc::new(GraphProbe::default());
-            let runtime = runtime(&probe);
+            let cancellation = runmat_execution::cancellation::CancellationSource::new();
+            let runtime = runtime(&probe).with_cancellation_token(cancellation.token());
             let outcome = futures::executor::block_on(
                 crate::native_auto::AdmittedAcceleration
                     .execute_numeric_region(
                         runtime.clone(),
-                        request_values(&runtime, &left, &right_input),
+                        request_values(&runtime, &left, &right_input, true),
                     )
                     .unwrap(),
             )
@@ -510,7 +546,8 @@ fn native_automatic_resident_host_route_uses_one_private_exact_readback_without_
                     .begin(&runtime, wrong, runmat_types::OperatorKind::Add)
                     .is_err());
             } else {
-                runtime.cancellation().cancel();
+                assert!(cancellation.cancel(runmat_execution::CancellationReason::User));
+                assert!(runtime.is_cancelled());
             }
             // Neither wrong occurrence nor cancellation grants permission
             // to replay the original GPU source after private preparation.

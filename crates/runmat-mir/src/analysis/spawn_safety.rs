@@ -577,13 +577,15 @@ fn transfer_future_targets(
     }
 }
 
-/// Execute the SAME ordered static transfer for both classification and the
+type SpawnClassifier<'a> = dyn FnMut(&MirRvalue, Span, &[BTreeSet<FunctionId>]) + 'a;
+
+/// Execute the same ordered static transfer for classification and the
 /// predecessor fixed point. Descriptor-only phases do not replay selectors.
 fn walk_spawn_statement(
     body: &MirBody,
     statement: &crate::MirStmt,
     state: &mut [BTreeSet<FunctionId>],
-    classify: &mut dyn FnMut(&MirRvalue, Span, &[BTreeSet<FunctionId>]),
+    classify: &mut SpawnClassifier<'_>,
 ) {
     match &statement.kind {
         MirStmtKind::PrepareFixedAssignment(owner) => {
@@ -668,7 +670,7 @@ fn walk_statement_preparation(
     body: &MirBody,
     statement: &crate::MirStmt,
     state: &mut [BTreeSet<FunctionId>],
-    classify: &mut dyn FnMut(&MirRvalue, Span, &[BTreeSet<FunctionId>]),
+    classify: &mut SpawnClassifier<'_>,
 ) {
     statement
         .kind
@@ -681,7 +683,7 @@ fn walk_spawn_steps(
     body: &MirBody,
     steps: &[crate::MirExpressionStep],
     state: &mut [BTreeSet<FunctionId>],
-    classify: &mut dyn FnMut(&MirRvalue, Span, &[BTreeSet<FunctionId>]),
+    classify: &mut SpawnClassifier<'_>,
 ) {
     for step in steps {
         match step {
@@ -703,7 +705,7 @@ fn walk_spawn_rvalue(
     value: &MirRvalue,
     span: Span,
     state: &mut [BTreeSet<FunctionId>],
-    classify: &mut dyn FnMut(&MirRvalue, Span, &[BTreeSet<FunctionId>]),
+    classify: &mut SpawnClassifier<'_>,
 ) {
     if let MirRvalue::ShortCircuit { right_temps, .. } = value {
         let mut executed = state.to_vec();
@@ -714,7 +716,7 @@ fn walk_spawn_rvalue(
         // not evidence that a known safe target survived the other branch.
         join_future_targets(state, &executed);
     } else {
-        value.visit_direct_expression_steps(&mut |steps| {
+        value.visit_direct_expression_steps_dyn(&mut |steps| {
             walk_spawn_steps(body, steps, state, classify)
         });
     }

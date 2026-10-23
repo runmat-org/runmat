@@ -1437,7 +1437,7 @@ async fn call_class_constructor(
     args: ConstructorArguments<'_>,
     output_count: Option<usize>,
     context: Option<&crate::context::RuntimeContext>,
-    target: ConstructorInvocationTarget,
+    target: ConstructorInvocationTarget<'_>,
 ) -> Result<crate::execution::RootedValue, RuntimeError> {
     let requested_outputs = output_count.unwrap_or(1);
     if class_identity.is(runmat_types::standard::EVENT_DATA) && !args.is_empty() {
@@ -1554,7 +1554,11 @@ async fn call_class_constructor(
                     })??;
                     return Ok(Some(resolve_single_sequence(result)?));
                 }
-                ConstructorInvocationTarget::ExactPrepared { owner, invoke } => {
+                ConstructorInvocationTarget::ExactPrepared {
+                    owner,
+                    invoke,
+                    guard,
+                } => {
                     let selected = context.ok_or_else(|| {
                         build_runtime_error("prepared constructor lacks a selected runtime")
                             .with_identifier("RunMat:ConstructorOwnerInvalid")
@@ -1566,7 +1570,7 @@ async fn call_class_constructor(
                     let selected = selected
                         .clone()
                         .with_constructor_receiver_for_method(Some(&owner))?;
-                    let future = invoke(selected.clone());
+                    let future = invoke.invoke(selected.clone(), guard)?;
                     return Ok(Some(resolve_single_sequence(
                         crate::context::run_owned_request_continuation(&selected, future).await?,
                     )?));

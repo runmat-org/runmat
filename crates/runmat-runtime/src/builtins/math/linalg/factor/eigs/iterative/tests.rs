@@ -169,53 +169,60 @@ fn successful_precision_probe_is_distinct_and_failed_probe_is_terminal() {
                             _ => panic!("native input"),
                         };
                         observed.borrow_mut().push((dtype, complex));
-                        Box::pin(async move {
-                            if fail {
-                                return Err(crate::build_runtime_error("probe failed")
-                                    .with_identifier("RunMat:Test:EigsProbe")
-                                    .build());
-                            }
-                            let output: Vec<_> = input
-                                .into_iter()
-                                .enumerate()
-                                .map(|(i, v)| {
-                                    let v = v * Complex64::new(
-                                        if i == 0 { 1.0 } else { 3.0 },
-                                        if complex_output { 0.25 } else { 0.0 },
-                                    );
-                                    (v.re, v.im)
-                                })
-                                .collect();
-                            let output = match (single, complex_output) {
-                                (false, false) => Value::Tensor(
-                                    Tensor::new(output.iter().map(|v| v.0).collect(), vec![2, 1])
+                        crate::execution::admit_executable_sequence_with(
+                            &_runtime.clone(),
+                            move || async move {
+                                if fail {
+                                    return Err(crate::build_runtime_error("probe failed")
+                                        .with_identifier("RunMat:Test:EigsProbe")
+                                        .build());
+                                }
+                                let output: Vec<_> = input
+                                    .into_iter()
+                                    .enumerate()
+                                    .map(|(i, v)| {
+                                        let v = v * Complex64::new(
+                                            if i == 0 { 1.0 } else { 3.0 },
+                                            if complex_output { 0.25 } else { 0.0 },
+                                        );
+                                        (v.re, v.im)
+                                    })
+                                    .collect();
+                                let output = match (single, complex_output) {
+                                    (false, false) => Value::Tensor(
+                                        Tensor::new(
+                                            output.iter().map(|v| v.0).collect(),
+                                            vec![2, 1],
+                                        )
                                         .unwrap(),
-                                ),
-                                (true, false) => Value::Tensor(
-                                    Tensor::from_f32(
-                                        output.iter().map(|v| v.0 as f32).collect(),
-                                        vec![2, 1],
-                                    )
-                                    .unwrap(),
-                                ),
-                                (false, true) => Value::ComplexTensor(
-                                    runmat_value::ComplexTensor::new(output, vec![2, 1]).unwrap(),
-                                ),
-                                (true, true) => Value::ComplexTensor(
-                                    runmat_value::ComplexTensor::from_f32(
-                                        output
-                                            .into_iter()
-                                            .map(|v| (v.0 as f32, v.1 as f32))
-                                            .collect(),
-                                        vec![2, 1],
-                                    )
-                                    .unwrap(),
-                                ),
-                            };
-                            crate::user_functions::test_support::rooted_single_value_sequence(
-                                output,
-                            )
-                        })
+                                    ),
+                                    (true, false) => Value::Tensor(
+                                        Tensor::from_f32(
+                                            output.iter().map(|v| v.0 as f32).collect(),
+                                            vec![2, 1],
+                                        )
+                                        .unwrap(),
+                                    ),
+                                    (false, true) => Value::ComplexTensor(
+                                        runmat_value::ComplexTensor::new(output, vec![2, 1])
+                                            .unwrap(),
+                                    ),
+                                    (true, true) => Value::ComplexTensor(
+                                        runmat_value::ComplexTensor::from_f32(
+                                            output
+                                                .into_iter()
+                                                .map(|v| (v.0 as f32, v.1 as f32))
+                                                .collect(),
+                                            vec![2, 1],
+                                        )
+                                        .unwrap(),
+                                    ),
+                                };
+                                crate::user_functions::test_support::rooted_single_value_sequence(
+                                    output,
+                                )
+                            },
+                        )
                     },
                 )));
                 let target = crate::user_functions::test_support::exact_local_handle(

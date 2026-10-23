@@ -70,9 +70,9 @@ where
 pub(crate) mod destination;
 
 pub use destination::{
-    AssignmentStepSpec, DestinationCardinality, DestinationLayout, DestinationRange,
-    PreparedSequenceDestination, PreparedSequenceEndpoint, SequenceDestinationBuilder,
-    SequenceEndpointSpec,
+    assignment_container_in_context, AssignmentStepSpec, DestinationCardinality, DestinationLayout,
+    DestinationRange, PreparedSequenceDestination, PreparedSequenceEndpoint,
+    SequenceDestinationBuilder, SequenceEndpointSpec,
 };
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -121,60 +121,61 @@ impl ResolveValueSequence for ValueSequence {
         use_context: SequenceUse,
         context: SequenceResolutionContext,
     ) -> Result<runmat_value::OutputListStorage, RuntimeError> {
-        match use_context {
-            SequenceUse::Discard => Ok(runmat_value::OutputListStorage::empty()),
-            SequenceUse::ExpandAll => Ok(self.into_output_storage()),
-            SequenceUse::RequireSingle => select_prefix(self, 1, true),
-            SequenceUse::SelectPrefix { count } => select_prefix(self, count, false),
-            SequenceUse::SelectCurrentFunctionOutputs => {
-                let count = context.current_function_outputs.ok_or_else(|| {
-                    semantic_error(
-                        "SequenceOutputContextUnavailable",
-                        "the current function output count is unavailable for this value sequence",
-                    )
-                })?;
-                select_prefix(self, count, false)
-            }
-            SequenceUse::SelectDestinationCardinality => {
-                let count = context.destination_cardinality.ok_or_else(|| {
-                    semantic_error(
-                        "SequenceDestinationContextUnavailable",
-                        "the destination cardinality is unavailable for this value sequence",
-                    )
-                })?;
-                select_prefix(self, count, false)
-            }
+        let count = resolved_output_count(self.len(), use_context, context)?;
+        if use_context == SequenceUse::Discard {
+            return Ok(runmat_value::OutputListStorage::empty());
         }
+        let mut values = self.into_output_storage();
+        values.truncate(count);
+        Ok(values)
     }
 }
 
-fn select_prefix(
-    sequence: ValueSequence,
-    count: usize,
-    require_exact_single: bool,
-) -> Result<runmat_value::OutputListStorage, RuntimeError> {
+/// The one sequence-selection policy, independent of physical output storage.
+/// Rooted iteration and legacy storage projection use identical validation.
+pub(crate) fn resolved_output_count(
+    len: usize,
+    use_context: SequenceUse,
+    context: SequenceResolutionContext,
+) -> Result<usize, RuntimeError> {
+    let count = match use_context {
+        SequenceUse::Discard => return Ok(0),
+        SequenceUse::ExpandAll => return Ok(len),
+        SequenceUse::RequireSingle => 1,
+        SequenceUse::SelectPrefix { count } => count,
+        SequenceUse::SelectCurrentFunctionOutputs => {
+            context.current_function_outputs.ok_or_else(|| {
+                semantic_error(
+                    "SequenceOutputContextUnavailable",
+                    "the current function output count is unavailable for this value sequence",
+                )
+            })?
+        }
+        SequenceUse::SelectDestinationCardinality => {
+            context.destination_cardinality.ok_or_else(|| {
+                semantic_error(
+                    "SequenceDestinationContextUnavailable",
+                    "the destination cardinality is unavailable for this value sequence",
+                )
+            })?
+        }
+    };
     runmat_value::validate_output_count(count).map_err(sequence_error_to_runtime)?;
-    let mut values = sequence.into_output_storage();
-    if require_exact_single && values.len() != 1 {
+    if use_context == SequenceUse::RequireSingle && len != 1 {
         return Err(semantic_error(
             "CommaSeparatedListRequiresSingleValue",
             format!(
-                "this expression requires one value, but the comma-separated list contains {}",
-                values.len()
+                "this expression requires one value, but the comma-separated list contains {len}"
             ),
         ));
     }
-    if values.len() < count {
+    if len < count {
         return Err(semantic_error(
             "CommaSeparatedListOutputShortage",
-            format!(
-                "the comma-separated list contains {} values, but {count} were requested",
-                values.len()
-            ),
+            format!("the comma-separated list contains {len} values, but {count} were requested"),
         ));
     }
-    values.truncate(count);
-    Ok(values)
+    Ok(count)
 }
 
 #[cfg(test)]

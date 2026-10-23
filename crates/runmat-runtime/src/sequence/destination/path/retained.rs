@@ -72,11 +72,16 @@ fn visit_components(components: &[ObjectIndexComponent], visitor: &mut impl FnMu
 fn visit_prepared_steps(steps: &[PreparedAssignmentStep], visitor: &mut impl FnMut(&Value)) {
     for step in steps {
         match step {
-            PreparedAssignmentStep::Member(_) | PreparedAssignmentStep::InitializingMember(_) => {}
+            PreparedAssignmentStep::Member(_)
+            | PreparedAssignmentStep::InitializingMember { .. } => {}
             PreparedAssignmentStep::Parentheses {
+                selector_values, ..
+            }
+            | PreparedAssignmentStep::InitializingParentheses {
                 selector_values, ..
             } => visit_components(selector_values, visitor),
             PreparedAssignmentStep::Braces(components) => visit_components(components, visitor),
+            PreparedAssignmentStep::InitializingCellContents { .. } => {}
         }
     }
 }
@@ -269,12 +274,19 @@ mod tests {
     fn builder_retains_current_and_prepared_selector_values() {
         let mut builder = SequenceDestinationBuilder::new(&Value::String("root".into()))
             .expect("root destination");
-        builder.steps.push(PreparedAssignmentStep::Braces(
-            runmat_value::ExactArrayStorage::shared_unbounded(vec![
-                ObjectIndexComponent::Colon,
-                ObjectIndexComponent::Value(Value::String("selector".into())),
-            ]),
-        ));
+        builder
+            .control
+            .push(
+                None,
+                &mut builder.steps,
+                PreparedAssignmentStep::Braces(runmat_value::ExactArrayStorage::shared_unbounded(
+                    vec![
+                        ObjectIndexComponent::Colon,
+                        ObjectIndexComponent::Value(Value::String("selector".into())),
+                    ],
+                )),
+            )
+            .expect("admit ordinary prepared-step backing before push");
         let mut values = Vec::new();
         builder.visit_retained_values(&mut |value| values.push(value.clone()));
         assert_eq!(

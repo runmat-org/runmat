@@ -18,6 +18,7 @@ mod native_region;
 
 struct FailingProvider {
     native_quote_ns: AtomicUsize,
+    quote_outputs: AtomicBool,
     typed: bool,
     typed_dispatches: AtomicUsize,
     precision: ProviderPrecision,
@@ -42,6 +43,7 @@ impl FailingProvider {
     fn with_abi(fail_upload_at: usize, precision: ProviderPrecision, typed: bool) -> &'static Self {
         Box::leak(Box::new(Self {
             native_quote_ns: AtomicUsize::new(0),
+            quote_outputs: AtomicBool::new(true),
             typed,
             typed_dispatches: AtomicUsize::new(0),
             precision,
@@ -56,41 +58,38 @@ impl FailingProvider {
             downloads: AtomicUsize::new(0),
         }))
     }
-    fn native_download_body<'a>(
-        &'a self,
-        handle: &'a GpuTensorHandle,
-    ) -> impl Future<Output = anyhow::Result<runmat_accelerate_api::HostNumericTensorOwned>> + 'a
-    {
-        async move {
-            assert!(
-                self.allow_readback.load(Ordering::SeqCst),
-                "unexpected private download"
-            );
-            assert_eq!(handle.device_id(), self.device_id());
-            handle.allocation_lease().validate_live()?;
-            let count = handle
-                .shape()
-                .iter()
-                .try_fold(1usize, |count, extent| count.checked_mul(*extent))
-                .unwrap();
-            self.downloads.fetch_add(1, Ordering::SeqCst);
-            // This provider allocates zeroed native fixture payloads. This is
-            // their actual numeric content, not a fabricated device address.
-            let data = match handle.physical().element_type() {
-                runmat_accelerate_api::NumericElementType::F32 => {
-                    runmat_accelerate_api::HostNumericDataOwned::F32(vec![0.0; count])
-                }
-                runmat_accelerate_api::NumericElementType::F64 => {
-                    runmat_accelerate_api::HostNumericDataOwned::F64(vec![0.0; count])
-                }
-                _ => panic!("closed floating source required"),
-            };
-            Ok(runmat_accelerate_api::HostNumericTensorOwned {
-                data,
-                shape: handle.shape().to_vec(),
-                storage: runmat_accelerate_api::GpuTensorStorage::Real,
-            })
-        }
+    async fn native_download_body(
+        &self,
+        handle: &GpuTensorHandle,
+    ) -> anyhow::Result<runmat_accelerate_api::HostNumericTensorOwned> {
+        assert!(
+            self.allow_readback.load(Ordering::SeqCst),
+            "unexpected private download"
+        );
+        assert_eq!(handle.device_id(), self.device_id());
+        handle.allocation_lease().validate_live()?;
+        let count = handle
+            .shape()
+            .iter()
+            .try_fold(1usize, |count, extent| count.checked_mul(*extent))
+            .unwrap();
+        self.downloads.fetch_add(1, Ordering::SeqCst);
+        // This provider allocates zeroed native fixture payloads. This is
+        // their actual numeric content, not a fabricated device address.
+        let data = match handle.physical().element_type() {
+            runmat_accelerate_api::NumericElementType::F32 => {
+                runmat_accelerate_api::HostNumericDataOwned::F32(vec![0.0; count])
+            }
+            runmat_accelerate_api::NumericElementType::F64 => {
+                runmat_accelerate_api::HostNumericDataOwned::F64(vec![0.0; count])
+            }
+            _ => panic!("closed floating source required"),
+        };
+        Ok(runmat_accelerate_api::HostNumericTensorOwned {
+            data,
+            shape: handle.shape().to_vec(),
+            storage: runmat_accelerate_api::GpuTensorStorage::Real,
+        })
     }
 }
 
@@ -200,8 +199,23 @@ impl AccelProvider for FailingProvider {
         0
     }
 
-    fn query_feasibility(&self, _: &ProviderFeasibilityQuery) -> ProviderFeasibility {
-        ProviderFeasibility::supported(Default::default())
+    fn query_feasibility(&self, query: &ProviderFeasibilityQuery) -> ProviderFeasibility {
+        // The mock allocates exactly the requested output representation.
+        // Preserve unknown/overflow rather than inventing a zero bound; the
+        // Native rejection matrix deliberately exercises that missing quote.
+        let output_bytes = self
+            .quote_outputs
+            .load(Ordering::SeqCst)
+            .then(|| {
+                query.outputs.iter().try_fold(0u64, |bytes, output| {
+                    bytes.checked_add(output.checked_byte_len()?)
+                })
+            })
+            .flatten();
+        ProviderFeasibility::supported(runmat_accelerate_api::ProviderResourceEstimate {
+            output_bytes,
+            ..Default::default()
+        })
     }
     fn supports_shader_requirements(&self, requirements: ProviderShaderRequirements) -> bool {
         // The injected F64 dispatch lane models IEEE-word shader support.
@@ -221,7 +235,9 @@ impl AccelProvider for FailingProvider {
         request: runmat_accelerate_api::ProviderFusedElementwiseRequest<'a>,
     ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            assert_eq!(request.abi.precision(), self.precision);
+            // A provider's preferred/default precision does not narrow an
+            // explicitly supported typed ABI (notably Single on F64).
+            assert!(self.supports_fused_elementwise_abi(request.abi));
             let element = match request.abi.precision() {
                 ProviderPrecision::F32 => runmat_accelerate_api::NumericElementType::F32,
                 ProviderPrecision::F64 => runmat_accelerate_api::NumericElementType::F64,

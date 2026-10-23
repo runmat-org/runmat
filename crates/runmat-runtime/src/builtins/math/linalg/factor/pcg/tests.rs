@@ -316,9 +316,12 @@ fn pcg_reuses_selected_callable_a_and_both_preconditioners_without_replaying_cal
                 vec![0.5 * input[0], 0.5 * input[1]]
             };
             let output = Value::Tensor(Tensor::new(output, vec![2, 1]).unwrap());
-            Box::pin(async move {
-                crate::user_functions::test_support::rooted_single_value_sequence(output)
-            })
+            crate::execution::admit_executable_sequence_with(
+                &_runtime.clone(),
+                move || async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(output)
+                },
+            )
         },
     )));
     let target = |index: usize| {
@@ -496,17 +499,20 @@ fn candidate_residual_callback_error_is_terminal_without_replay() {
                 if call == 3 && cancel {
                     callback_cancellation.cancel(CancellationReason::User);
                 }
-                Box::pin(async move {
-                    if call == 3 && !cancel {
-                        return Err(crate::build_runtime_error("candidate residual failed")
-                            .with_identifier("RunMat:Test:CandidateResidual")
-                            .with_source(std::io::Error::other("original candidate cause"))
-                            .build());
-                    }
-                    crate::user_functions::test_support::rooted_single_value_sequence(
-                        Value::Tensor(Tensor::new(vec![7.0 * input], vec![1, 1]).unwrap()),
-                    )
-                })
+                crate::execution::admit_executable_sequence_with(
+                    &_runtime.clone(),
+                    move || async move {
+                        if call == 3 && !cancel {
+                            return Err(crate::build_runtime_error("candidate residual failed")
+                                .with_identifier("RunMat:Test:CandidateResidual")
+                                .with_source(std::io::Error::other("original candidate cause"))
+                                .build());
+                        }
+                        crate::user_functions::test_support::rooted_single_value_sequence(
+                            Value::Tensor(Tensor::new(vec![7.0 * input], vec![1, 1]).unwrap()),
+                        )
+                    },
+                )
             },
         )));
         let target = crate::user_functions::test_support::exact_local_handle(

@@ -261,7 +261,7 @@ fn control_during_output_is_terminal_and_releases_unpublished_claims() {
     }
 }
 #[test]
-fn semidefinite_metric_deflation_empty_geometry_and_dense_fence_are_explicit() {
+fn semidefinite_metric_deflation_empty_geometry_and_dense_admission_are_explicit() {
     let ledger = ManagedHostEffectLedger::new(1 << 20);
     let runtime = managed(&ledger);
     // Coupled singular pencil: range(B) is e1, but the finite eigenspace is
@@ -360,18 +360,67 @@ fn semidefinite_metric_deflation_empty_geometry_and_dense_fence_are_explicit() {
         }
     }
     let _outputs = crate::output_count::push_output_count(Some(3)).unwrap();
-    let error = call(
+    // Dense compatibility now uses the shared admitted full-EVD owner; it is
+    // not a permanently refused DenseWork route. Qualify exact retained outputs
+    // under this original finite owner, including alias/drop retirement.
+    let output = call(
         &runtime,
+        Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
+        vec![],
+    )
+    .expect("funded dense full EVD");
+    let Value::OutputList(list) = &output else {
+        panic!("three dense outputs");
+    };
+    assert_eq!(list.len(), 3);
+    for value in &list.as_slice()[..2] {
+        let Value::Tensor(tensor) = value else {
+            panic!("real dense factors");
+        };
+        assert_eq!(tensor.shape(), [1, 1]);
+        assert_eq!(tensor.numeric_dtype(), NumericDType::F64);
+    }
+    assert!((values(&list.as_slice()[0])[0].norm_sqr() - 1.0).abs() < 1e-12);
+    assert_eq!(values(&list.as_slice()[1]), [Complex64::new(1.0, 0.0)]);
+    assert_eq!(list.as_slice()[2], Value::Num(0.0));
+    let retained = 2 * crate::context::host_allocation::HostAllocationPlan::retained_tensor_bytes(
+        NumericDType::F64,
+        &[1, 1],
+    )
+    .unwrap()
+        + crate::builtins::math::linalg::factor::iterative::output::retained_list_bytes(3).unwrap();
+    assert_retained(&ledger, retained);
+    let alias = output.clone();
+    drop(output);
+    assert_retained(&ledger, retained);
+    drop(alias);
+    empty(&ledger);
+
+    // This root-free Tensor needs no GC registration. Zero capacity denies
+    // the selected dense route's prefixed argument carrier, not its later EVD
+    // workspace. The funded case above exercises the dense owner; neither
+    // admission failure may trigger gather replay.
+    let denied_ledger = ManagedHostEffectLedger::new(0);
+    let denied_runtime = managed(&denied_ledger);
+    let error = call(
+        &denied_runtime,
         Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
         vec![],
     )
     .unwrap_err();
     assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
-    assert_eq!(
-        error.identifier(),
-        Some("RunMat:parallel:InfrastructureFailure")
-    );
-    empty(&ledger);
+    assert_eq!(error.identifier(), Some("RunMat:Call:Arguments"));
+    let mut cause: &(dyn std::error::Error + 'static) = &error;
+    let allocation = loop {
+        if let Some(allocation) =
+            cause.downcast_ref::<crate::context::host_allocation::HostAllocationError>()
+        {
+            break allocation;
+        }
+        cause = cause.source().expect("original dense admission cause");
+    };
+    assert!(allocation.is_capacity_denial());
+    empty(&denied_ledger);
 }
 
 #[test]

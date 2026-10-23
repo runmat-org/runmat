@@ -20,6 +20,8 @@ mod trace_scratch;
 
 pub(crate) use aligned::AlignedHostWorkspace;
 pub(crate) use checkpoint::HostAllocationCheckpoint;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use checkpoint::HostAllocationWorkerCheckpoint;
 pub use collection_allocator::{
     hashbrown_table_layout, AdmittedCollectionAllocator, OperationCollectionAllocator,
 };

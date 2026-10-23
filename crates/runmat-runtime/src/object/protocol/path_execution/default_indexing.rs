@@ -52,7 +52,7 @@ pub(super) fn assign_default_steps<'a>(
     values: Vec<Value>,
     caller: Option<&'a str>,
 ) -> crate::execution::RuntimeContinuationFuture<'a, RootedValue> {
-    super::super::context::admit_future(runtime, async move {
+    super::super::context::admit_future_with(runtime, move || async move {
         let _inputs_root = crate::execution::RootedValueLease::for_values(
             std::iter::once(&base).chain(values.iter()),
         )
@@ -107,8 +107,10 @@ pub(super) async fn read_default_step(
         ObjectIndexKind::Paren => {
             let values = index_values(step)?;
             let plan = plan_for(runtime, &base, values, false).await?;
-            RootedValue::new(crate::indexing::value::read_with_plan(base, &plan)?)
-                .map_err(|error| error.into_runtime_error())
+            RootedValue::in_optional_context(
+                crate::indexing::value::read_with_plan_in_context(runtime, base, &plan)?,
+                runtime,
+            )
         }
         ObjectIndexKind::Brace => read_brace_sequence(runtime, base, step)
             .await?
@@ -215,10 +217,16 @@ async fn write_default_step(
                 ));
             };
             let plan = plan_for(runtime, &base, index_values(&step)?, true).await?;
-            RootedValue::new(
-                crate::indexing::value::assign_with_plan(base, &plan, rhs.clone()).await?,
+            RootedValue::in_optional_context(
+                crate::indexing::value::assign_with_plan_in_context(
+                    runtime,
+                    base,
+                    &plan,
+                    rhs.clone(),
+                )
+                .await?,
+                runtime,
             )
-            .map_err(|error| error.into_runtime_error())
         }
         ObjectIndexKind::Brace => {
             let (ObjectIndexSelector::IndexValues { components }, _) = step.into_parts() else {
@@ -236,20 +244,21 @@ async fn write_default_step(
     }
 }
 
-async fn plan_for(
-    runtime: Option<&crate::context::RuntimeContext>,
-    base: &Value,
-    values: &[crate::object::indexing::ObjectIndexComponent],
+fn plan_for<'a>(
+    runtime: Option<&'a crate::context::RuntimeContext>,
+    base: &'a Value,
+    values: &'a [crate::object::indexing::ObjectIndexComponent],
     assignment: bool,
-) -> Result<crate::indexing::plan::IndexPlan, RuntimeError> {
-    let shape = crate::indexing::value::shape_borrowed(base).ok_or_else(invalid_base)?;
-    crate::object::indexing::plan_for_components_with_context(
-        runtime,
-        shape.as_slice(),
-        values,
-        assignment,
-    )
-    .await
+) -> impl std::future::Future<Output = Result<crate::indexing::plan::IndexPlan, RuntimeError>> + 'a
+{
+    let Some(shape) = crate::indexing::value::shape_borrowed(base) else {
+        return futures::future::Either::Left(async { Err(invalid_base()) });
+    };
+    // Transfer the existing borrowed/inline geometry into the original
+    // planner. No shape clone or intermediate planning poll frame is needed.
+    futures::future::Either::Right(crate::object::indexing::plan_for_components_with_context(
+        runtime, shape, values, assignment,
+    ))
 }
 
 fn index_values(

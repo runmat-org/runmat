@@ -51,13 +51,13 @@ fn callback_policy_upgrade_and_reused_unbounded_factor_fail_before_publication()
     let observed = finite.clone();
     let calls = Rc::new(Cell::new(0));
     let counted = calls.clone();
-    runtime.set_bound_function_invoker(Some(Rc::new(move |_, _, arguments, _, _| {
+    runtime.set_bound_function_invoker(Some(Rc::new(move |bound_runtime, _, arguments, _, _| {
         counted.set(counted.get() + 1);
         observed.set(true);
         let input = arguments.supplied()[0].clone();
-        Box::pin(
-            async move { crate::user_functions::test_support::rooted_single_value_sequence(input) },
-        )
+        crate::execution::admit_executable_sequence_with(&bound_runtime, move || async move {
+            crate::user_functions::test_support::rooted_single_value_sequence(input)
+        })
     })));
     let target =
         crate::user_functions::test_support::exact_local_handle(&runtime, "policy_upgrade", 9122);
@@ -230,13 +230,13 @@ fn callback_language_error_is_terminal_and_admission_precedes_effects() {
                 );
                 let calls = Rc::new(Cell::new(0));
                 let observed = Rc::clone(&calls);
-                runtime.set_bound_function_invoker(Some(Rc::new(move |_, _, arguments, _, _| {
+                runtime.set_bound_function_invoker(Some(Rc::new(move |bound_runtime, _, arguments, _, _| {
                     observed.set(observed.get() + 1);
                     let output = arguments.supplied()[0].clone();
                     if cancel {
                         callback_cancellation.cancel(CancellationReason::User);
                     }
-                    Box::pin(async move {
+                    crate::execution::admit_executable_sequence_with(&bound_runtime.clone(), move || async move {
                         if cancel {
                             crate::user_functions::test_support::rooted_single_value_sequence(
                                 output,
@@ -416,15 +416,15 @@ fn managed_callback_inputs_can_escape_without_aliasing_recurrence_scratch() {
         );
     let retained = Rc::new(RefCell::new(Vec::<Value>::new()));
     let observed = Rc::clone(&retained);
-    runtime.set_bound_function_invoker(Some(Rc::new(move |_, _, arguments, _, _| {
+    runtime.set_bound_function_invoker(Some(Rc::new(move |bound_runtime, _, arguments, _, _| {
         let [input] = arguments.supplied() else {
             panic!("one callback input")
         };
         let input = input.clone();
         observed.borrow_mut().push(input.clone());
-        Box::pin(
-            async move { crate::user_functions::test_support::rooted_single_value_sequence(input) },
-        )
+        crate::execution::admit_executable_sequence_with(&bound_runtime, move || async move {
+            crate::user_functions::test_support::rooted_single_value_sequence(input)
+        })
     })));
     let target =
         crate::user_functions::test_support::exact_local_handle(&runtime, "gmres_identity", 9120);

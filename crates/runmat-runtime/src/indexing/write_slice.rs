@@ -1,11 +1,11 @@
 use crate::builtins::common::tensor::tensor_element_len;
-use crate::indexing::integer_assignment::{self, IntegerAssignmentValue};
+use crate::indexing::integer_assignment;
 use crate::indexing::plan::IndexPlan;
 use crate::runtime_error::semantic_error as mex;
 use crate::RuntimeError;
 use runmat_value::{
-    CharArray, ComplexTensor, NumericDType, NumericScalar, NumericStorage, SparseTensor,
-    StringArray, Tensor, Value,
+    ComplexTensor, NumericDType, NumericScalar, NumericStorage, SparseTensor, StringArray, Tensor,
+    Value,
 };
 
 fn map_slice_shape_error(context: &str, err: impl std::fmt::Display) -> RuntimeError {
@@ -78,7 +78,8 @@ pub use numeric_delete::{delete_complex_with_plan_in_context, delete_tensor_with
 mod dense_assignment;
 mod growth;
 mod host_rhs;
-mod rhs_shape;
+pub(in crate::indexing) mod rhs_shape;
+pub(in crate::indexing) mod sparse;
 pub use dense_assignment::{
     assign_complex_with_plan_host_in_context, assign_tensor_with_plan_host_in_context,
 };
@@ -97,17 +98,6 @@ pub fn build_complex_rhs_view<'a>(
 ) -> Result<ComplexRhsView<'a>, RuntimeError> {
     host_rhs::HostRhs::complex(rhs, selection_lengths, false).map(ComplexRhsView)
 }
-fn materialize_complex_rhs_view_for_plan(
-    rhs: &ComplexRhsView<'_>,
-    plan: &IndexPlan,
-) -> Result<Vec<(f64, f64)>, RuntimeError> {
-    if rhs.0.len() != plan.indices.len() {
-        return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-    }
-    Ok((0..plan.indices.len())
-        .map(|ordinal| rhs.tensor_value(ordinal))
-        .collect())
-}
 pub fn scatter_complex_with_plan(
     tensor: &mut ComplexTensor,
     plan: &IndexPlan,
@@ -125,241 +115,40 @@ pub fn scatter_complex_with_plan(
     Ok(())
 }
 
-pub enum StringRhsView {
-    Scalar(runmat_value::Utf8Text),
-    Tensor {
-        data: runmat_value::ExactArrayStorage<runmat_value::Utf8Text>,
-        shape: Vec<usize>,
-        strides: Vec<usize>,
-    },
-}
-
-enum CellStringElement<'a> {
-    Text(&'a str),
-    Chars(&'a CharArray),
-}
-
-fn cell_string_element(value: &Value) -> Result<CellStringElement<'_>, RuntimeError> {
-    match value {
-        Value::String(text) => Ok(CellStringElement::Text(text)),
-        Value::CharArray(chars) if chars.rows == 1 => Ok(CellStringElement::Chars(chars)),
-        Value::CharArray(_) => Err(mex(
-            "InvalidSliceAssignmentRhs",
-            "rhs cell character arrays must be row vectors",
-        )),
-        Value::StringArray(strings) if strings.data().len() == 1 => {
-            Ok(CellStringElement::Text(strings.data()[0].as_str()))
-        }
-        other => Err(mex(
-            "InvalidSliceAssignmentRhs",
-            format!("rhs cell elements must be string scalars or character vectors, got {other:?}"),
-        )),
-    }
-}
+pub use super::value::text::StringRhsView;
+mod logical_assignment;
+pub use logical_assignment::{
+    assign_logical_with_plan_host_in_context, assign_logical_with_plan_in_context,
+};
 
 pub fn validate_string_rhs_for_plan(
     rhs: &Value,
     selection_lengths: &[usize],
 ) -> Result<(), RuntimeError> {
-    match rhs {
-        Value::String(_) => Ok(()),
-        Value::CharArray(chars) if chars.rows == 1 => Ok(()),
-        Value::CharArray(_) => Err(mex(
-            "InvalidSliceAssignmentRhs",
-            "rhs character array must be a row vector",
-        )),
-        Value::StringArray(strings) => rhs_shape::validate_empty_selection_rhs_shape(
-            &strings.shape,
-            strings.data().len(),
-            selection_lengths,
-        ),
-        Value::Cell(cell) => {
-            for value in cell.data() {
-                cell_string_element(value)?;
-            }
-            rhs_shape::validate_empty_selection_rhs_shape(
-                &cell.shape,
-                cell.data().len(),
-                selection_lengths,
-            )
-        }
-        _ => Err(mex(
-            "InvalidSliceAssignmentRhs",
-            "rhs must be string, string array, or cellstr",
-        )),
-    }
+    super::value::text::validate_rhs(rhs, selection_lengths)
 }
-
 pub fn build_string_rhs_view(
     rhs: &Value,
     selection_lengths: &[usize],
 ) -> Result<StringRhsView, RuntimeError> {
-    let scalar = match rhs {
-        Value::String(s) => Some(s.clone()),
-        Value::CharArray(chars) => Some(
-            chars
-                .try_row_string()
-                .map_err(|cause| {
-                    mex(
-                        "InvalidSliceAssignmentRhs",
-                        format!("character RHS contains malformed UTF-16: {cause}"),
-                    )
-                })?
-                .ok_or_else(|| {
-                    mex(
-                        "InvalidSliceAssignmentRhs",
-                        "rhs character array must be a row vector",
-                    )
-                })?
-                .into(),
-        ),
-        _ => None,
-    };
-    if let Some(s) = scalar {
-        return Ok(StringRhsView::Scalar(s));
-    }
-    if let Value::StringArray(rt) = rhs {
-        let dims = selection_lengths.len();
-        let shape = validated_assignment_rhs_shape(&rt.shape, rt.data().len(), selection_lengths)?;
-        let mut rstrides = vec![0usize; dims];
-        let mut racc = 1usize;
-        for d in 0..dims {
-            rstrides[d] = racc;
-            racc *= shape[d];
-        }
-        return Ok(StringRhsView::Tensor {
-            data: rt.data_owner().clone(),
-            shape,
-            strides: rstrides,
-        });
-    }
-    if let Value::Cell(cell) = rhs {
-        let dims = selection_lengths.len();
-        let mut data = Vec::with_capacity(cell.data().len());
-        for value in cell.data() {
-            match cell_string_element(value)? {
-                CellStringElement::Text(text) => data.push(runmat_value::Utf8Text::from(text)),
-                CellStringElement::Chars(chars) => data.push(
-                    chars
-                        .try_row_string()
-                        .map_err(|cause| {
-                            mex(
-                                "InvalidSliceAssignmentRhs",
-                                format!("character RHS contains malformed UTF-16: {cause}"),
-                            )
-                        })?
-                        .ok_or_else(|| {
-                            mex(
-                                "InvalidSliceAssignmentRhs",
-                                "rhs cell character arrays must be row vectors",
-                            )
-                        })?
-                        .into(),
-                ),
-            }
-        }
-        let shape =
-            validated_assignment_rhs_shape(&cell.shape, cell.data().len(), selection_lengths)?;
-        let mut rstrides = vec![0usize; dims];
-        let mut racc = 1usize;
-        for d in 0..dims {
-            rstrides[d] = racc;
-            racc *= shape[d];
-        }
-        return Ok(StringRhsView::Tensor {
-            data: runmat_value::ExactArrayStorage::shared_unbounded(data),
-            shape,
-            strides: rstrides,
-        });
-    }
-    Err(mex(
-        "InvalidSliceAssignmentRhs",
-        "rhs must be string, string array, or cellstr",
-    ))
+    let context = crate::context::legacy::active();
+    super::value::text::build_rhs(context.as_ref(), rhs, selection_lengths)
 }
-
 pub fn scatter_string_with_plan(
-    sa: &mut StringArray,
+    value: &mut StringArray,
     plan: &IndexPlan,
-    rhs_view: &StringRhsView,
+    view: &StringRhsView,
 ) -> Result<(), RuntimeError> {
-    let dims = plan.dims;
-    let mut idx = vec![0usize; dims];
-    if plan.indices.is_empty() {
-        return Ok(());
-    }
-    let selection_lengths = if plan.selection_lengths.is_empty() {
-        plan.output_shape.clone()
-    } else {
-        plan.selection_lengths.clone()
-    };
-    if !sa.data_owner().is_exact() {
-        sa.make_data_unique_unbounded().map_err(|error| {
-            mex(
-                "StringSliceOwner",
-                format!("string assignment owner unavailable: {error}"),
-            )
-        })?;
-    }
-    let destination_data = sa.try_data_mut_unique().ok_or_else(|| {
-        mex(
-            "StringSliceOwner",
-            "shared exact string assignment requires a preadmitted replacement owner",
-        )
-    })?;
-    loop {
-        match rhs_view {
-            StringRhsView::Scalar(val) => {
-                let lin_pos = {
-                    let mut p = 0usize;
-                    let mut mul = 1usize;
-                    for d in 0..dims {
-                        p += idx[d] * mul;
-                        mul *= selection_lengths[d].max(1);
-                    }
-                    p
-                };
-                let dst = plan.indices[lin_pos] as usize;
-                destination_data[dst] = val.clone();
-            }
-            StringRhsView::Tensor {
-                data,
-                shape,
-                strides,
-            } => {
-                let mut rlin = 0usize;
-                for d in 0..dims {
-                    let rhs_len = shape[d];
-                    let pos = if rhs_len == 1 { 0 } else { idx[d] };
-                    rlin += pos * strides[d];
-                }
-                let lin_pos = {
-                    let mut p = 0usize;
-                    let mut mul = 1usize;
-                    for d in 0..dims {
-                        p += idx[d] * mul;
-                        mul *= selection_lengths[d].max(1);
-                    }
-                    p
-                };
-                let dst = plan.indices[lin_pos] as usize;
-                destination_data[dst] = data[rlin].clone();
-            }
-        }
-        let mut d = 0usize;
-        while d < dims {
-            idx[d] += 1;
-            if idx[d] < selection_lengths[d].max(1) {
-                break;
-            }
-            idx[d] = 0;
-            d += 1;
-        }
-        if d == dims {
-            break;
-        }
-    }
-    Ok(())
+    let context = crate::context::legacy::active();
+    super::value::text::scatter_existing(context.as_ref(), value, plan, view)
+}
+pub fn assign_string_with_plan_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    value: StringArray,
+    plan: &IndexPlan,
+    rhs: &Value,
+) -> Result<Value, RuntimeError> {
+    super::value::text::assign(context, value, plan, rhs)
 }
 
 pub async fn materialize_rhs_real_for_plan(
@@ -380,16 +169,6 @@ pub fn materialize_rhs_real_for_plan_host(
     } else {
         materialize_rhs_nd_real_host(rhs, &plan.selection_lengths)
     }
-}
-
-fn materialize_integer_rhs_for_plan_host(
-    rhs: &Value,
-    plan: &IndexPlan,
-) -> Result<Vec<IntegerAssignmentValue>, RuntimeError> {
-    let view = host_rhs::HostRhs::for_plan(rhs, plan)?;
-    Ok((0..view.len())
-        .map(|ordinal| view.integer_at(ordinal))
-        .collect())
 }
 
 pub fn scatter_real_with_plan(
@@ -429,26 +208,21 @@ fn scatter_real_values(
 /// Sparse storage owns the batched merge; this module owns MATLAB selector and
 /// RHS assignment-shape semantics shared with dense tensor assignment.
 pub async fn assign_sparse_with_plan(
-    sparse: SparseTensor,
+    source: SparseTensor,
     plan: &IndexPlan,
     rhs: &Value,
 ) -> Result<Value, RuntimeError> {
-    if !matches!(rhs, Value::GpuTensor(_)) || plan.indices.is_empty() || sparse.is_complex() {
-        return assign_sparse_with_plan_host(sparse, plan, rhs);
-    }
-    preflight_sparse_assignment(&sparse, plan, rhs)?;
-    let sparse = expand_sparse_for_plan(sparse, plan)?;
-    let host_rhs = gather_assignment_rhs(rhs, sparse.integer_storage().is_some()).await?;
-    apply_sparse_assignment_host(sparse, plan, &host_rhs)
+    let context = crate::context::legacy::active();
+    assign_sparse_with_plan_in_context(context.as_ref(), source, plan, rhs).await
 }
 
-async fn gather_assignment_rhs(rhs: &Value, integer_target: bool) -> Result<Value, RuntimeError> {
-    if let Value::GpuTensor(handle) = rhs {
-        if integer_target && runmat_accelerate_api::handle_integer_type(handle).is_some() {
-            return download_integer_tensor(handle).await.map(Value::Tensor);
-        }
-    }
-    crate::dispatcher::gather_if_needed_async(rhs).await
+pub async fn assign_sparse_with_plan_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    source: SparseTensor,
+    plan: &IndexPlan,
+    rhs: &Value,
+) -> Result<Value, RuntimeError> {
+    sparse::assign(context, source, plan, rhs).await
 }
 
 pub(in crate::indexing) async fn gather_assignment_rhs_in_context(
@@ -470,7 +244,7 @@ pub(in crate::indexing) async fn gather_assignment_rhs_in_context(
     if policy == HostAllocationPolicy::Managed {
         // The existing exact native download/gather owner retains physical
         // callback claims independently of this logical cancellation waiter.
-        let host = crate::dispatcher::gather_if_needed_in_context_async(rhs, context).await?;
+        let host = super::resident::gather_dispatch_value_in_context(rhs, context).await?;
         if let Value::GpuTensor(handle) = rhs {
             if integer_target && runmat_accelerate_api::handle_integer_type(handle).is_some() {
                 return match host {
@@ -488,10 +262,12 @@ pub(in crate::indexing) async fn gather_assignment_rhs_in_context(
     }
     if let Value::GpuTensor(handle) = rhs {
         if integer_target && runmat_accelerate_api::handle_integer_type(handle).is_some() {
-            return download_integer_tensor(handle).await.map(Value::Tensor);
+            return download_integer_tensor_in_context(context, handle)
+                .await
+                .map(Value::Tensor);
         }
     }
-    crate::dispatcher::gather_if_needed_in_context_async(rhs, context).await
+    super::resident::gather_dispatch_value_in_context(rhs, context).await
 }
 
 fn preflight_sparse_assignment(
@@ -517,190 +293,39 @@ fn preflight_sparse_assignment(
 }
 
 pub fn assign_sparse_with_plan_host(
-    sparse: SparseTensor,
+    source: SparseTensor,
     plan: &IndexPlan,
     rhs: &Value,
 ) -> Result<Value, RuntimeError> {
-    preflight_sparse_assignment(&sparse, plan, rhs)?;
-    let sparse = expand_sparse_for_plan(sparse, plan)?;
-    apply_sparse_assignment_host(sparse, plan, rhs)
+    let context = crate::context::legacy::active();
+    assign_sparse_with_plan_host_in_context(context.as_ref(), source, plan, rhs)
 }
 
-fn expand_sparse_for_plan(
-    sparse: SparseTensor,
-    plan: &IndexPlan,
-) -> Result<SparseTensor, RuntimeError> {
-    let target_rows = plan.base_shape.first().copied().unwrap_or(sparse.rows);
-    let target_cols = plan.base_shape.get(1).copied().unwrap_or(sparse.cols);
-    if target_rows != sparse.rows || target_cols != sparse.cols {
-        sparse
-            .with_expanded_shape(target_rows, target_cols)
-            .map_err(|error| map_slice_shape_error("sparse slice expansion", error))
-    } else {
-        Ok(sparse)
-    }
-}
-
-fn apply_sparse_assignment_host(
-    sparse: SparseTensor,
+pub fn assign_sparse_with_plan_host_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    source: SparseTensor,
     plan: &IndexPlan,
     rhs: &Value,
 ) -> Result<Value, RuntimeError> {
-    if plan.indices.is_empty() {
-        return Ok(Value::SparseTensor(sparse));
-    }
-    let updated = if sparse.is_logical() {
-        let rhs_values = materialize_rhs_real_for_plan_host(rhs, plan)?;
-        let updates = plan
-            .indices
-            .iter()
-            .zip(rhs_values)
-            .map(|(&index, value)| (index as usize, value != 0.0))
-            .collect::<Vec<_>>();
-        sparse
-            .with_updated_logical_linear_values(&updates)
-            .map_err(|error| map_slice_shape_error("sparse slice assign", error))?
-    } else if let Some(storage) = sparse.integer_storage() {
-        let rhs_values = materialize_integer_rhs_for_plan_host(rhs, plan)?;
-        let updates = plan
-            .indices
-            .iter()
-            .zip(rhs_values.iter())
-            .map(|(&index, value)| {
-                (
-                    index as usize,
-                    integer_assignment::scalar_value(storage, value),
-                )
-            })
-            .collect::<Vec<_>>();
-        sparse
-            .with_updated_integer_linear_values(&updates)
-            .map_err(|error| map_slice_shape_error("sparse slice assign", error))?
-    } else if sparse.is_complex() {
-        let rhs_view = build_complex_rhs_view(rhs, &plan.selection_lengths)?;
-        let rhs_values = materialize_complex_rhs_view_for_plan(&rhs_view, plan)?;
-        let updates = plan
-            .indices
-            .iter()
-            .zip(rhs_values)
-            .map(|(&index, value)| (index as usize, value))
-            .collect::<Vec<_>>();
-        sparse
-            .with_updated_complex_linear_values(&updates)
-            .map_err(|error| map_slice_shape_error("sparse slice assign", error))?
-    } else if sparse.numeric_dtype() == Some(NumericDType::F32) {
-        let rhs_values = materialize_rhs_real_for_plan_host(rhs, plan)?;
-        let updates = plan
-            .indices
-            .iter()
-            .zip(rhs_values)
-            .map(|(&index, value)| (index as usize, value as f32))
-            .collect::<Vec<_>>();
-        sparse
-            .with_updated_f32_linear_values(&updates)
-            .map_err(|error| map_slice_shape_error("sparse slice assign", error))?
-    } else {
-        let rhs_values = materialize_rhs_real_for_plan_host(rhs, plan)?;
-        let updates = plan
-            .indices
-            .iter()
-            .zip(rhs_values)
-            .map(|(&index, value)| (index as usize, value))
-            .collect::<Vec<_>>();
-        sparse
-            .with_updated_linear_values(&updates)
-            .map_err(|error| map_slice_shape_error("sparse slice assign", error))?
-    };
-    Ok(Value::SparseTensor(updated))
-}
-
-enum SparseDeletionAxis {
-    Rows(Vec<usize>),
-    Columns(Vec<usize>),
-    All,
-}
-
-fn sparse_deletion_axis(
-    sparse: &SparseTensor,
-    plan: &IndexPlan,
-) -> Result<SparseDeletionAxis, RuntimeError> {
-    if plan.indices.is_empty() {
-        return Ok(SparseDeletionAxis::Rows(Vec::new()));
-    }
-    if plan.dims == 1 {
-        let indices = plan.indices.iter().map(|&index| index as usize).collect();
-        if sparse.rows == 1 {
-            return Ok(SparseDeletionAxis::Columns(indices));
-        }
-        if sparse.cols == 1 {
-            return Ok(SparseDeletionAxis::Rows(indices));
-        }
-        return Err(mex(
-            "UnsupportedDeletion",
-            "Linear sparse deletion is only supported for vectors",
-        ));
-    }
-    if plan.dims != 2 {
-        return Err(mex(
-            "UnsupportedDeletion",
-            "Sparse deletion currently supports vectors and complete matrix rows or columns",
-        ));
-    }
-    let selected_rows = plan.selection_lengths.first().copied().unwrap_or(0);
-    let selected_cols = plan.selection_lengths.get(1).copied().unwrap_or(0);
-    if selected_rows == sparse.rows && selected_cols == sparse.cols {
-        return Ok(SparseDeletionAxis::All);
-    }
-    if selected_rows == sparse.rows {
-        let columns = plan
-            .indices
-            .chunks(sparse.rows)
-            .map(|chunk| chunk[0] as usize / sparse.rows)
-            .collect();
-        return Ok(SparseDeletionAxis::Columns(columns));
-    }
-    if selected_cols == sparse.cols {
-        let rows = plan
-            .indices
-            .iter()
-            .take(selected_rows)
-            .map(|index| *index as usize % sparse.rows)
-            .collect();
-        return Ok(SparseDeletionAxis::Rows(rows));
-    }
-    Err(mex(
-        "UnsupportedDeletion",
-        "Sparse deletion requires selecting complete rows or columns",
-    ))
+    sparse::assign_host(context, source, plan, rhs)
 }
 
 pub fn delete_sparse_with_plan(
-    sparse: SparseTensor,
+    source: SparseTensor,
     plan: &IndexPlan,
     rhs: &Value,
 ) -> Result<Value, RuntimeError> {
-    if sparse.integer_storage().is_some() {
-        crate::compatibility::ensure_sparse_integer_extension_enabled("indexed assignment")?;
-    }
-    if !is_empty_delete_rhs(rhs) {
-        return Err(mex(
-            "DeletionRequiresEmptyRhs",
-            "Indexed deletion requires empty RHS",
-        ));
-    }
-    let updated = match sparse_deletion_axis(&sparse, plan)? {
-        SparseDeletionAxis::Rows(rows) => sparse.with_deleted_rows(&rows),
-        SparseDeletionAxis::Columns(columns) => sparse.with_deleted_columns(&columns),
-        SparseDeletionAxis::All => {
-            let rows = (0..sparse.rows).collect::<Vec<_>>();
-            let columns = (0..sparse.cols).collect::<Vec<_>>();
-            sparse
-                .with_deleted_rows(&rows)
-                .and_then(|sparse| sparse.with_deleted_columns(&columns))
-        }
-    }
-    .map_err(|error| map_slice_shape_error("sparse deletion", error))?;
-    Ok(Value::SparseTensor(updated))
+    let context = crate::context::legacy::active();
+    delete_sparse_with_plan_in_context(context.as_ref(), source, plan, rhs)
+}
+
+pub fn delete_sparse_with_plan_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    source: SparseTensor,
+    plan: &IndexPlan,
+    rhs: &Value,
+) -> Result<Value, RuntimeError> {
+    sparse::delete(context, source, plan, rhs)
 }
 
 pub async fn assign_tensor_with_plan(
@@ -838,7 +463,10 @@ pub fn delete_complex_with_plan(
 }
 
 mod resident;
-pub use resident::{assign_gpu_slice_with_plan, delete_gpu_slice_with_plan};
+pub use resident::{
+    assign_gpu_slice_with_plan, assign_gpu_slice_with_plan_in_context, delete_gpu_slice_with_plan,
+    delete_gpu_slice_with_plan_in_context,
+};
 
 fn integer_gpu_rhs_indices_for_plan(
     rhs_shape: &[usize],
@@ -940,10 +568,15 @@ pub fn materialize_rhs_nd_real_host(
     host_rhs::multidimensional(rhs, selection_lengths)
 }
 
-pub(crate) async fn download_integer_tensor(
+pub(crate) async fn download_integer_tensor_in_context(
+    context: Option<&crate::context::RuntimeContext>,
     handle: &runmat_accelerate_api::GpuTensorHandle,
 ) -> Result<Tensor, RuntimeError> {
-    match super::resident::gather(handle).await? {
+    let owner = crate::indexing::plan::admission::Owner::new(context)?;
+    match owner
+        .await_stage(super::resident::gather_in_context(context, handle))
+        .await??
+    {
         Value::Tensor(tensor) if tensor.integer_storage().is_some() => Ok(tensor),
         _ => Err(mex(
             "AccelerationOperationFailed",
@@ -959,7 +592,7 @@ mod tests {
         assign_tensor_with_plan, build_complex_rhs_view, build_string_rhs_view,
         delete_complex_with_plan, delete_gpu_slice_with_plan, delete_sparse_with_plan,
         delete_tensor_with_plan, integer_gpu_rhs_indices_for_plan, materialize_rhs_linear_real,
-        materialize_rhs_nd_real, validated_assignment_rhs_shape, StringRhsView,
+        materialize_rhs_nd_real, validated_assignment_rhs_shape,
     };
     use crate::indexing::plan::{build_assignment_plan, build_sparse_assignment_plan, IndexPlan};
     use crate::indexing::selectors::SliceSelector;
@@ -1270,7 +903,10 @@ mod tests {
         .is_err());
         assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
         let (cancelled, ledger) = managed(1_000_000);
-        cancelled.cancellation().cancel();
+        let cancellation = runmat_execution::cancellation::CancellationSource::new();
+        let cancelled = cancelled.with_cancellation_token(cancellation.token());
+        assert!(cancellation.cancel(runmat_execution::CancellationReason::User));
+        assert!(cancelled.is_cancelled());
         let error = block_on(super::delete_logical_with_plan(
             Some(&cancelled),
             source.clone(),
@@ -1284,6 +920,176 @@ mod tests {
             Some(crate::execution::ExecutionServiceError::Cancelled)
         ));
         assert_eq!(source.data.as_slice(), &[1, 0]);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+
+        // The same managed fixture also qualifies the reached primitive
+        // read/write owners, with no ambient activation or payload mirrors.
+        use runmat_value::{CharArray, Utf16CodeUnit};
+        let (runtime, ledger) = managed(1_000_000);
+        let select = IndexPlan::new(vec![1, 2], vec![1, 2], vec![2], 1, vec![2, 2]);
+        let chars = || {
+            CharArray::from_code_units_with_shape(
+                vec![
+                    Utf16CodeUnit::from_raw(0xd800),
+                    Utf16CodeUnit::from_raw(0),
+                    Utf16CodeUnit::from_raw(0xdc00),
+                    Utf16CodeUnit::from_raw(65),
+                ],
+                vec![2, 2],
+            )
+            .unwrap()
+        };
+        for base in [
+            Value::LogicalArray(LogicalArray::new(vec![1, 0, 1, 0], vec![2, 2]).unwrap()),
+            Value::CharArray(chars()),
+            Value::StringArray(
+                StringArray::new(
+                    vec!["a".into(), "b".into(), "c".into(), "d".into()],
+                    vec![2, 2],
+                )
+                .unwrap(),
+            ),
+        ] {
+            let selected =
+                crate::indexing::value::read_with_plan_in_context(Some(&runtime), base, &select)
+                    .unwrap();
+            match &selected {
+                Value::LogicalArray(value) => assert_eq!(value.data.as_slice(), &[0, 1]),
+                Value::CharArray(value) => assert_eq!(
+                    value
+                        .iter_column_major()
+                        .map(Utf16CodeUnit::raw)
+                        .collect::<Vec<_>>(),
+                    [0xdc00, 0]
+                ),
+                Value::StringArray(value) => assert_eq!(value.data(), ["b", "c"]),
+                _ => panic!("primitive read changed class"),
+            }
+            assert!(ledger.snapshot().live_claimed_bytes > 0);
+            let (pointer, rhs) = match &selected {
+                Value::LogicalArray(value) => (value.data.as_ptr() as usize, Value::Bool(true)),
+                Value::CharArray(value) => (
+                    value.data().as_ptr() as usize,
+                    Value::CharArray(CharArray::new_row("\0")),
+                ),
+                Value::StringArray(value) => (
+                    value.data().as_ptr() as usize,
+                    Value::String(Default::default()),
+                ),
+                _ => unreachable!("primitive class checked above"),
+            };
+            let before = ledger.snapshot().live_claimed_bytes;
+            let store = IndexPlan::new(vec![1], vec![1, 1], vec![1], 1, vec![1, 2]);
+            let updated = block_on(crate::indexing::value::assign_with_plan_in_context(
+                Some(&runtime),
+                selected,
+                &store,
+                rhs,
+            ))
+            .unwrap();
+            let after = match &updated {
+                Value::LogicalArray(value) => value.data.as_ptr() as usize,
+                Value::CharArray(value) => value.data().as_ptr() as usize,
+                Value::StringArray(value) => value.data().as_ptr() as usize,
+                _ => panic!("primitive unique class"),
+            };
+            assert_eq!(
+                after, pointer,
+                "admitted unique updates retain actual backing"
+            );
+            assert!(ledger.snapshot().live_claimed_bytes <= before);
+            drop(updated);
+            assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+        }
+        let update = IndexPlan::new(vec![1], vec![1, 1], vec![1], 1, vec![1, 3]);
+        let (zero, ledger) = managed(0);
+        let logical = LogicalArray::new(vec![1, 0, 1], vec![1, 3]).unwrap();
+        let pointer = logical.data.as_ptr();
+        let Value::LogicalArray(updated) =
+            block_on(crate::indexing::value::assign_with_plan_in_context(
+                Some(&zero),
+                Value::LogicalArray(logical),
+                &update,
+                Value::Bool(true),
+            ))
+            .unwrap()
+        else {
+            panic!("logical unique class")
+        };
+        assert_eq!(updated.data.as_ptr(), pointer);
+        assert_eq!(updated.data.as_slice(), &[1, 1, 1]);
+        drop(updated);
+        let character = CharArray::new_row("abc");
+        let pointer = character.data().as_ptr();
+        let Value::CharArray(updated) =
+            block_on(crate::indexing::value::assign_with_plan_in_context(
+                Some(&zero),
+                Value::CharArray(character),
+                &update,
+                Value::CharArray(CharArray::new_row("\0")),
+            ))
+            .unwrap()
+        else {
+            panic!("character unique class")
+        };
+        assert_eq!(updated.data().as_ptr(), pointer);
+        assert_eq!(updated.data()[1].raw(), 0);
+        drop(updated);
+        let text = StringArray::new(vec!["a".into(), "b".into(), "c".into()], vec![1, 3]).unwrap();
+        let pointer = text.data().as_ptr();
+        let Value::StringArray(updated) =
+            block_on(crate::indexing::value::assign_with_plan_in_context(
+                Some(&zero),
+                Value::StringArray(text),
+                &update,
+                Value::String(Default::default()),
+            ))
+            .unwrap()
+        else {
+            panic!("string unique class")
+        };
+        assert_eq!(updated.data().as_ptr(), pointer);
+        assert_eq!(updated.data()[1], "");
+        drop(updated);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+        for base in [
+            Value::LogicalArray(LogicalArray::new(vec![1, 0, 1], vec![1, 3]).unwrap()),
+            Value::CharArray(CharArray::new_row("abc")),
+            Value::StringArray(
+                StringArray::new(vec!["a".into(), "b".into(), "c".into()], vec![1, 3]).unwrap(),
+            ),
+        ] {
+            let rhs = match &base {
+                Value::LogicalArray(_) => Value::Bool(false),
+                Value::CharArray(_) => Value::CharArray(CharArray::new_row("x")),
+                _ => Value::String(Default::default()),
+            };
+            assert!(
+                block_on(crate::indexing::value::assign_with_plan_in_context(
+                    Some(&zero),
+                    base.clone(),
+                    &update,
+                    rhs
+                ))
+                .is_err(),
+                "shared backing must fund its replacement"
+            );
+        }
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+        let (runtime, ledger) = managed(1_000_000);
+        let both = IndexPlan::new(vec![0, 1], vec![1, 2], vec![2], 1, vec![1, 2]);
+        let promoted = super::assign_logical_with_plan_host_in_context(
+            Some(&runtime),
+            LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap(),
+            &both,
+            &Value::Complex(2., -3.),
+        )
+        .unwrap();
+        assert!(
+            matches!(&promoted,Value::ComplexTensor(value) if value.materialize_f64()==vec![(2.,-3.);2])
+        );
+        assert!(ledger.snapshot().live_claimed_bytes > 0);
+        drop(promoted);
         assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
     }
 
@@ -2374,11 +2180,9 @@ mod tests {
             .expect("character cell row"),
         );
         let view = build_string_rhs_view(&rhs, &[2]).expect("build string RHS view");
-        let StringRhsView::Tensor { data, .. } = view else {
-            panic!("cellstr RHS should materialize as a string tensor");
-        };
-        assert_eq!(data[0], "AvgOrders");
-        assert_eq!(data[1], "AvgRevenue");
+        assert_eq!(view.count(), 2);
+        assert_eq!(view.value_at(0), "AvgOrders");
+        assert_eq!(view.value_at(1), "AvgRevenue");
     }
 
     #[test]

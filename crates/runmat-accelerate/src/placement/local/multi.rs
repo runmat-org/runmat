@@ -697,7 +697,13 @@ fn plan_local_multi_with_provider_mode(
         });
     }
     rejected.sort_by(|left, right| left.0.cmp(&right.0));
-    if admitted.is_empty() {
+    // Rejecting every provider quote does not reject independent Native CPU
+    // implementations. Offer those through the same resource/intent-aware
+    // whole-work owner below; it alone determines whether any remain legal.
+    let compare_native_alternatives = native_original_current
+        && compare_profitability
+        && (cpu.native_alternative.is_some() || cpu.native_host_alternative.is_some());
+    if admitted.is_empty() && !compare_native_alternatives {
         if cpu_resources.is_none() {
             // A VM-owned region can resume its original instructions. An
             // admitted plain cast can likewise use its original resident
@@ -791,6 +797,7 @@ fn plan_local_multi_with_provider_mode(
         };
         // Price evidence controls comparison/feedback, not the legality of
         // this independently resource-admitted, sole remaining host route.
+        let native_origin = cpu.native_origin.take();
         let feedback = cpu.into_priced().and_then(|cpu| {
             rejected_cpu_feedback(
                 provider,
@@ -802,6 +809,7 @@ fn plan_local_multi_with_provider_mode(
                     observation_contract,
                     prepared_authority,
                     vm_right,
+                    native_right: native_origin.as_ref(),
                     query,
                     code: *code,
                     cpu: &cpu,

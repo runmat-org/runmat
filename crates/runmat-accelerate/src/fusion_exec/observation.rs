@@ -20,12 +20,7 @@ pub struct FusionProviderCompletion {
     receipt: ProviderOperationReceipt,
     command_contribution: Option<CommandProviderContribution>,
     feedback: LocalPlacementFeedback,
-    right: ProviderPublicationRight,
-}
-
-enum ProviderPublicationRight {
-    Vm(VmFusionCompletionRight),
-    Native(runmat_runtime::numeric_region::service::NativeNumericRegionRight),
+    right: VmFusionCompletionRight,
 }
 
 impl FusionProviderCompletion {
@@ -40,7 +35,7 @@ impl FusionProviderCompletion {
                 receipt,
                 command_contribution,
                 feedback,
-                right: ProviderPublicationRight::Vm(right),
+                right,
             })
     }
 
@@ -48,30 +43,16 @@ impl FusionProviderCompletion {
         let Some(prelude) = self.receipt.default_clock_prelude_since(outer_started) else {
             return;
         };
-        match self.right {
-            ProviderPublicationRight::Vm(right) => {
-                let Some(lease) = right.completion_lease(&self.feedback.runtime) else {
-                    return;
-                };
-                crate::placement::publish_provider_feedback_vm_full_call(
-                    self.receipt,
-                    self.feedback,
-                    prelude,
-                    lease,
-                    self.command_contribution,
-                );
-            }
-            ProviderPublicationRight::Native(right) => {
-                if right.is_current(&self.feedback.runtime) {
-                    crate::placement::publish_provider_feedback_full_call(
-                        self.receipt,
-                        self.feedback,
-                        prelude,
-                        self.command_contribution,
-                    );
-                }
-            }
-        }
+        let Some(lease) = self.right.completion_lease(&self.feedback.runtime) else {
+            return;
+        };
+        crate::placement::publish_provider_feedback_vm_full_call(
+            self.receipt,
+            self.feedback,
+            prelude,
+            lease,
+            self.command_contribution,
+        );
     }
 }
 
@@ -108,14 +89,17 @@ impl runmat_runtime::numeric_region::service::NativeNumericRegionPublication
             command_contribution,
             ..
         } = *self;
-        let started = right.started();
-        FusionProviderCompletion {
-            receipt,
-            feedback,
-            command_contribution,
-            right: ProviderPublicationRight::Native(right),
+        let Some(prelude) = receipt.default_clock_prelude_since(right.started()) else {
+            return;
+        };
+        if right.is_current(&feedback.runtime) {
+            crate::placement::publish_provider_feedback_full_call(
+                receipt,
+                feedback,
+                prelude,
+                command_contribution,
+            );
         }
-        .complete(started);
     }
 }
 
@@ -246,6 +230,10 @@ impl FusionCpuObservation {
         if self.native_kind
             != Some(runmat_runtime::numeric_region::service::NativeNumericRegionCpuKind::Generic)
         {
+            // Preparation metadata physically retires before its original
+            // funding receipt on vectorized/original/declined selections too.
+            drop(admission);
+            drop(receipt);
             return Ok(());
         }
         self.native_host_admission = admission
@@ -267,7 +255,7 @@ impl FusionCpuObservation {
             NativeNumericRegionCpuObservation, NativeNumericRegionOutcome,
         };
         if let Some(provider) = self.native_original_provider.take() {
-            let observation = native_original::NativeOriginalObservation::new(
+            let observation = native_original::NativeOriginalObservation::admit(
                 runtime,
                 provider,
                 &right,

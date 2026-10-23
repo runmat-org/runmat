@@ -12,12 +12,13 @@ use crate::{NativeExecutorError, NativeExecutorResult};
 use crate::execute::state::HostState;
 
 use crate::execute::call_suspension::{
-    begin_sequence_stage, take_completed_sequence_stage, SequenceStage,
+    begin_sequence_end_stage, begin_sequence_stage, take_completed_sequence_stage,
+    SequenceEndAdmission, SequenceStage,
 };
 
 enum Phase {
     MaterializePath,
-    PushStep(AssignmentStepSpec),
+    PushStep(AssignmentStepSpec, runmat_types::AssignmentChildCreation),
     MaterializeEndpoint,
     Finish(SequenceEndpointSpec),
     AwaitPush,
@@ -271,7 +272,7 @@ impl PendingSequenceTarget {
             let receiver = self.fixed_end_receiver.clone();
             self.fixed_end_pending = true;
             let builder = &mut self.builder;
-            stage_call(state, || {
+            end_stage_call(state, |admission| {
                 let builder = builder.take().expect("fixed End owns builder");
                 async move {
                     let caller = functions
@@ -298,24 +299,16 @@ impl PendingSequenceTarget {
                         component_count,
                     )
                     .await?;
-                    Ok(SequenceStage::End {
-                        builder,
-                        receiver,
-                        value,
-                    })
+                    admission.finish(&runtime, builder, receiver, value)
                 }
             })?
         };
-        let SequenceStage::End {
-            builder,
-            receiver,
-            value,
-        } = stage
-        else {
+        let SequenceStage::End(end) = stage else {
             return Err(NativeExecutorError::Host(
                 "fixed End completion has wrong typed payload".into(),
             ));
         };
+        let (builder, receiver, value) = end.into_parts();
         self.builder = Some(builder);
         self.fixed_end_receiver = Some(receiver);
         self.fixed_end_pending = false;
@@ -331,10 +324,10 @@ impl PendingSequenceTarget {
     fn refresh_retained(&mut self, state: &mut HostState) -> NativeExecutorResult<()> {
         self.retained.clear();
         let components = match &self.phase {
-            Phase::PushStep(AssignmentStepSpec::Parentheses { selectors }) => {
+            Phase::PushStep(AssignmentStepSpec::Parentheses { selectors }, _) => {
                 Some(selectors.as_slice())
             }
-            Phase::PushStep(AssignmentStepSpec::Braces(selectors)) => Some(selectors.as_slice()),
+            Phase::PushStep(AssignmentStepSpec::Braces(selectors), _) => Some(selectors.as_slice()),
             Phase::Finish(SequenceEndpointSpec::CellContents(selectors)) => {
                 Some(selectors.as_slice())
             }
@@ -478,14 +471,24 @@ impl PendingSequenceTarget {
                 } else {
                     assignment_step(state, self.current()?, place)?
                 };
-                self.phase = Phase::PushStep(step);
+                let child_creation = match &self.preparation_source {
+                    Some(source) => {
+                        let descriptor = source.descriptor()?;
+                        descriptor.mutation.place.assignment_child_creation(
+                            self.index + 1,
+                            descriptor.mutation.creation_policy,
+                        )
+                    }
+                    None => runmat_types::AssignmentChildCreation::ExistingOnly,
+                };
+                self.phase = Phase::PushStep(step, child_creation);
                 Ok(None)
             }
             Phase::MaterializePath => {
                 self.phase = Phase::MaterializeEndpoint;
                 Ok(None)
             }
-            Phase::PushStep(spec) => {
+            Phase::PushStep(spec, child_creation) => {
                 let runtime = state.runtime.clone();
                 let functions = std::sync::Arc::clone(&state.functions);
                 let function = state.function.portable_id;
@@ -505,7 +508,12 @@ impl PendingSequenceTarget {
                                 )
                             })?;
                         builder
-                            .push_step_in_context(&runtime, spec, Some(&caller.name))
+                            .push_assignment_step_in_context(
+                                &runtime,
+                                spec,
+                                child_creation,
+                                Some(&caller.name),
+                            )
                             .await?;
                         Ok(SequenceStage::Builder(builder))
                     }
@@ -568,13 +576,11 @@ impl PendingSequenceTarget {
                         }
                         MirSequenceTarget::CellContents { indexing, .. } => {
                             SequenceEndpointSpec::CellContents(
-                                runmat_value::ExactArrayStorage::unbounded(
-                                    super::super::super::indexing::materialize_index_components(
-                                        state,
-                                        self.current()?,
-                                        indexing,
-                                    )?,
-                                ),
+                                super::super::super::indexing::materialize_index_components(
+                                    state,
+                                    self.current()?,
+                                    indexing,
+                                )?,
                             )
                         }
                     },
@@ -619,12 +625,36 @@ fn stage_call<F>(
 where
     F: std::future::Future<Output = NativeExecutorResult<SequenceStage>> + 'static,
 {
+    stage_call_with(state, |state, embedded| {
+        begin_sequence_stage(state, embedded, make_future)
+    })
+}
+
+fn end_stage_call<F>(
+    state: &mut HostState,
+    make_future: impl FnOnce(SequenceEndAdmission) -> F,
+) -> NativeExecutorResult<SequenceStage>
+where
+    F: std::future::Future<Output = NativeExecutorResult<SequenceStage>> + 'static,
+{
+    stage_call_with(state, |state, embedded| {
+        begin_sequence_end_stage(state, embedded, make_future)
+    })
+}
+
+fn stage_call_with(
+    state: &mut HostState,
+    begin: impl FnOnce(
+        &mut HostState,
+        Option<crate::execute::state::EmbeddedOperationIdentity>,
+    ) -> NativeExecutorResult<SequenceStage>,
+) -> NativeExecutorResult<SequenceStage> {
     let embedded = state.enter_embedded_call()?;
     let result = (|| {
         if let Some(stage) = take_completed_sequence_stage(state, embedded.as_ref())? {
             return Ok(stage);
         }
-        begin_sequence_stage(state, embedded.clone(), make_future)
+        begin(state, embedded.clone())
     })();
     let finished = state.finish_embedded_call(embedded.as_ref());
     match (result, finished) {
@@ -763,13 +793,29 @@ fn assignment_step(
                 .map_err(Into::into)
         }
         MirPlace::Index(_, indexing) => {
-            let mut selectors = super::super::super::indexing::materialize_index_components(
-                state, current, indexing,
-            )?;
-            if indexing.cell_expand_all {
-                selectors = vec![ObjectIndexComponent::Colon];
-            }
-            let selectors = runmat_value::ExactArrayStorage::unbounded(selectors);
+            let selectors = if indexing.cell_expand_all {
+                let mut selectors =
+                    runmat_runtime::object::indexing::prepare_components_in_context(
+                        &state.runtime,
+                        1,
+                    )?;
+                selectors
+                    .try_push(ObjectIndexComponent::Colon)
+                    .map_err(|_| {
+                        NativeExecutorError::Host(
+                            "whole-cell selector exceeded its admitted width".into(),
+                        )
+                    })?;
+                selectors.try_finish().map_err(|_| {
+                    NativeExecutorError::Host(
+                        "whole-cell selector did not fill its admitted width".into(),
+                    )
+                })?
+            } else {
+                super::super::super::indexing::materialize_index_components(
+                    state, current, indexing,
+                )?
+            };
             Ok(match indexing.kind {
                 runmat_types::IndexKind::Paren => AssignmentStepSpec::Parentheses { selectors },
                 runmat_types::IndexKind::Brace => AssignmentStepSpec::Braces(selectors),

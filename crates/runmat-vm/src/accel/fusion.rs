@@ -317,6 +317,15 @@ pub enum FusionAttemptError {
     Terminal(RuntimeError),
 }
 
+// Resource admission and continuation control failures are never an explicit
+// pre-effect provider Unsupported receipt. Preserve them as terminal failures,
+// including when the selected continuation never constructs its child.
+impl From<RuntimeError> for FusionAttemptError {
+    fn from(error: RuntimeError) -> Self {
+        Self::Terminal(error)
+    }
+}
+
 pub struct FusionVmResult {
     pub final_value: Value,
     pub ordered_stores: Vec<(FusionStoreMaterialization, Value)>,

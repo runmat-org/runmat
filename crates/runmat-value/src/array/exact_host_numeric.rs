@@ -29,7 +29,8 @@ use integer::{allocate_integer, integer_layout, ExactIntegerStorage};
 pub use integer_complex::ExactHostIntegerComplexTensorAllocation;
 pub use logical::ExactHostLogicalTensorAllocation;
 pub use sparse::{
-    ExactHostSparseClass, ExactHostSparseTensorAllocation, PreparedExactSparseTensor,
+    ExactHostSparseClass, ExactHostSparsePublicationError, ExactHostSparseTensorAllocation,
+    PreparedExactSparseTensor,
 };
 
 macro_rules! integer_slice_mut {

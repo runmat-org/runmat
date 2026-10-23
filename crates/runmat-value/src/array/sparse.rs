@@ -4,6 +4,10 @@ use super::*;
 mod validation;
 pub use validation::{SparseCscValidation, ValidatedSparseCscParts};
 
+#[path = "sparse/merge.rs"]
+mod merge;
+pub use merge::SparseCscMergeEvent;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct SparseTensor {
     pub rows: usize,
@@ -812,63 +816,67 @@ impl SparseTensor {
         mut stored_value: impl FnMut(usize) -> Result<T, String>,
         is_zero: impl Fn(&T) -> bool,
     ) -> Result<SparseCscParts<T>, String> {
-        let total = self
-            .rows
-            .checked_mul(self.cols)
-            .ok_or_else(|| "SparseTensor assignment dimensions overflow usize".to_string())?;
-        let mut latest = BTreeMap::new();
-        for (index, value) in updates {
-            if *index >= total {
-                return Err(format!(
-                    "SparseTensor assignment linear index {} exceeds {} elements",
-                    index, total
-                ));
-            }
-            latest.insert(*index, value.clone());
-        }
-
-        let capacity = self
-            .nnz()
-            .checked_add(latest.len())
-            .ok_or_else(|| "SparseTensor assignment nnz overflow".to_string())?;
+        let mut order = updates
+            .iter()
+            .enumerate()
+            .map(|(ordinal, (linear, _))| (*linear, ordinal))
+            .collect::<Vec<_>>();
+        order.sort_unstable();
+        let mut count = 0usize;
+        self.visit_merged_linear_updates(
+            self.rows,
+            self.cols,
+            &order,
+            |event| {
+                let retained = match event {
+                    SparseCscMergeEvent::Stored { .. } => true,
+                    SparseCscMergeEvent::Update { ordinal, .. } => !is_zero(&updates[ordinal].1),
+                    SparseCscMergeEvent::ColumnEnd { .. } => false,
+                };
+                if retained {
+                    count = count
+                        .checked_add(1)
+                        .ok_or_else(|| "SparseTensor assignment nnz overflow".to_string())?;
+                }
+                Ok(())
+            },
+            |error| error,
+            || Ok(()),
+        )?;
         let mut col_ptrs = Vec::with_capacity(self.cols.saturating_add(1));
         let mut row_indices = Vec::new();
         let mut values = Vec::new();
         row_indices
-            .try_reserve_exact(capacity)
+            .try_reserve_exact(count)
             .map_err(|error| format!("SparseTensor assignment allocation failed: {error}"))?;
         values
-            .try_reserve_exact(capacity)
+            .try_reserve_exact(count)
             .map_err(|error| format!("SparseTensor assignment allocation failed: {error}"))?;
         col_ptrs.push(0);
-
-        for col in 0..self.cols {
-            let column_start = col * self.rows;
-            let column_end = column_start + self.rows;
-            let mut stored = self.col_ptrs[col];
-            let stored_end = self.col_ptrs[col + 1];
-            for (&linear, value) in latest.range(column_start..column_end) {
-                let row = linear - column_start;
-                while stored < stored_end && self.row_indices[stored] < row {
-                    row_indices.push(self.row_indices[stored]);
-                    values.push(stored_value(stored)?);
-                    stored += 1;
+        self.visit_merged_linear_updates(
+            self.rows,
+            self.cols,
+            &order,
+            |event| {
+                match event {
+                    SparseCscMergeEvent::Stored { row, entry } => {
+                        row_indices.push(row);
+                        values.push(stored_value(entry)?);
+                    }
+                    SparseCscMergeEvent::Update { row, ordinal } => {
+                        let value = &updates[ordinal].1;
+                        if !is_zero(value) {
+                            row_indices.push(row);
+                            values.push(value.clone());
+                        }
+                    }
+                    SparseCscMergeEvent::ColumnEnd { .. } => col_ptrs.push(values.len()),
                 }
-                if stored < stored_end && self.row_indices[stored] == row {
-                    stored += 1;
-                }
-                if !is_zero(value) {
-                    row_indices.push(row);
-                    values.push(value.clone());
-                }
-            }
-            while stored < stored_end {
-                row_indices.push(self.row_indices[stored]);
-                values.push(stored_value(stored)?);
-                stored += 1;
-            }
-            col_ptrs.push(values.len());
-        }
+                Ok(())
+            },
+            |error| error,
+            || Ok(()),
+        )?;
         Ok((col_ptrs, row_indices, values))
     }
 
@@ -1078,6 +1086,43 @@ impl SparseTensor {
         }
     }
 
+    /// Publish growth with one already owned/admitted column-pointer buffer.
+    /// Original row and value owners are moved intact, never materialized.
+    pub fn with_expanded_column_pointers(
+        self,
+        rows: usize,
+        cols: usize,
+        col_ptrs: HostIndexBuffer,
+    ) -> Result<Self, String> {
+        if rows < self.rows || cols < self.cols {
+            return Err(format!(
+                "SparseTensor cannot shrink shape ({}, {}) to ({rows}, {cols})",
+                self.rows, self.cols
+            ));
+        }
+        let expected = cols
+            .checked_add(1)
+            .ok_or_else(|| "SparseTensor expanded column count overflow".to_string())?;
+        if col_ptrs.len() != expected
+            || col_ptrs.get(..self.col_ptrs.len()) != Some(self.col_ptrs.as_ref())
+            || col_ptrs[self.col_ptrs.len()..]
+                .iter()
+                .any(|&offset| offset != self.nnz())
+        {
+            return Err(
+                "SparseTensor expanded column pointers do not retain the original CSC topology"
+                    .into(),
+            );
+        }
+        Ok(Self {
+            rows,
+            cols,
+            col_ptrs,
+            row_indices: self.row_indices,
+            storage: self.storage,
+        })
+    }
+
     fn checked_assignment_linear_index(&self, row: usize, col: usize) -> Result<usize, String> {
         if row >= self.rows || col >= self.cols {
             return Err(format!(
@@ -1136,17 +1181,25 @@ impl SparseTensor {
             .try_reserve_exact(self.nnz())
             .map_err(|error| format!("SparseTensor deletion allocation failed: {error}"))?;
         col_ptrs.push(0);
-        for &source_column in source_columns {
-            let start = self.col_ptrs[source_column];
-            let end = self.col_ptrs[source_column + 1];
-            for index in start..end {
-                if let Some(row) = map_row(self.row_indices[index]) {
-                    row_indices.push(row);
-                    values.push(stored_value(index)?);
+        self.visit_rebuilt_csc(
+            source_columns.iter().copied(),
+            &mut map_row,
+            |event| {
+                match event {
+                    SparseCscMergeEvent::Stored { row, entry: index } => {
+                        row_indices.push(row);
+                        values.push(stored_value(index)?);
+                    }
+                    SparseCscMergeEvent::ColumnEnd { .. } => col_ptrs.push(values.len()),
+                    SparseCscMergeEvent::Update { .. } => {
+                        unreachable!("rebuild only retains existing entries")
+                    }
                 }
-            }
-            col_ptrs.push(values.len());
-        }
+                Ok(())
+            },
+            || Ok(()),
+            |error| error,
+        )?;
         Ok((col_ptrs, row_indices, values))
     }
 

@@ -1,13 +1,11 @@
 use runmat_mir::{MirSubscriptChain, MirSubscriptStep};
-use runmat_runtime::execution::RootedValues;
 use runmat_runtime::object::indexing::{ObjectIndexSelector, ObjectSubscript, ObjectSubscriptPath};
-use runmat_runtime::sequence::ResolveValueSequence;
 use runmat_value::Value;
 
 use super::operand::{materialize_operand, materialize_retained_operand};
 use super::state::HostState;
-use crate::memory::ScopedValueRoots;
 use crate::{NativeExecutorError, NativeExecutorResult};
+use runmat_runtime::execution::RootedValueLease;
 mod access;
 mod arguments;
 mod end;
@@ -23,7 +21,9 @@ pub(super) fn materialize_target_selectors(
     state: &mut HostState,
     base: &Value,
     indexing: &runmat_mir::MirIndexing,
-) -> NativeExecutorResult<Vec<runmat_runtime::object::indexing::ObjectIndexComponent>> {
+) -> NativeExecutorResult<
+    runmat_value::ExactArrayStorage<runmat_runtime::object::indexing::ObjectIndexComponent>,
+> {
     indexing.validate_target_selectors().map_err(|error| {
         NativeExecutorError::Host(format!("invalid MIR target selectors: {error}"))
     })?;
@@ -74,11 +74,17 @@ fn read_inner(
         materialize_operand(state, &chain.root)?
     };
     let access = frame_access(state)?;
-    let mut steps = Vec::new();
+    let runtime = state.runtime.clone();
+    let mut steps = prepare_segment(&runtime, &chain.steps, 0)?;
     for (step_index, step) in chain.steps.iter().enumerate() {
         match step {
             MirSubscriptStep::Member(member) => {
-                steps.push(ObjectSubscript::member(member.clone()));
+                append_steps(
+                    &mut steps,
+                    [ObjectSubscript::member_retained(
+                        runmat_runtime::call::argument_text::copy_str(&member.0, Some(&runtime))?,
+                    )],
+                )?;
             }
             MirSubscriptStep::DynamicMember(member) => {
                 let member_value = if retains_inputs {
@@ -86,45 +92,48 @@ fn read_inner(
                 } else {
                     materialize_operand(state, member)?
                 };
-                let member = String::try_from(&member_value).map_err(|error| {
-                    NativeExecutorError::from(runmat_runtime::runtime_error::semantic_error(
-                        "DynamicFieldName",
-                        error,
-                    ))
-                })?;
-                steps.push(ObjectSubscript::member(member));
+                append_steps(
+                    &mut steps,
+                    [retained_dynamic_member(&runtime, &member_value)?],
+                )?;
             }
             MirSubscriptStep::PreparedDynamicMember(region) => {
                 let value = super::indexing::materialize_prepared_expression_region(state, region)?;
-                let member = String::try_from(&value).map_err(|error| {
-                    NativeExecutorError::from(runmat_runtime::runtime_error::semantic_error(
-                        "DynamicFieldName",
-                        error,
-                    ))
-                })?;
-                steps.push(ObjectSubscript::member(member));
+                append_steps(&mut steps, [retained_dynamic_member(&runtime, &value)?])?;
             }
             MirSubscriptStep::Index(indexing) => {
+                // Keep the original prefix alive through its preparation, but
+                // admit the replacement segment before any receiver/End effect.
+                let replacement = if starts_segment(step) && !steps.initialized().is_empty() {
+                    Some(prepare_segment(&runtime, &chain.steps, step_index)?)
+                } else {
+                    None
+                };
                 let materialized = materialize_selectors(
                     state,
                     step_index,
                     &root,
-                    &steps,
+                    steps.initialized(),
                     indexing,
                     &access,
                     retains_inputs,
                 )?;
                 if let Some(receiver) = materialized.prepared_receiver {
                     root = receiver;
-                    steps.clear();
+                    if let Some(replacement) = replacement {
+                        steps = replacement;
+                    }
                 }
                 let selector = ObjectIndexSelector::IndexValues {
-                    components: runmat_value::ExactArrayStorage::unbounded(materialized.components),
+                    components: materialized.components,
                 };
-                steps.push(match indexing.kind {
-                    runmat_types::IndexKind::Paren => ObjectSubscript::parentheses(selector),
-                    runmat_types::IndexKind::Brace => ObjectSubscript::braces(selector),
-                });
+                append_steps(
+                    &mut steps,
+                    [match indexing.kind {
+                        runmat_types::IndexKind::Paren => ObjectSubscript::parentheses(selector),
+                        runmat_types::IndexKind::Brace => ObjectSubscript::braces(selector),
+                    }],
+                )?;
             }
             MirSubscriptStep::DottedInvoke {
                 member,
@@ -134,10 +143,14 @@ fn read_inner(
                 // Resolve the preceding path before evaluating this call's
                 // arguments. The cached prepared receiver survives suspension
                 // and prevents replay of earlier invocation effects.
-                let prefix = if steps.is_empty() {
+                let prefix = if steps.initialized().is_empty() {
                     None
                 } else {
-                    Some(ObjectSubscriptPath::new(std::mem::take(&mut steps))?)
+                    let replacement = prepare_segment(&runtime, &chain.steps, step_index)?;
+                    let prefix = std::mem::replace(&mut steps, replacement);
+                    Some(ObjectSubscriptPath::from_storage(
+                        prefix.finish_initialized(),
+                    )?)
                 };
                 let prepared = selectors::prepare_dotted_receiver(
                     state,
@@ -148,15 +161,21 @@ fn read_inner(
                 )?;
                 root = prepared.receiver().clone();
                 let components = arguments::materialize(state, arguments, &prepared)?;
-                steps.extend(ObjectSubscript::dotted_invoke_retained_with_fallback(
-                    runmat_runtime::call::argument_text::copy_str(&member.0, Some(&state.runtime))?,
-                    runmat_value::ExactArrayStorage::unbounded(components),
-                    semantic_fallback.clone(),
-                ));
+                append_steps(
+                    &mut steps,
+                    ObjectSubscript::dotted_invoke_retained_with_fallback(
+                        runmat_runtime::call::argument_text::copy_str(
+                            &member.0,
+                            Some(&state.runtime),
+                        )?,
+                        components,
+                        semantic_fallback.clone(),
+                    ),
+                )?;
             }
         }
     }
-    let path = ObjectSubscriptPath::new(steps)?;
+    let path = ObjectSubscriptPath::from_storage(steps.finish_initialized())?;
     let sequence_context = match chain.sequence_use {
         runmat_types::SequenceUse::SelectCurrentFunctionOutputs => {
             runmat_runtime::sequence::SequenceResolutionContext::current_function_outputs(
@@ -178,27 +197,83 @@ fn read_inner(
     };
     let runtime = state.runtime.clone();
     let selection = chain.sequence_use;
-    let roots = ScopedValueRoots::register(
-        roots::subscript_roots(&root, Some(&path)),
-        "native_pending_subscript_path",
+    let roots = RootedValueLease::for_values_iterator_in_context(
+        roots::subscript_values(&root, Some(&path)),
+        &runtime,
     )?;
-    super::call_suspension::begin_rooted_arguments(
-        state,
-        embedded.cloned(),
-        Box::pin(async move {
-            let _roots = roots;
-            let sequence = runtime
+    super::call_suspension::begin_selected_sequence(state, embedded.cloned(), move || async move {
+        let _roots = roots;
+        let sequence = runtime
                 .scope(
                     runmat_runtime::object::protocol::read_subscript_path_sequence_with_access_in_context(
                         &runtime, root, path, request,
                     ),
                 )
                 .await?;
-            sequence.with_owned_sequence(|sequence| {
-                let values = sequence.resolve(selection, sequence_context)?;
-                RootedValues::from_output_storage(values)
-                    .map_err(|error| error.into_runtime_error())
-            })
+        sequence.resolve_sequence(selection, sequence_context)
+    })
+}
+
+type PathBuilder = runmat_runtime::context::host_allocation::PreparedHostArray<ObjectSubscript>;
+
+fn starts_segment(step: &MirSubscriptStep) -> bool {
+    match step {
+        MirSubscriptStep::DottedInvoke { .. } => true,
+        MirSubscriptStep::Index(indexing) => indexing.components.iter().any(|component| {
+            matches!(component, runmat_mir::MirIndexComponent::ContextualExpr(region)
+                if region.contains_contextual_end())
         }),
-    )
+        _ => false,
+    }
+}
+
+/// Each MIR step is counted once in its segment. The boundary step starts the
+/// next segment because its predecessor prefix is resolved before it appends
+/// its own index or dotted pair.
+fn prepare_segment(
+    runtime: &runmat_runtime::context::RuntimeContext,
+    source: &[MirSubscriptStep],
+    start: usize,
+) -> NativeExecutorResult<PathBuilder> {
+    let mut width = 0usize;
+    for (offset, step) in source[start..].iter().enumerate() {
+        if offset != 0 && starts_segment(step) {
+            break;
+        }
+        width = width
+            .checked_add(if matches!(step, MirSubscriptStep::DottedInvoke { .. }) {
+                2
+            } else {
+                1
+            })
+            .ok_or_else(|| NativeExecutorError::Host("subscript path width overflow".into()))?;
+    }
+    runmat_runtime::object::indexing::prepare_subscripts_in_context(runtime, width)
+        .map_err(Into::into)
+}
+
+fn append_steps<const N: usize>(
+    steps: &mut PathBuilder,
+    appended: [ObjectSubscript; N],
+) -> NativeExecutorResult<()> {
+    for step in appended {
+        steps.try_push(step).map_err(|_| {
+            NativeExecutorError::Host(
+                "subscript path exceeded its statically admitted segment width".into(),
+            )
+        })?;
+    }
+    Ok(())
+}
+
+fn retained_dynamic_member(
+    runtime: &runmat_runtime::context::RuntimeContext,
+    value: &Value,
+) -> NativeExecutorResult<ObjectSubscript> {
+    let runmat_runtime::sequence::AssignmentStepSpec::Member(name) =
+        runmat_runtime::sequence::AssignmentStepSpec::dynamic_member_in_context(runtime, value)?
+    else {
+        unreachable!("dynamic member factory")
+    };
+    Ok(ObjectSubscript::member_retained(name))
 }

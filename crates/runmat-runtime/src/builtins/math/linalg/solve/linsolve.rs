@@ -1264,6 +1264,7 @@ pub(crate) mod tests {
         assert!((actual - expected).abs() < 1e-7);
     }
 
+    #[cfg(feature = "wgpu")]
     fn first_output(outputs: runmat_value::OutputListStorage) -> Value {
         outputs
             .try_into_owned()

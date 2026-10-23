@@ -1,7 +1,6 @@
 //! Managed liveness for values owned by a suspended argument expansion.
 //! Physical resources remain owned by Values; this registration contains only
 //! compact GC identities, never clones of array payloads or device handles.
-use super::{MaterializedArgument, MaterializedExpansionSource};
 use crate::RuntimeError;
 use runmat_gc_api::{GcHandle, GcRoot, RootId, Trace, Tracer};
 use runmat_value::Value;
@@ -54,45 +53,10 @@ impl ExpansionRoots {
             handles,
         })
     }
-    pub(crate) fn retain_values(&self, values: &[Value]) {
-        self.retain_iter(values.iter());
-    }
-
     pub(crate) fn retain_iter<'a>(&self, values: impl IntoIterator<Item = &'a Value>) {
         let mut handles = self.handles.borrow_mut();
         for value in values {
             value.trace(&mut *handles);
-        }
-    }
-    pub(super) fn retain_arguments(&self, arguments: &[MaterializedArgument]) {
-        let mut handles = self.handles.borrow_mut();
-        for argument in arguments {
-            match argument {
-                MaterializedArgument::Single(value) => value.trace(&mut *handles),
-                MaterializedArgument::Sequence(sequence) => sequence.trace(&mut *handles),
-                MaterializedArgument::Expansion(source) => trace_source(source, &mut handles),
-            }
-        }
-    }
-
-    pub(super) fn retain_source(&self, source: &MaterializedExpansionSource) {
-        trace_source(source, &mut self.handles.borrow_mut());
-    }
-}
-
-fn trace_source(source: &MaterializedExpansionSource, handles: &mut Handles) {
-    match source {
-        MaterializedExpansionSource::CellContents { base, indices, .. } => {
-            base.trace(handles);
-            for index in indices {
-                index.trace(handles);
-            }
-        }
-        MaterializedExpansionSource::ReturnedOutputs(sequence) => sequence.trace(handles),
-        MaterializedExpansionSource::Member { base, .. } => base.trace(handles),
-        MaterializedExpansionSource::DynamicMember { base, member } => {
-            base.trace(handles);
-            member.trace(handles);
         }
     }
 }

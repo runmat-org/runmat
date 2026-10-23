@@ -174,14 +174,8 @@ impl WitnessMode {
                 expected,
                 ..
             } => {
-                ensure!(
-                    host.profile == NativeDeploymentProfile::HostedNative,
-                    "hosted-callback witness requires a hosted selected product"
-                );
+                validate_hosted_callback_inputs(host.profile, host.local_service_inputs.as_ref())?;
                 matlab_text(interface_name)?;
-                host.local_service_inputs
-                    .as_ref()
-                    .context("hosted-callback witness lacks selected environment inputs")?;
                 let actual = input
                     .checked_mul(2)
                     .and_then(|value| {
@@ -423,6 +417,24 @@ fn matlab_text(value: &str) -> Result<()> {
     Ok(())
 }
 
+fn validate_hosted_callback_inputs(
+    profile: NativeDeploymentProfile,
+    inputs: Option<&runmat_execution::host::NativeLocalServiceInputs>,
+) -> Result<()> {
+    ensure!(
+        profile == NativeDeploymentProfile::HostedNative,
+        "hosted-callback witness requires a hosted selected product"
+    );
+    // Hosted environment ports are ambient services with independently
+    // admitted issuers. Virtual local payloads belong only to deterministic
+    // deployment and are rejected by the canonical linked local owner.
+    ensure!(
+        inputs.is_none(),
+        "hosted-callback witness cannot carry deterministic local inputs"
+    );
+    Ok(())
+}
+
 fn clock_source(inputs: Option<&NativeClockInputs>) -> String {
     let mut body = String::from("\nfunction clockWitness()\n a = now();\n stamp = clock();\n");
     if let Some(inputs) = inputs {
@@ -444,4 +456,37 @@ fn clock_source(inputs: Option<&NativeClockInputs>) -> String {
     }
     body.push_str("end\n");
     body
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hosted_callback_uses_ambient_services_without_virtual_inputs() {
+        let inputs = runmat_execution::host::NativeLocalServiceInputs {
+            schema_version: 1,
+            environment: None,
+            random: None,
+            filesystem: None,
+        };
+        assert!(
+            validate_hosted_callback_inputs(NativeDeploymentProfile::HostedNative, None).is_ok()
+        );
+        assert!(validate_hosted_callback_inputs(
+            NativeDeploymentProfile::HostedNative,
+            Some(&inputs)
+        )
+        .is_err());
+        assert!(validate_hosted_callback_inputs(
+            NativeDeploymentProfile::DeterministicDeployed,
+            None
+        )
+        .is_err());
+        assert!(validate_hosted_callback_inputs(
+            NativeDeploymentProfile::DeterministicDeployed,
+            Some(&inputs)
+        )
+        .is_err());
+    }
 }

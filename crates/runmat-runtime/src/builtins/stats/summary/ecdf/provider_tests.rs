@@ -285,19 +285,23 @@ fn unavailable_ecdf_statement_form_does_not_download_resident_inputs() {
         .allocate_zeroed(vec![4, 1], NumericElementType::F64, GpuTensorStorage::Real)
         .unwrap();
     let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
-    let invalid = block_on(ecdf_builtin(vec![
-        Value::GpuTensor(allocation.handle.clone()),
-        Value::from("Alpha"),
-        Value::Num(2.0),
-    ]))
+    let invalid = block_on(ecdf_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::GpuTensor(allocation.handle.clone()),
+            Value::from("Alpha"),
+            Value::Num(2.0),
+        ]),
+    ))
     .expect_err("known invalid host control must precede missing presentation");
     assert_eq!(invalid.identifier(), Some("RunMat:ecdf:InvalidArgument"));
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
-    let invalid_sample = block_on(ecdf_builtin(vec![
-        Value::from("not numeric"),
-        Value::from("Frequency"),
-        Value::GpuTensor(allocation.handle.clone()),
-    ]))
+    let invalid_sample = block_on(ecdf_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![
+            Value::from("not numeric"),
+            Value::from("Frequency"),
+            Value::GpuTensor(allocation.handle.clone()),
+        ]),
+    ))
     .expect_err("known invalid host sample must precede missing presentation");
     assert_eq!(
         invalid_sample.identifier(),
@@ -306,18 +310,22 @@ fn unavailable_ecdf_statement_form_does_not_download_resident_inputs() {
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
     for (data, shape) in [(vec![], vec![0, 1]), (vec![1; 6], vec![2, 3])] {
         let logical = Value::LogicalArray(LogicalArray::new(data, shape).unwrap());
-        let error = block_on(ecdf_builtin(vec![
-            logical,
-            Value::from("Frequency"),
-            Value::GpuTensor(allocation.handle.clone()),
-        ]))
+        let error = block_on(ecdf_builtin(
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                logical,
+                Value::from("Frequency"),
+                Value::GpuTensor(allocation.handle.clone()),
+            ]),
+        ))
         .expect_err("known invalid logical shape must precede missing presentation");
         assert_eq!(error.identifier(), Some("RunMat:ecdf:InvalidArgument"));
         assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
     }
-    let error = block_on(ecdf_builtin(vec![Value::GpuTensor(
-        allocation.handle.clone(),
-    )]))
+    let error = block_on(ecdf_builtin(
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+            allocation.handle.clone(),
+        )]),
+    ))
     .expect_err("plotting is unavailable without plot-core");
     assert!(error
         .source

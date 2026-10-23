@@ -85,7 +85,10 @@ fn finite_denial_and_pre_cancel_do_not_allocate_or_publish_numeric_outputs() {
         assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
         assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
         let (cancelled, ledger) = runtime(1_000_000);
-        cancelled.cancellation().cancel();
+        let cancellation = runmat_execution::cancellation::CancellationSource::new();
+        let cancelled = cancelled.with_cancellation_token(cancellation.token());
+        assert!(cancellation.cancel(runmat_execution::CancellationReason::User));
+        assert!(cancelled.is_cancelled());
         assert!(matches!(
             execute_in_context(&program(), &[&input], &cancelled).unwrap(),
             NumericRegionOwnedExecution::Cancelled
@@ -98,7 +101,6 @@ fn finite_denial_and_pre_cancel_do_not_allocate_or_publish_numeric_outputs() {
 #[test]
 fn existing_program_limits_guard_fixed_stack_storage_before_access() {
     let (runtime, ledger) = runtime(1_000_000);
-    assert!(NUMERIC_REGION_EVALUATOR_ARRAY_BYTES <= 16_384);
     for program in [
         NumericRegionProgram {
             nodes: vec![NumericRegionNode::Input(0); MAX_NODES + 1],

@@ -77,7 +77,8 @@ pub(super) async fn order(
         job()
     } else {
         work.cooperation
-            .run_owned_blocking(
+            .run_owned_blocking_in_context(
+                work.runtime,
                 work.runtime
                     .service_ports()
                     .blocking_cpu()

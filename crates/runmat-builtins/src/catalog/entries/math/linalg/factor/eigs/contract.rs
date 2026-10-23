@@ -299,8 +299,8 @@ pub const EIGS_ERROR_DENSE_WORKSPACE: BuiltinErrorDescriptor = BuiltinErrorDescr
     code: "RM.EIGS.DENSE_WORKSPACE",
     identifier: Some("RunMat:eigs:DenseWorkspace"),
     when:
-        "The separate exact dense compatibility EVD is requested under finite Managed allocation.",
-    message: "eigs: exact dense compatibility EVD requires unrestricted allocation",
+        "The exact dense route cannot capture or retain its original execution allocation authority; actual workspace and output admission errors retain their allocation causes.",
+    message: "eigs: dense execution allocation authority is unavailable",
 };
 const ERRORS: [BuiltinErrorDescriptor; 9] = [
     EIGS_ERROR_INVALID_ARGUMENT,

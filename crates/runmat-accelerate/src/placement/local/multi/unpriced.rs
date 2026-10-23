@@ -65,42 +65,47 @@ pub(super) fn select(
             host.resources = resources;
             candidates.push(host);
         }
-        for alternative in [
-            cpu.native_alternative.as_ref(),
-            cpu.native_host_alternative.as_ref(),
-        ]
-        .into_iter()
-        .flatten()
+        let legal_location = |location| match constraint {
+            runmat_execution::WholeWorkConstraint::AnyLegal => true,
+            runmat_execution::WholeWorkConstraint::ProviderRequired { device_id } => matches!(
+                location,
+                CandidateExecutionLocation::Provider { device_id: selected }
+                    | CandidateExecutionLocation::NativeRegion { device_id: selected }
+                    | CandidateExecutionLocation::VmRegion { device_id: selected }
+                    if selected == device_id
+            ),
+        };
+        if let Some(alternative) = cpu
+            .native_alternative
+            .as_ref()
+            .filter(|alternative| legal_location(alternative.descriptor.execution_location))
         {
-            let legal_intent = match constraint {
-                runmat_execution::WholeWorkConstraint::AnyLegal => true,
-                runmat_execution::WholeWorkConstraint::ProviderRequired { device_id } => matches!(
-                    alternative.descriptor.execution_location,
-                    CandidateExecutionLocation::Provider { device_id: selected }
-                        | CandidateExecutionLocation::NativeRegion { device_id: selected }
-                        | CandidateExecutionLocation::VmRegion { device_id: selected }
-                        if selected == device_id
+            candidates.push(WholeWorkCandidate {
+                kind: alternative.descriptor.kind,
+                execution_location: alternative.descriptor.execution_location,
+                preparation: alternative.descriptor.preparation,
+                output_residency: alternative.descriptor.output_residency,
+                presentation: alternative.descriptor.presentation.clone(),
+                route_facts: Digest::sha256_serialized(&(
+                    "native-host-alternative-v2",
+                    &alternative.descriptor,
+                ))
+                .expect("native alternative serializes"),
+                cost: runmat_execution::CandidateCostEvidence::Estimated(
+                    alternative.descriptor.cost,
                 ),
-            };
-            if legal_intent {
-                candidates.push(WholeWorkCandidate {
-                    kind: alternative.descriptor.kind,
-                    execution_location: alternative.descriptor.execution_location,
-                    preparation: alternative.descriptor.preparation,
-                    output_residency: alternative.descriptor.output_residency,
-                    presentation: alternative.descriptor.presentation.clone(),
-                    route_facts: Digest::sha256_serialized(&(
-                        "native-host-alternative-v2",
-                        &alternative.descriptor,
-                    ))
-                    .expect("native alternative serializes"),
-                    cost: runmat_execution::CandidateCostEvidence::Estimated(
-                        alternative.descriptor.cost,
-                    ),
-                    resources: alternative.resources,
-                    transactional_results: alternative.transactional_results,
-                });
-            }
+                resources: alternative.resources,
+                transactional_results: alternative.transactional_results,
+            });
+        }
+        if let Some(alternative) = cpu
+            .native_host_alternative
+            .as_ref()
+            .filter(|alternative| legal_location(alternative.execution_location))
+        {
+            // Preserve unavailable complete-route evidence. Only this same
+            // selected full-call owner may replace it with an observation.
+            candidates.push(alternative.clone());
         }
     }
     let provider_offset = candidates.len();

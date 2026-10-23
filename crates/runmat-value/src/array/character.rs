@@ -372,18 +372,49 @@ impl CharArray {
     /// Visit MATLAB linear order without materializing a second character
     /// payload. The array retains its backing for the iterator's lifetime.
     pub fn iter_column_major(&self) -> impl ExactSizeIterator<Item = Utf16CodeUnit> + '_ {
-        let page_len = if self.data.is_empty() {
-            0
-        } else {
-            self.rows * self.cols
-        };
         (0..self.data.len()).map(move |linear| {
-            let page = linear / page_len.max(1);
-            let within_page = linear % page_len.max(1);
-            let row = within_page % self.rows.max(1);
-            let col = within_page / self.rows.max(1);
-            self.data[page * page_len + row * self.cols + col]
+            self.column_major_value_at(linear)
+                .expect("valid character layout")
         })
+    }
+
+    /// Address one MATLAB-linear code unit without a column-major mirror.
+    pub fn column_major_value_at(&self, linear: usize) -> Option<Utf16CodeUnit> {
+        let physical = Self::row_major_position(self.rows, self.cols, linear)?;
+        self.data.get(physical).copied()
+    }
+
+    /// The same zero-aware code-unit cardinality used by character
+    /// construction and admission, including an empty-rank empty payload.
+    pub fn code_unit_count_for_shape(shape: &[usize]) -> Option<usize> {
+        character_len(shape)
+    }
+
+    /// Canonical page-preserving layout map, also usable while a producer
+    /// exclusively borrows a final character backing for indexed mutation.
+    pub fn row_major_position(rows: usize, cols: usize, linear: usize) -> Option<usize> {
+        let page_len = rows.checked_mul(cols)?;
+        if page_len == 0 {
+            return None;
+        }
+        let page = linear / page_len;
+        let within = linear % page_len;
+        page.checked_mul(page_len)?
+            .checked_add((within % rows).checked_mul(cols)?)?
+            .checked_add(within / rows)
+    }
+
+    /// Inverse of row_major_position for direct final row-major fill.
+    pub fn column_major_position(rows: usize, cols: usize, physical: usize) -> Option<usize> {
+        let page_len = rows.checked_mul(cols)?;
+        if page_len == 0 {
+            return None;
+        }
+        let page = physical / page_len;
+        let within = physical % page_len;
+        page.checked_mul(page_len)?
+            .checked_add(within / cols)?
+            .checked_add((within % cols).checked_mul(rows)?)
     }
     pub fn shape(&self) -> &[usize] {
         &self.shape

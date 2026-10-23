@@ -23,7 +23,7 @@ pub(super) struct NativeOriginalObservation {
 }
 
 impl NativeOriginalObservation {
-    pub(super) fn new(
+    pub(super) fn admit(
         runtime: &RuntimeContext,
         provider: &'static dyn AccelProvider,
         right: &NativeNumericRegionRight,

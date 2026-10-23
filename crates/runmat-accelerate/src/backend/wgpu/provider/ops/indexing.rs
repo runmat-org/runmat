@@ -1,9 +1,9 @@
 use super::*;
 
-#[path = "indexing/validated_plan.rs"]
-mod validated_plan;
 #[path = "indexing/functional_scatter.rs"]
 mod functional_scatter;
+#[path = "indexing/validated_plan.rs"]
+mod validated_plan;
 
 fn indexing_unproven(
     error: impl Into<runmat_accelerate_api::ProviderExecutionError>,
@@ -980,19 +980,51 @@ impl WgpuProvider {
         indices: &[u32],
         output_shape: &[usize],
     ) -> Result<GpuTensorHandle> {
-        let source_contiguous = self.reshape_exec(source, source.shape())?;
-        let source = &source_contiguous;
+        self.gather_linear_exec_admitted(source, indices, output_shape, None)
+    }
 
+    pub(crate) fn gather_linear_exec_admitted(
+        &self,
+        source: &GpuTensorHandle,
+        indices: &[u32],
+        output_shape: &[usize],
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> Result<GpuTensorHandle> {
         let entry = self.get_entry_for_bitwise_move(source, "gather_linear")?;
         let expected = product_checked(output_shape)
             .ok_or_else(|| anyhow!("gather_linear: output shape product overflow"))?;
         let source_logical_len = product_checked(source.shape())
             .ok_or_else(|| anyhow!("gather_linear: source shape product overflow"))?;
+        let transpose = runmat_accelerate_api::handle_transpose_info(source);
+        let (source_rows, source_columns) = if let Some(info) = transpose {
+            ensure!(
+                source.shape() == [info.base_cols, info.base_rows]
+                    && info.base_rows.checked_mul(info.base_cols) == Some(source_logical_len),
+                "gather_linear: transpose geometry mismatch"
+            );
+            (
+                u32::try_from(info.base_rows)?,
+                u32::try_from(info.base_cols)?,
+            )
+        } else {
+            (0, 0)
+        };
         let lane_factor = if source_logical_len == 0 {
             1
         } else {
             functional_scatter::word_geometry(source)?.1
         };
+        let source_words = source_logical_len
+            .checked_mul(lane_factor)
+            .ok_or_else(|| anyhow!("gather_linear: source word extent overflow"))?;
+        let output_words = expected
+            .checked_mul(lane_factor)
+            .ok_or_else(|| anyhow!("gather_linear: output word extent overflow"))?;
+        ensure!(
+            source_words.saturating_sub(1) <= u32::MAX as usize
+                && output_words.saturating_sub(1) <= u32::MAX as usize,
+            "gather_linear: word address exceeds GPU indexing limits"
+        );
         let _span = info_span!(
             "gpu.gather_linear",
             source_len = entry.len,
@@ -1011,12 +1043,13 @@ impl WgpuProvider {
             let out = self.with_emission(|emission, _| {
                 self.create_storage_buffer(emission, 0, "runmat-gather-linear-empty")
             })??;
-            let handle = self.register_storage_move_buffer(
+            let handle = self.register_storage_move_buffer_admitted(
                 out.clone(),
                 &entry,
                 output_shape.to_vec(),
                 0,
                 out.size(),
+                admission,
             )?;
             return Ok(handle);
         }
@@ -1066,7 +1099,8 @@ impl WgpuProvider {
             let params = LinearGatherParams {
                 count: indices.len() as u32,
                 lane_factor: lane_factor as u32,
-                _pad: [0; 2],
+                source_rows,
+                source_columns,
             };
             let params_buffer =
                 self.uniform_buffer(emission, &params, "runmat-gather-linear-params")?;
@@ -1126,12 +1160,13 @@ impl WgpuProvider {
                 })
                 .ok_or_else(|| anyhow!("gather_linear: registration length overflow"))?
         };
-        let handle = self.register_storage_move_buffer(
+        let handle = self.register_storage_move_buffer_admitted(
             out_buffer.clone(),
             &entry,
             output_shape.to_vec(),
             registration_len,
             out_buffer.size(),
+            admission,
         )?;
         Ok(handle)
     }
@@ -1246,7 +1281,8 @@ impl WgpuProvider {
         let params = LinearScatterParams {
             count: indices.len() as u32,
             lane_factor: lane_factor as u32,
-            _pad: [0; 2],
+            rhs_scalar: 0,
+            _pad: 0,
         };
         let params_buffer = self.uniform_buffer(emission, &params, "runmat-scatter-linear-params")?;
         let bind_group = emission.device()

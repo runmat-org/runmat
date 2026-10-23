@@ -43,7 +43,9 @@ impl<'a> Request<'a> {
             .map(OperatorWork::new)
             .transpose()
             .map_err(|e| super::operator_error(runtime, e))?;
-        use super::super::{is_empty_matrix, is_generalized_b, matrix_order, parse_k, parse_sigma};
+        use super::super::{
+            is_empty_matrix, is_generalized_b, matrix_order, parse_k, parse_sigma_in_context,
+        };
         let callable = crate::builtins::math::linalg::factor::iterative::controls::is_callable(a);
         let mut cursor = 0;
         let n = if callable {
@@ -94,7 +96,8 @@ impl<'a> Request<'a> {
                     )
                 }
             } else {
-                parse_sigma(value)?.map(|sigma| (sigma, ImaginaryAlias::Explicit))
+                parse_sigma_in_context(runtime, value)?
+                    .map(|sigma| (sigma, ImaginaryAlias::Explicit))
             };
             if let Some((parsed, alias)) = parsed {
                 if super::super::is_typed_integer_value(value) {

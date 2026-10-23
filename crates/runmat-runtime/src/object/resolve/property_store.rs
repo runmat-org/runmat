@@ -148,6 +148,14 @@ fn invalid_handle() -> RuntimeError {
     )
 }
 
+pub(super) fn require_valid_handle(handle: &HandleRef) -> Result<(), RuntimeError> {
+    if handle.valid {
+        Ok(())
+    } else {
+        Err(invalid_handle())
+    }
+}
+
 fn target_object<'a>(
     handle: &HandleRef,
     value: &'a Value,

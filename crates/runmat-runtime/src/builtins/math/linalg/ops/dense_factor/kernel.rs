@@ -1,15 +1,18 @@
 use super::*;
+fn workspace_requirement<E: ComplexField>(order: usize) -> StackReq {
+    let params: Spec<factor::PartialPivLuParams, E> = Default::default();
+    StackReq::any_of(&[
+        factor::lu_in_place_scratch::<usize, E>(order, order, Par::Seq, params),
+        solve::solve_in_place_scratch::<usize, E>(order, 1, Par::Seq),
+    ])
+}
 pub(super) fn quote<T: FaerFactorScalar>(
     order: usize,
 ) -> Result<(HostAllocationPlan, StackReq), HostAllocationError> {
     let count = order
         .checked_mul(order)
         .ok_or(HostAllocationError::Overflow)?;
-    let params: Spec<factor::PartialPivLuParams, T::Element> = Default::default();
-    let scratch = StackReq::any_of(&[
-        factor::lu_in_place_scratch::<usize, T::Element>(order, order, Par::Seq, params),
-        solve::solve_in_place_scratch::<usize, T::Element>(order, 1, Par::Seq),
-    ]);
+    let scratch = workspace_requirement::<T::Element>(order);
     let layout = scratch
         .layout()
         .map_err(|_| HostAllocationError::Overflow)?;

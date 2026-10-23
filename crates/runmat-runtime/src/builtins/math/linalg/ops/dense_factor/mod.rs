@@ -292,7 +292,8 @@ impl<T: FaerFactorScalar> DenseFactor<T> {
             } else {
                 runtime
                     .cpu_cooperation()
-                    .run_owned_blocking(
+                    .run_owned_blocking_in_context(
+                        runtime,
                         runtime
                             .service_ports()
                             .blocking_cpu()
@@ -394,7 +395,8 @@ impl<T: FaerFactorScalar> DenseFactor<T> {
             } else {
                 runtime
                     .cpu_cooperation()
-                    .run_owned_blocking(
+                    .run_owned_blocking_in_context(
+                        runtime,
                         runtime
                             .service_ports()
                             .blocking_cpu()

@@ -698,7 +698,7 @@ fn verify_fixed_assignment_flow(
     function: &NativeFunction,
     blocks: &BTreeMap<NativeBlockId, &NativeBlock>,
 ) -> NativeCodegenResult<()> {
-    let error = |message| {
+    let error = |message: &str| {
         NativeCodegenError::new("native.ir.prepared_assignment_owner", message)
             .at_function(function.id)
     };
@@ -751,7 +751,7 @@ fn verify_fixed_assignment_flow(
                 if let Some(runmat_mir::MirFixedSelectorDestination::Scalar(local)) = owner.output()
                 {
                     if !function.locals.iter().any(|metadata| {
-                        usize::try_from(local.0).ok() == usize::try_from(metadata.id.0).ok()
+                        Some(local.0) == usize::try_from(metadata.id.0).ok()
                             && metadata.kind == super::NativeLocalKind::Temporary
                             && metadata.binding.is_none()
                     }) {
@@ -793,7 +793,7 @@ fn verify_fixed_assignment_flow(
                 }
             }
             NativeOperation::Statement(runmat_mir::MirStmtKind::Assign { place, .. })
-                if place.has_expanding_selectors() =>
+                if place.requires_prepared_assignment() =>
             {
                 return Err(error(
                     "expanding fixed assignment lacks its typed preparation/consumer roles",

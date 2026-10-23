@@ -6,6 +6,28 @@ use crate::{
 };
 use std::num::NonZeroUsize;
 
+#[derive(Debug)]
+pub enum ExactHostSparsePublicationError {
+    Allocation(ExactHostNumericAllocationError),
+    Invalid(String),
+}
+impl std::fmt::Display for ExactHostSparsePublicationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Allocation(error) => write!(f, "{error}"),
+            Self::Invalid(error) => write!(f, "{error}"),
+        }
+    }
+}
+impl std::error::Error for ExactHostSparsePublicationError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Allocation(error) => Some(error),
+            Self::Invalid(_) => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExactHostSparseClass {
     Logical,
@@ -144,14 +166,14 @@ impl ExactComplexAllocation {
         Ok(())
     }
 
-    fn into_buffer(self) -> Result<ReadyValues, String> {
+    fn into_buffer(self) -> Result<ReadyValues, ExactHostNumericAllocationError> {
         match self {
             Self::F32(allocation, len) => {
-                HostComplexBuffer::<f32>::try_adopt_exact(allocation, len)
+                HostComplexBuffer::<f32>::try_adopt_exact_fallible(allocation, len)
                     .map(ReadyValues::ComplexF32)
             }
             Self::F64(allocation, len) => {
-                HostComplexBuffer::<f64>::try_adopt_exact(allocation, len)
+                HostComplexBuffer::<f64>::try_adopt_exact_fallible(allocation, len)
                     .map(ReadyValues::ComplexF64)
             }
         }
@@ -301,19 +323,31 @@ impl ExactHostSparseTensorAllocation {
     }
 
     pub fn into_validation(self) -> Result<PreparedExactSparseTensor, String> {
-        let col_ptrs = self.col_ptrs.into_buffer()?;
-        let row_indices = self.row_indices.into_buffer()?;
+        self.into_validation_fallible()
+            .map_err(|error| error.to_string())
+    }
+
+    /// Preserve physical header/publication failures as typed causes. The
+    /// original string adapter remains an ordinary compatibility boundary.
+    pub fn into_validation_fallible(
+        self,
+    ) -> Result<PreparedExactSparseTensor, ExactHostSparsePublicationError> {
+        use ExactHostSparsePublicationError::{Allocation, Invalid};
+        let col_ptrs = self.col_ptrs.into_buffer_fallible().map_err(Allocation)?;
+        let row_indices = self
+            .row_indices
+            .into_buffer_fallible()
+            .map_err(Allocation)?;
         let values = match self.values {
             Values::Logical => ReadyValues::Logical,
-            Values::Numeric(values) => ReadyValues::Numeric(
-                values
-                    .try_into_host_buffer()
-                    .map_err(|error| error.to_string())?,
-            ),
-            Values::Complex(values) => values.into_buffer()?,
+            Values::Numeric(values) => {
+                ReadyValues::Numeric(values.try_into_host_buffer().map_err(Allocation)?)
+            }
+            Values::Complex(values) => values.into_buffer().map_err(Allocation)?,
         };
         let validation =
-            SparseCscValidation::new(self.rows, self.cols, col_ptrs, row_indices, self.nnz)?;
+            SparseCscValidation::new(self.rows, self.cols, col_ptrs, row_indices, self.nnz)
+                .map_err(Invalid)?;
         Ok(PreparedExactSparseTensor { validation, values })
     }
 }

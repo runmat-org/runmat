@@ -1,12 +1,11 @@
 use crate::indexing::plan::{build_index_plan, IndexPlan};
 use crate::indexing::selectors::{build_slice_selectors, SliceSelector};
 use crate::RuntimeError;
-use runmat_value::{
-    ComplexTensor, IntValue, IntegerStorage, NumericDType, SparseTensor, StringArray, Tensor, Value,
-};
-use std::collections::HashMap;
+use runmat_value::{ComplexTensor, SparseTensor, StringArray, Tensor, Value};
 
 pub(super) mod payload;
+pub(in crate::indexing) mod sparse;
+pub use sparse::SparseReadZeroPolicy;
 
 fn map_slice_shape_error(err: impl std::fmt::Display) -> RuntimeError {
     crate::runtime_error::semantic_error(
@@ -29,15 +28,24 @@ pub fn try_tensor_slice_2d_fast_path(
     dims: usize,
     selectors: &[SliceSelector],
 ) -> Result<Option<Value>, RuntimeError> {
+    let context = crate::context::legacy::active();
+    try_tensor_slice_2d_fast_path_in_context(context.as_ref(), tensor, dims, selectors)
+}
+
+pub fn try_tensor_slice_2d_fast_path_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    tensor: &Tensor,
+    dims: usize,
+    selectors: &[SliceSelector],
+) -> Result<Option<Value>, RuntimeError> {
     if dims != 2 {
         return Ok(None);
     }
     let rows = tensor.shape().first().copied().unwrap_or(1);
     let cols = tensor.shape().get(1).copied().unwrap_or(1);
-    let context = crate::context::legacy::active();
-    let owner = crate::indexing::plan::admission::Owner::new(context.as_ref())?;
+    let owner = crate::indexing::plan::admission::Owner::new(context)?;
     let output_shape = |rows, cols| {
-        crate::indexing::plan::admission::shape(context.as_ref(), 2, |dimension| {
+        crate::indexing::plan::admission::shape(context, 2, |dimension| {
             Ok(if dimension == 0 { rows } else { cols })
         })
     };
@@ -56,7 +64,7 @@ pub fn try_tensor_slice_2d_fast_path(
                 rows,
                 |position| start + position,
                 || output_shape(rows, 1),
-                context.as_ref(),
+                context,
             )
             .map(Some)
         }
@@ -73,7 +81,7 @@ pub fn try_tensor_slice_2d_fast_path(
                 cols,
                 |position| i0 + position * rows,
                 || output_shape(1, cols),
-                context.as_ref(),
+                context,
             )
             .map(Some)
         }
@@ -96,7 +104,7 @@ pub fn try_tensor_slice_2d_fast_path(
                 count,
                 |position| (js[position / rows] - 1) * rows + position % rows,
                 || output_shape(rows, js.len()),
-                context.as_ref(),
+                context,
             )
             .map(Some)
         }
@@ -122,7 +130,7 @@ pub fn try_tensor_slice_2d_fast_path(
                 count,
                 |position| is[position % is.len()] - 1 + (position / is.len()) * rows,
                 || output_shape(is.len(), cols),
-                context.as_ref(),
+                context,
             )
             .map(Some)
         }
@@ -137,19 +145,60 @@ pub async fn read_tensor_slice_nd(
     end_mask: u32,
     numeric: &[Value],
 ) -> Result<Value, RuntimeError> {
-    let selectors =
-        build_slice_selectors(dims, colon_mask, end_mask, numeric, tensor.shape()).await?;
-    if let Some(value) = try_tensor_slice_2d_fast_path(tensor, dims, &selectors)? {
+    let context = crate::context::legacy::active();
+    read_tensor_slice_nd_in_context(
+        context.as_ref(),
+        tensor,
+        dims,
+        colon_mask,
+        end_mask,
+        numeric,
+    )
+    .await
+}
+
+pub async fn read_tensor_slice_nd_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    tensor: &Tensor,
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    numeric: &[Value],
+) -> Result<Value, RuntimeError> {
+    let selectors = match context {
+        Some(context) => {
+            crate::indexing::selectors::build_slice_selectors_in_context(
+                context,
+                dims,
+                colon_mask,
+                end_mask,
+                numeric,
+                tensor.shape(),
+            )
+            .await?
+        }
+        None => build_slice_selectors(dims, colon_mask, end_mask, numeric, tensor.shape()).await?,
+    };
+    if let Some(value) =
+        try_tensor_slice_2d_fast_path_in_context(context, tensor, dims, &selectors)?
+    {
         return Ok(value);
     }
-    let plan = build_index_plan(&selectors, dims, tensor.shape())?;
-    let context = crate::context::legacy::active();
+    let plan = match context {
+        Some(context) => crate::indexing::plan::build_index_plan_in_context(
+            context,
+            &selectors,
+            dims,
+            tensor.shape(),
+        )?,
+        None => build_index_plan(&selectors, dims, tensor.shape())?,
+    };
     payload::real(
         tensor,
         plan.indices.len(),
         |position| plan.indices[position] as usize,
         || Ok(plan.output_shape),
-        context.as_ref(),
+        context,
     )
 }
 
@@ -186,564 +235,10 @@ fn sparse_output_shape(plan: &IndexPlan) -> Result<(usize, usize), RuntimeError>
     }
 }
 
-fn sparse_scalar_value(
-    sparse: &SparseTensor,
-    row: usize,
-    col: usize,
-) -> Result<Value, RuntimeError> {
-    if sparse.is_logical() {
-        let scalar = if sparse.logical_at(row, col).unwrap_or(false) {
-            SparseTensor::new_logical(1, 1, vec![0, 1], vec![0]).map_err(map_slice_shape_error)?
-        } else {
-            SparseTensor::zeros_logical(1, 1)
-        };
-        return Ok(Value::SparseTensor(scalar));
-    }
-    if let Some(storage) = sparse.integer_storage() {
-        let scalar = match sparse.integer_at(row, col) {
-            Some(value) => {
-                SparseTensor::new_integer_like(1, 1, vec![0, 1], vec![0], vec![value], storage)
-            }
-            None => Ok(SparseTensor::zeros_with_integer_storage(1, 1, storage)),
-        }
-        .map_err(map_slice_shape_error)?;
-        return Ok(Value::SparseTensor(scalar));
-    }
-
-    if sparse.is_complex() {
-        let scalar = match sparse.complex_at(row, col) {
-            Some(value) => sparse.new_complex_like(1, 1, vec![0, 1], vec![0], vec![value]),
-            None => Ok(sparse.zeros_like(1, 1)),
-        }
-        .map_err(map_slice_shape_error)?;
-        return Ok(Value::SparseTensor(scalar));
-    }
-
-    if sparse.numeric_dtype() == Some(NumericDType::F32) {
-        let value = sparse.get(row, col).unwrap_or(0.0) as f32;
-        let scalar = if value == 0.0 {
-            SparseTensor::zeros_f32(1, 1)
-        } else {
-            SparseTensor::new_f32(1, 1, vec![0, 1], vec![0], vec![value])
-                .map_err(map_slice_shape_error)?
-        };
-        return Ok(Value::SparseTensor(scalar));
-    }
-    let value = sparse.get(row, col).unwrap_or(0.0);
-    if value == 0.0 {
-        return Ok(Value::SparseTensor(SparseTensor::zeros(1, 1)));
-    }
-    let sparse =
-        SparseTensor::new(1, 1, vec![0, 1], vec![0], vec![value]).map_err(map_slice_shape_error)?;
-    Ok(Value::SparseTensor(sparse))
-}
-
 fn checked_sparse_numel(sparse: &SparseTensor) -> Result<usize, RuntimeError> {
     sparse.rows.checked_mul(sparse.cols).ok_or_else(|| {
         crate::runtime_error::semantic_error("IndexOutOfBounds", "Sparse dimensions overflow")
     })
-}
-
-fn sparse_zeros_like(sparse: &SparseTensor, rows: usize, cols: usize) -> SparseTensor {
-    sparse.zeros_like(rows, cols)
-}
-
-fn typed_sparse_from_column_entries(
-    rows: usize,
-    cols: usize,
-    mut col_entries: Vec<Vec<(usize, IntValue)>>,
-    prototype: &IntegerStorage,
-) -> Result<Value, RuntimeError> {
-    let mut col_ptrs = Vec::with_capacity(cols.saturating_add(1));
-    let mut row_indices = Vec::new();
-    let mut values = Vec::new();
-    col_ptrs.push(0);
-    for entries in col_entries.iter_mut().take(cols) {
-        entries.sort_by_key(|(row, _)| *row);
-        for (row, value) in entries.drain(..) {
-            if !value.is_zero() {
-                row_indices.push(row);
-                values.push(value);
-            }
-        }
-        col_ptrs.push(values.len());
-    }
-    let sparse =
-        SparseTensor::new_integer_like(rows, cols, col_ptrs, row_indices, values, prototype)
-            .map_err(map_slice_shape_error)?;
-    Ok(Value::SparseTensor(sparse))
-}
-
-fn linear_sparse_slice(
-    sparse: &SparseTensor,
-    selector: &SliceSelector,
-) -> Result<Value, RuntimeError> {
-    let total = checked_sparse_numel(sparse)?;
-    let base_is_row_vector = sparse.rows == 1 && sparse.cols > 1;
-    if matches!(selector, SliceSelector::Colon) {
-        let mut row_indices = Vec::with_capacity(sparse.nnz());
-        for col in 0..sparse.cols {
-            for entry in sparse.col_ptrs[col]..sparse.col_ptrs[col + 1] {
-                row_indices.push(sparse.row_indices[entry] + col * sparse.rows);
-            }
-        }
-        let sparse = if sparse.is_logical() {
-            SparseTensor::new_logical(total, 1, vec![0, sparse.nnz()], row_indices)
-        } else if let Some(storage) = sparse.integer_storage() {
-            SparseTensor::new_integer(
-                total,
-                1,
-                vec![0, sparse.nnz()],
-                row_indices,
-                storage.clone(),
-            )
-        } else if sparse.is_complex() {
-            sparse.new_complex_like(
-                total,
-                1,
-                vec![0, sparse.nnz()],
-                row_indices,
-                sparse
-                    .materialize_complex_f64()
-                    .map_err(map_slice_shape_error)?,
-            )
-        } else if let Some(values) = sparse.as_f32_slice() {
-            SparseTensor::new_f32(
-                total,
-                1,
-                vec![0, sparse.nnz()],
-                row_indices,
-                values.to_vec(),
-            )
-        } else {
-            SparseTensor::new(
-                total,
-                1,
-                vec![0, sparse.nnz()],
-                row_indices,
-                sparse
-                    .as_f64_slice()
-                    .expect("double sparse storage")
-                    .to_vec(),
-            )
-        }
-        .map_err(map_slice_shape_error)?;
-        return Ok(Value::SparseTensor(sparse));
-    }
-    let context = crate::context::legacy::active();
-    let indices = selector.iter_indices(total);
-    let output_shape = match selector {
-        SliceSelector::Colon => unreachable!("colon sparse linear slices return early"),
-        SliceSelector::Scalar(_) => {
-            crate::indexing::plan::admission::shape(context.as_ref(), 2, |_| Ok(1))?
-        }
-        SliceSelector::Indices(values) => {
-            let shape = if values.is_empty() {
-                [0, 1]
-            } else if values.len() == 1 {
-                [1, 1]
-            } else if base_is_row_vector {
-                [1, values.len()]
-            } else {
-                [values.len(), 1]
-            };
-            crate::indexing::plan::admission::shape(context.as_ref(), 2, |dimension| {
-                Ok(shape[dimension])
-            })?
-        }
-        SliceSelector::LinearIndices { output_shape, .. } => output_shape.clone(),
-    };
-    if indices.clone().any(|index| index == 0 || index > total) {
-        return Err(crate::runtime_error::semantic_error(
-            "IndexOutOfBounds",
-            "Index out of bounds",
-        ));
-    }
-    if indices.len() == 1 {
-        let lin = indices.clone().next().expect("singleton selection") - 1;
-        let row = lin % sparse.rows;
-        let col = lin / sparse.rows;
-        return sparse_scalar_value(sparse, row, col);
-    }
-    let (out_rows, out_cols) = match output_shape.as_slice() {
-        [rows, cols] => (*rows, *cols),
-        [len] => (*len, 1),
-        _ => {
-            return Err(crate::runtime_error::semantic_error(
-                "UnsupportedSparseIndexRank",
-                "Sparse indexing currently supports two-dimensional outputs",
-            ))
-        }
-    };
-    if indices.clone().next().is_none() {
-        return Ok(Value::SparseTensor(sparse_zeros_like(
-            sparse, out_rows, out_cols,
-        )));
-    }
-
-    if sparse.is_logical() {
-        let mut col_rows = vec![Vec::new(); out_cols];
-        for (out_pos, index) in indices.clone().enumerate() {
-            let base_lin = index - 1;
-            let base_row = base_lin % sparse.rows;
-            let base_col = base_lin / sparse.rows;
-            if sparse.logical_at(base_row, base_col).unwrap_or(false) {
-                col_rows[out_pos / out_rows].push(out_pos % out_rows);
-            }
-        }
-        return sparse_logical_from_column_rows(out_rows, out_cols, col_rows);
-    }
-
-    if let Some(storage) = sparse.integer_storage() {
-        let mut col_entries: Vec<Vec<(usize, IntValue)>> = vec![Vec::new(); out_cols];
-        for (out_pos, index) in indices.clone().enumerate() {
-            let base_lin = index - 1;
-            let base_row = base_lin % sparse.rows;
-            let base_col = base_lin / sparse.rows;
-            if let Some(value) = sparse.integer_at(base_row, base_col) {
-                let out_row = out_pos % out_rows;
-                let out_col = out_pos / out_rows;
-                col_entries[out_col].push((out_row, value));
-            }
-        }
-        return typed_sparse_from_column_entries(out_rows, out_cols, col_entries, storage);
-    }
-
-    if sparse.is_complex() {
-        let mut col_entries: Vec<Vec<(usize, (f64, f64))>> = vec![Vec::new(); out_cols];
-        for (out_pos, index) in indices.clone().enumerate() {
-            let base_lin = index - 1;
-            let base_row = base_lin % sparse.rows;
-            let base_col = base_lin / sparse.rows;
-            if let Some(value) = sparse.complex_at(base_row, base_col) {
-                let out_row = out_pos % out_rows;
-                let out_col = out_pos / out_rows;
-                col_entries[out_col].push((out_row, value));
-            }
-        }
-        return sparse_complex_from_column_entries(sparse, out_rows, out_cols, col_entries);
-    }
-
-    if sparse.numeric_dtype() == Some(NumericDType::F32) {
-        let mut col_entries: Vec<Vec<(usize, f32)>> = vec![Vec::new(); out_cols];
-        for (out_pos, index) in indices.clone().enumerate() {
-            let base_lin = index - 1;
-            let base_row = base_lin % sparse.rows;
-            let base_col = base_lin / sparse.rows;
-            if let Some(value) = sparse.get(base_row, base_col).map(|value| value as f32) {
-                if value != 0.0 {
-                    let out_row = out_pos % out_rows;
-                    let out_col = out_pos / out_rows;
-                    col_entries[out_col].push((out_row, value));
-                }
-            }
-        }
-        return sparse_f32_from_column_entries(out_rows, out_cols, col_entries);
-    }
-
-    let mut col_entries: Vec<Vec<(usize, f64)>> = vec![Vec::new(); out_cols];
-    for (out_pos, index) in indices.clone().enumerate() {
-        let base_lin = index - 1;
-        let base_row = base_lin % sparse.rows;
-        let base_col = base_lin / sparse.rows;
-        if let Some(value) = sparse.get(base_row, base_col) {
-            if value != 0.0 {
-                let out_row = out_pos % out_rows;
-                let out_col = out_pos / out_rows;
-                col_entries[out_col].push((out_row, value));
-            }
-        }
-    }
-    sparse_from_column_entries(out_rows, out_cols, col_entries)
-}
-
-fn sparse_from_column_entries(
-    rows: usize,
-    cols: usize,
-    mut col_entries: Vec<Vec<(usize, f64)>>,
-) -> Result<Value, RuntimeError> {
-    let mut col_ptrs = Vec::with_capacity(cols.saturating_add(1));
-    let mut row_indices = Vec::new();
-    let mut values = Vec::new();
-    col_ptrs.push(0);
-    for entries in col_entries.iter_mut().take(cols) {
-        entries.sort_by_key(|(row, _)| *row);
-        for &(row, value) in entries.iter() {
-            if value != 0.0 {
-                row_indices.push(row);
-                values.push(value);
-            }
-        }
-        col_ptrs.push(values.len());
-    }
-    let sparse = SparseTensor::new(rows, cols, col_ptrs, row_indices, values)
-        .map_err(map_slice_shape_error)?;
-    Ok(Value::SparseTensor(sparse))
-}
-
-fn sparse_f32_from_column_entries(
-    rows: usize,
-    cols: usize,
-    mut col_entries: Vec<Vec<(usize, f32)>>,
-) -> Result<Value, RuntimeError> {
-    let mut col_ptrs = Vec::with_capacity(cols.saturating_add(1));
-    let mut row_indices = Vec::new();
-    let mut values = Vec::new();
-    col_ptrs.push(0);
-    for entries in col_entries.iter_mut().take(cols) {
-        entries.sort_by_key(|(row, _)| *row);
-        for &(row, value) in entries.iter() {
-            if value != 0.0 {
-                row_indices.push(row);
-                values.push(value);
-            }
-        }
-        col_ptrs.push(values.len());
-    }
-    let sparse = SparseTensor::new_f32(rows, cols, col_ptrs, row_indices, values)
-        .map_err(map_slice_shape_error)?;
-    Ok(Value::SparseTensor(sparse))
-}
-
-fn sparse_complex_from_column_entries(
-    prototype: &SparseTensor,
-    rows: usize,
-    cols: usize,
-    mut col_entries: Vec<Vec<(usize, (f64, f64))>>,
-) -> Result<Value, RuntimeError> {
-    let mut col_ptrs = Vec::with_capacity(cols.saturating_add(1));
-    let mut row_indices = Vec::new();
-    let mut values = Vec::new();
-    col_ptrs.push(0);
-    for entries in col_entries.iter_mut().take(cols) {
-        entries.sort_by_key(|(row, _)| *row);
-        for &(row, value) in entries.iter() {
-            if value.0 != 0.0 || value.1 != 0.0 {
-                row_indices.push(row);
-                values.push(value);
-            }
-        }
-        col_ptrs.push(values.len());
-    }
-    let sparse = prototype
-        .new_complex_like(rows, cols, col_ptrs, row_indices, values)
-        .map_err(map_slice_shape_error)?;
-    Ok(Value::SparseTensor(sparse))
-}
-
-fn sparse_logical_from_column_rows(
-    rows: usize,
-    cols: usize,
-    mut col_rows: Vec<Vec<usize>>,
-) -> Result<Value, RuntimeError> {
-    let mut col_ptrs = Vec::with_capacity(cols.saturating_add(1));
-    let mut row_indices = Vec::new();
-    col_ptrs.push(0);
-    for rows in col_rows.iter_mut().take(cols) {
-        rows.sort_unstable();
-        row_indices.extend(rows.iter().copied());
-        col_ptrs.push(row_indices.len());
-    }
-    let sparse = SparseTensor::new_logical(rows, cols, col_ptrs, row_indices)
-        .map_err(map_slice_shape_error)?;
-    Ok(Value::SparseTensor(sparse))
-}
-
-fn matrix_sparse_slice(
-    sparse: &SparseTensor,
-    selectors: &[SliceSelector],
-) -> Result<Value, RuntimeError> {
-    let row_selector = selectors.first().unwrap_or(&SliceSelector::Colon);
-    let col_selector = selectors.get(1).unwrap_or(&SliceSelector::Colon);
-    let all_rows = matches!(row_selector, SliceSelector::Colon);
-    let rows = row_selector.iter_indices(if all_rows { 0 } else { sparse.rows });
-    let cols = col_selector.iter_indices(sparse.cols);
-    if (!all_rows && rows.clone().any(|row| row == 0 || row > sparse.rows))
-        || cols.clone().any(|col| col == 0 || col > sparse.cols)
-    {
-        return Err(crate::runtime_error::semantic_error(
-            "IndexOutOfBounds",
-            "Index out of bounds",
-        ));
-    }
-    let out_rows = if all_rows { sparse.rows } else { rows.len() };
-    let out_cols = cols.len();
-    if out_rows == 0 || out_cols == 0 {
-        return Ok(Value::SparseTensor(sparse_zeros_like(
-            sparse, out_rows, out_cols,
-        )));
-    }
-
-    let mut row_positions: HashMap<usize, Vec<usize>> = HashMap::new();
-    if !all_rows {
-        for (out_row, row) in rows.clone().enumerate() {
-            row_positions.entry(row - 1).or_default().push(out_row);
-        }
-    }
-    if let Some(storage) = sparse.integer_storage() {
-        let mut col_entries: Vec<Vec<(usize, IntValue)>> = vec![Vec::new(); out_cols];
-        for (out_col, col) in cols.clone().enumerate() {
-            let base_col = col - 1;
-            for entry in sparse.col_ptrs[base_col]..sparse.col_ptrs[base_col + 1] {
-                let base_row = sparse.row_indices[entry];
-                let value = storage
-                    .value_at(entry)
-                    .expect("typed sparse entry is present");
-                if all_rows {
-                    col_entries[out_col].push((base_row, value));
-                } else if let Some(output_rows) = row_positions.get(&base_row) {
-                    for &out_row in output_rows {
-                        col_entries[out_col].push((out_row, value.clone()));
-                    }
-                }
-            }
-        }
-        if out_rows == 1 && out_cols == 1 {
-            let value = col_entries
-                .first()
-                .and_then(|entries| entries.first())
-                .map(|(_, value)| value.clone());
-            let scalar = match value {
-                Some(value) => {
-                    SparseTensor::new_integer_like(1, 1, vec![0, 1], vec![0], vec![value], storage)
-                }
-                None => Ok(SparseTensor::zeros_with_integer_storage(1, 1, storage)),
-            }
-            .map_err(map_slice_shape_error)?;
-            return Ok(Value::SparseTensor(scalar));
-        }
-        return typed_sparse_from_column_entries(out_rows, out_cols, col_entries, storage);
-    }
-
-    if sparse.is_logical() {
-        let mut col_rows = vec![Vec::new(); out_cols];
-        for (out_col, col) in cols.clone().enumerate() {
-            let base_col = col - 1;
-            for entry in sparse.col_ptrs[base_col]..sparse.col_ptrs[base_col + 1] {
-                let base_row = sparse.row_indices[entry];
-                if all_rows {
-                    col_rows[out_col].push(base_row);
-                } else if let Some(output_rows) = row_positions.get(&base_row) {
-                    col_rows[out_col].extend(output_rows.iter().copied());
-                }
-            }
-        }
-        if out_rows == 1 && out_cols == 1 {
-            let scalar = if col_rows.first().is_some_and(|rows| !rows.is_empty()) {
-                SparseTensor::new_logical(1, 1, vec![0, 1], vec![0])
-                    .map_err(map_slice_shape_error)?
-            } else {
-                SparseTensor::zeros_logical(1, 1)
-            };
-            return Ok(Value::SparseTensor(scalar));
-        }
-        return sparse_logical_from_column_rows(out_rows, out_cols, col_rows);
-    }
-
-    if sparse.is_complex() {
-        let mut col_entries = vec![Vec::new(); out_cols];
-        for (out_col, col) in cols.clone().enumerate() {
-            let base_col = col - 1;
-            let start = sparse.col_ptrs[base_col];
-            let end = sparse.col_ptrs[base_col + 1];
-            for (index, &base_row) in sparse.row_indices[start..end].iter().enumerate() {
-                let value = sparse
-                    .complex_value_at(start + index)
-                    .expect("complex sparse storage is consistent")
-                    .into();
-                if all_rows {
-                    col_entries[out_col].push((base_row, value));
-                } else if let Some(output_rows) = row_positions.get(&base_row) {
-                    for &out_row in output_rows {
-                        col_entries[out_col].push((out_row, value));
-                    }
-                }
-            }
-        }
-        if out_rows == 1 && out_cols == 1 {
-            let value = col_entries
-                .first()
-                .and_then(|entries| entries.first())
-                .map(|(_, value)| *value);
-            let scalar = match value {
-                Some(value) => sparse.new_complex_like(1, 1, vec![0, 1], vec![0], vec![value]),
-                None => Ok(sparse.zeros_like(1, 1)),
-            }
-            .map_err(map_slice_shape_error)?;
-            return Ok(Value::SparseTensor(scalar));
-        }
-        return sparse_complex_from_column_entries(sparse, out_rows, out_cols, col_entries);
-    }
-
-    if let Some(values) = sparse.as_f32_slice() {
-        let mut col_entries = vec![Vec::new(); out_cols];
-        for (out_col, col) in cols.clone().enumerate() {
-            let base_col = col - 1;
-            let start = sparse.col_ptrs[base_col];
-            let end = sparse.col_ptrs[base_col + 1];
-            for (&base_row, &value) in sparse.row_indices[start..end]
-                .iter()
-                .zip(&values[start..end])
-            {
-                if all_rows {
-                    col_entries[out_col].push((base_row, value));
-                } else if let Some(output_rows) = row_positions.get(&base_row) {
-                    for &out_row in output_rows {
-                        col_entries[out_col].push((out_row, value));
-                    }
-                }
-            }
-        }
-        if out_rows == 1 && out_cols == 1 {
-            let value = col_entries
-                .first()
-                .and_then(|entries| entries.first())
-                .map(|(_, value)| *value)
-                .unwrap_or(0.0);
-            let scalar = if value == 0.0 {
-                SparseTensor::zeros_f32(1, 1)
-            } else {
-                SparseTensor::new_f32(1, 1, vec![0, 1], vec![0], vec![value])
-                    .map_err(map_slice_shape_error)?
-            };
-            return Ok(Value::SparseTensor(scalar));
-        }
-        return sparse_f32_from_column_entries(out_rows, out_cols, col_entries);
-    }
-
-    let values = sparse.as_f64_slice().expect("double sparse storage");
-    let mut col_entries = vec![Vec::new(); out_cols];
-    for (out_col, col) in cols.clone().enumerate() {
-        let base_col = col - 1;
-        let start = sparse.col_ptrs[base_col];
-        let end = sparse.col_ptrs[base_col + 1];
-        for (&base_row, &value) in sparse.row_indices[start..end]
-            .iter()
-            .zip(&values[start..end])
-        {
-            if all_rows {
-                col_entries[out_col].push((base_row, value));
-            } else if let Some(output_rows) = row_positions.get(&base_row) {
-                for &out_row in output_rows {
-                    col_entries[out_col].push((out_row, value));
-                }
-            }
-        }
-    }
-    if out_rows == 1 && out_cols == 1 {
-        let value = col_entries
-            .first()
-            .and_then(|entries| entries.first())
-            .map(|(_, value)| *value)
-            .unwrap_or(0.0);
-        if value == 0.0 {
-            return Ok(Value::SparseTensor(SparseTensor::zeros(1, 1)));
-        }
-        let scalar = SparseTensor::new(1, 1, vec![0, 1], vec![0], vec![value])
-            .map_err(map_slice_shape_error)?;
-        return Ok(Value::SparseTensor(scalar));
-    }
-    sparse_from_column_entries(out_rows, out_cols, col_entries)
 }
 
 pub async fn read_sparse_slice(
@@ -753,22 +248,143 @@ pub async fn read_sparse_slice(
     end_mask: u32,
     numeric: &[Value],
 ) -> Result<Value, RuntimeError> {
+    let context = crate::context::legacy::active();
+    read_sparse_slice_in_context(
+        context.as_ref(),
+        sparse,
+        dims,
+        colon_mask,
+        end_mask,
+        numeric,
+    )
+    .await
+}
+
+pub async fn read_sparse_slice_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    sparse: &SparseTensor,
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    numeric: &[Value],
+) -> Result<Value, RuntimeError> {
     if sparse.integer_storage().is_some() {
         crate::compatibility::ensure_sparse_integer_extension_enabled("indexed access")?;
     }
     let selectors =
-        build_slice_selectors(dims, colon_mask, end_mask, numeric, &sparse.shape()).await?;
+        sparse_slice_selectors(context, sparse, dims, colon_mask, end_mask, numeric).await?;
+    sparse_selectors_in_context(
+        context,
+        sparse,
+        dims,
+        &selectors,
+        SparseReadZeroPolicy::BySelector,
+    )
+}
+
+/// Select without materializing dense Cartesian coordinates. The explicit
+/// zero policy preserves the caller's established physical component contract.
+pub async fn read_sparse_slice_with_policy_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    sparse: &SparseTensor,
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    numeric: &[Value],
+    policy: SparseReadZeroPolicy,
+) -> Result<Value, RuntimeError> {
+    let selectors =
+        sparse_slice_selectors(context, sparse, dims, colon_mask, end_mask, numeric).await?;
+    preserve_sparse_plan_geometry(sparse, policy)?;
+    if sparse.integer_storage().is_some() {
+        crate::compatibility::ensure_sparse_integer_extension_enabled("indexed access")?;
+    }
+    sparse_selectors_in_context(context, sparse, dims, &selectors, policy)
+}
+
+async fn sparse_slice_selectors(
+    context: Option<&crate::context::RuntimeContext>,
+    sparse: &SparseTensor,
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    numeric: &[Value],
+) -> Result<runmat_value::ExactArrayStorage<SliceSelector>, RuntimeError> {
+    let shape = [sparse.rows, sparse.cols];
+    match context {
+        Some(context) => {
+            crate::indexing::selectors::build_slice_selectors_in_context(
+                context, dims, colon_mask, end_mask, numeric, &shape,
+            )
+            .await
+        }
+        None => build_slice_selectors(dims, colon_mask, end_mask, numeric, &shape).await,
+    }
+}
+
+/// Genuine synchronous host-selector capability. Unsupported selector inputs
+/// decline before sparse selection; no future is polled under a native entry.
+pub fn try_read_sparse_slice_host_in_context(
+    context: &crate::context::RuntimeContext,
+    sparse: &SparseTensor,
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    numeric: &[Value],
+    policy: SparseReadZeroPolicy,
+) -> Result<Option<Value>, RuntimeError> {
+    let shape = [sparse.rows, sparse.cols];
+    let Some(selectors) = crate::indexing::selectors::build_slice_selectors_host_in_context(
+        context, dims, colon_mask, end_mask, numeric, &shape,
+    )?
+    else {
+        return Ok(None);
+    };
+    preserve_sparse_plan_geometry(sparse, policy)?;
+    if sparse.integer_storage().is_some() {
+        crate::compatibility::ensure_sparse_integer_extension_enabled("indexed access")?;
+    }
+    sparse_selectors_in_context(Some(context), sparse, dims, &selectors, policy).map(Some)
+}
+
+fn preserve_sparse_plan_geometry(
+    sparse: &SparseTensor,
+    policy: SparseReadZeroPolicy,
+) -> Result<(), RuntimeError> {
+    if policy == SparseReadZeroPolicy::PreserveTypedComponents {
+        // Retain the original planned read's checked total geometry without
+        // constructing its Cartesian index collection.
+        crate::indexing::plan::effective_index_extent(&[sparse.rows, sparse.cols], 1, 0)?;
+    }
+    Ok(())
+}
+
+fn sparse_selectors_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    sparse: &SparseTensor,
+    dims: usize,
+    selectors: &[SliceSelector],
+    policy: SparseReadZeroPolicy,
+) -> Result<Value, RuntimeError> {
     match dims {
-        1 => linear_sparse_slice(
+        1 => sparse::linear(
+            context,
             sparse,
             selectors
                 .first()
                 .unwrap_or(&SliceSelector::Indices(Default::default())),
+            policy,
         ),
-        2 => matrix_sparse_slice(sparse, &selectors),
+        2 => sparse::matrix(context, sparse, selectors, policy),
         _ => {
-            let plan = build_index_plan(&selectors, dims, &sparse.shape())?;
-            read_sparse_slice_from_plan(sparse, &plan)
+            let shape = [sparse.rows, sparse.cols];
+            let plan = match context {
+                Some(context) => crate::indexing::plan::build_index_plan_in_context(
+                    context, selectors, dims, &shape,
+                )?,
+                None => build_index_plan(selectors, dims, &shape)?,
+            };
+            sparse::from_plan(context, sparse, &plan)
         }
     }
 }
@@ -777,149 +393,16 @@ pub fn read_sparse_slice_from_plan(
     sparse: &SparseTensor,
     plan: &IndexPlan,
 ) -> Result<Value, RuntimeError> {
-    if sparse.integer_storage().is_some() {
-        crate::compatibility::ensure_sparse_integer_extension_enabled("indexed access")?;
-    }
-    if plan.indices.len() == 1 {
-        let lin = plan.indices[0] as usize;
-        if sparse.rows == 0 || lin >= sparse.rows.saturating_mul(sparse.cols) {
-            return Err(crate::runtime_error::semantic_error(
-                "IndexOutOfBounds",
-                "Index out of bounds",
-            ));
-        }
-        let row = lin % sparse.rows;
-        let col = lin / sparse.rows;
-        return sparse_scalar_value(sparse, row, col);
-    }
+    let context = crate::context::legacy::active();
+    read_sparse_slice_from_plan_in_context(context.as_ref(), sparse, plan)
+}
 
-    let (out_rows, out_cols) = sparse_output_shape(plan)?;
-    if plan.indices.is_empty() {
-        return Ok(Value::SparseTensor(sparse_zeros_like(
-            sparse, out_rows, out_cols,
-        )));
-    }
-
-    let total = sparse.rows.checked_mul(sparse.cols).ok_or_else(|| {
-        crate::runtime_error::semantic_error("IndexOutOfBounds", "Sparse dimensions overflow")
-    })?;
-    let mut col_ptrs = Vec::with_capacity(out_cols.saturating_add(1));
-    let mut row_indices = Vec::new();
-    let mut values = Vec::new();
-    col_ptrs.push(0);
-    if let Some(storage) = sparse.integer_storage() {
-        let mut integer_values = Vec::new();
-        for out_col in 0..out_cols {
-            for out_row in 0..out_rows {
-                let out_lin = out_row + out_col * out_rows;
-                let Some(&base_lin) = plan.indices.get(out_lin) else {
-                    return Err(crate::runtime_error::semantic_error(
-                        "ShapeMismatch",
-                        "sparse slice plan output shape does not match selected indices",
-                    ));
-                };
-                let base_lin = base_lin as usize;
-                if sparse.rows == 0 || base_lin >= total {
-                    return Err(crate::runtime_error::semantic_error(
-                        "IndexOutOfBounds",
-                        "Index out of bounds",
-                    ));
-                }
-                let base_row = base_lin % sparse.rows;
-                let base_col = base_lin / sparse.rows;
-                if let Some(value) = sparse.integer_at(base_row, base_col) {
-                    row_indices.push(out_row);
-                    integer_values.push(value);
-                }
-            }
-            col_ptrs.push(integer_values.len());
-        }
-        let out = SparseTensor::new_integer_like(
-            out_rows,
-            out_cols,
-            col_ptrs,
-            row_indices,
-            integer_values,
-            storage,
-        )
-        .map_err(map_slice_shape_error)?;
-        return Ok(Value::SparseTensor(out));
-    }
-    if sparse.is_complex() {
-        let mut complex_values = Vec::new();
-        for out_col in 0..out_cols {
-            for out_row in 0..out_rows {
-                let out_lin = out_row + out_col * out_rows;
-                let Some(&base_lin) = plan.indices.get(out_lin) else {
-                    return Err(crate::runtime_error::semantic_error(
-                        "ShapeMismatch",
-                        "sparse slice plan output shape does not match selected indices",
-                    ));
-                };
-                let base_lin = base_lin as usize;
-                if sparse.rows == 0 || base_lin >= total {
-                    return Err(crate::runtime_error::semantic_error(
-                        "IndexOutOfBounds",
-                        "Index out of bounds",
-                    ));
-                }
-                let base_row = base_lin % sparse.rows;
-                let base_col = base_lin / sparse.rows;
-                if let Some(value) = sparse.complex_at(base_row, base_col) {
-                    row_indices.push(out_row);
-                    complex_values.push(value);
-                }
-            }
-            col_ptrs.push(complex_values.len());
-        }
-        let out = sparse
-            .new_complex_like(out_rows, out_cols, col_ptrs, row_indices, complex_values)
-            .map_err(map_slice_shape_error)?;
-        return Ok(Value::SparseTensor(out));
-    }
-    for out_col in 0..out_cols {
-        for out_row in 0..out_rows {
-            let out_lin = out_row + out_col * out_rows;
-            let Some(&base_lin) = plan.indices.get(out_lin) else {
-                return Err(crate::runtime_error::semantic_error(
-                    "ShapeMismatch",
-                    "sparse slice plan output shape does not match selected indices",
-                ));
-            };
-            let base_lin = base_lin as usize;
-            if sparse.rows == 0 || base_lin >= total {
-                return Err(crate::runtime_error::semantic_error(
-                    "IndexOutOfBounds",
-                    "Index out of bounds",
-                ));
-            }
-            let base_row = base_lin % sparse.rows;
-            let base_col = base_lin / sparse.rows;
-            if let Some(value) = sparse.get(base_row, base_col) {
-                if value != 0.0 {
-                    row_indices.push(out_row);
-                    values.push(value);
-                }
-            }
-        }
-        col_ptrs.push(values.len());
-    }
-
-    let out = if sparse.is_logical() {
-        SparseTensor::new_logical(out_rows, out_cols, col_ptrs, row_indices)
-    } else if sparse.numeric_dtype() == Some(NumericDType::F32) {
-        SparseTensor::new_f32(
-            out_rows,
-            out_cols,
-            col_ptrs,
-            row_indices,
-            values.into_iter().map(|value| value as f32).collect(),
-        )
-    } else {
-        SparseTensor::new(out_rows, out_cols, col_ptrs, row_indices, values)
-    }
-    .map_err(map_slice_shape_error)?;
-    Ok(Value::SparseTensor(out))
+pub fn read_sparse_slice_from_plan_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    sparse: &SparseTensor,
+    plan: &IndexPlan,
+) -> Result<Value, RuntimeError> {
+    sparse::from_plan(context, sparse, plan)
 }
 
 pub async fn read_complex_slice(
@@ -929,10 +412,50 @@ pub async fn read_complex_slice(
     end_mask: u32,
     numeric: &[Value],
 ) -> Result<Value, RuntimeError> {
-    let selectors =
-        build_slice_selectors(dims, colon_mask, end_mask, numeric, tensor.shape()).await?;
-    let plan = build_index_plan(&selectors, dims, tensor.shape())?;
-    read_complex_slice_from_plan(tensor, &plan)
+    let context = crate::context::legacy::active();
+    read_complex_slice_in_context(
+        context.as_ref(),
+        tensor,
+        dims,
+        colon_mask,
+        end_mask,
+        numeric,
+    )
+    .await
+}
+
+pub async fn read_complex_slice_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    tensor: &ComplexTensor,
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    numeric: &[Value],
+) -> Result<Value, RuntimeError> {
+    let selectors = match context {
+        Some(context) => {
+            crate::indexing::selectors::build_slice_selectors_in_context(
+                context,
+                dims,
+                colon_mask,
+                end_mask,
+                numeric,
+                tensor.shape(),
+            )
+            .await?
+        }
+        None => build_slice_selectors(dims, colon_mask, end_mask, numeric, tensor.shape()).await?,
+    };
+    let plan = match context {
+        Some(context) => crate::indexing::plan::build_index_plan_in_context(
+            context,
+            &selectors,
+            dims,
+            tensor.shape(),
+        )?,
+        None => build_index_plan(&selectors, dims, tensor.shape())?,
+    };
+    read_complex_slice_from_plan_in_context(context, tensor, &plan)
 }
 
 pub fn read_complex_slice_from_plan(
@@ -958,25 +481,63 @@ pub async fn read_gpu_slice(
     end_mask: u32,
     numeric: &[Value],
 ) -> Result<Value, RuntimeError> {
-    let base_shape = handle.shape().to_vec();
-    let selectors = build_slice_selectors(dims, colon_mask, end_mask, numeric, &base_shape).await?;
-    let plan = build_index_plan(&selectors, dims, &base_shape)?;
-    read_gpu_slice_from_plan(handle, &plan)
+    let context = crate::context::legacy::active();
+    read_gpu_slice_in_context(
+        context.as_ref(),
+        handle,
+        dims,
+        colon_mask,
+        end_mask,
+        numeric,
+    )
+    .await
+}
+
+pub async fn read_gpu_slice_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    numeric: &[Value],
+) -> Result<Value, RuntimeError> {
+    let owner = crate::indexing::plan::admission::Owner::new(context)?;
+    let base_shape = handle.shape();
+    let selectors = match context {
+        Some(context) => {
+            owner
+                .await_stage(
+                    crate::indexing::selectors::build_slice_selectors_in_context(
+                        context, dims, colon_mask, end_mask, numeric, base_shape,
+                    ),
+                )
+                .await??
+        }
+        None => build_slice_selectors(dims, colon_mask, end_mask, numeric, base_shape).await?,
+    };
+    let plan = match context {
+        Some(context) => crate::indexing::plan::build_index_plan_in_context(
+            context, &selectors, dims, base_shape,
+        )?,
+        None => build_index_plan(&selectors, dims, base_shape)?,
+    };
+    read_gpu_slice_from_plan_in_context(context, handle, &plan)
 }
 
 pub fn read_gpu_slice_from_plan(
     handle: &runmat_accelerate_api::GpuTensorHandle,
     plan: &IndexPlan,
 ) -> Result<Value, RuntimeError> {
-    let provider = super::resident::owner(handle)?;
-    let _residency = crate::builtins::common::gpu_helpers::ResidencyRestoreGuard::new(handle);
-    if plan.indices.is_empty() {
-        return super::resident::empty_read(handle, &plan.output_shape);
-    }
-    let result = provider
-        .gather_linear(handle, &plan.indices, &plan.output_shape)
-        .map_err(|cause| super::resident::failure("indexed gather", cause.into()))?;
-    super::resident::admit_read(result, handle, &plan.output_shape)
+    let context = crate::context::legacy::active();
+    read_gpu_slice_from_plan_in_context(context.as_ref(), handle, plan)
+}
+
+pub fn read_gpu_slice_from_plan_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+    plan: &IndexPlan,
+) -> Result<Value, RuntimeError> {
+    super::resident::read_with_plan_in_context(context, handle, plan)
 }
 
 pub async fn read_string_slice(
@@ -992,41 +553,15 @@ pub async fn read_string_slice(
 }
 
 pub fn gather_string_slice(sa: &StringArray, plan: &IndexPlan) -> Result<Value, RuntimeError> {
-    if plan.indices.is_empty() {
-        let empty = StringArray::from_shared_storage(
-            runmat_value::ExactArrayStorage::empty(),
-            plan.output_shape.clone(),
-        )
-        .map_err(map_slice_shape_error)?;
-        return Ok(Value::StringArray(empty));
-    }
-    if plan.indices.len() == 1 {
-        let lin = plan.indices[0] as usize;
-        let value = sa.data().get(lin).cloned().ok_or_else(|| {
-            crate::runtime_error::semantic_error(
-                "IndexOutOfBounds",
-                "Slice error: string index out of bounds",
-            )
-        })?;
-        return Ok(Value::String(value));
-    }
-    let mut out = Vec::with_capacity(plan.indices.len());
-    for &lin in &plan.indices {
-        let idx = lin as usize;
-        let value = sa.data().get(idx).cloned().ok_or_else(|| {
-            crate::runtime_error::semantic_error(
-                "IndexOutOfBounds",
-                "Slice error: string index out of bounds",
-            )
-        })?;
-        out.push(value);
-    }
-    let out_sa = StringArray::from_shared_storage(
-        runmat_value::ExactArrayStorage::shared_unbounded(out),
-        plan.output_shape.clone(),
-    )
-    .map_err(map_slice_shape_error)?;
-    Ok(Value::StringArray(out_sa))
+    let context = crate::context::legacy::active();
+    gather_string_slice_in_context(context.as_ref(), sa, plan)
+}
+pub fn gather_string_slice_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    sa: &StringArray,
+    plan: &IndexPlan,
+) -> Result<Value, RuntimeError> {
+    super::value::text::read(context, sa.data(), plan)
 }
 
 #[cfg(test)]

@@ -196,7 +196,7 @@ pub(super) fn execute(
             } else {
                 (false, place.assignment_creation_policy(false))
             };
-            if place.has_expanding_selectors() {
+            if place.requires_prepared_assignment() {
                 return Err(NativeExecutorError::Host(
                     "expanded assignment requires its canonical prepared producer/consumer".into(),
                 ));

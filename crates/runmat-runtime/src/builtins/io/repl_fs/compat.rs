@@ -42,7 +42,9 @@ pub(super) fn scalar_text(value: &Value, name: &str, arg: &str) -> BuiltinResult
         Value::StringArray(array) if array.data().len() == 1 => {
             Ok(array.data()[0].as_str().to_owned())
         }
-        Value::CharArray(array) if array.rows == 1 => {
+        Value::CharArray(array)
+            if crate::builtins::common::validation::value_is_text_scalar(value) =>
+        {
             let mut text = crate::builtins::io::utf16::decode_utf16_with_error(
                 &array.data()[..array.cols],
                 || {
@@ -1772,10 +1774,14 @@ mod tests {
             CharArray::from_unicode_scalars_with_shape(vec!['-', 'w'], vec![1, 1, 2])
                 .expect("two pages"),
         );
+        assert!(matches!(&page, Value::CharArray(array) if array.shape.as_slice() == [1, 1, 2]));
         assert!(scalar_text(&page, "fileattrib", "attribute").is_err());
         let accepted = Value::CharArray(
             CharArray::from_unicode_scalars_with_shape(vec!['-', 'w', ' '], vec![1, 3, 1])
                 .expect("trailing singleton page"),
+        );
+        assert!(
+            matches!(&accepted, Value::CharArray(array) if array.shape.as_slice() == [1, 3, 1])
         );
         assert_eq!(
             scalar_text(&accepted, "fileattrib", "attribute").unwrap(),
@@ -1947,9 +1953,9 @@ mod tests {
             crate::execution::RuntimeExecutionService::new(),
         ));
         let calls = Rc::clone(&observed);
-        context.set_dynamic_function_refresher(Some(Rc::new(move |_runtime, request| {
+        context.set_dynamic_function_refresher(Some(Rc::new(move |runtime, request| {
             let calls = Rc::clone(&calls);
-            Box::pin(async move {
+            crate::execution::admit_domain_continuation_with(&runtime, move || async move {
                 calls.borrow_mut().push(request);
                 Ok(())
             })
@@ -2043,9 +2049,9 @@ mod tests {
         ))
         .with_cancellation_token(cancellation.token());
         let counted = Rc::clone(&calls);
-        context.set_dynamic_function_refresher(Some(Rc::new(move |_, _| {
+        context.set_dynamic_function_refresher(Some(Rc::new(move |runtime, _| {
             counted.set(counted.get() + 1);
-            Box::pin(async { Ok(()) })
+            crate::execution::admit_domain_continuation_with(&runtime, || async { Ok(()) })
         })));
         let _active = context.enter();
         let error = run(rehash_builtin(
@@ -2092,8 +2098,10 @@ mod tests {
         ))
         .with_cancellation_token(cancellation.token());
         let selected = Rc::clone(&dropped);
-        context.set_dynamic_function_refresher(Some(Rc::new(move |_, _| {
-            Box::pin(PendingRefresh(Rc::clone(&selected)))
+        context.set_dynamic_function_refresher(Some(Rc::new(move |runtime, _| {
+            crate::execution::admit_domain_continuation_with(&runtime, || {
+                PendingRefresh(Rc::clone(&selected))
+            })
         })));
         let _active = context.enter();
         let mut call = Box::pin(rehash_builtin(
@@ -2143,8 +2151,10 @@ mod tests {
             crate::execution::RuntimeExecutionService::new(),
         ));
         let selected = Rc::clone(&dropped);
-        context.set_dynamic_function_refresher(Some(Rc::new(move |_, _| {
-            Box::pin(PendingRefresh(Rc::clone(&selected)))
+        context.set_dynamic_function_refresher(Some(Rc::new(move |runtime, _| {
+            crate::execution::admit_domain_continuation_with(&runtime, || {
+                PendingRefresh(Rc::clone(&selected))
+            })
         })));
         let _active = context.enter();
         let mut call = Box::pin(rehash_builtin(

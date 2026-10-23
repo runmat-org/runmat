@@ -8,7 +8,9 @@ use super::*;
 use crate::interpreter::vars::InterpreterVars;
 #[cfg(feature = "native-accel")]
 use runmat_runtime::context::VmFusionHostInstruction;
+#[cfg(feature = "wgpu")]
 use std::future::Future;
+#[cfg(feature = "wgpu")]
 use std::pin::Pin;
 
 #[path = "instruction_loop/fusion_publish.rs"]
@@ -71,7 +73,7 @@ pub(super) struct InstructionLoopContext<'a> {
 }
 
 pub(super) type BoxedInstructionLoop<'a> =
-    Pin<Box<dyn Future<Output = InstructionLoopResult> + 'a>>;
+    runmat_runtime::execution::RuntimeContinuationFuture<'a, ()>;
 
 #[cfg(feature = "wgpu")]
 pin_project_lite::pin_project! {
@@ -98,38 +100,36 @@ impl<F: Future> Future for AuditedInstructionLoop<F> {
 }
 
 #[inline(never)]
-pub(super) fn boxed(context: InstructionLoopContext<'_>) -> BoxedInstructionLoop<'_> {
-    #[cfg(feature = "wgpu")]
-    {
-        let slot = context
-            .fusion_observations
-            .route_audit_slot(context.image_installation.is_some());
-        Box::pin(AuditedInstructionLoop {
-            inner: run(context),
-            slot,
-        })
-    }
-    #[cfg(not(feature = "wgpu"))]
-    {
-        Box::pin(run(context))
-    }
+pub(super) fn boxed(
+    context: InstructionLoopContext<'_>,
+) -> Result<BoxedInstructionLoop<'_>, RuntimeError> {
+    let runtime = context.catch_runtime;
+    runmat_runtime::execution::admit_domain_continuation_with(runtime, move || {
+        #[cfg(feature = "wgpu")]
+        {
+            let slot = context
+                .fusion_observations
+                .route_audit_slot(context.image_installation.is_some());
+            AuditedInstructionLoop {
+                inner: run(context),
+                slot,
+            }
+        }
+        #[cfg(not(feature = "wgpu"))]
+        {
+            run(context)
+        }
+    })
 }
 
 // Fusion planning owns a different execution future from ordinary instruction
 // dispatch. Allocate it only for a selected fusion candidate, so recursive VM
 // polling does not reserve space for its concrete provider future.
 #[cfg(feature = "native-accel")]
-type FusionExecutionFuture<'a> = Pin<
-    Box<
-        dyn Future<
-                Output = Result<
-                    runmat_accelerate::fusion_exec::FusionExecutionOutcome<
-                        accel_fusion::FusionVmResult,
-                    >,
-                    accel_fusion::FusionAttemptError,
-                >,
-            > + 'a,
-    >,
+type FusionExecutionFuture<'a> = runmat_runtime::execution::RuntimeContinuationFuture<
+    'a,
+    runmat_accelerate::fusion_exec::FusionExecutionOutcome<accel_fusion::FusionVmResult>,
+    accel_fusion::FusionAttemptError,
 >;
 
 #[cfg(feature = "native-accel")]
@@ -145,42 +145,45 @@ struct FusionExecutionFrame<'a> {
 #[cfg(feature = "native-accel")]
 #[inline(never)]
 fn boxed_fusion_execution<'a>(
+    runtime: &runmat_runtime::context::RuntimeContext,
     plan: &'a runmat_accelerate::FusionGroupPlan,
     graph: &'a runmat_accelerate::AccelGraph,
     frame: FusionExecutionFrame<'a>,
     placement: Option<runmat_accelerate::placement::PlacementCorrelationId>,
     invocation: accel_fusion::VmFusionInvocation<'a>,
-) -> FusionExecutionFuture<'a> {
-    #[cfg(test)]
-    fusion_store_tests::record_fusion_execution_entry();
-    Box::pin(async move {
-        let FusionExecutionFrame {
-            stack,
-            vars,
-            context,
-            persistent_aliases,
-            global_aliases,
-            missing_input_slots,
-        } = frame;
-        if invocation.transport.is_none_or(|transport| {
-            !transport.permits_frame_reads(
+) -> Result<FusionExecutionFuture<'a>, accel_fusion::FusionAttemptError> {
+    runmat_runtime::execution::admit_native_hostcall_with_contextual_error(runtime, move || {
+        #[cfg(test)]
+        fusion_store_tests::record_fusion_execution_entry();
+        async move {
+            let FusionExecutionFrame {
+                stack,
+                vars,
                 context,
-                missing_input_slots,
-                global_aliases,
                 persistent_aliases,
+                global_aliases,
+                missing_input_slots,
+            } = frame;
+            if invocation.transport.is_none_or(|transport| {
+                !transport.permits_frame_reads(
+                    context,
+                    missing_input_slots,
+                    global_aliases,
+                    persistent_aliases,
+                )
+            }) {
+                return Err(accel_fusion::FusionAttemptError::Deopt(
+                    crate::interpreter::errors::mex(
+                        "FusionInputTransport",
+                        "fusion region retains an ordinary semantic load",
+                    ),
+                ));
+            }
+            accel_fusion::try_execute_fusion_group_with_inputs(
+                plan, graph, stack, vars, context, placement, invocation,
             )
-        }) {
-            return Err(accel_fusion::FusionAttemptError::Deopt(
-                crate::interpreter::errors::mex(
-                    "FusionInputTransport",
-                    "fusion region retains an ordinary semantic load",
-                ),
-            ));
+            .await
         }
-        accel_fusion::try_execute_fusion_group_with_inputs(
-            plan, graph, stack, vars, context, placement, invocation,
-        )
-        .await
     })
 }
 
@@ -463,31 +466,42 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                             .as_ref()
                             .and_then(|active| installation.input_transport(active, &plan))
                     });
-                    let fusion_future = boxed_fusion_execution(
-                        &plan,
-                        graph,
-                        FusionExecutionFrame {
-                            stack,
-                            vars: &mut *vars,
-                            context: &mut *context,
-                            persistent_aliases: &*persistent_aliases,
-                            global_aliases,
-                            missing_input_slots,
-                        },
-                        Some(trace.correlation()),
-                        accel_fusion::VmFusionInvocation {
-                            right,
-                            decline,
-                            input_uses,
-                            transport,
-                        },
-                    );
-                    let fusion_result = if let Some(exception) = active_catch.clone() {
-                        catch_runtime
-                            .scope_active_catch_unboxed_shared(Some(exception), fusion_future)
-                            .await
-                    } else {
-                        fusion_future.await
+                    let fusion_result = {
+                        let fusion_future = boxed_fusion_execution(
+                            catch_runtime,
+                            &plan,
+                            graph,
+                            FusionExecutionFrame {
+                                stack,
+                                vars: &mut *vars,
+                                context: &mut *context,
+                                persistent_aliases: &*persistent_aliases,
+                                global_aliases,
+                                missing_input_slots,
+                            },
+                            Some(trace.correlation()),
+                            accel_fusion::VmFusionInvocation {
+                                right,
+                                decline,
+                                input_uses,
+                                transport,
+                            },
+                        );
+                        match fusion_future {
+                            Ok(fusion_future) => {
+                                if let Some(exception) = active_catch.clone() {
+                                    catch_runtime
+                                        .scope_active_catch_unboxed_shared(
+                                            Some(exception),
+                                            fusion_future,
+                                        )
+                                        .await
+                                } else {
+                                    fusion_future.await
+                                }
+                            }
+                            Err(error) => Err(error),
+                        }
                     };
                     match fusion_result {
                         Ok(runmat_accelerate::fusion_exec::FusionExecutionOutcome::Executed(
@@ -963,8 +977,8 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
             | Instr::PrepareIndexedMemberDynamicSequenceOutputTarget { .. }
             | Instr::PrepareCellContentsSequenceOutputTarget { .. }
             | Instr::BeginSequenceOutputTarget { .. }
-            | Instr::PrepareMemberPathStep(_)
-            | Instr::PrepareDynamicMemberPathStep
+            | Instr::PrepareMemberPathStep { .. }
+            | Instr::PrepareDynamicMemberPathStep { .. }
             | Instr::BeginPreparedIndexSelectors { .. }
             | Instr::LoadPreparedIndexEnd { .. }
             | Instr::BeginContextualIndexSelectors { .. }

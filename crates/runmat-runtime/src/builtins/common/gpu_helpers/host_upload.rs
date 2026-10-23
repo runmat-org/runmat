@@ -385,9 +385,15 @@ impl<'a> GpuHostUpload<'a> {
             ));
         }
         let ProviderFeasibility::Supported { estimate } = provider.query_feasibility(&query) else {
-            return Err(error(
-                label,
-                format!("{label}: provider cannot upload this native class"),
+            return Err(crate::runtime_error::with_provider_execution_source(
+                error(
+                    label,
+                    format!("{label}: provider cannot upload this native class"),
+                ),
+                runmat_accelerate_api::unsupported_provider_operation(
+                    "provider cannot upload the requested native class",
+                )
+                .into(),
             ));
         };
         let physical = provider.upload_physical_evidence(&query).ok_or_else(|| {

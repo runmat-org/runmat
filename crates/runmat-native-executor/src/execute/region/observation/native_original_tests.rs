@@ -115,9 +115,10 @@ fn exact_hostcall_suspension_retains_source_cursor_without_publishing_a_sample()
             request: entry,
             embedded: None,
             retained_roots: Vec::new(),
-            future: crate::execute::call_suspension::PendingCompletionFuture::Ordinary(Box::pin(
-                async { Ok(crate::execute::call_suspension::CallCompletion::StatementOutput) },
-            )),
+            future: crate::execute::call_suspension::admit_completion_with(&state, || async {
+                Ok(crate::execute::call_suspension::CallCompletion::StatementOutput)
+            })
+            .unwrap(),
         });
         after_site(&mut state, entry, &Ok(NativeSiteOutcome::exit())).unwrap();
         assert_eq!(state.region_observation.as_ref().unwrap().cursor, 0);

@@ -4,14 +4,13 @@ use runmat_runtime::context::host_allocation::{
 };
 use runmat_runtime::execution::{RootedValueLease, RootedValues};
 use runmat_runtime::indexing::plan::IndexPlan;
-use runmat_runtime::indexing::read_slice;
 use runmat_runtime::object::dispatch::resolve_object_index_protocol;
 use runmat_runtime::object::indexing::{
     ObjectIndexComponent, ObjectIndexOp, ObjectIndexSelector, ObjectSubscript, ObjectSubscriptPath,
 };
 use runmat_runtime::RuntimeError;
-use runmat_types::{IndexKind, IndexResultContext};
-use runmat_value::{LogicalArray, SymbolicArray, Value};
+use runmat_types::IndexKind;
+use runmat_value::{SymbolicArray, Value};
 
 use crate::{NativeExecutorError, NativeExecutorResult};
 
@@ -19,6 +18,7 @@ use super::operand::{materialize_operand, materialize_retained_operand};
 use super::state::HostState;
 
 mod assignment_operation;
+mod brace_operation;
 mod read_operation;
 
 /// A direct host completion allocates selector and result backing on the
@@ -93,24 +93,38 @@ impl IndexedAssignmentOutcome {
     }
 }
 
-fn object_selector(selectors: &MaterializedSelectors) -> NativeExecutorResult<ObjectIndexSelector> {
+fn object_selector(
+    runtime: &runmat_runtime::context::RuntimeContext,
+    selectors: &MaterializedSelectors,
+) -> NativeExecutorResult<ObjectIndexSelector> {
     if selectors.end_mask != 0 {
-        return Err(NativeExecutorError::from(semantic_error(
+        return Err(semantic_error(
             "ContextualEndRequiresSubscriptPath",
             "object end must be evaluated through the contextual subscript path",
-        )));
+        )
+        .into());
     }
-    let mut values = selectors.numeric.iter();
-    let mut components = Vec::with_capacity(selectors.dims);
+    let mut components =
+        runmat_runtime::object::indexing::prepare_components_in_context(runtime, selectors.dims)?;
+    let mut values = selectors.numeric.values().iter();
     for dimension in 0..selectors.dims {
-        if selectors.colon_mask & (1_u32 << dimension) != 0 {
-            components.push(ObjectIndexComponent::Colon);
+        let component = if selectors.colon_mask & (1_u32 << dimension) != 0 {
+            ObjectIndexComponent::Colon
         } else {
-            let value = values.next().ok_or_else(|| {
-                NativeExecutorError::Host("object selector is missing a component".into())
-            })?;
-            components.push(ObjectIndexComponent::Value(value.clone()));
-        }
+            ObjectIndexComponent::Value(
+                values
+                    .next()
+                    .ok_or_else(|| {
+                        NativeExecutorError::Host("object selector is missing a component".into())
+                    })?
+                    .clone(),
+            )
+        };
+        components.try_push(component).map_err(|_| {
+            NativeExecutorError::Host(
+                "object selector exceeded its admitted component width".into(),
+            )
+        })?;
     }
     if values.next().is_some() {
         return Err(NativeExecutorError::Host(
@@ -118,7 +132,11 @@ fn object_selector(selectors: &MaterializedSelectors) -> NativeExecutorResult<Ob
         ));
     }
     Ok(ObjectIndexSelector::IndexValues {
-        components: runmat_value::ExactArrayStorage::unbounded(components),
+        components: components.try_finish().map_err(|_| {
+            NativeExecutorError::Host(
+                "object selector did not fill its admitted component width".into(),
+            )
+        })?,
     })
 }
 
@@ -228,8 +246,14 @@ fn read_value_inner(
         IndexKind::Paren => {
             read_operation::read_paren(state, base, selectors, requested_outputs, embedded)
         }
-        IndexKind::Brace => read_brace(base, selectors, indexing, requested_outputs)
-            .map(IndexedReadOutcome::Ordinary),
+        IndexKind::Brace => brace_operation::read_brace(
+            &state.runtime,
+            base,
+            selectors,
+            indexing,
+            requested_outputs,
+        )
+        .map(IndexedReadOutcome::Host),
     }
 }
 
@@ -292,7 +316,7 @@ fn assign_inner_with_completion(
     let retains_inputs = indexing_requires_retention(indexing);
     let selectors = materialize_selectors(state, &base, indexing, retains_inputs)?;
     if indexing.kind == IndexKind::Brace {
-        return assign_brace(&state.runtime, base, selectors, rhs, delete)
+        return brace_operation::assign_brace(&state.runtime, base, selectors, rhs, delete)
             .map(IndexedAssignmentOutcome::Ordinary);
     }
     if matches!(
@@ -301,61 +325,38 @@ fn assign_inner_with_completion(
     ) {
         let resolution = resolve_object_index_protocol(&base, ObjectIndexOp::Subsasgn, None)?;
         if let Some(method) = resolution {
-            let path = ObjectSubscriptPath::single(ObjectSubscript::parentheses(object_selector(
-                &selectors,
-            )?));
-            let values = runmat_runtime::call::arguments::adapt_legacy_builtin_result(rhs.clone())?
-                .into_output_storage();
-            let values = values
-                .try_into_owned()
-                .map_err(|_| {
-                    NativeExecutorError::from(semantic_error(
-                        "ManagedObjectAssignmentOutputUnavailable",
-                        "object assignment cannot detach shared managed output storage",
-                    ))
-                })?
-                .try_into_unbounded_vec()
-                .map_err(|_| {
-                    NativeExecutorError::from(semantic_error(
-                        "ManagedObjectAssignmentOutputUnavailable",
-                        "object assignment requires an unbounded output owner",
-                    ))
-                })?;
-            let roots = RootedValueLease::for_values(
-                std::iter::once(&base)
-                    .chain(selectors.numeric.iter())
-                    .chain(std::iter::once(&rhs)),
-            )
-            .map_err(|error| NativeExecutorError::from(error.into_runtime_error()))?;
-            let runtime = state.runtime.clone();
-            let mut outputs = super::call_suspension::begin_rooted_arguments(
-                state,
-                embedded.cloned(),
-                Box::pin(async move {
-                    let _roots = roots;
-                    let value = runtime
-                        .scope(runmat_runtime::object::protocol::invoke_resolved_object_assignment_in_context(
-                            &runtime, &method, base, path, values,
-                        ))
-                        .await?;
-                    value.with_owned(|value| {
-                        RootedValues::new(vec![value]).map_err(|error| error.into_runtime_error())
-                    })
-                }),
+            let path = ObjectSubscriptPath::single_in_context(
+                Some(&state.runtime),
+                ObjectSubscript::parentheses(object_selector(&state.runtime, &selectors)?),
             )?;
-            if outputs.len() != 1 {
-                return Err(NativeExecutorError::Host(
-                    "object assignment did not produce one receiver".into(),
-                ));
-            }
-            return Ok(IndexedAssignmentOutcome::Ordinary(outputs.remove(0)));
+            let runtime = state.runtime.clone();
+            let roots = RootedValueLease::for_values_iterator_in_context(
+                [&base, &rhs].into_iter(),
+                &runtime,
+            )?;
+            return super::call_suspension::begin_admitted_semantic_operation_with(
+                state, embedded.cloned(),
+                super::call_suspension::SemanticOperationKind::IndexedAssignment,
+                || async move {
+                    let _roots = roots;
+                    let _selector_roots = selectors.numeric;
+                    let rhs = runmat_runtime::call::arguments::adapt_legacy_builtin_result(rhs)?;
+                    let value = runtime.scope(
+                        runmat_runtime::object::protocol::invoke_resolved_object_assignment_sequence_in_context(
+                            &runtime, &method, base, path, rhs)).await?;
+                    value.with_owned(|value| {
+                        let mut value = Some(value);
+                        RootedValues::try_initialize_in_context(1, &runtime, |_|
+                            Ok::<_, NativeExecutorError>(value.take().expect("one assigned receiver")))
+                    })
+                }).map(IndexedAssignmentOutcome::Host);
         }
     }
-    let direct_host = assignment_operation::host_assignment_eligible(&base, &rhs)
+    let direct_host = assignment_operation::host_assignment_eligible(&base, &rhs, delete)
         && direct_host_indexing_allowed(state)?;
     let roots = RootedValueLease::for_values(
         std::iter::once(&base)
-            .chain(selectors.numeric.iter())
+            .chain(selectors.numeric.values().iter())
             .chain(std::iter::once(&rhs)),
     )
     .map_err(|error| NativeExecutorError::from(error.into_runtime_error()))?;
@@ -391,7 +392,7 @@ fn assign_inner_with_completion(
         embedded.cloned(),
         super::call_suspension::SemanticOperationKind::IndexedAssignment,
         Vec::new(),
-        future,
+        move || future,
     )?;
     values.with_owned_output_storage(|values| {
         if values.as_slice().len() != 1 {
@@ -411,8 +412,28 @@ struct MaterializedSelectors {
     dims: usize,
     colon_mask: u32,
     end_mask: u32,
-    numeric: Vec<Value>,
-    positional: Vec<Value>,
+    numeric: RootedValues,
+}
+
+impl MaterializedSelectors {
+    fn positional_in_context(
+        &self,
+        runtime: &runmat_runtime::context::RuntimeContext,
+    ) -> NativeExecutorResult<RootedValues> {
+        let mut values = self.numeric.values().iter();
+        RootedValues::try_initialize_in_context(self.dims, runtime, |dimension| {
+            if self.colon_mask & (1_u32 << dimension) != 0 {
+                return runmat_runtime::call::argument_text::copy_str(":", Some(runtime))
+                    .map(Value::String)
+                    .map_err(Into::into);
+            }
+            values.next().cloned().ok_or_else(|| {
+                NativeExecutorError::Host(
+                    "positional selector is missing its rooted numeric value".into(),
+                )
+            })
+        })
+    }
 }
 
 fn materialize_selectors(
@@ -437,49 +458,51 @@ fn materialize_selectors(
     }
     let shape = value_shape(base);
     let dims = indexing.components.len();
-    let mut colon_mask = 0_u32;
-    let end_mask = 0_u32;
-    let mut numeric = Vec::new();
-    let mut positional = Vec::with_capacity(dims);
-    for (dimension, component) in indexing.components.iter().enumerate() {
-        match component {
-            MirIndexComponent::Colon => {
-                colon_mask |= 1_u32 << dimension;
-                positional.push(Value::String(":".into()));
-            }
-            MirIndexComponent::Expr(operand) => {
-                let value = if retains_inputs {
-                    materialize_retained_operand(state, operand)?.1
+    let colon_mask =
+        indexing
+            .components
+            .iter()
+            .enumerate()
+            .fold(0u32, |mask, (dimension, component)| {
+                if matches!(component, MirIndexComponent::Colon) {
+                    mask | (1_u32 << dimension)
                 } else {
-                    materialize_operand(state, operand)?
-                };
-                numeric.push(value.clone());
-                positional.push(value);
+                    mask
+                }
+            });
+    let count = dims - colon_mask.count_ones() as usize;
+    let runtime = state.runtime.clone();
+    let mut components = indexing
+        .components
+        .iter()
+        .enumerate()
+        .filter(|(_, component)| !matches!(component, MirIndexComponent::Colon));
+    // Plain operands remain arena-owned. With regions, retained input slots and
+    // each region's retained result keep every earlier child rooted while later
+    // initializer calls may execute or suspend. This is final backing, not a
+    // temporary payload collector.
+    let numeric = RootedValues::try_initialize_in_context(count, &runtime, |_| {
+        let (dimension, component) = components.next().expect("precounted non-colon component");
+        match component {
+            MirIndexComponent::Expr(operand) if retains_inputs => {
+                materialize_retained_operand(state, operand).map(|(_, value)| value)
             }
+            MirIndexComponent::Expr(operand) => materialize_operand(state, operand),
             MirIndexComponent::PreparedExpr(region) => {
-                let value = materialize_prepared_expression_region(state, region)?;
-                numeric.push(value.clone());
-                positional.push(value);
+                materialize_prepared_expression_region(state, region)
             }
             MirIndexComponent::ContextualExpr(region) => {
                 let extent = selector_dimension_length(&shape, dims, dimension)?;
-                let value = materialize_expression_region(state, region, extent)?;
-                numeric.push(value.clone());
-                positional.push(value);
+                materialize_expression_region(state, region, extent)
             }
-            MirIndexComponent::Expansion(_) => {
-                return Err(NativeExecutorError::UnsupportedSite(
-                    "expanded parentheses require the ordered subscript-path executor".into(),
-                ));
-            }
+            _ => unreachable!("expanded and colon components excluded before admission"),
         }
-    }
+    })?;
     Ok(MaterializedSelectors {
         dims,
         colon_mask,
-        end_mask,
+        end_mask: 0,
         numeric,
-        positional,
     })
 }
 
@@ -498,7 +521,7 @@ pub(super) fn materialize_index_components(
     state: &mut HostState,
     base: &Value,
     indexing: &MirIndexing,
-) -> NativeExecutorResult<Vec<ObjectIndexComponent>> {
+) -> NativeExecutorResult<runmat_value::ExactArrayStorage<ObjectIndexComponent>> {
     if indexing
         .components
         .iter()
@@ -508,30 +531,12 @@ pub(super) fn materialize_index_components(
     }
     let selectors =
         materialize_selectors(state, base, indexing, indexing_requires_retention(indexing))?;
-    let mut values = selectors.positional.into_iter();
-    indexing
-        .components
-        .iter()
-        .map(|component| match component {
-            MirIndexComponent::Colon => {
-                let _ = values.next();
-                Ok(ObjectIndexComponent::Colon)
-            }
-            MirIndexComponent::Expr(_)
-            | MirIndexComponent::PreparedExpr(_)
-            | MirIndexComponent::ContextualExpr(_) => values
-                .next()
-                .map(ObjectIndexComponent::Value)
-                .ok_or_else(|| {
-                    NativeExecutorError::Host(
-                        "materialized index component is missing its value".into(),
-                    )
-                }),
-            MirIndexComponent::Expansion(_) => Err(NativeExecutorError::UnsupportedSite(
-                "expanded parentheses require the ordered subscript-path executor".into(),
-            )),
-        })
-        .collect()
+    object_selector(&state.runtime, &selectors).map(|selector| {
+        let ObjectIndexSelector::IndexValues { components } = selector else {
+            unreachable!("canonical component selector")
+        };
+        components
+    })
 }
 
 pub(super) fn materialize_cell_expansion_source(
@@ -539,16 +544,23 @@ pub(super) fn materialize_cell_expansion_source(
     base: Value,
     indexing: &MirIndexing,
 ) -> NativeExecutorResult<runmat_runtime::call::arguments::MaterializedExpansionSource> {
-    let retains_inputs = indexing_requires_retention(indexing);
-    let selectors = materialize_selectors(state, &base, indexing, retains_inputs)?;
+    let selectors = materialize_selectors(
+        state,
+        &base,
+        indexing,
+        indexing_requires_retention(indexing),
+    )?;
+    let indices = if indexing.cell_expand_all {
+        runmat_value::OutputListStorage::empty()
+    } else {
+        selectors
+            .positional_in_context(&state.runtime)?
+            .with_owned_output_storage(|values| values)
+    };
     Ok(
         runmat_runtime::call::arguments::MaterializedExpansionSource::CellContents {
             base,
-            indices: runmat_value::OutputListStorage::unbounded(if indexing.cell_expand_all {
-                Vec::new()
-            } else {
-                selectors.positional
-            }),
+            indices,
             expand_all: indexing.cell_expand_all,
         },
     )
@@ -677,148 +689,30 @@ fn selector_dimension_length(
         .map_err(NativeExecutorError::from)
 }
 
-fn read_brace(
+fn read_with_plan(
+    runtime: Option<&runmat_runtime::context::RuntimeContext>,
     base: Value,
-    selectors: MaterializedSelectors,
-    indexing: &MirIndexing,
-    requested_outputs: usize,
-) -> NativeExecutorResult<runmat_value::OutputListStorage> {
-    let Value::Cell(cell) = base else {
-        return Err(NativeExecutorError::from(semantic_error(
-            "CellIndexType",
-            "Brace indexing requires a cell array",
-        )));
-    };
-    let values = runmat_runtime::object::cell::expand_cell_indices(&cell, &selectors.positional)?;
-    if indexing.result_context == IndexResultContext::ReadCommaList || indexing.cell_expand_all {
-        if values.len() != requested_outputs {
-            return Err(NativeExecutorError::from(semantic_error(
-                "OutputArityMismatch",
-                format!(
-                    "cell comma-list produced {} values for {requested_outputs} outputs",
-                    values.len()
-                ),
-            )));
-        }
-        return Ok(runmat_value::OutputListStorage::unbounded(values));
-    }
-    match values.as_slice() {
-        [value] if requested_outputs == 1 => Ok(runmat_value::OutputListStorage::unbounded(vec![
-            value.clone(),
-        ])),
-        _ => Err(NativeExecutorError::from(semantic_error(
-            "CellIndexArity",
-            "Cell brace indexing must select exactly one value in scalar context",
-        ))),
-    }
-}
-
-fn assign_brace(
-    runtime: &runmat_runtime::context::RuntimeContext,
-    base: Value,
-    selectors: MaterializedSelectors,
-    rhs: Value,
-    delete: bool,
+    plan: &IndexPlan,
 ) -> NativeExecutorResult<Value> {
-    if delete {
-        return Err(NativeExecutorError::from(semantic_error(
-            "UnsupportedCellBraceDeletion",
-            "Cell brace assignment does not support deletion",
-        )));
-    }
-    let Value::Cell(cell) = base else {
-        return Err(NativeExecutorError::from(semantic_error(
-            "CellIndexType",
-            "Brace assignment requires a cell array",
-        )));
-    };
-    let positions = runmat_runtime::object::cell::resolve_cell_assignment_positions(
-        &cell,
-        &selectors.positional,
-    )?;
-    let sequence = runmat_runtime::call::arguments::adapt_legacy_builtin_result(rhs)?;
-    let kind = sequence.kind();
-    let values = match kind {
-        runmat_value::ValueSequenceKind::CommaSeparated => sequence.into_output_storage(),
-        runmat_value::ValueSequenceKind::Single if positions.len() == 1 => {
-            sequence.into_output_storage()
-        }
-        runmat_value::ValueSequenceKind::Single => {
-            let value = super::call_suspension::own_output_storage(sequence.into_output_storage())?
-                .into_iter()
-                .next()
-                .ok_or_else(|| {
-                    semantic_error(
-                        "CellAssignmentArityMismatch",
-                        "single cell assignment value is missing",
-                    )
-                })?;
-            runmat_value::OutputListStorage::unbounded(vec![value; positions.len()])
-        }
-    };
-    runmat_runtime::object::cell::assign_cell_value_multi_in_context(
-        Some(runtime),
-        cell,
-        &positions,
-        values.as_slice(),
-        |_, _| {},
-    )
-    .map_err(NativeExecutorError::from)
-}
-
-fn read_with_plan(base: Value, plan: &IndexPlan) -> NativeExecutorResult<Value> {
     match base {
-        Value::Tensor(value) => {
-            read_slice::read_tensor_slice_from_plan(&value, plan).map_err(NativeExecutorError::from)
-        }
-        Value::ComplexTensor(value) => read_slice::read_complex_slice_from_plan(&value, plan)
-            .map_err(NativeExecutorError::from),
-        Value::SparseTensor(value) => {
-            read_slice::read_sparse_slice_from_plan(&value, plan).map_err(NativeExecutorError::from)
-        }
-        Value::GpuTensor(value) => {
-            read_slice::read_gpu_slice_from_plan(&value, plan).map_err(NativeExecutorError::from)
-        }
-        Value::StringArray(value) => {
-            read_slice::gather_string_slice(&value, plan).map_err(NativeExecutorError::from)
-        }
-        Value::LogicalArray(value) => gather_logical(&value, plan),
-        value @ Value::CharArray(_) => runmat_runtime::indexing::value::read_with_plan(value, plan)
-            .map_err(NativeExecutorError::from),
-        Value::Cell(value) => {
-            let indices = plan
-                .indices
-                .iter()
-                .map(|index| *index as usize + 1)
-                .collect::<Vec<_>>();
-            runmat_runtime::object::cell::gather_cell_paren_linear_indices(
-                &value,
-                &indices,
-                &plan.output_shape,
-            )
-            .map_err(NativeExecutorError::from)
-        }
-        Value::StructArray(value) => {
-            runmat_runtime::indexing::structure::read_with_plan(&value, plan)
-                .map_err(NativeExecutorError::from)
-        }
-        value @ (Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_)) => {
-            runmat_runtime::indexing::object::read_with_plan(&value, plan)
+        value @ (Value::Tensor(_)
+        | Value::ComplexTensor(_)
+        | Value::SparseTensor(_)
+        | Value::GpuTensor(_)
+        | Value::StringArray(_)
+        | Value::LogicalArray(_)
+        | Value::CharArray(_)
+        | Value::Cell(_)
+        | Value::StructArray(_)
+        | Value::Object(_)
+        | Value::ObjectArray(_)
+        | Value::HandleObject(_)) => {
+            runmat_runtime::indexing::value::read_with_plan_in_context(runtime, value, plan)
                 .map_err(NativeExecutorError::from)
         }
         Value::SymbolicArray(value) => gather_symbolic(&value, plan),
         value => read_scalar(value, plan),
     }
-}
-
-fn gather_logical(value: &LogicalArray, plan: &IndexPlan) -> NativeExecutorResult<Value> {
-    let values = gather(&value.data, plan, "logical")?;
-    if let [value] = values.as_slice() {
-        return Ok(Value::Bool(*value != 0));
-    }
-    LogicalArray::new(values, plan.output_shape.clone())
-        .map(Value::LogicalArray)
-        .map_err(|error| NativeExecutorError::from(shape_error(error)))
 }
 
 fn gather_symbolic(value: &SymbolicArray, plan: &IndexPlan) -> NativeExecutorResult<Value> {
@@ -918,6 +812,7 @@ mod tests {
     use crate::execute::region::observation::test_support::observed_state;
     use crate::region::placement_test_support::Probe;
     use runmat_mir::{MirConstant, MirIndexComponent, MirIndexPlan, MirIndexing, MirOperand};
+    use runmat_runtime::execution::RootedValues;
     use runmat_runtime::indexing::plan::IndexPlan;
     use runmat_types::{IndexKind, IndexResultContext};
     use runmat_value::{CharArray, Tensor, Value};
@@ -925,6 +820,18 @@ mod tests {
 
     #[test]
     fn host_index_read_and_write_finish_without_pending_semantic_call() {
+        let logical =
+            Value::LogicalArray(runmat_value::LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap());
+        assert!(super::assignment_operation::host_assignment_eligible(
+            &logical,
+            &Value::Num(1.),
+            false
+        ));
+        assert!(!super::assignment_operation::host_assignment_eligible(
+            &logical,
+            &Value::Num(1.),
+            true
+        ));
         runmat_gc::gc_test_context(|| {
             let mut state = observed_state(&Rc::new(Probe::default()));
             assert!(super::direct_host_indexing_allowed(&state).expect("unbounded host policy"));
@@ -949,6 +856,30 @@ mod tests {
             };
             assert_eq!(updated.materialize_f64(), vec![10.0, 99.0, 30.0]);
             assert!(state.pending_call.is_none());
+            let sparse_indexing = MirIndexing {
+                components: vec![
+                    MirIndexComponent::Colon,
+                    MirIndexComponent::Expr(MirOperand::Constant(MirConstant::Number("1".into()))),
+                ],
+                ..indexing
+            };
+            let sparse = runmat_value::SparseTensor::new(
+                1_000_000_000,
+                1,
+                vec![0, 1],
+                vec![999_999_999],
+                vec![2.0],
+            )
+            .unwrap();
+            let output = read_value(&mut state, Value::SparseTensor(sparse), &sparse_indexing, 1)
+                .expect("sparse host colon must not build dense coordinate metadata");
+            let [Value::SparseTensor(output)] = output.as_slice() else {
+                panic!("sparse host output");
+            };
+            assert_eq!(output.shape(), [1_000_000_000, 1]);
+            assert_eq!(output.row_indices.as_ref(), &[999_999_999]);
+            assert_eq!(output.as_f64_slice(), Some(&[2.0][..]));
+            assert!(state.pending_call.is_none());
         });
     }
 
@@ -958,8 +889,7 @@ mod tests {
             dims: 1,
             colon_mask: 0,
             end_mask: 0,
-            numeric: vec![Value::Num(3.0)],
-            positional: vec![Value::Num(3.0)],
+            numeric: RootedValues::new(vec![Value::Num(3.0)]).expect("root fixture selectors"),
         };
         for base in [
             Value::Num(9.0),
@@ -991,7 +921,7 @@ mod tests {
         let row = IndexPlan::new(vec![1, 3, 5, 7], vec![1, 4], vec![1, 4], 2, vec![2, 4]);
         let column = IndexPlan::new(vec![4, 5], vec![2, 1], vec![2, 1], 2, vec![2, 4]);
         let Value::CharArray(row) =
-            read_with_plan(Value::CharArray(chars.clone()), &row).expect("row slice")
+            read_with_plan(None, Value::CharArray(chars.clone()), &row).expect("row slice")
         else {
             panic!("expected character row");
         };
@@ -999,7 +929,7 @@ mod tests {
         assert_eq!(row.row_string().as_deref(), Some("wxyz"));
 
         let Value::CharArray(column) =
-            read_with_plan(Value::CharArray(chars), &column).expect("column slice")
+            read_with_plan(None, Value::CharArray(chars), &column).expect("column slice")
         else {
             panic!("expected character column");
         };

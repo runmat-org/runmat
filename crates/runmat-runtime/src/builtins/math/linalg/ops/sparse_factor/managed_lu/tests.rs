@@ -1,8 +1,7 @@
 use super::*;
 use crate::context::host_effect::ManagedHostEffectLedger;
 use crate::context::{
-    ParallelCapability, RuntimeParallelResources, RuntimeParallelService, RuntimeServiceFuture,
-    RuntimeServicePorts,
+    ParallelCapability, RuntimeParallelResources, RuntimeParallelService, RuntimeServicePorts,
 };
 use crate::execution::{
     CpuCooperationBudget, OwnedCpuJob, RuntimeBlockingCpuService, RuntimeExecutionService,
@@ -393,9 +392,18 @@ fn abandoning_a_pending_growth_turn_releases_replacement_without_losing_original
 #[derive(Default)]
 struct HeldCpu(RefCell<Option<OwnedCpuJob>>);
 impl RuntimeBlockingCpuService for HeldCpu {
-    fn submit(&self, job: OwnedCpuJob) -> RuntimeServiceFuture<Result<(), ExecutionServiceError>> {
+    fn submit(
+        &self,
+        runtime: Option<&RuntimeContext>,
+        job: OwnedCpuJob,
+    ) -> crate::execution::OwnedCpuSubmission {
+        let submitted = crate::execution::admit_optional_hostcall_with(
+            runtime,
+            ExecutionServiceError::HostAllocation,
+            || async { Ok(()) },
+        )?;
         assert!(self.0.borrow_mut().replace(job).is_none());
-        Box::pin(async { Ok(()) })
+        Ok(submitted)
     }
 }
 #[cfg(not(target_arch = "wasm32"))]
@@ -438,7 +446,7 @@ fn ordering_claims_survive_await_drop_or_cancel_until_physical_job_finishes() {
             "physical work still owns topology and scratch"
         );
         assert!(ledger.snapshot().live_reserved_bytes > 0);
-        service.0.borrow_mut().take().unwrap()();
+        service.0.borrow_mut().take().unwrap().run();
         empty(&ledger);
     }
 }

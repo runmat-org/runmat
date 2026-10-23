@@ -18,6 +18,10 @@ pub(in crate::execute) use preparation::PendingMultiPreparation;
 pub(in crate::execute) use preparation::{has_fixed_end_context, resolve_fixed_end};
 use roots::local_value;
 
+#[expect(
+    clippy::large_enum_variant,
+    reason = "Sequence retains its move-once destination inline; boxing adds an assignment allocation, while hoisting it creates invalid Place/Discard destination states"
+)]
 pub(super) enum PreparedTarget {
     Place(MirPlace),
     Sequence {

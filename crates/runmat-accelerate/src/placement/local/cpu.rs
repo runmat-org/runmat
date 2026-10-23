@@ -13,7 +13,7 @@ pub(crate) struct LocalCpuCandidate {
     pub(super) guards: Vec<RegionGuardId>,
     pub(super) route: WholeWorkCandidate,
     pub(super) native_alternative: Option<runmat_execution::PlacementGraphCandidate>,
-    pub(super) native_host_alternative: Option<runmat_execution::PlacementGraphCandidate>,
+    pub(super) native_host_alternative: Option<WholeWorkCandidate>,
     pub(super) native_origin:
         Option<runmat_runtime::numeric_region::service::NativeNumericRegionSelectionAuthority>,
 }
@@ -26,41 +26,49 @@ impl LocalCpuCandidate {
         provider: &dyn runmat_accelerate_api::AccelProvider,
         right: &runmat_runtime::numeric_region::service::NativeNumericRegionRight,
         source_host: Option<&crate::fusion_exec::host_readback::CpuHostResources>,
-        host_cost: runmat_execution::ExecutionCostEstimate,
-    ) -> Self {
+    ) -> (Self, super::multi::LocalCpuAdmission) {
         let (region, site) = right.identity();
         let identity = format!("native.original.f{}.r{}", region.function.0, region.ordinal);
         let tail = provider.region_queue_tail_resources();
-        let native_host_alternative = source_host.and_then(|host| {
-            let mut cost = host_cost;
-            cost.components.download_ns = cost
-                .components
-                .download_ns
-                .checked_add(super::transfer_prior_ns(host.download_bytes))?;
-            cost.components.synchronization_ns = cost
-                .components
-                .synchronization_ns
-                .checked_add(5_000_u64.checked_mul(host.readback_count)?)?;
-            cost.scratch_bytes = Some(host.scratch_bytes);
-            let resources = host.resources;
-            Some(runmat_execution::PlacementGraphCandidate {
-                descriptor: ExecutionCandidateDescriptor {
-                    identity: format!("cpu.source.f{}.r{}", region.function.0, region.ordinal),
-                    region: Some(region),
-                    kind: ExecutionCandidateKind::SpecializedNativeCpu,
-                    execution_location: CandidateExecutionLocation::Host,
-                    preparation: CandidatePreparationState::Ready,
-                    cost,
-                    output_residency: CandidateOutputResidency::Host,
-                    presentation: host.presentation.clone(),
-                    guards: Vec::new(),
-                },
-                resources,
-                output_facts: None,
-                transactional_results: false,
-            })
+        let native_host_alternative = source_host.map(|host| WholeWorkCandidate {
+            kind: ExecutionCandidateKind::SpecializedNativeCpu,
+            execution_location: CandidateExecutionLocation::Host,
+            preparation: CandidatePreparationState::Ready,
+            output_residency: CandidateOutputResidency::Host,
+            presentation: host.presentation.clone(),
+            // Scalar arithmetic alone is not the complete source-host route.
+            // Canonical dispatch, admitted inputs/outputs and optional readback
+            // belong to this same full-call observation, not the separate
+            // generic numeric evaluator's compiler prior.
+            cost: CandidateCostEvidence::Unavailable(
+                runmat_execution::CandidateCostUnavailable::NoObservations,
+            ),
+            resources: host.resources,
+            route_facts: Digest::sha256_serialized(&(
+                "native-canonical-source-host-v3",
+                region,
+                site.function,
+                site.block,
+                site.position,
+                site.phase.0,
+                site.ordinal,
+                host.download_bytes,
+                host.readback_count,
+                host.scratch_bytes,
+                &host.resources,
+            ))
+            .expect("typed native source-host facts serialize"),
+            transactional_results: false,
         });
-        Self {
+        let original_admission = if tail.is_some() {
+            super::multi::LocalCpuAdmission::NativeRegionAtUse
+        } else {
+            // Ordinary source execution remains available through decline.
+            // An unmeasured comparative route cannot explore forever without
+            // its physical completion/audit capability.
+            super::multi::LocalCpuAdmission::Unavailable
+        };
+        (Self {
             identity,
             region: Some(region),
             guards: Vec::new(),
@@ -76,7 +84,8 @@ impl LocalCpuCandidate {
                 route_facts: Digest::sha256_serialized(&("native-original-source-v1", region, site.function, site.block, site.position, site.phase.0, site.ordinal)).expect("native site identity serializes"),
                 cost: CandidateCostEvidence::Unavailable(runmat_execution::CandidateCostUnavailable::NoObservations),
                 resources: CandidateResourceDemand {
-                    queue_slots: tail.map_or(1, |tail| tail.queue_slots),
+                    // No tail means no admitted comparative original route.
+                    queue_slots: tail.map_or(0, |tail| tail.queue_slots),
                     scratch_bytes: tail.map(|tail| ResourceByteBound::Known(tail.provider_scratch_bytes)).unwrap_or(ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoScratchBound)),
                     provider_host_workspace: tail.and_then(|tail| tail.completion_control_host_bytes)
                         .and_then(|bytes| runmat_runtime::context::host_allocation::HostAllocationPlan::retained_metadata_bytes(bytes).ok())
@@ -85,7 +94,7 @@ impl LocalCpuCandidate {
                 },
                 transactional_results: false,
             },
-        }
+        }, original_admission)
     }
     /// Source-ordered original VM instructions, not a host-only fallback.
     /// The installed-region owner supplies `source_region`; placement never

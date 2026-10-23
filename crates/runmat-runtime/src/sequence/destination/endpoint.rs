@@ -2,6 +2,7 @@ use crate::execution::{RootedValue, RootedValueLease, RootedValueSequence};
 use crate::object::indexing::{
     ObjectIndexComponent, ObjectIndexSelector, ObjectSubscript, ObjectSubscriptPath,
 };
+use crate::object::resolve::{ContextualMemberScope, MemberStoreScope, OrdinaryMemberScope};
 use crate::runtime_error::semantic_error;
 use crate::RuntimeError;
 use runmat_gc::{Trace, Tracer};
@@ -204,7 +205,7 @@ impl PreparedSequenceEndpoint {
     ) -> Result<RootedValue, RuntimeError> {
         let values = runmat_value::ValueSequence::comma_separated(values)
             .map_err(crate::sequence::sequence_error_to_runtime)?;
-        self.assign_with_context(None, base, values, caller_function_name)
+        self.assign_sequence(base, values, caller_function_name)
             .await
     }
 
@@ -217,37 +218,37 @@ impl PreparedSequenceEndpoint {
     ) -> Result<RootedValue, RuntimeError> {
         let values = runmat_value::ValueSequence::comma_separated(values)
             .map_err(crate::sequence::sequence_error_to_runtime)?;
-        self.assign_with_context(Some(context), base, values, caller_function_name)
+        self.assign_sequence_in_context(context, base, values, caller_function_name)
             .await
     }
 
-    pub(crate) async fn assign_sequence(
+    pub(crate) fn assign_sequence<'a>(
         self,
         base: Value,
         values: runmat_value::ValueSequence,
-        caller: Option<&str>,
-    ) -> Result<RootedValue, RuntimeError> {
-        self.assign_with_context(None, base, values, caller).await
+        caller: Option<&'a str>,
+    ) -> impl std::future::Future<Output = Result<RootedValue, RuntimeError>> + 'a {
+        self.assign_sequence_with_scope(OrdinaryMemberScope, base, values, caller)
     }
 
-    pub(crate) async fn assign_sequence_in_context(
+    pub(crate) fn assign_sequence_in_context<'a>(
         self,
-        context: &crate::context::RuntimeContext,
+        context: &'a crate::context::RuntimeContext,
         base: Value,
         values: runmat_value::ValueSequence,
-        caller: Option<&str>,
-    ) -> Result<RootedValue, RuntimeError> {
-        self.assign_with_context(Some(context), base, values, caller)
-            .await
+        caller: Option<&'a str>,
+    ) -> impl std::future::Future<Output = Result<RootedValue, RuntimeError>> + 'a {
+        self.assign_sequence_with_scope(ContextualMemberScope(context), base, values, caller)
     }
 
-    async fn assign_with_context(
+    pub(crate) async fn assign_sequence_with_scope<'a, M: MemberStoreScope<'a> + 'a>(
         self,
-        context: Option<&crate::context::RuntimeContext>,
+        scope: M,
         base: Value,
         values: runmat_value::ValueSequence,
-        caller_function_name: Option<&str>,
+        caller_function_name: Option<&'a str>,
     ) -> Result<RootedValue, RuntimeError> {
+        let context = scope.runtime();
         let Self {
             spec,
             cardinality,
@@ -298,12 +299,11 @@ impl PreparedSequenceEndpoint {
                         RootedValue::in_optional_context(value, context)
                     }
                     super::AssignmentStepSpec::Member(member) => {
-                        crate::object::resolve::store_member_text_with_context(
-                            context,
+                        crate::object::resolve::store_member_text_with_scope(
+                            scope,
                             base,
                             member,
                             rhs,
-                            false,
                             caller_function_name,
                             runmat_gc::gc_record_write,
                         )
@@ -355,27 +355,16 @@ impl PreparedSequenceEndpoint {
                     }
                 }
             }
-            SequenceEndpointSpec::Member(field) => match context {
-                Some(context) => {
-                    crate::object::resolve::store_member_sequence_values_in_context(
-                        context,
-                        base,
-                        field,
-                        values,
-                        caller_function_name,
-                    )
-                    .await
-                }
-                None => {
-                    crate::object::resolve::store_member_sequence_values(
-                        base,
-                        field,
-                        values,
-                        caller_function_name,
-                    )
-                    .await
-                }
-            },
+            SequenceEndpointSpec::Member(field) => {
+                crate::object::resolve::store_member_sequence_values_with_scope(
+                    scope,
+                    base,
+                    field,
+                    values,
+                    caller_function_name,
+                )
+                .await
+            }
             SequenceEndpointSpec::CellContents(indices) => {
                 assign_cell_contents_with_context(context, base, indices, values).await
             }

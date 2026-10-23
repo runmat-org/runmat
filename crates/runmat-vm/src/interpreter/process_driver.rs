@@ -478,8 +478,35 @@ impl ProcessDriverHandle {
         F: Future<Output = SemanticReply> + 'static,
         M: FnOnce() -> F + 'static,
     {
+        self.enqueue_owned_catch_scoped_in_context(context, scope, make_future)
+    }
+
+    /// A semantic callee inherits the caller's selected catch even when its
+    /// first poll is moved to a sibling. Capture before enqueueing; `None`
+    /// explicitly masks any other catch active while that sibling is polled.
+    pub(crate) fn enqueue_owned_catch_scoped_in_context<T, F, M>(
+        &self,
+        context: &RuntimeContext,
+        scope: PreparedRuntimeScope,
+        make_future: M,
+    ) -> Result<ProcessReplyTicket<T>, RuntimeError>
+    where
+        T: 'static,
+        F: Future<Output = Result<T, RuntimeError>> + 'static,
+        M: FnOnce() -> F + 'static,
+    {
+        let catch = context.active_catch_exception_shared();
+        let catch_runtime = context.clone();
         let scope = scope.prepare_future::<F>()?;
-        self.enqueue_typed_in_context(context, 0, move || Ok(scope.defer_result(make_future)))
+        self.enqueue_typed_in_context(context, 0, move || {
+            // Keep the unboxed catch around the deferred owner itself: an
+            // unpolled factory's captures and a constructed child's poll/drop
+            // must all run under the same selected catch. The inner quote is
+            // still exactly F, and the queue admits this concrete wrapper in
+            // its original allocation; no extra child Box is introduced.
+            Ok(catch_runtime
+                .scope_active_catch_unboxed_shared(catch, scope.defer_result(make_future)))
+        })
     }
 
     fn enqueue_typed_unbounded<T: 'static>(

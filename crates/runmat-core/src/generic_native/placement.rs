@@ -3,6 +3,9 @@
 
 use std::rc::Rc;
 
+use runmat_execution::placement::{
+    PreparationPaybackEvidence, PreparationPaybackUnavailable, WholeWorkRouteIdentity,
+};
 use runmat_execution::{
     CandidateCostEvidence, CandidateCostUnavailable, CandidateExecutionLocation,
     CandidateOutputPresentation, CandidateOutputResidency, CandidatePreparationState,
@@ -106,7 +109,7 @@ impl ReadyRouteSelection {
         {
             // Both samples belong to this complete-call signature. Actual
             // compilation evidence is not added to a warm execution quote.
-            let payback = runmat_execution::PreparationPaybackEvidence::from_observations(
+            let payback = PreparationPaybackEvidence::from_observations(
                 *paid,
                 self.service.observed_candidate_duration(
                     &selected.decision.signature,
@@ -324,9 +327,8 @@ pub(crate) fn repreparation_evidence(
     runtime: &RuntimeContext,
     invocation: ReadyInvocation<'_>,
     quote: &runmat_jit::entry::NativePreparationQuote,
-) -> Result<runmat_execution::PreparationPaybackEvidence, RuntimeError> {
+) -> Result<PreparationPaybackEvidence, RuntimeError> {
     ready_route_checkpoint(runtime)?;
-    use runmat_execution::{PreparationPaybackEvidence, PreparationPaybackUnavailable};
     let unavailable = || {
         PreparationPaybackEvidence::Unavailable(PreparationPaybackUnavailable::Baseline(
             CandidateCostUnavailable::NoObservations,
@@ -357,7 +359,7 @@ pub(crate) fn repreparation_evidence(
     )
     .selected(&signature.operation);
     let prepared_kind = native_kind(quote.tier);
-    let retired_identity = runmat_execution::WholeWorkRouteIdentity {
+    let retired_identity = WholeWorkRouteIdentity {
         kind: prepared_kind,
         execution_location: CandidateExecutionLocation::Host,
         preparation: CandidatePreparationState::Ready,

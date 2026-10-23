@@ -809,16 +809,19 @@ mod tests {
                 assert_eq!(requested_outputs, 0);
                 let entry = Rc::clone(&entry);
                 let counter = Arc::clone(&counter);
-                Box::pin(async move {
-                    entry
-                        .lease()
-                        .expect("task lease attached before poll")
-                        .cancel();
-                    *counter.lock().unwrap() += 1;
-                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
-                        0.0,
-                    ))
-                })
+                crate::user_functions::admit_user_function_with(
+                    _runtime.as_ref(),
+                    move || async move {
+                        entry
+                            .lease()
+                            .expect("task lease attached before poll")
+                            .cancel();
+                        *counter.lock().unwrap() += 1;
+                        crate::user_functions::test_support::rooted_single_value_sequence(
+                            Value::Num(0.0),
+                        )
+                    },
+                )
             }
         }))
         .expect("call-port scope");

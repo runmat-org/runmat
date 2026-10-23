@@ -542,7 +542,10 @@ fn feval_closure_with_embedded_semantic_prefers_embedded_identity() {
                 assert_eq!(requested_outputs, 1);
                 assert_eq!(args.captures(), &[Value::Num(10.0)]);
                 assert_eq!(args.supplied(), &[Value::Num(2.0)]);
-                Box::pin(async { Ok(single_sequence(Value::Num(12.0))) })
+                runmat_runtime::execution::admit_executable_sequence_with(
+                    &_runtime,
+                    move || async move { Ok(single_sequence(Value::Num(12.0))) },
+                )
             },
         );
 
@@ -810,7 +813,10 @@ fn feval_semantic_function_handle_prefers_embedded_function_id() {
                 assert_eq!(requested_outputs, 1);
                 assert!(args.captures().is_empty());
                 assert_eq!(args.supplied(), &[Value::Num(2.0)]);
-                Box::pin(async { Ok(single_sequence(Value::Num(3.0))) })
+                runmat_runtime::execution::admit_executable_sequence_with(
+                    &_runtime,
+                    move || async move { Ok(single_sequence(Value::Num(3.0))) },
+                )
             },
         );
 

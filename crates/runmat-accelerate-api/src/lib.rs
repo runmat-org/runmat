@@ -112,9 +112,11 @@ pub use logical_upload::{
 pub use native_device::*;
 pub use numeric_upload::{
     class_preserving_upload_query, is_invalid_numeric_upload_result, upload_numeric_protecting,
-    upload_numeric_protecting_admitted, InvalidNumericUploadResult, NumericUploadCompletionError,
+    upload_numeric_protecting_admitted, upload_numeric_protecting_admitted_with_scratch,
+    HostNumericUploadScratch, InvalidNumericUploadResult, NumericUploadCompletionError,
     NumericUploadError, NumericUploadResult,
 };
+mod resident_indexing;
 pub use numerical_domain::{NumericalDomainEvidence, RoundDigitsMode};
 pub use placement::*;
 pub use power::{
@@ -122,6 +124,7 @@ pub use power::{
     PowerScalarWorkload, RealPowerArithmeticMode, RealPowerOperand,
 };
 pub use residency::{clear_residency_checked, ResidencyCleanupError, ResidencyRestoreGuard};
+pub use resident_indexing::ProviderScatterValueMapping;
 pub use sparse::*;
 
 type ResidencyMarkFn = fn(&GpuTensorHandle);
@@ -2177,6 +2180,33 @@ pub trait AccelProvider: AcceleratorThreadBound {
         }
     }
 
+    /// Exact temporary u32 encoding extent for a native upload. None is an
+    /// unknown bound, never zero. The count includes paired complex lanes.
+    fn numeric_upload_encoding_words(
+        &self,
+        _element: NumericElementType,
+        _lanes: usize,
+    ) -> Option<usize> {
+        None
+    }
+
+    /// Same raw publication contract with operation-owned encoding scratch.
+    /// Unsupported scratch is declined before effects, without ordinary retry.
+    fn upload_numeric_raw_admitted_with_scratch(
+        &self,
+        host: &crate::HostNumericTensorView,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+        scratch: Option<crate::HostNumericUploadScratch<'_>>,
+    ) -> ProviderExecutionResult<GpuTensorHandle> {
+        if scratch.is_some() {
+            return Err(unsupported_provider_operation(
+                "provider does not implement admitted numeric encoding scratch",
+            )
+            .into());
+        }
+        self.upload_numeric_raw_admitted(host, admission)
+    }
+
     /// Download one native numeric payload through the shared all-class
     /// transfer contract. The default adapter keeps exact real-integer and
     /// native-double downloads available while refusing to present widened
@@ -2777,6 +2807,47 @@ pub trait AccelProvider: AcceleratorThreadBound {
         Err(unsupported_provider_operation(
             "gather_linear not supported by provider",
         ))
+    }
+
+    /// Temporary host metadata allocated by these existing native indexing
+    /// owners. None/Unavailable is unknown, not zero. A RHS selects functional
+    /// scatter; no RHS selects gather. Retained registration is quoted apart.
+    fn indexing_host_workspace_bound(
+        &self,
+        _source: &GpuTensorHandle,
+        _rhs: Option<&GpuTensorHandle>,
+    ) -> runmat_execution::ResourceByteBound {
+        runmat_execution::ResourceByteBound::Unavailable(
+            runmat_execution::ResourceBoundUnavailable::NoScratchBound,
+        )
+    }
+
+    /// Same gather kernel with request-local publication authority. Missing
+    /// support declines before allocation/submission, never ordinary-then-claim.
+    fn gather_linear_admitted(
+        &self,
+        _source: &GpuTensorHandle,
+        _indices: &[u32],
+        _output_shape: &[usize],
+        _admission: &dyn runmat_execution::resource::ProviderHostMetadataAdmission,
+    ) -> ProviderExecutionResult<GpuTensorHandle> {
+        Err(unsupported_provider_operation("provider has no admitted indexed gather").into())
+    }
+
+    /// Native functional emission is synchronous; device execution remains
+    /// asynchronous. This port adds no erased future allocation per operation.
+    fn scatter_linear_functional_admitted(
+        &self,
+        _target: &GpuTensorHandle,
+        _indices: &[u32],
+        _values: &GpuTensorHandle,
+        _mapping: ProviderScatterValueMapping,
+        _admission: &dyn runmat_execution::resource::ProviderHostMetadataAdmission,
+    ) -> ProviderExecutionResult<GpuTensorHandle> {
+        Err(
+            unsupported_provider_operation("provider has no admitted functional indexed scatter")
+                .into(),
+        )
     }
 
     /// Scatter logical elements from `values` into `target` at the provided zero-based linear

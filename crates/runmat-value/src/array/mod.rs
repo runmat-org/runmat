@@ -1,6 +1,5 @@
 use crate::aggregate::{shape_rows_cols, total_len};
 use crate::*;
-use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::fmt;
 
@@ -47,8 +46,8 @@ pub use exact_host_numeric::{
     ExactHostComplexTensorAllocation, ExactHostIndexBufferAllocation,
     ExactHostIntegerComplexTensorAllocation, ExactHostLogicalTensorAllocation,
     ExactHostNumericAllocation, ExactHostNumericAllocationError, ExactHostSparseClass,
-    ExactHostSparseTensorAllocation, ExactHostTensor2dAllocation, ExactHostTensorAllocation,
-    PreparedExactSparseTensor,
+    ExactHostSparsePublicationError, ExactHostSparseTensorAllocation, ExactHostTensor2dAllocation,
+    ExactHostTensorAllocation, PreparedExactSparseTensor,
 };
 pub use exact_vec::{exact_capacity_vec, exact_capacity_vec_from_slice, exact_capacity_vec_with};
 pub(crate) use format::{format_integer_complex_value, should_expand_nd_display, write_nd_pages};
@@ -59,6 +58,6 @@ pub use host_logical_buffer::HostLogicalBuffer;
 pub use host_numeric_buffer::{HostNumericBuffer, UniqueHostNumericMutation};
 pub use logical::LogicalArray;
 pub use shared_shape::{HostShapeInput, SharedShape, SharedShapeBuilder, SharedShapeIntoIter};
-pub use sparse::{SparseCscValidation, SparseTensor, ValidatedSparseCscParts};
+pub use sparse::{SparseCscMergeEvent, SparseCscValidation, SparseTensor, ValidatedSparseCscParts};
 pub use string::StringArray;
 pub use symbolic::SymbolicArray;

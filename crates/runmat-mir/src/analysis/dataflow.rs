@@ -1191,7 +1191,11 @@ fn diagnose_operand_read(
     let MirOperand::Local(local) = operand else {
         return;
     };
-    match state[local.0] {
+    let Some(fact) = state.get(local.0) else {
+        diagnostics.push(invalid_region_local_diagnostic(*local, span));
+        return;
+    };
+    match fact {
         InitFact::DefinitelyAssigned | InitFact::RuntimeWorkspaceLookup => {}
         InitFact::Unassigned => {
             diagnostics.push(init_diagnostic(UninitializedRead::Definite, span))
@@ -1200,6 +1204,16 @@ fn diagnose_operand_read(
             diagnostics.push(init_diagnostic(UninitializedRead::Possible, span))
         }
     }
+}
+
+fn invalid_region_local_diagnostic(local: MirLocalId, span: Span) -> MirDiagnostic {
+    MirDiagnostic::new(
+        "RM-MIR0021",
+        MirDiagnosticSeverity::Error,
+        format!("expression region references undeclared local {local:?}"),
+        span,
+    )
+    .with_category("expression-region")
 }
 
 enum UninitializedRead {

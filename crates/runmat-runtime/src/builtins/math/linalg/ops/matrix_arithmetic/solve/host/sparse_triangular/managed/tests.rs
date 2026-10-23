@@ -6,7 +6,7 @@ use crate::context::host_allocation::HostAllocationPlan;
 use crate::context::host_effect::ManagedHostEffectLedger;
 use crate::context::{
     ParallelCapability, RuntimeContext, RuntimeParallelResources, RuntimeParallelService,
-    RuntimeServiceFuture, RuntimeServicePorts,
+    RuntimeServicePorts,
 };
 use crate::execution::{
     ExecutionServiceError, OwnedCpuJob, RuntimeBlockingCpuService, RuntimeExecutionService,
@@ -34,7 +34,11 @@ impl RuntimeParallelService for Parallel {
 }
 struct NoLu;
 impl RuntimeBlockingCpuService for NoLu {
-    fn submit(&self, _: OwnedCpuJob) -> RuntimeServiceFuture<Result<(), ExecutionServiceError>> {
+    fn submit(
+        &self,
+        _: Option<&RuntimeContext>,
+        _: OwnedCpuJob,
+    ) -> crate::execution::OwnedCpuSubmission {
         panic!("a triangular solve must not factor through LU/COLAMD")
     }
 }

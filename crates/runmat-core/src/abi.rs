@@ -19,6 +19,17 @@ pub enum SourceInput {
     CapturedPath(CapturedPathSource),
 }
 
+impl SourceInput {
+    /// Exact captured bytes only; never reread a path for identity reporting.
+    pub fn captured_text(&self) -> Option<&str> {
+        match self {
+            Self::CapturedPath(source) => Some(source.text()),
+            Self::Text { text, .. } => Some(text),
+            Self::Path(_) => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CapturedPathSource {
     display_name: String,

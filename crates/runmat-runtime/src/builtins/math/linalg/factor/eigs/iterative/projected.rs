@@ -2,6 +2,7 @@
 //! evd_imp uses temp_mat_uninit for H/Z/Householder/Schur/X; unlike the
 //! high-level eig wrapper, this path owns no hidden Mat allocation.
 use super::storage::Buffer;
+use crate::builtins::math::linalg::ops::dense_evd::{kernel, EvdFailure};
 use crate::{
     context::{
         host_allocation::{
@@ -12,33 +13,14 @@ use crate::{
     execution::CpuCooperationPolicy,
     BuiltinResult,
 };
-use faer::{
-    diag::DiagMut,
-    dyn_stack::{MemBuffer, MemStack, StackReq},
-    linalg::evd::{self, ComputeEigenvectors, EvdParams},
-    mat::{MatMut, MatRef},
-    Par, Spec,
-};
+use faer::dyn_stack::{MemBuffer, StackReq};
 use num_complex::Complex64;
-
-#[derive(Debug)]
-struct ProjectedError(faer::linalg::evd::EvdError);
-impl std::fmt::Display for ProjectedError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "projected eigendecomposition failed: {:?}", self.0)
-    }
-}
-impl std::error::Error for ProjectedError {}
 
 enum Scratch {
     Managed(AlignedHostWorkspace),
     Unbounded(MemBuffer),
 }
-#[derive(Clone, Copy)]
-pub(super) enum Kind {
-    General,
-    SelfAdjoint,
-}
+pub(super) use kernel::Kind;
 pub(super) struct Projected {
     pub matrix: Buffer<Complex64>,
     pub values: Buffer<Complex64>,
@@ -49,21 +31,7 @@ pub(super) struct Projected {
     kind: Kind,
 }
 pub(super) fn requirement(order: usize, kind: Kind) -> StackReq {
-    if matches!(kind, Kind::SelfAdjoint) {
-        return evd::self_adjoint_evd_scratch::<Complex64>(
-            order,
-            ComputeEigenvectors::Yes,
-            Par::Seq,
-            Default::default(),
-        );
-    }
-    evd::evd_scratch::<Complex64>(
-        order,
-        ComputeEigenvectors::No,
-        ComputeEigenvectors::Yes,
-        Par::Seq,
-        Spec::<EvdParams, Complex64>::default(),
-    )
+    kernel::requirement(order, kind, false)
 }
 pub(super) fn bytes(order: usize, kind: Kind) -> Result<u64, HostAllocationError> {
     let square = order
@@ -113,45 +81,19 @@ impl Projected {
             kind,
         })
     }
-    fn kernel(&mut self) -> Result<(), faer::linalg::evd::EvdError> {
+    fn kernel(&mut self) -> Result<(), EvdFailure> {
         let scratch = match &mut self.scratch {
             Scratch::Managed(v) => v.as_mut_uninit(),
             Scratch::Unbounded(v) => &mut *v,
         };
-        if matches!(self.kind, Kind::SelfAdjoint) {
-            return evd::self_adjoint_evd(
-                MatRef::from_column_major_slice(
-                    &self.matrix.get()[..self.order * self.order],
-                    self.order,
-                    self.order,
-                ),
-                DiagMut::from_slice_mut(&mut self.values.get_mut()[..self.order]),
-                Some(MatMut::from_column_major_slice_mut(
-                    &mut self.vectors.get_mut()[..self.order * self.order],
-                    self.order,
-                    self.order,
-                )),
-                Par::Seq,
-                MemStack::new(scratch),
-                Default::default(),
-            );
-        }
-        evd::evd_cplx(
-            MatRef::from_column_major_slice(
-                &self.matrix.get()[..self.order * self.order],
-                self.order,
-                self.order,
-            ),
-            DiagMut::from_slice_mut(&mut self.values.get_mut()[..self.order]),
+        kernel::compute(
+            self.order,
+            self.kind,
+            &self.matrix.get()[..self.order * self.order],
+            &mut self.values.get_mut()[..self.order],
+            &mut self.vectors.get_mut()[..self.order * self.order],
             None,
-            Some(MatMut::from_column_major_slice_mut(
-                &mut self.vectors.get_mut()[..self.order * self.order],
-                self.order,
-                self.order,
-            )),
-            Par::Seq,
-            MemStack::new(scratch),
-            Default::default(),
+            scratch,
         )
     }
     pub async fn compute(
@@ -188,7 +130,8 @@ impl Projected {
             } else {
                 runtime
                     .cpu_cooperation()
-                    .run_owned_blocking(
+                    .run_owned_blocking_in_context(
+                        runtime,
                         runtime.service_ports().blocking_cpu().map(|s| s.as_ref()),
                         receipt.map(HostAllocationReceipt::retain_scratch_for_cpu_work),
                         work,
@@ -201,9 +144,9 @@ impl Projected {
         };
         super::work::Work::new(runtime, receipt)?.check()?;
         result.map_err(|e| {
-            crate::build_runtime_error(format!("eigs: projected EVD failed: {e:?}"))
+            crate::build_runtime_error(format!("eigs: projected EVD failed: {:?}", e.0))
                 .with_builtin("eigs")
-                .with_source(ProjectedError(e))
+                .with_source(e)
                 .with_identifier("RunMat:eigs:ProjectedNoConvergence")
                 .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
                 .build()

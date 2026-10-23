@@ -49,7 +49,10 @@ pub(super) fn validate(instructions: &[Instr]) -> Result<(), String> {
         }
         let outgoing = transition::apply(incoming, &instructions[pc], pc)?;
         let successors = normal_successors(instructions, pc)?;
-        if successors.is_empty() && outgoing.is_some() {
+        if successors.is_empty()
+            && !super::control_flow::is_exceptional_exit(&instructions[pc])
+            && outgoing.is_some()
+        {
             return Err(format!(
                 "prepared output-assignment state remains live at function exit instruction {pc}"
             ));

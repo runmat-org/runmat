@@ -1,7 +1,6 @@
 use super::super::{
     assign_tensor_with_plan, build_complex_rhs_view, build_string_rhs_view,
     integer_gpu_rhs_indices_for_plan, materialize_rhs_nd_real, validate_string_rhs_for_plan,
-    StringRhsView,
 };
 use super::validated_assignment_rhs_shape;
 use crate::indexing::plan::IndexPlan;
@@ -14,8 +13,8 @@ use runmat_value::{
 fn externally_constructed_complex_plan_cannot_overrun_borrowed_rhs_ordinals() {
     let plan = IndexPlan::new(vec![0, 1], vec![1, 2], vec![1], 1, vec![1, 2]);
     let rhs = Value::ComplexTensor(ComplexTensor::new(vec![(2.0, 3.0)], vec![1, 1]).unwrap());
-    let view = build_complex_rhs_view(&rhs, &plan.selection_lengths).unwrap();
-    let error = super::super::materialize_complex_rhs_view_for_plan(&view, &plan)
+    let target = ComplexTensor::new(vec![(0.0, 0.0); 2], vec![1, 2]).unwrap();
+    let error = super::super::assign_complex_with_plan_host_in_context(None, target, &plan, &rhs)
         .expect_err("mismatched public plan must not reach a second source ordinal");
     assert_eq!(error.identifier(), Some("RunMat:ShapeMismatch"));
 }
@@ -103,17 +102,12 @@ fn numeric_logical_complex_and_string_views_share_singleton_alignment() {
     let strings = Value::StringArray(
         StringArray::new(vec!["first".into(), "second".into()], vec![1, 2]).unwrap(),
     );
-    let StringRhsView::Tensor {
-        data,
-        shape,
-        strides,
-    } = build_string_rhs_view(&strings, &[2, 1]).unwrap()
-    else {
-        panic!("string array view");
-    };
-    assert_eq!(data, vec!["first", "second"]);
-    assert_eq!(shape, vec![2, 1]);
-    assert_eq!(strides, vec![1, 2]);
+    let view = build_string_rhs_view(&strings, &[2, 1]).unwrap();
+    assert_eq!(view.count(), 2);
+    assert_eq!(
+        (view.value_at(0).as_str(), view.value_at(1).as_str()),
+        ("first", "second")
+    );
     let cells = Value::Cell(
         CellArray::new(
             vec![
@@ -125,17 +119,12 @@ fn numeric_logical_complex_and_string_views_share_singleton_alignment() {
         )
         .unwrap(),
     );
-    let StringRhsView::Tensor {
-        data,
-        shape,
-        strides,
-    } = build_string_rhs_view(&cells, &[2, 1]).unwrap()
-    else {
-        panic!("cell contents array view");
-    };
-    assert_eq!(data, vec!["first", "second"]);
-    assert_eq!(shape, vec![2, 1]);
-    assert_eq!(strides, vec![1, 2]);
+    let view = build_string_rhs_view(&cells, &[2, 1]).unwrap();
+    assert_eq!(view.count(), 2);
+    assert_eq!(
+        (view.value_at(0).as_str(), view.value_at(1).as_str()),
+        ("first", "second")
+    );
 }
 
 #[test]

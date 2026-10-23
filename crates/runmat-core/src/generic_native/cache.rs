@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 
-use runmat_execution::Digest;
+use runmat_execution::{placement::PreparationPaybackEvidence, Digest};
 use runmat_hir::FunctionId;
 use runmat_jit::{
     entry::{EntryKey, EntryPublications, EntryRegistry, PublishedEntry},
@@ -405,7 +405,7 @@ impl GenericNativeCache {
                     placement.zip(self.entries.preparation_quote(&key, profile, &current))
                 {
                     if matches!(super::placement::repreparation_evidence(runtime, invocation, &quote)?,
-                        runmat_execution::PreparationPaybackEvidence::NonImproving { confidence, .. }
+                        PreparationPaybackEvidence::NonImproving { confidence, .. }
                             if confidence >= runmat_execution::EstimateConfidence::Medium)
                     {
                         // This is a fresh statistics query, not a permanent

@@ -325,9 +325,9 @@ mod tests {
             crate::execution::RuntimeExecutionService::new(),
         ));
         let observed = std::rc::Rc::clone(&requests);
-        context.set_dynamic_function_clearer(Some(std::rc::Rc::new(move |_runtime, request| {
+        context.set_dynamic_function_clearer(Some(std::rc::Rc::new(move |runtime, request| {
             let observed = std::rc::Rc::clone(&observed);
-            Box::pin(async move {
+            crate::execution::admit_domain_continuation_with(&runtime, move || async move {
                 observed.borrow_mut().push(request);
                 Ok(())
             })
@@ -352,9 +352,9 @@ mod tests {
             crate::execution::RuntimeExecutionService::new(),
         ));
         let observed = std::rc::Rc::clone(&requests);
-        context.set_dynamic_function_clearer(Some(std::rc::Rc::new(move |_runtime, request| {
+        context.set_dynamic_function_clearer(Some(std::rc::Rc::new(move |runtime, request| {
             let observed = std::rc::Rc::clone(&observed);
-            Box::pin(async move {
+            crate::execution::admit_domain_continuation_with(&runtime, move || async move {
                 observed.borrow_mut().push(request);
                 Ok(())
             })

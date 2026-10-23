@@ -135,8 +135,8 @@ macro_rules! with_instruction_function_references {
             | crate::bytecode::Instr::PrepareIndexedMemberDynamicSequenceOutputTarget { .. }
             | crate::bytecode::Instr::PrepareCellContentsSequenceOutputTarget { .. }
             | crate::bytecode::Instr::BeginSequenceOutputTarget { .. }
-            | crate::bytecode::Instr::PrepareMemberPathStep(..)
-            | crate::bytecode::Instr::PrepareDynamicMemberPathStep
+            | crate::bytecode::Instr::PrepareMemberPathStep { .. }
+            | crate::bytecode::Instr::PrepareDynamicMemberPathStep { .. }
             | crate::bytecode::Instr::BeginPreparedIndexSelectors { .. }
             | crate::bytecode::Instr::LoadPreparedIndexEnd { .. }
             | crate::bytecode::Instr::BeginContextualIndexSelectors { .. }

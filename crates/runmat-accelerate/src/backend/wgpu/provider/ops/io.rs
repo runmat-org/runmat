@@ -139,29 +139,57 @@ fn record_provider_copy(reason: runmat_value::HostCopyReason, bytes: u64) {
 }
 
 fn integer_words(data: HostIntegerDataView<'_>) -> Vec<u32> {
-    match data {
-        HostIntegerDataView::I8(values) => {
-            values.iter().map(|&value| value as i32 as u32).collect()
-        }
-        HostIntegerDataView::I16(values) => {
-            values.iter().map(|&value| value as i32 as u32).collect()
-        }
-        HostIntegerDataView::I32(values) => values.iter().map(|&value| value as u32).collect(),
-        HostIntegerDataView::U8(values) => values.iter().map(|&value| value as u32).collect(),
-        HostIntegerDataView::U16(values) => values.iter().map(|&value| value as u32).collect(),
-        HostIntegerDataView::U32(values) => values.to_vec(),
-        HostIntegerDataView::I64(values) => values
-            .iter()
-            .flat_map(|&value| {
-                let bits = value as u64;
-                [bits as u32, (bits >> 32) as u32]
-            })
-            .collect(),
-        HostIntegerDataView::U64(values) => values
-            .iter()
-            .flat_map(|&value| [value as u32, (value >> 32) as u32])
-            .collect(),
+    let count = integer_encoding_words(data.element_type(), data.len())
+        .expect("validated integer upload extent");
+    let mut output = vec![0; count];
+    fill_integer_words(data, &mut output).expect("exact ordinary encoding extent");
+    output
+}
+
+pub(super) fn integer_encoding_words(element: IntegerElementType, lanes: usize) -> Option<usize> {
+    lanes.checked_mul(
+        if matches!(element, IntegerElementType::I64 | IntegerElementType::U64) {
+            2
+        } else {
+            1
+        },
+    )
+}
+
+fn fill_integer_words(data: HostIntegerDataView<'_>, output: &mut [u32]) -> Result<()> {
+    ensure!(
+        Some(output.len()) == integer_encoding_words(data.element_type(), data.len()),
+        "native upload encoding workspace extent changed"
+    );
+    macro_rules! fill {
+        ($values:expr, $convert:expr) => {
+            for (slot, &value) in output.iter_mut().zip($values) {
+                *slot = $convert(value);
+            }
+        };
     }
+    match data {
+        HostIntegerDataView::I8(values) => fill!(values, |v: i8| v as i32 as u32),
+        HostIntegerDataView::I16(values) => fill!(values, |v: i16| v as i32 as u32),
+        HostIntegerDataView::I32(values) => fill!(values, |v: i32| v as u32),
+        HostIntegerDataView::U8(values) => fill!(values, |v: u8| u32::from(v)),
+        HostIntegerDataView::U16(values) => fill!(values, |v: u16| u32::from(v)),
+        HostIntegerDataView::U32(values) => output.copy_from_slice(values),
+        HostIntegerDataView::I64(values) => {
+            for (words, &value) in output.chunks_exact_mut(2).zip(values) {
+                let bits = value as u64;
+                words[0] = bits as u32;
+                words[1] = (bits >> 32) as u32;
+            }
+        }
+        HostIntegerDataView::U64(values) => {
+            for (words, &value) in output.chunks_exact_mut(2).zip(values) {
+                words[0] = value as u32;
+                words[1] = (value >> 32) as u32;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn integer_view_from_numeric(data: HostNumericDataView<'_>) -> Result<HostIntegerDataView<'_>> {
@@ -512,13 +540,20 @@ impl WgpuProvider {
 
     /// Report the first buffer-creation effect to the typed raw hook while
     /// keeping optional request-local metadata admission at registration.
-    pub(crate) fn upload_numeric_exec_observed_admitted(
+    pub(crate) fn upload_numeric_exec_observed_admitted_with_scratch(
         &self,
         host: &HostNumericTensorView,
         on_buffer_created: impl FnOnce() -> Result<()>,
         admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+        scratch: Option<runmat_accelerate_api::HostNumericUploadScratch<'_>>,
     ) -> Result<GpuTensorHandle> {
-        self.upload_numeric_produced_observed(host, false, on_buffer_created, admission)
+        self.upload_numeric_produced_observed_with_scratch(
+            host,
+            false,
+            on_buffer_created,
+            admission,
+            scratch,
+        )
     }
 
     pub(crate) fn upload_logical_exec_observed_admitted(
@@ -625,12 +660,40 @@ impl WgpuProvider {
         on_buffer_created: impl FnOnce() -> Result<()>,
         admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> Result<GpuTensorHandle> {
+        self.upload_numeric_produced_observed_with_scratch(
+            host,
+            logical,
+            on_buffer_created,
+            admission,
+            None,
+        )
+    }
+
+    fn upload_numeric_produced_observed_with_scratch(
+        &self,
+        host: &HostNumericTensorView,
+        logical: bool,
+        on_buffer_created: impl FnOnce() -> Result<()>,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+        scratch: Option<runmat_accelerate_api::HostNumericUploadScratch<'_>>,
+    ) -> Result<GpuTensorHandle> {
         host.validate()?;
         let element_type = host.element_type();
         let len = host.data.len();
+        let mut ordinary_words = None;
         let integer_words = if element_type.integer_type().is_some() {
-            Some(integer_words(integer_view_from_numeric(host.data)?))
+            let data = integer_view_from_numeric(host.data)?;
+            Some(if let Some(scratch) = scratch {
+                fill_integer_words(data, scratch.words)?;
+                &*scratch.words
+            } else {
+                ordinary_words.insert(integer_words(data)).as_slice()
+            })
         } else {
+            ensure!(
+                scratch.is_none(),
+                "floating upload received integer encoding scratch"
+            );
             None
         };
         let bytes = integer_words.as_ref().map_or_else(
@@ -1120,6 +1183,25 @@ impl WgpuProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn numeric_upload_encoding_uses_exact_borrowed_words() {
+        let lanes = [u64::MAX, 9_007_199_254_740_993, 0, 1];
+        let mut words = [0; 8];
+        fill_integer_words(HostIntegerDataView::U64(&lanes), &mut words).unwrap();
+        assert_eq!(words, [u32::MAX, u32::MAX, 1, 2_097_152, 0, 0, 1, 0]);
+        assert_eq!(integer_encoding_words(IntegerElementType::U64, 4), Some(8));
+        assert_eq!(
+            integer_encoding_words(IntegerElementType::I64, usize::MAX),
+            None
+        );
+        let mut invalid = [123; 7];
+        assert!(fill_integer_words(HostIntegerDataView::U64(&lanes), &mut invalid).is_err());
+        assert_eq!(invalid, [123; 7]);
+        let mut narrow = [0; 2];
+        fill_integer_words(HostIntegerDataView::I8(&[-1, i8::MIN]), &mut narrow).unwrap();
+        assert_eq!(narrow, [u32::MAX, (-128i32) as u32]);
+    }
 
     #[test]
     fn exact_download_extent_accepts_payload_or_backing_record_but_not_mismatch() {

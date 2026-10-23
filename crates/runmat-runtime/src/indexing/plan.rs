@@ -333,7 +333,7 @@ pub(in crate::indexing) fn effective_index_shape_in_context(
     })
 }
 
-pub(super) fn effective_index_extent(
+pub(crate) fn effective_index_extent(
     base_shape: &[usize],
     dims: usize,
     dimension: usize,

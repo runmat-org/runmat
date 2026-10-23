@@ -27,7 +27,7 @@ pub enum MirFixedPreparationPhase {
         /// None is the dynamic member name; indexed selectors carry their
         /// exact source component so contextual end has a typed receiver.
         component: Option<usize>,
-        region: MirCallArgumentRegion,
+        region: Box<MirCallArgumentRegion>,
         destination: MirFixedSelectorDestination,
     },
     FinishStep {

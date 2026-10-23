@@ -230,29 +230,30 @@ pub async fn observe_runtime_name(
     ) {
         let native = match context
             .as_ref()
-            .map(|context| context.native_resolution_scope())
+            .map(|context| (context, context.native_resolution_scope()))
         {
-            Some(NativeResolutionScope::Selected(route)) => route.observe(name.to_owned()).await?,
-            #[cfg(not(target_arch = "wasm32"))]
-            Some(NativeResolutionScope::SelectedOrdinary {
-                route,
-                source_owner,
-                ..
-            }) if context
-                .as_ref()
-                .is_some_and(|runtime| source_owner.is_bound_in(runtime)) =>
-            {
-                route.observe(name.to_owned()).await?
+            Some((runtime, NativeResolutionScope::Selected(route))) => {
+                route.observe(runtime.clone(), name.to_owned()).await?
             }
             #[cfg(not(target_arch = "wasm32"))]
-            Some(NativeResolutionScope::SelectedOrdinary { .. }) => None,
-            Some(NativeResolutionScope::SelectedClosed) => None,
-            Some(NativeResolutionScope::Session) | None => {
-                if let Some(observer) = context
-                    .as_ref()
-                    .and_then(|context| context.state().call.borrow().native_name_observer.clone())
-                {
-                    observer(name.to_owned()).await?
+            Some((
+                runtime,
+                NativeResolutionScope::SelectedOrdinary {
+                    route,
+                    source_owner,
+                    ..
+                },
+            )) if source_owner.is_bound_in(runtime) => {
+                route.observe(runtime.clone(), name.to_owned()).await?
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            Some((_, NativeResolutionScope::SelectedOrdinary { .. })) => None,
+            Some((_, NativeResolutionScope::SelectedClosed)) | None => None,
+            Some((runtime, NativeResolutionScope::Session)) => {
+                let observer = runtime.state().call.borrow().native_name_observer.clone();
+                if let Some(observer) = observer {
+                    super::await_native_name_observation(observer(runtime.clone(), name.to_owned()))
+                        .await?
                 } else {
                     None
                 }

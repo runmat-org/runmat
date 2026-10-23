@@ -25,19 +25,19 @@ fn phase(error: runmat_runtime::RuntimeError, after_effect: bool) -> ProviderExe
         error
     }
 }
-fn retain_numeric(value: &Value) -> Result<Value, runmat_runtime::RuntimeError> {
+fn retain_numeric(value: &Value) -> Option<Value> {
     match value {
-        Value::Num(value) => Ok(Value::Num(*value)),
+        Value::Num(value) => Some(Value::Num(*value)),
         Value::Tensor(tensor)
             if matches!(
                 tensor.numeric_dtype(),
                 runmat_value::NumericDType::F32 | runmat_value::NumericDType::F64
             ) =>
         {
-            Ok(Value::Tensor(tensor.clone()))
+            Some(Value::Tensor(tensor.clone()))
         }
-        Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle.clone())),
-        _ => Err(invalid()),
+        Value::GpuTensor(handle) => Some(Value::GpuTensor(handle.clone())),
+        _ => None,
     }
 }
 
@@ -172,7 +172,7 @@ pub(super) async fn prepare_native_host(
                     let slot = slots
                         .get_mut(original)
                         .ok_or_else(|| phase(invalid(), had_effects))?;
-                    *slot = retain_numeric(value).map_err(|error| phase(error, had_effects))?;
+                    *slot = retain_numeric(value).ok_or_else(|| phase(invalid(), had_effects))?;
                     *filled
                         .get_mut(original)
                         .ok_or_else(|| phase(invalid(), had_effects))? = true;

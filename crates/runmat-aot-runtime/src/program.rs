@@ -5,13 +5,13 @@ use runmat_types::FunctionId;
 use runmat_value::{Value, ValueSequence};
 
 mod bound;
+mod class_registration;
 mod external_sources;
 mod name_selection;
-mod super_constructor;
-mod class_registration;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "program/s1_aot_direct_call_tests.rs"]
 mod s1_aot_direct_call_tests;
+mod super_constructor;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "program/super_constructor_tests.rs"]
 mod super_constructor_tests;
@@ -244,39 +244,43 @@ impl ProgramInvocationGuards {
                 let runtime = isolated_runtime(runtime);
                 let previous = previous_semantic.clone();
                 let native_functions = Arc::clone(&semantic_native_functions);
-                Box::pin(async move {
-                    if !same_owner {
-                        return Err(native_error(
-                            "semantic callback selected another standalone runtime owner",
-                        ));
-                    }
-                    let function = FunctionId(function);
-                    if !native_functions.contains(&function) {
-                        if let Some(previous) = previous {
-                            return runtime
-                                .scope(previous(
-                                    Some(runtime.clone()),
-                                    function.0,
-                                    arguments,
-                                    requested_outputs,
-                                ))
-                                .await;
+                let admission_runtime = runtime.clone();
+                runmat_runtime::user_functions::admit_user_function_with(
+                    Some(&admission_runtime),
+                    move || async move {
+                        if !same_owner {
+                            return Err(native_error(
+                                "semantic callback selected another standalone runtime owner",
+                            ));
                         }
-                        return Err(native_error(format!(
-                            "semantic function {} is unavailable",
-                            function.0
-                        )));
-                    }
-                    invoke_native_values(
-                        Rc::clone(&executor),
-                        function,
-                        arguments,
-                        requested_outputs,
-                        runtime,
-                        lexical_environment,
-                    )
-                    .await
-                })
+                        let function = FunctionId(function);
+                        if !native_functions.contains(&function) {
+                            if let Some(previous) = previous {
+                                return runtime
+                                    .scope(previous(
+                                        Some(runtime.clone()),
+                                        function.0,
+                                        arguments,
+                                        requested_outputs,
+                                    )?)
+                                    .await;
+                            }
+                            return Err(native_error(format!(
+                                "semantic function {} is unavailable",
+                                function.0
+                            )));
+                        }
+                        invoke_native_values(
+                            Rc::clone(&executor),
+                            function,
+                            arguments,
+                            requested_outputs,
+                            runtime,
+                            lexical_environment,
+                        )
+                        .await
+                    },
+                )
             }),
         )?;
 
@@ -287,49 +291,52 @@ impl ProgramInvocationGuards {
                 let executor = Rc::clone(&bound_executor);
                 let functions = Arc::clone(&bound_functions);
                 let previous = previous_bound.clone();
-                Box::pin(async move {
-                    let Some(function) = functions.resolve(&binding).map_err(|error| *error)?
-                    else {
-                        if let Some(previous) = previous {
-                            return previous(
-                                runtime,
-                                binding,
-                                arguments,
-                                requested_outputs,
-                                lexical_environment,
-                            )
-                            .await;
-                        }
-                        return Err(bound::unavailable(
-                            "bound function has no admitted execution owner",
-                        ));
-                    };
-                    let (runtime, super_body_owner) =
-                        runtime.take_retained_super_body_for(&binding)?;
-                    if let Some(expected) = super_body_owner {
-                        let selected_owner = executor
-                            .function_metadata(function)
-                            .and_then(|metadata| metadata.class_method_owner.as_ref());
-                        if selected_owner != Some(&expected)
-                            || expected.role != runmat_types::ClassMethodRole::Constructor
-                            || expected.is_static
-                        {
-                            return Err(native_error(
-                                "linked superclass body disagrees with its admitted owner",
+                runmat_runtime::execution::admit_executable_sequence_with(
+                    &runtime.clone(),
+                    move || async move {
+                        let Some(function) = functions.resolve(&binding).map_err(|error| *error)?
+                        else {
+                            if let Some(previous) = previous {
+                                return previous(
+                                    runtime,
+                                    binding,
+                                    arguments,
+                                    requested_outputs,
+                                    lexical_environment,
+                                )?
+                                .await;
+                            }
+                            return Err(bound::unavailable(
+                                "bound function has no admitted execution owner",
                             ));
+                        };
+                        let (runtime, super_body_owner) =
+                            runtime.take_retained_super_body_for(&binding)?;
+                        if let Some(expected) = super_body_owner {
+                            let selected_owner = executor
+                                .function_metadata(function)
+                                .and_then(|metadata| metadata.class_method_owner.as_ref());
+                            if selected_owner != Some(&expected)
+                                || expected.role != runmat_types::ClassMethodRole::Constructor
+                                || expected.is_static
+                            {
+                                return Err(native_error(
+                                    "linked superclass body disagrees with its admitted owner",
+                                ));
+                            }
                         }
-                    }
-                    let runtime = isolated_runtime(runtime);
-                    invoke_native_values(
-                        Rc::clone(&executor),
-                        function,
-                        arguments,
-                        requested_outputs,
-                        runtime,
-                        lexical_environment,
-                    )
-                    .await
-                })
+                        let runtime = isolated_runtime(runtime);
+                        invoke_native_values(
+                            Rc::clone(&executor),
+                            function,
+                            arguments,
+                            requested_outputs,
+                            runtime,
+                            lexical_environment,
+                        )
+                        .await
+                    },
+                )
             },
         ))?;
 
@@ -364,40 +371,44 @@ impl ProgramInvocationGuards {
                 let runtime = isolated_runtime(runtime);
                 let previous = previous_lexical.clone();
                 let native_functions = Arc::clone(&lexical_native_functions);
-                Box::pin(async move {
-                    let _call_roots = call_roots?;
-                    if !same_owner {
-                        return Err(native_error(
-                            "lexical callback selected another standalone runtime owner",
-                        ));
-                    }
-                    let function = FunctionId(call.function);
-                    if !native_functions.contains(&function) {
-                        if let Some(previous) = previous {
-                            return runtime.scope(previous(Some(runtime.clone()), call)).await;
+                let admission_runtime = runtime.clone();
+                runmat_runtime::user_functions::admit_lexical_function_with(
+                    Some(&admission_runtime),
+                    move || async move {
+                        let _call_roots = call_roots?;
+                        if !same_owner {
+                            return Err(native_error(
+                                "lexical callback selected another standalone runtime owner",
+                            ));
                         }
-                        return Err(native_error(format!(
-                            "lexical function {} is unavailable",
-                            function.0
-                        )));
-                    }
-                    let roots = runmat_runtime::execution::RootedValueLease::for_values(
-                        call.arguments
-                            .iter()
-                            .chain(call.captures.iter().map(|capture| &capture.value)),
-                    )
-                    .map_err(|error| error.into_runtime_error())?;
-                    let environment_roots = call
-                        .environment
-                        .as_ref()
-                        .map(runmat_runtime::call::lexical::root_environment)
-                        .transpose()?;
-                    let runtime = super_constructor::bind_selected(&executor, function, runtime)
-                        .map_err(|error| *error)?;
-                    let (runtime, placement) = runtime.native_invocation_context();
-                    let selected = runtime.clone();
-                    let requested_outputs = call.requested_outputs;
-                    let execution = runmat_runtime::context::run_native_continuation_with(
+                        let function = FunctionId(call.function);
+                        if !native_functions.contains(&function) {
+                            if let Some(previous) = previous {
+                                return runtime.scope(previous(Some(runtime.clone()), call)?).await;
+                            }
+                            return Err(native_error(format!(
+                                "lexical function {} is unavailable",
+                                function.0
+                            )));
+                        }
+                        let roots = runmat_runtime::execution::RootedValueLease::for_values(
+                            call.arguments
+                                .iter()
+                                .chain(call.captures.iter().map(|capture| &capture.value)),
+                        )
+                        .map_err(|error| error.into_runtime_error())?;
+                        let environment_roots = call
+                            .environment
+                            .as_ref()
+                            .map(runmat_runtime::call::lexical::root_environment)
+                            .transpose()?;
+                        let runtime =
+                            super_constructor::bind_selected(&executor, function, runtime)
+                                .map_err(|error| *error)?;
+                        let (runtime, placement) = runtime.native_invocation_context();
+                        let selected = runtime.clone();
+                        let requested_outputs = call.requested_outputs;
+                        let execution = runmat_runtime::context::run_native_continuation_with(
                         &runtime,
                         placement,
                         roots,
@@ -425,17 +436,21 @@ impl ProgramInvocationGuards {
                         },
                     )
                     .await?;
-                    execution.try_map_owned(
-                        |execution| {
-                            Ok(runmat_runtime::call::lexical::LexicalCallResult {
-                                outputs: normalize_outputs(execution.outputs, requested_outputs)
+                        execution.try_map_owned(
+                            |execution| {
+                                Ok(runmat_runtime::call::lexical::LexicalCallResult {
+                                    outputs: normalize_outputs(
+                                        execution.outputs,
+                                        requested_outputs,
+                                    )
                                     .map_err(|error| *error)?,
-                                captures: execution.captures,
-                            })
-                        },
-                        |error| error.into_runtime_error(),
-                    )
-                })
+                                    captures: execution.captures,
+                                })
+                            },
+                            |error| error.into_runtime_error(),
+                        )
+                    },
+                )
             }),
         );
 

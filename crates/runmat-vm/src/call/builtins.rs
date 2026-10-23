@@ -3,7 +3,7 @@ use crate::interpreter::api::InterpreterOutcome;
 use crate::interpreter::errors::mex;
 use crate::interpreter::stack::pop_args;
 use crate::runtime::workspace::{
-    base_target_authority, capture_workspace_target, has_workspace_target_in_context,
+    base_target_authority, capture_workspace_target_in_context, has_workspace_target_in_context,
     AdmittedDynamicInput, BaseTargetAuthority, WorkspaceAssignedReport, WorkspaceFrameFuture,
     WorkspaceTarget, WorkspaceTargetIdentity, WorkspaceTargetSnapshot, WorkspaceValueSnapshot,
 };
@@ -15,10 +15,10 @@ use runmat_thread_local::runmat_thread_local;
 use runmat_value::Value;
 use std::collections::{HashMap, HashSet};
 
-#[path = "builtins/eval_hir_sites.rs"]
-mod eval_hir_sites;
 #[path = "builtins/dynamic_base_target.rs"]
 mod dynamic_base_target;
+#[path = "builtins/eval_hir_sites.rs"]
+mod eval_hir_sites;
 #[path = "builtins/eval_static_selection.rs"]
 mod eval_static_selection;
 #[path = "builtins/native_target.rs"]
@@ -1138,8 +1138,10 @@ async fn eval_workspace_source(
                 Some(BaseTargetAuthority::CanonicalService)
             )
         {
-            let (identity, _) = capture_workspace_target(WorkspaceTarget::Current)
-                .map_err(|err| mex("DynamicWorkspaceUnavailable", &format!("{builtin}: {err}")))?;
+            let (identity, _) =
+                capture_workspace_target_in_context(&runtime, WorkspaceTarget::Current).map_err(
+                    |err| mex("DynamicWorkspaceUnavailable", &format!("{builtin}: {err}")),
+                )?;
             let (base, frame) = dynamic_base_target::ExplicitBaseTarget::capture(&runtime)?;
             (
                 DynamicEvalTarget::Frame {
@@ -1149,7 +1151,7 @@ async fn eval_workspace_source(
                 DynamicEvalInput::Frame(RootedDynamicEvalInput::new(frame)?),
             )
         } else {
-            let (identity, frame) = capture_workspace_target(target)
+            let (identity, frame) = capture_workspace_target_in_context(&runtime, target)
                 .map_err(|err| mex("DynamicWorkspaceUnavailable", &format!("{builtin}: {err}")))?;
             (
                 DynamicEvalTarget::Frame {

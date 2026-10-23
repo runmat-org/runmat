@@ -101,7 +101,11 @@ pub(super) fn diagnose_expression_steps(
         match step {
             MirExpressionStep::Let { local, value, span } => {
                 diagnose_rvalue_reads(value, state, current_bindings, *span, diagnostics);
-                state[local.0] = InitFact::DefinitelyAssigned;
+                if let Some(fact) = state.get_mut(local.0) {
+                    *fact = InitFact::DefinitelyAssigned;
+                } else {
+                    diagnostics.push(super::invalid_region_local_diagnostic(*local, *span));
+                }
             }
             MirExpressionStep::CaptureSequence { source, span, .. } => {
                 diagnose_expansion_source_reads(
@@ -120,6 +124,25 @@ pub(super) fn diagnose_expression_steps(
 mod tests {
     use super::*;
     use crate::{MirCallArg, MirCallArgumentRegion, MirConstant, MirExpansionSource, MirLocalId};
+
+    #[test]
+    fn undeclared_region_definitions_and_reads_diagnose_without_indexing_past_the_frame() {
+        let span = Span { start: 3, end: 9 };
+        let mut state = [InitFact::DefinitelyAssigned];
+        let mut diagnostics = Vec::new();
+        diagnose_expression_steps(
+            &[MirExpressionStep::Let {
+                local: MirLocalId(1),
+                value: crate::MirRvalue::Use(crate::MirOperand::Local(MirLocalId(2))),
+                span,
+            }],
+            &mut state,
+            &[],
+            &mut diagnostics,
+        );
+        assert_eq!(diagnostics.len(), 2);
+        assert_eq!(state, [InitFact::DefinitelyAssigned]);
+    }
 
     #[test]
     fn expansion_subscript_chain_respects_argument_region_order() {

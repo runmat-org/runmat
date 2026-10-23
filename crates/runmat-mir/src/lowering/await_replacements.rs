@@ -13,6 +13,28 @@ pub(crate) struct AwaitReplacements {
     sequences: HashMap<ExprId, MirSequenceLocalId>,
 }
 
+impl AwaitReplacements {
+    pub fn get(&self, expression: &ExprId) -> Option<&MirOperand> {
+        self.operands.get(expression)
+    }
+    pub fn insert(&mut self, expression: ExprId, operand: MirOperand) -> Option<MirOperand> {
+        self.sequences.remove(&expression);
+        self.operands.insert(expression, operand)
+    }
+    pub fn contains_key(&self, expression: &ExprId) -> bool {
+        self.operands.contains_key(expression) || self.sequences.contains_key(expression)
+    }
+
+    pub fn sequence(&self, expression: ExprId) -> Option<MirSequenceLocalId> {
+        self.sequences.get(&expression).copied()
+    }
+
+    pub fn insert_sequence(&mut self, expression: ExprId, sequence: MirSequenceLocalId) {
+        self.operands.remove(&expression);
+        self.sequences.insert(expression, sequence);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -34,27 +56,5 @@ mod tests {
         replacements.insert(expression, operand.clone());
         assert!(replacements.sequence(expression).is_none());
         assert_eq!(replacements.get(&expression), Some(&operand));
-    }
-}
-
-impl AwaitReplacements {
-    pub fn get(&self, expression: &ExprId) -> Option<&MirOperand> {
-        self.operands.get(expression)
-    }
-    pub fn insert(&mut self, expression: ExprId, operand: MirOperand) -> Option<MirOperand> {
-        self.sequences.remove(&expression);
-        self.operands.insert(expression, operand)
-    }
-    pub fn contains_key(&self, expression: &ExprId) -> bool {
-        self.operands.contains_key(expression) || self.sequences.contains_key(expression)
-    }
-
-    pub fn sequence(&self, expression: ExprId) -> Option<MirSequenceLocalId> {
-        self.sequences.get(&expression).copied()
-    }
-
-    pub fn insert_sequence(&mut self, expression: ExprId, sequence: MirSequenceLocalId) {
-        self.operands.remove(&expression);
-        self.sequences.insert(expression, sequence);
     }
 }

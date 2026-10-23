@@ -75,7 +75,7 @@ impl SequenceState {
             _ => Ok(()),
         }
     }
-    pub(super) fn capture_rooted_values(
+    pub(crate) fn capture_rooted_values(
         &mut self,
         slot: usize,
         stack: &mut crate::interpreter::stack::InterpreterStack,

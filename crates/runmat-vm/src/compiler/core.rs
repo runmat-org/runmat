@@ -1405,6 +1405,11 @@ impl Compiler {
             || parallel_output_count.is_some();
         if !emits_requested_values {
             self.emit(Instr::Unpack(targets.targets.len()));
+            if output_count > 1 {
+                // Scalar Unpack is an unconditional TooManyOutputs error.
+                // It has no normal successor and cannot initialize targets.
+                return Ok(());
+            }
         }
         for target in targets.targets.iter().rev() {
             self.compile_mir_output_target_store(target)?;
@@ -1534,13 +1539,18 @@ impl Compiler {
             MirPlace::Local(_) | MirPlace::Binding(_) => Ok(()),
             MirPlace::Member(base, member) => {
                 self.compile_mir_sequence_target_path(base)?;
-                self.emit(Instr::PrepareMemberPathStep(member.clone()));
+                self.emit(Instr::PrepareMemberPathStep {
+                    member: member.clone(),
+                    child_creation: runmat_types::AssignmentChildCreation::ExistingOnly,
+                });
                 Ok(())
             }
             MirPlace::DynamicMember(base, member) => {
                 self.compile_mir_sequence_target_path(base)?;
                 self.compile_mir_operand(member)?;
-                self.emit(Instr::PrepareDynamicMemberPathStep);
+                self.emit(Instr::PrepareDynamicMemberPathStep {
+                    child_creation: runmat_types::AssignmentChildCreation::ExistingOnly,
+                });
                 Ok(())
             }
             MirPlace::Index(base, indexing) => {
@@ -1549,10 +1559,12 @@ impl Compiler {
                     self.compile_prepared_index_components(indexing)?;
                 match indexing.kind {
                     IndexKind::Paren => self.emit(Instr::PrepareParenthesesPathStep {
+                        child_creation: runmat_types::AssignmentChildCreation::ExistingOnly,
                         component_count,
                         selectors,
                     }),
                     IndexKind::Brace => self.emit(Instr::PrepareBracesPathStep {
+                        child_creation: runmat_types::AssignmentChildCreation::ExistingOnly,
                         component_count,
                         selectors,
                         expand_all: indexing.cell_expand_all,
@@ -2275,7 +2287,7 @@ impl Compiler {
                     .with_identifier(IDENT_MIR_DELETE_ASSIGNMENT_RHS_INVALID));
             }
         }
-        if place.has_expanding_selectors() {
+        if place.requires_prepared_assignment() {
             return Err(self.compile_error(
                 "expanded fixed assignment requires its canonical prepared producer/consumer",
             ));
@@ -2339,27 +2351,8 @@ impl Compiler {
         match &phase.phase {
             Phase::CaptureReceiver => {
                 let root_slot = self.mir_place_root_slot(place)?;
-                let root_creation = if preparation.mutation.creation_policy
-                    == runmat_types::AssignmentCreationPolicy::ExistingOnly
-                {
-                    runmat_mir::SequenceRootCreation::Ordinary(
-                        runmat_types::AssignmentCreationPolicy::ExistingOnly,
-                    )
-                } else {
-                    match place.first_root_step() {
-                        Some(runmat_mir::MirRootStep::Index(IndexKind::Brace)) => {
-                            runmat_mir::SequenceRootCreation::OrdinaryCell
-                        }
-                        Some(runmat_mir::MirRootStep::Member) => {
-                            runmat_mir::SequenceRootCreation::Ordinary(
-                                runmat_types::AssignmentCreationPolicy::CreateStructFieldPath,
-                            )
-                        }
-                        _ => runmat_mir::SequenceRootCreation::Ordinary(
-                            runmat_types::AssignmentCreationPolicy::CreateArrayByIndex,
-                        ),
-                    }
-                };
+                let root_creation =
+                    place.assignment_root_creation(preparation.mutation.creation_policy);
                 self.emit(Instr::BeginFixedAssignment {
                     source_statement: preparation.source_statement,
                     root_slot,
@@ -2425,6 +2418,10 @@ impl Compiler {
                     .path_step(*path_step)
                     .ok_or_else(|| self.compile_error("fixed path finish is outside its source"))?;
                 let final_step = *path_step + 1 == preparation.path_len();
+                let child_creation = place.assignment_child_creation(
+                    *path_step + 1,
+                    preparation.mutation.creation_policy,
+                );
                 let (endpoint, selector_context) = match step {
                     MirPlace::Member(_, member) => (Step::Member(member.clone()), None),
                     MirPlace::DynamicMember(_, member) => {
@@ -2468,10 +2465,12 @@ impl Compiler {
                         if !final_step {
                             match indexing.kind {
                                 IndexKind::Paren => self.emit(Instr::PrepareParenthesesPathStep {
+                                    child_creation,
                                     component_count,
                                     selectors,
                                 }),
                                 IndexKind::Brace => self.emit(Instr::PrepareBracesPathStep {
+                                    child_creation,
                                     component_count,
                                     selectors,
                                     expand_all: indexing.cell_expand_all,
@@ -2489,8 +2488,13 @@ impl Compiler {
                 };
                 if !final_step {
                     match endpoint {
-                        Step::Member(member) => self.emit(Instr::PrepareMemberPathStep(member)),
-                        Step::DynamicMember => self.emit(Instr::PrepareDynamicMemberPathStep),
+                        Step::Member(member) => self.emit(Instr::PrepareMemberPathStep {
+                            member,
+                            child_creation,
+                        }),
+                        Step::DynamicMember => {
+                            self.emit(Instr::PrepareDynamicMemberPathStep { child_creation })
+                        }
                         _ => unreachable!("indexed prefix handled above"),
                     };
                     return Ok(());

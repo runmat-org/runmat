@@ -24,7 +24,7 @@ impl SelectorRegionContext<'_> {
             crate::MirFixedPreparationPhase::EvaluateSelector {
                 path_step: self.path_step,
                 component: self.component,
-                region,
+                region: Box::new(region),
                 destination,
             },
             self.span,
@@ -77,7 +77,7 @@ pub(super) fn plan<'a>(
     let HirStmtKind::Assign(target, rhs, _) = &statement.kind else {
         return Ok(None);
     };
-    if !super::stmt::assignment_target_expands(target) {
+    if !super::stmt::assignment_target_requires_preparation(target) {
         return Ok(None);
     }
     let mut builder = TargetBuilder {
@@ -365,7 +365,7 @@ pub(super) fn lower_completed(
                 crate::MirFixedPreparationPhase::EvaluateSelector {
                     path_step,
                     component,
-                    region,
+                    region: Box::new(region),
                     destination,
                 }
             }

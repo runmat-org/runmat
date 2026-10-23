@@ -384,7 +384,6 @@ impl AccelProvider for CudaProvider {
             &format!("cuda-ordinal-{}", self.ordinal),
             inventory_epoch,
         )
-        .map(Some)
     }
 
     fn native_device_api(&self) -> Option<NativeDeviceApi> {

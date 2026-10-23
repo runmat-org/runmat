@@ -404,11 +404,11 @@ impl RuntimeBuiltinService for FailingBuiltin {
             |_| {
                 CALLS.with(|calls| calls.set(calls.get() + 1));
                 let diagnostic = DIAGNOSTIC.with(Cell::get);
-                Box::pin(async move {
-                    Err(crate::build_runtime_error("the selected callee failed")
+                crate::builtin::rejected_builtin_future(
+                    crate::build_runtime_error("the selected callee failed")
                         .with_identifier(diagnostic)
-                        .build())
-                })
+                        .build(),
+                )
             },
         )]
     }
@@ -560,7 +560,7 @@ fn resolved_family_selection_is_cold_until_the_selected_future_is_polled() {
         move |_runtime, function, _, _| {
             assert_eq!(function, 41);
             observed.set(observed.get() + 1);
-            Box::pin(async {
+            crate::user_functions::admit_user_function_with(_runtime.as_ref(), move || async {
                 crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(41.0))
             })
         },

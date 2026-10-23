@@ -5,10 +5,10 @@ use super::ExecutionServiceError;
 
 #[path = "completion/initialization.rs"]
 mod initialization;
-#[path = "completion/publication.rs"]
-mod publication;
 #[path = "completion/iteration.rs"]
 mod iteration;
+#[path = "completion/publication.rs"]
+mod publication;
 pub(crate) use iteration::RootedValuesIteration;
 #[path = "completion/argument_transform.rs"]
 mod argument_transform;
@@ -940,6 +940,30 @@ impl RootedResult<ValueSequence> {
         })
     }
 
+    /// Apply canonical sequence selection while retaining the original roots
+    /// and physical backing. Aliased columns are read, never destructively
+    /// unwrapped or copied into a second collection; singles remain inline.
+    pub fn resolve_values(
+        self,
+        use_context: runmat_types::SequenceUse,
+        context: crate::sequence::SequenceResolutionContext,
+    ) -> Result<std::iter::Take<RootedValuesIntoIter>, crate::RuntimeError> {
+        let count = crate::sequence::resolved_output_count(self.len(), use_context, context)?;
+        Ok(self.try_into_values()?.take(count))
+    }
+
+    /// Retain the same selected sequence backing and roots for a suspended
+    /// consumer. Selection changes only its visible width, never its children.
+    pub fn resolve_sequence(
+        mut self,
+        use_context: runmat_types::SequenceUse,
+        context: crate::sequence::SequenceResolutionContext,
+    ) -> Result<Self, crate::RuntimeError> {
+        let count = crate::sequence::resolved_output_count(self.len(), use_context, context)?;
+        self.value.truncate(count);
+        Ok(self)
+    }
+
     /// Register the existing canonical sequence slice under the selected
     /// operation; no output-slot or child payload copy is required.
     pub fn in_context(
@@ -1044,6 +1068,81 @@ mod tests {
         assert_eq!(sequence.as_slice().as_ptr(), pointer);
         assert!(live.load(Ordering::SeqCst) > 0);
         let alias = sequence.clone();
+        use crate::sequence::SequenceResolutionContext;
+        use runmat_types::SequenceUse;
+        for (selection, context, count) in [
+            (
+                SequenceUse::SelectDestinationCardinality,
+                SequenceResolutionContext::destination_cardinality(2),
+                2,
+            ),
+            (
+                SequenceUse::SelectCurrentFunctionOutputs,
+                SequenceResolutionContext::current_function_outputs(1),
+                1,
+            ),
+            (
+                SequenceUse::SelectPrefix { count: 0 },
+                SequenceResolutionContext::default(),
+                0,
+            ),
+            (
+                SequenceUse::Discard,
+                SequenceResolutionContext::default(),
+                0,
+            ),
+        ] {
+            let selected = sequence
+                .clone()
+                .resolve_sequence(selection, context)
+                .unwrap();
+            assert_eq!(selected.len(), count);
+            assert_eq!(sequence.len(), 2, "selection never changes the source view");
+            assert_eq!(alias.as_slice(), &[Value::Num(1.0), Value::Num(2.0)]);
+            assert_eq!(alias.as_slice().as_ptr(), pointer);
+            // Shared column selection changes only the visible width.
+            if count != 0 {
+                assert_eq!(selected.as_slice().as_ptr(), pointer);
+            }
+            let mut selected = selected
+                .resolve_values(SequenceUse::ExpandAll, Default::default())
+                .unwrap();
+            assert_eq!(selected.len(), count);
+            if count != 0 {
+                assert_eq!(selected.next(), Some(Value::Num(1.0)));
+            }
+            drop(selected);
+            assert!(live.load(Ordering::SeqCst) > 0);
+        }
+        for (selection, context, identifier) in [
+            (
+                SequenceUse::SelectPrefix { count: 3 },
+                SequenceResolutionContext::default(),
+                "RunMat:CommaSeparatedListOutputShortage",
+            ),
+            (
+                SequenceUse::RequireSingle,
+                SequenceResolutionContext::default(),
+                "RunMat:CommaSeparatedListRequiresSingleValue",
+            ),
+            (
+                SequenceUse::SelectDestinationCardinality,
+                SequenceResolutionContext::default(),
+                "RunMat:SequenceDestinationContextUnavailable",
+            ),
+            (
+                SequenceUse::SelectCurrentFunctionOutputs,
+                SequenceResolutionContext::default(),
+                "RunMat:SequenceOutputContextUnavailable",
+            ),
+        ] {
+            let error = sequence
+                .clone()
+                .resolve_values(selection, context)
+                .unwrap_err();
+            assert_eq!(error.identifier(), Some(identifier));
+            assert!(live.load(Ordering::SeqCst) > 0);
+        }
         let mut values = sequence.try_into_values().unwrap();
         assert_eq!(values.next(), Some(Value::Num(1.0)));
         assert!(live.load(Ordering::SeqCst) > 0);
@@ -1248,12 +1347,15 @@ mod tests {
             let initial = runmat_gc::gc_allocate_rooted(Value::String("retained".into()))
                 .expect("allocate rooted payload");
             let handle = initial.handle();
-            let sequence = ValueSequence::comma_separated(vec![Value::HandleObject(HandleRef {
-                class_name: "CompletionHandle".into(),
-                target: handle,
-                valid: true,
-            })])
-            .expect("valid completion sequence");
+            let storage =
+                OutputListStorage::shared_unbounded(vec![Value::HandleObject(HandleRef {
+                    class_name: "CompletionHandle".into(),
+                    target: handle,
+                    valid: true,
+                })]);
+            let backing_alias = storage.clone();
+            let sequence =
+                ValueSequence::from_output_storage(storage).expect("valid completion sequence");
             let rooted = RootedValueSequence::new(sequence).expect("root completion");
             initial.unroot().expect("transfer root to completion");
 
@@ -1263,7 +1365,19 @@ mod tests {
                 Value::String("retained".into())
             );
 
-            drop(rooted);
+            let mut selected = rooted
+                .resolve_values(
+                    runmat_types::SequenceUse::SelectDestinationCardinality,
+                    crate::sequence::SequenceResolutionContext::destination_cardinality(1),
+                )
+                .unwrap();
+            drop(backing_alias);
+            runmat_gc::gc_collect_major().expect("selection retains original roots");
+            assert!(runmat_gc::gc_clone_value(&handle).is_ok());
+            assert!(matches!(selected.next(), Some(Value::HandleObject(_))));
+            runmat_gc::gc_collect_major().expect("exhausted iterator retains its roots until drop");
+            assert!(runmat_gc::gc_clone_value(&handle).is_ok());
+            drop(selected);
             runmat_gc::gc_collect_major().expect("collect after completion discard");
             assert!(runmat_gc::gc_clone_value(&handle).is_err());
         });

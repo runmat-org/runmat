@@ -23,7 +23,7 @@ use crate::interpreter::vars::InterpreterVars;
 use crate::runtime::workspace::{workspace_slot_assigned, workspace_slot_name};
 use runmat_runtime::RuntimeError;
 use runmat_value::{Tensor, Value};
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 
 pub(crate) use arrays::MatrixConstructionAtSource;
@@ -126,6 +126,10 @@ struct PendingSequenceDestination {
     prepared_root: Option<Value>,
 }
 
+#[expect(
+    clippy::large_enum_variant,
+    reason = "Keep prepared destination and rooted receivers inline without a per-assignment allocation"
+)]
 pub(super) enum PreparedOutputTarget {
     Fixed,
     Discard,
@@ -235,6 +239,10 @@ impl SequenceState {
             runmat_mir::SequenceRootCreation::Ordinary(creation) => {
                 builder.with_assignment_creation(creation)
             }
+            runmat_mir::SequenceRootCreation::OrdinaryContainer(_) => builder
+                .with_assignment_creation(
+                    runmat_types::AssignmentCreationPolicy::CreateStructFieldPath,
+                ),
             runmat_mir::SequenceRootCreation::OrdinaryCell => builder.with_assignment_creation(
                 runmat_types::AssignmentCreationPolicy::CreateArrayByIndex,
             ),
@@ -520,29 +528,6 @@ impl SequenceState {
         self.expected_output_targets = None;
         self.fixed_assignment_owner = None;
         std::mem::take(&mut self.output_targets)
-    }
-
-    pub fn capture(
-        &mut self,
-        slot: usize,
-        stack: &mut crate::interpreter::stack::InterpreterStack,
-        values: impl Into<runmat_value::OutputListStorage>,
-    ) -> Result<(), RuntimeError> {
-        if self.captures.contains_key(&slot) {
-            return Err(crate::interpreter::errors::mex(
-                "RunMat:CommaSeparatedListState",
-                "captured sequence slot was overwritten before consumption",
-            ));
-        }
-        self.reserve_capture_entry()?;
-        let values = values.into();
-        let window = SequenceRegister {
-            start: stack.len(),
-            len: values.len(),
-        };
-        stack.try_extend_output(values)?;
-        self.captures.insert(slot, window);
-        Ok(())
     }
 
     pub fn take_captures(

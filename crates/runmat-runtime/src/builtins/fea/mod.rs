@@ -3900,6 +3900,7 @@ mod tests {
         assert!(matches!(field_handle.value(), Value::Num(handle) if *handle >= 1.0));
     }
 
+    #[cfg(feature = "plot-core")]
     #[test]
     fn mesh_request_defaults_to_solver_edges_and_accepts_cad_reference() {
         let _guard = crate::analysis::storage::artifact_store_test_guard();
@@ -3927,6 +3928,7 @@ mod tests {
         assert!(!configured.show_edges);
     }
 
+    #[cfg(feature = "plot-core")]
     #[test]
     fn fea_plot_request_accepts_solver_mesh_edge_option() {
         let _guard = crate::analysis::storage::artifact_store_test_guard();

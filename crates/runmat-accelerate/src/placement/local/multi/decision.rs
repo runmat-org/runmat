@@ -44,7 +44,8 @@ pub(super) fn select_decision(
     if matches!(
         request.publication,
         LocalPublicationSemantics::SourceOrderedVm | LocalPublicationSemantics::SourceOrderedNative
-    ) || request.cpu.route.cost.estimate().is_none()
+    ) || request.cpu.native_host_alternative.is_some()
+        || request.cpu.route.cost.estimate().is_none()
         || request
             .admitted
             .iter()
@@ -87,20 +88,13 @@ pub(super) fn select_decision(
         ),
     };
     let native_alternative = cpu.native_alternative.take().filter(legal_native);
-    let native_host_alternative = cpu.native_host_alternative.take().filter(legal_native);
     let cpu = cpu
         .into_priced()
         .expect("numeric branch requires an estimated host carrier");
-    let native_set_identity = (native_alternative.is_some() || native_host_alternative.is_some())
-        .then(|| {
-            Digest::sha256_serialized(&(
-                "native-numeric-cpu-set-v2",
-                &cpu,
-                &native_alternative,
-                &native_host_alternative,
-            ))
+    let native_set_identity = native_alternative.is_some().then(|| {
+        Digest::sha256_serialized(&("native-numeric-cpu-set-v3", &cpu, &native_alternative))
             .expect("typed native candidates serialize")
-        });
+    });
     let (resources, digest, host_epoch, _) = physical_facts;
     resources.validate().map_err(|message| {
         plan_error(crate::placement::PlacementPlanError {
@@ -122,12 +116,8 @@ pub(super) fn select_decision(
                 .build(),
         ));
     }
-    let mut graph_candidates = Vec::with_capacity(
-        admitted.len()
-            + 1
-            + usize::from(native_alternative.is_some())
-            + usize::from(native_host_alternative.is_some()),
-    );
+    let mut graph_candidates =
+        Vec::with_capacity(admitted.len() + 1 + usize::from(native_alternative.is_some()));
     if let Some(resources) = cpu_resources.filter(|_| compare_profitability) {
         graph_candidates.push(PlacementGraphCandidate {
             resources,
@@ -137,10 +127,7 @@ pub(super) fn select_decision(
         });
     }
     if compare_profitability {
-        for alternative in [native_alternative, native_host_alternative]
-            .into_iter()
-            .flatten()
-        {
+        if let Some(alternative) = native_alternative {
             graph_candidates.push(alternative);
         }
     }

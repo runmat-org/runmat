@@ -54,8 +54,8 @@ pub(super) fn family(instruction: &Instr) -> InstructionDispatchFamily {
         | Instr::PrepareIndexedMemberDynamicSequenceOutputTarget { .. }
         | Instr::PrepareCellContentsSequenceOutputTarget { .. }
         | Instr::BeginSequenceOutputTarget { .. }
-        | Instr::PrepareMemberPathStep(..)
-        | Instr::PrepareDynamicMemberPathStep
+        | Instr::PrepareMemberPathStep { .. }
+        | Instr::PrepareDynamicMemberPathStep { .. }
         | Instr::BeginPreparedIndexSelectors { .. }
         | Instr::LoadPreparedIndexEnd { .. }
         | Instr::BeginContextualIndexSelectors { .. }
@@ -234,7 +234,9 @@ mod tests {
         );
         assert_eq!(family(&Instr::Await), InstructionDispatchFamily::Parallel);
         assert_eq!(
-            family(&Instr::PrepareDynamicMemberPathStep),
+            family(&Instr::PrepareDynamicMemberPathStep {
+                child_creation: runmat_types::AssignmentChildCreation::ExistingOnly
+            }),
             InstructionDispatchFamily::PreparedOutput
         );
     }

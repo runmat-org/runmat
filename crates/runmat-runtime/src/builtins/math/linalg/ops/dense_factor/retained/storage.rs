@@ -260,7 +260,8 @@ pub(super) async fn run_owned<R: Send + 'static>(
     } else {
         runtime
             .cpu_cooperation()
-            .run_owned_blocking(
+            .run_owned_blocking_in_context(
+                runtime,
                 runtime.service_ports().blocking_cpu().map(|s| s.as_ref()),
                 receipt.map(HostAllocationReceipt::retain_scratch_for_cpu_work),
                 body,

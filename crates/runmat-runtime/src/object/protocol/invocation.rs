@@ -71,32 +71,27 @@ async fn invoke_resolved_object_protocol_in_scope(
 /// Invoke a prepared assignment protocol with the exact comma-separated RHS.
 /// The sequence remains an argument list and can never be stored as one
 /// language value.
-pub fn invoke_resolved_object_assignment<'method>(
-    method: &'method ResolvedObjectMethod,
+pub async fn invoke_resolved_object_assignment(
+    method: &ResolvedObjectMethod,
     base: Value,
     path: ObjectSubscriptPath,
     values: Vec<Value>,
-) -> impl Future<Output = Result<RootedValue, RuntimeError>> + use<'method> {
-    async move {
-        let values = runmat_value::ValueSequence::comma_separated(values)
-            .map_err(crate::sequence::sequence_error_to_runtime)?;
-        invoke_resolved_object_assignment_with_context(None, method, base, path, values).await
-    }
+) -> Result<RootedValue, RuntimeError> {
+    let values = runmat_value::ValueSequence::comma_separated(values)
+        .map_err(crate::sequence::sequence_error_to_runtime)?;
+    invoke_resolved_object_assignment_with_context(None, method, base, path, values).await
 }
 
-pub fn invoke_resolved_object_assignment_in_context<'runtime, 'method>(
-    runtime: &'runtime RuntimeContext,
-    method: &'method ResolvedObjectMethod,
+pub async fn invoke_resolved_object_assignment_in_context(
+    runtime: &RuntimeContext,
+    method: &ResolvedObjectMethod,
     base: Value,
     path: ObjectSubscriptPath,
     values: Vec<Value>,
-) -> impl Future<Output = Result<RootedValue, RuntimeError>> + use<'runtime, 'method> {
-    async move {
-        let values = runmat_value::ValueSequence::comma_separated(values)
-            .map_err(crate::sequence::sequence_error_to_runtime)?;
-        invoke_resolved_object_assignment_with_context(Some(runtime), method, base, path, values)
-            .await
-    }
+) -> Result<RootedValue, RuntimeError> {
+    let values = runmat_value::ValueSequence::comma_separated(values)
+        .map_err(crate::sequence::sequence_error_to_runtime)?;
+    invoke_resolved_object_assignment_with_context(Some(runtime), method, base, path, values).await
 }
 
 pub(crate) fn invoke_resolved_object_assignment_sequence<'method>(
@@ -108,7 +103,7 @@ pub(crate) fn invoke_resolved_object_assignment_sequence<'method>(
     invoke_resolved_object_assignment_with_context(None, method, base, path, values)
 }
 
-pub(crate) fn invoke_resolved_object_assignment_sequence_in_context<'runtime, 'method>(
+pub fn invoke_resolved_object_assignment_sequence_in_context<'runtime, 'method>(
     runtime: &'runtime RuntimeContext,
     method: &'method ResolvedObjectMethod,
     base: Value,

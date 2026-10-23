@@ -1,5 +1,6 @@
 use super::*;
 
+#[path = "numeric_region_inputs/native_continuation.rs"]
 mod native_continuation;
 
 #[test]

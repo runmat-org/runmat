@@ -106,6 +106,7 @@ impl PreparedSequenceDestination {
                     endpoint,
                     values,
                     caller,
+                    _inputs,
                 )
                 .await
             }
@@ -149,6 +150,7 @@ impl PreparedSequenceDestination {
                     },
                     values,
                     caller,
+                    _inputs,
                 )
                 .await
             }

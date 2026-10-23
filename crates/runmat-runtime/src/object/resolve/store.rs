@@ -4,19 +4,17 @@ pub async fn store_member<OnWrite>(
     base: Value,
     field: String,
     rhs: Value,
-    allow_init: bool,
     caller_function_name: Option<&str>,
     on_write: OnWrite,
 ) -> Result<RootedValue, RuntimeError>
 where
     OnWrite: FnMut(&Value, &Value),
 {
-    store_member_with_context(
-        None,
+    store_member_with_scope(
+        OrdinaryMemberScope,
         base,
         field,
         rhs,
-        allow_init,
         caller_function_name,
         on_write,
     )
@@ -28,19 +26,17 @@ pub async fn store_member_in_context<OnWrite>(
     base: Value,
     field: String,
     rhs: Value,
-    allow_init: bool,
     caller_function_name: Option<&str>,
     on_write: OnWrite,
 ) -> Result<RootedValue, RuntimeError>
 where
     OnWrite: FnMut(&Value, &Value),
 {
-    store_member_with_context(
-        Some(context),
+    store_member_with_scope(
+        ContextualMemberScope(context),
         base,
         field,
         rhs,
-        allow_init,
         caller_function_name,
         on_write,
     )
@@ -52,22 +48,59 @@ pub(super) async fn store_member_with_context<OnWrite>(
     base: Value,
     field: String,
     rhs: Value,
-    allow_init: bool,
     caller_function_name: Option<&str>,
     on_write: OnWrite,
 ) -> Result<RootedValue, RuntimeError>
 where
     OnWrite: FnMut(&Value, &Value),
 {
+    match context {
+        Some(context) => {
+            store_member_with_scope(
+                ContextualMemberScope(context),
+                base,
+                field,
+                rhs,
+                caller_function_name,
+                on_write,
+            )
+            .await
+        }
+        None => {
+            store_member_with_scope(
+                OrdinaryMemberScope,
+                base,
+                field,
+                rhs,
+                caller_function_name,
+                on_write,
+            )
+            .await
+        }
+    }
+}
+
+async fn store_member_with_scope<'a, M, OnWrite>(
+    scope: M,
+    base: Value,
+    field: String,
+    rhs: Value,
+    caller_function_name: Option<&'a str>,
+    on_write: OnWrite,
+) -> Result<RootedValue, RuntimeError>
+where
+    M: MemberStoreScope<'a> + 'a,
+    OnWrite: FnMut(&Value, &Value) + 'a,
+{
+    let context = scope.runtime();
     let roots = member_store_roots(context, &base, &rhs)?;
     let field = crate::call::argument_text::adopt_string(field, context)?;
     store_member_scoped(
-        context,
+        scope,
         MemberStore {
             base,
             field,
             rhs,
-            allow_init,
             _roots: roots,
         },
         caller_function_name,
@@ -81,21 +114,58 @@ pub(crate) async fn store_member_text_with_context<OnWrite>(
     base: Value,
     field: runmat_value::Utf8Text,
     rhs: Value,
-    allow_init: bool,
     caller_function_name: Option<&str>,
     on_write: OnWrite,
 ) -> Result<RootedValue, RuntimeError>
 where
     OnWrite: FnMut(&Value, &Value),
 {
+    match context {
+        Some(context) => {
+            store_member_text_with_scope(
+                ContextualMemberScope(context),
+                base,
+                field,
+                rhs,
+                caller_function_name,
+                on_write,
+            )
+            .await
+        }
+        None => {
+            store_member_text_with_scope(
+                OrdinaryMemberScope,
+                base,
+                field,
+                rhs,
+                caller_function_name,
+                on_write,
+            )
+            .await
+        }
+    }
+}
+
+pub(crate) async fn store_member_text_with_scope<'a, M, OnWrite>(
+    scope: M,
+    base: Value,
+    field: runmat_value::Utf8Text,
+    rhs: Value,
+    caller_function_name: Option<&'a str>,
+    on_write: OnWrite,
+) -> Result<RootedValue, RuntimeError>
+where
+    M: MemberStoreScope<'a> + 'a,
+    OnWrite: FnMut(&Value, &Value) + 'a,
+{
+    let context = scope.runtime();
     let roots = member_store_roots(context, &base, &rhs)?;
     store_member_scoped(
-        context,
+        scope,
         MemberStore {
             base,
             field,
             rhs,
-            allow_init,
             _roots: roots,
         },
         caller_function_name,
@@ -108,7 +178,6 @@ struct MemberStore {
     base: Value,
     field: runmat_value::Utf8Text,
     rhs: Value,
-    allow_init: bool,
     _roots: RootedValueLease,
 }
 
@@ -127,20 +196,22 @@ fn member_store_roots(
     }
 }
 
-async fn store_member_scoped<OnWrite>(
-    context: Option<&crate::context::RuntimeContext>,
+fn store_member_scoped<'a, M, OnWrite>(
+    scope: M,
     request: MemberStore,
-    caller_function_name: Option<&str>,
+    caller_function_name: Option<&'a str>,
     on_write: OnWrite,
-) -> Result<RootedValue, RuntimeError>
+) -> impl std::future::Future<Output = Result<RootedValue, RuntimeError>> + 'a
 where
-    OnWrite: FnMut(&Value, &Value),
+    M: MemberStoreScope<'a> + 'a,
+    OnWrite: FnMut(&Value, &Value) + 'a,
 {
-    let work = store_member_in_scope(context, request, caller_function_name, on_write);
-    match context {
-        Some(context) => context.scope(work).await,
-        None => work.await,
-    }
+    scope.scope(store_member_in_scope(
+        scope.runtime(),
+        request,
+        caller_function_name,
+        on_write,
+    ))
 }
 
 async fn store_member_in_scope<OnWrite>(
@@ -156,7 +227,6 @@ where
         base,
         field,
         rhs,
-        allow_init,
         _roots,
     } = request;
     match base {
@@ -227,6 +297,9 @@ where
             if super::graphics::is_graphics_receiver_handle(&handle) {
                 return super::graphics::store_graphics_member(context, base, &field, rhs).await;
             }
+            // Invalid handle stores retain their established property-store
+            // error domain before selected protocol authority is consulted.
+            property_store::require_valid_handle(&handle)?;
             let access = crate::object::protocol::ObjectAccessContext::from_legacy_function_name(
                 caller_function_name,
             );
@@ -264,11 +337,6 @@ where
         .build()),
         Value::Foreign(reference) => {
             crate::foreign::store_foreign_member_text(reference, field, rhs).await
-        }
-        Value::Num(0.0) if allow_init => {
-            crate::execution::structure::construct_struct_from_fields_in_optional_context(
-                context, std::iter::once((field.as_str(), &rhs)),
-            )
         }
         base @ (Value::Num(_) | Value::Int(_)) => {
             if !is_possible_graphics_handle_value(&base) {
@@ -309,12 +377,11 @@ pub async fn store_member_dynamic<OnWrite>(
     base: Value,
     name: String,
     rhs: Value,
-    allow_init: bool,
     caller_function_name: Option<&str>,
     on_write: OnWrite,
 ) -> Result<RootedValue, RuntimeError>
 where
     OnWrite: FnMut(&Value, &Value),
 {
-    store_member(base, name, rhs, allow_init, caller_function_name, on_write).await
+    store_member(base, name, rhs, caller_function_name, on_write).await
 }

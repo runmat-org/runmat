@@ -37,20 +37,34 @@ impl LogicalInput {
     }
 }
 
-enum Positions<'a> {
+struct Admission<'a> {
+    receipt: HostAllocationReceipt,
+    runtime: &'a RuntimeContext,
+}
+
+enum PositionStorage {
     Empty,
     Ordinary(Vec<usize>),
-    Managed {
-        values: HostTypedWorkspace<usize>,
-        receipt: HostAllocationReceipt,
-        runtime: &'a RuntimeContext,
-    },
+    Managed(HostTypedWorkspace<usize>),
+}
+
+struct Positions<'a> {
+    // Physical storage retires before its external admission owner.
+    storage: PositionStorage,
+    admission: Option<Admission<'a>>,
 }
 
 impl<'a> Positions<'a> {
+    fn empty() -> Self {
+        Self {
+            storage: PositionStorage::Empty,
+            admission: None,
+        }
+    }
+
     fn allocate(runtime: Option<&'a RuntimeContext>, len: usize) -> Result<Self, RuntimeError> {
         if len == 0 {
-            return Ok(Self::Empty);
+            return Ok(Self::empty());
         }
         let scratch = HostTypedWorkspace::<usize>::quoted_bytes(len)
             .map_err(|cause| allocation(runtime, cause))?;
@@ -65,37 +79,36 @@ impl<'a> Positions<'a> {
                 let values = receipt
                     .temporary_typed(runtime, len)
                     .map_err(|cause| allocation(Some(runtime), cause))?;
-                Ok(Self::Managed {
-                    values,
-                    receipt,
-                    runtime,
+                Ok(Self {
+                    storage: PositionStorage::Managed(values),
+                    admission: Some(Admission { receipt, runtime }),
                 })
             }
-            None => Ok(Self::Ordinary(vec![0; len])),
+            None => Ok(Self {
+                storage: PositionStorage::Ordinary(vec![0; len]),
+                admission: None,
+            }),
         }
     }
 
     fn as_slice(&self) -> &[usize] {
-        match self {
-            Self::Empty => &[],
-            Self::Ordinary(values) => values,
-            Self::Managed { values, .. } => values.as_slice(),
+        match &self.storage {
+            PositionStorage::Empty => &[],
+            PositionStorage::Ordinary(values) => values,
+            PositionStorage::Managed(values) => values.as_slice(),
         }
     }
 
     fn as_mut_slice(&mut self) -> &mut [usize] {
-        match self {
-            Self::Empty => &mut [],
-            Self::Ordinary(values) => values,
-            Self::Managed { values, .. } => values.as_mut_slice(),
+        match &mut self.storage {
+            PositionStorage::Empty => &mut [],
+            PositionStorage::Ordinary(values) => values,
+            PositionStorage::Managed(values) => values.as_mut_slice(),
         }
     }
 
     fn checkpoint(&self) -> Result<(), RuntimeError> {
-        if let Self::Managed {
-            receipt, runtime, ..
-        } = self
-        {
+        if let Some(Admission { receipt, runtime }) = &self.admission {
             receipt
                 .checkpoint(runtime)
                 .map_err(|cause| allocation(Some(runtime), cause))?;
@@ -104,14 +117,15 @@ impl<'a> Positions<'a> {
     }
 }
 
-enum LogicalOutput<'a> {
+enum LogicalStorage {
     Ordinary(Vec<u8>),
-    Managed {
-        // Storage is destroyed before its external admission owner.
-        values: ExactHostLogicalTensorAllocation,
-        receipt: HostAllocationReceipt,
-        runtime: &'a RuntimeContext,
-    },
+    Managed(ExactHostLogicalTensorAllocation),
+}
+
+struct LogicalOutput<'a> {
+    // Physical storage retires before its external admission owner.
+    storage: LogicalStorage,
+    admission: Option<Admission<'a>>,
 }
 
 impl<'a> LogicalOutput<'a> {
@@ -134,30 +148,29 @@ impl<'a> LogicalOutput<'a> {
                         ExactHostLogicalTensorAllocation::new(shape, permit)
                     })
                     .map_err(|cause| allocation(Some(runtime), cause))?;
-                Ok(Self::Managed {
-                    values,
-                    receipt,
-                    runtime,
+                Ok(Self {
+                    storage: LogicalStorage::Managed(values),
+                    admission: Some(Admission { receipt, runtime }),
                 })
             }
-            None => Ok(Self::Ordinary(vec![0; shape.iter().product()])),
+            None => Ok(Self {
+                storage: LogicalStorage::Ordinary(vec![0; shape.iter().product()]),
+                admission: None,
+            }),
         }
     }
 
     fn as_mut_slice(&mut self) -> &mut [u8] {
-        match self {
-            Self::Ordinary(values) => values,
-            Self::Managed { values, .. } => values.as_mut_slice(),
+        match &mut self.storage {
+            LogicalStorage::Ordinary(values) => values,
+            LogicalStorage::Managed(values) => values.as_mut_slice(),
         }
     }
 
     fn admission(&self) -> Option<(&HostAllocationReceipt, &RuntimeContext)> {
-        match self {
-            Self::Ordinary(_) => None,
-            Self::Managed {
-                receipt, runtime, ..
-            } => Some((receipt, runtime)),
-        }
+        self.admission
+            .as_ref()
+            .map(|admission| (&admission.receipt, admission.runtime))
     }
 
     async fn into_array(
@@ -167,18 +180,17 @@ impl<'a> LogicalOutput<'a> {
         budget: &mut Option<CpuCooperationBudget>,
         positions: &Positions<'_>,
     ) -> Result<LogicalArray, RuntimeError> {
-        match self {
-            Self::Ordinary(values) => {
+        let Self { storage, admission } = self;
+        match storage {
+            LogicalStorage::Ordinary(values) => {
                 let array = LogicalArray::new(values, shape.to_vec())
                     .map_err(|detail| semantic_error("ShapeMismatch", detail))?;
                 checkpoint(runtime, budget, positions, None, 0).await?;
                 Ok(array)
             }
-            Self::Managed {
-                values,
-                receipt,
-                runtime,
-            } => {
+            LogicalStorage::Managed(values) => {
+                let Admission { receipt, runtime } =
+                    admission.expect("managed logical output retains its admission");
                 let array = receipt
                     .with_output_allocation(runtime, |_| values.into_array())
                     .map_err(|cause| allocation(Some(runtime), cause))?;
@@ -267,7 +279,7 @@ async fn delete(
     let owner = HostAllocationReceipt::capture_owner(runtime)
         .map_err(|cause| allocation(runtime, cause))?;
     let mut budget = runtime.map(RuntimeContext::cpu_cooperation);
-    checkpoint(runtime, &mut budget, &Positions::Empty, None, 0).await?;
+    checkpoint(runtime, &mut budget, &Positions::empty(), None, 0).await?;
     if !is_empty_delete_rhs(rhs) {
         return Err(semantic_error(
             "DeletionRequiresEmptyRhs",

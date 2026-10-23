@@ -64,12 +64,21 @@ fn site() -> runmat_runtime::native::NativeSiteRequest {
     }
 }
 
-fn start(fail: bool) -> (HostState, Rc<Cell<usize>>, Rc<Cell<usize>>) {
+fn start(
+    fail: bool,
+) -> (
+    HostState,
+    Rc<Cell<usize>>,
+    Rc<Cell<usize>>,
+    runmat_execution::cancellation::CancellationSource,
+) {
     let calls = Rc::new(Cell::new(0));
     let publications = Rc::new(Cell::new(0));
-    let runtime = RuntimeContext::new(Rc::new(
-        runmat_runtime::execution::RuntimeExecutionService::new(),
-    ))
+    let cancellation = runmat_execution::cancellation::CancellationSource::new();
+    let runtime = RuntimeContext::with_cancellation(
+        Rc::new(runmat_runtime::execution::RuntimeExecutionService::new()),
+        cancellation.token(),
+    )
     .with_service_ports(
         RuntimeServicePorts::default().with_acceleration(Rc::new(Adapter {
             calls: calls.clone(),
@@ -88,6 +97,9 @@ fn start(fail: bool) -> (HostState, Rc<Cell<usize>>, Rc<Cell<usize>>) {
             input: 0,
         });
     plan.program.outputs[0] = 1;
+    // The appended unary operation executes at this actual native rvalue
+    // occurrence. Keep the verified site's transcript complete.
+    plan.operation_sites.push(plan.entry);
     plan.skipped_sites.insert(crate::region::SiteIdentity {
         point: runmat_types::ProgramPointId {
             function: plan.region.function,
@@ -102,13 +114,13 @@ fn start(fail: bool) -> (HostState, Rc<Cell<usize>>, Rc<Cell<usize>>) {
         crate::region::OptimizedRegionPlanLease::from_test_plan(plan),
     );
     state.current_request = Some(site());
-    (state, calls, publications)
+    (state, calls, publications, cancellation)
 }
 
 #[test]
 fn native_region_suspends_before_poll_and_publishes_once_after_completion() {
     runmat_gc::gc_test_context(|| {
-        let (mut state, calls, publications) = start(false);
+        let (mut state, calls, publications, _cancellation) = start(false);
         let mut exit = runmat_runtime::native::NativeExit::completed(0);
         assert!(matches!(
             crate::execute::region::checkpoint(&mut state, site(), &mut exit),
@@ -147,7 +159,7 @@ fn native_region_suspends_before_poll_and_publishes_once_after_completion() {
 fn native_region_error_or_unpolled_drop_never_publishes_or_skips() {
     runmat_gc::gc_test_context(|| {
         for poll in [false, true] {
-            let (mut state, calls, publications) = start(true);
+            let (mut state, calls, publications, _cancellation) = start(true);
             let mut exit = runmat_runtime::native::NativeExit::completed(0);
             assert!(matches!(
                 crate::execute::region::checkpoint(&mut state, site(), &mut exit),
@@ -195,7 +207,7 @@ fn native_region_error_or_unpolled_drop_never_publishes_or_skips() {
                 Some(self.0.clone())
             }
         }
-        let (mut state, calls, publications) = start(false);
+        let (mut state, calls, publications, _cancellation) = start(false);
         let ledger = ManagedHostEffectLedger::new(8 * 1024 * 1024);
         let ports = state
             .runtime
@@ -232,7 +244,7 @@ fn native_region_error_or_unpolled_drop_never_publishes_or_skips() {
 #[test]
 fn native_pass_through_publication_uses_original_generation_not_refreshed_local() {
     runmat_gc::gc_test_context(|| {
-        let (mut state, _, _) = start(false);
+        let (mut state, _, _, _cancellation) = start(false);
         let mut plan = crate::region::placement_test_support::plan();
         let original = state.local_reference(0).unwrap();
         plan.outputs[0].source = crate::region::RegionOutputSource::Input(0);
@@ -251,7 +263,7 @@ fn native_pass_through_publication_uses_original_generation_not_refreshed_local(
 #[test]
 fn cancelled_native_completion_never_publishes_or_skips() {
     runmat_gc::gc_test_context(|| {
-        let (mut state, _, publications) = start(false);
+        let (mut state, _, publications, cancellation) = start(false);
         let mut exit = runmat_runtime::native::NativeExit::completed(0);
         assert!(matches!(
             crate::execute::region::checkpoint(&mut state, site(), &mut exit),
@@ -265,7 +277,8 @@ fn cancelled_native_completion_never_publishes_or_skips() {
             generation,
         ))
         .unwrap();
-        state.runtime.cancellation().cancel();
+        assert!(cancellation.cancel(runmat_execution::CancellationReason::User));
+        assert!(state.runtime.is_cancelled());
         assert!(
             crate::execute::region::checkpoint(&mut state, site(), &mut exit)
                 .unwrap()

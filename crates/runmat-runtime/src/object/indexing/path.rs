@@ -153,7 +153,7 @@ impl ObjectSubscriptPath {
             step,
         ]))
     }
-    pub(crate) fn single_in_context(
+    pub fn single_in_context(
         context: Option<&crate::context::RuntimeContext>,
         step: ObjectSubscript,
     ) -> Result<Self, RuntimeError> {

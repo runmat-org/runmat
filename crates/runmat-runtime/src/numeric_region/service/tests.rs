@@ -70,12 +70,13 @@ fn native_capture_retains_exact_payload_and_shape_without_changing_original() {
 #[test]
 fn closed_capture_declines_non_floating_before_effects_and_cancellation_revokes_right() {
     runmat_gc::gc_test_context(|| {
-        let runtime = runtime();
+        let cancellation = runmat_execution::cancellation::CancellationSource::new();
+        let runtime = runtime().with_cancellation_token(cancellation.token());
         for value in [
             Value::String("not numeric".into()),
-            Value::Int(1),
+            Value::Int(runmat_value::IntValue::I32(1)),
             Value::Bool(true),
-            Value::Complex(num_complex::Complex64::new(1.0, 1.0)),
+            Value::Complex(1.0, 1.0),
         ] {
             assert!(NativeNumericRegionRequest::capture_verified(
                 &runtime,
@@ -97,7 +98,8 @@ fn closed_capture_declines_non_floating_before_effects_and_cancellation_revokes_
         .unwrap()
         .unwrap();
         let (_program_owner, _, right) = request.into_parts();
-        runtime.cancellation().cancel();
+        assert!(cancellation.cancel(runmat_execution::CancellationReason::User));
+        assert!(runtime.is_cancelled());
         assert!(!right.is_current(&runtime));
         assert!(NativeNumericRegionRequest::capture_verified(
             &runtime,
@@ -287,7 +289,8 @@ fn native_publication_owner_retires_payload_before_claim_on_terminal_paths() {
         #[cfg(panic = "unwind")]
         Terminal::Unwind,
     ] {
-        let runtime = runtime();
+        let cancellation = runmat_execution::cancellation::CancellationSource::new();
+        let runtime = runtime().with_cancellation_token(cancellation.token());
         let request = NativeNumericRegionRequest::capture_verified(
             &runtime,
             region(),
@@ -318,7 +321,8 @@ fn native_publication_owner_retires_payload_before_claim_on_terminal_paths() {
             Terminal::Abandon => drop(owner),
             Terminal::Complete => owner.complete(&runtime, right),
             Terminal::Cancelled => {
-                runtime.cancellation().cancel();
+                assert!(cancellation.cancel(runmat_execution::CancellationReason::User));
+                assert!(runtime.is_cancelled());
                 owner.complete(&runtime, right);
             }
             #[cfg(panic = "unwind")]

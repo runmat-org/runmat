@@ -101,7 +101,7 @@ impl ControlFlowBuilder {
         for (idx, stmt) in body.statements.iter().enumerate().skip(start) {
             if let Some(await_expr) = first_unlowered_await_in_stmt(stmt, await_replacements) {
                 if matches!(&stmt.kind, HirStmtKind::Assign(target, rhs, _)
-                    if super::stmt::assignment_target_expands(target)
+                    if super::stmt::assignment_target_requires_preparation(target)
                     && first_unlowered_await(rhs, await_replacements).map(|value| value.id) != Some(await_expr.id))
                 {
                     let entry =
@@ -908,75 +908,11 @@ impl ControlFlowBuilder {
                     },
                 });
             }
-            if let HirStmtKind::ExprStmt(expr, _) = &stmt.kind {
-                if let HirExprKind::Await(future) = &expr.kind {
-                    let resume = self.lower_continuation_target(
-                        idx + 1,
-                        final_terminator,
-                        BlockLoweringEnv {
-                            fixed_preparation,
-                            ctx,
-                            body,
-                            return_terminator,
-                            loop_targets,
-                            await_replacements,
-                        },
-                    )?;
-                    let future = lower_operand_with_replacements(
-                        ctx,
-                        future,
-                        &mut statements,
-                        await_replacements,
-                    )?;
-                    return Ok(BasicBlock {
-                        id,
-                        statements,
-                        terminator: MirTerminator {
-                            kind: MirTerminatorKind::Await {
-                                future,
-                                result: None,
-                                resume,
-                            },
-                            span: stmt.span,
-                        },
-                    });
-                }
-            }
-            if let HirStmtKind::Assign(place, expr, _) = &stmt.kind {
-                if let HirExprKind::Await(future) = &expr.kind {
-                    let resume = self.lower_continuation_target(
-                        idx + 1,
-                        final_terminator,
-                        BlockLoweringEnv {
-                            fixed_preparation,
-                            ctx,
-                            body,
-                            return_terminator,
-                            loop_targets,
-                            await_replacements,
-                        },
-                    )?;
-                    let future = lower_operand_with_replacements(
-                        ctx,
-                        future,
-                        &mut statements,
-                        await_replacements,
-                    )?;
-                    let result = lower_place(ctx, place, &mut statements)?;
-                    return Ok(BasicBlock {
-                        id,
-                        statements,
-                        terminator: MirTerminator {
-                            kind: MirTerminatorKind::Await {
-                                future,
-                                result: Some(result),
-                                resume,
-                            },
-                            span: stmt.span,
-                        },
-                    });
-                }
-            }
+            // Unconsumed Await is handled by first_unlowered_await_in_stmt
+            // above. A resumed direct RHS must reach ordinary statement
+            // lowering with its replacement and exact retained preparation;
+            // matching the raw HIR Await again would replay it and omit the
+            // prepared assignment consumer.
             if matches!(stmt.kind, HirStmtKind::Return) {
                 return Ok(BasicBlock {
                     id,

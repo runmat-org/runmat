@@ -24,12 +24,27 @@ impl RuntimeParallelService for Managed {
 }
 
 fn runtime(budget: u64) -> (RuntimeContext, ManagedHostEffectLedger) {
-    let ledger = ManagedHostEffectLedger::new_with_epoch(budget, 296);
-    let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
-        .with_service_ports(
-            RuntimeServicePorts::default().with_parallel(Rc::new(Managed(ledger.clone()))),
-        );
+    let (runtime, ledger, _) = cancellable_runtime(budget);
     (runtime, ledger)
+}
+
+fn cancellable_runtime(
+    budget: u64,
+) -> (
+    RuntimeContext,
+    ManagedHostEffectLedger,
+    runmat_execution::cancellation::CancellationSource,
+) {
+    let cancellation = runmat_execution::cancellation::CancellationSource::new();
+    let ledger = ManagedHostEffectLedger::new_with_epoch(budget, 296);
+    let runtime = RuntimeContext::with_cancellation(
+        Rc::new(crate::execution::RuntimeExecutionService::new()),
+        cancellation.token(),
+    )
+    .with_service_ports(
+        RuntimeServicePorts::default().with_parallel(Rc::new(Managed(ledger.clone()))),
+    );
+    (runtime, ledger, cancellation)
 }
 
 struct FundingProbe {
@@ -63,6 +78,179 @@ impl Drop for FundingProbe {
 
 #[test]
 fn native_concrete_future_is_admitted_before_factory_and_refunded_on_abandonment() {
+    // Opaque embedding futures are not evidence of their concrete layout.
+    // Managed rejection precedes factory effects; ordinary adoption retains
+    // the exact original Box instead of allocating a Box around its pointer.
+    let (managed, legacy_ledger) = runtime(1_000_000);
+    let legacy_factory = Cell::new(false);
+    let denied = adopt_unbounded_legacy_rooted_future(Some(&managed), || {
+        legacy_factory.set(true);
+        Box::pin(async { Ok::<(), RuntimeError>(()) })
+    });
+    assert!(denied.is_err());
+    assert!(!legacy_factory.get());
+    assert_eq!(legacy_ledger.snapshot().live_reserved_bytes, 0);
+    let active = managed.enter();
+    let concrete = crate::user_functions::admit_user_function_with(None, || {
+        legacy_factory.set(true);
+        std::future::pending::<Result<crate::execution::RootedValueSequence, RuntimeError>>()
+    });
+    assert!(
+        concrete.is_err(),
+        "None cannot admit an uncharged selected callable"
+    );
+    let lexical = crate::user_functions::admit_lexical_function_with(None, || {
+        legacy_factory.set(true);
+        std::future::pending::<Result<crate::call::lexical::RootedLexicalCallResult, RuntimeError>>(
+        )
+    });
+    assert!(lexical.is_err());
+    assert!(!legacy_factory.get());
+    let denied = adopt_unbounded_legacy_rooted_future(None, || {
+        legacy_factory.set(true);
+        Box::pin(async { Ok::<(), RuntimeError>(()) })
+    });
+    assert!(
+        denied.is_err(),
+        "legacy None cannot bypass an active finite owner"
+    );
+    assert!(!legacy_factory.get());
+    drop(active);
+    let concrete = crate::user_functions::admit_user_function_with(None, || {
+        std::future::pending::<Result<crate::execution::RootedValueSequence, RuntimeError>>()
+    })
+    .expect("truly unscoped concrete callable remains ordinary");
+    drop(concrete);
+    let lexical = crate::user_functions::admit_lexical_function_with(None, || {
+        std::future::pending::<Result<crate::call::lexical::RootedLexicalCallResult, RuntimeError>>(
+        )
+    })
+    .expect("truly unscoped lexical callable remains ordinary");
+    drop(lexical);
+    // Context-free concrete factories have no execution grant, but retain
+    // the original ordinary cancellation guard just like opaque embeddings.
+    // Check before first poll, after a pending poll, and at final publication.
+    for lexical in [false, true] {
+        for mode in 0..3 {
+            use futures::FutureExt;
+            let source = runmat_execution::cancellation::CancellationSource::new();
+            let selected =
+                RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+                    .with_cancellation_token(source.token());
+            selected.set_error_namespace("OriginalNone398");
+            let polls = Rc::new(Cell::new(0));
+            let observed = Rc::clone(&polls);
+            let inside_source = source.clone();
+            let work = move || async move {
+                observed.set(observed.get() + 1);
+                if mode == 1 {
+                    std::future::pending::<()>().await;
+                }
+                if mode == 2 {
+                    assert!(inside_source.cancel(runmat_execution::CancellationReason::Deadline));
+                }
+            };
+            let entry = selected.enter();
+            let mut future = if lexical {
+                futures::future::Either::Left(
+                    crate::user_functions::admit_lexical_function_with(None, move || async move {
+                        work().await;
+                        crate::execution::RootedResult::new(
+                            crate::call::lexical::LexicalCallResult {
+                                outputs: runmat_value::ValueSequence::empty(),
+                                captures: Vec::new(),
+                            },
+                        )
+                        .map_err(|error| error.into_runtime_error())
+                    })
+                    .unwrap()
+                    .map(|result| result.map(|_| ())),
+                )
+            } else {
+                futures::future::Either::Right(
+                    crate::user_functions::admit_user_function_with(None, move || async move {
+                        work().await;
+                        crate::execution::RootedValueSequence::new(
+                            runmat_value::ValueSequence::empty(),
+                        )
+                        .map_err(|error| error.into_runtime_error())
+                    })
+                    .unwrap()
+                    .map(|result| result.map(|_| ())),
+                )
+            };
+            drop(entry);
+            let (foreign, _) = runtime(1_000_000);
+            foreign.set_error_namespace("ForeignNone398");
+            let _foreign = foreign.enter();
+            let mut context = Context::from_waker(futures::task::noop_waker_ref());
+            if mode == 1 {
+                assert!(Pin::new(&mut future).poll(&mut context).is_pending());
+                assert_eq!(polls.get(), 1);
+            }
+            if mode != 2 {
+                assert!(source.cancel(runmat_execution::CancellationReason::User));
+            }
+            let Poll::Ready(Err(error)) = Pin::new(&mut future).poll(&mut context) else {
+                panic!("late cancellation must prevent ordinary callable publication");
+            };
+            assert_eq!(error.identifier(), Some("OriginalNone398:Cancelled"));
+            assert!(matches!(
+                std::error::Error::source(&error).and_then(|source| {
+                    source.downcast_ref::<crate::execution::ExecutionServiceError>()
+                }),
+                Some(crate::execution::ExecutionServiceError::Cancelled)
+            ));
+            assert_eq!(polls.get(), usize::from(mode != 0));
+            assert!(
+                !foreign.is_cancelled(),
+                "the ambient scope is not cancellation authority"
+            );
+            drop(future);
+        }
+    }
+    let ordinary = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()));
+    let original = Cell::new(std::ptr::null::<()>());
+    let adopted = adopt_unbounded_legacy_rooted_future(Some(&ordinary), || {
+        let future = Box::pin(async {
+            std::future::pending::<()>().await;
+            Ok::<(), RuntimeError>(())
+        });
+        original.set(future.as_ref().get_ref() as *const _ as *const ());
+        future
+    })
+    .expect("ordinary embedding keeps its original owner");
+    match &adopted.body {
+        ContinuationBody::Running { future, claim, .. } => {
+            assert_eq!(
+                future.as_ref().get_ref() as *const _ as *const (),
+                original.get()
+            );
+            assert!(
+                claim.is_none(),
+                "opaque adoption never fabricates a managed grant"
+            );
+        }
+        ContinuationBody::Rejected(_) => panic!("ordinary factory was accepted"),
+    }
+    drop(adopted);
+    let (cancelled, _, source) = cancellable_runtime(1_000_000);
+    cancelled.set_error_namespace("LegacyOwner397");
+    source.cancel(runmat_execution::CancellationReason::Deadline);
+    let error = adopt_unbounded_legacy_rooted_future(Some(&cancelled), || {
+        legacy_factory.set(true);
+        Box::pin(async { Ok::<(), RuntimeError>(()) })
+    })
+    .err()
+    .expect("captured cancellation precedes embedding factory");
+    assert_eq!(error.identifier(), Some("LegacyOwner397:Cancelled"));
+    assert!(!legacy_factory.get());
+    // Rejection never carries a receipt. The inline carrier must not pay for
+    // both the full RuntimeError and the mutually exclusive running receipt.
+    const _: () = assert!(
+        std::mem::size_of::<RuntimeContinuationFuture<'_, (), RuntimeError>>()
+            < std::mem::size_of::<HostAllocationReceipt>() + std::mem::size_of::<RuntimeError>()
+    );
     let (denied, ledger) = runtime(1);
     let called = Cell::new(false);
     let result = admit_native_hostcall_with(
@@ -89,7 +277,7 @@ fn native_concrete_future_is_admitted_before_factory_and_refunded_on_abandonment
         std::mem::size_of::<FundingProbe>() as u64
     );
     for mode in 0..5 {
-        let (admitted, ledger) = runtime(1_000_000);
+        let (admitted, ledger, cancellation) = cancellable_runtime(1_000_000);
         let polls = Rc::new(Cell::new(0));
         let mut future = admit_native_hostcall_with(
             &admitted,
@@ -104,7 +292,8 @@ fn native_concrete_future_is_admitted_before_factory_and_refunded_on_abandonment
         .unwrap();
         assert!(ledger.snapshot().live_claimed_bytes + ledger.snapshot().live_reserved_bytes > 0);
         if mode == 2 {
-            admitted.cancellation().cancel();
+            assert!(cancellation.cancel(runmat_execution::CancellationReason::User));
+            assert!(admitted.is_cancelled());
         }
         if mode == 3 {
             ledger.revoke();
@@ -130,12 +319,40 @@ fn native_concrete_future_is_admitted_before_factory_and_refunded_on_abandonment
         assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
         assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
     }
+    // The same physical hostcall owner may borrow a live caller frame and
+    // return a borrowed non-Value domain result. No wrapper Box or cloned
+    // payload is needed to manufacture a static lifetime.
+    for ready in [false, true] {
+        let (selected, ledger) = runtime(1_000_000);
+        let borrowed = [11_u8; 64];
+        let polls = Cell::new(0);
+        let mut future = admit_native_hostcall_with_contextual_error(&selected, || async {
+            polls.set(polls.get() + 1);
+            if !ready {
+                std::future::pending::<()>().await;
+            }
+            Ok::<_, RuntimeError>(&borrowed)
+        })
+        .unwrap();
+        assert!(ledger.snapshot().live_reserved_bytes > 0);
+        let mut context = Context::from_waker(futures::task::noop_waker_ref());
+        match future.as_mut().poll(&mut context) {
+            Poll::Ready(Ok(value)) if ready => assert!(std::ptr::eq(value, &borrowed)),
+            Poll::Pending if !ready => {}
+            other => panic!("borrowed hostcall completion: {other:?}"),
+        }
+        assert_eq!(polls.get(), 1);
+        drop(future);
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    }
 }
 
 #[test]
 fn cancelled_native_admission_never_constructs_or_polls_child() {
-    let (cancelled, ledger) = runtime(1_000_000);
-    cancelled.cancellation().cancel();
+    let (cancelled, ledger, cancellation) = cancellable_runtime(1_000_000);
+    assert!(cancellation.cancel(runmat_execution::CancellationReason::User));
+    assert!(cancelled.is_cancelled());
     let called = Cell::new(false);
     let result = admit_native_hostcall_with(
         &cancelled,
@@ -171,4 +388,153 @@ fn cancelled_native_admission_never_constructs_or_polls_child() {
     drop(rejected);
     assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
     assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+
+    // Both the initial admission and later poll must use the selected
+    // cancellation authority, never a foreign ambient diagnostic namespace.
+    for already_cancelled in [true, false] {
+        let (selected, ledger, cancellation) = cancellable_runtime(1_000_000);
+        selected.set_error_namespace("SelectedHostcall");
+        if already_cancelled {
+            assert!(cancellation.cancel(runmat_execution::CancellationReason::User));
+            assert!(selected.is_cancelled());
+        }
+        let constructed = Cell::new(false);
+        let result = admit_native_hostcall_with_contextual_error(&selected, || {
+            constructed.set(true);
+            std::future::pending::<Result<(), RuntimeError>>()
+        });
+        let error = if already_cancelled {
+            assert!(!constructed.get());
+            result.err().expect("cancelled admission")
+        } else {
+            assert!(constructed.get());
+            let mut future = result.expect("admitted hostcall");
+            let (foreign, _) = runtime(1_000_000);
+            foreign.set_error_namespace("ForeignHostcall");
+            let _foreign_scope = foreign.enter();
+            assert!(cancellation.cancel(runmat_execution::CancellationReason::User));
+            assert!(selected.is_cancelled());
+            let mut context = Context::from_waker(futures::task::noop_waker_ref());
+            let Poll::Ready(Err(error)) = future.as_mut().poll(&mut context) else {
+                panic!("selected cancellation precedes child poll");
+            };
+            drop(future);
+            error
+        };
+        assert_eq!(error.identifier(), Some("SelectedHostcall:Cancelled"));
+        assert!(matches!(
+            std::error::Error::source(&error).and_then(|source| {
+                source.downcast_ref::<crate::execution::ExecutionServiceError>()
+            }),
+            Some(crate::execution::ExecutionServiceError::Cancelled)
+        ));
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    }
+}
+
+#[test]
+fn dynamic_load_preserves_original_miss_owner_and_terminal_control_failures() {
+    use crate::call::RootedFunctionArguments;
+    use crate::execution::{RootedValueSequence, RootedValues};
+    use crate::user_functions::await_dynamic_function_load;
+    use std::ops::ControlFlow;
+
+    let (denied, ledger) = runtime(0);
+    let factories = Cell::new(0);
+    let rejected = admit_dynamic_function_load_with(&denied, || {
+        factories.set(factories.get() + 1);
+        async {
+            ControlFlow::Continue(RootedFunctionArguments::ordinary(
+                RootedValues::new(Vec::new()).unwrap(),
+            ))
+        }
+    });
+    assert!(rejected.is_err());
+    assert_eq!(
+        factories.get(),
+        0,
+        "admission precedes source selection and future construction"
+    );
+    assert!(matches!(
+        futures::executor::block_on(await_dynamic_function_load(rejected)),
+        ControlFlow::Break(Err(_))
+    ));
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+
+    for mode in 0..6 {
+        let (selected, ledger, cancellation) = cancellable_runtime(1_000_000);
+        selected.set_error_namespace("DynamicControl396");
+        // Inputs already have their independent original root/backing owner;
+        // this row qualifies continuation control, not their allocation budget.
+        let arguments = RootedFunctionArguments::ordinary(
+            RootedValues::new(vec![runmat_value::Value::String("original".into())]).unwrap(),
+        );
+        let runmat_value::Value::String(original) = &arguments[0] else {
+            unreachable!()
+        };
+        let pointer = original.as_ptr();
+        let polls = Rc::new(Cell::new(0));
+        let observed = Rc::clone(&polls);
+        let mut future = admit_dynamic_function_load_with(&selected, move || async move {
+            observed.set(observed.get() + 1);
+            if mode == 1 {
+                std::future::pending::<()>().await;
+            }
+            if mode == 4 {
+                return ControlFlow::Break(Err(crate::build_runtime_error(
+                    "selected source failed",
+                )
+                .with_identifier("RunMat:DynamicControl396:Selected")
+                .build()));
+            }
+            if mode == 5 {
+                return ControlFlow::Break(
+                    RootedValueSequence::new(runmat_value::ValueSequence::empty())
+                        .map_err(|error| error.into_runtime_error()),
+                );
+            }
+            ControlFlow::Continue(arguments)
+        })
+        .unwrap();
+        assert!(ledger.snapshot().live_reserved_bytes > 0);
+        if mode == 1 {
+            let mut context = Context::from_waker(futures::task::noop_waker_ref());
+            assert!(future.as_mut().poll(&mut context).is_pending());
+            drop(future);
+            assert_eq!(polls.get(), 1);
+        } else {
+            if mode == 2 {
+                assert!(cancellation.cancel(runmat_execution::CancellationReason::User));
+            }
+            if mode == 3 {
+                ledger.revoke();
+            }
+            match futures::executor::block_on(await_dynamic_function_load(Ok(future))) {
+                ControlFlow::Continue(arguments) if mode == 0 => {
+                    let runmat_value::Value::String(value) = &arguments[0] else {
+                        unreachable!()
+                    };
+                    assert_eq!(
+                        value.as_ptr(),
+                        pointer,
+                        "a miss moves the original owner without cloning"
+                    );
+                }
+                ControlFlow::Break(Err(error)) if mode == 2 => {
+                    assert_eq!(error.identifier(), Some("DynamicControl396:Cancelled"));
+                    assert_eq!(polls.get(), 0);
+                }
+                ControlFlow::Break(Err(_)) if mode == 3 => assert_eq!(polls.get(), 0),
+                ControlFlow::Break(Err(error)) if mode == 4 => assert_eq!(
+                    error.identifier(),
+                    Some("RunMat:DynamicControl396:Selected")
+                ),
+                ControlFlow::Break(Ok(output)) if mode == 5 => assert!(output.value().is_empty()),
+                _ => panic!("dynamic control changed its selected/miss/error outcome"),
+            }
+        }
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    }
 }

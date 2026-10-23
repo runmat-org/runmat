@@ -196,6 +196,22 @@ pub async fn try_call_semantic_function(
     try_call_semantic_function_in_context(None, function, args, requested_outputs).await
 }
 
+/// The borrowed ABI needs one owned handle collection for queued callbacks.
+/// Reuse the canonical final-slot constructor: original roots survive its
+/// allocator callbacks, and backing is admitted before any Value is copied.
+fn materialize_borrowed_arguments(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: &[Value],
+) -> Result<crate::execution::RootedValues, RuntimeError> {
+    if runtime.is_none() {
+        // None remains a context-free embedding call, not an ambient managed
+        // grant. Reject an active finite/cancelled scope before allocating;
+        // never pass that guard's context to the selected callback.
+        crate::execution::rooted_continuation::unbounded_callable_cancellation(None)?;
+    }
+    crate::execution::RootedValues::from_borrowed_arguments(args, runtime)
+}
+
 /// Carry an explicitly selected invocation owner into a semantic body. A
 /// callback-selected context must not be replaced by an invoker's installation
 /// context, or Java/Python reentry loses its exact active-lane authority.
@@ -205,11 +221,7 @@ pub async fn try_call_semantic_function_in_context(
     args: &[Value],
     requested_outputs: usize,
 ) -> Option<Result<crate::execution::RootedValueSequence, RuntimeError>> {
-    let arguments = match runtime {
-        Some(runtime) => crate::execution::RootedValues::in_context(args.to_vec(), runtime),
-        None => crate::execution::RootedValues::new(args.to_vec())
-            .map_err(|error| error.into_runtime_error()),
-    };
+    let arguments = materialize_borrowed_arguments(runtime, args);
     let arguments = match arguments {
         Ok(arguments) => crate::call::RootedFunctionArguments::ordinary(arguments),
         Err(error) => return Some(Err(error)),
@@ -229,7 +241,12 @@ pub async fn try_call_rooted_semantic_function_in_context(
 ) -> Option<Result<crate::execution::RootedValueSequence, RuntimeError>> {
     let invoker = current_semantic_function_invoker();
     let invoker = invoker?;
-    Some(invoker(runtime.cloned(), function, arguments, requested_outputs).await)
+    Some(
+        match invoker(runtime.cloned(), function, arguments, requested_outputs) {
+            Ok(future) => future.await,
+            Err(error) => Err(error),
+        },
+    )
 }
 
 pub async fn try_call_bound_function(
@@ -262,19 +279,21 @@ pub async fn try_call_bound_function(
         )));
     }
     let invoker = current_bound_function_invoker()?;
-    let args = match crate::execution::RootedValues::new(args.to_vec()) {
+    let args = match materialize_borrowed_arguments(Some(&runtime), args) {
         Ok(args) => args,
-        Err(error) => return Some(Err(error.into_runtime_error())),
+        Err(error) => return Some(Err(error)),
     };
     Some(
-        invoker(
+        match invoker(
             runtime,
             binding,
             crate::call::RootedFunctionArguments::ordinary(args),
             requested_outputs,
             None,
-        )
-        .await,
+        ) {
+            Ok(future) => future.await,
+            Err(error) => Err(error),
+        },
     )
 }
 
@@ -310,14 +329,12 @@ pub fn try_call_bound_function_with_environment_in_context<'a>(
         .map(crate::call::lexical::root_environment)
         .transpose()
         .and_then(|roots| {
-            crate::execution::RootedValues::new(args.to_vec())
-                .map(|args| {
-                    (
-                        roots.unwrap_or_default(),
-                        crate::call::RootedFunctionArguments::ordinary(args),
-                    )
-                })
-                .map_err(|error| error.into_runtime_error())
+            materialize_borrowed_arguments(Some(runtime), args).map(|args| {
+                (
+                    roots.unwrap_or_default(),
+                    crate::call::RootedFunctionArguments::ordinary(args),
+                )
+            })
         });
     invoke_rooted_bound_function_with_environment_in_context(
         runtime,
@@ -439,14 +456,16 @@ async fn invoke_rooted_bound_function_with_environment_in_context(
         .bound_invoker()
         .unwrap_or_else(|| runtime.state().call.borrow().bound_invoker.clone())?;
     Some(
-        invoker(
+        match invoker(
             runtime.clone(),
             binding,
             args,
             requested_outputs,
             lexical_environment,
-        )
-        .await,
+        ) {
+            Ok(future) => future.await,
+            Err(error) => Err(error),
+        },
     )
 }
 
@@ -461,7 +480,10 @@ pub async fn try_call_external_function_in_context(
     call: ExternalFunctionCall,
 ) -> Option<Result<crate::execution::RootedValueSequence, RuntimeError>> {
     let invoker = current_external_function_invoker()?;
-    Some(invoker(runtime.cloned(), call).await)
+    Some(match invoker(runtime.cloned(), call) {
+        Ok(future) => future.await,
+        Err(error) => Err(error),
+    })
 }
 
 pub(crate) async fn try_call_external_function_owned_in_context(
@@ -474,7 +496,10 @@ pub(crate) async fn try_call_external_function_owned_in_context(
     let Some(invoker) = current_external_function_invoker() else {
         return std::ops::ControlFlow::Continue(call);
     };
-    std::ops::ControlFlow::Break(invoker(runtime.cloned(), call).await)
+    std::ops::ControlFlow::Break(match invoker(runtime.cloned(), call) {
+        Ok(future) => future.await,
+        Err(error) => Err(error),
+    })
 }
 
 pub async fn try_call_lexical_function(
@@ -503,7 +528,10 @@ pub async fn try_call_lexical_function_in_context(
         },
         None => Vec::new(),
     };
-    Some(invoker(runtime.cloned(), call).await)
+    Some(match invoker(runtime.cloned(), call) {
+        Ok(future) => future.await,
+        Err(error) => Err(error),
+    })
 }
 
 pub async fn try_call_semantic_function_by_name(
@@ -669,14 +697,14 @@ pub async fn try_load_and_call_dynamic_function(
     let Some(loader) = context.state().call.borrow().dynamic_loader.clone() else {
         return std::ops::ControlFlow::Continue(args);
     };
-    loader(
+    super::await_dynamic_function_load(loader(
         context,
         name,
         args,
         requested_outputs,
         phase,
         input_callsite,
-    )
+    ))
     .await
 }
 
@@ -695,7 +723,7 @@ pub async fn select_observed_source_binding_in_context(
     let arguments = crate::call::RootedFunctionArguments::ordinary(
         crate::execution::RootedValues::in_context(Vec::new(), &runtime)?,
     );
-    let result = loader(
+    let result = super::await_dynamic_function_load(loader(
         runtime,
         name,
         arguments,
@@ -705,7 +733,7 @@ pub async fn select_observed_source_binding_in_context(
             selected_source: Some(source),
         },
         None,
-    )
+    ))
     .await;
     let sequence = match result {
         std::ops::ControlFlow::Break(result) => result?,
@@ -729,7 +757,10 @@ pub async fn try_clear_dynamic_functions(
 ) -> Option<Result<(), RuntimeError>> {
     let context = crate::context::legacy::active()?;
     let clearer = context.state().call.borrow().dynamic_clearer.clone()?;
-    Some(clearer(context, request).await)
+    Some(match clearer(context, request) {
+        Ok(future) => future.await,
+        Err(error) => Err(error),
+    })
 }
 
 pub async fn try_refresh_dynamic_functions(
@@ -741,9 +772,13 @@ pub async fn try_refresh_dynamic_functions(
     if let Err(source) = cooperation.checkpoint(0).await {
         return Some(Err(refresh_execution_error(&context, source)));
     }
+    let future = match refresher(context.clone(), request) {
+        Ok(future) => future,
+        Err(error) => return Some(Err(error)),
+    };
     Some(
         cooperation
-            .await_cancellable(refresher(context.clone(), request))
+            .await_cancellable(future)
             .await
             .map_err(|source| refresh_execution_error(&context, source))
             .and_then(std::convert::identity),

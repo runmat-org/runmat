@@ -1,12 +1,15 @@
 //! Allocation-free native owners installed before Object publication. Native
 //! states requiring their own physical storage use separate admitted factories.
-use runmat_value::{ExactObjectBuilder, ForeignRef, GraphicsReceiverRef, ObjectInstance};
+#[cfg(feature = "plot-core")]
+use runmat_value::GraphicsReceiverRef;
+use runmat_value::{ExactObjectBuilder, ForeignRef, ObjectInstance};
 
 pub(crate) enum ObjectNativeInitialization<'a> {
     ForeignHostControl(ForeignRef),
     DatasetAuthority(ForeignRef),
     MatfileAuthority(ForeignRef),
     TcpAuthority(ForeignRef),
+    #[cfg(feature = "plot-core")]
     GraphicsReceiver(GraphicsReceiverRef),
     NumericFactor(&'a runmat_value::NumericFactorData),
 }
@@ -30,6 +33,7 @@ impl ObjectNativeInitialization<'_> {
             Self::DatasetAuthority(value) => builder.try_set_dataset_authority(value),
             Self::MatfileAuthority(value) => builder.try_set_matfile_authority(value),
             Self::TcpAuthority(value) => builder.try_set_tcp_authority(value),
+            #[cfg(feature = "plot-core")]
             Self::GraphicsReceiver(value) => builder.try_set_graphics_receiver(value),
             Self::NumericFactor(value) => {
                 return builder.try_set_numeric_factor_data(value.clone(), permit)
@@ -42,6 +46,7 @@ impl ObjectNativeInitialization<'_> {
             Self::DatasetAuthority(value) => object.with_dataset_authority(value),
             Self::MatfileAuthority(value) => object.with_matfile_authority(value),
             Self::TcpAuthority(value) => object.with_tcp_authority(value),
+            #[cfg(feature = "plot-core")]
             Self::GraphicsReceiver(value) => object.with_graphics_receiver(value),
             Self::NumericFactor(value) => object.with_numeric_factor_data(value.clone()),
         }

@@ -497,7 +497,10 @@ mod tests {
     use futures::executor::block_on;
     use runmat_value::{CellArray, HandleRef, Value, ValueSequence};
 
-    use super::{expand_arguments, MaterializedArgument, MaterializedExpansionSource};
+    use super::{
+        expand_arguments, MaterializedArgument, MaterializedExpansionSource, OutputListStorage,
+        RootedValueSequence,
+    };
 
     fn runtime() -> crate::context::RuntimeContext {
         crate::context::RuntimeContext::new(std::rc::Rc::new(
@@ -517,7 +520,7 @@ mod tests {
                 vec![MaterializedArgument::Expansion(
                     MaterializedExpansionSource::CellContents {
                         base,
-                        indices,
+                        indices: indices.into(),
                         expand_all: false,
                     },
                 )],

@@ -129,7 +129,7 @@ fn materialize_arguments_inner(
     })
 }
 
-fn materialize_argument(
+pub(super) fn materialize_argument(
     state: &mut HostState,
     argument: &MirCallArg,
 ) -> NativeExecutorResult<MaterializedArgument> {
@@ -356,18 +356,21 @@ pub(super) fn normalize_sequence_outputs(
     requested_outputs: usize,
 ) -> NativeExecutorResult<OutputListStorage> {
     let values = sequence.into_output_storage();
+    validate_output_arity(values.len(), requested_outputs)?;
     if requested_outputs == 0 {
         return Ok(OutputListStorage::empty());
     }
-    if values.as_slice().len() == requested_outputs {
-        Ok(values)
-    } else {
-        Err(NativeExecutorError::Host(format!(
-            "runtime returned {} outputs for a {}-output call",
-            values.as_slice().len(),
-            requested_outputs
-        )))
+    Ok(values)
+}
+
+/// Exact ordinary call arity, not comma-separated prefix selection.
+pub(super) fn validate_output_arity(actual: usize, requested: usize) -> NativeExecutorResult<()> {
+    if requested == 0 || actual == requested {
+        return Ok(());
     }
+    Err(NativeExecutorError::Host(format!(
+        "runtime returned {actual} outputs for a {requested}-output call"
+    )))
 }
 
 fn complete_rooted_call(
@@ -385,7 +388,7 @@ fn complete_rooted_call(
     super::call_suspension::begin_rooted_sequence(
         state,
         embedded,
-        Box::pin(async move { runtime.scope(future).await }),
+        move || async move { runtime.scope(future).await },
         requested_outputs,
     )
     .map(OutputListStorage::unbounded)

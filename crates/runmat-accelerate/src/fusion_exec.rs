@@ -624,29 +624,43 @@ fn select_fusion_provider_with_implementation(
         confidence: EstimateConfidence::Prior,
         source: EstimateSource::StaticPrior,
     };
-    let cpu_admission = match host {
-        host_readback::CpuHostPlacement::Native { .. } => {
-            crate::placement::LocalCpuAdmission::NativeRegionAtUse
+    let (cpu, cpu_admission) = match host {
+        host_readback::CpuHostPlacement::Native {
+            cpu: native_cpu,
+            right,
+            source_host,
+        } => crate::placement::LocalCpuCandidate::native_region(
+            native_cpu,
+            provider,
+            right,
+            source_host,
+        ),
+        _ if host_execution_ns.is_none() => {
+            (cpu.into(), crate::placement::LocalCpuAdmission::Unavailable)
         }
-        _ if host_execution_ns.is_none() => crate::placement::LocalCpuAdmission::Unavailable,
-        host_readback::CpuHostPlacement::Legacy => crate::placement::LocalCpuAdmission::Legacy,
+        host_readback::CpuHostPlacement::Legacy => {
+            (cpu.into(), crate::placement::LocalCpuAdmission::Legacy)
+        }
         host_readback::CpuHostPlacement::Unavailable => {
-            crate::placement::LocalCpuAdmission::Unavailable
+            (cpu.into(), crate::placement::LocalCpuAdmission::Unavailable)
         }
         host_readback::CpuHostPlacement::Readbacks(exact) => {
             cpu.presentation = exact.presentation.clone();
             cpu.cost.scratch_bytes = Some(exact.scratch_bytes);
-            crate::placement::LocalCpuAdmission::ExactReadbacks {
-                resources: Box::new(exact.resources),
-                download_bytes: exact.download_bytes,
-                readback_count: exact.readback_count,
-            }
+            (
+                cpu.into(),
+                crate::placement::LocalCpuAdmission::ExactReadbacks {
+                    resources: Box::new(exact.resources),
+                    download_bytes: exact.download_bytes,
+                    readback_count: exact.readback_count,
+                },
+            )
         }
     };
     let host_unavailable = matches!(
         cpu_admission,
         crate::placement::LocalCpuAdmission::Unavailable
-    );
+    ) && !matches!(host, host_readback::CpuHostPlacement::Native { .. });
     match crate::placement::plan_local_vm_cpu_with_provider(
         provider,
         LocalPlacementRequest {
@@ -702,20 +716,7 @@ fn select_fusion_provider_with_implementation(
             },
             preparation_program,
             shader_requirements,
-            cpu: match host {
-                host_readback::CpuHostPlacement::Native {
-                    cpu: native_cpu,
-                    right,
-                    source_host,
-                } => crate::placement::LocalCpuCandidate::native_region(
-                    native_cpu,
-                    provider,
-                    right,
-                    source_host,
-                    cpu.cost,
-                ),
-                _ => cpu.into(),
-            },
+            cpu,
             provider_fallback: runmat_execution::CandidateCostEvidence::Estimated(
                 provider_fallback,
             ),

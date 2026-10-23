@@ -54,7 +54,6 @@ fn assert_selective_readback(handle: f64, coordinate: &str, expected_type: &str)
 fn scatter_exported_source_preserves_exact_values_and_borrowed_leases() {
     use runmat_plot::core::{BoundingBox, GpuVertexBuffer};
     use runmat_plot::plots::{scatter::ScatterGpuStyle, MarkerStyle};
-    use std::sync::Arc;
 
     let _accel_guard = crate::builtins::common::test_support::accel_test_lock();
     let _plot_guard = lock_plot_registry();
@@ -89,19 +88,19 @@ fn scatter_exported_source_preserves_exact_values_and_borrowed_leases() {
     let scalar = ScalarType::from_is_f64(x_export.precision == ProviderPrecision::F64);
     let x_buffer = GpuInputBuffer::from(x_export);
     let y_buffer = GpuInputBuffer::from(y_export);
-    let dummy_vertices = Arc::new(
-        context
-            .access
-            .with_shared(|emission| {
-                emission.device().create_buffer(&wgpu::BufferDescriptor {
+    let dummy_vertices = context
+        .access
+        .with_shared(|emission| {
+            runmat_accelerate_api::WgpuBufferOwner::new(emission.device().create_buffer(
+                &wgpu::BufferDescriptor {
                     label: Some("scatter-property-vertex-placeholder"),
                     size: 16,
                     usage: wgpu::BufferUsages::VERTEX,
                     mapped_at_creation: false,
-                })
-            })
-            .expect("shared device vertex buffer"),
-    );
+                },
+            ))
+        })
+        .expect("shared device vertex buffer");
     let style = ScatterGpuStyle {
         color: glam::Vec4::ONE,
         edge_color: glam::Vec4::ONE,

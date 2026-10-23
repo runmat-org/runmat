@@ -648,7 +648,6 @@ mod tests {
                 &format!("test-device-{}", self.device_id),
                 inventory_epoch,
             )
-            .map(Some)
         }
     }
 

@@ -1,52 +1,6 @@
 use super::*;
 
 impl WgpuProvider {
-    pub(crate) async fn eig_exec(
-        &self,
-        handle: &GpuTensorHandle,
-        compute_left: bool,
-    ) -> runmat_accelerate_api::ProviderExecutionResult<ProviderEigResult> {
-        let source_precision = self.real_floating_input_precision_exec(handle)?;
-        let tensor = self.download_real_floating_tensor_exec(handle).await?;
-        let eval = runmat_runtime::builtins::math::linalg::factor::eig::evaluate(
-            Value::Tensor(tensor),
-            runmat_runtime::call::FunctionArgumentView::from_slice(&[]),
-            compute_left,
-        )
-        .await
-        .map_err(runtime_flow_to_provider_error)?;
-
-        let eigenvalues_value = eval.eigenvalues();
-        let diagonal_value = eval.diagonal_matrix();
-        let right_value = eval.right();
-        let left_value = if compute_left {
-            Some(eval.left().map_err(runtime_flow_to_provider_error)?)
-        } else {
-            None
-        };
-        for value in [&eigenvalues_value, &diagonal_value, &right_value]
-            .into_iter()
-            .chain(left_value.iter())
-        {
-            eig_transfer::admit_eig_output_class(value, source_precision)?;
-        }
-        let eigenvalues = self.upload_eig_output_exec(eigenvalues_value, &[handle])?;
-        let diagonal = self.upload_eig_output_exec(diagonal_value, &[handle, &eigenvalues])?;
-        let right = self.upload_eig_output_exec(right_value, &[handle, &eigenvalues, &diagonal])?;
-        let left = left_value
-            .map(|value| {
-                self.upload_eig_output_exec(value, &[handle, &eigenvalues, &diagonal, &right])
-            })
-            .transpose()?;
-
-        Ok(ProviderEigResult {
-            eigenvalues,
-            diagonal,
-            right,
-            left,
-        })
-    }
-
     pub(crate) fn issymmetric_exec(
         &self,
         matrix: &GpuTensorHandle,

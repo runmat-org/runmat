@@ -8,7 +8,58 @@ use runmat_value::Value;
 use crate::{NativeExecutorError, NativeExecutorResult};
 
 use super::super::state::{ActiveForLoop, HostState};
-use super::{CallCompletion, CompletedPayload, CompletionFuture, PendingCall};
+use super::payload::{PayloadBox, PayloadReservation};
+use super::{CallCompletion, CompletedPayload, PendingCall};
+
+pub(in crate::execute) struct PendingTerminator {
+    stage: TerminatorCompletion,
+    // Inline metadata; the first physical block's exact layout includes it.
+    // The receipt remains active across first-block retirement and Ready allocation.
+    reservation: PayloadReservation,
+}
+
+impl PendingTerminator {
+    pub(super) fn is_for_next(&self) -> bool {
+        self.stage.is_for_next()
+    }
+
+    pub(super) fn restore_for_next(
+        self,
+        state: &mut HostState,
+    ) -> NativeExecutorResult<(
+        Result<Option<RootedValue>, runmat_runtime::RuntimeError>,
+        PayloadReservation,
+    )> {
+        let next = self.stage.restore_for_next(state)?;
+        Ok((next, self.reservation))
+    }
+
+    pub(super) fn finish(
+        self,
+        runtime: &runmat_runtime::context::RuntimeContext,
+    ) -> NativeExecutorResult<PayloadBox<TerminatorReady>> {
+        self.reservation.allocate(runtime, self.stage.finish()?)
+    }
+}
+
+pub(in crate::execute) fn prepare_payload(
+    runtime: &runmat_runtime::context::RuntimeContext,
+) -> NativeExecutorResult<PayloadReservation> {
+    PayloadReservation::prepare_sequence::<PendingTerminator, TerminatorReady>(runtime)
+}
+
+pub(in crate::execute) fn completion(
+    runtime: &runmat_runtime::context::RuntimeContext,
+    reservation: PayloadReservation,
+    stage: TerminatorCompletion,
+) -> NativeExecutorResult<CallCompletion> {
+    let allocator = reservation.allocator(runtime)?;
+    let result = allocator
+        .allocate(PendingTerminator { stage, reservation })
+        .map_err(|cause| super::payload::error(runtime, cause))?;
+    result.reservation.check(runtime)?;
+    Ok(CallCompletion::Terminator(result))
+}
 
 pub(in crate::execute) enum TerminatorCompletion {
     BranchTruth(bool),
@@ -22,7 +73,7 @@ pub(in crate::execute) enum TerminatorCompletion {
         discriminant: RootedValue,
         truth: bool,
     },
-    ForCapture(Box<runmat_runtime::iteration::ForColumnIterator>),
+    ForCapture(runmat_runtime::iteration::ForColumnIterator),
     ForNext {
         header: NativeBlockId,
         active: ActiveForLoop,
@@ -49,7 +100,7 @@ pub(in crate::execute) enum TerminatorReadyStage {
         discriminant: RootedValue,
         truth: bool,
     },
-    ForCapture(Box<runmat_runtime::iteration::ForColumnIterator>),
+    ForCapture(runmat_runtime::iteration::ForColumnIterator),
     ForNext(Option<NativeValueRef>),
 }
 
@@ -79,14 +130,14 @@ impl TerminatorCompletion {
     }
 
     pub(super) fn restore_for_next(
-        self: Box<Self>,
+        self,
         state: &mut HostState,
     ) -> NativeExecutorResult<Result<Option<RootedValue>, runmat_runtime::RuntimeError>> {
         let Self::ForNext {
             header,
             active,
             next,
-        } = *self
+        } = self
         else {
             return Err(NativeExecutorError::Host(
                 "native terminator completion is not a for iteration".into(),
@@ -96,8 +147,8 @@ impl TerminatorCompletion {
         Ok(next)
     }
 
-    pub(super) fn finish(self: Box<Self>) -> NativeExecutorResult<TerminatorReady> {
-        Ok(match *self {
+    pub(super) fn finish(self) -> NativeExecutorResult<TerminatorReady> {
+        Ok(match self {
             Self::BranchTruth(truth) => TerminatorReady {
                 stage: TerminatorReadyStage::BranchTruth(truth),
                 equality: None,
@@ -162,7 +213,7 @@ pub(in crate::execute) fn take_completed_terminator(
     let CompletedPayload::Terminator(stage) = completed.payload else {
         unreachable!("typed terminator payload was checked")
     };
-    Ok(Some(*stage))
+    Ok(Some(stage.into_inner()))
 }
 
 fn admission(state: &mut HostState) -> NativeExecutorResult<(NativeSiteRequest, u64, u64)> {
@@ -178,19 +229,30 @@ fn admission(state: &mut HostState) -> NativeExecutorResult<(NativeSiteRequest, 
     Ok((request, continuation, generation))
 }
 
-fn install(
+fn install<F>(
     state: &mut HostState,
     identity: (NativeSiteRequest, u64, u64),
-    future: CompletionFuture,
+    make_future: impl FnOnce() -> F,
+) -> NativeExecutorResult<NativeSiteOutcome>
+where
+    F: std::future::Future<Output = NativeExecutorResult<CallCompletion>> + 'static,
+{
+    let future = super::admit_completion_with(state, make_future)?;
+    install_admitted(state, identity, future)
+}
+
+fn install_admitted(
+    state: &mut HostState,
+    identity: (NativeSiteRequest, u64, u64),
+    future: super::PendingCompletionFuture,
 ) -> NativeExecutorResult<NativeSiteOutcome> {
-    let future = super::scope_completion(state, future);
     state.pending_call = Some(PendingCall {
         request: identity.0,
         continuation: identity.1,
         generation: identity.2,
         embedded: None,
         retained_roots: Vec::new(),
-        future: crate::execute::call_suspension::PendingCompletionFuture::Ordinary(future),
+        future,
     });
     Err(NativeExecutorError::CallSuspended)
 }
@@ -200,25 +262,20 @@ pub(in crate::execute) fn begin_branch_truth(
     condition: Value,
 ) -> NativeExecutorResult<NativeSiteOutcome> {
     let identity = admission(state)?;
+    let payload = prepare_payload(&state.runtime)?;
     let condition = RootedValue::new(condition)
         .map_err(|error| NativeExecutorError::from(error.into_runtime_error()))?;
     let runtime = state.runtime.clone();
-    install(
-        state,
-        identity,
-        Box::pin(async move {
-            let truth = runtime
-                .scope(runmat_runtime::condition::control_flow_truth_from_value(
-                    &runtime,
-                    condition.value(),
-                    "branch condition",
-                ))
-                .await?;
-            Ok(CallCompletion::Terminator(Box::new(
-                TerminatorCompletion::BranchTruth(truth),
-            )))
-        }),
-    )
+    install(state, identity, move || async move {
+        let truth = runtime
+            .scope(runmat_runtime::condition::control_flow_truth_from_value(
+                &runtime,
+                condition.value(),
+                "branch condition",
+            ))
+            .await?;
+        completion(&runtime, payload, TerminatorCompletion::BranchTruth(truth))
+    })
 }
 
 pub(in crate::execute) fn begin_switch_equality(
@@ -228,29 +285,28 @@ pub(in crate::execute) fn begin_switch_equality(
     case: Value,
 ) -> NativeExecutorResult<NativeSiteOutcome> {
     let identity = admission(state)?;
+    let payload = prepare_payload(&state.runtime)?;
     let case = RootedValue::new(case)
         .map_err(|error| NativeExecutorError::from(error.into_runtime_error()))?;
     let runtime = state.runtime.clone();
-    install(
-        state,
-        identity,
-        Box::pin(async move {
-            let equality = runtime
-                .scope(runmat_runtime::call_builtin_async_in_context(
-                    &runtime,
-                    "eq",
-                    &[discriminant.value().clone(), case.value().clone()],
-                ))
-                .await?;
-            Ok(CallCompletion::Terminator(Box::new(
-                TerminatorCompletion::SwitchEquality {
-                    index,
-                    discriminant,
-                    equality,
-                },
-            )))
-        }),
-    )
+    install(state, identity, move || async move {
+        let equality = runtime
+            .scope(runmat_runtime::call_builtin_async_in_context(
+                &runtime,
+                "eq",
+                &[discriminant.value().clone(), case.value().clone()],
+            ))
+            .await?;
+        completion(
+            &runtime,
+            payload,
+            TerminatorCompletion::SwitchEquality {
+                index,
+                discriminant,
+                equality,
+            },
+        )
+    })
 }
 
 pub(in crate::execute) fn begin_switch_truth(
@@ -260,26 +316,25 @@ pub(in crate::execute) fn begin_switch_truth(
     equality: RootedValue,
 ) -> NativeExecutorResult<NativeSiteOutcome> {
     let identity = admission(state)?;
+    let payload = prepare_payload(&state.runtime)?;
     let runtime = state.runtime.clone();
-    install(
-        state,
-        identity,
-        Box::pin(async move {
-            let truth = runtime
-                .scope(runmat_runtime::condition::logical_truth_from_value(
-                    equality.value(),
-                    "switch case comparison",
-                ))
-                .await?;
-            Ok(CallCompletion::Terminator(Box::new(
-                TerminatorCompletion::SwitchTruth {
-                    index,
-                    discriminant,
-                    truth,
-                },
-            )))
-        }),
-    )
+    install(state, identity, move || async move {
+        let truth = runtime
+            .scope(runmat_runtime::condition::logical_truth_from_value(
+                equality.value(),
+                "switch case comparison",
+            ))
+            .await?;
+        completion(
+            &runtime,
+            payload,
+            TerminatorCompletion::SwitchTruth {
+                index,
+                discriminant,
+                truth,
+            },
+        )
+    })
 }
 
 pub(in crate::execute) fn begin_for_capture(
@@ -287,23 +342,22 @@ pub(in crate::execute) fn begin_for_capture(
     source: Value,
 ) -> NativeExecutorResult<NativeSiteOutcome> {
     let identity = admission(state)?;
+    let payload = prepare_payload(&state.runtime)?;
     let source = RootedValue::new(source)
         .map_err(|error| NativeExecutorError::from(error.into_runtime_error()))?;
     let runtime = state.runtime.clone();
-    install(
-        state,
-        identity,
-        Box::pin(async move {
-            let iterator = runtime
-                .scope(runmat_runtime::iteration::ForColumnIterator::new(
-                    source.value().clone(),
-                ))
-                .await?;
-            Ok(CallCompletion::Terminator(Box::new(
-                TerminatorCompletion::ForCapture(Box::new(iterator)),
-            )))
-        }),
-    )
+    install(state, identity, move || async move {
+        let iterator = runtime
+            .scope(runmat_runtime::iteration::ForColumnIterator::new(
+                source.value().clone(),
+            ))
+            .await?;
+        completion(
+            &runtime,
+            payload,
+            TerminatorCompletion::ForCapture(iterator),
+        )
+    })
 }
 
 pub(in crate::execute) fn begin_for_next(
@@ -312,20 +366,31 @@ pub(in crate::execute) fn begin_for_next(
 ) -> NativeExecutorResult<NativeSiteOutcome> {
     // Validate the handoff before moving the only loop record out of HostState.
     let identity = admission(state)?;
-    let mut active = state.take_for_loop(header)?;
+    if !state.has_for_loop(header) {
+        return Err(NativeExecutorError::Host(
+            "native for-loop state is unavailable".into(),
+        ));
+    }
+    let payload = prepare_payload(&state.runtime)?;
     let runtime = state.runtime.clone();
-    install(
-        state,
-        identity,
-        Box::pin(async move {
+    let catch = state.active_catch_exception();
+    let future = super::admit_completion_in_context_with(&runtime.clone(), catch, || {
+        // The exact allocation is admitted before this factory removes the
+        // move-only iterator. Refusal therefore leaves the loop in HostState.
+        let active = state.take_for_loop(header);
+        async move {
+            let mut active = active?;
             let next = runtime.scope(active.iterator.next()).await;
-            Ok(CallCompletion::Terminator(Box::new(
+            completion(
+                &runtime,
+                payload,
                 TerminatorCompletion::ForNext {
                     header,
                     active,
                     next,
                 },
-            )))
-        }),
-    )
+            )
+        }
+    })?;
+    install_admitted(state, identity, future)
 }

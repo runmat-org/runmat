@@ -16,12 +16,13 @@ pub async fn plan_for_fixed_assignment(
     let context = crate::context::legacy::active();
     plan_for_step(context.as_ref(), shape, step, PlanMode::FixedAssignment).await
 }
-pub async fn plan_for_fixed_assignment_in_context(
-    context: &RuntimeContext,
-    shape: &[usize],
-    step: &ObjectSubscript,
-) -> Result<crate::indexing::plan::IndexPlan, RuntimeError> {
-    plan_for_step(Some(context), shape, step, PlanMode::FixedAssignment).await
+pub fn plan_for_fixed_assignment_in_context<'a>(
+    context: &'a RuntimeContext,
+    shape: &'a [usize],
+    step: &'a ObjectSubscript,
+) -> impl std::future::Future<Output = Result<crate::indexing::plan::IndexPlan, RuntimeError>> + 'a
+{
+    plan_for_step(Some(context), shape, step, PlanMode::FixedAssignment)
 }
 pub async fn plan_for_shape(
     shape: &[usize],
@@ -41,12 +42,13 @@ pub async fn plan_for_shape(
     )
     .await
 }
-pub async fn plan_for_shape_in_context(
-    context: &RuntimeContext,
-    shape: &[usize],
-    step: &ObjectSubscript,
+pub fn plan_for_shape_in_context<'a>(
+    context: &'a RuntimeContext,
+    shape: &'a [usize],
+    step: &'a ObjectSubscript,
     assignment: bool,
-) -> Result<crate::indexing::plan::IndexPlan, RuntimeError> {
+) -> impl std::future::Future<Output = Result<crate::indexing::plan::IndexPlan, RuntimeError>> + 'a
+{
     plan_for_step(
         Some(context),
         shape,
@@ -57,7 +59,6 @@ pub async fn plan_for_shape_in_context(
             PlanMode::Read
         },
     )
-    .await
 }
 async fn plan_for_step(
     context: Option<&RuntimeContext>,
@@ -81,20 +82,22 @@ pub async fn plan_for_components(
     let context = crate::context::legacy::active();
     plan_for_components_with_context(context.as_ref(), shape, components, assignment).await
 }
-pub async fn plan_for_components_in_context(
-    context: &RuntimeContext,
-    shape: &[usize],
-    components: &[ObjectIndexComponent],
+pub fn plan_for_components_in_context<'a>(
+    context: &'a RuntimeContext,
+    shape: &'a [usize],
+    components: &'a [ObjectIndexComponent],
     assignment: bool,
-) -> Result<crate::indexing::plan::IndexPlan, RuntimeError> {
-    plan_for_components_with_context(Some(context), shape, components, assignment).await
+) -> impl std::future::Future<Output = Result<crate::indexing::plan::IndexPlan, RuntimeError>> + 'a
+{
+    plan_for_components_with_context(Some(context), shape, components, assignment)
 }
-pub(crate) async fn plan_for_components_with_context(
-    context: Option<&RuntimeContext>,
-    shape: &[usize],
-    components: &[ObjectIndexComponent],
+pub(crate) fn plan_for_components_with_context<'a, S: AsRef<[usize]> + 'a>(
+    context: Option<&'a RuntimeContext>,
+    shape: S,
+    components: &'a [ObjectIndexComponent],
     assignment: bool,
-) -> Result<crate::indexing::plan::IndexPlan, RuntimeError> {
+) -> impl std::future::Future<Output = Result<crate::indexing::plan::IndexPlan, RuntimeError>> + 'a
+{
     plan_for_mode(
         context,
         shape,
@@ -105,14 +108,16 @@ pub(crate) async fn plan_for_components_with_context(
             PlanMode::Read
         },
     )
-    .await
 }
-async fn plan_for_mode(
+async fn plan_for_mode<S: AsRef<[usize]>>(
     context: Option<&RuntimeContext>,
-    shape: &[usize],
+    shape: S,
     components: &[ObjectIndexComponent],
     mode: PlanMode,
 ) -> Result<crate::indexing::plan::IndexPlan, RuntimeError> {
+    // Own either the caller's borrowed dimensions or its existing inline
+    // scalar/sparse shape in this original planner, not a forwarding future.
+    let shape = shape.as_ref();
     let owner = crate::indexing::plan::admission::Owner::new(context)?;
     let selectors = owner
         .await_stage(
@@ -182,10 +187,26 @@ mod tests {
 
     #[test]
     fn fixed_assignment_preserves_valid_column_major_selection() {
+        let step = index(&[2.0, 3.0]);
         let planned =
-            futures::executor::block_on(plan_for_fixed_assignment(&[2, 3], &index(&[2.0, 3.0])))
-                .unwrap();
+            futures::executor::block_on(plan_for_fixed_assignment(&[2, 3], &step)).unwrap();
         assert_eq!(planned.indices, vec![5]);
         assert_eq!(planned.output_shape, vec![1, 1]);
+
+        let ObjectIndexSelector::IndexValues { components } = step.selector() else {
+            unreachable!("ordinary test indices")
+        };
+        use crate::builtins::common::shape::ValueDimensions;
+        for shape in [
+            ValueDimensions::Stored(&[2, 3]),
+            ValueDimensions::Inline([2, 3]),
+        ] {
+            let read = futures::executor::block_on(plan_for_components_with_context(
+                None, shape, components, false,
+            ))
+            .unwrap();
+            assert_eq!(read.indices, planned.indices);
+            assert_eq!(read.output_shape, planned.output_shape);
+        }
     }
 }

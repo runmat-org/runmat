@@ -4,14 +4,14 @@ use runmat_runtime::execution::value_codec::ValueCodecError;
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 
+use super::future::control;
 use super::{build_user_function_expand_multi_args, calls, DispatchDecision, DispatchHandled};
-use std::{future::Future, pin::Pin};
 
+mod data_dispatch;
 mod future_creation;
 mod future_wait;
 mod pool_dispatch;
 mod region_dispatch;
-mod data_dispatch;
 
 mod collective;
 mod distributed;
@@ -29,7 +29,7 @@ pub(super) struct ParallelDispatchContext<'a> {
 }
 
 type ParallelDispatchResult = Result<Option<DispatchHandled>, RuntimeError>;
-type ParallelDispatchFuture<'a> = Pin<Box<dyn Future<Output = ParallelDispatchResult> + 'a>>;
+type ParallelDispatchFuture<'a> = control::ControlDispatchFuture<'a>;
 
 struct ParallelDispatchState<'a> {
     instr: &'a Instr,
@@ -72,7 +72,7 @@ pub(super) fn dispatch<'a>(
         Instr::EnsurePool(..) | Instr::CurrentPool(..) => pool_dispatch::suspend(state),
         Instr::ExecuteParfor { .. } | Instr::ExecuteSpmd { .. } => region_dispatch::suspend(state),
         Instr::Collective { .. } | Instr::Distributed(..) => data_dispatch::suspend(state),
-        _ => Box::pin(async { Ok(None) }),
+        _ => control::admit(&state.context.execution.runtime, || async { Ok(None) }),
     }
 }
 

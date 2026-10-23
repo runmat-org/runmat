@@ -62,7 +62,10 @@ pub(super) fn validate_sequence_capture_flow(instructions: &[Instr]) -> Result<(
             consume(slot, pc, &mut consumed, &mut outgoing)?;
         }
         let successors = normal_successors(instructions, pc)?;
-        if successors.is_empty() && !outgoing.is_empty() {
+        if successors.is_empty()
+            && !super::control_flow::is_exceptional_exit(&instructions[pc])
+            && !outgoing.is_empty()
+        {
             return Err(format!("captured comma-separated sequence locals {outgoing:?} remain live at function exit instruction {pc}"));
         }
         pending.extend(successors.into_iter().map(|next| (next, outgoing.clone())));

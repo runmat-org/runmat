@@ -339,8 +339,11 @@ impl MirPreparedAssignment {
     fn validate_contract(&self, phased: bool) -> Result<(), String> {
         use runmat_types::{IndexKind, PlaceMutationKind};
         let place = &self.mutation.place;
-        if !place.has_expanding_selectors() {
-            return Err("prepared fixed assignment has no expanding selectors".into());
+        if !place.requires_prepared_assignment() {
+            return Err(
+                "prepared fixed assignment requires expanding selectors or an indexed member path"
+                    .into(),
+            );
         }
         let delete = self.mutation.kind == PlaceMutationKind::Delete;
         let expected = match place {
@@ -539,11 +542,15 @@ pub enum SequenceRootCreation {
     /// creation policy; this is not destination-cardinality output selection.
     Ordinary(runmat_types::AssignmentCreationPolicy),
     OrdinaryCell,
+    OrdinaryContainer(runmat_types::AssignmentChildCreation),
 }
 
 impl SequenceRootCreation {
     pub fn retains_original_receiver(self) -> bool {
-        matches!(self, Self::Ordinary(_) | Self::OrdinaryCell)
+        matches!(
+            self,
+            Self::Ordinary(_) | Self::OrdinaryCell | Self::OrdinaryContainer(_)
+        )
     }
 }
 

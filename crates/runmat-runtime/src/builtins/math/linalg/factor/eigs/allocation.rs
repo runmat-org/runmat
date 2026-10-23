@@ -1,10 +1,9 @@
-//! Dense/GPU/nonfloating compatibility EVD has no finite host owner yet.
-//! This is an explicit L25 fence, never a Managed-to-ordinary fallback.
+//! Route selection captures authority, never a blanket allocation grant.
+//! The shared EVD, parser slots and published factors admit their own storage.
 use crate::{
     context::{
         host_allocation::{
-            host_allocation_runtime_error, HostAllocationError, HostAllocationPolicy,
-            HostAllocationReceipt,
+            host_allocation_runtime_error, HostAllocationCheckpoint, HostAllocationReceipt,
         },
         RuntimeContext,
     },
@@ -13,7 +12,7 @@ use crate::{
 use runmat_value::Value;
 pub(super) enum Selected<'a> {
     Iterative,
-    Legacy(DenseWork<'a>),
+    Dense(DenseExecution<'a>),
 }
 impl<'a> Selected<'a> {
     pub fn admit(
@@ -40,33 +39,43 @@ impl<'a> Selected<'a> {
         {
             Ok(Self::Iterative)
         } else {
-            Ok(Self::Legacy(DenseWork::new(runtime)?))
+            Ok(Self::Dense(DenseExecution::new(runtime)?))
         }
     }
 }
-pub(super) struct DenseWork<'a> {
+pub(super) struct DenseExecution<'a> {
     runtime: Option<&'a RuntimeContext>,
+    owner: Option<HostAllocationCheckpoint>,
 }
-impl<'a> DenseWork<'a> {
+impl<'a> DenseExecution<'a> {
     fn new(runtime: Option<&'a RuntimeContext>) -> BuiltinResult<Self> {
-        let result = Self { runtime };
-        result.check_with(HostAllocationError::MissingManagedOwner)?;
+        let owner = HostAllocationReceipt::capture_owner(runtime).map_err(|source| {
+            super::with_context(host_allocation_runtime_error(
+                runtime,
+                "RunMat:eigs:DenseWorkspace",
+                "eigs: dense execution authority",
+                source,
+            ))
+        })?;
+        let result = Self { runtime, owner };
+        result.check()?;
         Ok(result)
     }
-    fn check_with(&self, managed: HostAllocationError) -> BuiltinResult<()> {
-        let source = match HostAllocationReceipt::policy(self.runtime) {
-            Ok(HostAllocationPolicy::Unbounded) => return Ok(()),
-            Ok(HostAllocationPolicy::Managed) => managed,
-            Err(source) => source,
-        };
-        Err(super::with_context(host_allocation_runtime_error(
-            self.runtime,"RunMat:eigs:DenseWorkspace",
-            format!("eigs: exact dense compatibility EVD requires unrestricted allocation until its shared full-EVD owner is available; {source}"),
-            source,
-        )))
-    }
     pub fn check(&self) -> BuiltinResult<()> {
-        self.check_with(HostAllocationError::StaleAuthority)
+        if let Some(owner) = &self.owner {
+            owner
+                .check(self.runtime.expect("managed dense context"))
+                .map_err(|source| {
+                    super::with_context(host_allocation_runtime_error(
+                        self.runtime,
+                        "RunMat:eigs:DenseWorkspace",
+                        "eigs: dense execution authority changed",
+                        source,
+                    ))
+                })
+        } else {
+            super::super::iterative::copy::unbounded_checkpoint(self.runtime, "eigs")
+        }
     }
     pub fn finish<T>(&self, result: BuiltinResult<T>) -> BuiltinResult<T> {
         let output = result?;

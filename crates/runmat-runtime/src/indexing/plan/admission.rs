@@ -193,17 +193,3 @@ impl<T: HostTypedElement> Scratch<T> {
         }
     }
 }
-
-pub(in crate::indexing) fn indices_as_usize(
-    context: Option<&RuntimeContext>,
-    indices: &[u32],
-) -> Result<Scratch<usize>, RuntimeError> {
-    let owner = Owner::new(context)?;
-    let mut output = Scratch::new(context, indices.len())?;
-    for (destination, &index) in output.as_mut_slice().iter_mut().zip(indices) {
-        owner.check()?;
-        *destination = usize::try_from(index).map_err(|_| geometry())?;
-    }
-    owner.check()?;
-    Ok(output)
-}

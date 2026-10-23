@@ -36,10 +36,11 @@ fn upload_numeric_with_admission(
     provider: &WgpuProvider,
     host: &HostNumericTensorView,
     admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    scratch: Option<runmat_accelerate_api::HostNumericUploadScratch<'_>>,
 ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
     let buffer_created = std::cell::Cell::new(false);
     let output = provider
-        .upload_numeric_exec_observed_admitted(
+        .upload_numeric_exec_observed_admitted_with_scratch(
             host,
             || {
                 buffer_created.set(true);
@@ -61,6 +62,7 @@ fn upload_numeric_with_admission(
                 Ok(())
             },
             admission,
+            scratch,
         )
         .map_err(|error| numeric_upload_failure(error, buffer_created.get()))?;
     if let Err(error) = complete_observed_upload(provider) {
@@ -1137,7 +1139,6 @@ impl AccelProvider for WgpuProvider {
             ),
             inventory_epoch,
         )
-        .map(Some)
     }
 
     fn query_feasibility(
@@ -1298,6 +1299,55 @@ impl AccelProvider for WgpuProvider {
         output_shape: &[usize],
     ) -> Result<GpuTensorHandle> {
         self.gather_linear_exec(source, indices, output_shape)
+    }
+
+    fn indexing_host_workspace_bound(
+        &self,
+        source: &GpuTensorHandle,
+        rhs: Option<&GpuTensorHandle>,
+    ) -> runmat_execution::ResourceByteBound {
+        // entry_for_handle constructs exactly one logical-shape Vec per
+        // authenticated input; the admitted kernels retain at most these two.
+        source
+            .shape()
+            .len()
+            .checked_add(rhs.map_or(0, |rhs| rhs.shape().len()))
+            .and_then(|rank| rank.checked_mul(std::mem::size_of::<usize>()))
+            .and_then(|bytes| u64::try_from(bytes).ok())
+            .map(runmat_execution::ResourceByteBound::Known)
+            .unwrap_or(runmat_execution::ResourceByteBound::Unavailable(
+                runmat_execution::ResourceBoundUnavailable::NoScratchBound,
+            ))
+    }
+
+    fn gather_linear_admitted(
+        &self,
+        source: &GpuTensorHandle,
+        indices: &[u32],
+        output_shape: &[usize],
+        admission: &dyn runmat_execution::resource::ProviderHostMetadataAdmission,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        self.gather_linear_exec_admitted(source, indices, output_shape, Some(admission))
+            .map_err(|cause| {
+                runmat_accelerate_api::ProviderExecutionError::from(cause).with_unproven_effects()
+            })
+    }
+
+    fn scatter_linear_functional_admitted(
+        &self,
+        target: &GpuTensorHandle,
+        indices: &[u32],
+        values: &GpuTensorHandle,
+        mapping: runmat_accelerate_api::ProviderScatterValueMapping,
+        admission: &dyn runmat_execution::resource::ProviderHostMetadataAdmission,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        self.scatter_linear_functional_exec_admitted(
+            target,
+            indices,
+            values,
+            mapping,
+            Some(admission),
+        )
     }
 
     fn scatter_linear(
@@ -3507,13 +3557,6 @@ impl AccelProvider for WgpuProvider {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.dot_exec(lhs, rhs, dim) })
     }
-    fn eig<'a>(
-        &'a self,
-        handle: &'a GpuTensorHandle,
-        compute_left: bool,
-    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, ProviderEigResult> {
-        Box::pin(async move { self.eig_exec(handle, compute_left).await })
-    }
 
     fn reduce_sum_dim<'a>(
         &'a self,
@@ -4315,14 +4358,32 @@ impl AccelProvider for WgpuProvider {
         &self,
         host: &HostNumericTensorView,
     ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
-        upload_numeric_with_admission(self, host, None)
+        upload_numeric_with_admission(self, host, None, None)
     }
     fn upload_numeric_raw_admitted(
         &self,
         host: &HostNumericTensorView,
         admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
-        upload_numeric_with_admission(self, host, admission)
+        upload_numeric_with_admission(self, host, admission, None)
+    }
+    fn numeric_upload_encoding_words(
+        &self,
+        element: runmat_accelerate_api::NumericElementType,
+        lanes: usize,
+    ) -> Option<usize> {
+        match element.integer_type() {
+            Some(element) => super::io::integer_encoding_words(element, lanes),
+            None => Some(0),
+        }
+    }
+    fn upload_numeric_raw_admitted_with_scratch(
+        &self,
+        host: &HostNumericTensorView,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+        scratch: Option<runmat_accelerate_api::HostNumericUploadScratch<'_>>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        upload_numeric_with_admission(self, host, admission, scratch)
     }
     fn upload_logical_raw(
         &self,

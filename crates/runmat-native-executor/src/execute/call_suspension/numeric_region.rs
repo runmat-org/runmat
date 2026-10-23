@@ -146,7 +146,7 @@ pub(in crate::execute) fn begin(
         // backing is in request, with no GC handles. Original generation references
         // remain in the frame and inline completion, not a duplicate root Vec.
         retained_roots: Vec::new(),
-        future: crate::execute::call_suspension::PendingCompletionFuture::Admitted(future),
+        future,
     });
     Err(NativeExecutorError::CallSuspended)
 }
@@ -192,7 +192,7 @@ pub(in crate::execute) fn begin_original_completion(
         request,
         embedded: None,
         retained_roots: Vec::new(),
-        future: crate::execute::call_suspension::PendingCompletionFuture::Admitted(future),
+        future,
     });
     Err(NativeExecutorError::CallSuspended)
 }

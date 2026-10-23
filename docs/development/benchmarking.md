@@ -21,11 +21,31 @@ The command resolves the script, creates a session, warms up three times, runs t
 
 Use `--jit` when measuring JIT behavior. Without it, the benchmark runs through the default session configuration.
 
+For local raw command-boundary measurements, create a new JSONL report:
+
+```bash
+runmat benchmark benchmarks/elementwise-math/runmat.m --jit --warmup 3 --iterations 31 --report elementwise.jsonl
+```
+
+The report adds one first invocation in a fresh session, then records the requested warmups and each repeated sample separately. `cold_first` means first invocation of this session, not an empty process-global, provider or disk cache. `warm` labels the repeated phase, not a guarantee that every selected physical recipe is warm. Without `--report`, the existing default three warmups and aggregate output remain; `--warmup` can explicitly change their count. Zero iterations is rejected.
+
+Each raw nanosecond sample times the same driven execution request through command return and existing cleanup. Session construction, frozen-source capture, profile snapshots, executable hashing and report writes are outside that clock. Human aggregate results retain their existing evaluator-millisecond boundary and must not be mixed with the report's raw command-boundary samples.
+
+The identity row hashes the captured source text actually reused by every request and reads the current executable for a SHA256 identity (or reports unavailable). It does not substitute a Git revision or package version for executable bytes. Requested provider/JIT settings are separate from observed execution. The reported JIT threshold records the input setting; native tiering does not use it. Enabling JIT permits native execution but does not force a particular tier. See [JIT Compilation Pipeline](/docs/runtime/jit/pipeline) for tiering and placement policies. There is no benchmark force-specialized, force-GPU or force-fusion option.
+
+Per-sample feedback deltas retain the canonical typed signature, candidate identity and kind. They describe completed feedback, not every selected or declined route; no feedback means `no_observed_feedback`, not an inferred interpreter execution. Eviction/reset/schema changes and counter underflow are explicit unknown history. CPU/OSR/vectorized counter deltas and `used_jit` are supplementary, not replacements for a matching route identity. Different region and whole-call signatures must not be combined into one execution-cost comparison.
+
+Core projects sealed physical/deferred facts at its existing admission-to-seal join. Their canonical coverage remains `incomplete`: pending-free counts do not certify that all possible routes were observed. Provider-wide transfer-byte deltas are supplementary isolated-run diagnostics, not command-attributed completion or device time. Only existing certified profiling supplies optional device time and kernel counts; unknown metrics remain null. A fusion plan or queued dispatch is not proof of successful fused physical execution.
+
+Qualification workloads must independently assert values/precision and include any required `gather`/host-result dependency **inside** the measured source. The command does not insert a gather, copy results for an oracle, change numerical classes, or claim that every returned value is host-resident. Use identical frozen workloads, precision and result boundaries across settings, and retain modes not actually observed as not observed. Report completion alone is not a numerical/performance acceptance verdict or a claim that CPU/GPU routes all ran.
+
+Reports use exclusive creation, stream/flushing records instead of retaining an iteration-sized buffer, and keep partial output on errors. A terminal `failed_or_abandoned` row distinguishes normal failure/unwinding from completion; I/O failure or abrupt process death may leave no terminal row, which is never success. Output files are not overwritten and no telemetry consent is changed.
+
 ## Cross-Language Benchmark Suite
 
 The `benchmarks/` directory contains reproducible workload comparisons. Each case has a RunMat script and comparable implementations in Python, PyTorch, Julia, or Octave where applicable.
 
-So far, the following cases are implemented, with more to come:
+The suite includes these cases:
 
 | Case | Purpose |
 | --- | --- |
@@ -86,9 +106,9 @@ runmat accel-calibrate --refresh --json
 
 Use telemetry when deciding whether a benchmark is measuring the intended execution path. For GPU work, verify provider selection, offload decisions, residency behavior, and fallback counts before interpreting raw timings.
 
-Suite residual CPU-time/category allocations are diagnostic estimates, not isolated CPU measurements. The harness marks them with schema 2 and `diagnostic-residual-v1`; importing them with `--dry-run` reports unchanged coefficients and `residual-diagnostic` provenance. They cannot be committed as calibration. `--auto-calibrate` now invokes `accel-calibrate --refresh`, which reuses the runtime's existing original CPU templates, provider comparisons, and cleanup owner. `--dry-run` measures without persisting; a committed refresh writes the provider/precision-specific v2 cache. Automatic sample counts are not fabricated: the refresh outcome has `runs: null` because that owner does not export a sample census. Input files and `--refresh` are mutually exclusive.
+Suite residual CPU-time/category allocations are diagnostic estimates, not isolated CPU measurements. The harness marks them with schema 2 and `diagnostic-residual-v1`; importing them with `--dry-run` reports unchanged coefficients and `residual-diagnostic` provenance. They cannot be committed as calibration. `--auto-calibrate` invokes `accel-calibrate --refresh`, which reuses the runtime's existing original CPU templates, provider comparisons, and cleanup owner. `--dry-run` measures without persisting; a committed refresh writes the provider/precision-specific v2 cache. Automatic sample counts are not fabricated: the refresh outcome has `runs: null` because that owner does not export a sample census. Input files and `--refresh` are mutually exclusive.
 
-Qualified original-template imports require schema 2, the closed `original-scan-mac-v1` unit policy, exact provider identity, and `F32`/`F64` precision. Historical scan/MAC denominators are unchanged. Output publication/conversion is separately identified cold-prior work, not a relabeled template measurement. Legacy category profile fitting, `RUNMAT_ACCEL_PROFILE`, and auto-offload `profile_path` no longer participate in decisions or calibration. `wgpu_profile` remains a diagnostic benchmark; matched whole-call observations belong to the canonical PlacementSession owner.
+Qualified original-template imports require schema 2, the closed `original-scan-mac-v1` unit policy, exact provider identity, and `F32`/`F64` precision. Historical scan/MAC denominators are unchanged. Output publication/conversion is separately identified cold-prior work, not a relabeled template measurement. Legacy category profile fitting, `RUNMAT_ACCEL_PROFILE`, and auto-offload `profile_path` do not participate in decisions or calibration. `wgpu_profile` remains a diagnostic benchmark; matched whole-call observations belong to the canonical PlacementSession owner.
 
 GPU submission time measures how long the host takes to enqueue work; it does not measure completed device execution. Fusion placement traces report successful submission as a queue event, without a completion event or a successful execution-cost sample. Measure device completion and any required transfers or synchronization when comparing CPU and GPU latency. A CPU-selected fusion region records completion only after its bytecode reaches the region's normal exit; errors, cancellation, and abandoned execution do not contribute successful timing samples.
 

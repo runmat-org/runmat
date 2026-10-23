@@ -294,10 +294,8 @@ async fn invoke_semantic_function_with_captures(
     ),
     RuntimeError,
 > {
-    let arguments = runmat_runtime::call::RootedFunctionArguments::ordinary(
-        runmat_runtime::execution::RootedValues::new(args.to_vec())
-            .map_err(|error| error.into_runtime_error())?,
-    );
+    let arguments = runmat_runtime::call::BuiltinArguments::from_borrowed(args, Some(&runtime))?
+        .into_function_arguments();
     invoke_semantic_function_with_rooted_captures(
         function,
         arguments,
@@ -778,9 +776,13 @@ async fn invoke_semantic_function_with_owned_inputs(
                 let queue_runtime = runtime.clone();
                 let queued_scope = queue_runtime.prepare_poll_scope()?;
                 driver
-                    .enqueue_owned_scoped_in_context(&queue_runtime, queued_scope, move || {
-                        interpret_function_with_counts_in_context_with_driver(invocation, vars)
-                    })?
+                    .enqueue_owned_catch_scoped_in_context(
+                        &queue_runtime,
+                        queued_scope,
+                        move || {
+                            interpret_function_with_counts_in_context_with_driver(invocation, vars)
+                        },
+                    )?
                     .await?
             } else {
                 let execution_runtime = runtime.clone();
@@ -789,10 +791,13 @@ async fn invoke_semantic_function_with_owned_inputs(
                 // it before boxing would still consume the caller's native stack.
                 // No interpreter polling or foreign execution occurs here.
                 let mut future = stacker::grow(SEMANTIC_CALL_STACK_BYTES, || {
-                    Box::pin(interpret_function_with_counts_in_context_with_driver(
-                        invocation, vars,
-                    ))
-                });
+                    runmat_runtime::execution::admit_native_hostcall_with_contextual_error(
+                        &execution_runtime,
+                        move || {
+                            interpret_function_with_counts_in_context_with_driver(invocation, vars)
+                        },
+                    )
+                })?;
                 futures::future::poll_fn(move |context| {
                     stacker::grow(SEMANTIC_CALL_STACK_BYTES, || {
                         let _stack = execution_runtime.enter_execution_stack(
@@ -874,11 +879,11 @@ async fn await_prior_bound_invoker(
     driver: Option<ProcessDriverHandle>,
     runtime: runmat_runtime::context::RuntimeContext,
     environment_roots: Option<Vec<runmat_gc::ExplicitRoot>>,
-    factory: impl FnOnce() -> user_functions::UserFunctionFuture + 'static,
+    factory: impl FnOnce() -> Result<user_functions::BoundFunctionFuture, RuntimeError> + 'static,
 ) -> Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
     let Some(driver) = driver else {
         let _environment_roots = environment_roots;
-        return factory().await;
+        return factory()?.await;
     };
     if runtime
         .service_ports()
@@ -888,7 +893,7 @@ async fn await_prior_bound_invoker(
     {
         return runmat_runtime::context::run_selected_callback_continuation(&runtime, async move {
             let _environment_roots = environment_roots;
-            factory().await
+            factory()?.await
         })
         .await;
     }
@@ -896,7 +901,7 @@ async fn await_prior_bound_invoker(
     let (outputs, _) = driver
         .enqueue_scoped_in_context(&runtime, queued_scope, move || async move {
             let _environment_roots = environment_roots;
-            let outputs = factory().await?;
+            let outputs = factory()?.await?;
             let captures = runmat_runtime::execution::RootedValues::new(Vec::new())
                 .map_err(|error| error.into_runtime_error())?;
             Ok((outputs, captures))
@@ -1780,36 +1785,44 @@ async fn run_interpreter_inner(
                     nested_runtime.clone()
                 };
                 let driver = nested_driver.clone();
-                Box::pin(async move {
-                    if !same_owner {
-                        return Err(runmat_runtime::build_runtime_error(
-                            "semantic callback selected another VM runtime owner",
-                        )
-                        .with_identifier("RunMat:VmCallbackOwner")
-                        .build());
-                    }
-                    let local_function = function_registry
-                        .get(runmat_hir::FunctionId(function))
-                        .is_some();
-                    if !local_function {
-                        if let Some(invoker) = previous_invoker {
-                            let future =
-                                invoker(Some(runtime.clone()), function, args, requested_outputs);
-                            return await_prior_semantic_invoker(driver, runtime, future).await;
+                let admission_runtime = runtime.clone();
+                user_functions::admit_user_function_with(
+                    Some(&admission_runtime),
+                    move || async move {
+                        if !same_owner {
+                            return Err(runmat_runtime::build_runtime_error(
+                                "semantic callback selected another VM runtime owner",
+                            )
+                            .with_identifier("RunMat:VmCallbackOwner")
+                            .build());
                         }
-                    }
-                    invoke_semantic_function_with_rooted_captures(
-                        function,
-                        args,
-                        requested_outputs,
-                        &function_registry,
-                        runtime,
-                        driver,
-                        lexical_environment,
-                    )
-                    .await
-                    .map(|(value, _)| value)
-                })
+                        let local_function = function_registry
+                            .get(runmat_hir::FunctionId(function))
+                            .is_some();
+                        if !local_function {
+                            if let Some(invoker) = previous_invoker {
+                                let future = invoker(
+                                    Some(runtime.clone()),
+                                    function,
+                                    args,
+                                    requested_outputs,
+                                )?;
+                                return await_prior_semantic_invoker(driver, runtime, future).await;
+                            }
+                        }
+                        invoke_semantic_function_with_rooted_captures(
+                            function,
+                            args,
+                            requested_outputs,
+                            &function_registry,
+                            runtime,
+                            driver,
+                            lexical_environment,
+                        )
+                        .await
+                        .map(|(value, _)| value)
+                    },
+                )
             },
         ))?;
     let previous_bound_invoker = user_functions::current_bound_function_invoker();
@@ -1821,72 +1834,75 @@ async fn run_interpreter_inner(
                 let previous = previous_bound_invoker.clone();
                 let registry = std::rc::Rc::clone(&registry_for_bound_invoker);
                 let driver = bound_driver.clone();
-                Box::pin(async move {
-                    let function = runmat_hir::FunctionId(binding.function);
-                    if let runmat_value::BoundFunctionAuthority::Portable { origin } =
-                        &binding.authority
-                    {
-                        if registry
-                            .get_current(function)
-                            .filter(|body| body.binding_origin == Some(*origin))
-                            .is_some()
+                runmat_runtime::execution::admit_executable_sequence_with(
+                    &runtime.clone(),
+                    move || async move {
+                        let function = runmat_hir::FunctionId(binding.function);
+                        if let runmat_value::BoundFunctionAuthority::Portable { origin } =
+                            &binding.authority
                         {
+                            if registry
+                                .get_current(function)
+                                .filter(|body| body.binding_origin == Some(*origin))
+                                .is_some()
+                            {
+                                return super_constructor::invoke_selected_bound(
+                                    runtime,
+                                    binding,
+                                    args,
+                                    requested_outputs,
+                                    registry.as_ref().clone(),
+                                    driver.clone(),
+                                    lexical_environment,
+                                )
+                                .await;
+                            }
+                        }
+                        let view = registry.owned_view(function, &binding.authority);
+                        if let Some(view) = view {
                             return super_constructor::invoke_selected_bound(
                                 runtime,
                                 binding,
                                 args,
                                 requested_outputs,
-                                registry.as_ref().clone(),
-                                driver.clone(),
+                                view,
+                                driver,
                                 lexical_environment,
                             )
                             .await;
                         }
-                    }
-                    let view = registry.owned_view(function, &binding.authority);
-                    if let Some(view) = view {
-                        return super_constructor::invoke_selected_bound(
-                            runtime,
-                            binding,
-                            args,
-                            requested_outputs,
-                            view,
-                            driver,
-                            lexical_environment,
-                        )
-                        .await;
-                    }
-                    if let Some(previous) = previous {
-                        let selected_runtime = runtime.clone();
-                        let environment_roots = if driver.is_some() {
-                            lexical_environment
-                                .as_ref()
-                                .map(runmat_runtime::call::lexical::root_environment)
-                                .transpose()?
-                        } else {
-                            None
-                        };
-                        return await_prior_bound_invoker(
-                            driver,
-                            selected_runtime,
-                            environment_roots,
-                            move || {
-                                previous(
-                                    runtime,
-                                    binding,
-                                    args,
-                                    requested_outputs,
-                                    lexical_environment,
-                                )
-                            },
-                        )
-                        .await;
-                    }
-                    Err(mex(
-                        "UnavailableBoundFunction",
-                        "bound function definition is unavailable in this execution owner",
-                    ))
-                })
+                        if let Some(previous) = previous {
+                            let selected_runtime = runtime.clone();
+                            let environment_roots = if driver.is_some() {
+                                lexical_environment
+                                    .as_ref()
+                                    .map(runmat_runtime::call::lexical::root_environment)
+                                    .transpose()?
+                            } else {
+                                None
+                            };
+                            return await_prior_bound_invoker(
+                                driver,
+                                selected_runtime,
+                                environment_roots,
+                                move || {
+                                    previous(
+                                        runtime,
+                                        binding,
+                                        args,
+                                        requested_outputs,
+                                        lexical_environment,
+                                    )
+                                },
+                            )
+                            .await;
+                        }
+                        Err(mex(
+                            "UnavailableBoundFunction",
+                            "bound function definition is unavailable in this execution owner",
+                        ))
+                    },
+                )
             },
         ))?;
     let previous_semantic_resolver = user_functions::current_semantic_function_resolver();
@@ -2154,7 +2170,7 @@ async fn run_interpreter_inner(
             feature = "wgpu"
         ))]
         fusion_publication_fault: &mut fusion_publication_fault,
-    });
+    })?;
     let execution_result =
         super::dispatch_cancellation::until_cancelled(&cancellation, instruction_loop).await;
     // The suspended operation is gone before cleanup touches its frame.
@@ -2196,7 +2212,9 @@ async fn run_interpreter_inner(
 pub async fn interpret(
     bytecode: &Bytecode,
 ) -> Result<runmat_runtime::execution::RootedValues, RuntimeError> {
-    let mut vars = vec![Value::Num(0.0); bytecode.var_count];
+    // Frame preparation reserves compiled slots. This entry supplies no
+    // existing values: padding here would mark every binding as assigned.
+    let mut vars = Vec::new();
     match interpret_with_vars(bytecode, &mut vars, Some("<main>")).await {
         Ok(InterpreterOutcome::Completed(completion)) => completion.with_owned(|completion| {
             let values = completion.values.into_owned().map_err(|_| {

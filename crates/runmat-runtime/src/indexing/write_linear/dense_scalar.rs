@@ -112,11 +112,13 @@ pub(super) async fn assign_real(
     let rhs = host.as_ref().unwrap_or(rhs);
     let value = if let Some(prototype) = tensor.integer_storage() {
         let value = owner
-            .await_stage(rhs_to_integer_assignment_scalar(rhs))
+            .await_stage(rhs_to_integer_assignment_scalar(context, rhs))
             .await??;
         NumericScalar::from(integer_assignment::scalar_value(prototype, &value))
     } else {
-        owner.await_stage(rhs_to_real_numeric_scalar(rhs)).await??
+        owner
+            .await_stage(rhs_to_real_numeric_scalar(context, rhs))
+            .await??
     };
     owner.check()?;
     if shape.as_slice() == tensor.shape()
@@ -315,7 +317,7 @@ pub(super) async fn assign_complex(
     let rhs = host.as_ref().unwrap_or(rhs);
     let (real, imag) = if let Some((real, imag)) = source.prototypes() {
         let value = owner
-            .await_stage(rhs_to_complex_integer_assignment_scalar(rhs))
+            .await_stage(rhs_to_complex_integer_assignment_scalar(context, rhs))
             .await??;
         source.validate()?;
         (
@@ -324,7 +326,7 @@ pub(super) async fn assign_complex(
         )
     } else {
         let value = owner
-            .await_stage(rhs_to_complex_numeric_scalar(rhs))
+            .await_stage(rhs_to_complex_numeric_scalar(context, rhs))
             .await??;
         source.validate()?;
         value

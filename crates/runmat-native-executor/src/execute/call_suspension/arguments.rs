@@ -38,7 +38,7 @@ where
         generation,
         embedded,
         retained_roots: Vec::new(),
-        future: super::PendingCompletionFuture::Admitted(future),
+        future,
     });
     Err(NativeExecutorError::CallSuspended)
 }

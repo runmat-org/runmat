@@ -42,6 +42,14 @@ pub(crate) fn execution_profiling(
         .and_then(|metrics| metrics.gpu_execution)
         .and_then(|duration| u64::try_from(duration.as_millis()).ok());
     ExecutionProfiling {
+        command_evidence: Some(crate::execution::CommandExecutionEvidence {
+            physical_submissions: snapshot.physical_submissions,
+            deferred_work: snapshot.deferred_work,
+            route_coverage: snapshot.route_coverage,
+            canonical_device_route_admitted: canonical_device_route,
+            unproven_device_route: snapshot.unproven_device_route,
+            unproven_device_time: snapshot.unproven_device_time,
+        }),
         total_ms: command_wall_ms,
         gpu_ms,
         kernel_count,
@@ -74,6 +82,11 @@ mod tests {
         assert_eq!(summary.total_ms, 13);
         assert_eq!(summary.kernel_count, Some(2));
         assert_eq!(summary.gpu_ms, None);
+        let evidence = summary.command_evidence.expect("original sealed evidence");
+        assert_eq!(evidence.route_coverage, CommandRouteCoverage::Incomplete);
+        assert!(evidence.canonical_device_route_admitted);
+        assert!(evidence.unproven_device_time);
+        assert_eq!(evidence.physical_submissions.unwrap().completed, 1);
     }
 
     #[test]

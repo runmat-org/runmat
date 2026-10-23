@@ -39,6 +39,84 @@ fn runtime(capacity: u64) -> (RuntimeContext, ManagedHostEffectLedger, Cancellat
 }
 
 #[test]
+fn borrowed_semantic_ingress_admits_final_slots_before_selected_callback() {
+    use std::{cell::Cell, future::Future};
+    runmat_gc::gc_test_context(|| {
+        for mode in 0..4 {
+            let text: runmat_value::Utf8Text = "original argument payload".into();
+            let pointer = text.as_str().as_ptr();
+            let source = RootedValues::new(vec![Value::String(text)]).unwrap();
+            let (runtime, ledger, cancellation) = runtime(if mode == 0 { 0 } else { 1 << 20 });
+            let invoked = Rc::new(Cell::new(0));
+            let observed = Rc::clone(&invoked);
+            // Install the session's callback before entering the invocation.
+            // This matrix measures borrowed ingress, not overlay registration:
+            // a zero-budget invocation must reach its own admission boundary.
+            runtime.state().call.borrow_mut().semantic_invoker =
+                Some(Rc::new(move |selected, _, arguments, _| {
+                    observed.set(observed.get() + 1);
+                    let Value::String(text) = &arguments.supplied()[0] else {
+                        panic!("original string argument");
+                    };
+                    assert_eq!(text.as_str().as_ptr(), pointer, "no payload-byte copy");
+                    crate::user_functions::admit_user_function_with(
+                        selected.as_ref(),
+                        move || async move {
+                            let _arguments = arguments;
+                            futures::future::pending::<
+                                Result<crate::execution::RootedValueSequence, RuntimeError>,
+                            >()
+                            .await
+                        },
+                    )
+                }));
+            let _entry = runtime.enter();
+            if mode == 1 {
+                assert!(cancellation.cancel(CancellationReason::User));
+            }
+            let mut call = Box::pin(
+                crate::user_functions::try_call_semantic_function_in_context(
+                    if mode == 3 { None } else { Some(&runtime) },
+                    7,
+                    source.values(),
+                    1,
+                ),
+            );
+            let waker = futures::task::noop_waker();
+            let mut context = std::task::Context::from_waker(&waker);
+            match call.as_mut().poll(&mut context) {
+                std::task::Poll::Pending if mode == 2 => {
+                    assert_eq!(invoked.get(), 1);
+                    assert!(
+                        ledger.snapshot().live_reserved_bytes
+                            + ledger.snapshot().live_claimed_bytes
+                            > 0
+                    );
+                }
+                std::task::Poll::Ready(Some(Err(error))) if mode != 2 => {
+                    assert_eq!(
+                        invoked.get(),
+                        0,
+                        "no callback on denied/cancelled/unscoped finite ingress"
+                    );
+                    assert!(
+                        std::error::Error::source(&error).is_some(),
+                        "original typed control cause"
+                    );
+                }
+                _ => panic!("expected actual admitted pending call or terminal pre-callback error"),
+            }
+            drop(call);
+            assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+            assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+            assert!(
+                matches!(&source.values()[0], Value::String(text) if text.as_str().as_ptr() == pointer)
+            );
+        }
+    });
+}
+
+#[test]
 fn final_slots_retain_original_payload_and_roots_until_last_fork_retires() {
     runmat_gc::gc_test_context(|| {
         let initial = runmat_gc::gc_allocate_rooted(Value::Num(29.)).unwrap();

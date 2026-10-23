@@ -7,7 +7,10 @@ pub(crate) mod endpoint;
 mod path;
 
 pub use endpoint::{PreparedSequenceEndpoint, SequenceEndpointSpec};
-pub use path::{AssignmentStepSpec, PreparedSequenceDestination, SequenceDestinationBuilder};
+pub use path::{
+    assignment_container_in_context, AssignmentStepSpec, PreparedSequenceDestination,
+    SequenceDestinationBuilder,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DestinationCardinality {
@@ -175,7 +178,8 @@ mod tests {
                 let Value::Object(context) = &supplied[2] else { panic!("indexing context") };
                 assert_eq!(context.property("__enum_member__"), Some(&Value::String("Assignment".into())));
                 observed.borrow_mut().push("overload");
-                Box::pin(async move {
+                let admission_runtime = runtime.clone();
+                crate::user_functions::admit_user_function_with(admission_runtime.as_ref(), move || async move {
                     let _arguments = arguments;
                     crate::execution::RootedValueSequence::in_context(
                         crate::sequence::ValueSequence::single(Value::Num(3.))
@@ -185,6 +189,11 @@ mod tests {
                 })
             },
         )).unwrap();
+        // Fixture hooks install admitted backing on the selected context.
+        // Its independent pre-operation charge lasts until that context retires.
+        let fixture = ledger.snapshot();
+        assert!(fixture.live_claimed_bytes > 0);
+        assert_eq!(fixture.live_reserved_bytes, fixture.live_claimed_bytes);
         crate::class_registry::register_class(crate::class_registry::RuntimeClass {
             events: Default::default(),
             name: "MemberCardinality321".into(),
@@ -216,6 +225,22 @@ mod tests {
         assert_eq!(endpoint.cardinality(), 3);
         assert_eq!(*trace.borrow(), ["before", "overload", "after"]);
         drop(endpoint);
+        assert_eq!(
+            ledger.snapshot().live_reserved_bytes,
+            fixture.live_reserved_bytes
+        );
+        assert_eq!(
+            ledger.snapshot().live_claimed_bytes,
+            fixture.live_claimed_bytes
+        );
+        drop(_invoker);
+        drop(_resolver);
+        assert_eq!(
+            ledger.snapshot().live_claimed_bytes,
+            fixture.live_claimed_bytes
+        );
+        drop(_activation);
+        drop(runtime);
         assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
         assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
     }

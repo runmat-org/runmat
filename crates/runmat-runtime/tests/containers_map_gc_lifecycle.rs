@@ -20,7 +20,7 @@ fn map_handle(value: &Value) -> runmat_gc::GcHandle {
 fn subscript(key: &str) -> Value {
     ObjectSubscriptPath::single(ObjectSubscript::parentheses(
         ObjectIndexSelector::IndexValues {
-            components: vec![ObjectIndexComponent::Value(Value::from(key))],
+            components: vec![ObjectIndexComponent::Value(Value::from(key))].into(),
         },
     ))
     .to_standard_substruct_value()

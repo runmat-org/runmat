@@ -1,10 +1,9 @@
 use std::future::Future;
-use std::pin::Pin;
 
 use crate::{NativeExecutorError, NativeExecutorResult};
 
 use super::super::state::{EmbeddedOperationIdentity, HostState};
-use super::{CallCompletion, CompletedPayload, CompletionFuture, PendingCall};
+use super::{CallCompletion, CompletedPayload, PendingCall};
 
 pub(in crate::execute) fn take_completed_prepared_receiver(
     state: &mut HostState,
@@ -28,35 +27,40 @@ pub(in crate::execute) fn take_completed_prepared_receiver(
             "completed receiver preparation payload has the wrong typed result".into(),
         ));
     };
-    let prepared = prepared.as_ref().clone();
+    let prepared = (**prepared).clone();
     if let Some(embedded) = embedded {
         state.restore_embedded_call_regions(embedded);
     }
     Ok(Some(prepared))
 }
 
-pub(in crate::execute) fn begin_prepared_receiver(
+pub(in crate::execute) fn begin_prepared_receiver<F>(
     state: &mut HostState,
     embedded: Option<EmbeddedOperationIdentity>,
-    future: Pin<
-        Box<
-            dyn Future<
-                    Output = NativeExecutorResult<
-                        runmat_runtime::object::protocol::PreparedSubscriptReceiver,
-                    >,
-                > + 'static,
-        >,
-    >,
-) -> NativeExecutorResult<runmat_runtime::object::protocol::PreparedSubscriptReceiver> {
-    let future: CompletionFuture = Box::pin(async move {
-        future
-            .await
-            .map(Box::new)
-            .map(CallCompletion::PreparedReceiver)
-    });
-    let future = super::scope_completion(state, future);
+    make_future: impl FnOnce() -> F,
+) -> NativeExecutorResult<runmat_runtime::object::protocol::PreparedSubscriptReceiver>
+where
+    F: Future<
+            Output = NativeExecutorResult<
+                runmat_runtime::object::protocol::PreparedSubscriptReceiver,
+            >,
+        > + 'static,
+{
     let request = state.current_request.ok_or_else(|| {
         NativeExecutorError::Host("pending receiver preparation has no active site".into())
+    })?;
+    let reservation = super::payload::PayloadReservation::prepare::<
+        runmat_runtime::object::protocol::PreparedSubscriptReceiver,
+    >(&state.runtime)?;
+    let runtime = state.runtime.clone();
+    let future = super::admit_completion_with(state, move || {
+        let future = make_future();
+        async move {
+            let prepared = future.await?;
+            reservation
+                .allocate(&runtime, prepared)
+                .map(CallCompletion::PreparedReceiver)
+        }
     })?;
     let (continuation, generation) = state.next_suspension_identity()?;
     state.pending_call = Some(PendingCall {
@@ -65,7 +69,7 @@ pub(in crate::execute) fn begin_prepared_receiver(
         request,
         embedded,
         retained_roots: Vec::new(),
-        future: crate::execute::call_suspension::PendingCompletionFuture::Ordinary(future),
+        future,
     });
     Err(NativeExecutorError::CallSuspended)
 }

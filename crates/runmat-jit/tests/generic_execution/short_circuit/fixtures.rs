@@ -207,7 +207,7 @@ pub(super) fn caught_capture_fixture() -> runmat_native_codegen::NativeAssembly 
         entrypoints: vec![function],
     };
     let analysis = runmat_mir::analysis::analyze_assembly(&mir);
-    let manifest = manifest(analysis.revision.schema_version);
+    let manifest = manifest(&analysis);
     lower_executable(NativeLoweringInput {
         mir: &mir,
         analysis: &analysis,

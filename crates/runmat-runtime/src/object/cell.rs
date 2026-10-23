@@ -343,65 +343,217 @@ pub fn gather_cell_paren_linear_indices(
     indices: &[usize],
     output_shape: &[usize],
 ) -> Result<Value, RuntimeError> {
-    let mut handles = Vec::with_capacity(indices.len());
+    let context = crate::context::legacy::active();
+    gather_cell_paren_linear_indices_in_context(context.as_ref(), ca, indices, output_shape)
+}
+
+pub(crate) fn gather_cell_paren_linear_indices_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    ca: &CellArray,
+    indices: &[usize],
+    output_shape: &[usize],
+) -> Result<Value, RuntimeError> {
+    // Validate before entering the constructor's repeatable borrowed view.
     for &idx in indices {
-        let pos = row_major_pos_from_linear(ca, idx)?;
-        handles.push(ca.data()[pos].clone());
+        row_major_pos_from_linear(ca, idx)?;
     }
+    let fallback = [1, indices.len().max(1)];
     let shape = if output_shape.is_empty() {
-        vec![1, handles.len().max(1)]
+        fallback.as_slice()
     } else {
-        output_shape.to_vec()
+        output_shape
     };
-    Ok(Value::Cell(
-        CellArray::new_with_shape(handles, shape)
-            .map_err(|e| map_cell_shape_error("cell paren indexing error", e))?,
-    ))
+    let expected = shape
+        .iter()
+        .try_fold(1usize, |count, extent| count.checked_mul(*extent))
+        .ok_or_else(|| {
+            map_cell_shape_error(
+                "cell paren indexing error",
+                "Cell data shape exceeds platform limits",
+            )
+        })?;
+    if expected != indices.len() {
+        return Err(map_cell_shape_error(
+            "cell paren indexing error",
+            format!(
+                "Cell data length {} doesn't match shape {:?} ({} elements)",
+                indices.len(),
+                shape,
+                expected
+            ),
+        ));
+    }
+    crate::execution::structure::cell::from_borrowed_values(
+        context,
+        shape,
+        indices.iter().map(|&idx| {
+            &ca.data()[row_major_pos_from_linear(ca, idx).expect("validated cell index")]
+        }),
+    )
+    .map(|value| value.with_owned(|value| value))
 }
 
 pub fn expand_cell_indices(ca: &CellArray, indices: &[Value]) -> Result<Vec<Value>, RuntimeError> {
-    fn is_colon_selector(value: &Value) -> bool {
-        matches!(value, Value::String(text) if text == ":")
-            || matches!(value, Value::CharArray(chars) if chars.row_string().as_deref() == Some(":"))
+    if indices.len() > 1 {
+        expand_cell_subscripts(ca, indices)
+    } else {
+        selection::CellSelection::new(ca, indices)?.collect()
     }
+}
 
-    match indices.len() {
-        1 => match &indices[0] {
-            value if is_colon_selector(value) => expand_all_cell_values(ca),
-            Value::Num(n) => {
-                if let Some(idx) = resolve_cell_end_relative_index(*n, ca.data().len())? {
-                    return Ok(vec![index_cell_value(ca, &[idx])?]);
-                }
-                if n.is_nan() {
-                    return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
-                }
-                let idx = parse_cell_index_value(&indices[0])?;
-                Ok(vec![index_cell_value(ca, &[idx])?])
+/// Project the same brace selection directly into its final admitted output.
+/// The original Cell children remain rooted until the completed output owns
+/// its roots, including when a later selected index fails validation.
+pub fn expand_cell_indices_in_context(
+    context: &crate::context::RuntimeContext,
+    cell: &CellArray,
+    indices: &[Value],
+) -> Result<crate::execution::RootedValues, RuntimeError> {
+    let owner = crate::indexing::plan::admission::Owner::new(Some(context))?;
+    let selection = selection::CellSelection::new(cell, indices)?;
+    let _source_roots = cell_deletion_roots(Some(context), cell)?;
+    let output = crate::execution::RootedValues::try_initialize_in_context(
+        selection.len(),
+        context,
+        |ordinal| {
+            if ordinal % 4096 == 0 {
+                owner.check()?;
             }
-            Value::Int(_) => {
-                let idx = parse_cell_index_value(&indices[0])?;
-                Ok(vec![index_cell_value(ca, &[idx])?])
-            }
-            Value::Tensor(t) => {
-                if tensor_element_len(t) == 1 && t.shape().iter().product::<usize>() == 1 {
-                    let idx = parse_cell_index_value_for_len(&indices[0], ca.data().len())?;
-                    return Ok(vec![index_cell_value(ca, &[idx])?]);
-                }
-                (0..t.len())
-                    .map(|index| {
-                        let idx = parse_positive_cell_index(index_scalar_from_numeric(
-                            t.numeric_value_at(index)
-                                .expect("validated numeric tensor storage"),
-                        )?)?;
-                        index_cell_value(ca, &[idx])
-                    })
-                    .collect()
-            }
-            _ => Err(mex("CellIndexType", "Unsupported cell index type")),
+            selection.value_at(ordinal)
         },
-        0 => Err(mex("CellIndexType", "Unsupported cell index type")),
-        _ => expand_cell_subscripts(ca, indices),
+    )?;
+    owner.check()?;
+    Ok(output)
+}
+
+/// Structural prefix reads have the ordinary brace expansion's one-output
+/// padding/truncation contract. Validate the entire selection first, but do
+/// not construct discarded output slots or a second unrooted collection.
+pub(crate) fn read_cell_brace_single_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    cell: &CellArray,
+    indices: &[Value],
+) -> Result<crate::execution::RootedValue, RuntimeError> {
+    let owner = crate::indexing::plan::admission::Owner::new(context)?;
+    let selected = if indices.is_empty() {
+        if cell.data().is_empty() {
+            Value::Num(0.0)
+        } else {
+            index_cell_value(cell, &[1])?
+        }
+    } else {
+        let selection = selection::CellSelection::new(cell, indices)?;
+        let mut first = None;
+        for index in 0..selection.len() {
+            if index % 4096 == 0 {
+                owner.check()?;
+            }
+            let value = selection.value_ref_at(index)?;
+            if first.is_none() {
+                first = Some(value);
+            }
+        }
+        first.cloned().unwrap_or(Value::Num(0.0))
+    };
+    owner.check()?;
+    let selected = crate::execution::RootedValue::in_optional_context(selected, context)?;
+    owner.check()?;
+    Ok(selected)
+}
+
+/// The selected child of an initializing fixed path is private until writeback.
+/// Validate using the same scalar growth rules, but never grow/copy the cell
+/// just to obtain a new member-assignment receiver.
+pub(crate) fn read_cell_assignment_child_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    cell: &CellArray,
+    positions: &[usize],
+    intent: runmat_types::AssignmentChildCreation,
+) -> Result<crate::execution::RootedValue, RuntimeError> {
+    let owner = crate::indexing::plan::admission::Owner::new(context)?;
+    if positions.contains(&0) {
+        return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
     }
+    let growing = match positions {
+        [position] if *position > cell.data().len() => {
+            linear_cell_growth_shape(cell, *position)?;
+            true
+        }
+        [row, column] if *row > cell.rows || *column > cell.cols => {
+            rectangular_cell_growth_shape(cell, *row, *column)?;
+            true
+        }
+        _ => false,
+    };
+    let result = if growing {
+        crate::sequence::assignment_container_in_context(context, intent)?
+    } else {
+        crate::execution::RootedValue::in_optional_context(
+            index_cell_value(cell, positions)?,
+            context,
+        )?
+    };
+    owner.check()?;
+    Ok(result)
+}
+
+pub(crate) fn resolve_cell_assignment_child_components_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    cell: &CellArray,
+    components: &[crate::object::indexing::ObjectIndexComponent],
+) -> Result<runmat_value::ExactArrayStorage<usize>, RuntimeError> {
+    use crate::object::indexing::ObjectIndexComponent;
+    if components.is_empty() {
+        return Err(mex(
+            "UnsupportedCellIndexCount",
+            "Unsupported number of cell indices",
+        ));
+    }
+    crate::context::host_allocation::initialize_host_array(context, components.len(), |axis| {
+        match &components[axis] {
+            ObjectIndexComponent::Value(value) if cell_assignment_index_count(value) == 1 => {
+                cell_assignment_index_at(value, 0)
+            }
+            ObjectIndexComponent::Colon
+                if cell_selector_extent(cell, components.len(), axis)? == 1 =>
+            {
+                Ok(1)
+            }
+            _ => Err(mex(
+                "CellAssignmentArityMismatch",
+                "nested cell assignment requires one destination",
+            )),
+        }
+    })
+}
+
+fn linear_cell_growth_shape(cell: &CellArray, maximum: usize) -> Result<[usize; 2], RuntimeError> {
+    if !(cell.data().is_empty() || cell.rows <= 1 || cell.cols <= 1) {
+        return Err(mex(
+            "UnsupportedCellGrowth",
+            "Cell growth via linear brace assignment is only supported for vectors",
+        ));
+    }
+    Ok(if cell.data().is_empty() || cell.rows <= 1 {
+        [1, maximum]
+    } else {
+        [maximum, 1]
+    })
+}
+
+fn rectangular_cell_growth_shape(
+    cell: &CellArray,
+    row: usize,
+    column: usize,
+) -> Result<[usize; 2], RuntimeError> {
+    let shape = [cell.rows.max(row), cell.cols.max(column)];
+    shape[0].checked_mul(shape[1]).ok_or_else(|| {
+        mex(
+            "CellSubscriptOutOfBounds",
+            "Cell array expansion exceeds supported size",
+        )
+    })?;
+    Ok(shape)
 }
 
 pub fn assign_cell_value<OnWrite>(
@@ -472,14 +624,8 @@ where
             }
             let (mut ca, _roots) = if i > ca.rows || j > ca.cols {
                 let old_cols = ca.cols;
-                let new_rows = ca.rows.max(i);
-                let new_cols = old_cols.max(j);
-                let total = new_rows.checked_mul(new_cols).ok_or_else(|| {
-                    mex(
-                        "CellSubscriptOutOfBounds",
-                        "Cell array expansion exceeds supported size",
-                    )
-                })?;
+                let [new_rows, new_cols] = rectangular_cell_growth_shape(&ca, i, j)?;
+                let total = new_rows * new_cols;
                 let filler = empty_numeric_cell_value(context)?;
                 let old = ca.data();
                 let old_rows = ca.rows;
@@ -605,17 +751,7 @@ where
     let old_len = ca.data().len();
     let (mut ca, _roots) = if let Some(max_pos) = positions.iter().copied().max() {
         if max_pos > old_len {
-            if !(ca.data().is_empty() || ca.rows <= 1 || ca.cols <= 1) {
-                return Err(mex(
-                    "UnsupportedCellGrowth",
-                    "Cell growth via linear brace assignment is only supported for vectors",
-                ));
-            }
-            let shape = if old_len == 0 || ca.rows <= 1 {
-                [1, max_pos]
-            } else {
-                [max_pos, 1]
-            };
+            let shape = linear_cell_growth_shape(&ca, max_pos)?;
             let filler = empty_numeric_cell_value(context)?;
             let old = ca.data();
             let values = (0..max_pos).map(|position| old.get(position).unwrap_or(&filler));
@@ -656,6 +792,24 @@ pub fn resolve_cell_assignment_positions(
     parse_cell_index_values_for_assignment(&indices[0])
 }
 
+/// Preserve the ordinary Value-selector assignment policy, but construct the
+/// final native position table under the selected operation's exact owner.
+pub fn resolve_cell_assignment_positions_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    cell: &CellArray,
+    indices: &[Value],
+) -> Result<runmat_value::ExactArrayStorage<usize>, RuntimeError> {
+    let [index] = indices else {
+        return Err(mex("CellIndexType", "Unsupported cell index type"));
+    };
+    let _ = cell;
+    crate::context::host_allocation::initialize_host_array(
+        context,
+        cell_assignment_index_count(index),
+        |ordinal| cell_assignment_index_at(index, ordinal),
+    )
+}
+
 pub fn delete_cell_linear(ca: CellArray, idx: usize) -> Result<Value, RuntimeError> {
     delete_cell_linear_in_context(None, ca, idx)
 }
@@ -675,13 +829,15 @@ pub fn delete_cell_linear_in_context(
             "Linear cell deletion is only supported for vectors",
         ));
     }
+    let owner = crate::indexing::plan::admission::Owner::new(context)?;
+    let _source_roots = cell_deletion_roots(context, &ca)?;
     let len = ca.data().len() - 1;
     let shape = if len == 0 {
-        vec![0, 0]
+        [0, 0]
     } else if ca.rows == 1 {
-        vec![1, len]
+        [1, len]
     } else {
-        vec![len, 1]
+        [len, 1]
     };
     let position = idx - 1;
     let values = ca
@@ -691,6 +847,7 @@ pub fn delete_cell_linear_in_context(
         .filter(move |(index, _)| *index != position)
         .map(|(_, value)| value);
     let (cell, _roots) = borrowed_cell(context, &shape, values)?;
+    owner.check()?;
     Ok(Value::Cell(cell))
 }
 
@@ -701,6 +858,101 @@ pub fn assign_cell_paren_with_policy(
     delete: bool,
 ) -> Result<Value, RuntimeError> {
     assign_cell_paren_with_policy_in_context(None, ca, indices, rhs, delete)
+}
+
+/// Planned deletion consumes native zero-based positions without a separate
+/// one-based index vector at the dispatch boundary.
+pub fn delete_cell_with_plan_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    ca: CellArray,
+    plan: &crate::indexing::plan::IndexPlan,
+    rhs: &Value,
+) -> Result<Value, RuntimeError> {
+    let owner = crate::indexing::plan::admission::Owner::new(context)?;
+    let one_based = |index: u32| {
+        usize::try_from(index)
+            .ok()
+            .and_then(|index| index.checked_add(1))
+            .ok_or_else(|| mex("IndexOutOfBounds", "cell index exceeds the supported range"))
+    };
+    // Keep the dispatch's original conversion-before-RHS diagnostic order.
+    for (ordinal, &index) in plan.indices.iter().enumerate() {
+        if ordinal % 4096 == 0 {
+            owner.check()?;
+        }
+        one_based(index)?;
+    }
+    validate_cell_delete(&ca, rhs)?;
+    delete_cell_positions(context, &ca, plan.indices.len(), |ordinal| {
+        row_major_pos_from_linear(&ca, one_based(plan.indices[ordinal])?)
+    })
+}
+
+fn validate_cell_delete(ca: &CellArray, rhs: &Value) -> Result<(), RuntimeError> {
+    if !is_empty_tensor(rhs) {
+        return Err(mex(
+            "DeletionRequiresEmptyRhs",
+            "Cell deletion requires empty RHS",
+        ));
+    }
+    if !(ca.rows == 1 || ca.cols == 1) {
+        return Err(mex(
+            "UnsupportedCellDeletion",
+            "Linear cell deletion is only supported for vectors",
+        ));
+    }
+    Ok(())
+}
+
+fn delete_cell_positions(
+    context: Option<&crate::context::RuntimeContext>,
+    ca: &CellArray,
+    count: usize,
+    mut position: impl FnMut(usize) -> Result<usize, RuntimeError>,
+) -> Result<Value, RuntimeError> {
+    let owner = crate::indexing::plan::admission::Owner::new(context)?;
+    let _source_roots = cell_deletion_roots(context, ca)?;
+    let positions =
+        crate::context::host_allocation::initialize_host_array(context, count, |index| {
+            if index % 4096 == 0 {
+                owner.check()?;
+            }
+            position(index)
+        })?;
+    let mut positions = positions
+        .try_into_owned()
+        .unwrap_or_else(|_| unreachable!("fresh deletion positions have one owner"));
+    positions.as_mut_slice().sort_unstable();
+    let mut unique = 0;
+    for index in 0..positions.len() {
+        if index % 4096 == 0 {
+            owner.check()?;
+        }
+        if unique == 0 || positions.as_slice()[index] != positions.as_slice()[unique - 1] {
+            let value = positions.as_slice()[index];
+            positions.as_mut_slice()[unique] = value;
+            unique += 1;
+        }
+    }
+    owner.check()?;
+    let removed = &positions.as_slice()[..unique];
+    let len = ca.data().len() - unique;
+    let shape = if len == 0 {
+        [0, 0]
+    } else if ca.rows == 1 {
+        [1, len]
+    } else {
+        [len, 1]
+    };
+    let values = ca
+        .data()
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| removed.binary_search(index).is_err())
+        .map(|(_, value)| value);
+    let (cell, _roots) = borrowed_cell(context, &shape, values)?;
+    owner.check()?;
+    Ok(Value::Cell(cell))
 }
 
 pub fn assign_cell_paren_with_policy_in_context(
@@ -734,6 +986,20 @@ pub fn assign_cell_paren_with_policy_in_context(
     ))
 }
 
+fn cell_deletion_roots(
+    context: Option<&crate::context::RuntimeContext>,
+    ca: &CellArray,
+) -> Result<crate::execution::RootedValueLease, RuntimeError> {
+    match context {
+        Some(context) => crate::execution::RootedValueLease::for_values_iterator_in_context(
+            ca.data().iter(),
+            context,
+        ),
+        None => crate::execution::RootedValueLease::for_values(ca.data().iter())
+            .map_err(|error| error.into_runtime_error()),
+    }
+}
+
 pub fn assign_cell_paren_linear_indices_with_policy(
     ca: CellArray,
     indices: &[usize],
@@ -751,40 +1017,10 @@ pub fn assign_cell_paren_linear_indices_with_policy_in_context(
     delete: bool,
 ) -> Result<Value, RuntimeError> {
     if delete {
-        if !is_empty_tensor(rhs) {
-            return Err(mex(
-                "DeletionRequiresEmptyRhs",
-                "Cell deletion requires empty RHS",
-            ));
-        }
-        if !(ca.rows == 1 || ca.cols == 1) {
-            return Err(mex(
-                "UnsupportedCellDeletion",
-                "Linear cell deletion is only supported for vectors",
-            ));
-        }
-        let mut positions = indices
-            .iter()
-            .map(|&idx| row_major_pos_from_linear(&ca, idx))
-            .collect::<Result<Vec<_>, _>>()?;
-        positions.sort_unstable();
-        positions.dedup();
-        let len = ca.data().len() - positions.len();
-        let shape = if len == 0 {
-            vec![0, 0]
-        } else if ca.rows == 1 {
-            vec![1, len]
-        } else {
-            vec![len, 1]
-        };
-        let values = ca
-            .data()
-            .iter()
-            .enumerate()
-            .filter(|(index, _)| positions.binary_search(index).is_err())
-            .map(|(_, value)| value);
-        let (cell, _roots) = borrowed_cell(context, &shape, values)?;
-        return Ok(Value::Cell(cell));
+        validate_cell_delete(&ca, rhs)?;
+        return delete_cell_positions(context, &ca, indices.len(), |ordinal| {
+            row_major_pos_from_linear(&ca, indices[ordinal])
+        });
     }
     let Value::Cell(rhs_cell) = rhs else {
         return Err(mex(
@@ -997,6 +1233,29 @@ mod tests {
             )
             .unwrap();
             assert_eq!(positions.as_slice(), &[4, 1, 4]);
+            let native_indices = [Value::Tensor(
+                Tensor::new(vec![4., 1., 4.], vec![1, 3]).unwrap(),
+            )];
+            let native_positions = super::resolve_cell_assignment_positions_in_context(
+                Some(&runtime),
+                &original,
+                &native_indices,
+            )
+            .unwrap();
+            assert_eq!(native_positions.as_slice(), positions.as_slice());
+            let selected =
+                super::expand_cell_indices_in_context(&runtime, &original, &native_indices)
+                    .unwrap();
+            assert_eq!(
+                selected.values(),
+                &[Value::Num(22.), Value::Num(11.), Value::Num(22.)]
+            );
+            let invalid = [Value::Tensor(
+                Tensor::new(vec![1., 5.], vec![1, 2]).unwrap(),
+            )];
+            let error = super::expand_cell_indices_in_context(&runtime, &original, &invalid)
+                .expect_err("later selected index must fail");
+            assert_eq!(error.identifier(), Some("RunMat:CellIndexOutOfBounds"));
             let rhs = Value::Tensor(Tensor::new(vec![7., 8.], vec![1, 2]).unwrap());
             let Value::Tensor(tensor) = &rhs else {
                 unreachable!()
@@ -1045,6 +1304,18 @@ mod tests {
             )
             .is_err());
             let denied = ManagedHostEffectLedger::new(1);
+            assert!(super::expand_cell_indices_in_context(
+                &context(&denied),
+                &original,
+                &native_indices,
+            )
+            .is_err());
+            assert!(super::resolve_cell_assignment_positions_in_context(
+                Some(&context(&denied)),
+                &original,
+                &native_indices,
+            )
+            .is_err());
             assert!(super::resolve_cell_assignment_components_in_context(
                 Some(&context(&denied)),
                 &original,

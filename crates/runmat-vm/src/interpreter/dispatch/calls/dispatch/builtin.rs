@@ -6,12 +6,12 @@
 
 use super::*;
 
+#[path = "builtin/feval.rs"]
+mod feval;
 #[path = "builtin/ordinary.rs"]
 mod ordinary;
 #[path = "builtin/superclass.rs"]
 mod superclass;
-#[path = "builtin/feval.rs"]
-mod feval;
 
 pub(super) fn dispatch<'a>(ctx: CallDispatchContext<'a>) -> CallFuture<'a> {
     match ctx.instr {
@@ -31,15 +31,18 @@ pub(super) fn dispatch<'a>(ctx: CallDispatchContext<'a>) -> CallFuture<'a> {
 
 #[inline(never)]
 fn suspend_ordinary(ctx: CallDispatchContext<'_>) -> CallFuture<'_> {
-    Box::pin(ordinary::dispatch(ctx))
+    let context = ctx.context;
+    control::admit(&context.runtime, move || ordinary::dispatch(ctx))
 }
 
 #[inline(never)]
 fn suspend_superclass(ctx: CallDispatchContext<'_>) -> CallFuture<'_> {
-    Box::pin(superclass::dispatch(ctx))
+    let context = ctx.context;
+    control::admit(&context.runtime, move || superclass::dispatch(ctx))
 }
 
 #[inline(never)]
 fn suspend_feval(ctx: CallDispatchContext<'_>) -> CallFuture<'_> {
-    Box::pin(feval::dispatch(ctx))
+    let context = ctx.context;
+    control::admit(&context.runtime, move || feval::dispatch(ctx))
 }

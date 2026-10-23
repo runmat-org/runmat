@@ -46,10 +46,8 @@ impl PendingSequenceAssign {
                 let field = self.prepared.destination.field.clone();
                 let runtime = state.runtime.clone();
                 let caller = state.function.name.clone();
-                let updated = member_call(
-                    state,
-                    Box::pin(async move {
-                        let value = runtime
+                let updated = member_call(state, move || async move {
+                    let value = runtime
                             .scope(runmat_runtime::object::resolve::store_member_sequence_traced_in_context(
                                 &runtime,
                                 base,
@@ -58,9 +56,8 @@ impl PendingSequenceAssign {
                                 Some(&caller),
                             ))
                             .await?;
-                        single_member_sequence(value).map_err(|error| *error)
-                    }),
-                )?;
+                    single_member_sequence(value).map_err(|error| *error)
+                })?;
                 self.phase = SequencePhase::Writeback(state.arena.insert(updated));
             }
             SequencePhase::Writeback(current) => {
@@ -70,7 +67,7 @@ impl PendingSequenceAssign {
                 };
                 let parent = state.arena.get(*parent)?.clone();
                 let value = state.arena.get(current)?.clone();
-                let updated = write_step(state, parent, segment, value, false, true)?;
+                let updated = write_step(state, parent, segment, value, false)?;
                 self.prepared.destination.writeback.parents.pop();
                 self.phase = SequencePhase::Writeback(state.arena.insert(updated));
             }
@@ -211,7 +208,7 @@ pub(in crate::execute) fn assign_prepared_sequence(
             request,
             embedded: embedded.clone(),
             retained_roots: Vec::new(),
-            future: suspension::PendingCompletionFuture::Admitted(future),
+            future,
         });
         Err(NativeExecutorError::CallSuspended)
     })();
@@ -317,7 +314,7 @@ pub(in crate::execute) fn assign_prepared_fixed(
                     request,
                     embedded: embedded.clone(),
                     retained_roots: Vec::new(),
-                    future: suspension::PendingCompletionFuture::Admitted(future),
+                    future,
                 });
                 Err(NativeExecutorError::CallSuspended)
             }

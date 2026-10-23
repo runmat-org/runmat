@@ -66,25 +66,21 @@ fn managed_arguments_suspend_before_first_poll_and_survive_publication() {
 
             let polls = Rc::new(Cell::new(0));
             let polls_in_future = Rc::clone(&polls);
-            let outcome = begin_rooted_arguments(
-                &mut state,
-                None,
-                Box::pin(async move {
-                    let mut first_poll = true;
-                    futures::future::poll_fn(move |cx| {
-                        polls_in_future.set(polls_in_future.get() + 1);
-                        if pending && first_poll {
-                            first_poll = false;
-                            cx.waker().wake_by_ref();
-                            Poll::Pending
-                        } else {
-                            Poll::Ready(())
-                        }
-                    })
-                    .await;
-                    Ok(rooted)
-                }),
-            );
+            let outcome = begin_rooted_arguments(&mut state, None, move || async move {
+                let mut first_poll = true;
+                futures::future::poll_fn(move |cx| {
+                    polls_in_future.set(polls_in_future.get() + 1);
+                    if pending && first_poll {
+                        first_poll = false;
+                        cx.waker().wake_by_ref();
+                        Poll::Pending
+                    } else {
+                        Poll::Ready(())
+                    }
+                })
+                .await;
+                Ok(rooted)
+            });
             assert!(matches!(outcome, Err(NativeExecutorError::CallSuspended)));
             assert_eq!(polls.get(), 0, "native entry must not poll the callback");
             runmat_gc::gc_collect_major().expect("collect with pending result owner");
@@ -143,28 +139,26 @@ fn sequence_and_preparation_futures_are_not_polled_under_native_entry() {
                     begin_rooted_sequence(
                         &mut state,
                         None,
-                        Box::pin(futures::future::poll_fn(move |_| {
+                        move || futures::future::poll_fn(move |_| {
                             polls.set(polls.get() + 1);
                             Poll::<Result<RootedValueSequence, runmat_runtime::RuntimeError>>::Pending
-                        })),
+                        }),
                         1,
                     )
                     .map(|_| ())
                 }
                 1 => {
                     let polls = Rc::clone(&polls);
-                    begin_prepared_receiver(
-                        &mut state,
-                        None,
-                        Box::pin(futures::future::poll_fn(move |_| {
+                    begin_prepared_receiver(&mut state, None, move || {
+                        futures::future::poll_fn(move |_| {
                             polls.set(polls.get() + 1);
                             Poll::<
                                 NativeExecutorResult<
                                     runmat_runtime::object::protocol::PreparedSubscriptReceiver,
                                 >,
                             >::Pending
-                        })),
-                    )
+                        })
+                    })
                     .map(|_| ())
                 }
                 _ => {
@@ -239,15 +233,11 @@ fn unpolled_native_call_releases_its_captured_input_root_on_abandonment() {
         });
         let captured = RootedValues::new(vec![argument]).unwrap();
         allocation.unroot().unwrap();
-        let result = begin_rooted_arguments(
-            &mut state,
-            None,
-            Box::pin(async move {
-                let _captured = captured;
-                futures::future::pending::<()>().await;
-                unreachable!("abandoned call never resumes")
-            }),
-        );
+        let result = begin_rooted_arguments(&mut state, None, move || async move {
+            let _captured = captured;
+            futures::future::pending::<()>().await;
+            unreachable!("abandoned call never resumes")
+        });
         assert!(matches!(result, Err(NativeExecutorError::CallSuspended)));
         runmat_gc::gc_collect_major().unwrap();
         assert!(runmat_gc::gc_clone_value(&handle).is_ok());
@@ -276,7 +266,7 @@ fn ready_sequence_and_error_complete_only_after_native_resume() {
             let result = begin_rooted_sequence(
                 &mut state,
                 None,
-                Box::pin(async move {
+                move || async move {
                     polls_in_future.set(polls_in_future.get() + 1);
                     if fail {
                         Err(runmat_runtime::runtime_error::semantic_error(
@@ -289,7 +279,7 @@ fn ready_sequence_and_error_complete_only_after_native_resume() {
                         RootedValueSequence::new(sequence)
                             .map_err(|error| error.into_runtime_error())
                     }
-                }),
+                },
                 1,
             );
             assert!(matches!(result, Err(NativeExecutorError::CallSuspended)));

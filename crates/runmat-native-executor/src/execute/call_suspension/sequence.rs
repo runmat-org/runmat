@@ -7,14 +7,16 @@ use crate::{NativeExecutorError, NativeExecutorResult};
 use super::super::state::{EmbeddedOperationIdentity, HostState};
 use super::{CallCompletion, CompletedPayload, PendingCall};
 
+#[path = "sequence/end.rs"]
+mod end;
+pub(in crate::execute) use end::{
+    begin_sequence_end_stage, SequenceEndAdmission, SequenceEndOwner,
+};
+
 pub(in crate::execute) enum SequenceStage {
     Builder(SequenceDestinationBuilder),
     Destination(PreparedSequenceDestination),
-    End {
-        builder: SequenceDestinationBuilder,
-        receiver: runmat_runtime::object::protocol::PreparedSubscriptReceiver,
-        value: runmat_runtime::execution::RootedValue,
-    },
+    End(SequenceEndOwner),
 }
 
 pub(in crate::execute) fn take_completed_sequence_stage(
@@ -83,7 +85,7 @@ where
         request,
         embedded,
         retained_roots: Vec::new(),
-        future: crate::execute::call_suspension::PendingCompletionFuture::Admitted(future),
+        future,
     });
     Err(NativeExecutorError::CallSuspended)
 }

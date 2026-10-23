@@ -53,9 +53,14 @@ impl RuntimePlacementService for ControlledReadyPlacement {
             }
         }
         let selected = RuntimePlacementService::select_whole_work(self.actual.as_ref(), request)?;
-        self.chosen
-            .borrow_mut()
-            .push(selected.decision.selected.kind);
+        // A selected specialized invocation can itself run a numerical-region
+        // comparison (including OriginalNativeRegion). That is a different
+        // decision domain, not another complete-call ready alternative.
+        if selected.decision.signature.operation == "core.ready-invocation" {
+            self.chosen
+                .borrow_mut()
+                .push(selected.decision.selected.kind);
+        }
         Ok(selected)
     }
 
@@ -133,7 +138,13 @@ fn controlled_ready_routes(winner: runmat_execution::ExecutionCandidateKind, pro
         last.contains(&ExecutionCandidateKind::SpecializedNativeCpu),
         !profileless
     );
-    assert_eq!(service.chosen.borrow().last(), Some(&winner));
+    let chosen = service.chosen.borrow();
+    assert_eq!(
+        chosen.len(),
+        offered.len(),
+        "one decision per ready comparison"
+    );
+    assert_eq!(chosen.last(), Some(&winner));
 }
 
 #[cfg(not(target_arch = "wasm32"))]

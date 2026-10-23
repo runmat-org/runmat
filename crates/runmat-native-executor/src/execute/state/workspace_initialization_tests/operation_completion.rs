@@ -97,10 +97,8 @@ fn ready_call_completion_reconciles_partial_writes_for_both_outcomes() {
                 reserved: 0,
             };
             state.current_request = Some(request);
-            let outcome = call_suspension::begin_rooted_arguments(
-                &mut state,
-                None,
-                Box::pin(async move {
+            let outcome =
+                call_suspension::begin_rooted_arguments(&mut state, None, move || async move {
                     service.assign_with_context(&call_runtime, "x", Value::Num(9.0))?;
                     if fail {
                         Err(runmat_runtime::runtime_error::semantic_error(
@@ -111,8 +109,7 @@ fn ready_call_completion_reconciles_partial_writes_for_both_outcomes() {
                         runmat_runtime::execution::RootedValues::new(vec![Value::Bool(true)])
                             .map_err(|error| error.into_runtime_error())
                     }
-                }),
-            );
+                });
             assert!(matches!(outcome, Err(NativeExecutorError::CallSuspended)));
             missing_error(&mut state);
             let pending = state.pending_call.as_ref().unwrap();
@@ -160,7 +157,7 @@ fn pending_semantic_completion_reconciles_once_before_nested_reads() {
             None,
             call_suspension::SemanticOperationKind::IndexedRead,
             Vec::new(),
-            async move {
+            move || async move {
                 observed_writes.set(observed_writes.get() + 1);
                 service.assign_with_context(&call_runtime, "x", Value::Num(11.0))?;
                 let mut first_poll = true;

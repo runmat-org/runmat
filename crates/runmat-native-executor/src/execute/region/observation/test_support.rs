@@ -9,6 +9,76 @@ use runmat_native_codegen::{
 use runmat_types::{ProgramFunctionId, ProgramPointId, ProgramSourceId, ProgramSpan};
 use std::{rc::Rc, sync::Arc};
 
+// Failure retires an original observation; it does not prove a physical sample.
+// Keep that lifecycle observable without authorizing feedback or fake costs.
+struct Retirement {
+    retired: Rc<std::cell::Cell<usize>>,
+    _program: runmat_runtime::numeric_region::service::NativeNumericRegionProgramOwner,
+    _inputs: runmat_runtime::execution::RootedValues,
+}
+impl Drop for Retirement {
+    fn drop(&mut self) {
+        self.retired.set(self.retired.get() + 1);
+    }
+}
+impl runmat_runtime::numeric_region::service::NativeOriginalRegionObservation for Retirement {
+    fn audit(&self) -> Option<runmat_runtime::numeric_region::service::SourceRegionRouteAudit> {
+        None
+    }
+    fn complete(
+        self: Box<Self>,
+        _: runmat_runtime::context::RuntimeContext,
+        _: runmat_runtime::numeric_region::service::NativeNumericRegionRight,
+    ) -> Result<
+        runmat_runtime::execution::RuntimeContinuationFuture<'static, ()>,
+        runmat_runtime::RuntimeError,
+    > {
+        panic!("failed native execution must not complete an observation")
+    }
+}
+
+pub(in crate::execute) fn observed_state_with_retirement(
+    probe: &Rc<Probe>,
+    retired: Rc<std::cell::Cell<usize>>,
+) -> HostState {
+    let mut state = observed_state(probe);
+    let plan = plan();
+    let site = runmat_runtime::native::NativeSiteRequest {
+        function: plan.entry.point.function.0,
+        block: plan.entry.point.block,
+        position: plan.entry.point.position,
+        phase: runmat_runtime::native::NativeSitePhase::RVALUE,
+        ordinal: plan.entry.ordinal,
+        reserved: 0,
+    };
+    let (program, inputs, right) =
+        runmat_runtime::numeric_region::service::NativeNumericRegionRequest::capture_verified(
+            &state.runtime,
+            plan.region,
+            site,
+            &plan.program,
+            &[&runmat_value::Value::Num(1.)],
+        )
+        .unwrap()
+        .unwrap()
+        .into_parts();
+    assert!(right.is_current(&state.runtime));
+    assert!(right.matches(plan.region, site));
+    state.region_observation = Some(GenericRegionObservation::new(
+        crate::region::OptimizedRegionPlanLease::from_test_plan(plan),
+        RegionObservation::original(
+            state.runtime.clone(),
+            right,
+            Some(Box::new(Retirement {
+                retired,
+                _program: program,
+                _inputs: inputs,
+            })),
+        ),
+    ));
+    state
+}
+
 pub(in crate::execute) fn observed_state(probe: &Rc<Probe>) -> HostState {
     let runtime = runtime(probe);
     let function = NativeFunction {

@@ -128,7 +128,7 @@ fn evaluate_inner(
         state,
         embedded.cloned(),
         retained_roots,
-        Box::pin(async move { scoped_runtime.scope(future).await }),
+        move || async move { scoped_runtime.scope(future).await },
         1,
     )?;
     let [value] = <[Value; 1]>::try_from(values).map_err(|_| {

@@ -201,8 +201,14 @@ mod tests {
             let complex = Value::ComplexTensor(
                 runmat_value::ComplexTensor::new(vec![(1.0, 2.0); count], shape.clone()).unwrap(),
             );
-            assert_eq!(value_shape(&real), shape);
-            assert_eq!(value_shape(&complex), shape);
+            assert_eq!(
+                crate::builtins::common::shape::stored_dimensions_borrowed(&real).as_slice(),
+                shape
+            );
+            assert_eq!(
+                crate::builtins::common::shape::stored_dimensions_borrowed(&complex).as_slice(),
+                shape
+            );
         }
     }
 }

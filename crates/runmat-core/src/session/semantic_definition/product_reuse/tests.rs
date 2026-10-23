@@ -66,7 +66,7 @@ fn closed_external_and_dotted_references_prove_then_rebind_the_draft() {
         steps: vec![BytecodeSubscriptStep::DottedInvoke {
             member: MemberName("stable".into()),
             arguments: vec![],
-            semantic_fallback: Some(external(id)),
+            semantic_fallback: Some(Arc::new(external(id))),
         }],
         selection: runmat_types::SequenceUse::RequireSingle,
         context: runmat_types::ObjectIndexingContext::Expression,
@@ -152,12 +152,12 @@ fn closed_external_and_dotted_references_prove_then_rebind_the_draft() {
     assert!(matches!(
         &steps[0],
         BytecodeSubscriptStep::DottedInvoke {
-            semantic_fallback: Some(CallableIdentity::ExternalFunction {
-                function: FunctionId(7),
-                ..
-            }),
+            semantic_fallback: Some(identity),
             ..
-        }
+        } if matches!(identity.as_ref(), CallableIdentity::ExternalFunction {
+            function: FunctionId(7),
+            ..
+        })
     ));
     assert!(matches!(
         &unit.bytecode().instructions[0],
@@ -165,12 +165,12 @@ fn closed_external_and_dotted_references_prove_then_rebind_the_draft() {
             if matches!(
                 &steps[0],
                 BytecodeSubscriptStep::DottedInvoke {
-                    semantic_fallback: Some(CallableIdentity::ExternalFunction {
-                        function: FunctionId(7),
-                        ..
-                    }),
+                    semantic_fallback: Some(identity),
                     ..
-                }
+                } if matches!(identity.as_ref(), CallableIdentity::ExternalFunction {
+                    function: FunctionId(7),
+                    ..
+                })
             )
     ));
 }

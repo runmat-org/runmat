@@ -78,15 +78,17 @@ fn member_read_roots(
     crate::execution::structure::replacement::lease(base, context)
 }
 
-async fn read_member_sequence_scoped(
-    context: Option<&crate::context::RuntimeContext>,
+fn read_member_sequence_scoped<'a>(
+    context: Option<&'a crate::context::RuntimeContext>,
     request: MemberRead,
-    caller_function_name: Option<&str>,
-) -> Result<RootedValueSequence, RuntimeError> {
+    caller_function_name: Option<&'a str>,
+) -> impl std::future::Future<Output = Result<RootedValueSequence, RuntimeError>> + 'a {
+    // The callers already defer and retain roots before reaching this scope
+    // boundary. Return the same scoped child, without a forwarding poll frame.
     let work = read_member_sequence_in_scope(context, request, caller_function_name);
     match context {
-        Some(context) => context.scope(work).await,
-        None => work.await,
+        Some(context) => futures::future::Either::Left(context.scope(work)),
+        None => futures::future::Either::Right(work),
     }
 }
 

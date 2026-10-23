@@ -11,18 +11,21 @@ use crate::{object::indexing::allocation_error, RuntimeError};
 use allocator_api2::{boxed::Box as AllocatedBox, vec::Vec as AllocatedVec};
 use std::alloc::Layout;
 
+#[inline(never)]
 pub(super) fn admit_future<'a, F>(
     context: Option<&RuntimeContext>,
-    future: F,
+    make_future: impl FnOnce() -> F,
 ) -> crate::execution::RuntimeContinuationFuture<'a, crate::execution::RootedValue>
 where
     F: std::future::Future<Output = Result<crate::execution::RootedValue, RuntimeError>> + 'a,
 {
-    crate::execution::rooted_continuation::admit_rooted_future(
-        context,
+    // Recursive callers pass their captures, not a fully constructed child
+    // future. Keep its existing single allocation and exact admission owner.
+    crate::execution::rooted_continuation::admit_rooted_future_with(
+        context.cloned(),
         "sequence assignment",
         crate::builtin::builtin_control_error,
-        future,
+        move |_| make_future(),
     )
 }
 

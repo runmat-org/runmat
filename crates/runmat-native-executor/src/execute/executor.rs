@@ -192,7 +192,23 @@ impl NativeExecutor {
         } = request;
         self.require_runtime_services(&runtime)?;
         let retained_captures = self.retained_capture_arguments(function, &arguments)?;
-        self.validate_entry_profile(function, arguments.supplied().iter())?;
+        // Match the profile's original logical ingress before ABI preparation:
+        // interactive entries include their immutable caller workspace after
+        // supplied arguments, just like the legacy request path below.
+        let profile_values = || {
+            arguments.supplied().iter().chain(
+                workspace
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|workspace| workspace.profile_values()),
+            )
+        };
+        self.validate_entry_profile(function, profile_values())?;
+        if let Some(target) = &osr_target {
+            target
+                .executor()
+                .validate_entry_profile(function, profile_values())?;
+        }
         let function_ir = self
             .functions
             .iter()

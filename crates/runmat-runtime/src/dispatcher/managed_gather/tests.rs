@@ -68,25 +68,23 @@ struct Provider {
     marker: Arc<()>,
 }
 impl Provider {
-    fn staged<'a>(
-        &'a self,
-        handle: &'a GpuTensorHandle,
+    async fn staged(
+        &self,
+        handle: &GpuTensorHandle,
         mut stage: Option<PreparedNumericDownloadStage>,
-    ) -> impl Future<Output = anyhow::Result<HostNumericTensorOwned>> + 'a {
-        async move {
-            let callback = stage.as_mut().unwrap().take_callback().unwrap();
-            *self.physical.lock().unwrap() = Some(callback);
-            if self.pending.load(Ordering::SeqCst) != 0 {
-                return futures::future::pending().await;
-            }
-            drop(self.physical.lock().unwrap().take());
-            drop(stage);
-            Ok(HostNumericTensorOwned {
-                data: HostNumericDataOwned::F64(vec![17.0; handle.shape().iter().product()]),
-                shape: handle.shape().to_vec(),
-                storage: GpuTensorStorage::Real,
-            })
+    ) -> anyhow::Result<HostNumericTensorOwned> {
+        let callback = stage.as_mut().unwrap().take_callback().unwrap();
+        *self.physical.lock().unwrap() = Some(callback);
+        if self.pending.load(Ordering::SeqCst) != 0 {
+            return futures::future::pending().await;
         }
+        drop(self.physical.lock().unwrap().take());
+        drop(stage);
+        Ok(HostNumericTensorOwned {
+            data: HostNumericDataOwned::F64(vec![17.0; handle.shape().iter().product()]),
+            shape: handle.shape().to_vec(),
+            storage: GpuTensorStorage::Real,
+        })
     }
 }
 impl AccelProvider for Provider {

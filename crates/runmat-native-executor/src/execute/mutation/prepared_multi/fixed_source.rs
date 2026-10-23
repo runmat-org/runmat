@@ -14,7 +14,7 @@ use crate::{NativeExecutorError, NativeExecutorResult};
 pub(super) struct FixedSourceOwner {
     functions: Arc<Vec<NativeFunction>>,
     request: NativeSiteRequest,
-    occurrence: runmat_hir::StmtId,
+    occurrence: runmat_types::StmtId,
     function_index: usize,
     block_index: usize,
     instruction_index: usize,

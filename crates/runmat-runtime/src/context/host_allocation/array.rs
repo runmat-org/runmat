@@ -118,6 +118,22 @@ pub fn prepare_host_array_optional<T>(
     Ok(PreparedHostArray { body, count })
 }
 impl<T> PreparedHostArray<T> {
+    /// Borrow the initialized prefix without publishing or reallocating it.
+    pub fn initialized(&self) -> &[T] {
+        match &self.body {
+            IndexArrayBody::Managed(builder) => builder.initialized(),
+            IndexArrayBody::Ordinary(values) => values,
+        }
+    }
+
+    /// Publish the initialized prefix with its original capacity owner/claim.
+    pub fn finish_initialized(self) -> ExactArrayStorage<T> {
+        match self.body {
+            IndexArrayBody::Managed(builder) => builder.finish_initialized(),
+            IndexArrayBody::Ordinary(values) => ExactArrayStorage::shared_unbounded(values),
+        }
+    }
+
     pub fn try_push(&mut self, value: T) -> Result<(), T> {
         match &mut self.body {
             IndexArrayBody::Managed(builder) => builder.try_push(value),

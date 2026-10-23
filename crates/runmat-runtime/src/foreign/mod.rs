@@ -158,6 +158,26 @@ pub async fn assign_foreign_resource_index(
     invoke_foreign_member(reference.clone(), "set_item", arguments).await
 }
 
+/// Retain canonical admitted index slots through the same set_item dispatch.
+/// Neither the incoming nor routing arguments pass through a bare Vec.
+pub async fn assign_foreign_resource_index_retained_in_context(
+    runtime: &crate::context::RuntimeContext,
+    reference: runmat_value::ForeignRef,
+    indices: crate::call::BuiltinArguments,
+    value: runmat_value::Value,
+) -> Result<crate::execution::RootedValue, crate::RuntimeError> {
+    let count = indices.len();
+    let value = crate::execution::RootedValue::in_context(value, runtime)?;
+    let arguments = indices
+        .try_insert_in_context(count, value, runtime)?
+        .into_supplied_function_arguments(Some(runtime))?
+        .prepend_routing_in_context(runmat_value::Value::Foreign(reference.clone()), runtime)?;
+    require_foreign_single(
+        invoke_foreign_rooted_in_context(Some(runtime), reference, "set_item", arguments, 1)
+            .await?,
+    )
+}
+
 /// Invoke a method on a foreign resource through its owning adapter. Object
 /// dispatch remains backend-neutral; native libraries, JVMs, and later
 /// adapters define their own method sets behind this operation.

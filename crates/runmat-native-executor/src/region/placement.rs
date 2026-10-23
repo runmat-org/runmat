@@ -107,10 +107,9 @@ impl RegionObservation {
             }
         };
         match owner {
-            RegionObservationOwner::Original { .. } => return,
+            RegionObservationOwner::Original { .. } => (),
             RegionObservationOwner::Composed { right, observation } => {
                 observation.finish(&self.runtime, right, succeeded);
-                return;
             }
             RegionObservationOwner::WholeWork(selected) => {
                 let Some(service) = self.runtime.service_ports().placement() else {
@@ -381,12 +380,6 @@ pub(crate) fn choose_region(
         started,
         owner: Some(owner),
     }))
-}
-
-fn checked_output_bytes(bytes_per_value: u64, outputs: usize) -> Option<u64> {
-    u64::try_from(outputs)
-        .ok()
-        .and_then(|count| bytes_per_value.checked_mul(count))
 }
 
 fn signature_ref<'a>(

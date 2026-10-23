@@ -8,6 +8,16 @@ impl<'a> GpuHostUpload<'a> {
         tensor: &ComplexTensor,
         shape: &[usize],
     ) -> BuiltinResult<GpuTensorHandle> {
+        let source = self.source;
+        self.publish_complex_protecting(tensor, shape, &[source])
+    }
+
+    pub(crate) fn publish_complex_protecting(
+        &mut self,
+        tensor: &ComplexTensor,
+        shape: &[usize],
+        protected: &[&GpuTensorHandle],
+    ) -> BuiltinResult<GpuTensorHandle> {
         let lanes = tensor
             .len()
             .checked_mul(2)
@@ -24,24 +34,33 @@ impl<'a> GpuHostUpload<'a> {
                         .iter()
                         .enumerate()
                     {
+                        if index.is_multiple_of(4096) {
+                            self.checkpoint()?;
+                        }
                         values[2 * index] = pair.0;
                         values[2 * index + 1] = pair.1;
                     }
-                    return self.publish(&HostNumericTensorView {
-                        data: HostNumericDataView::F64(values),
-                        shape,
-                        storage: GpuTensorStorage::ComplexInterleaved,
-                    });
+                    return self.publish_protecting(
+                        &HostNumericTensorView {
+                            data: HostNumericDataView::F64(values),
+                            shape,
+                            storage: GpuTensorStorage::ComplexInterleaved,
+                        },
+                        protected,
+                    );
                 }
                 let values = gpu_helpers::complex_transfer::interleave(
                     tensor.as_f64_slice().expect("double complex tensor"),
                 )
                 .map_err(|source| error(self.label, source))?;
-                self.publish(&HostNumericTensorView {
-                    data: HostNumericDataView::F64(&values),
-                    shape,
-                    storage: GpuTensorStorage::ComplexInterleaved,
-                })
+                self.publish_protecting(
+                    &HostNumericTensorView {
+                        data: HostNumericDataView::F64(&values),
+                        shape,
+                        storage: GpuTensorStorage::ComplexInterleaved,
+                    },
+                    protected,
+                )
             }
             NumericDType::F32 => {
                 if let Some(mut workspace) = self.sample_workspace(NumericDType::F32, lanes)? {
@@ -54,24 +73,33 @@ impl<'a> GpuHostUpload<'a> {
                         .iter()
                         .enumerate()
                     {
+                        if index.is_multiple_of(4096) {
+                            self.checkpoint()?;
+                        }
                         values[2 * index] = pair.0;
                         values[2 * index + 1] = pair.1;
                     }
-                    return self.publish(&HostNumericTensorView {
-                        data: HostNumericDataView::F32(values),
-                        shape,
-                        storage: GpuTensorStorage::ComplexInterleaved,
-                    });
+                    return self.publish_protecting(
+                        &HostNumericTensorView {
+                            data: HostNumericDataView::F32(values),
+                            shape,
+                            storage: GpuTensorStorage::ComplexInterleaved,
+                        },
+                        protected,
+                    );
                 }
                 let values = gpu_helpers::complex_transfer::interleave(
                     tensor.as_f32_slice().expect("single complex tensor"),
                 )
                 .map_err(|source| error(self.label, source))?;
-                self.publish(&HostNumericTensorView {
-                    data: HostNumericDataView::F32(&values),
-                    shape,
-                    storage: GpuTensorStorage::ComplexInterleaved,
-                })
+                self.publish_protecting(
+                    &HostNumericTensorView {
+                        data: HostNumericDataView::F32(&values),
+                        shape,
+                        storage: GpuTensorStorage::ComplexInterleaved,
+                    },
+                    protected,
+                )
             }
             _ => Err(error(self.label, "complex integer upload is unsupported")),
         }
@@ -83,6 +111,22 @@ impl<'a> GpuHostUpload<'a> {
         &mut self,
         view: &HostNumericTensorView<'_>,
     ) -> BuiltinResult<GpuTensorHandle> {
+        let source = self.source;
+        self.publish_protecting(view, &[source])
+    }
+
+    /// `protected` contains the source and every still-live sibling result.
+    pub(crate) fn publish_protecting(
+        &mut self,
+        view: &HostNumericTensorView<'_>,
+        protected: &[&GpuTensorHandle],
+    ) -> BuiltinResult<GpuTensorHandle> {
+        if !protected
+            .iter()
+            .any(|handle| handle.shares_allocation_with(self.source))
+        {
+            return Err(error(self.label, "native upload source is not protected"));
+        }
         self.check_source_before_upload()?;
         if view.shape != self.shape
             || self.class
@@ -105,7 +149,7 @@ impl<'a> GpuHostUpload<'a> {
                 upload_numeric_protecting_admitted(
                     self.provider,
                     view,
-                    &[self.source],
+                    protected,
                     self.permit.as_deref(),
                 )
             });
@@ -130,6 +174,15 @@ impl<'a> GpuHostUpload<'a> {
     pub(crate) fn publish_logical(
         &mut self,
         view: &HostLogicalTensorView<'_>,
+    ) -> BuiltinResult<GpuTensorHandle> {
+        let source = self.source;
+        self.publish_logical_protecting(view, &[source])
+    }
+
+    pub(crate) fn publish_logical_protecting(
+        &mut self,
+        view: &HostLogicalTensorView<'_>,
+        protected: &[&GpuTensorHandle],
     ) -> BuiltinResult<GpuTensorHandle> {
         self.check_source_before_upload()?;
         if self.class != HostUploadClass::Logical || view.shape != self.shape {
@@ -162,7 +215,7 @@ impl<'a> GpuHostUpload<'a> {
                 upload_logical_protecting_admitted(
                     self.provider,
                     view,
-                    &[self.source],
+                    protected,
                     self.permit.as_deref(),
                     scratch,
                 )

@@ -14,7 +14,8 @@ pub struct LenOpParams {
 pub struct LinearGatherParams {
     pub count: u32,
     pub lane_factor: u32,
-    pub _pad: [u32; 2],
+    pub source_rows: u32,
+    pub source_columns: u32,
 }
 
 #[repr(C)]
@@ -22,7 +23,8 @@ pub struct LinearGatherParams {
 pub struct LinearScatterParams {
     pub count: u32,
     pub lane_factor: u32,
-    pub _pad: [u32; 2],
+    pub rhs_scalar: u32,
+    pub _pad: u32,
 }
 
 #[repr(C)]

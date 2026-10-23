@@ -72,7 +72,7 @@ pub(super) fn apply(
             }
             state.destination_live = true;
         }
-        Instr::PrepareMemberPathStep(_) | Instr::PrepareDynamicMemberPathStep => {
+        Instr::PrepareMemberPathStep { .. } | Instr::PrepareDynamicMemberPathStep { .. } => {
             let state = outgoing.as_ref().ok_or_else(|| {
                 format!("destination path step appears at instruction {pc} without a plan")
             })?;
@@ -107,6 +107,7 @@ pub(super) fn apply(
         Instr::PrepareParenthesesPathStep {
             component_count,
             selectors,
+            ..
         }
         | Instr::PrepareBracesPathStep {
             component_count,

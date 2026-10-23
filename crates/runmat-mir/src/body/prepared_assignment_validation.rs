@@ -92,7 +92,7 @@ pub(super) fn validate(body: &MirBody) -> Result<(), String> {
                     return Err("fixed assignment source occurrence has multiple consumers".into());
                 }
             }
-            MirStmtKind::Assign { place, .. } if place.has_expanding_selectors() => {
+            MirStmtKind::Assign { place, .. } if place.requires_prepared_assignment() => {
                 return Err(
                     "expanding fixed assignment lacks its canonical preparation/consumer roles"
                         .into(),

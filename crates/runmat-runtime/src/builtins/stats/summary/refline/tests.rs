@@ -380,16 +380,18 @@ fn refline_least_squares_reads_gpu_scatter_source_data() {
     let dummy_vertices = context
         .access
         .with_shared(|emission| {
-            emission.device().create_buffer(&wgpu::BufferDescriptor {
-                label: Some("refline-lsline-gpu-scatter-test-dummy-vertices"),
-                size: 16,
-                usage: wgpu::BufferUsages::VERTEX,
-                mapped_at_creation: false,
-            })
+            runmat_accelerate_api::WgpuBufferOwner::new(emission.device().create_buffer(
+                &wgpu::BufferDescriptor {
+                    label: Some("refline-lsline-gpu-scatter-test-dummy-vertices"),
+                    size: 16,
+                    usage: wgpu::BufferUsages::VERTEX,
+                    mapped_at_creation: false,
+                },
+            ))
         })
         .expect("shared WGPU device access");
     let scatter = ScatterPlot::from_gpu_buffer(
-        GpuVertexBuffer::new(std::sync::Arc::new(dummy_vertices), 0),
+        GpuVertexBuffer::new(dummy_vertices, 0),
         0,
         BoundingBox::new(
             glam::Vec3::new(1.0, 2.0, 0.0),

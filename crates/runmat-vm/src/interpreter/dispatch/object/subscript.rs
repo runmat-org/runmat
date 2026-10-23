@@ -1,18 +1,22 @@
 use super::{
     execute_subscript_path, frame_access, materialize_subscript_path,
-    write_rooted_sequence_register, ObjectDispatchContext, SubscriptPathReadContext,
+    write_rooted_sequence_register, Request, SubscriptPathReadContext,
 };
 use runmat_runtime::RuntimeError;
 
-pub(super) async fn dispatch(
-    instr: &crate::bytecode::Instr,
-    stack: &mut crate::interpreter::stack::InterpreterStack,
-    sequence_register: &mut super::super::SequenceState,
-    context: ObjectDispatchContext<'_>,
+#[inline(never)]
+pub(super) async fn begin_subscript_end_receiver(
+    request: Request<'_>,
 ) -> Result<bool, RuntimeError> {
+    let Request {
+        instruction: instr,
+        stack,
+        sequence_register,
+        context,
+        ..
+    } = request;
     let runtime = context.runtime;
     let bytecode = context.bytecode;
-    let invocation_arity = context.invocation_arity;
     match instr {
         crate::bytecode::Instr::BeginSubscriptEndReceiver { prefix } => {
             sequence_register.prepare_subscript_receiver()?;
@@ -49,6 +53,21 @@ pub(super) async fn dispatch(
             sequence_register.push_subscript_receiver(prepared, start, stack_index)?;
             Ok(true)
         }
+        _ => Ok(false),
+    }
+}
+
+#[inline(never)]
+pub(super) async fn load_subscript_end(request: Request<'_>) -> Result<bool, RuntimeError> {
+    let Request {
+        instruction: instr,
+        stack,
+        sequence_register,
+        context,
+        ..
+    } = request;
+    let runtime = context.runtime;
+    match instr {
         crate::bytecode::Instr::LoadSubscriptEnd {
             component,
             component_count,
@@ -63,6 +82,21 @@ pub(super) async fn dispatch(
             value.with_owned(|value| stack.try_push(value))?;
             Ok(true)
         }
+        _ => Ok(false),
+    }
+}
+
+#[inline(never)]
+pub(super) async fn finish_subscript_end_receiver(
+    request: Request<'_>,
+) -> Result<bool, RuntimeError> {
+    let Request {
+        instruction: instr,
+        stack,
+        sequence_register,
+        ..
+    } = request;
+    match instr {
         crate::bytecode::Instr::FinishSubscriptEndReceiver {
             selector_count,
             prefix_operand_count,
@@ -98,6 +132,21 @@ pub(super) async fn dispatch(
             stack.try_insert(prefix_start, prepared.receiver().clone())?;
             Ok(true)
         }
+        _ => Ok(false),
+    }
+}
+
+#[inline(never)]
+pub(super) async fn finish_dotted_invoke_receiver(
+    request: Request<'_>,
+) -> Result<bool, RuntimeError> {
+    let Request {
+        instruction: instr,
+        stack,
+        sequence_register,
+        ..
+    } = request;
+    match instr {
         crate::bytecode::Instr::FinishDottedInvokeReceiver {
             prefix_operand_count,
             argument_operand_count,
@@ -109,6 +158,23 @@ pub(super) async fn dispatch(
             )?;
             Ok(true)
         }
+        _ => Ok(false),
+    }
+}
+
+#[inline(never)]
+pub(super) async fn read_subscript_path(request: Request<'_>) -> Result<bool, RuntimeError> {
+    let Request {
+        instruction: instr,
+        stack,
+        sequence_register,
+        context,
+        ..
+    } = request;
+    let runtime = context.runtime;
+    let bytecode = context.bytecode;
+    let invocation_arity = context.invocation_arity;
+    match instr {
         crate::bytecode::Instr::ReadSubscriptPath {
             steps,
             selection,
@@ -135,6 +201,23 @@ pub(super) async fn dispatch(
             }
             Ok(true)
         }
+        _ => Ok(false),
+    }
+}
+
+#[inline(never)]
+pub(super) async fn capture_subscript_path(request: Request<'_>) -> Result<bool, RuntimeError> {
+    let Request {
+        instruction: instr,
+        stack,
+        sequence_register,
+        context,
+        ..
+    } = request;
+    let runtime = context.runtime;
+    let bytecode = context.bytecode;
+    let invocation_arity = context.invocation_arity;
+    match instr {
         crate::bytecode::Instr::CaptureSubscriptPath {
             steps,
             sequence_slot,

@@ -467,8 +467,18 @@ async fn execute_elementwise_outputs(
                 output_ids,
                 &bindings,
                 provider,
-                vm_right,
-                input_uses,
+                native
+                    .map(|(cpu, right, program)| host_candidate::Source::Native {
+                        cpu,
+                        right,
+                        program,
+                    })
+                    .or_else(|| {
+                        vm_right
+                            .zip(input_uses)
+                            .map(|(right, uses)| host_candidate::Source::Vm { right, uses })
+                    }),
+                preparation_receipt,
                 host_continuation,
             );
         }

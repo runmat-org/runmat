@@ -7,6 +7,7 @@ use runmat_value::Value;
 mod capture;
 mod read;
 mod subscript;
+mod suspend;
 mod write;
 
 pub(super) fn write_sequence_register(
@@ -84,52 +85,7 @@ pub struct ObjectDispatchContext<'a> {
     pub invocation_arity: runmat_runtime::context::RuntimeInvocationArity,
 }
 
-pub async fn dispatch_object(
-    instr: &crate::bytecode::Instr,
-    stack: &mut crate::interpreter::stack::InterpreterStack,
-    sequence_register: &mut super::SequenceState,
-    context: ObjectDispatchContext<'_>,
-) -> Result<bool, RuntimeError> {
-    match instr {
-        crate::bytecode::Instr::BeginSubscriptEndReceiver { .. }
-        | crate::bytecode::Instr::LoadSubscriptEnd { .. }
-        | crate::bytecode::Instr::FinishSubscriptEndReceiver { .. }
-        | crate::bytecode::Instr::FinishDottedInvokeReceiver { .. }
-        | crate::bytecode::Instr::ReadSubscriptPath { .. }
-        | crate::bytecode::Instr::CaptureSubscriptPath { .. } => {
-            subscript::dispatch(instr, stack, sequence_register, context).await
-        }
-        crate::bytecode::Instr::LoadMember(_)
-        | crate::bytecode::Instr::LoadMemberOrInit(_)
-        | crate::bytecode::Instr::LoadMemberDynamic
-        | crate::bytecode::Instr::LoadMemberDynamicOrInit
-        | crate::bytecode::Instr::LoadMemberSequence { .. }
-        | crate::bytecode::Instr::LoadMemberDynamicSequence { .. }
-        | crate::bytecode::Instr::MemberSequenceCardinality
-        | crate::bytecode::Instr::LoadMemberSequenceUsingOutputSlot { .. }
-        | crate::bytecode::Instr::LoadMemberDynamicSequenceUsingOutputSlot { .. } => {
-            read::dispatch(instr, stack, sequence_register, context).await
-        }
-        crate::bytecode::Instr::CaptureCallOutputSequence
-        | crate::bytecode::Instr::CaptureScalarSequence
-        | crate::bytecode::Instr::CaptureMemberSequence { .. }
-        | crate::bytecode::Instr::CaptureMemberDynamicSequence { .. }
-        | crate::bytecode::Instr::CaptureCellContentsSequence { .. }
-        | crate::bytecode::Instr::CaptureReturnedOutputsSequence { .. }
-        | crate::bytecode::Instr::MoveCapturedSequence { .. } => {
-            capture::dispatch(instr, stack, sequence_register, context).await
-        }
-        crate::bytecode::Instr::StoreMember(_)
-        | crate::bytecode::Instr::StoreMemberOrInit(_)
-        | crate::bytecode::Instr::StoreMemberDynamic
-        | crate::bytecode::Instr::StoreMemberDynamicOrInit
-        | crate::bytecode::Instr::StoreMemberSequence(_)
-        | crate::bytecode::Instr::StoreMemberDynamicSequence => {
-            write::dispatch(instr, stack, sequence_register, context).await
-        }
-        _ => Ok(false),
-    }
-}
+pub(super) use suspend::{dispatch_object, Request};
 
 fn frame_access(
     bytecode: &crate::bytecode::Bytecode,

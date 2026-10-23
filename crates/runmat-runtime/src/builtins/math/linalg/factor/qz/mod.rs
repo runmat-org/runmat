@@ -4,6 +4,16 @@ mod algorithm;
 mod allocation;
 mod eigvals;
 mod eigvectors;
+
+// Borrowed shared owners, not an additional QZ/eigenvector implementation.
+#[cfg(not(all(feature = "blas-lapack", not(target_arch = "wasm32"))))]
+pub(in crate::builtins::math::linalg) use algorithm::{
+    complex_qz_optional_in_place, complex_qz_scratch, ComplexQzOptionalView,
+};
+#[cfg(not(all(feature = "blas-lapack", not(target_arch = "wasm32"))))]
+pub(in crate::builtins::math::linalg) use eigvectors::{
+    complex_eigenvectors_in_place, ComplexPencilView,
+};
 mod ordqz;
 #[cfg(target_arch = "wasm32")]
 pub(crate) use ordqz::__runmat_wasm_register_builtin_ordqz_builtin;

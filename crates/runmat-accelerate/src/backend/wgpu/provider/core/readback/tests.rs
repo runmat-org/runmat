@@ -132,7 +132,6 @@ fn native_map_and_progress_both_gate_decode_and_preserve_failures() {
 
     #[derive(Debug)]
     struct Claim;
-    impl RetainedHostAllocationClaim for Claim {}
     let claim = Arc::new(Claim);
     let weak = Arc::downgrade(&claim);
     let completion = FundedMapCompletion {

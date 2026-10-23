@@ -472,8 +472,13 @@ pub enum Instr {
         root_slot: usize,
         root_creation: runmat_mir::SequenceRootCreation,
     },
-    PrepareMemberPathStep(runmat_types::MemberName),
-    PrepareDynamicMemberPathStep,
+    PrepareMemberPathStep {
+        member: runmat_types::MemberName,
+        child_creation: runmat_types::AssignmentChildCreation,
+    },
+    PrepareDynamicMemberPathStep {
+        child_creation: runmat_types::AssignmentChildCreation,
+    },
     BeginPreparedIndexSelectors {
         component_count: usize,
     },
@@ -490,10 +495,12 @@ pub enum Instr {
         component_count: usize,
     },
     PrepareParenthesesPathStep {
+        child_creation: runmat_types::AssignmentChildCreation,
         component_count: usize,
         selectors: Vec<super::BytecodeSubscriptSelector>,
     },
     PrepareBracesPathStep {
+        child_creation: runmat_types::AssignmentChildCreation,
         component_count: usize,
         selectors: Vec<super::BytecodeSubscriptSelector>,
         expand_all: bool,
@@ -898,10 +905,10 @@ impl Instr {
                 effect(*num_indices, 0)
             }
             Instr::BeginSequenceOutputTarget { .. }
-            | Instr::PrepareMemberPathStep(_)
+            | Instr::PrepareMemberPathStep { .. }
             | Instr::BeginPreparedIndexSelectors { .. }
             | Instr::FinishMemberSequenceOutputTarget(_) => effect(0, 0),
-            Instr::PrepareDynamicMemberPathStep
+            Instr::PrepareDynamicMemberPathStep { .. }
             | Instr::FinishDynamicMemberSequenceOutputTarget => effect(1, 0),
             Instr::LoadPreparedIndexEnd { .. } | Instr::LoadContextualIndexEnd { .. } => {
                 effect(0, 1)

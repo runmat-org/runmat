@@ -69,17 +69,20 @@ fn failed_inverse_action_retains_best_iterate_but_language_errors_stay_terminal(
                 } else {
                     vec![f64::NAN; 2]
                 };
-                Box::pin(async move {
-                    if language_error && call == 2 {
-                        return Err(crate::build_runtime_error("reader failed")
-                            .with_identifier("RunMat:Test:InverseAction")
-                            .build());
-                    }
-                    crate::user_functions::test_support::rooted_single_value_sequence(matrix(
-                        values,
-                        vec![2, 1],
-                    ))
-                })
+                crate::execution::admit_executable_sequence_with(
+                    &_runtime.clone(),
+                    move || async move {
+                        if language_error && call == 2 {
+                            return Err(crate::build_runtime_error("reader failed")
+                                .with_identifier("RunMat:Test:InverseAction")
+                                .build());
+                        }
+                        crate::user_functions::test_support::rooted_single_value_sequence(matrix(
+                            values,
+                            vec![2, 1],
+                        ))
+                    },
+                )
             },
         )));
         let target = crate::user_functions::test_support::exact_local_handle(

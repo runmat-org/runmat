@@ -555,8 +555,9 @@ fn suspended_call_completion_reconciles_workspace_on_success_and_error() {
                 request,
                 embedded: None,
                 retained_roots: Vec::new(),
-                future: crate::execute::call_suspension::PendingCompletionFuture::Ordinary(
-                    Box::pin(async move {
+                future: crate::execute::call_suspension::admit_completion_with(
+                    &state,
+                    move || async move {
                         service.assign_with_context(&call_runtime, "x", Value::Num(42.0))?;
                         if fail {
                             Err(runmat_runtime::runtime_error::semantic_error(
@@ -572,8 +573,9 @@ fn suspended_call_completion_reconciles_workspace_on_success_and_error() {
                                 ),
                             )
                         }
-                    }),
-                ),
+                    },
+                )
+                .unwrap(),
             });
             let result = futures::executor::block_on(crate::execute::call_suspension::complete(
                 &mut state, 1, 1,
@@ -645,8 +647,9 @@ fn suspended_contextual_call_reconciles_a_new_canonical_revision() {
                 request,
                 embedded: None,
                 retained_roots: Vec::new(),
-                future: crate::execute::call_suspension::PendingCompletionFuture::Ordinary(
-                    Box::pin(async move {
+                future: crate::execute::call_suspension::admit_completion_with(
+                    &state,
+                    move || async move {
                         reached_call.set(true);
                         gate.await.map_err(|_| {
                             runmat_runtime::runtime_error::semantic_error(
@@ -674,8 +677,9 @@ fn suspended_contextual_call_reconciles_a_new_canonical_revision() {
                                 ),
                             )
                         }
-                    }),
-                ),
+                    },
+                )
+                .unwrap(),
             });
             let mut completion =
                 Box::pin(crate::execute::call_suspension::complete(&mut state, 1, 1));
