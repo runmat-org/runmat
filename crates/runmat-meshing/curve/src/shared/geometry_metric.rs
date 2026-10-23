@@ -186,6 +186,7 @@ pub fn derive_curve_geometry_metric(
         }
         edge_witnesses.push(EdgeWitness {
             edge_id: edge.id.clone(),
+            tolerance_m: edge.tolerance_m,
             endpoint_ids: edge
                 .start_vertex_id
                 .iter()
