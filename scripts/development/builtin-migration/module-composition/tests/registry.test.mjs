@@ -43,16 +43,18 @@ const REVIEWED_SHARED_TARGET_PACKAGES = [
   "strings/transform", "table/timetable", "testing/plugins", "testing/runner", "workspace",
 ];
 
-test("registry declares the exact canonical 178-product census", () => {
+test("registry declares the exact canonical 180-product census", () => {
   assert.deepEqual(MODULE_COMPOSITION_SUFFIXES, EXPECTED_SUFFIXES);
   const products = moduleCompositionProductRegistry();
-  assert.equal(products.length, 178);
-  assert.equal(products.filter((entry) => entry.crate_role === "catalog").length, 89);
+  assert.equal(products.length, 180);
+  assert.equal(products.filter((entry) => entry.crate_role === "catalog").length, 91);
   assert.equal(products.filter((entry) => entry.crate_role === "runtime").length, 89);
 
   const ids = new Set(products.map((entry) => entry.product_id));
   assert.ok(ids.has("catalog-aliases"));
   assert.ok(ids.has("catalog-root"));
+  assert.ok(ids.has("catalog-plotting-line"));
+  assert.ok(ids.has("catalog-io-tabular"));
   assert.ok(ids.has("runtime-root"));
   assert.ok(ids.has("runtime-logical-rel"));
   for (const suffix of EXPECTED_SUFFIXES) {
@@ -152,8 +154,8 @@ test("registry identifiers and paths are globally unique", () => {
   const products = moduleCompositionProductRegistry();
   for (const field of ["product_id", "path", "module_path"]) {
     const values = products.map((entry) => entry[field]);
-    assert.equal(new Set(values).size, 178, `${field} must be unique`);
-    assert.equal(new Set(values.map((entry) => entry.toLowerCase())).size, 178,
+    assert.equal(new Set(values).size, 180, `${field} must be unique`);
+    assert.equal(new Set(values.map((entry) => entry.toLowerCase())).size, 180,
       `${field} must be case-fold unique`);
   }
   assert.deepEqual(products.map((entry) => entry.product_id),
@@ -178,9 +180,9 @@ test("registry values are deeply immutable and never discover the filesystem", (
 
 test("selected observation still uses registered products and exact source inventory", () => {
   const selected = observeSelectedWorkingTreeModuleCompositionProducts(REPOSITORY,
-    ["catalog-root", "catalog-io-repl-fs"]);
+    ["catalog-root", "catalog-io-repl-fs", "catalog-io-tabular", "catalog-plotting-line"]);
   assert.deepEqual(selected.map((product) => product.product_id),
-    ["catalog-io-repl-fs", "catalog-root"]);
+    ["catalog-io-repl-fs", "catalog-io-tabular", "catalog-plotting-line", "catalog-root"]);
   assert.ok(selected.every((product) => product.state === "present" && product.parent_evidence));
   assert.throws(() => observeSelectedWorkingTreeModuleCompositionProducts(REPOSITORY,
     ["catalog-root", "catalog-root"]), /repeat/);

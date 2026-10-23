@@ -1,4 +1,4 @@
-use super::{exist_error, exist_error_row, BUILTIN_NAME};
+use super::{exist_error_row, BUILTIN_NAME};
 use crate::builtins::common::fs::contains_wildcards;
 use crate::builtins::common::path_search::{
     class_file_exists as path_class_file_exists,
@@ -63,7 +63,7 @@ impl ExistResultKind {
 }
 
 pub(super) fn parse_type_argument(value: &Value) -> BuiltinResult<ExistQuery> {
-    let text = value_to_string(value).ok_or_else(|| exist_error_row(&EXIST_ERROR_TYPE_ARG))?;
+    let text = value_to_string(value)?.ok_or_else(|| exist_error_row(&EXIST_ERROR_TYPE_ARG))?;
     match text.trim() {
         "var" => Ok(ExistQuery::Var),
         "file" => Ok(ExistQuery::File),
@@ -141,7 +141,7 @@ pub(super) async fn exist_for_query(
         ExistQuery::Mex => Ok(
             if path_find_file_with_extensions(name, MEX_EXTENSIONS, "exist")
                 .await
-                .map_err(exist_error)?
+                .map_err(|error| error.into_runtime_error(BUILTIN_NAME))?
                 .is_some()
             {
                 ExistResultKind::Mex
@@ -152,7 +152,7 @@ pub(super) async fn exist_for_query(
         ExistQuery::Pcode => Ok(
             if path_find_file_with_extensions(name, PCODE_EXTENSIONS, "exist")
                 .await
-                .map_err(exist_error)?
+                .map_err(|error| error.into_runtime_error(BUILTIN_NAME))?
                 .is_some()
             {
                 ExistResultKind::Pcode
@@ -168,7 +168,7 @@ pub(super) async fn exist_for_query(
         ExistQuery::Simulink => Ok(
             if path_find_file_with_extensions(name, SIMULINK_EXTENSIONS, "exist")
                 .await
-                .map_err(exist_error)?
+                .map_err(|error| error.into_runtime_error(BUILTIN_NAME))?
                 .is_some()
             {
                 ExistResultKind::Simulink
@@ -179,7 +179,7 @@ pub(super) async fn exist_for_query(
         ExistQuery::Thunk => Ok(
             if path_find_file_with_extensions(name, THUNK_EXTENSIONS, "exist")
                 .await
-                .map_err(exist_error)?
+                .map_err(|error| error.into_runtime_error(BUILTIN_NAME))?
                 .is_some()
             {
                 ExistResultKind::File
@@ -190,7 +190,7 @@ pub(super) async fn exist_for_query(
         ExistQuery::Lib => Ok(
             if path_find_file_with_extensions(name, LIB_EXTENSIONS, "exist")
                 .await
-                .map_err(exist_error)?
+                .map_err(|error| error.into_runtime_error(BUILTIN_NAME))?
                 .is_some()
             {
                 ExistResultKind::File
@@ -275,8 +275,13 @@ async fn class_exists(name: &str) -> BuiltinResult<bool> {
 }
 
 async fn class_folder_exists(name: &str) -> BuiltinResult<bool> {
-    for path in path_class_folder_candidates(name, "exist").map_err(exist_error)? {
-        if path_is_directory(&path).await {
+    for path in path_class_folder_candidates(name, "exist")
+        .map_err(|error| error.into_runtime_error(BUILTIN_NAME))?
+    {
+        if path_is_directory(&path)
+            .await
+            .map_err(|error| error.into_runtime_error(BUILTIN_NAME))?
+        {
             return Ok(true);
         }
     }
@@ -286,7 +291,7 @@ async fn class_folder_exists(name: &str) -> BuiltinResult<bool> {
 async fn class_file_exists(name: &str) -> BuiltinResult<bool> {
     path_class_file_exists(name, CLASS_M_FILE_EXTENSIONS, "classdef", "exist")
         .await
-        .map_err(exist_error)
+        .map_err(|error| error.into_runtime_error(BUILTIN_NAME))
 }
 
 fn method_exists(name: &str) -> bool {
@@ -306,8 +311,13 @@ fn method_exists(name: &str) -> bool {
 }
 
 async fn directory_exists(name: &str) -> BuiltinResult<bool> {
-    for path in path_directory_candidates(name, "exist").map_err(exist_error)? {
-        if path_is_directory(&path).await {
+    for path in path_directory_candidates(name, "exist")
+        .map_err(|error| error.into_runtime_error(BUILTIN_NAME))?
+    {
+        if path_is_directory(&path)
+            .await
+            .map_err(|error| error.into_runtime_error(BUILTIN_NAME))?
+        {
             return Ok(true);
         }
     }
@@ -317,28 +327,28 @@ async fn directory_exists(name: &str) -> BuiltinResult<bool> {
 async fn detect_file_kind(name: &str) -> BuiltinResult<Option<ExistResultKind>> {
     if path_find_file_with_extensions(name, MEX_EXTENSIONS, "exist")
         .await
-        .map_err(exist_error)?
+        .map_err(|error| error.into_runtime_error(BUILTIN_NAME))?
         .is_some()
     {
         return Ok(Some(ExistResultKind::Mex));
     }
     if path_find_file_with_extensions(name, PCODE_EXTENSIONS, "exist")
         .await
-        .map_err(exist_error)?
+        .map_err(|error| error.into_runtime_error(BUILTIN_NAME))?
         .is_some()
     {
         return Ok(Some(ExistResultKind::Pcode));
     }
     if path_find_file_with_extensions(name, SIMULINK_EXTENSIONS, "exist")
         .await
-        .map_err(exist_error)?
+        .map_err(|error| error.into_runtime_error(BUILTIN_NAME))?
         .is_some()
     {
         return Ok(Some(ExistResultKind::Simulink));
     }
     if path_find_file_with_extensions(name, GENERAL_FILE_EXTENSIONS, "exist")
         .await
-        .map_err(exist_error)?
+        .map_err(|error| error.into_runtime_error(BUILTIN_NAME))?
         .is_some()
     {
         return Ok(Some(ExistResultKind::File));
@@ -346,19 +356,22 @@ async fn detect_file_kind(name: &str) -> BuiltinResult<Option<ExistResultKind>> 
     Ok(None)
 }
 
-pub(super) fn value_to_string(value: &Value) -> Option<String> {
+pub(super) fn value_to_string(value: &Value) -> BuiltinResult<Option<String>> {
     match value {
-        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::String(text) => Ok(Some(text.as_str().to_owned())),
         Value::CharArray(array)
             if array.rows == 1
                 && crate::builtins::common::shape::effective_rank(&array.shape) <= 2 =>
         {
-            Some(array.data().iter().collect())
+            crate::builtins::io::utf16::decode_utf16_with_error(array.data(), || {
+                exist_error_row(&EXIST_ERROR_TYPE_ARG)
+            })
+            .map(Some)
         }
         Value::StringArray(array) if array.data().len() == 1 => {
-            Some(array.data()[0].as_str().to_owned())
+            Ok(Some(array.data()[0].as_str().to_owned()))
         }
-        _ => None,
+        _ => Ok(None),
     }
 }
 

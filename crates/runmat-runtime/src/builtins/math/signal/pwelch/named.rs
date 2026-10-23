@@ -42,7 +42,7 @@ pub(super) fn split_named_controls(
     let mut parent = None;
     let mut index = 0;
     while index < rest.len() {
-        let token = keyword(&rest[index]);
+        let token = keyword(&rest[index])?;
         if token == Some(PwelchKeyword::Parent) {
             if parent.is_some() {
                 return Err(pwelch_error(&PWELCH_ERROR_INVALID_PARENT));
@@ -65,18 +65,22 @@ pub(super) fn split_named_controls(
     })
 }
 
-pub(super) fn keyword(value: &Value) -> Option<PwelchKeyword> {
-    match value {
+pub(super) fn keyword(value: &Value) -> BuiltinResult<Option<PwelchKeyword>> {
+    Ok(match value {
         Value::String(text) => Some(PwelchKeyword::decode(text)),
         Value::StringArray(array) if array.data().len() == 1 => {
             Some(PwelchKeyword::decode(&array.data()[0]))
         }
         Value::CharArray(chars) if chars.rows <= 1 => {
-            let text = chars.data().iter().collect::<String>();
+            let text = runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
+                let mut error = pwelch_error(&PWELCH_ERROR_INVALID_RANGE);
+                error.source = Some(Box::new(source));
+                error
+            })?;
             Some(PwelchKeyword::decode(&text))
         }
         _ => None,
-    }
+    })
 }
 
 #[cfg(feature = "plot-core")]

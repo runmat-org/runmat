@@ -46,7 +46,16 @@ pub(super) fn handles_value(handles: &[FigureHandle]) -> Value {
 pub(super) fn scalar_string(value: &Value, builtin: &'static str) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.as_str().to_owned()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data().iter().collect()),
+        Value::CharArray(ca) if ca.rows == 1 => Ok(runmat_value::decode_utf16_code_units(
+            ca.data(),
+        )
+        .map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                builtin,
+                source.to_string(),
+                source,
+            )
+        })?),
         Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].as_str().to_owned()),
         Value::CharArray(_) => Err(persistence_error(
             &ERROR_INVALID_ARGUMENT,

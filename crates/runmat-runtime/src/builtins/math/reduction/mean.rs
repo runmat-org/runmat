@@ -93,7 +93,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: None,
     reduction: None,
     emits_nan: true,
-    notes: "Fusion fallback currently gathers to host; future kernels will divide the accumulated sum by slice size.",
+    notes: "The typed reduction owner binds axes, NaN handling, accumulation and output classes, and mean division; weighted forms retain their ordinary runtime path.",
 };
 
 #[derive(Clone)]
@@ -477,7 +477,7 @@ async fn parse_arguments(
     let mut idx = 0;
     while idx < args.len() {
         let arg = &args[idx];
-        if let Some(text) = keyword_of(arg) {
+        if let Some(text) = keyword_of(arg)? {
             match MeanControl::from_public_option(&text) {
                 Some(MeanControl::Weights) => {
                     if weights.is_some() {

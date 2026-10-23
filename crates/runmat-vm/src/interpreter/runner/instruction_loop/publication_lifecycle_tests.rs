@@ -46,9 +46,10 @@ fn actual_provider_scope() -> runmat_accelerate_api::ThreadProviderGuard {
     // leave physical completion work after its logical scope has ended.
     // Establish a clean queue boundary before observing this witness's receipts.
     block_on(
-        runmat_accelerate_api::AccelProvider::observe_vm_region_queue_tail(
+        runmat_accelerate_api::AccelProvider::observe_region_queue_tail(
             provider,
             runmat_accelerate_api::AccelProvider::device_id(provider),
+            None,
         ),
     )
     .expect("previous provider queue work must retire before the lifecycle witness");

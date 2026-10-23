@@ -24,7 +24,7 @@ fn cell_contents_must_be_character_vectors_or_string_scalars() {
     let _mode = crate::compatibility::push_runmat_extensions_enabled(true);
     for value in [
         Value::Num(1.0),
-        Value::CharArray(CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap()),
+        Value::CharArray(CharArray::from_unicode_scalars(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap()),
     ] {
         let input = Value::Cell(CellArray::new(vec![value], 1, 1).unwrap());
         let error = call(input).expect_err("invalid cell content");

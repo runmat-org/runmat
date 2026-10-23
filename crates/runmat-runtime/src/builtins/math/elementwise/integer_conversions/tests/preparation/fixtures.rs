@@ -32,9 +32,6 @@ struct Service {
     replace_invalid: bool,
 }
 impl RuntimeAccelerationService for Service {
-    fn supports_operation(&self, _: &str) -> bool {
-        true
-    }
     fn prepare_admitted(
         &self,
         _: RuntimeContext,

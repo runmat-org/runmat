@@ -15,7 +15,7 @@ struct PathStateGuard {
 
 impl Drop for PathStateGuard {
     fn drop(&mut self) {
-        set_path_string(&self.previous);
+        set_path_string(&self.previous).expect("test search path update");
     }
 }
 
@@ -34,7 +34,7 @@ fn push_cwd(path: &Path) -> CwdGuard {
 fn push_path_state(path: &Path) -> PathStateGuard {
     let previous = current_path_string();
     let path = path.to_string_lossy().to_string();
-    set_path_string(&path);
+    set_path_string(&path).expect("test search path update");
     PathStateGuard { previous }
 }
 
@@ -114,7 +114,9 @@ fn rejects_numeric_residency_and_character_pages_before_provider_access() {
         crate::builtins::io::repl_fs::test_support::unregistered_numeric_allocation(vec![1, 1])
             .handle,
     );
-    let pages = Value::CharArray(CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap());
+    let pages = Value::CharArray(
+        CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap(),
+    );
     for value in [resident, pages] {
         let error = block_on(resolve_run_source(&value)).unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:run:InvalidScriptArgument"));
@@ -128,9 +130,9 @@ fn trailing_singleton_character_row_resolves_normally() {
     let path = temp.path().join("trailing.m");
     std::fs::write(&path, "value = 4;").unwrap();
     let chars = path.to_string_lossy().chars().collect::<Vec<_>>();
-    let shape = vec![1, chars.len(), 1];
+    let shape = vec![1, path.to_string_lossy().encode_utf16().count(), 1];
     let source = block_on(resolve_run_source(&Value::CharArray(
-        CharArray::new_with_shape(chars, shape).unwrap(),
+        CharArray::from_unicode_scalars_with_shape(chars, shape).unwrap(),
     )))
     .unwrap();
     assert_eq!(source.text, "value = 4;");

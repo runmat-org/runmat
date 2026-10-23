@@ -97,7 +97,9 @@ fn extract_text(value: Value) -> BuiltinResult<String> {
             if array.rows > 1 {
                 return Err(jsondecode_error(&JSONDECODE_ERROR_INPUT_TYPE));
             }
-            Ok(array.data().iter().copied().collect::<String>())
+            crate::builtins::common::text::decode_utf16_with_error(array.data(), || {
+                jsondecode_error(&JSONDECODE_ERROR_INPUT_TYPE)
+            })
         }
         Value::String(s) => Ok(s.into_string_unbounded()),
         Value::StringArray(sa) => {

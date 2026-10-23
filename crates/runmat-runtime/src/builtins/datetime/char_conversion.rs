@@ -7,17 +7,17 @@ pub fn datetime_char_array(value: &Value) -> BuiltinResult<Option<CharArray>> {
     let width = array
         .data()
         .iter()
-        .map(|s| s.chars().count())
+        .map(|s| s.encode_utf16().count())
         .max()
         .unwrap_or(0);
     let rows = array.data().len();
-    let mut data = vec![' '; rows * width];
+    let mut data = vec![Utf16CodeUnit::from_raw(b' ' as u16); rows * width];
     for (row, text) in array.data().iter().enumerate() {
-        for (col, ch) in text.chars().enumerate() {
-            data[row * width + col] = ch;
+        for (col, unit) in text.encode_utf16().enumerate() {
+            data[row * width + col] = Utf16CodeUnit::from_raw(unit);
         }
     }
-    let out = CharArray::new(data, rows, width)
+    let out = CharArray::from_code_units(data, rows, width)
         .map_err(|err| datetime_error(format!("datetime: {err}")))?;
     Ok(Some(out))
 }

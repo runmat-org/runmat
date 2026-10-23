@@ -132,7 +132,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         },
         BuiltinExample {
             id: "serial-helpers", title: "Use serial-date conversion helpers",
-            program: "n = datenum(2024,4,9); v = datevec(n); s = datestr(n,'yyyy-MM-dd'); disp(s);",
+            program: "n = datenum(2024,4,9); v = datevec(n); s = datestr(n,'yyyy-mm-dd'); disp(s);",
             display_output: Some("2024-04-09"), compatibility: BuiltinExampleCompatibility::Matlab,
             harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,

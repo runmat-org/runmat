@@ -10,7 +10,7 @@ use crate::{ArtifactError, ArtifactResult};
 use super::binding::NativePairedBuildBinding;
 use super::{canonical_bytes, decode_canonical};
 
-pub const NATIVE_TARGET_TEST_PROTOCOL_SCHEMA_VERSION: u16 = 1;
+pub const NATIVE_TARGET_TEST_PROTOCOL_SCHEMA_VERSION: u16 = 4;
 const MAX_DIAGNOSTIC_BYTES: usize = 64 * 1024;
 
 /// Inputs and placement bounds for one compiled test entry. The digest covers
@@ -25,6 +25,11 @@ pub struct NativeTargetTestRequest {
     pub attempt: u32,
     pub inputs: ProgramExecutionInputs,
     pub resources: ResourceRequest,
+    /// Per-attempt deterministic time inputs, covered by this request digest.
+    /// Hosted ambient products must not supply a virtual clock policy.
+    pub clock_inputs: Option<runmat_execution::host::NativeClockInputs>,
+    /// Per-attempt local service inputs, sealed by this request digest.
+    pub local_service_inputs: Option<runmat_execution::host::NativeLocalServiceInputs>,
 }
 
 impl NativeTargetTestRequest {
@@ -40,6 +45,16 @@ impl NativeTargetTestRequest {
             ));
         }
         self.inputs.validate()?;
+        runmat_execution::host::validate_native_clock_inputs(
+            Some(&binding.selected_product),
+            self.clock_inputs.as_ref(),
+        )
+        .map_err(crate::error::contract_error)?;
+        runmat_execution::host::validate_native_local_inputs(
+            Some(&binding.selected_product),
+            self.local_service_inputs.as_ref(),
+        )
+        .map_err(crate::error::contract_error)?;
         self.resources
             .validate()
             .map_err(crate::error::contract_error)?;
@@ -50,7 +65,7 @@ impl NativeTargetTestRequest {
         self.validate_for(binding)?;
         Ok(Digest::sha256(
             [
-                b"runmat-native-target-test-request-v1\0".as_slice(),
+                b"runmat-native-target-test-request-v3\0".as_slice(),
                 &canonical_bytes(self)?,
             ]
             .concat(),

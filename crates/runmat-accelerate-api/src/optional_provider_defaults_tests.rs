@@ -386,12 +386,20 @@ fn optional_reduction_and_calculus_defaults_are_typed_unsupported() {
     let results = [
         Defaults.zeros(&[2, 3]),
         Defaults.scalar_add(&input, 1.0),
-        provider.gradient_dim(&input, 0, 1.0),
         provider.gradient_dim_with_coordinates(&input, 0, &input),
-        provider.cumtrapz_dim(&input, 0, ProviderTrapezoidSpacing::Scalar(1.0)),
         provider.not_nan_mask(&input),
         Defaults.gather_linear(&input, &[0], &[1, 1]),
     ];
+    for result in [
+        futures::executor::block_on(provider.reduce_nnz(&input)),
+        futures::executor::block_on(provider.reduce_nnz_dim(&input, 0)),
+        futures::executor::block_on(provider.reduce_prod(&input)),
+        futures::executor::block_on(provider.reduce_prod_dim(&input, 0)),
+        futures::executor::block_on(provider.reduce_integer_prod_native(&input)),
+        futures::executor::block_on(provider.reduce_integer_prod_native_dim(&input, 0)),
+    ] {
+        assert!(result.unwrap().is_none());
+    }
     for result in [
         Defaults.fill(&[2, 3], 0.0),
         Defaults.fill(&[2, 3], 1.0),
@@ -400,6 +408,14 @@ fn optional_reduction_and_calculus_defaults_are_typed_unsupported() {
         Defaults.zeros_like(&input, &[2, 3]),
         Defaults.logical_fill(&[2, 3], true),
         Defaults.ones(&[2, 3]),
+    ] {
+        assert!(result.unwrap().is_none());
+    }
+    for result in [
+        provider.gradient_dim(&input, 0, 1.0),
+        provider.diff_dim(&input, 1, 0),
+        provider.trapz_dim(&input, 0, ProviderTrapezoidSpacing::Unit),
+        provider.cumtrapz_dim(&input, 0, ProviderTrapezoidSpacing::Scalar(1.0)),
     ] {
         assert!(result.unwrap().is_none());
     }

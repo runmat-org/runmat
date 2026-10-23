@@ -5,11 +5,10 @@ use crate::{
 };
 use runmat_builtins::{BuiltinAsyncBehavior, BuiltinSemantics};
 use runmat_hir::{
-    CallableIdentity, CommandArgument, ExprId, HirCallableRef, HirCommandCall, HirError, HirExpr,
+    CallableIdentity, CommandArgument, HirCallableRef, HirCommandCall, HirError, HirExpr,
     HirExprKind, IndexComponent, IndexKind, IndexResultContext, IndexingSemantics, OperatorKind,
     RequestedOutputCount, StringLiteral,
 };
-use std::collections::HashMap;
 
 use super::MirLoweringContext;
 
@@ -21,8 +20,13 @@ pub(crate) fn lower_expr_with_replacements(
     ctx: &MirLoweringContext,
     expr: &HirExpr,
     temps: &mut Vec<MirStmt>,
-    await_replacements: &HashMap<ExprId, MirOperand>,
+    await_replacements: &crate::lowering::AwaitReplacements,
 ) -> Result<MirRvalue, HirError> {
+    if await_replacements.sequence(expr.id).is_some() {
+        return Err(HirError::new(
+            "captured argument sequence cannot be scalarized across await",
+        ));
+    }
     if let Some(operand) = await_replacements.get(&expr.id) {
         return Ok(MirRvalue::Use(operand.clone()));
     }
@@ -317,7 +321,7 @@ fn lower_subscript_chain(
     ctx: &MirLoweringContext,
     chain: &runmat_hir::HirSubscriptChain,
     temps: &mut Vec<MirStmt>,
-    await_replacements: &HashMap<ExprId, MirOperand>,
+    await_replacements: &crate::lowering::AwaitReplacements,
 ) -> Result<crate::MirSubscriptChain, HirError> {
     let root = lower_operand_with_replacements(ctx, &chain.root, temps, await_replacements)?;
     let mut steps = Vec::with_capacity(chain.steps.len());
@@ -351,7 +355,9 @@ fn lower_subscript_chain(
                 semantic_fallback,
             } => crate::MirSubscriptStep::DottedInvoke {
                 member: member.clone(),
-                semantic_fallback: semantic_fallback.clone(),
+                semantic_fallback: semantic_fallback
+                    .as_ref()
+                    .map(|identity| std::sync::Arc::new(identity.clone())),
                 arguments: arguments
                     .iter()
                     .map(|argument| match argument {
@@ -396,14 +402,16 @@ fn lower_subscript_chain(
 fn lower_chain_indexing(
     ctx: &MirLoweringContext,
     indexing: &IndexingSemantics,
-    await_replacements: &HashMap<ExprId, MirOperand>,
+    await_replacements: &crate::lowering::AwaitReplacements,
 ) -> Result<MirIndexing, HirError> {
     let mut components = Vec::with_capacity(indexing.components.len());
     for (dim, source) in indexing.components.iter().enumerate() {
         let mut preparation = Vec::new();
         let component =
             lower_index_component(ctx, dim, source, &mut preparation, await_replacements)?;
-        if !preparation.is_empty() {
+        if !preparation.is_empty()
+            || matches!(&component, MirIndexComponent::Expansion(region) if !region.steps.is_empty())
+        {
             // Earlier selectors must be read before this selector's preparation,
             // even though the enclosing path is dispatched only after all
             // selector values have been assembled.
@@ -731,12 +739,15 @@ fn lower_parallel_intrinsic(
     Ok(value)
 }
 
-fn lower_call_arg(
+pub(super) fn lower_call_arg(
     ctx: &MirLoweringContext,
     arg: &HirExpr,
     temps: &mut Vec<MirStmt>,
-    await_replacements: &HashMap<ExprId, MirOperand>,
+    await_replacements: &crate::lowering::AwaitReplacements,
 ) -> Result<MirCallArg, HirError> {
+    if let Some(sequence) = await_replacements.sequence(arg.id) {
+        return Ok(MirCallArg::CapturedSequence(sequence));
+    }
     match &arg.kind {
         HirExprKind::Member {
             base,
@@ -847,7 +858,7 @@ fn lower_ordered_fields(
     ctx: &MirLoweringContext,
     fields: &[(runmat_types::MemberName, HirExpr)],
     temps: &mut Vec<MirStmt>,
-    await_replacements: &HashMap<ExprId, MirOperand>,
+    await_replacements: &crate::lowering::AwaitReplacements,
 ) -> Result<Vec<(runmat_types::MemberName, MirOperand)>, HirError> {
     let mut lowered: Vec<(runmat_types::MemberName, MirOperand)> = Vec::with_capacity(fields.len());
     let mut pending_bindings: Vec<(usize, runmat_hir::Span)> = Vec::new();
@@ -873,7 +884,7 @@ fn lower_aggregate_elements(
     ctx: &MirLoweringContext,
     rows: &[Vec<HirExpr>],
     temps: &mut Vec<MirStmt>,
-    await_replacements: &HashMap<ExprId, MirOperand>,
+    await_replacements: &crate::lowering::AwaitReplacements,
 ) -> Result<Vec<crate::MirAggregateElement>, HirError> {
     let mut lowered: Vec<(crate::MirAggregateElement, runmat_hir::Span)> = Vec::new();
     let mut pending_bindings: Vec<(usize, runmat_hir::Span)> = Vec::new();
@@ -1004,15 +1015,32 @@ pub(crate) fn lower_indexing(
     indexing: &IndexingSemantics,
     temps: &mut Vec<MirStmt>,
 ) -> Result<MirIndexing, HirError> {
-    lower_indexing_with_replacements(ctx, indexing, temps, &HashMap::new())
+    lower_indexing_with_replacements(
+        ctx,
+        indexing,
+        temps,
+        &crate::lowering::AwaitReplacements::default(),
+    )
 }
 
 pub(crate) fn lower_indexing_with_replacements(
     ctx: &MirLoweringContext,
     indexing: &IndexingSemantics,
     temps: &mut Vec<MirStmt>,
-    await_replacements: &HashMap<ExprId, MirOperand>,
+    await_replacements: &crate::lowering::AwaitReplacements,
 ) -> Result<MirIndexing, HirError> {
+    if matches!(
+        indexing.result_context,
+        IndexResultContext::AssignmentTarget | IndexResultContext::DeletionTarget
+    ) && indexing.components.iter().any(|component| {
+        matches!(component,
+            IndexComponent::Expr(expression) if expression.expands_call_argument_sequence())
+    }) {
+        // Keep each captured sequence and its preparation in its source slot.
+        // Lifting later selector work into statement temporaries would execute
+        // it before an earlier private expansion region has been captured.
+        return lower_chain_indexing(ctx, indexing, await_replacements);
+    }
     let mut components: Vec<MirIndexComponent> = Vec::with_capacity(indexing.components.len());
     let mut pending_bindings = Vec::new();
     for (dim, component) in indexing.components.iter().enumerate() {
@@ -1054,7 +1082,7 @@ pub(crate) fn lower_indexing_with_replacements(
     })
 }
 
-fn classify_mir_index_plan(indexing: &IndexingSemantics) -> MirIndexPlan {
+pub(super) fn classify_mir_index_plan(indexing: &IndexingSemantics) -> MirIndexPlan {
     match indexing.kind {
         IndexKind::Brace => MirIndexPlan::Cell,
         IndexKind::Paren => {
@@ -1154,11 +1182,20 @@ fn lower_index_component(
     _dim: usize,
     component: &IndexComponent,
     temps: &mut Vec<MirStmt>,
-    await_replacements: &HashMap<ExprId, MirOperand>,
+    await_replacements: &crate::lowering::AwaitReplacements,
 ) -> Result<MirIndexComponent, HirError> {
     Ok(match component {
         IndexComponent::Colon => MirIndexComponent::Colon,
         IndexComponent::End { offset, .. } => lower_contextual_end(ctx, *offset),
+        IndexComponent::Expr(expr) if expr.expands_call_argument_sequence() => {
+            let mut preparation = Vec::new();
+            let argument = lower_call_arg(ctx, expr, &mut preparation, await_replacements)?;
+            MirIndexComponent::Expansion(crate::MirCallArgumentRegion {
+                steps: crate::MirExpressionRegion::steps_from_lowered(preparation)?,
+                argument,
+                span: expr.span,
+            })
+        }
         IndexComponent::Expr(expr) if hir_expr_contains_end(expr) => {
             let mut statements = Vec::new();
             let value =
@@ -1195,7 +1232,14 @@ fn lower_index_component(
 }
 
 fn lower_contextual_end(ctx: &MirLoweringContext, offset: isize) -> MirIndexComponent {
-    let span = runmat_hir::Span::default();
+    lower_contextual_end_at(ctx, offset, runmat_hir::Span::default())
+}
+
+fn lower_contextual_end_at(
+    ctx: &MirLoweringContext,
+    offset: isize,
+    span: runmat_hir::Span,
+) -> MirIndexComponent {
     let end_local = ctx.fresh_temp(span);
     let mut statements = vec![MirStmt {
         kind: MirStmtKind::Assign {
@@ -1230,6 +1274,22 @@ fn lower_contextual_end(ctx: &MirLoweringContext, offset: isize) -> MirIndexComp
         crate::MirExpressionRegion::from_lowered(statements, result)
             .expect("canonical end expression region is valid"),
     )
+}
+
+pub(super) fn contextual_end_argument_region(
+    ctx: &MirLoweringContext,
+    offset: isize,
+    span: runmat_hir::Span,
+) -> crate::MirCallArgumentRegion {
+    let MirIndexComponent::ContextualExpr(region) = lower_contextual_end_at(ctx, offset, span)
+    else {
+        unreachable!("canonical end lowering is contextual");
+    };
+    crate::MirCallArgumentRegion {
+        steps: region.steps().to_vec(),
+        argument: MirCallArg::Single(region.result().clone()),
+        span,
+    }
 }
 
 fn lower_command_call(call: &HirCommandCall) -> Result<MirRvalue, HirError> {
@@ -1447,14 +1507,19 @@ pub(crate) fn lower_operand(
     expr: &HirExpr,
     temps: &mut Vec<MirStmt>,
 ) -> Result<MirOperand, HirError> {
-    lower_operand_with_replacements(ctx, expr, temps, &HashMap::new())
+    lower_operand_with_replacements(
+        ctx,
+        expr,
+        temps,
+        &crate::lowering::AwaitReplacements::default(),
+    )
 }
 
 pub(crate) fn lower_operand_with_replacements(
     ctx: &MirLoweringContext,
     expr: &HirExpr,
     temps: &mut Vec<MirStmt>,
-    await_replacements: &HashMap<ExprId, MirOperand>,
+    await_replacements: &crate::lowering::AwaitReplacements,
 ) -> Result<MirOperand, HirError> {
     if let Some(operand) = await_replacements.get(&expr.id) {
         return Ok(operand.clone());

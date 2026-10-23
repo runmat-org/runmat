@@ -336,7 +336,7 @@ async fn parse_reduction_options(
     let mut selection_set = !matches!(args.selection, DimSelection::Auto);
     let mut comparison_set = matches!(args.comparison, ComparisonMethod::Auto);
     while idx < rest.len() {
-        if let Some(keyword) = keyword_of(&rest[idx]) {
+        if let Some(keyword) = keyword_of(&rest[idx])? {
             match MinControl::from_public_option(&keyword) {
                 Some(MinControl::Missing(mode)) => {
                     args.nan_mode = mode;
@@ -410,7 +410,7 @@ fn parse_elementwise_options(
     let mut comparison_set = false;
     let mut idx = 0usize;
     while idx < rest.len() {
-        if let Some(keyword) = keyword_of(&rest[idx]) {
+        if let Some(keyword) = keyword_of(&rest[idx])? {
             match MinControl::from_public_option(&keyword) {
                 Some(MinControl::ComparisonMethod) => {
                     let Some(value) = rest.get(idx + 1) else {
@@ -444,7 +444,7 @@ fn parse_elementwise_options(
 }
 
 fn parse_comparison_method(value: &Value) -> BuiltinResult<ComparisonMethod> {
-    let Some(keyword) = keyword_of(value) else {
+    let Some(keyword) = keyword_of(value)? else {
         return Err(min_invalid_argument(
             "min: 'ComparisonMethod' expects a string value",
         ));

@@ -50,7 +50,8 @@ fn vectors(values: Vec<Value>) -> BuiltinResult<FindGroupsInput> {
             ));
         }
     }
-    let columns = columns_from_arguments(values, true).map_err(error::invalid)?;
+    let columns = columns_from_arguments(values, true)
+        .map_err(|source| source.attach(error::invalid("invalid grouping variable")))?;
     Ok(FindGroupsInput::Vectors {
         columns,
         output_shape,
@@ -77,7 +78,8 @@ fn table(values: Vec<Value>) -> BuiltinResult<FindGroupsInput> {
                 variables.fields.get(&name).cloned().ok_or_else(|| {
                     error::invalid(format!("findgroups: unknown variable '{name}'"))
                 })?;
-            let column = GroupColumn::vector(name.clone(), value).map_err(error::invalid)?;
+            let column = GroupColumn::vector(name.clone(), value)
+                .map_err(|source| source.attach(error::invalid("invalid grouping variable")))?;
             if column.rows != rows {
                 return Err(error::invalid(format!(
                     "findgroups: table variable '{name}' has {} rows; expected {rows}",

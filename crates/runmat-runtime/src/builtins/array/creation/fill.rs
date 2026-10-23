@@ -3,17 +3,11 @@
 //! The implementation mirrors the modern RunMat builtin blueprint with GPU-aware semantics.
 
 use runmat_accelerate_api::GpuTensorHandle;
-#[cfg(test)]
-use runmat_builtins::{ResolveContext, Type};
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, Tensor, Value,
 };
 
-#[cfg(test)]
-use crate::builtins::array::type_resolvers::{
-    is_scalar_type, logical_type_from_rank, rank_from_dims_args, tensor_type_from_rank,
-};
 #[cfg(test)]
 use crate::builtins::common::random_args::shape_from_value;
 use crate::builtins::common::random_args::{extract_dims, keyword_of};
@@ -61,35 +55,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Fusion planner treats fill as a constant generator backed by a uniform parameter.",
 };
-
-#[cfg(test)]
-fn fill_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    let Some((fill_value, rest)) = args.split_first() else {
-        return Type::Unknown;
-    };
-    if rest.iter().any(|arg| matches!(arg, Type::String)) {
-        return Type::Unknown;
-    }
-    let wants_logical = matches!(fill_value, Type::Bool | Type::Logical { .. });
-    if rest.is_empty() {
-        if wants_logical {
-            return Type::Logical {
-                shape: Some(vec![Some(1), Some(1)]),
-            };
-        }
-        if is_scalar_type(fill_value) {
-            return Type::Num;
-        }
-        return Type::tensor();
-    }
-    let rest_ctx = ResolveContext::new(ctx.literal_args.get(1..).unwrap_or(&[]).to_vec());
-    let rank = rank_from_dims_args(rest, &rest_ctx);
-    if wants_logical {
-        logical_type_from_rank(rank)
-    } else {
-        tensor_type_from_rank(rest, &rest_ctx)
-    }
-}
 
 #[runtime_builtin(
     name = "createArray",
@@ -196,7 +161,7 @@ impl FillScalar {
                 if ca.data().len() != 1 {
                     return Err("fill: fill value must be a scalar".to_string());
                 }
-                Ok(FillScalar::Real(ca.data()[0] as u32 as f64))
+                Ok(FillScalar::Real(f64::from(ca.data()[0].raw())))
             }
             Value::StringArray(sa) if sa.data().len() == 1 && sa.data()[0].len() == 1 => {
                 let ch = sa.data()[0].chars().next().unwrap();
@@ -256,14 +221,14 @@ impl FillScalar {
 }
 
 impl ParsedFill {
-    async fn parse_create_array(args: crate::call::BuiltinArguments) -> Result<Self, String> {
+    async fn parse_create_array(args: crate::call::BuiltinArguments) -> crate::BuiltinResult<Self> {
         let mut dims = Vec::new();
         let mut class_name: Option<String> = None;
         let mut fill_value: Option<Value> = None;
         let mut like: Option<Value> = None;
         let mut idx = 0;
         while idx < args.len() {
-            if let Some(keyword) = keyword_of(&args[idx]) {
+            if let Some(keyword) = keyword_of(&args[idx])? {
                 match keyword.as_str() {
                     "fillvalue" => {
                         let value = args.get(idx + 1).cloned().ok_or_else(|| {
@@ -350,7 +315,7 @@ impl ParsedFill {
     }
 
     #[cfg(test)]
-    async fn parse(fill: FillScalar, args: Vec<Value>) -> Result<Self, String> {
+    async fn parse(fill: FillScalar, args: Vec<Value>) -> crate::BuiltinResult<Self> {
         let mut dims: Vec<usize> = Vec::new();
         let mut saw_dims_arg = false;
         let mut shape_source: Option<Vec<usize>> = None;
@@ -361,20 +326,19 @@ impl ParsedFill {
         let mut idx = 0;
         while idx < args.len() {
             let arg = args[idx].clone();
-            if let Some(keyword) = keyword_of(&arg) {
+            if let Some(keyword) = keyword_of(&arg)? {
                 match keyword.as_str() {
                     "like" => {
                         if like_proto.is_some() {
-                            return Err("fill: multiple 'like' specifications are not supported"
-                                .to_string());
-                        }
-                        if class_override.is_some() {
                             return Err(
-                                "fill: cannot combine 'like' with class specifiers".to_string()
+                                "fill: multiple 'like' specifications are not supported".into()
                             );
                         }
+                        if class_override.is_some() {
+                            return Err("fill: cannot combine 'like' with class specifiers".into());
+                        }
                         let Some(proto) = args.get(idx + 1).cloned() else {
-                            return Err("fill: expected prototype after 'like'".to_string());
+                            return Err("fill: expected prototype after 'like'".into());
                         };
                         like_proto = Some(proto.clone());
                         if shape_source.is_none() && !saw_dims_arg {
@@ -385,7 +349,7 @@ impl ParsedFill {
                     }
                     "logical" => {
                         if like_proto.is_some() {
-                            return Err("fill: cannot combine 'like' with 'logical'".to_string());
+                            return Err("fill: cannot combine 'like' with 'logical'".into());
                         }
                         class_override = Some(OutputTemplate::Logical);
                         idx += 1;
@@ -393,7 +357,7 @@ impl ParsedFill {
                     }
                     "double" => {
                         if like_proto.is_some() {
-                            return Err("fill: cannot combine 'like' with 'double'".to_string());
+                            return Err("fill: cannot combine 'like' with 'double'".into());
                         }
                         class_override = Some(OutputTemplate::Double);
                         idx += 1;
@@ -401,7 +365,7 @@ impl ParsedFill {
                     }
                     "complex" => {
                         if like_proto.is_some() {
-                            return Err("fill: cannot combine 'like' with 'complex'".to_string());
+                            return Err("fill: cannot combine 'like' with 'complex'".into());
                         }
                         class_override = Some(OutputTemplate::Complex);
                         idx += 1;
@@ -410,7 +374,9 @@ impl ParsedFill {
                     "int8" | "int16" | "int32" | "int64" | "uint8" | "uint16" | "uint32"
                     | "uint64" => {
                         if like_proto.is_some() {
-                            return Err(format!("fill: cannot combine 'like' with '{keyword}'"));
+                            return Err(
+                                format!("fill: cannot combine 'like' with '{keyword}'").into()
+                            );
                         }
                         class_override = Some(OutputTemplate::Integer(
                             integer_storage_prototype_from_keyword(keyword.as_str())
@@ -420,12 +386,10 @@ impl ParsedFill {
                         continue;
                     }
                     "single" => {
-                        return Err(
-                            "fill: single precision output is not implemented yet".to_string()
-                        );
+                        return Err("fill: single precision output is not implemented yet".into());
                     }
                     other => {
-                        return Err(format!("fill: unrecognised option '{other}'"));
+                        return Err(format!("fill: unrecognised option '{other}'").into());
                     }
                 }
             }
@@ -1048,25 +1012,6 @@ pub(crate) mod tests {
     fn fill_scalar_defaults() {
         let result = block_on(fill_builtin(Value::Num(5.0), Vec::new())).expect("fill");
         assert_eq!(result, Value::Num(5.0));
-    }
-
-    #[test]
-    fn fill_type_scalar_numeric_is_num() {
-        assert_eq!(
-            fill_type(&[Type::Num], &ResolveContext::new(Vec::new())),
-            Type::Num
-        );
-    }
-
-    #[test]
-    fn fill_type_logical_dims_returns_logical_tensor() {
-        let ctx = ResolveContext::new(Vec::new());
-        assert_eq!(
-            fill_type(&[Type::Bool, Type::Num, Type::Num], &ctx),
-            Type::Logical {
-                shape: Some(vec![None, None])
-            }
-        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

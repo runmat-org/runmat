@@ -110,12 +110,18 @@ impl AllocationState {
         if identity.device_id() != self.device_id {
             return Err(AllocationAcquisitionError::WrongOwner);
         }
-        // Monotonic allocation IDs are never reused; this owner has one generation.
-        if identity.generation() != 1 {
-            return Err(AllocationAcquisitionError::StaleGeneration);
-        }
         if self.is_lost() {
             return Err(AllocationAcquisitionError::NotLive);
+        }
+        let records = self
+            .buffers
+            .lock()
+            .map_err(|_| AllocationAcquisitionError::NotLive)?;
+        let record = records
+            .get(&identity.allocation_id())
+            .ok_or(AllocationAcquisitionError::NotLive)?;
+        if identity.generation() != record.scope.map_or(1, |scope| scope.epoch()) {
+            return Err(AllocationAcquisitionError::StaleGeneration);
         }
         Ok(())
     }
@@ -155,9 +161,6 @@ impl AllocationOwner for AllocationState {
         if identity.device_id() != self.device_id {
             return Err(AllocationRegistrationError::WrongOwner);
         }
-        if identity.generation() != 1 {
-            return Err(AllocationRegistrationError::StaleGeneration);
-        }
         let mut records = self
             .buffers
             .lock()
@@ -168,6 +171,22 @@ impl AllocationOwner for AllocationState {
         let record = records
             .get_mut(&identity.allocation_id())
             .ok_or(AllocationRegistrationError::UnknownAllocation)?;
+        let entry = record
+            .entry
+            .as_ref()
+            .ok_or(AllocationRegistrationError::NotLive)?;
+        entry
+            .buffer
+            .validate_creation_scope()
+            .map_err(|_| AllocationRegistrationError::StaleGeneration)?;
+        if identity.generation()
+            != entry
+                .buffer
+                .creation_scope()
+                .map_or(1, |scope| scope.epoch())
+        {
+            return Err(AllocationRegistrationError::StaleGeneration);
+        }
         if record.lease.is_some() {
             return Err(AllocationRegistrationError::AlreadyRegistered);
         }
@@ -237,10 +256,31 @@ impl AllocationOwner for AllocationState {
     }
 
     fn retire(&self, identity: AllocationIdentity) -> AllocationRetirementOutcome {
-        if identity.device_id() != self.device_id || identity.generation() != 1 {
+        if identity.device_id() != self.device_id {
             return AllocationRetirementOutcome::Uncertain {
                 detail: "WGPU retirement owner identity mismatch".into(),
             };
+        }
+        {
+            let records = match self.lock_records() {
+                Ok(records) => records,
+                Err(error) => {
+                    return AllocationRetirementOutcome::RetainedFailure {
+                        detail: error.to_string(),
+                    }
+                }
+            };
+            // A scoped reset already physically retired this monotonic id.
+            if records.get(&identity.allocation_id()).is_none() {
+                return AllocationRetirementOutcome::Retired;
+            }
+            if let Some(record) = records.get(&identity.allocation_id()) {
+                if identity.generation() != record.scope.map_or(1, |scope| scope.epoch()) {
+                    return AllocationRetirementOutcome::Uncertain {
+                        detail: "WGPU retirement generation mismatch".into(),
+                    };
+                }
+            }
         }
         match self.retire_physical(identity.allocation_id()) {
             Ok(()) => AllocationRetirementOutcome::Retired,

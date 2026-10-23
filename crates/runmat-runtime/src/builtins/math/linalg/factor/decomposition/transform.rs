@@ -1,13 +1,6 @@
 use super::*;
 
-pub(super) fn oriented_matrix(spec: &DecompositionSpec) -> BuiltinResult<Value> {
-    if spec.is_conjugate_transposed {
-        conjugate_transpose(spec.matrix.clone())
-    } else {
-        Ok(spec.matrix.clone())
-    }
-}
-
+#[cfg(test)]
 pub(super) fn conjugate_transpose(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::Tensor(tensor) => {
@@ -105,6 +98,7 @@ pub(super) fn conjugate_transpose(value: Value) -> BuiltinResult<Value> {
     }
 }
 
+#[cfg(test)]
 pub(super) fn scale_matrix(value: Value, scale: (f64, f64)) -> BuiltinResult<Value> {
     if scale == (1.0, 0.0) {
         return Ok(value);
@@ -158,6 +152,7 @@ pub(super) fn scale_matrix(value: Value, scale: (f64, f64)) -> BuiltinResult<Val
     }
 }
 
+#[cfg(test)]
 pub(super) fn floating_scale_dtype(dtype: NumericDType) -> NumericDType {
     if dtype == NumericDType::F32 {
         NumericDType::F32
@@ -170,10 +165,14 @@ pub(super) fn matrix_datatype(matrix: &Value) -> &'static str {
     match matrix {
         Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32 => "single",
         Value::ComplexTensor(tensor) if tensor.numeric_dtype() == NumericDType::F32 => "single",
+        Value::SparseTensor(matrix) if matrix.numeric_dtype() == Some(NumericDType::F32) => {
+            "single"
+        }
         _ => "double",
     }
 }
 
+#[cfg(test)]
 pub(super) fn matrix_is_real(matrix: &Value) -> bool {
     match matrix {
         Value::ComplexTensor(tensor) => {
@@ -184,12 +183,15 @@ pub(super) fn matrix_is_real(matrix: &Value) -> bool {
     }
 }
 
+#[cfg(test)]
 pub(super) enum ComplexPairView<'a> {
     Borrowed(&'a [ComplexElement<f64>]),
     Materialized(Vec<(f64, f64)>),
 }
 
+#[cfg(test)]
 impl ComplexPairView<'_> {
+    #[cfg(test)]
     pub(super) fn len(&self) -> usize {
         match self {
             Self::Borrowed(values) => values.len(),
@@ -197,6 +199,7 @@ impl ComplexPairView<'_> {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn get(&self, index: usize) -> (f64, f64) {
         match self {
             Self::Borrowed(values) => values[index].into(),
@@ -205,6 +208,7 @@ impl ComplexPairView<'_> {
     }
 }
 
+#[cfg(test)]
 pub(super) fn complex_tensor_values_pair_view(tensor: &ComplexTensor) -> ComplexPairView<'_> {
     if let Some(values) = tensor.as_f64_slice() {
         ComplexPairView::Borrowed(values)

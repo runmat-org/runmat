@@ -1,5 +1,5 @@
 use runmat_macros::runtime_builtin;
-use runmat_value::{CellArray, StructValue, Value};
+use runmat_value::{StructValue, Value};
 
 use crate::{BuiltinResult, RuntimeError};
 
@@ -25,34 +25,39 @@ pub(super) async fn layer_graph_builtin(
         ));
     }
     let layers = if args.is_empty() {
-        Vec::new()
+        &[][..]
     } else if matches!(
         args.first(),
         Some(Value::Object(_) | Value::Cell(_) | Value::OutputList(_))
     ) {
-        layers_from_value(args[0].clone(), "layerGraph")?
+        layers_from_value(&args[0], "layerGraph")?
     } else {
         return Err(graph_error(
             "layerGraph",
             "layerGraph: layers must be a layer object or cell collection",
         ));
     };
-    let names = layer_names(&layers, "layerGraph")?;
+    let names = layer_names(layers, "layerGraph")?;
     let layer_count = layers.len();
-    let layers_cell = CellArray::new(layers, layer_count, 1)
-        .map(Value::Cell)
-        .map_err(|err| graph_error("layerGraph", err))?;
-    object(
-        "nnet.cnn.LayerGraph",
-        vec![
-            ("Layers", layers_cell),
-            (
-                "LayerNames",
-                string_array(names, vec![layer_count, 1], "layerGraph")?,
-            ),
-            ("Connections", Value::Struct(StructValue::new())),
-        ],
-    )
+    let context = crate::context::legacy::active();
+    let layers_cell = crate::execution::structure::cell::from_values(
+        context.as_ref(),
+        &[layer_count, 1],
+        layers,
+    )?;
+    layers_cell.with_owned(|layers_cell| {
+        object(
+            "nnet.cnn.LayerGraph",
+            vec![
+                ("Layers", layers_cell),
+                (
+                    "LayerNames",
+                    string_array(names, vec![layer_count, 1], "layerGraph")?,
+                ),
+                ("Connections", Value::Struct(StructValue::new())),
+            ],
+        )
+    })
 }
 
 #[runtime_builtin(
@@ -62,25 +67,17 @@ pub(super) async fn layer_graph_builtin(
 )]
 pub(super) async fn analyze_network_builtin(network: Value) -> BuiltinResult<Value> {
     super::errors::admit_single_output("analyzeNetwork", &runmat_builtins::GRAPH_INVALID_INPUT)?;
-    let layers = match &network {
-        Value::Object(object) if object.class_name().is(super::LAYER_GRAPH_CLASS) => object
-            .properties()
-            .get("Layers")
-            .cloned()
-            .map(|value| layers_from_value(value, "analyzeNetwork"))
-            .transpose()?
-            .unwrap_or_default(),
-        Value::Object(_) | Value::Cell(_) | Value::OutputList(_) => {
-            layers_from_value(network.clone(), "analyzeNetwork")?
-        }
-        _ => {
-            return Err(graph_error(
-                "analyzeNetwork",
-                "analyzeNetwork: expected a layer graph, layer object, or cell collection",
-            ));
-        }
-    };
-    let names = layer_names(&layers, "analyzeNetwork")?;
+    if !matches!(
+        network,
+        Value::Object(_) | Value::Cell(_) | Value::OutputList(_)
+    ) {
+        return Err(graph_error(
+            "analyzeNetwork",
+            "analyzeNetwork: expected a layer graph, network, or layer collection",
+        ));
+    }
+    let layers = layers_from_value(&network, "analyzeNetwork")?;
+    let names = layer_names(layers, "analyzeNetwork")?;
     object(
         "nnet.cnn.NetworkAnalysis",
         vec![

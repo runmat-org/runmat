@@ -169,7 +169,7 @@ fn char_columns(value: &CharArray, columns: &[usize]) -> BuiltinResult<Value> {
             data.push(value.data()[row * value.cols + *column]);
         }
     }
-    CharArray::new(data, value.rows, columns.len())
+    CharArray::from_code_units(data, value.rows, columns.len())
         .map(Value::CharArray)
         .map_err(error::invalid)
 }

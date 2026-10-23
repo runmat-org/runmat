@@ -56,7 +56,7 @@ pub(super) fn prepare_writable_options(
     let mut values = rest.into_iter();
     while let Some(name) = values.next() {
         let value = values.next().expect("validated complete Writable pair");
-        let name = value_to_string_scalar(&name).ok_or_else(|| {
+        let name = value_to_string_scalar(&name)?.ok_or_else(|| {
             matfile_error_with(
                 &MATFILE_ERROR_INVALID_OPTION,
                 "matfile: option names must be character vectors or string scalars",
@@ -124,7 +124,7 @@ impl PreparedWritableOptions {
 }
 
 pub(super) fn normalise_path(value: &Value) -> BuiltinResult<PathBuf> {
-    let raw = value_to_string_scalar(value).ok_or_else(|| {
+    let raw = value_to_string_scalar(value)?.ok_or_else(|| {
         matfile_error_with(
             &MATFILE_ERROR_INVALID_ARGUMENT,
             "matfile: filename must be a character vector or string scalar",
@@ -144,7 +144,7 @@ pub(super) fn normalise_path(value: &Value) -> BuiltinResult<PathBuf> {
 }
 
 pub(super) fn member_name(value: &Value, builtin: &str) -> BuiltinResult<String> {
-    value_to_string_scalar(value).ok_or_else(|| {
+    value_to_string_scalar(value)?.ok_or_else(|| {
         matfile_error_with(
             &MATFILE_ERROR_INVALID_ARGUMENT,
             format!("{builtin}: member name must be a character vector or string scalar"),
@@ -189,14 +189,22 @@ pub(super) fn replace_or_append(entries: &mut Vec<(String, Value)>, field: Strin
     }
 }
 
-fn value_to_string_scalar(value: &Value) -> Option<String> {
+fn value_to_string_scalar(value: &Value) -> BuiltinResult<Option<String>> {
     match value {
-        Value::String(s) => Some(s.as_str().to_owned()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data().iter().collect()),
-        Value::StringArray(array) if array.data().len() == 1 => {
-            Some(array.data()[0].as_str().to_owned())
+        Value::String(s) => Ok(Some(s.as_str().to_owned())),
+        Value::CharArray(ca) if ca.rows == 1 => {
+            crate::builtins::io::utf16::decode_utf16_with_error(ca.data(), || {
+                matfile_error_with(
+                    &MATFILE_ERROR_INVALID_ARGUMENT,
+                    "matfile: malformed UTF-16 text",
+                )
+            })
+            .map(Some)
         }
-        _ => None,
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(Some(array.data()[0].as_str().to_owned()))
+        }
+        _ => Ok(None),
     }
 }
 

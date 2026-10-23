@@ -24,6 +24,34 @@ pub(super) fn dimensions(
         {
             return ShapeFact::from(vec![Some(size), Some(size)]);
         }
+        // A typed scalar size specifies two unknown extents. A size vector's
+        // length specifies rank, not the values of any output extent.
+        let Some(argument) = request.arguments.get(first) else {
+            return ShapeFact::Unknown;
+        };
+        if !matches!(
+            argument.kind,
+            runmat_types::ValueKindFact::Numeric(runmat_types::NumericFact {
+                domain: runmat_types::NumericDomain::Real,
+                ..
+            })
+        ) {
+            return ShapeFact::Unknown;
+        }
+        if argument.is_scalar() {
+            return ShapeFact::Ranked { rank: 2 };
+        }
+        if let Some(shape) = argument.shape.known_dims() {
+            if shape.first() == Some(&Some(1)) {
+                if let Some(rank) = argument.shape.element_count() {
+                    return if rank == 0 {
+                        ShapeFact::from(vec![Some(0), Some(0)])
+                    } else {
+                        ShapeFact::Ranked { rank: rank.max(2) }
+                    };
+                }
+            }
+        }
         return ShapeFact::Unknown;
     }
     let mut dimensions = Vec::with_capacity(end - first);

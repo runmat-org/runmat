@@ -452,7 +452,10 @@ mod tests {
             panic!("character output")
         };
         assert_eq!(output.shape(), &[2, 3]);
-        assert_eq!(output.data().iter().collect::<String>(), "ab   c");
+        assert_eq!(
+            runmat_value::decode_utf16_code_units(output.data()).expect("valid UTF-16 fixture"),
+            "ab   c"
+        );
         let selected = futures::executor::block_on(super::super::blkdiag_builtin(
             Some(runtime(&ledger)),
             crate::builtins::common::test_support::builtin_arguments(vec![
@@ -462,7 +465,7 @@ mod tests {
         ))
         .unwrap();
         assert!(
-            matches!(&selected, Value::CharArray(chars) if chars.data().iter().collect::<String>() == "ab   c")
+            matches!(&selected, Value::CharArray(chars) if runmat_value::decode_utf16_code_units(chars.data()).expect("valid UTF-16 fixture") == "ab   c")
         );
         assert!(ledger.snapshot().live_claimed_bytes > 0);
         drop((chars, selected));

@@ -207,6 +207,8 @@ pub async fn execute(
     let object = runmat_aot::emit_native_object(
         &unit,
         runmat_aot::NativeObjectOptions {
+            clock_inputs: None,
+            local_service_inputs: None,
             optimization: match optimization {
                 AotOptLevel::None => runmat_native_codegen::aot::NativeOptimization::None,
                 AotOptLevel::Size => runmat_native_codegen::aot::NativeOptimization::SpeedAndSize,

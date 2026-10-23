@@ -3,11 +3,7 @@ use std::error::Error;
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum ExportMode {
-    Normal { transition: bool },
-    CatalogPreview,
-}
+pub(super) use runmat_builtins::documentation_export::ExportMode;
 
 pub(super) struct ExportOptions {
     pub output: Option<PathBuf>,
@@ -66,4 +62,23 @@ pub(super) fn parse_options(
         },
         identities,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn catalog_preview_cli_requires_selection_and_excludes_acceptance_modes() {
+        let parse = |arguments: &[&str]| {
+            parse_options(arguments.iter().map(std::ffi::OsString::from))
+                .map(|options| (options.mode, options.identities))
+        };
+        assert!(parse(&["--catalog-preview"]).is_err());
+        assert!(parse(&["--catalog-preview", "--identity", "colon", "--check"]).is_err());
+        assert!(parse(&["--catalog-preview", "--identity", "colon", "--transition"]).is_err());
+        let (mode, identities) =
+            parse(&["--catalog-preview", "--identity", "colon"]).expect("valid preview");
+        assert!(mode == ExportMode::CatalogPreview);
+        assert_eq!(identities, BTreeSet::from(["colon".to_string()]));
+    }
 }

@@ -314,7 +314,10 @@ fn acosh_char_array(ca: CharArray) -> BuiltinResult<Value> {
             .map_err(|e| acosh_error_with_detail(&ACOSH_ERROR_INTERNAL, e))?;
         return Ok(tensor::tensor_into_value(tensor));
     }
-    let data: Vec<f64> = ca.data().iter().map(|&ch| ch as u32 as f64).collect();
+    let data: Vec<f64> = ca
+        .iter_column_major()
+        .map(|ch| f64::from(ch.raw()))
+        .collect();
     let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
         .map_err(|e| acosh_error_with_detail(&ACOSH_ERROR_INTERNAL, e))?;
     acosh_tensor_real(tensor)
@@ -348,7 +351,7 @@ pub(crate) mod tests {
             logical.identifier(),
             ACOSH_LOGICAL_INPUT_EXTENSION.error_identifier
         );
-        let chars = CharArray::new("A".chars().collect(), 1, 1).unwrap();
+        let chars = CharArray::from_unicode_scalars("A".chars().collect(), 1, 1).unwrap();
         let character = block_on(super::acosh_builtin(None, Value::CharArray(chars)))
             .expect_err("character input must be gated");
         assert_eq!(
@@ -510,7 +513,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acosh_char_array_roundtrip() {
-        let chars = CharArray::new("Az".chars().collect(), 1, 2).expect("char array");
+        let chars =
+            CharArray::from_unicode_scalars("Az".chars().collect(), 1, 2).expect("char array");
         let result = acosh_builtin(Value::CharArray(chars)).expect("acosh");
         match result {
             Value::Tensor(t) => {
@@ -539,7 +543,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn acosh_char_array_promotes_to_complex() {
-        let chars = CharArray::new(vec!['\0'], 1, 1).expect("char array");
+        let chars = CharArray::from_unicode_scalars(vec!['\0'], 1, 1).expect("char array");
         let result = acosh_builtin(Value::CharArray(chars)).expect("acosh");
         match result {
             Value::Complex(re, im) => {

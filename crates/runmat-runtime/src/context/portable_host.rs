@@ -58,7 +58,7 @@ impl RuntimeHostService for PortableConsoleHost {
             .ok_or_else(|| "console capture already sealed".to_string())
             .and_then(|capture| {
                 capture
-                    .push(stream, text.as_str().to_owned())
+                    .push_borrowed(stream, text.as_str())
                     .map_err(|error| error.to_string())
             });
         let result = result.and_then(|()| {
@@ -127,6 +127,30 @@ impl RuntimeHostService for NonCapturingPortableHost {
     ) -> RuntimeServiceFuture<Result<crate::interaction::InteractionResponse, RuntimeError>> {
         noninteractive_response()
     }
+    fn warning(&self, _warning: crate::warning_store::RuntimeWarning) {}
+}
+
+/// Selected stock native console: output follows the existing admitted
+/// console-text and thread-buffer path, including target-test redirection.
+/// It owns no duplicate capture or graphical/interactive authority.
+pub struct PortableForwardingConsoleHost;
+
+impl RuntimeHostService for PortableForwardingConsoleHost {
+    fn console(&self, stream: ConsoleStream, text: crate::console::ConsoleText) {
+        crate::console::forward_host_text(stream, text);
+    }
+
+    fn accepts_queued_interaction(&self) -> bool {
+        false
+    }
+
+    fn interact(
+        &self,
+        _request: HostInteraction,
+    ) -> RuntimeServiceFuture<Result<crate::interaction::InteractionResponse, RuntimeError>> {
+        noninteractive_response()
+    }
+
     fn warning(&self, _warning: crate::warning_store::RuntimeWarning) {}
 }
 

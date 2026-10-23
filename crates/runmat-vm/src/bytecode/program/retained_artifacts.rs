@@ -19,6 +19,7 @@ mod fingerprints;
 mod types;
 pub use types::{
     PreparedRetainedCallableUnits, RetainedCallableStageError, RetainedCallableStageLimits,
+    SelectedFingerprintInvariant,
 };
 #[path = "retained_artifacts/class_declarations.rs"]
 mod class_declarations;

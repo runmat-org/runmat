@@ -1,8 +1,8 @@
 use runmat_runtime::object::indexing::ObjectSubscriptPath;
 use runmat_value::Value;
 
-use crate::memory::ScopedValueRoots;
 use crate::NativeExecutorResult;
+use runmat_runtime::execution::RootedValueLease;
 
 use super::super::super::state::{EmbeddedOperationIdentity, HostState};
 
@@ -51,15 +51,15 @@ fn prepare_receiver_inner(
     {
         return Ok(prepared);
     }
-    let roots = ScopedValueRoots::register(
-        super::super::roots::subscript_roots(&root, prefix.as_ref()),
-        "native_pending_subscript_receiver_preparation",
+    let roots = RootedValueLease::for_values_iterator_in_context(
+        super::super::roots::subscript_values(&root, prefix.as_ref()),
+        &state.runtime,
     )?;
     let runtime = state.runtime.clone();
     super::super::super::call_suspension::begin_prepared_receiver(
         state,
         embedded.cloned(),
-        Box::pin(async move {
+        move || async move {
             let _roots = roots;
             runtime
                 .scope(
@@ -69,6 +69,6 @@ fn prepare_receiver_inner(
                 )
                 .await
                 .map_err(Into::into)
-        }),
+        },
     )
 }

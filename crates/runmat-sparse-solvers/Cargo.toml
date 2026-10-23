@@ -10,6 +10,7 @@ repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
 num-complex = { version = "0.4.6", default-features = false, features = ["std"] }
+libm = "0.2"
 rayon = "1.11"
 runmat-cpu-execution = { workspace = true }
 thiserror = { workspace = true }

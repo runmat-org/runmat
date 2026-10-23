@@ -65,15 +65,22 @@ fn bind_compile_error(
 mod facts;
 use facts::{function_output_arities, mir_local_fact_count_for_entrypoint};
 
-fn source_lookup_cwd(source_name: &str) -> Option<PathBuf> {
+fn source_lookup_cwd(source_name: &str) -> Result<PathBuf, RuntimeError> {
     let source_path = PathBuf::from(source_name);
     if crate::diagnostic_path::host_path_is_absolute(&source_path) {
-        return source_path
+        return Ok(source_path
             .parent()
             .map(Path::to_path_buf)
-            .or_else(|| Some(PathBuf::from(".")));
+            .unwrap_or_else(|| PathBuf::from(".")));
     }
-    Some(runmat_filesystem::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+    runmat_filesystem::current_dir().map_err(|source| {
+        build_runtime_error(format!(
+            "failed to resolve source working directory: {source}"
+        ))
+        .with_source(source)
+        .with_gpu_gather_retry(runmat_runtime::GpuGatherRetry::Never)
+        .build()
+    })
 }
 
 fn resolved_source_path(source_name: &str, cwd: &Path) -> PathBuf {
@@ -541,15 +548,13 @@ fn dependency_composed_name(
 
 pub(super) async fn discover_project_compilation_context_async(
     source_name: &str,
-) -> Result<Option<ProjectCompilationContext>, String> {
-    let Some(cwd) = source_lookup_cwd(source_name) else {
-        return Ok(None);
-    };
+) -> Result<Option<ProjectCompilationContext>, RuntimeError> {
+    let cwd = source_lookup_cwd(source_name)?;
     let primary_source_path = resolved_source_path(source_name, &cwd);
-    let primary_is_local_file = runmat_filesystem::metadata_async(&primary_source_path)
-        .await
-        .map(|metadata| metadata.is_file())
-        .unwrap_or(false);
+    let primary_is_local_file =
+        runmat_runtime::builtins::common::path_search::path_is_file(&primary_source_path)
+            .await
+            .map_err(|error| error.into_runtime_error("source resolution"))?;
     if !primary_is_local_file {
         return Ok(None);
     }
@@ -561,10 +566,20 @@ pub(super) async fn discover_project_compilation_context_async(
         Default::default(),
     )
     .await
-    .map_err(|error| error.to_string())?;
+    .map_err(|error| {
+        build_runtime_error(error.to_string())
+            .with_source(error)
+            .with_gpu_gather_retry(runmat_runtime::GpuGatherRetry::Never)
+            .build()
+    })?;
     let frozen = if let Some(frozen) = frozen {
         let handoff = runmat_package::FrozenProjectHandoff::new(frozen);
-        handoff.validate().map_err(|error| error.to_string())?;
+        handoff.validate().map_err(|error| {
+            build_runtime_error(error.to_string())
+                .with_source(error)
+                .with_gpu_gather_retry(runmat_runtime::GpuGatherRetry::Never)
+                .build()
+        })?;
         Some(handoff.into_project())
     } else {
         None
@@ -580,7 +595,12 @@ pub(super) async fn discover_project_compilation_context_async(
     } else {
         let index = runmat_config::project::build_loose_source_index_async(parent)
             .await
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| {
+                build_runtime_error(error.to_string())
+                    .with_source(error)
+                    .with_gpu_gather_retry(runmat_runtime::GpuGatherRetry::Never)
+                    .build()
+            })?;
         let catalog =
             runmat_package::source_symbols_from_index(&index, parent, &primary_source_path, None);
         (Some(index), Some(catalog))
@@ -597,10 +617,14 @@ pub(super) async fn discover_project_compilation_context_async(
 pub(super) fn project_compilation_context_from_handoff(
     source_name: &str,
     handoff: &runmat_package::FrozenProjectHandoff,
-) -> Result<ProjectCompilationContext, String> {
-    handoff.validate().map_err(|error| error.to_string())?;
-    let cwd = source_lookup_cwd(source_name)
-        .ok_or_else(|| format!("cannot resolve project requester `{source_name}`"))?;
+) -> Result<ProjectCompilationContext, RuntimeError> {
+    handoff.validate().map_err(|error| {
+        build_runtime_error(error.to_string())
+            .with_source(error)
+            .with_gpu_gather_retry(runmat_runtime::GpuGatherRetry::Never)
+            .build()
+    })?;
+    let cwd = source_lookup_cwd(source_name)?;
     let primary_source_path = resolved_source_path(source_name, &cwd);
     let frozen = handoff.project.clone();
     let source_catalog = Some(runmat_package::source_symbols_from_frozen(
@@ -624,7 +648,7 @@ async fn compose_frozen_project_async(
     frozen: &runmat_package::FrozenProject,
     compat_mode: runmat_parser::CompatMode,
     test_authority: Option<&CapturedTestSourceAuthority<'_>>,
-) -> Result<CompanionSourceDiscovery, String> {
+) -> Result<CompanionSourceDiscovery, RuntimeError> {
     compose_frozen_source_view_async(context, frozen, compat_mode, test_authority, None).await
 }
 
@@ -636,7 +660,7 @@ async fn compose_frozen_source_view_async(
     compat_mode: runmat_parser::CompatMode,
     test_authority: Option<&CapturedTestSourceAuthority<'_>>,
     captured: Option<&CapturedSourceBytes>,
-) -> Result<CompanionSourceDiscovery, String> {
+) -> Result<CompanionSourceDiscovery, RuntimeError> {
     let options = ParserOptions::new(compat_mode);
     let mut out = CompanionSourceDiscovery::default();
     out.source_catalog = context.source_catalog.clone();
@@ -660,7 +684,8 @@ async fn compose_frozen_source_view_async(
                 return Err(format!(
                     "captured source differs from its frozen identity: {}",
                     file_path.display()
-                ));
+                )
+                .into());
             }
             let text = std::str::from_utf8(bytes).map_err(|_| {
                 format!(
@@ -672,15 +697,19 @@ async fn compose_frozen_source_view_async(
         } else {
             let file_path =
                 runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(access_path)
-                    .await;
+                    .await
+                    .map_err(|error| error.into_runtime_error("source resolution"))?;
             let contents =
                 runmat_runtime::builtins::io::repl_fs::pcode::read_source_text_async(&file_path)
                     .await
                     .map_err(|error| {
-                        format!(
+                        build_runtime_error(format!(
                             "failed to read graph-declared source {}: {error}",
                             file_path.display()
-                        )
+                        ))
+                        .with_source(error)
+                        .with_gpu_gather_retry(runmat_runtime::GpuGatherRetry::Never)
+                        .build()
                     })?;
             (file_path, Cow::Owned(contents), true)
         };
@@ -774,7 +803,7 @@ async fn compose_loose_project_async(
     context: &ProjectCompilationContext,
     source_index: &runmat_config::project::ProjectSourceIndex,
     compat_mode: runmat_parser::CompatMode,
-) -> Result<CompanionSourceDiscovery, String> {
+) -> Result<CompanionSourceDiscovery, RuntimeError> {
     let mut out = CompanionSourceDiscovery {
         source_catalog: context.source_catalog.clone(),
         project_symbol_aliases: project_symbol_aliases(context.source_catalog.as_ref()),
@@ -798,8 +827,25 @@ async fn compose_loose_project_async(
                 .map(|text| runmat_execution::Digest::sha256(text.as_bytes())),
             uses_pcode_reader: false,
         });
-        let Ok(contents) = contents else {
-            continue;
+        let contents = match contents {
+            Ok(contents) => contents,
+            Err(source)
+                if matches!(
+                    source.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+                ) =>
+            {
+                continue
+            }
+            Err(source) => {
+                return Err(build_runtime_error(format!(
+                    "failed to read companion source '{}': {source}",
+                    path.display()
+                ))
+                .with_source(source)
+                .with_gpu_gather_retry(runmat_runtime::GpuGatherRetry::Never)
+                .build());
+            }
         };
         if !contents.contains("classdef") && !contents.contains("function") {
             continue;
@@ -849,7 +895,7 @@ async fn compose_loose_project_async(
 pub(super) async fn compose_project_compilation_context_async(
     context: &ProjectCompilationContext,
     compat_mode: runmat_parser::CompatMode,
-) -> Result<CompanionSourceDiscovery, String> {
+) -> Result<CompanionSourceDiscovery, RuntimeError> {
     if let Some(frozen) = context.frozen.as_ref() {
         compose_frozen_project_async(context, frozen, compat_mode, None).await
     } else if let Some(loose_index) = context.loose_index.as_ref() {
@@ -862,7 +908,7 @@ pub(super) async fn compose_project_compilation_context_async(
 pub(super) async fn discover_companion_source_statements_async(
     source_name: &str,
     compat_mode: runmat_parser::CompatMode,
-) -> Result<CompanionSourceDiscovery, String> {
+) -> Result<CompanionSourceDiscovery, RuntimeError> {
     let Some(context) = discover_project_compilation_context_async(source_name).await? else {
         return Ok(CompanionSourceDiscovery::default());
     };
@@ -874,7 +920,7 @@ pub(super) async fn companion_source_statements_from_handoff_async(
     compat_mode: runmat_parser::CompatMode,
     handoff: &runmat_package::FrozenProjectHandoff,
     test_authority: Option<&CapturedTestSourceAuthority<'_>>,
-) -> Result<CompanionSourceDiscovery, String> {
+) -> Result<CompanionSourceDiscovery, RuntimeError> {
     let context = project_compilation_context_from_handoff(source_name, handoff)?;
     compose_frozen_project_async(&context, &handoff.project, compat_mode, test_authority).await
 }
@@ -1066,6 +1112,8 @@ impl RunMatSession {
                 }
                 Err(error) => Err(RunError::Runtime(
                     build_runtime_error(format!("project composition failed: {error}"))
+                        .with_source(error)
+                        .with_gpu_gather_retry(runmat_runtime::GpuGatherRetry::Never)
                         .with_identifier("RunMat:ProjectComposition")
                         .build(),
                 )),
@@ -1255,6 +1303,8 @@ impl RunMatSession {
         .map_err(|error| {
             RunError::Runtime(
                 build_runtime_error(format!("project composition failed: {error}"))
+                    .with_source(error)
+                    .with_gpu_gather_retry(runmat_runtime::GpuGatherRetry::Never)
                     .with_identifier("RunMat:ProjectComposition")
                     .build(),
             )

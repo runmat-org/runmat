@@ -83,7 +83,7 @@ fn validates_domains_representations_and_output_count() {
         assert_eq!(error.identifier(), WBLRND_ERROR_INVALID_ARGUMENT.identifier);
     }
     for value in [
-        Value::CharArray(runmat_value::CharArray::new(vec!['2'], 1, 1).unwrap()),
+        Value::CharArray(runmat_value::CharArray::from_unicode_scalars(vec!['2'], 1, 1).unwrap()),
         Value::Complex(2.0, 0.0),
         Value::SparseTensor(runmat_value::SparseTensor::zeros(1, 1)),
     ] {

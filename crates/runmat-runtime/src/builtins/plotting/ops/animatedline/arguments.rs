@@ -37,6 +37,13 @@ pub(super) async fn parse_animatedline_args(
     let mut maximum_num_points = Some(DEFAULT_MAXIMUM_NUM_POINTS);
     while idx < args.len() {
         let key = value_as_string(&args[idx])
+            .map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    "animatedline",
+                    source.to_string(),
+                    source,
+                )
+            })?
             .ok_or_else(|| animatedline_err("property names must be strings"))?;
         idx += 1;
         if idx >= args.len() {
@@ -131,7 +138,16 @@ pub(super) fn validate_pair_syntax(args: &[Value]) -> BuiltinResult<()> {
         return Err(animatedline_err("name-value arguments must come in pairs"));
     }
     for pair in args[start..].chunks_exact(2) {
-        if value_as_string(&pair[0]).is_none() {
+        if value_as_string(&pair[0])
+            .map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    "animatedline",
+                    source.to_string(),
+                    source,
+                )
+            })?
+            .is_none()
+        {
             return Err(animatedline_err("property names must be strings"));
         }
     }

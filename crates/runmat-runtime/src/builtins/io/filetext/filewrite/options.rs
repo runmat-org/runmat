@@ -97,7 +97,14 @@ fn is_keyword(value: &Value) -> BuiltinResult<bool> {
 fn keyword_name(value: &Value) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.as_str().to_owned()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data().iter().collect()),
+        Value::CharArray(ca) if ca.rows == 1 => {
+            crate::builtins::io::utf16::decode_utf16_with_error(ca.data(), || {
+                filewrite_error_with_detail(
+                    &FILEWRITE_ERROR_INVALID_OPTION,
+                    "keyword name contains malformed UTF-16 text",
+                )
+            })
+        }
         Value::CharArray(_) => Err(filewrite_error_with_detail(
             &FILEWRITE_ERROR_INVALID_OPTION,
             "keyword names must be 1-by-N character vectors",
@@ -151,7 +158,12 @@ pub(super) fn resolve_path(value: &Value) -> BuiltinResult<PathBuf> {
     match value {
         Value::String(s) => normalize_path(s),
         Value::CharArray(ca) if ca.rows == 1 => {
-            let path: String = ca.data().iter().collect();
+            let path = crate::builtins::io::utf16::decode_utf16_with_error(ca.data(), || {
+                filewrite_error_with_detail(
+                    &FILEWRITE_ERROR_INVALID_INPUT,
+                    "filename contains malformed UTF-16 text",
+                )
+            })?;
             normalize_path(&path)
         }
         Value::CharArray(_) => Err(filewrite_error_with_detail(

@@ -59,6 +59,13 @@ fn parse_linkaxes_args(
 
 fn link_mode_from_value(value: &Value) -> crate::BuiltinResult<Option<LinkAxesMode>> {
     let option = value_as_string(value)
+        .map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                "linkaxes",
+                source.to_string(),
+                source,
+            )
+        })?
         .ok_or_else(|| plotting_error("linkaxes", "linkaxes: option must be a string"))?;
     match option.trim().to_ascii_lowercase().as_str() {
         "x" => Ok(Some(LinkAxesMode::X)),

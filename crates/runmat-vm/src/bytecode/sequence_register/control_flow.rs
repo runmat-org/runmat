@@ -25,6 +25,7 @@ pub(in crate::bytecode) fn normal_successors(
     pc: usize,
 ) -> Result<Vec<usize>, String> {
     match &instructions[pc] {
+        instruction if is_exceptional_exit(instruction) => Ok(Vec::new()),
         Instr::Return | Instr::ReturnValue => Ok(Vec::new()),
         Instr::Jump(target) => Ok(vec![checked_target(instructions.len(), pc, *target)?]),
         Instr::JumpIfFalse(target) | Instr::AndAnd(target) | Instr::OrOr(target) => {
@@ -41,6 +42,12 @@ pub(in crate::bytecode) fn normal_successors(
         _ if pc + 1 < instructions.len() => Ok(vec![pc + 1]),
         _ => Ok(Vec::new()),
     }
+}
+
+/// This instruction never returns normally. Error routing clears the same
+/// sequence/prepared owners on catch, or drops them with the failed frame.
+pub(super) fn is_exceptional_exit(instruction: &Instr) -> bool {
+    matches!(instruction, Instr::Unpack(count) if *count > 1)
 }
 
 fn checked_target(len: usize, pc: usize, target: usize) -> Result<usize, String> {

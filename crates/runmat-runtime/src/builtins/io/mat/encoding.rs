@@ -98,13 +98,25 @@ mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn non_bmp_multidimensional_char_array_rejects_instead_of_truncating() {
-        let source = CharArray::new_with_shape(vec!['😀', 'x'], vec![2, 1])
-            .expect("rectangular RunMat characters");
-        let error = block_on(convert_value(Value::CharArray(source)))
-            .expect_err("two-dimensional MAT units cannot represent scalar-width rows");
-        assert_eq!(error.identifier(), Some("RunMat:save:Unsupported"));
-        assert!(error.message().contains("UTF-16 geometry"));
+    fn multidimensional_char_array_preserves_utf16_units_and_column_major_layout() {
+        let source = CharArray::from_code_units(
+            vec![
+                runmat_value::Utf16CodeUnit::from_raw(0xD83D),
+                runmat_value::Utf16CodeUnit::from_raw(0xDE00),
+                runmat_value::Utf16CodeUnit::from_raw(b'x' as u16),
+                runmat_value::Utf16CodeUnit::from_raw(0xD800),
+            ],
+            2,
+            2,
+        )
+        .expect("rectangular UTF-16 units");
+        let array = block_on(convert_value(Value::CharArray(source)))
+            .expect("raw UTF-16 geometry is directly representable in MAT");
+        assert_eq!(array.dims, vec![2, 2]);
+        let MatData::Char { data } = array.data else {
+            panic!("expected character payload");
+        };
+        assert_eq!(data, vec![0xD83D, b'x' as u16, 0xDE00, 0xD800]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -118,6 +130,32 @@ mod tests {
         .expect_err("MAT-file assignment rejects unsupported payload");
         assert_eq!(error.identifier(), Some("RunMat:matfile:Unsupported"));
         assert!(error.message().starts_with("matfile:"));
+
+        for sparse in [
+            runmat_value::SparseTensor::new_complex(1, 1, vec![0, 1], vec![0], vec![(1.0, 2.0)])
+                .unwrap(),
+            runmat_value::SparseTensor::new_complex_f32(
+                1,
+                1,
+                vec![0, 1],
+                vec![0],
+                vec![(1.0, 2.0)],
+            )
+            .unwrap(),
+        ] {
+            for (owner, expected) in [
+                (MatEncodingOwner::Save, "RunMat:save:Unsupported"),
+                (MatEncodingOwner::MatFile, "RunMat:matfile:Unsupported"),
+            ] {
+                let error = block_on(convert_value_with_cooperation(
+                    Value::SparseTensor(sparse.clone()),
+                    owner,
+                    None,
+                ))
+                .expect_err("unsupported sparse complex storage must not panic");
+                assert_eq!(error.identifier(), Some(expected));
+            }
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

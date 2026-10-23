@@ -410,7 +410,14 @@ pub(in crate::builtins::table) fn parse_rowfilter_selector(
                 return evaluate_named_rowfilter(text, selector, object);
             }
             Value::CharArray(chars) if chars.rows == 1 => {
-                let text = chars.data().iter().collect::<String>();
+                let text =
+                    runmat_value::decode_utf16_code_units(chars.data()).map_err(|error| {
+                        table_error_with_source(
+                            &TABLE_ERROR_INVALID_INDEX,
+                            format!("table row selector is not valid UTF-16 text: {error}"),
+                            error,
+                        )
+                    })?;
                 return evaluate_named_rowfilter(&text, selector, object);
             }
             _ => {}

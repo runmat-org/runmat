@@ -5,12 +5,16 @@ use super::super::linear_operator::scalar::LinearOperatorScalar;
 /// Substitution-only arithmetic on the same four native host scalar classes
 /// as the shared dense/CSC product. No Value conversion or independent dtype
 /// dispatch is introduced here.
-pub(super) trait TriangularScalar: LinearOperatorScalar + PartialEq {
+pub(in crate::builtins::math::linalg) trait TriangularScalar:
+    LinearOperatorScalar + PartialEq
+{
     fn one() -> Self;
     fn is_zero(self) -> bool;
     fn is_finite(self) -> bool;
     fn subtract_product(accumulator: &mut Self, coefficient: Self, input: Self);
     fn divide(self, diagonal: Self) -> Option<Self>;
+    fn divide_ieee(self, diagonal: Self) -> Self;
+    fn from_ieee_parts(real: f64, imag: f64) -> Self;
 }
 
 macro_rules! real_scalar {
@@ -35,6 +39,12 @@ macro_rules! real_scalar {
 
             fn divide(self, diagonal: Self) -> Option<Self> {
                 <Self as LinearOperatorScalar>::divide_finite(self, diagonal)
+            }
+            fn divide_ieee(self, diagonal: Self) -> Self {
+                self / diagonal
+            }
+            fn from_ieee_parts(real: f64, _imag: f64) -> Self {
+                real as $scalar
             }
         }
     };
@@ -67,6 +77,16 @@ macro_rules! complex_scalar {
 
             fn divide(self, diagonal: Self) -> Option<Self> {
                 <Self as LinearOperatorScalar>::divide_finite(self, diagonal)
+            }
+            fn divide_ieee(self, diagonal: Self) -> Self {
+                let (re, im) = runmat_value::divide_complex_f64(
+                    (f64::from(self.0), f64::from(self.1)),
+                    (f64::from(diagonal.0), f64::from(diagonal.1)),
+                );
+                ComplexElement(re as $scalar, im as $scalar)
+            }
+            fn from_ieee_parts(real: f64, imag: f64) -> Self {
+                ComplexElement(real as $scalar, imag as $scalar)
             }
         }
     };

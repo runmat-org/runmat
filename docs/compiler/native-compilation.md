@@ -128,6 +128,92 @@ The CLI reserves two additional names:
 
 Neither policy is implemented by the current host-native workflow.
 
+### Selected native service policies
+
+The selected-target pack API admits the complete reached-effect service union,
+not just non-effect requirements such as SourceEvaluation. The current linked
+receiver implements SourceEvaluation through its compiler-bearing factory and
+Clock through its actual linked timing factory. Other reached host services
+fail admission rather than acquiring ambient implementations from a label.
+
+Clock behavior is explicit. `HostedAmbient` preserves the platform clock,
+timezone and available CPU counters; an ordinary hosted application does not
+silently become virtual. `DeterministicDeclared` requires versioned
+`NativeClockInputs`: initial monotonic/wall instants, a positive bounded read
+increment, a fixed calendar offset, and an optional advancing logical process
+CPU counter. Absence of that counter means unavailable, not zero or wall time.
+Logical CPU values never create physical command-thread profiling evidence.
+Absolute calendar conversion has its own signed instant type, preserving
+pre-1970 RFC3339 dates and valid leap-second representation under the captured
+timezone or declared fixed offset. It is not normalized through elapsed/sleep
+`Duration`. Timer scheduling explicitly rejects calendar instants outside its
+nonnegative, non-leap epoch domain rather than silently changing their value.
+
+The object producer supplies application inputs through
+`NativeObjectOptions.clock_inputs`; they are captured in AOT program schema 11
+and authenticated with the linked program bytes. Paired target-test request
+schema 2 supplies its own per-attempt `clock_inputs`, covered by its complete
+request digest. Missing deterministic inputs, virtual inputs for an ambient
+service, mismatched factory ABI/component, or a replaced timing port fail
+closed. Decoding a policy does not issue service or execution authority.
+Deterministic selected setup first restricts timing access, including for a
+product whose effect closure contains no Clock. Only exact selected Clock
+installation restores that access; generic injection cannot undo the
+restriction. Language timing reads return a service-unavailable error instead
+of falling back to the default platform clock. Business-calendar declarations
+conservatively retain Clock for accepted relative date and holiday text.
+
+Deterministic monotonic/wall reads share logical elapsed time. Calendar
+conversion uses only the declared fixed offset, without ambient timezone/DST
+resolution. Sleep is a cold, cooperative wait: completion advances by the
+requested duration; unpolled, abandoned, cancelled and overflowing waits do
+not advance it. Checked duration arithmetic retains the last representable
+instant on infallible read exhaustion; subsequent sleep reports exhaustion.
+Each invocation owns its clock state and cancellation generation without a
+strong RuntimeContext backedge. These source contracts are not a substitute
+for matching physical application/test, replay, cancellation and target-pack
+qualification receipts.
+
+The logical read increment is consumed by language clock/stopwatch operations
+and timer scheduling, not telemetry stamps or physical profiling. Current and
+relative calendar producers (`now`, `clock`, `today`, `datetime`, legacy date
+conversions and business-calendar defaults) use the same owned timing port.
+RFC3339 instants are interpreted under that port's calendar policy; absolute
+naive calendar parsing does not consult current time. Context-free Rust helper
+calls cannot request current/relative time or timezone conversion.
+
+This is partial selected-service implementation, not native capability closure.
+Selected WorkspaceRead/Write, EnvironmentRead/Write, FilesystemRead/Write,
+Network, UserInterface, Randomness and HostCallback effects, plus hosted dynamic
+dispatch, are not yet admitted by this receiver. Selected programs using such
+operations now fail closed instead of reaching ambient behavior (for example,
+`disp`, file I/O or RNG). This restriction does not change unselected hosted
+compilation into deterministic execution. MayThrow and MaySuspend remain
+runtime-driver control effects, not invented external-service grants.
+
+The existing `native_paired` example accepts an optional fifth argument, a JSON
+file containing `NativeClockInputs` (or JSON `null` for the HostedAmbient Clock
+variant). Its default four-argument pure witness and three semantic controls
+remain unchanged. Both the application and passing test assert real reached
+clock/calendar/wait/CPU behavior through the ordinary compile/link/process path:
+
+```bash
+cargo run -p runmat-test-runner-native --example native_paired -- \
+  PACK_MANIFEST COMPONENT_ROOT INDEPENDENT_HOST_ADMISSION EXISTING_OUTPUT_DIRECTORY CLOCK_INPUTS_JSON
+```
+
+For a deterministic pack, a replayable example policy is:
+
+```json
+{"schema_version":1,"initial_monotonic_nanos":71,"initial_wall_unix_seconds":1700000000,"initial_wall_nanosecond":0,"read_step_nanos":1000000,"local_offset_seconds":19800,"process_cpu":null}
+```
+
+Use a freshly rebuilt, matching archive and an independently admitted pack with
+the canonical Clock ABI. Repeating into a different existing output directory
+exercises fresh invocation state. A modeled CPU variant supplies
+`"process_cpu":{"initial_nanos":2000000000,"read_step_nanos":25000000}`.
+These commands describe the witness; they do not assert it has been qualified.
+
 ## Inspect the link plan
 
 Use `--explain-link` to print the program and runtime nodes retained by compilation:
@@ -172,6 +258,8 @@ Temporary objects, the decoded runtime archive, and the linker response file are
 ## Runtime archive and compatibility checks
 
 Official native CLI packages embed a compressed static archive built from `runmat-aot-runtime`. The archive contains `Value`, garbage collection, runtime operations, builtin implementations, and the shared native executor. It excludes the parser, HIR/MIR lowering, static analysis, Core composition, VM, adaptive JIT policy, and native object emitter.
+
+Selected target-pack compilation also requires an independent host-admission file. When the selected Clock service declares deterministic behavior, supply its typed `clock_inputs` in that file; the compiler validates and binds those inputs into the executable. Missing inputs or inputs inconsistent with the selected service stop compilation. Ordinary embedded-runtime compilation uses the host clock and does not require these inputs.
 
 The archive manifest records the target, object format, native ABI, schema versions, runtime and builtin-catalog identities, archive digests, linker requirements, and supported runtime capabilities. Before linking, RunMat checks the archive against the compiler and current host. A target, ABI, schema, runtime, archive, or catalog mismatch stops compilation.
 

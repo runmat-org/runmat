@@ -19,5 +19,6 @@ runmat-types = { workspace = true }
 indexmap = { version = "1.9", features = ["std"] }
 num-bigint = "0.4"
 num-integer = "0.1"
+num-rational = "=0.4.2"
 num-traits = "0.2"
 libm = "0.2"

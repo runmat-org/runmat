@@ -32,7 +32,7 @@ pub(super) fn run_without_output_context(
 
 pub(super) fn set_path(path: &str) -> PathGuard {
     let previous = crate::builtins::common::path_state::current_path_string();
-    crate::builtins::common::path_state::set_path_string(path);
+    crate::builtins::common::path_state::set_path_string(path).expect("test search path update");
     PathGuard { previous }
 }
 
@@ -42,7 +42,8 @@ pub(super) struct PathGuard {
 
 impl Drop for PathGuard {
     fn drop(&mut self) {
-        crate::builtins::common::path_state::set_path_string(&self.previous);
+        crate::builtins::common::path_state::set_path_string(&self.previous)
+            .expect("test search path update");
     }
 }
 

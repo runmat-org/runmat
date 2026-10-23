@@ -504,25 +504,36 @@ fn mat_unicode_char_row_roundtrip_restores_scalar_geometry() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
-fn external_non_bmp_char_matrix_rejects_unrepresentable_geometry() {
+fn external_utf16_char_matrix_preserves_rectangular_code_unit_geometry() {
     let _state = crate::builtins::io::mat::tests::state_guard();
-    let error = mat_array_to_value(MatArray {
+    let value = mat_array_to_value(MatArray {
         class: MatClass::Char,
         dims: vec![2, 1],
         data: MatData::Char {
             data: vec![0xd83d, 0xde00],
         },
     })
-    .expect_err("surrogate pair cannot fit two rectangular scalar rows");
-    assert_eq!(error.identifier(), Some("RunMat:load:InvalidArgument"));
-    assert!(error.message().contains("UTF-16 geometry"));
+    .expect("MAT UTF-16 units are the canonical character payload");
+    let Value::CharArray(array) = value else {
+        panic!("expected character array");
+    };
+    assert_eq!(array.shape(), &[2, 1]);
+    assert_eq!(
+        array
+            .data()
+            .iter()
+            .map(|unit| unit.raw())
+            .collect::<Vec<_>>(),
+        vec![0xd83d, 0xde00]
+    );
 }
 
 #[test]
 fn load_save_nd_char_and_cell_roundtrip_preserves_shape_and_order() {
     let _state = crate::builtins::io::mat::tests::state_guard();
     ensure_test_resolver();
-    let chars = CharArray::new_with_shape("abcd".chars().collect(), vec![1, 2, 2]).expect("chars");
+    let chars = CharArray::from_unicode_scalars_with_shape("abcd".chars().collect(), vec![1, 2, 2])
+        .expect("chars");
     let cells = CellArray::new_with_shape(vec![Value::Num(1.0), Value::Num(2.0)], vec![1, 1, 2])
         .expect("cells");
     set_workspace(&[
@@ -565,7 +576,10 @@ fn load_compressed_level5_payload() {
     assert!(matches!(entries[0].1, Value::Num(123.0)));
     assert_eq!(entries[1].0, "B");
     match &entries[1].1 {
-        Value::CharArray(ca) => assert_eq!(ca.data().iter().collect::<String>(), "text"),
+        Value::CharArray(ca) => assert_eq!(
+            runmat_value::decode_utf16_code_units(ca.data()).unwrap(),
+            "text"
+        ),
         other => panic!("expected char array, got {other:?}"),
     }
 }
@@ -1104,7 +1118,7 @@ fn load_char_array_names_trimmed() {
         }
         data.extend(chars);
     }
-    let name_array = CharArray::new(data, 2, cols).unwrap();
+    let name_array = CharArray::from_unicode_scalars(data, 2, cols).unwrap();
 
     let eval = block_on(evaluate(&[
         Value::from(path.to_string_lossy().to_string()),

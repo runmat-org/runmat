@@ -1,5 +1,6 @@
 use super::*;
 use futures::executor::block_on;
+use runmat_builtins::NANMAX_DESCRIPTOR;
 use runmat_value::{ObjectInstance, Tensor, Value};
 
 fn max_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -9,7 +10,9 @@ fn max_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 fn nanmax_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    block_on(super::nanmax_builtin(value, rest))
+    let rest =
+        crate::execution::RootedValues::new(rest).map_err(|error| error.into_runtime_error())?;
+    block_on(super::nanmax_builtin(None, value, rest.into()))
 }
 
 #[test]

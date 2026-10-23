@@ -5,6 +5,16 @@ use runmat_value::{ComplexTensor, Tensor, Value};
 
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+mod arguments;
+mod provider;
+mod host;
+pub(in crate::builtins::math::reduction) use arguments::{
+    parse_integration_arguments, validate_integration_inputs, IntegrationArguments,
+};
+pub(in crate::builtins::math::reduction) use host::{
+    gather_integration_inputs, restore_integration_result,
+};
+pub(in crate::builtins::math::reduction) use provider::try_provider_integration;
 
 #[derive(Clone)]
 pub(crate) enum SpacingSpec {
@@ -23,6 +33,14 @@ pub(crate) enum GpuIntegrationSpacing {
 }
 
 impl GpuIntegrationSpacing {
+    fn into_handle(self) -> Option<GpuTensorHandle> {
+        match self {
+            Self::ScalarHandle { handle } | Self::Vector { handle } | Self::Tensor { handle } => {
+                Some(handle)
+            }
+            Self::Unit | Self::Scalar(_) => None,
+        }
+    }
     pub(crate) fn as_provider_spacing(&self) -> ProviderTrapezoidSpacing<'_> {
         match self {
             Self::Unit => ProviderTrapezoidSpacing::Unit,
@@ -76,16 +94,14 @@ pub(crate) fn default_dimension_from_shape(shape: &[usize]) -> usize {
         .unwrap_or(1)
 }
 
-pub(crate) fn pad_shape_for_dim(shape: &[usize], dim: usize) -> Vec<usize> {
-    let mut padded = if shape.is_empty() {
+pub(crate) fn pad_shape_for_dim(shape: &[usize], _dim: usize) -> Vec<usize> {
+    // Axes beyond the stored rank are virtual singletons. Never allocate a
+    // dimension-sized metadata buffer for an arbitrary public scalar control.
+    if shape.is_empty() {
         vec![1, 1]
     } else {
         shape.to_vec()
-    };
-    while padded.len() < dim {
-        padded.push(1);
     }
-    padded
 }
 
 pub(crate) fn dim_product(dims: &[usize]) -> usize {
@@ -145,14 +161,6 @@ pub(crate) fn value_has_gpu_tensor(value: &Value) -> bool {
     matches!(value, Value::GpuTensor(_))
 }
 
-pub(crate) async fn gather_host_value(value: Value) -> BuiltinResult<Value> {
-    if matches!(value, Value::GpuTensor(_)) {
-        gpu_helpers::gather_value_async(&value).await
-    } else {
-        Ok(value)
-    }
-}
-
 pub(crate) fn spacing_from_value(
     name: &str,
     value: Option<Value>,
@@ -183,7 +191,7 @@ pub(crate) fn spacing_from_value(
     }
 
     if is_vector_shape(&tensor_shape) {
-        let expected = padded_y_shape[dim - 1];
+        let expected = padded_y_shape.get(dim - 1).copied().unwrap_or(1);
         let values = real_tensor_values(&tensor_value);
         if values.len() != expected {
             return Err(integration_error(
@@ -201,24 +209,6 @@ pub(crate) fn spacing_from_value(
         name,
         format!("{name}: X must be a scalar, vector, or the same size as Y"),
     ))
-}
-
-pub(crate) fn spacing_from_gpu_or_host_value(
-    name: &str,
-    value: Option<Value>,
-    y_shape: &[usize],
-    dim: usize,
-) -> BuiltinResult<GpuIntegrationSpacing> {
-    if value.is_none() {
-        return Ok(GpuIntegrationSpacing::Unit);
-    }
-    let Some(provider) = runmat_accelerate_api::provider() else {
-        return Err(integration_error(
-            name,
-            format!("{name}: no acceleration provider"),
-        ));
-    };
-    spacing_from_gpu_or_host_value_for_provider(name, value, y_shape, dim, provider)
 }
 
 pub(crate) fn spacing_from_gpu_or_host_value_for_provider(
@@ -259,7 +249,7 @@ pub(crate) fn spacing_from_gpu_or_host_value_for_provider(
             return Ok(GpuIntegrationSpacing::Tensor { handle });
         }
         if is_vector_shape(handle.shape()) {
-            let expected = padded_y_shape[dim - 1];
+            let expected = padded_y_shape.get(dim - 1).copied().unwrap_or(1);
             if len != expected {
                 return Err(integration_error(
                     name,
@@ -387,37 +377,6 @@ pub(crate) fn value_into_complex_tensor(name: &str, value: Value) -> BuiltinResu
                 .map_err(|err| integration_error(name, err))?;
             real_tensor_to_complex(name, &tensor)
         }
-    }
-}
-
-pub(crate) fn promote_real_value_to_gpu(name: &str, value: Value) -> BuiltinResult<Value> {
-    let Some(provider) = runmat_accelerate_api::provider() else {
-        return Ok(value);
-    };
-
-    match value {
-        Value::Tensor(tensor) => {
-            let data = real_tensor_values(&tensor);
-            let view = HostTensorView {
-                data: &data,
-                shape: tensor.shape(),
-            };
-            match provider.upload(&view) {
-                Ok(handle) => Ok(Value::GpuTensor(handle)),
-                Err(_) => Ok(Value::Tensor(tensor)),
-            }
-        }
-        Value::Num(n) => {
-            let tensor = Tensor::new(vec![n], vec![1, 1])
-                .map_err(|err| integration_error(name, format!("{name}: {err}")))?;
-            promote_real_value_to_gpu(name, Value::Tensor(tensor))
-        }
-        Value::LogicalArray(logical) => {
-            let tensor =
-                tensor::logical_to_tensor(&logical).map_err(|err| integration_error(name, err))?;
-            promote_real_value_to_gpu(name, Value::Tensor(tensor))
-        }
-        other => Ok(other),
     }
 }
 

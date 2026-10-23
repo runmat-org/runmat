@@ -20,7 +20,7 @@ const INPUTS: [BuiltinParamDescriptor; 3] = [
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Variadic,
         default: None,
-        description: "Optional tol, maxit, M1, M2, and x0 positions. Preconditioners are callable inverse actions or validated triangular dense/CSC factors.",
+        description: "Optional tol, maxit, M1, M2, and x0 positions. Preconditioners are selected callable inverse actions or reusable native-class dense/CSC matrix solves; general CSC factors require unrestricted host allocation.",
     },
 ];
 
@@ -37,7 +37,7 @@ const OUTPUTS: [BuiltinParamDescriptor; 5] = [
         ty: BuiltinParamType::NumericScalar,
         arity: BuiltinParamArity::Optional,
         default: None,
-        description: "Convergence flag: 0 converged, 1 iteration limit, 3 stagnation, 4 breakdown.",
+        description: "Convergence flag: 0 converged, 1 iteration limit, 2 unusable numerical preconditioner result, 3 stagnation, 4 breakdown. Language and execution-control failures remain errors.",
     },
     BuiltinParamDescriptor {
         name: "relres",

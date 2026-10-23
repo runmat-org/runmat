@@ -16,12 +16,12 @@ use std::collections::{HashMap, HashSet};
 #[cfg(feature = "native-accel")]
 #[path = "compile/function_fusion.rs"]
 mod function_fusion;
-#[cfg(feature = "native-accel")]
-#[path = "compile/fusion_windows.rs"]
-pub(crate) mod fusion_windows;
 #[cfg(all(test, feature = "native-accel"))]
 #[path = "compile/fusion_admission_tests.rs"]
 mod fusion_admission_tests;
+#[cfg(feature = "native-accel")]
+#[path = "compile/fusion_windows.rs"]
+pub(crate) mod fusion_windows;
 #[cfg(feature = "native-accel")]
 #[path = "compile/semantic_fusion_candidates.rs"]
 mod semantic_fusion_candidates;
@@ -279,11 +279,13 @@ fn derive_semantic_async_metadata(
         for block in &body.blocks {
             for (stmt_index, stmt) in block.statements.iter().enumerate() {
                 let value = match &stmt.kind {
-                    MirStmtKind::Assign { value, .. }
+                    MirStmtKind::PreparedAssign { value, .. }
+                    | MirStmtKind::Assign { value, .. }
                     | MirStmtKind::MultiAssign { value, .. }
                     | MirStmtKind::SequenceAssign { value, .. }
                     | MirStmtKind::Expr(value) => value,
-                    MirStmtKind::PlaceMutation(_)
+                    MirStmtKind::PrepareFixedAssignment(_)
+                    | MirStmtKind::PlaceMutation(_)
                     | MirStmtKind::CaptureSequence { .. }
                     | MirStmtKind::WorkspaceEffect { .. }
                     | MirStmtKind::StatementOutput(_)
@@ -1182,11 +1184,13 @@ mod tests {
         for block in &mut body.blocks {
             for statement in &mut block.statements {
                 let value = match &mut statement.kind {
-                    MirStmtKind::Assign { value, .. }
+                    MirStmtKind::PreparedAssign { value, .. }
+                    | MirStmtKind::Assign { value, .. }
                     | MirStmtKind::MultiAssign { value, .. }
                     | MirStmtKind::SequenceAssign { value, .. }
                     | MirStmtKind::Expr(value) => value,
-                    MirStmtKind::CaptureSequence { .. }
+                    MirStmtKind::PrepareFixedAssignment(_)
+                    | MirStmtKind::CaptureSequence { .. }
                     | MirStmtKind::PlaceMutation(_)
                     | MirStmtKind::WorkspaceEffect { .. }
                     | MirStmtKind::StatementOutput(_)

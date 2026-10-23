@@ -1,6 +1,5 @@
-use std::collections::VecDeque;
-use std::future::Future;
-use std::pin::Pin;
+use super::super::control::{ControlIter, ControlVec};
+use crate::execution::RuntimeContinuationFuture;
 
 use crate::execution::RootedValue;
 use runmat_value::Value;
@@ -8,120 +7,233 @@ use runmat_value::Value;
 use super::{AssignmentStepSpec, PreparedAssignmentStep};
 use crate::object::dispatch::resolve_object_index_protocol;
 use crate::object::indexing::{ObjectIndexOp, ObjectSubscriptPath};
+use crate::object::resolve::{ContextualMemberScope, MemberStoreScope, OrdinaryMemberScope};
 use crate::runtime_error::semantic_error;
 use crate::sequence::destination::{PreparedSequenceEndpoint, SequenceEndpointSpec};
-use crate::RuntimeError;
 
 pub(super) fn assign_object_path<'a>(
     context: Option<&'a crate::context::RuntimeContext>,
-    current: Value,
-    mut prefix: VecDeque<PreparedAssignmentStep>,
-    expected_class: runmat_types::ClassIdentity,
-    suffix_steps: Vec<AssignmentStepSpec>,
+    mut current: Value,
+    prefix: ControlIter<PreparedAssignmentStep>,
+    expected_class: runmat_value::SharedClassIdentity,
+    suffix_steps: ControlVec<AssignmentStepSpec>,
     endpoint: SequenceEndpointSpec,
     path: ObjectSubscriptPath,
-    values: Vec<Value>,
+    cardinality: crate::builtins::introspection::object_indexing::PreparedObjectAssignmentCardinality,
+    values: runmat_value::ValueSequence,
     caller: Option<&'a str>,
-) -> Pin<Box<dyn Future<Output = Result<RootedValue, RuntimeError>> + 'a>> {
-    Box::pin(async move {
-        if prefix.is_empty() {
-            let actual =
-                crate::object::indexing::class_name_from_base(&current).ok_or_else(|| {
-                    semantic_error(
-                        "PreparedDestinationReceiverChanged",
-                        "prepared object destination no longer refers to an object receiver",
+    mut roots: crate::execution::RootedValueLease,
+) -> RuntimeContinuationFuture<'a, RootedValue> {
+    super::super::control::admit_future(context, move || async move {
+        check_cardinality(&cardinality)?;
+        if prefix.len() == 0 {
+            return assign_object_leaf(
+                context,
+                current,
+                expected_class,
+                suffix_steps,
+                endpoint,
+                path,
+                cardinality,
+                values,
+                caller,
+                roots,
+            )
+            .await;
+        }
+        let mut ancestors = super::structural::Writeback::new(context, prefix.len())?;
+        for step in prefix {
+            ancestors.check(context)?;
+            let child =
+                super::structural::read_step(context, current.clone(), &step, caller).await?;
+            ancestors.push(context, current, step, roots)?;
+            (current, roots) = child.into_value_and_lease();
+            // This is the next recursive node's original pre-effect check.
+            check_cardinality(&cardinality)?;
+        }
+        let updated = assign_object_leaf(
+            context,
+            current,
+            expected_class,
+            suffix_steps,
+            endpoint,
+            path,
+            cardinality,
+            values,
+            caller,
+            roots,
+        )
+        .await?;
+        ancestors.finish(context, updated, caller).await
+    })
+}
+
+async fn assign_object_leaf(
+    context: Option<&crate::context::RuntimeContext>,
+    current: Value,
+    expected_class: runmat_value::SharedClassIdentity,
+    suffix_steps: ControlVec<AssignmentStepSpec>,
+    endpoint: SequenceEndpointSpec,
+    path: ObjectSubscriptPath,
+    cardinality: crate::builtins::introspection::object_indexing::PreparedObjectAssignmentCardinality,
+    values: runmat_value::ValueSequence,
+    caller: Option<&str>,
+    roots: crate::execution::RootedValueLease,
+) -> Result<RootedValue, crate::RuntimeError> {
+    let actual = crate::object::indexing::class_name_from_base(&current).ok_or_else(|| {
+        semantic_error(
+            "PreparedDestinationReceiverChanged",
+            "prepared object destination no longer refers to an object receiver",
+        )
+    })?;
+    if actual != expected_class.as_identity() {
+        return Err(semantic_error(
+            "PreparedDestinationReceiverChanged",
+            format!(
+                "prepared object destination changed class from {} to {actual}",
+                expected_class.as_identity()
+            ),
+        ));
+    }
+    match resolve_object_index_protocol(&current, ObjectIndexOp::Subsasgn, caller)? {
+        Some(method) => {
+            let result = match context {
+                Some(context) => {
+                    crate::object::protocol::invoke_resolved_object_assignment_sequence_in_context(
+                        context, &method, current, path, values,
                     )
-                })?;
-            if actual != &expected_class {
-                return Err(semantic_error(
-                    "PreparedDestinationReceiverChanged",
-                    format!("prepared object destination changed class from {expected_class} to {actual}"),
-                ));
-            }
-            return match resolve_object_index_protocol(&current, ObjectIndexOp::Subsasgn, caller)? {
-                Some(method) => match context {
-                    Some(context) => {
-                        crate::object::protocol::invoke_resolved_object_assignment_in_context(
-                            context, &method, current, path, values,
-                        )
-                        .await
-                    }
-                    None => {
-                        crate::object::protocol::invoke_resolved_object_assignment(
-                            &method, current, path, values,
-                        )
-                        .await
-                    }
-                },
+                    .await
+                }
                 None => {
-                    assign_unprepared_path(
-                        context,
-                        current,
-                        suffix_steps.into(),
-                        endpoint,
-                        values,
-                        caller,
+                    crate::object::protocol::invoke_resolved_object_assignment_sequence(
+                        &method, current, path, values,
                     )
                     .await
                 }
             };
+            drop(roots);
+            result
         }
-        let step = prefix.pop_front().expect("nonempty prefix checked above");
-        let child = super::structural::read_step(context, current.clone(), &step, caller).await?;
-        let updated = child
-            .with_owned_async(|child| {
-                assign_object_path(
-                    context,
-                    child,
-                    prefix,
-                    expected_class,
-                    suffix_steps,
-                    endpoint,
-                    path,
-                    values,
-                    caller,
-                )
-            })
-            .await?;
-        updated
-            .with_owned_async(|updated| {
-                super::structural::write_step(context, current, step, updated, caller)
-            })
+        None => {
+            assign_unprepared_path(
+                context,
+                current,
+                suffix_steps.into_iter(),
+                endpoint,
+                cardinality,
+                values,
+                caller,
+                roots,
+            )
             .await
-    })
+        }
+    }
 }
-
 fn assign_unprepared_path<'a>(
     context: Option<&'a crate::context::RuntimeContext>,
     current: Value,
-    mut steps: VecDeque<AssignmentStepSpec>,
+    steps: ControlIter<AssignmentStepSpec>,
     endpoint: SequenceEndpointSpec,
-    values: Vec<Value>,
+    cardinality: crate::builtins::introspection::object_indexing::PreparedObjectAssignmentCardinality,
+    values: runmat_value::ValueSequence,
     caller: Option<&'a str>,
-) -> Pin<Box<dyn Future<Output = Result<RootedValue, RuntimeError>> + 'a>> {
-    Box::pin(async move {
-        let Some(spec) = steps.pop_front() else {
-            let prepared = PreparedSequenceEndpoint::prepare(&current, endpoint).await?;
-            return match context {
-                Some(context) => {
-                    prepared
-                        .assign_in_context(context, current, values, caller)
-                        .await
-                }
-                None => prepared.assign(current, values, caller).await,
-            };
-        };
-        let step = super::structural::prepare_step(&current, spec).await?;
-        let child = super::structural::read_step(context, current.clone(), &step, caller).await?;
-        let updated = child
-            .with_owned_async(|child| {
-                assign_unprepared_path(context, child, steps, endpoint, values, caller)
-            })
+    roots: crate::execution::RootedValueLease,
+) -> RuntimeContinuationFuture<'a, RootedValue> {
+    match context {
+        Some(context) => assign_unprepared_path_with_scope(
+            ContextualMemberScope(context),
+            current,
+            steps,
+            endpoint,
+            cardinality,
+            values,
+            caller,
+            roots,
+        ),
+        None => assign_unprepared_path_with_scope(
+            OrdinaryMemberScope,
+            current,
+            steps,
+            endpoint,
+            cardinality,
+            values,
+            caller,
+            roots,
+        ),
+    }
+}
+
+fn assign_unprepared_path_with_scope<'a, M: MemberStoreScope<'a> + 'a>(
+    scope: M,
+    mut current: Value,
+    steps: ControlIter<AssignmentStepSpec>,
+    endpoint: SequenceEndpointSpec,
+    cardinality: crate::builtins::introspection::object_indexing::PreparedObjectAssignmentCardinality,
+    values: runmat_value::ValueSequence,
+    caller: Option<&'a str>,
+    mut roots: crate::execution::RootedValueLease,
+) -> RuntimeContinuationFuture<'a, RootedValue> {
+    let context = scope.runtime();
+    super::super::control::admit_future(context, move || async move {
+        check_cardinality(&cardinality)?;
+        if steps.len() == 0 {
+            let prepared = PreparedSequenceEndpoint::prepare_with_cardinality(
+                context,
+                &current,
+                endpoint,
+                Some(cardinality),
+            )
             .await?;
-        updated
-            .with_owned_async(|updated| {
-                super::structural::write_step(context, current, step, updated, caller)
-            })
-            .await
+            let result = prepared
+                .assign_sequence_with_scope(scope, current, values, caller)
+                .await;
+            drop(roots);
+            return result;
+        }
+        let mut ancestors = super::structural::Writeback::new(context, steps.len())?;
+        for spec in steps {
+            ancestors.check(context)?;
+            let step = super::structural::prepare_step_with_initialization(
+                context,
+                &current,
+                spec,
+                runmat_types::AssignmentChildCreation::ExistingOnly,
+                super::ReceiverCreationOrigin::Existing,
+            )
+            .await?;
+            let child =
+                super::structural::read_step(context, current.clone(), &step, caller).await?;
+            ancestors.push(context, current, step, roots)?;
+            (current, roots) = child.into_value_and_lease();
+            check_cardinality(&cardinality)?;
+        }
+        let prepared = PreparedSequenceEndpoint::prepare_with_cardinality(
+            context,
+            &current,
+            endpoint,
+            Some(cardinality),
+        )
+        .await?;
+        let updated = prepared
+            .assign_sequence_with_scope(scope, current, values, caller)
+            .await?;
+        drop(roots);
+        ancestors.finish(context, updated, caller).await
     })
+}
+
+fn check_cardinality(
+    cardinality: &crate::builtins::introspection::object_indexing::PreparedObjectAssignmentCardinality,
+) -> Result<(), crate::RuntimeError> {
+    if cardinality
+        .method
+        .as_ref()
+        .is_some_and(|method| !crate::object::protocol::resolved_method_is_current(method))
+    {
+        return Err(semantic_error(
+            "StaleObjectProtocolResolution",
+            "object protocol binding changed after the destination was prepared",
+        ));
+    }
+    Ok(())
 }

@@ -9,7 +9,8 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
-    CharArray, IntValue, LogicalArray, NumericScalar, StringArray, Tensor, Utf8Text, Value,
+    encode_utf16_code_units, CharArray, IntValue, LogicalArray, NumericScalar, StringArray, Tensor,
+    Utf16CodeUnit, Utf8Text, Value,
 };
 
 use crate::builtins::common::broadcast as matlab_broadcast;
@@ -24,6 +25,11 @@ use crate::{build_runtime_error, gather_if_needed_async, make_cell_with_shape, B
 
 pub(crate) fn compat_error(name: &str, message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin(name).build()
+}
+
+fn decoded_char_row(array: &CharArray, row: usize, fn_name: &str) -> BuiltinResult<String> {
+    char_row_to_string_slice(array.data(), array.cols, row)
+        .map_err(|error| compat_error(fn_name, format!("{fn_name}: {error}")))
 }
 
 fn map_flow(name: &'static str) -> impl Fn(crate::RuntimeError) -> crate::RuntimeError {
@@ -280,7 +286,7 @@ async fn mat2str_builtin(
         &value,
         precision,
         include_class,
-    ))))
+    )?)))
 }
 
 #[runtime_builtin(
@@ -445,9 +451,7 @@ pub(crate) fn scalar_text(value: &Value, fn_name: &str) -> BuiltinResult<String>
             Ok(array.data()[0].as_str().to_owned())
         }
         Value::CharArray(array) if array.rows == 0 => Ok(String::new()),
-        Value::CharArray(array) if array.rows == 1 => {
-            Ok(char_row_to_string_slice(array.data(), array.cols, 0))
-        }
+        Value::CharArray(array) if array.rows == 1 => decoded_char_row(array, 0, fn_name),
         other => Err(compat_error(
             fn_name,
             format!("{fn_name}: expected a text scalar, got {other:?}"),
@@ -540,11 +544,7 @@ impl TextList {
                     });
                 }
                 for row in 0..array.rows {
-                    items.push(Some(Utf8Text::new(char_row_to_string_slice(
-                        array.data(),
-                        array.cols,
-                        row,
-                    ))));
+                    items.push(Some(Utf8Text::new(decoded_char_row(&array, row, fn_name)?)));
                 }
                 Ok(Self {
                     items,
@@ -629,7 +629,8 @@ fn map_text_pair_preserve(
             let mut first = Vec::with_capacity(array.rows);
             let mut second = Vec::with_capacity(array.rows);
             for row in 0..array.rows {
-                let (a, b) = map(&char_row_to_string_slice(array.data(), array.cols, row));
+                let text = decoded_char_row(array, row, fn_name)?;
+                let (a, b) = map(&text);
                 first.push(a);
                 second.push(b);
             }
@@ -679,19 +680,26 @@ fn strtok_pair(text: &str, delimiters: &str) -> (String, String) {
 
 fn char_rows_from_strings(rows: Vec<String>, fn_name: &str) -> BuiltinResult<Value> {
     let row_count = rows.len();
-    let cols = rows.iter().map(|s| s.chars().count()).max().unwrap_or(0);
+    let encoded = rows
+        .iter()
+        .map(|row| encode_utf16_code_units(row))
+        .collect::<Vec<_>>();
+    let cols = encoded.iter().map(Vec::len).max().unwrap_or(0);
     let mut data = Vec::with_capacity(row_count * cols);
-    for row in rows {
-        let mut chars = row.chars().collect::<Vec<_>>();
-        chars.resize(cols, ' ');
-        data.extend(chars);
+    for mut row in encoded {
+        row.resize(cols, Utf16CodeUnit::from_raw(b' ' as u16));
+        data.extend(row);
     }
-    CharArray::new(data, row_count, cols)
+    CharArray::from_code_units(data, row_count, cols)
         .map(Value::CharArray)
         .map_err(|e| compat_error(fn_name, e))
 }
 
-fn mat2str_value(value: &Value, precision: Option<usize>, include_class: bool) -> String {
+fn mat2str_value(
+    value: &Value,
+    precision: Option<usize>,
+    include_class: bool,
+) -> BuiltinResult<String> {
     let body = match value {
         Value::Num(n) => format_number(*n, precision),
         Value::Int(i) => i.decimal_string(),
@@ -706,7 +714,7 @@ fn mat2str_value(value: &Value, precision: Option<usize>, include_class: bool) -
         Value::CharArray(array) if array.rows <= 1 => {
             format!(
                 "'{}'",
-                char_row_to_string_slice(array.data(), array.cols, 0).replace('\'', "''")
+                decoded_char_row(array, 0, "mat2str")?.replace('\'', "''")
             )
         }
         Value::Tensor(tensor) => tensor_to_matrix_string(tensor, precision),
@@ -723,12 +731,12 @@ fn mat2str_value(value: &Value, precision: Option<usize>, include_class: bool) -
         _ => value.to_string(),
     };
     if !include_class {
-        return body;
+        return Ok(body);
     }
-    match mat2str_class_name(value) {
+    Ok(match mat2str_class_name(value) {
         Some(class) => format!("{class}({body})"),
         None => body,
-    }
+    })
 }
 
 fn mat2str_class_name(value: &Value) -> Option<&'static str> {
@@ -860,9 +868,7 @@ fn bytes_from_value(value: &Value, fn_name: &str) -> BuiltinResult<Vec<u8>> {
             .collect(),
         Value::Int(i) => Ok(vec![byte_from_intvalue(i, fn_name)?]),
         Value::Num(n) => Ok(vec![byte_from_f64(*n, fn_name)?]),
-        Value::CharArray(array) => {
-            Ok(char_row_to_string_slice(array.data(), array.cols, 0).into_bytes())
-        }
+        Value::CharArray(array) => Ok(decoded_char_row(array, 0, fn_name)?.into_bytes()),
         Value::String(text) => Ok(text.as_bytes().to_vec()),
         other => Err(compat_error(
             fn_name,
@@ -908,7 +914,7 @@ fn decode_bytes(bytes: &[u8], encoding: &str, shape: Vec<usize>) -> BuiltinResul
         )
     })?;
     let (text, _, _) = encoding.decode(bytes);
-    let chars = text.chars().collect::<Vec<_>>();
+    let chars = encode_utf16_code_units(text.as_ref());
     let output = if shape.iter().product::<usize>() == chars.len() {
         CharArray::from_column_major(chars, shape)
     } else {
@@ -1002,7 +1008,8 @@ mod tests {
                 &Value::Int(runmat_value::IntValue::U64(u64::MAX)),
                 None,
                 false,
-            ),
+            )
+            .unwrap(),
             "18446744073709551615"
         );
         let tensor = Tensor::new_integer(
@@ -1011,14 +1018,14 @@ mod tests {
         )
         .expect("typed integer matrix");
         assert_eq!(
-            mat2str_value(&Value::Tensor(tensor), None, false),
+            mat2str_value(&Value::Tensor(tensor), None, false).unwrap(),
             "[18446744073709551615 9007199254740993]"
         );
 
         let typed = Tensor::new_integer(IntegerStorage::U16(vec![256, 512]), vec![1, 2])
             .expect("typed integer matrix");
         assert_eq!(
-            mat2str_value(&Value::Tensor(typed), None, true),
+            mat2str_value(&Value::Tensor(typed), None, true).unwrap(),
             "uint16([256 512])"
         );
     }
@@ -1194,6 +1201,28 @@ mod tests {
 
     #[test]
     fn sscanf_character_fields_keep_character_class_and_field_limit() {
+        let astral_units = sscanf_scan("🙂X", "%1c%1c", Some(vec![2, 1])).unwrap();
+        assert_eq!(astral_units.count, 2);
+        assert_eq!(astral_units.next_index, 3);
+        let Value::CharArray(astral_chars) = astral_units.value else {
+            panic!("expected character output");
+        };
+        assert_eq!(
+            astral_chars
+                .data()
+                .iter()
+                .map(|unit| unit.raw())
+                .collect::<Vec<_>>(),
+            vec![0xD83D, 0xDE42],
+        );
+        let width_one = sscanf_scan("🙂X", "%1s", Some(vec![1, 1])).unwrap();
+        assert_eq!(width_one.count, 1);
+        assert_eq!(width_one.next_index, 2);
+        let Value::CharArray(width_one) = width_one.value else {
+            panic!("expected character output");
+        };
+        assert_eq!(width_one.data()[0].raw(), 0xD83D);
+
         for (input, format, expected, next_index) in [
             ("hello world", "%s", "hello", 6),
             ("abcde", "%3c", "abc", 4),
@@ -1215,7 +1244,11 @@ mod tests {
             assert_eq!(
                 matrix.value,
                 Value::CharArray(
-                    CharArray::from_column_major(vec!['a', 'b', 'c', 'd'], vec![2, 2]).unwrap()
+                    CharArray::from_column_major(
+                        runmat_value::encode_utf16_code_units("abcd"),
+                        vec![2, 2]
+                    )
+                    .unwrap()
                 )
             );
         }
@@ -1225,7 +1258,11 @@ mod tests {
         assert_eq!(
             partial.value,
             Value::CharArray(
-                CharArray::from_column_major(vec!['a', 'b', 'c', '\0'], vec![2, 2]).unwrap()
+                CharArray::from_column_major(
+                    runmat_value::encode_utf16_code_units("abc\0"),
+                    vec![2, 2]
+                )
+                .unwrap()
             )
         );
 
@@ -1925,7 +1962,7 @@ mod tests {
 
     #[test]
     fn conversion_scope_and_container_shapes_match_their_contracts() {
-        let matrix = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap();
+        let matrix = CharArray::from_unicode_scalars(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap();
         assert_eq!(
             block(convert_chars_to_strings_builtin(
                 Value::CharArray(matrix),
@@ -1988,7 +2025,7 @@ mod tests {
                     crate::builtins::common::test_support::builtin_arguments(Vec::new())
                 ))
                 .unwrap(),
-                Value::CharArray(CharArray::new(Vec::new(), 0, 0).unwrap())
+                Value::CharArray(CharArray::from_unicode_scalars(Vec::new(), 0, 0).unwrap())
             );
         }
         let converted = block(convert_contained_strings_to_chars_builtin(
@@ -2049,11 +2086,13 @@ mod tests {
         assert_eq!(converted.shape(), [2, 1]);
         assert!(matches!(
             converted.get_linear(0).unwrap().fields.get("label"),
-            Some(Value::CharArray(value)) if value.data().iter().collect::<String>() == "first"
+            Some(Value::CharArray(value))
+                if value.try_row_string().unwrap().as_deref() == Some("first")
         ));
         assert!(matches!(
             converted.get_linear(1).unwrap().fields.get("label"),
-            Some(Value::CharArray(value)) if value.data().iter().collect::<String>() == "second"
+            Some(Value::CharArray(value))
+                if value.try_row_string().unwrap().as_deref() == Some("second")
         ));
     }
 

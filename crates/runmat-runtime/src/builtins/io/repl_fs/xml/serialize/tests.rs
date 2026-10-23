@@ -54,9 +54,13 @@ fn struct_text_uses_scalar_geometry_without_losing_wide_integer_values() {
         scalar_xml_text(&Value::StringArray(scalar)).unwrap(),
         "text"
     );
-    let paged = runmat_value::CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap();
+    let paged =
+        runmat_value::CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 1, 2])
+            .unwrap();
     assert!(scalar_xml_text(&Value::CharArray(paged)).is_err());
-    let trailing = runmat_value::CharArray::new_with_shape(vec!['a', 'b'], vec![1, 2, 1]).unwrap();
+    let trailing =
+        runmat_value::CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 2, 1])
+            .unwrap();
     assert_eq!(scalar_xml_text(&Value::CharArray(trailing)).unwrap(), "ab");
     assert_eq!(
         scalar_xml_text(&Value::Int(runmat_value::IntValue::U64(u64::MAX))).unwrap(),

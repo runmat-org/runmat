@@ -11,9 +11,7 @@ use crate::builtins::plotting::properties::{resolve_plot_handle, PlotHandle};
 use crate::builtins::plotting::state::{
     render_active_plot, select_axes_for_figure, FigureHandle, PlotRenderOptions,
 };
-use crate::builtins::plotting::style::{
-    parse_surface_style_args, value_as_string, SurfaceStyleDefaults,
-};
+use crate::builtins::plotting::style::{parse_surface_style_args, SurfaceStyleDefaults};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[path = "cylinder/output.rs"]
@@ -187,14 +185,14 @@ async fn parse_arguments(
     let mut radius = RadiusProfile::Constant(1.0);
     if args
         .first()
-        .is_some_and(|value| value_as_string(value).is_none())
+        .is_some_and(|value| !matches!(value, Value::String(_) | Value::CharArray(_)))
     {
         radius = parse_radius(args.pop_front().expect("radius argument"))?;
     }
     let mut n = DEFAULT_N;
     if args
         .first()
-        .is_some_and(|value| value_as_string(value).is_none())
+        .is_some_and(|value| !matches!(value, Value::String(_) | Value::CharArray(_)))
     {
         n = parse_resolution(&args.pop_front().expect("resolution argument")).await?;
     }

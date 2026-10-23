@@ -150,7 +150,7 @@ impl RegexprepOptions {
                 idx += 1;
                 continue;
             }
-            let raw = value_to_lower_string(&rest[idx]).ok_or_else(|| {
+            let raw = value_to_lower_string(&rest[idx])?.ok_or_else(|| {
                 runtime_error_for(format!(
                     "{builtin}: expected option string, got {:?}",
                     rest[idx]
@@ -161,24 +161,28 @@ impl RegexprepOptions {
                 "ignorecase" => case_insensitive = true,
                 "matchcase" => case_insensitive = false,
                 "lineanchors" => {
-                    let flag = parse_toggle(rest.get(idx));
+                    let flag = parse_toggle(rest.get(idx))?;
                     multi_line = flag.unwrap_or(true);
                     idx += usize::from(flag.is_some());
                 }
                 "dotall" => {
-                    let flag = parse_toggle(rest.get(idx));
+                    let flag = parse_toggle(rest.get(idx))?;
                     dot_all = flag.unwrap_or(true);
                     idx += usize::from(flag.is_some());
                 }
                 "dotexceptnewline" => {
-                    let flag = parse_toggle(rest.get(idx));
+                    let flag = parse_toggle(rest.get(idx))?;
                     dot_all = !flag.unwrap_or(true);
                     idx += usize::from(flag.is_some());
                 }
                 "once" => once = true,
                 "emptymatch" => {
                     emptymatch = EmptyMatchPolicy::Allow;
-                    match rest.get(idx).and_then(value_to_lower_string).as_deref() {
+                    let next_text = match rest.get(idx) {
+                        Some(value) => value_to_lower_string(value)?,
+                        None => None,
+                    };
+                    match next_text.as_deref() {
                         Some("allow") => idx += 1,
                         Some("remove") => {
                             emptymatch = EmptyMatchPolicy::Remove;
@@ -191,7 +195,7 @@ impl RegexprepOptions {
                 "stringanchors" => multi_line = false,
                 "preservecase" => {
                     if idx < rest.len() {
-                        if let Some(flag) = parse_toggle(rest.get(idx)) {
+                        if let Some(flag) = parse_toggle(rest.get(idx))? {
                             preserve_case = flag;
                             if flag {
                                 case_insensitive = true;
@@ -320,7 +324,7 @@ fn collect_char_array(array: CharArray) -> BuiltinResult<SubjectCollection> {
         });
     }
     if array.rows == 1 {
-        let text: String = array.data().iter().copied().collect();
+        let text = decode_char_array(array.data())?;
         return Ok(SubjectCollection {
             entries: vec![Utf8Text::new(text)],
             rows: 1,
@@ -330,10 +334,8 @@ fn collect_char_array(array: CharArray) -> BuiltinResult<SubjectCollection> {
     }
     let mut entries = Vec::with_capacity(array.rows);
     for row in 0..array.rows {
-        let mut line = String::with_capacity(array.cols);
-        for col in 0..array.cols {
-            line.push(array.data()[row * array.cols + col]);
-        }
+        let start = row * array.cols;
+        let line = decode_char_array(&array.data()[start..start + array.cols])?;
         entries.push(Utf8Text::new(line));
     }
     Ok(SubjectCollection {
@@ -373,7 +375,7 @@ async fn collect_cell_array(
         let value = gather_if_needed_async(ptr)
             .await
             .map_err(with_builtin_context)?;
-        let text = extract_string(&value).ok_or_else(|| {
+        let text = extract_string(&value)?.ok_or_else(|| {
             runtime_error_for(format!(
                 "{builtin}: cell array elements must be character vectors or string scalars, got {value:?}"
             ))
@@ -418,15 +420,13 @@ impl PatternCollection {
 
 fn collect_pattern_char_array(array: CharArray) -> BuiltinResult<PatternCollection> {
     if array.rows <= 1 {
-        let text: String = array.data().iter().copied().collect();
+        let text = decode_char_array(array.data())?;
         return Ok(PatternCollection::Scalar(Utf8Text::new(text)));
     }
     let mut entries = Vec::with_capacity(array.rows);
     for row in 0..array.rows {
-        let mut line = String::with_capacity(array.cols);
-        for col in 0..array.cols {
-            line.push(array.data()[row * array.cols + col]);
-        }
+        let start = row * array.cols;
+        let line = decode_char_array(&array.data()[start..start + array.cols])?;
         entries.push(Utf8Text::new(line));
     }
     Ok(PatternCollection::Sequence(entries))
@@ -458,7 +458,7 @@ async fn collect_pattern_cell(
         let value = gather_if_needed_async(ptr)
             .await
             .map_err(with_builtin_context)?;
-        let text = extract_string(&value).ok_or_else(|| {
+        let text = extract_string(&value)?.ok_or_else(|| {
             runtime_error_for(format!(
                 "{builtin}: pattern cell elements must be character vectors or string scalars, got {value:?}"
             ))
@@ -498,15 +498,13 @@ impl ReplacementCollection {
 
 fn collect_replacement_char_array(array: CharArray) -> BuiltinResult<ReplacementCollection> {
     if array.rows <= 1 {
-        let text: String = array.data().iter().copied().collect();
+        let text = decode_char_array(array.data())?;
         return Ok(ReplacementCollection::Scalar(Utf8Text::new(text)));
     }
     let mut entries = Vec::with_capacity(array.rows);
     for row in 0..array.rows {
-        let mut line = String::with_capacity(array.cols);
-        for col in 0..array.cols {
-            line.push(array.data()[row * array.cols + col]);
-        }
+        let start = row * array.cols;
+        let line = decode_char_array(&array.data()[start..start + array.cols])?;
         entries.push(Utf8Text::new(line));
     }
     Ok(ReplacementCollection::Sequence(entries))
@@ -538,7 +536,7 @@ async fn collect_replacement_cell(
         let value = gather_if_needed_async(ptr)
             .await
             .map_err(with_builtin_context)?;
-        let text = extract_string(&value).ok_or_else(|| {
+        let text = extract_string(&value)?.ok_or_else(|| {
             runtime_error_for(format!(
                 "{builtin}: replacement cell elements must be character vectors or string scalars, got {value:?}"
             ))
@@ -806,25 +804,29 @@ fn strings_to_char_array(
     strings: &[String],
 ) -> BuiltinResult<CharArray> {
     if rows == 0 {
-        return CharArray::new(Vec::new(), 0, 0)
+        return CharArray::from_code_units(Vec::new(), 0, 0)
             .map_err(|e| runtime_error_for(format!("{builtin}: {e}")));
     }
     let max_cols = strings
         .iter()
         .take(rows)
-        .map(|s| s.chars().count())
+        .map(|s| s.encode_utf16().count())
         .max()
         .unwrap_or(0);
     let mut data = Vec::with_capacity(rows * max_cols);
     for idx in 0..rows {
         let text = strings.get(idx).cloned().unwrap_or_default();
-        let mut chars: Vec<char> = text.chars().collect();
-        while chars.len() < max_cols {
-            chars.push(' ');
+        let mut units = text
+            .encode_utf16()
+            .map(runmat_value::Utf16CodeUnit::from_raw)
+            .collect::<Vec<_>>();
+        while units.len() < max_cols {
+            units.push(runmat_value::Utf16CodeUnit::from_raw(b' ' as u16));
         }
-        data.extend(chars);
+        data.extend(units);
     }
-    CharArray::new(data, rows, max_cols).map_err(|e| runtime_error_for(format!("{builtin}: {e}")))
+    CharArray::from_code_units(data, rows, max_cols)
+        .map_err(|e| runtime_error_for(format!("{builtin}: {e}")))
 }
 
 fn matlab_template_to_rust(raw: &str) -> String {
@@ -946,43 +948,50 @@ fn to_title_case(text: &str) -> String {
     result
 }
 
-fn extract_string(value: &Value) -> Option<Utf8Text> {
-    match value {
-        Value::String(s) => Some(s.clone()),
-        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].clone()),
-        Value::CharArray(ca) if ca.rows == 1 => {
-            Some(Utf8Text::new(ca.data().iter().copied().collect()))
-        }
-        _ => None,
-    }
+fn decode_char_array(units: &[runmat_value::Utf16CodeUnit]) -> BuiltinResult<String> {
+    runmat_value::decode_utf16_code_units(units)
+        .map_err(|e| runtime_error_for(format!("{BUILTIN_NAME}: {e}")))
 }
 
-fn value_to_lower_string(value: &Value) -> Option<String> {
-    match value {
+fn extract_string(value: &Value) -> BuiltinResult<Option<Utf8Text>> {
+    Ok(match value {
+        Value::String(s) => Some(s.clone()),
+        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].clone()),
+        Value::CharArray(ca) if ca.rows == 1 => Some(Utf8Text::new(decode_char_array(ca.data())?)),
+        _ => None,
+    })
+}
+
+fn value_to_lower_string(value: &Value) -> BuiltinResult<Option<String>> {
+    Ok(match value {
         Value::String(s) => Some(s.to_ascii_lowercase()),
         Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].to_ascii_lowercase()),
         Value::CharArray(ca) if ca.rows == 1 => {
-            Some(ca.data().iter().collect::<String>().to_ascii_lowercase())
+            Some(decode_char_array(ca.data())?.to_ascii_lowercase())
         }
         _ => None,
-    }
+    })
 }
 
-fn parse_toggle(value: Option<&Value>) -> Option<bool> {
-    let value = value?;
-    match value {
+fn parse_toggle(value: Option<&Value>) -> BuiltinResult<Option<bool>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    Ok(match value {
         Value::Bool(b) => Some(*b),
         Value::Int(i) => Some(!i.is_zero()),
         Value::Num(n) => Some(*n != 0.0),
         _ => {
-            let text = value_to_lower_string(value)?;
+            let Some(text) = value_to_lower_string(value)? else {
+                return Ok(None);
+            };
             match text.as_str() {
                 "on" | "true" | "yes" | "1" => Some(true),
                 "off" | "false" | "no" | "0" => Some(false),
                 _ => None,
             }
         }
-    }
+    })
 }
 
 #[cfg(test)]
@@ -1029,6 +1038,22 @@ pub(crate) mod tests {
             Value::String(s) => assert_eq!(s, "XbrXcXdXbrX"),
             other => panic!("unexpected result {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn regexprep_rejects_malformed_utf16_character_input() {
+        let subject =
+            CharArray::from_code_units(vec![runmat_value::Utf16CodeUnit::from_raw(0xD800)], 1, 1)
+                .unwrap();
+        let error = run_regexprep(
+            Value::CharArray(subject),
+            Value::String("x".into()),
+            Value::String("y".into()),
+            Vec::new(),
+        )
+        .expect_err("malformed UTF-16 must not be normalized or replaced");
+        assert_eq!(error.context.builtin.as_deref(), Some(BUILTIN_NAME));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1323,7 +1348,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexprep_char_array_result() {
-        let chars = CharArray::new(vec!['c', 'a', 't', 'd', 'o', 'g'], 2, 3).unwrap();
+        let chars =
+            CharArray::from_unicode_scalars(vec!['c', 'a', 't', 'd', 'o', 'g'], 2, 3).unwrap();
         let result = run_regexprep(
             Value::CharArray(chars),
             Value::String("[ao]".into()),
@@ -1335,7 +1361,10 @@ pub(crate) mod tests {
             Value::CharArray(out) => {
                 assert_eq!(out.rows, 2);
                 assert_eq!(out.cols, 3);
-                assert_eq!(out.data(), vec!['c', 'X', 't', 'd', 'X', 'g']);
+                assert_eq!(
+                    runmat_value::decode_utf16_code_units(out.data()).unwrap(),
+                    "cXtdXg"
+                );
             }
             other => panic!("expected char array, got {other:?}"),
         }

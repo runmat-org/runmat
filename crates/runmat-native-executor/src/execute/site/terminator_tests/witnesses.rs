@@ -1,7 +1,5 @@
 use super::*;
-use crate::execute::call_suspension::{
-    self, CallCompletion, CompletionFuture, PendingCall, TerminatorCompletion,
-};
+use crate::execute::call_suspension::{self, PendingCall, TerminatorCompletion};
 use runmat_value::HandleRef;
 use std::cell::Cell;
 use std::future::Future;
@@ -24,7 +22,8 @@ fn genuinely_pending_branch_completion_restores_origin_scope_and_resumes_once() 
         let polls = Rc::new(Cell::new(0));
         let polled = Rc::clone(&polls);
         let runtime = state.runtime.clone();
-        let future: CompletionFuture = Box::pin(async move {
+        let payload = call_suspension::terminator::prepare_payload(&runtime).unwrap();
+        let future = call_suspension::admit_completion_with(&state, move || async move {
             runtime
                 .scope(futures::future::poll_fn(move |cx| {
                     assert!(runmat_runtime::context::legacy::active().is_some());
@@ -37,11 +36,13 @@ fn genuinely_pending_branch_completion_restores_origin_scope_and_resumes_once() 
                     }
                 }))
                 .await;
-            Ok(CallCompletion::Terminator(Box::new(
+            call_suspension::terminator::completion(
+                &runtime,
+                payload,
                 TerminatorCompletion::BranchTruth(true),
-            )))
-        });
-        let future = call_suspension::scope_completion(&state, future);
+            )
+        })
+        .unwrap();
         let (continuation, generation) = state.next_suspension_identity().unwrap();
         state.pending_call = Some(PendingCall {
             continuation,

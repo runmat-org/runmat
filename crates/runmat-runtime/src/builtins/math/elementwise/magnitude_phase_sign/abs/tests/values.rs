@@ -100,7 +100,7 @@ fn abs_complex_tensor_to_real_tensor() {
 #[test]
 fn abs_char_array_codes() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-    let char_array = CharArray::new("Az".chars().collect(), 1, 2).unwrap();
+    let char_array = CharArray::from_unicode_scalars("Az".chars().collect(), 1, 2).unwrap();
     let result = abs_builtin(Value::CharArray(char_array)).expect("abs");
     match result {
         Value::Tensor(t) => {

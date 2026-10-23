@@ -1020,7 +1020,7 @@ fn assemble_sparse(blocks: Vec<Block>, dtype: Option<NumericDType>) -> BuiltinRe
 fn assemble_char(blocks: Vec<Block>) -> BuiltinResult<Value> {
     let (rows, cols) = output_dims(&blocks)?;
     let len = checked_len(rows, cols)?;
-    let mut data = filled_vec(' ', len)?;
+    let mut data = filled_vec(runmat_value::Utf16CodeUnit::from_raw(b' ' as u16), len)?;
     let mut row_offset = 0usize;
     let mut col_offset = 0usize;
     for block in &blocks {
@@ -1040,7 +1040,7 @@ fn assemble_char(blocks: Vec<Block>) -> BuiltinResult<Value> {
         row_offset += block.rows();
         col_offset += block.cols();
     }
-    CharArray::new(data, rows, cols)
+    CharArray::from_code_units(data, rows, cols)
         .map(Value::CharArray)
         .map_err(|detail| error_with_detail(&BLKDIAG_ERROR_INVALID_INPUT, detail))
 }
@@ -1841,13 +1841,14 @@ mod tests {
 
     #[test]
     fn char_blocks_are_space_padded() {
-        let a = CharArray::new("ab".chars().collect(), 1, 2).unwrap();
-        let b = CharArray::new("cd".chars().collect(), 2, 1).unwrap();
+        let a = CharArray::from_unicode_scalars("ab".chars().collect(), 1, 2).unwrap();
+        let b = CharArray::from_unicode_scalars("cd".chars().collect(), 2, 1).unwrap();
         match call(vec![Value::CharArray(a), Value::CharArray(b)]).unwrap() {
             Value::CharArray(out) => {
                 assert_eq!(out.rows, 3);
                 assert_eq!(out.cols, 3);
-                let text: String = out.data().iter().collect();
+                let text = runmat_value::decode_utf16_code_units(out.data())
+                    .expect("valid UTF-16 fixture text");
                 assert_eq!(text, "ab   c  d");
             }
             other => panic!("expected char array, got {other:?}"),

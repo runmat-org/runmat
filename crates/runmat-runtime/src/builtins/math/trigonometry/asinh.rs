@@ -221,7 +221,7 @@ fn asinh_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let data = ca
         .data()
         .iter()
-        .map(|&ch| (ch as u32 as f64).asinh())
+        .map(|&ch| (u32::from(ch.raw()) as f64).asinh())
         .collect::<Vec<_>>();
     let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
         .map_err(|e| asinh_error_with_detail(&ASINH_ERROR_INTERNAL, e))?;
@@ -282,7 +282,7 @@ pub(crate) mod tests {
             logical.identifier(),
             ASINH_LOGICAL_INPUT_EXTENSION.error_identifier
         );
-        let chars = CharArray::new("A".chars().collect(), 1, 1).unwrap();
+        let chars = CharArray::from_unicode_scalars("A".chars().collect(), 1, 1).unwrap();
         let character = block_on(super::asinh_builtin(None, Value::CharArray(chars)))
             .map(|owned| owned.value().clone())
             .expect_err("character input must be gated");
@@ -439,7 +439,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn asinh_char_array_roundtrip() {
-        let chars = CharArray::new("az".chars().collect(), 1, 2).expect("char array");
+        let chars =
+            CharArray::from_unicode_scalars("az".chars().collect(), 1, 2).expect("char array");
         let result = asinh_builtin(Value::CharArray(chars)).expect("asinh");
         match result {
             Value::Tensor(t) => {

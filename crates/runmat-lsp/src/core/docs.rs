@@ -6,6 +6,9 @@ use std::fmt::Write as _;
 
 use crate::core::builtins_json;
 
+#[cfg(test)]
+mod tests;
+
 /// Helpers for documentation linking/formatting.
 const RUNMAT_DOC_BASE_URL: &str = "https://runmat.com/docs/reference/builtins/";
 
@@ -159,6 +162,15 @@ fn render_builtin_hover_from_json(
     }
 
     // Syntax (derived from behaviors or from explicit syntax field).
+    if let Some(sections) = doc.sections.as_ref() {
+        for section in sections {
+            let _ = writeln!(out, "**{}**\n", section.heading);
+            for paragraph in &section.paragraphs {
+                let _ = writeln!(out, "{}\n", normalize_markdown(paragraph.clone()));
+            }
+        }
+    }
+
     let mut syntax: Vec<String> = Vec::new();
     if let Some(behaviors) = doc.behaviors.as_ref() {
         syntax = extract_syntax_from_behaviors(name, behaviors);
@@ -254,9 +266,11 @@ fn render_builtin_hover_from_json(
         out.push_str("**Examples**\n");
         for ex in examples {
             let _ = writeln!(out, "\n**{}**", ex.description.trim());
-            out.push_str("```matlab\n");
-            out.push_str(&normalize_markdown(ex.input.trim_end().to_string()));
-            out.push_str("\n```\n");
+            if let Some(input) = &ex.input {
+                out.push_str("```matlab\n");
+                out.push_str(&normalize_markdown(input.trim_end().to_string()));
+                out.push_str("\n```\n");
+            }
             if let Some(output) = ex.output.as_deref().filter(|s| !s.trim().is_empty()) {
                 out.push_str("\nOutput:\n```text\n");
                 out.push_str(&normalize_markdown(output.trim_end().to_string()));
@@ -267,6 +281,15 @@ fn render_builtin_hover_from_json(
     }
 
     // See also
+    if let Some(faqs) = &doc.faqs {
+        if !faqs.is_empty() {
+            out.push_str("**Questions**\n\n");
+            for faq in faqs {
+                let _ = writeln!(out, "**{}**\n\n{}\n", faq.question, faq.answer);
+            }
+        }
+    }
+
     if let Some(links) = doc.links.as_ref().filter(|l| !l.is_empty()) {
         let mut rendered: Vec<String> = Vec::new();
         for l in links {

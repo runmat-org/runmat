@@ -76,7 +76,9 @@ pub async fn pp_from_value(value: Value, name: &'static str) -> BuiltinResult<Pi
     let form = st
         .fields
         .get("form")
-        .and_then(keyword_of)
+        .map(keyword_of)
+        .transpose()?
+        .flatten()
         .ok_or_else(|| interp_error(name, format!("{name}: pp struct is missing form")))?;
     if PiecewiseForm::from_keyword(&form) != Some(PiecewiseForm::Polynomial) {
         return Err(interp_error(

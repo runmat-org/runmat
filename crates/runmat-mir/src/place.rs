@@ -18,6 +18,120 @@ pub enum MirRootStep {
 }
 
 impl MirPlace {
+    /// Private selector regions, in root-to-leaf evaluation order. The caller
+    /// owns the phase in which the destination is prepared.
+    pub fn visit_selector_regions(
+        &self,
+        mut visitor: impl FnMut(crate::MirExpressionRegionRef<'_>),
+    ) {
+        fn visit(place: &MirPlace, visitor: &mut dyn FnMut(crate::MirExpressionRegionRef<'_>)) {
+            match place {
+                MirPlace::Local(_) | MirPlace::Binding(_) => {}
+                MirPlace::Member(base, _) | MirPlace::DynamicMember(base, _) => {
+                    visit(base, visitor)
+                }
+                MirPlace::Index(base, indexing) => {
+                    visit(base, visitor);
+                    indexing.visit_direct_expression_regions_dyn(visitor);
+                }
+            }
+        }
+        visit(self, &mut visitor);
+    }
+
+    pub fn has_expanding_selectors(&self) -> bool {
+        match self {
+            Self::Local(_) | Self::Binding(_) => false,
+            Self::Member(base, _) | Self::DynamicMember(base, _) => base.has_expanding_selectors(),
+            Self::Index(base, indexing) => {
+                base.has_expanding_selectors()
+                    || indexing.components.iter().any(|component| {
+                        matches!(component, crate::MirIndexComponent::Expansion(_))
+                    })
+            }
+        }
+    }
+    /// Member paths crossing an indexed receiver need one captured destination
+    /// even when every selector has statically scalar width.
+    pub fn has_indexed_member_path(&self) -> bool {
+        fn kinds(place: &MirPlace) -> (bool, bool) {
+            match place {
+                MirPlace::Local(_) | MirPlace::Binding(_) => (false, false),
+                MirPlace::Member(base, _) | MirPlace::DynamicMember(base, _) => {
+                    let (_, index) = kinds(base);
+                    (true, index)
+                }
+                MirPlace::Index(base, _) => {
+                    let (member, _) = kinds(base);
+                    (member, true)
+                }
+            }
+        }
+        let (member, index) = kinds(self);
+        member && index
+    }
+    pub fn requires_prepared_assignment(&self) -> bool {
+        self.has_expanding_selectors() || self.assignment_path_len() > 1
+    }
+
+    fn assignment_path_len(&self) -> usize {
+        match self {
+            Self::Local(_) | Self::Binding(_) => 0,
+            Self::Member(base, _) | Self::DynamicMember(base, _) | Self::Index(base, _) => {
+                base.assignment_path_len() + 1
+            }
+        }
+    }
+
+    fn assignment_path_step(&self, index: usize) -> Option<&Self> {
+        match self {
+            Self::Local(_) | Self::Binding(_) => None,
+            Self::Member(base, _) | Self::DynamicMember(base, _) | Self::Index(base, _) => {
+                let prefix = base.assignment_path_len();
+                if index == prefix {
+                    Some(self)
+                } else {
+                    base.assignment_path_step(index)
+                }
+            }
+        }
+    }
+
+    /// Derive a missing receiver's exact container from the unevaluated suffix.
+    /// Parentheses preserve a container; leading parentheses before a member
+    /// require an empty structure array, not a scalar that would make end=1.
+    pub fn assignment_child_creation(
+        &self,
+        first_step: usize,
+        creation: AssignmentCreationPolicy,
+    ) -> runmat_types::AssignmentChildCreation {
+        use runmat_types::AssignmentChildCreation as Child;
+        if creation == AssignmentCreationPolicy::ExistingOnly {
+            return Child::ExistingOnly;
+        }
+        let mut parentheses = false;
+        for index in first_step..self.assignment_path_len() {
+            match self.assignment_path_step(index) {
+                Some(Self::Member(..) | Self::DynamicMember(..)) => {
+                    return if parentheses {
+                        Child::StructureArray
+                    } else {
+                        Child::ScalarStructure
+                    };
+                }
+                Some(Self::Index(_, indexing)) if indexing.kind == IndexKind::Brace => {
+                    return Child::CellArray;
+                }
+                Some(Self::Index(..)) => parentheses = true,
+                _ => unreachable!("bounded assignment path step"),
+            }
+        }
+        if parentheses {
+            Child::NumericArray
+        } else {
+            Child::ExistingOnly
+        }
+    }
     pub fn root_local(&self) -> Option<MirLocalId> {
         match self {
             Self::Local(local) => Some(*local),
@@ -39,6 +153,21 @@ impl MirPlace {
             Self::Member(base, _) | Self::DynamicMember(base, _) => {
                 base.first_root_step().or(Some(MirRootStep::Member))
             }
+        }
+    }
+
+    /// Parenthesis projections preserve their container. The first member or
+    /// brace operation following those projections determines an absent root's
+    /// carrier, without granting conversion of any existing receiver.
+    pub fn assignment_root_creation(
+        &self,
+        creation: AssignmentCreationPolicy,
+    ) -> crate::SequenceRootCreation {
+        match self.assignment_child_creation(0, creation) {
+            runmat_types::AssignmentChildCreation::ExistingOnly => {
+                crate::SequenceRootCreation::Ordinary(AssignmentCreationPolicy::ExistingOnly)
+            }
+            child => crate::SequenceRootCreation::OrdinaryContainer(child),
         }
     }
 
@@ -83,6 +212,16 @@ mod tests {
         );
         let nested = MirPlace::Member(Box::new(indexed), MemberName("field".into()));
         assert_eq!(
+            nested.assignment_root_creation(nested.assignment_creation_policy(false)),
+            crate::SequenceRootCreation::OrdinaryContainer(
+                runmat_types::AssignmentChildCreation::StructureArray
+            )
+        );
+        assert_eq!(
+            nested.assignment_root_creation(AssignmentCreationPolicy::ExistingOnly),
+            crate::SequenceRootCreation::Ordinary(AssignmentCreationPolicy::ExistingOnly)
+        );
+        assert_eq!(
             nested.first_root_step(),
             Some(MirRootStep::Index(IndexKind::Paren))
         );
@@ -111,6 +250,13 @@ mod tests {
             brace_indexing.clone(),
         );
         assert_eq!(
+            MirPlace::Member(Box::new(brace.clone()), MemberName("field".into()))
+                .assignment_root_creation(AssignmentCreationPolicy::CreateStructFieldPath),
+            crate::SequenceRootCreation::OrdinaryContainer(
+                runmat_types::AssignmentChildCreation::CellArray
+            )
+        );
+        assert_eq!(
             MirPlace::Member(Box::new(brace.clone()), MemberName("field".into())).first_root_step(),
             Some(MirRootStep::Index(IndexKind::Brace))
         );
@@ -128,5 +274,27 @@ mod tests {
             nested_paren.first_root_step(),
             Some(MirRootStep::Index(IndexKind::Brace))
         );
+        use runmat_types::AssignmentChildCreation as Child;
+        let scalar = MirPlace::Member(
+            Box::new(MirPlace::Local(MirLocalId(0))),
+            MemberName("child".into()),
+        );
+        assert_eq!(
+            scalar.assignment_child_creation(0, AssignmentCreationPolicy::CreateStructFieldPath),
+            Child::ScalarStructure
+        );
+        assert_eq!(
+            nested.assignment_child_creation(1, AssignmentCreationPolicy::CreateStructFieldPath),
+            Child::ScalarStructure
+        );
+        assert_eq!(
+            nested.assignment_child_creation(0, AssignmentCreationPolicy::ExistingOnly),
+            Child::ExistingOnly
+        );
+        assert_eq!(
+            nested_paren.assignment_child_creation(1, AssignmentCreationPolicy::CreateArrayByIndex),
+            Child::NumericArray
+        );
+        assert!(nested_paren.requires_prepared_assignment());
     }
 }

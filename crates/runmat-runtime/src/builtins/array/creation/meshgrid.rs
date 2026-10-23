@@ -4,8 +4,6 @@ use runmat_builtins::{MESHGRID_COMPLEX_AXES_EXTENSION, MESHGRID_LIKE_EXTENSION};
 use std::cmp::max;
 
 use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
-#[cfg(test)]
-use runmat_builtins::{ResolveContext, Type};
 use runmat_value::{
     ComplexStorage, ComplexTensor, IntegerComplexStorage, IntegerStorage, NumericDType,
     NumericStorage, Tensor, Value,
@@ -14,8 +12,6 @@ use runmat_value::{
 use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
-#[cfg(test)]
-use crate::builtins::array::type_resolvers::size_vector_len;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::residency::{sequence_gpu_preference, SequenceIntent};
@@ -58,30 +54,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes:
         "Meshgrid explicitly materialises dense coordinate arrays and therefore bypasses fusion.",
 };
-
-#[cfg(test)]
-fn meshgrid_type(args: &[Type], _context: &ResolveContext) -> Type {
-    if args.is_empty() {
-        return Type::Unknown;
-    }
-    let mut axis_count = args.len();
-    if axis_count >= 2 && matches!(args[axis_count - 2], Type::String) {
-        axis_count = axis_count.saturating_sub(2);
-    }
-    if axis_count == 0 {
-        return Type::Unknown;
-    }
-    let axis_args = &args[..axis_count];
-    let len_x = axis_args.get(0).and_then(size_vector_len);
-    let len_y = axis_args.get(1).and_then(size_vector_len).or(len_x);
-    let len_z = axis_args.get(2).and_then(size_vector_len);
-    let shape = if axis_count >= 3 {
-        vec![len_y, len_x, len_z]
-    } else {
-        vec![len_y, len_x]
-    };
-    Type::Tensor { shape: Some(shape) }
-}
 
 #[runtime_builtin(
     name = "meshgrid",
@@ -184,7 +156,7 @@ impl ParsedMeshgrid {
         let mut idx = 0;
         while idx < args.len() {
             let value = args[idx].clone();
-            if let Some(keyword) = keyword_of(&value) {
+            if let Some(keyword) = keyword_of(&value)? {
                 match keyword.as_str() {
                     "like" => {
                         crate::compatibility::ensure_builtin_extension_enabled(
@@ -1511,44 +1483,6 @@ pub(crate) mod tests {
             evaluate(&[Value::ComplexTensor(axis())])
                 .expect("RunMat mode accepts complex meshgrid axes");
         }
-    }
-
-    #[test]
-    fn meshgrid_type_infers_rank_from_axis_count() {
-        let ctx = ResolveContext::new(Vec::new());
-        assert_eq!(
-            meshgrid_type(&[Type::Num, Type::Num], &ctx),
-            Type::Tensor {
-                shape: Some(vec![Some(1), Some(1)])
-            }
-        );
-        assert_eq!(
-            meshgrid_type(&[Type::Num, Type::Num, Type::Num], &ctx),
-            Type::Tensor {
-                shape: Some(vec![Some(1), Some(1), Some(1)])
-            }
-        );
-    }
-
-    #[test]
-    fn meshgrid_type_uses_vector_lengths() {
-        let ctx = ResolveContext::new(Vec::new());
-        assert_eq!(
-            meshgrid_type(
-                &[
-                    Type::Tensor {
-                        shape: Some(vec![Some(1), Some(201)]),
-                    },
-                    Type::Tensor {
-                        shape: Some(vec![Some(1), Some(101)]),
-                    },
-                ],
-                &ctx,
-            ),
-            Type::Tensor {
-                shape: Some(vec![Some(101), Some(201)])
-            }
-        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

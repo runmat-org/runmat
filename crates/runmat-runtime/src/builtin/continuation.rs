@@ -10,6 +10,13 @@ use crate::RuntimeError;
 
 use super::{builtin_control_error, BuiltinContinuationInput, RuntimeBuiltinFuture};
 
+/// Preserve an ingress failure without allocating a continuation or acquiring
+/// new execution authority for a builtin body that will never run.
+#[doc(hidden)]
+pub fn rejected_builtin_future(error: RuntimeError) -> RuntimeBuiltinFuture {
+    crate::execution::RuntimeContinuationFuture::rejected(error)
+}
+
 /// Erase a concrete builtin continuation once, at the canonical rooted call
 /// boundary. Admission precedes the one heap allocation and the first poll.
 #[doc(hidden)]

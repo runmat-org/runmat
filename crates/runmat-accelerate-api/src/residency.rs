@@ -82,5 +82,23 @@ impl Drop for ResidencyRestoreGuard<'_> {
     }
 }
 
+/// Restore every borrowed operand without allocating one guard per handle.
+/// Each restoration retains the ordinary guard's independent unwind barrier.
+pub(crate) struct ResidencyRestoreSliceGuard<'a> {
+    handles: &'a [&'a GpuTensorHandle],
+}
+impl<'a> ResidencyRestoreSliceGuard<'a> {
+    pub(crate) fn new(handles: &'a [&'a GpuTensorHandle]) -> Self {
+        Self { handles }
+    }
+}
+impl Drop for ResidencyRestoreSliceGuard<'_> {
+    fn drop(&mut self) {
+        for handle in self.handles {
+            drop(ResidencyRestoreGuard::new(handle));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests;

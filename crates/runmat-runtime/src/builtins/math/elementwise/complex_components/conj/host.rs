@@ -82,7 +82,7 @@ fn conjugate_chars(chars: CharArray) -> BuiltinResult<Value> {
     let data = chars
         .to_column_major()
         .iter()
-        .map(|&character| character as u32 as f64)
+        .map(|&character| f64::from(character.raw()))
         .collect();
     let tensor = Tensor::new(data, chars.shape.clone())
         .map_err(|error| builtin_error_with_detail(&CONJ_ERROR_INTERNAL, error))?;

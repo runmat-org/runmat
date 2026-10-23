@@ -29,7 +29,7 @@ pub async fn tic_builtin(
     requested_outputs: Option<usize>,
 ) -> BuiltinResult<Value> {
     let runtime = runtime.ok_or_else(|| tic_error(&TIC_ERROR_CONTEXT_UNAVAILABLE))?;
-    let now = runtime.service_ports().timing().monotonic_elapsed();
+    let now = runtime.service_ports().timing()?.monotonic_elapsed();
     // A missing count is treated as observed for direct API callers and
     // nested `toc(tic)` expressions without an enclosing output scope.
     let publish = requested_outputs != Some(0);

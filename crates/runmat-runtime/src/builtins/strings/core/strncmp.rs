@@ -402,7 +402,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_char_array_rows() {
-        let chars = CharArray::new(
+        let chars = CharArray::from_unicode_scalars(
             vec![
                 'c', 'a', 't', ' ', ' ', 'c', 'a', 'm', 'e', 'l', 'c', 'o', 'w', ' ', ' ',
             ],

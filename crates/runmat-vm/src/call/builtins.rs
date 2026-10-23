@@ -3,7 +3,7 @@ use crate::interpreter::api::InterpreterOutcome;
 use crate::interpreter::errors::mex;
 use crate::interpreter::stack::pop_args;
 use crate::runtime::workspace::{
-    base_target_authority, capture_workspace_target, has_workspace_target_in_context,
+    base_target_authority, capture_workspace_target_in_context, has_workspace_target_in_context,
     AdmittedDynamicInput, BaseTargetAuthority, WorkspaceAssignedReport, WorkspaceFrameFuture,
     WorkspaceTarget, WorkspaceTargetIdentity, WorkspaceTargetSnapshot, WorkspaceValueSnapshot,
 };
@@ -15,10 +15,10 @@ use runmat_thread_local::runmat_thread_local;
 use runmat_value::Value;
 use std::collections::{HashMap, HashSet};
 
-#[path = "builtins/eval_hir_sites.rs"]
-mod eval_hir_sites;
 #[path = "builtins/dynamic_base_target.rs"]
 mod dynamic_base_target;
+#[path = "builtins/eval_hir_sites.rs"]
+mod eval_hir_sites;
 #[path = "builtins/eval_static_selection.rs"]
 mod eval_static_selection;
 #[path = "builtins/native_target.rs"]
@@ -542,7 +542,21 @@ fn evalc_output_value(
 fn workspace_text_arg(builtin: &str, value: &Value) -> Result<String, RuntimeError> {
     match value {
         Value::String(text) => Ok(text.to_string()),
-        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data().iter().collect()),
+        Value::CharArray(chars) if chars.rows == 1 => chars
+            .try_row_string()
+            .map_err(|source| {
+                runmat_runtime::runtime_error::semantic_error_with_source(
+                    "DynamicWorkspaceArgumentType",
+                    format!("{builtin}: character row is not valid UTF-16 text"),
+                    source,
+                )
+            })?
+            .ok_or_else(|| {
+                mex(
+                    "DynamicWorkspaceArgumentType",
+                    &format!("{builtin}: expected a character row"),
+                )
+            }),
         Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].to_string()),
         other => Err(mex(
             "DynamicWorkspaceArgumentType",
@@ -1124,8 +1138,10 @@ async fn eval_workspace_source(
                 Some(BaseTargetAuthority::CanonicalService)
             )
         {
-            let (identity, _) = capture_workspace_target(WorkspaceTarget::Current)
-                .map_err(|err| mex("DynamicWorkspaceUnavailable", &format!("{builtin}: {err}")))?;
+            let (identity, _) =
+                capture_workspace_target_in_context(&runtime, WorkspaceTarget::Current).map_err(
+                    |err| mex("DynamicWorkspaceUnavailable", &format!("{builtin}: {err}")),
+                )?;
             let (base, frame) = dynamic_base_target::ExplicitBaseTarget::capture(&runtime)?;
             (
                 DynamicEvalTarget::Frame {
@@ -1135,7 +1151,7 @@ async fn eval_workspace_source(
                 DynamicEvalInput::Frame(RootedDynamicEvalInput::new(frame)?),
             )
         } else {
-            let (identity, frame) = capture_workspace_target(target)
+            let (identity, frame) = capture_workspace_target_in_context(&runtime, target)
                 .map_err(|err| mex("DynamicWorkspaceUnavailable", &format!("{builtin}: {err}")))?;
             (
                 DynamicEvalTarget::Frame {
@@ -2498,14 +2514,34 @@ mod tests {
         compile_dynamic_workspace_eval, compile_dynamic_workspace_eval_product,
         current_dynamic_eval_options, dynamic_source_context, imported_builtin_qualified_name,
         merge_eval_function_registry, push_dynamic_eval_options, remap_dynamic_workspace_slots,
-        retain_dynamic_result_slot, DynamicEvalResult, PreparedDynamicEvalResultCapture,
+        retain_dynamic_result_slot, workspace_text_arg, DynamicEvalResult,
+        PreparedDynamicEvalResultCapture,
     };
     use crate::bytecode::{FunctionBytecode, FunctionRegistry, Instr};
     use crate::{Bytecode, DynamicEvalCompileProduct};
     use runmat_hir::FunctionId;
     use runmat_parser::CompatMode;
     use runmat_types::{CallableFallbackPolicy, CallableIdentity};
+    use runmat_value::{CharArray, Utf16CodeUnit, Utf16DecodeError, Value};
     use std::collections::HashMap;
+
+    #[test]
+    fn dynamic_workspace_text_decodes_full_utf16_or_preserves_invalid_cause() {
+        let text = Value::CharArray(CharArray::new_row("A🙂"));
+        assert_eq!(workspace_text_arg("evalin", &text).unwrap(), "A🙂");
+
+        let malformed = Value::CharArray(
+            CharArray::from_code_units(vec![Utf16CodeUnit::from_raw(0xD800)], 1, 1)
+                .expect("raw UTF-16 row"),
+        );
+        let error = workspace_text_arg("evalin", &malformed).unwrap_err();
+        assert_eq!(
+            error.identifier.as_deref(),
+            Some("RunMat:DynamicWorkspaceArgumentType")
+        );
+        assert!(std::error::Error::source(&error)
+            .is_some_and(|source| source.downcast_ref::<Utf16DecodeError>().is_some()));
+    }
 
     fn compile_test_source(source: &str) -> crate::Bytecode {
         let ast = runmat_parser::parse(source).expect("parse test source");

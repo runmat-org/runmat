@@ -134,9 +134,19 @@ fn savefig_round_trips_exact_native_float_sources_and_surface_hole() {
 fn savefig_round_trips_multiple_figures() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let _guard = setup();
-    let first = figure_builtin(vec![]).expect("figure one");
+    let first = figure_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    )
+    .expect("figure one");
     block_on(plot_builtin(vec![Value::Tensor(tensor(&[1.0, 2.0, 3.0]))])).expect("plot one");
-    let second = figure_builtin(vec![Value::String("next".into())]).expect("figure two");
+    let second = figure_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![Value::String(
+            "next".into(),
+        )]),
+    )
+    .expect("figure two");
     block_on(plot_builtin(vec![Value::Tensor(tensor(&[3.0, 2.0, 1.0]))])).expect("plot two");
     let handles =
         Value::Tensor(Tensor::new(vec![first, second], vec![1, 2]).expect("figure handle row"));
@@ -166,7 +176,11 @@ fn savefig_round_trips_multiple_figures() {
 #[test]
 fn savefig_rejects_typed_integer_handle_arrays_before_io() {
     let _guard = setup();
-    let first = figure_builtin(vec![]).expect("figure one");
+    let first = figure_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    )
+    .expect("figure one");
     let handles = Tensor::new_integer(
         runmat_value::IntegerStorage::I64(vec![first as i64]),
         vec![1, 1],
@@ -190,7 +204,11 @@ fn savefig_rejects_typed_integer_handle_arrays_before_io() {
 #[test]
 fn hgsave_deduplicates_handles_resolving_to_same_figure() {
     let _guard = setup();
-    let fig = figure_builtin(vec![]).expect("figure");
+    let fig = figure_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    )
+    .expect("figure");
     block_on(plot_builtin(vec![Value::Tensor(tensor(&[1.0, 2.0, 3.0]))])).expect("plot");
     let handles =
         Value::Tensor(Tensor::new(vec![fig, fig], vec![1, 2]).expect("figure handle row"));

@@ -1,7 +1,7 @@
 use runmat_java::JavaParameterType;
 use runmat_java::JavaValue;
 use runmat_value::{
-    CharArray, IntValue, IntegerStorage, LogicalArray, NumericStorage, Tensor, Value,
+    CharArray, IntValue, IntegerStorage, LogicalArray, NumericStorage, Tensor, Utf16CodeUnit, Value,
 };
 
 use super::super::{foreign_error, ForeignErrorKind};
@@ -42,7 +42,8 @@ pub(super) fn value_to_java(value: Value) -> Result<JavaValue, RuntimeError> {
                 .collect(),
         }),
         Value::CharArray(value) => value
-            .row_string()
+            .try_row_string()
+            .map_err(|cause| invalid_conversion(format!("invalid UTF-16 character row: {cause}")))?
             .map(JavaValue::String)
             .ok_or_else(|| invalid_conversion("Java string conversion requires a character row")),
         Value::Cell(value) => Ok(JavaValue::Array {
@@ -89,7 +90,8 @@ pub(super) fn value_ref_to_java(value: &Value) -> Result<JavaValue, RuntimeError
                 .collect(),
         }),
         Value::CharArray(value) => value
-            .row_string()
+            .try_row_string()
+            .map_err(|cause| invalid_conversion(format!("invalid UTF-16 character row: {cause}")))?
             .map(JavaValue::String)
             .ok_or_else(|| invalid_conversion("Java string conversion requires a character row")),
         Value::Cell(value) => Ok(JavaValue::Array {
@@ -304,12 +306,12 @@ pub(super) fn array_from_java(
         )
         .map(Value::Tensor)
         .map_err(invalid_conversion),
-        JavaParameterType::Char => CharArray::new(
+        JavaParameterType::Char => CharArray::from_code_units(
             collect_array(elements, |value| {
                 let JavaValue::Char(value) = value else {
                     return None;
                 };
-                char::from_u32(u32::from(value))
+                Some(Utf16CodeUnit::from_raw(value))
             })?,
             1,
             length,

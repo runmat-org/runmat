@@ -1,7 +1,7 @@
 use crate::ir::*;
 use crate::{NativeCodegenError, NativeCodegenResult};
 use runmat_mir::analysis::{AnalysisStore, ProgramPointFacts};
-use runmat_types::{CapabilitySet, EffectSet, FunctionId, ProgramPointId, ProgramSpan};
+use runmat_types::{FunctionId, ProgramPointId, ProgramSpan};
 
 pub(super) struct FunctionLoweringContext<'a> {
     pub function: FunctionId,
@@ -129,42 +129,22 @@ impl<'a> FunctionLoweringContext<'a> {
             })
     }
 
-    pub fn effect_delta(
+    pub fn operation_contract(
         &self,
-        before: ProgramPointId,
-        after: ProgramPointId,
-    ) -> (EffectSet, CapabilitySet) {
-        let before = self.facts(before);
-        let after = self.facts(after);
-        let empty_effects = std::collections::BTreeSet::new();
-        let empty_capabilities = std::collections::BTreeSet::new();
-        let before_effects = before.map_or(&empty_effects, |facts| &facts.effects.0);
-        let before_capabilities = before.map_or(&empty_capabilities, |facts| &facts.capabilities.0);
-        let effects = after
-            .map(|facts| {
-                EffectSet(
-                    facts
-                        .effects
-                        .0
-                        .difference(before_effects)
-                        .copied()
-                        .collect(),
-                )
-            })
-            .unwrap_or_default();
-        let capabilities = after
-            .map(|facts| {
-                CapabilitySet(
-                    facts
-                        .capabilities
-                        .0
-                        .difference(before_capabilities)
-                        .copied()
-                        .collect(),
-                )
-            })
-            .unwrap_or_default();
-        (effects, capabilities)
+        site: &runmat_mir::analysis::MirOperationSite,
+    ) -> NativeCodegenResult<super::operation::OperationRequirements> {
+        let contract = self.analysis.operation_contract_at(site).ok_or_else(|| {
+            NativeCodegenError::new(
+                "native.lowering.operation_contract",
+                "lowered MIR site has no canonical operation-local analysis contract",
+            )
+            .at_point(site.point)
+            .for_construct(site.construct)
+        })?;
+        Ok(super::operation::OperationRequirements {
+            effects: contract.effects.clone(),
+            capabilities: contract.capabilities.clone(),
+        })
     }
 }
 

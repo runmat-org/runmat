@@ -52,7 +52,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     if !callable
         && !matches!(
             matrix.storage,
-            StorageFact::Dense | StorageFact::Sparse | StorageFact::Unknown
+            StorageFact::Scalar | StorageFact::Dense | StorageFact::Sparse | StorageFact::Unknown
         )
     {
         diagnostics.push(argument_error(
@@ -131,7 +131,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         }
     }
     let residuals = factor_output(&rhs, matrix_shape(None, Some(1)), true, false, true);
-    finish_fixed_outputs(
+    let result = finish_fixed_outputs(
         entry,
         request,
         vec![
@@ -142,5 +142,6 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             residuals,
         ],
         diagnostics,
-    )
+    );
+    super::super::entry::iterative_effects(result, request, &[0, 4, 5], false)
 }

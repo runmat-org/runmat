@@ -476,7 +476,8 @@ fn filewrite_accepts_char_array_filename() {
     let path = unique_path("filewrite_char_path");
     let path_str = path.to_string_lossy();
     let chars: Vec<char> = path_str.chars().collect();
-    let char_array = CharArray::new(chars, 1, path_str.len()).expect("char array path");
+    let units = path_str.encode_utf16().count();
+    let char_array = CharArray::from_unicode_scalars(chars, 1, units).expect("char array path");
 
     run_filewrite(
         Value::CharArray(char_array),

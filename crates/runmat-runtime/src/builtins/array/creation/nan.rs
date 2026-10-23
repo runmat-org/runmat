@@ -133,7 +133,9 @@ impl ParsedNan {
         let mut idx = 0;
         while idx < args.len() {
             let arg = args[idx].clone();
-            if let Some(keyword) = keyword_of(&arg) {
+            if let Some(keyword) =
+                crate::builtins::common::arg_tokens::scalar_keyword_of(&arg, "nan")?
+            {
                 match keyword.as_str() {
                     "like" => {
                         if like_proto.is_some() {
@@ -363,18 +365,6 @@ fn dtype_from_precision(precision: ProviderPrecision) -> NumericDType {
     match precision {
         ProviderPrecision::F32 => NumericDType::F32,
         ProviderPrecision::F64 => NumericDType::F64,
-    }
-}
-
-fn keyword_of(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => Some(s.to_ascii_lowercase()),
-        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].to_ascii_lowercase()),
-        Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data().iter().collect();
-            Some(text.to_ascii_lowercase())
-        }
-        _ => None,
     }
 }
 

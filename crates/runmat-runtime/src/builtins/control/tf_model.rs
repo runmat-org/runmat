@@ -1,11 +1,11 @@
 //! Shared SISO transfer-function object parsing, construction, and algebra.
 mod admission;
+#[cfg(test)]
+mod boundary_tests;
 mod domain;
 mod numerics;
 mod physical;
 mod power;
-#[cfg(test)]
-mod boundary_tests;
 pub use admission::preflight_ss_host_properties;
 pub(super) use admission::state_matrix_dimensions;
 use admission::{
@@ -933,7 +933,17 @@ pub fn scalar_text(
         Value::String(text) => Ok(text.clone()),
         Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].clone()),
         Value::CharArray(array) if array.rows == 1 => {
-            Ok(array.data().iter().collect::<String>().into())
+            Ok(runmat_value::decode_utf16_code_units(array.data())
+                .map_err(|source| {
+                    let mut error = control_error(
+                        builtin,
+                        invalid_argument_identifier(builtin),
+                        source.to_string(),
+                    );
+                    error.source = Some(Box::new(source));
+                    error
+                })?
+                .into())
         }
         other => Err(control_error(
             builtin,
@@ -1113,11 +1123,19 @@ pub async fn gather_ss_property_values<const N: usize>(
             .expect("preflight checked property")
             .clone()
     });
-    for value in &mut values {
-        *value = dispatcher::gather_if_needed_async(value).await?;
-    }
-    for (name, value) in required.into_iter().zip(&values) {
-        preflight_ss_host_value(name, value, builtin)?;
+    let mut attempted = false;
+    for (name, value) in required.into_iter().zip(&mut values) {
+        attempted |= matches!(value, Value::GpuTensor(_));
+        let terminal = |mut error: RuntimeError| {
+            if attempted {
+                error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            }
+            error
+        };
+        *value = dispatcher::gather_if_needed_async(value)
+            .await
+            .map_err(terminal)?;
+        preflight_ss_host_value(name, value, builtin).map_err(terminal)?;
     }
     Ok(values)
 }
@@ -1147,18 +1165,13 @@ pub async fn ss_poles_from_object_async(
     if !a_resident && !ts_resident {
         return ss_poles_from_object(object, builtin);
     }
-    let state = dispatcher::gather_if_needed_async(
-        object.properties().get("A").expect("prevalidated ss state"),
-    )
-    .await?;
-    let sample = dispatcher::gather_if_needed_async(
-        object
-            .properties()
-            .get("Ts")
-            .expect("prevalidated ss sample time"),
-    )
-    .await?;
-    ss_poles_from_values(&state, &sample, builtin)
+    // Reuse the consumed-property owner: native integer payload admission is
+    // repeated after its one owning gather, before any binary64 conversion.
+    let [state, sample] = gather_ss_property_values(object, ["A", "Ts"], builtin).await?;
+    ss_poles_from_values(&state, &sample, builtin).map_err(|mut error| {
+        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        error
+    })
 }
 
 fn ss_state_matrix_property(

@@ -61,9 +61,8 @@ impl ClientCallbackTasks {
             &cancellation,
         );
         self.active.insert(key, cancellation);
-        self.pending.push(Box::pin(async move {
-            handle_callback(callback, origin, snapshots.as_ref()).await
-        }));
+        self.pending
+            .push(Box::pin(handle_callback(callback, origin, snapshots)));
         Ok(())
     }
 

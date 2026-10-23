@@ -133,4 +133,20 @@ fn functional_scatter_preserves_target_and_rhs_aliases_without_download() {
     assert_eq!(provider.snapshot(&rhs), vec![9.0]);
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
     assert_eq!(provider.inplace_calls.load(Ordering::SeqCst), 0);
+    // A third-party provider implements only the original exactly-K contract.
+    // Scalar-to-many must retain its expanded upload, not pass a one-element
+    // RHS to that hook or force an unavailable host download.
+    let both = IndexPlan::new(vec![0, 1], vec![1, 2], vec![2], 1, vec![1, 2]);
+    let Value::GpuTensor(broadcast) = futures::executor::block_on(assign_gpu_slice_with_plan(
+        &target,
+        &both,
+        &Value::Num(13.0),
+    ))
+    .unwrap() else {
+        panic!("resident legacy broadcast")
+    };
+    assert_eq!(provider.snapshot(&broadcast), vec![13.0, 13.0]);
+    assert_eq!(provider.snapshot(&target), vec![1.0, 2.0]);
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+    assert_eq!(provider.inplace_calls.load(Ordering::SeqCst), 0);
 }

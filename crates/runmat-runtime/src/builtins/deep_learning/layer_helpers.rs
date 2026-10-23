@@ -92,35 +92,11 @@ pub(in crate::builtins) fn parse_name_values(
     Ok(map)
 }
 
-pub(in crate::builtins) fn layers_from_value(
-    value: Value,
+pub(in crate::builtins) fn layers_from_value<'a>(
+    value: &'a Value,
     function: &'static str,
-) -> BuiltinResult<Vec<Value>> {
-    match value {
-        Value::Object(_) => Ok(vec![value]),
-        Value::Cell(cell) => cell
-            .into_owned_data()
-            .map_err(|_| deep_learning_error(function, format!("{function}: shared Layers require an admitted replacement")))?
-            .try_into_unbounded_vec()
-            .map_err(|_| deep_learning_error(function, format!("{function}: admitted Layers cannot become an unclaimed vector"))),
-        Value::OutputList(values) => values
-            .try_into_owned()
-            .map_err(|_| {
-                crate::sequence::sequence_error_to_runtime(
-                    runmat_value::ValueSequenceError::SharedOutputStorage,
-                )
-            })?
-            .try_into_unbounded_vec()
-            .map_err(|_| {
-                crate::sequence::sequence_error_to_runtime(
-                    runmat_value::ValueSequenceError::SharedOutputStorage,
-                )
-            }),
-        other => Err(deep_learning_error(
-            function,
-            format!("{function}: layers must be a layer object, cell array, or object array, got {other:?}"),
-        )),
-    }
+) -> BuiltinResult<&'a [Value]> {
+    super::model::layers_from_network_ref(value, function)
 }
 
 pub(in crate::builtins) fn layer_names(

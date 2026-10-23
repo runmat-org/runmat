@@ -66,7 +66,7 @@ impl Buffer<f64> {
     fn from_chars(value: CharArray) -> Self {
         let ordered = value
             .iter_column_major()
-            .map(|character| character as u32 as f64)
+            .map(|character| f64::from(character.raw()))
             .collect();
         Self {
             data: ExactArrayStorage::unbounded(ordered),

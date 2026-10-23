@@ -13,7 +13,9 @@ use runmat_value::{
 
 const CHECKPOINT_CHUNK: usize = 4096;
 
+mod character;
 mod unicode16;
+pub(crate) use character::transform_character_case;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TextCase {

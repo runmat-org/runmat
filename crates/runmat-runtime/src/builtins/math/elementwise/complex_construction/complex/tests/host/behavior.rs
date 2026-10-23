@@ -231,7 +231,7 @@ fn complex_bool_scalar_promotion() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn complex_rejects_char_array_input() {
-    let chars = CharArray::new("AB".chars().collect(), 1, 2).unwrap();
+    let chars = CharArray::from_unicode_scalars("AB".chars().collect(), 1, 2).unwrap();
     let imag = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
     let err = complex_call(Value::CharArray(chars), vec![Value::Tensor(imag)]).unwrap_err();
     assert!(err.message().contains("char"), "{}", err.message());

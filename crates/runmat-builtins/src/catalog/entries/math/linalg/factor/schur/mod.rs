@@ -16,3 +16,5 @@ pub const SCHUR_CATALOG_ENTRY: crate::BuiltinCatalogEntry =
         residency: crate::BuiltinResidencyPolicy::Host,
         maturity: crate::BuiltinContractMaturity::Complete,
     });
+
+pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[&SCHUR_CATALOG_ENTRY];

@@ -128,7 +128,16 @@ pub(super) fn label_strings(
             Ok(Some(labels))
         }
         Value::String(text) => Ok(Some(vec![text.to_string()])),
-        Value::CharArray(chars) if chars.rows == 1 => Ok(Some(vec![chars.data().iter().collect()])),
+        Value::CharArray(chars) if chars.rows == 1 => {
+            Ok(Some(vec![runmat_value::decode_utf16_code_units(
+                chars.data(),
+            )
+            .map_err(|source| {
+                let mut error = deep_learning_error(function, source.to_string());
+                error.source = Some(Box::new(source));
+                error
+            })?]))
+        }
         Value::StringArray(array) => {
             Ok(Some(array.data().iter().map(ToString::to_string).collect()))
         }

@@ -35,7 +35,9 @@ Every published target records exact program, builtin-catalog, project, and refe
 
 ## Optimized Regions And Placement
 
-Specialized products may include verified effect-free numeric regions. The JIT derives the region plan, Runtime evaluates the admitted numeric DAG transactionally, and the session's shared placement authority decides between ordinary specialized CPU execution and vectorized CPU execution. The JIT does not contain independent GPU policy. Unsupported storage, shape, resource, cancellation, or placement conditions leave ordinary execution intact.
+Specialized products may include verified effect-free numeric regions. The JIT derives the region plan, and Runtime retains its validated numeric DAG and operation identities. The session's shared placement authority considers the eligible implementations: original native execution, vectorized CPU execution, CPU evaluation through Runtime's original operations, and provider fusion. Each route must support the input types and shapes and supply its required resource bounds and completion capabilities. The JIT does not maintain separate GPU policy.
+
+Placement compares complete routes, including preparation, transfers, and synchronization. Estimates and observations remain tied to the implementation and execution boundary they describe. A missing complete-route price stays unknown; bounded exploration can measure an otherwise legal route when the selected runtime supports it. Explicit `gpuArray` intent excludes host alternatives. Rejection before effects can retain ordinary execution; a failed or cancelled execution is not replayed through another route.
 
 ## Interactive Workspace Contract
 

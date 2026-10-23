@@ -190,18 +190,18 @@ fn class_from_keyword(keyword: &str) -> Option<EmptyClass> {
 fn split_class_arg(
     mut args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<(EmptyClass, crate::call::BuiltinArguments, bool)> {
-    if args.iter().any(|arg| {
-        keyword_of(arg)
-            .as_deref()
-            .is_some_and(|keyword| keyword == "like")
-    }) {
-        return Err(unsupported_class(
-            "empty: the global 'like' shorthand is not supported; use ClassName.empty",
-        ));
+    for arg in args.iter() {
+        if keyword_of(arg)?.as_deref() == Some("like") {
+            return Err(unsupported_class(
+                "empty: the global 'like' shorthand is not supported; use ClassName.empty",
+            ));
+        }
     }
     if let Some(class) = args
         .last()
-        .and_then(keyword_of)
+        .map(keyword_of)
+        .transpose()?
+        .flatten()
         .as_deref()
         .and_then(class_from_keyword)
     {
@@ -389,7 +389,7 @@ async fn build_empty_protecting(
                     "empty: character arrays must be two-dimensional",
                 ));
             }
-            CharArray::new(Vec::new(), shape[0], shape[1])
+            CharArray::from_code_units(Vec::new(), shape[0], shape[1])
                 .map(Value::CharArray)
                 .map_err(internal_error)
         }

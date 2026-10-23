@@ -294,9 +294,9 @@ fn numeric_input(builtin: &'static str, value: Value) -> BuiltinResult<NumericIn
     })
 }
 
-mod resident;
 mod admission;
 mod precision;
+mod resident;
 use resident::try_blsprice_gpu;
 
 fn tensor_shape(shape: &[usize], rows: usize, cols: usize) -> Vec<usize> {
@@ -463,7 +463,14 @@ fn text_scalar(builtin: &'static str, value: &Value) -> BuiltinResult<String> {
         Value::StringArray(array) if array.data().len() == 1 => {
             Ok(array.data()[0].as_str().to_owned())
         }
-        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data().iter().collect()),
+        Value::CharArray(chars) if chars.rows == 1 => Ok(runmat_value::decode_utf16_code_units(
+            chars.data(),
+        )
+        .map_err(|source| {
+            let mut error = error(builtin, source.to_string(), &ERROR_INVALID_ARGUMENT);
+            error.source = Some(Box::new(source));
+            error
+        })?),
         _ => Err(error(
             builtin,
             format!("{builtin}: option names and text values must be scalar text"),

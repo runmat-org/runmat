@@ -16,17 +16,17 @@ pub(super) fn atoms(value: &Value, rows: usize) -> VariableResult<Vec<KeyAtom>> 
     };
     if object.is_class(runmat_types::standard::DATETIME) {
         let values = crate::builtins::datetime::serials_from_datetime_value(value)
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| super::VariableError::with_source(error.to_string(), error))?;
         return numeric_atoms(&values, rows, "datetime");
     }
     if object.is_class(runmat_types::standard::DURATION) {
         let values = crate::builtins::duration::duration_tensor_from_duration_value(value)
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| super::VariableError::with_source(error.to_string(), error))?;
         return numeric_atoms(&values, rows, "duration");
     }
     if object.is_class(runmat_types::standard::CALENDAR_DURATION) {
         let (months, days) = crate::builtins::datetime::calendar_duration_tensors_from_value(value)
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| super::VariableError::with_source(error.to_string(), error))?;
         if tensor_element_len(&months) != rows || tensor_element_len(&days) != rows {
             return Err("calendarDuration grouping storage has an inconsistent shape".into());
         }
@@ -51,14 +51,15 @@ fn numeric_atoms(value: &Tensor, rows: usize, context: &str) -> VariableResult<V
         return Err(format!(
             "{context} grouping storage has {} observations; expected {rows}",
             actual
-        ));
+        )
+        .into());
     }
     (0..rows)
         .map(|row| {
             value
                 .numeric_value_at(row)
                 .map(|value| KeyAtom::from_numeric(value).unwrap_or(KeyAtom::Missing))
-                .ok_or_else(|| format!("{context} grouping row is out of bounds"))
+                .ok_or_else(|| format!("{context} grouping row is out of bounds").into())
         })
         .collect()
 }
@@ -67,5 +68,5 @@ fn numeric_value_at(value: &Tensor, row: usize, context: &str) -> VariableResult
     value
         .numeric_value_at(row)
         .map(NumericScalar::materialize_f64)
-        .ok_or_else(|| format!("{context} grouping row is out of bounds"))
+        .ok_or_else(|| format!("{context} grouping row is out of bounds").into())
 }

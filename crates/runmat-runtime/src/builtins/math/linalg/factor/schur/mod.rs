@@ -211,15 +211,21 @@ fn output_pair(
     }
 }
 
-fn option_text(value: &Value) -> Option<String> {
-    match value {
+fn option_text(value: &Value, context: SchurContext) -> BuiltinResult<Option<String>> {
+    Ok(match value {
         Value::String(text) => Some(text.as_str().to_owned()),
         Value::StringArray(array) if array.data().len() == 1 => {
             Some(array.data()[0].as_str().to_owned())
         }
-        Value::CharArray(chars) if chars.rows <= 1 => Some(chars.data().iter().collect()),
+        Value::CharArray(chars) if chars.rows <= 1 => Some(
+            runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
+                let mut error = invalid_argument(context, source.to_string());
+                error.source = Some(Box::new(source));
+                error
+            })?,
+        ),
         _ => None,
-    }
+    })
 }
 
 fn validate_pair_outputs(context: SchurContext) -> BuiltinResult<()> {
@@ -246,7 +252,7 @@ async fn schur_builtin(matrix: Value, rest: crate::call::BuiltinArguments) -> Bu
     }
     let dtype = precision(&matrix, NAME)?;
     let mode = if let Some(option) = rest.first() {
-        let text = option_text(option)
+        let text = option_text(option, NAME)?
             .ok_or_else(|| invalid_argument(NAME, "mode must be 'real' or 'complex'"))?;
         if text.trim().eq_ignore_ascii_case("real") {
             SchurMode::Real

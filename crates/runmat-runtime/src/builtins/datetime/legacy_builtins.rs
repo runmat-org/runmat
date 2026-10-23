@@ -1,6 +1,6 @@
 use super::capabilities::{
     BUILTIN_NAME, DATETIME_CLASS, DATETIME_GPU_INPUT_EXTENSION, DATETIME_LOGICAL_INPUT_EXTENSION,
-    DEFAULT_DATETIME_FORMAT, SECONDS_PER_DAY,
+    SECONDS_PER_DAY,
 };
 use super::*;
 use runmat_builtins::{
@@ -62,14 +62,37 @@ pub(super) async fn datenum_builtin(
         )?;
     }
     preflight_legacy_inputs("datenum", args.iter(), true)?;
-    let args = gather_retained_args(args, runtime.as_ref()).await?;
+    let owner = super::allocation::datenum::capture(runtime.as_ref())?;
+    if let Some(owner) = owner {
+        let runtime = runtime.as_ref().expect("managed owner has runtime context");
+        return super::allocation::datenum::managed(runtime, owner, args).await;
+    }
+    let work = super::allocation::UnboundedCalendarWork::admit(runtime.as_ref(), "datenum")?;
+    let args = args
+        .try_map_preserving_roots_async(args.len(), runtime.as_ref(), async |index| {
+            work.check()?;
+            let gather = gather_if_needed_async(&args[index]);
+            let value = match runtime.as_ref() {
+                Some(runtime) => runtime.scope(gather).await,
+                None => gather.await,
+            }
+            .map_err(|source| datetime_gather_error(runtime.as_ref(), source))?;
+            work.check()?;
+            Ok(value)
+        })
+        .await
+        .map_err(super::allocation::datenum::never)?;
     let tensor = match args.len() {
-        0 => Tensor::new(vec![datenum_from_naive(current_naive_local())], vec![1, 1])
-            .map_err(|err| datetime_error(format!("datenum: {err}")))?,
+        0 => Tensor::new(
+            vec![datenum_from_naive(current_naive_local(runtime.as_ref())?)],
+            vec![1, 1],
+        )
+        .map_err(|err| datetime_error(format!("datenum: {err}")))?,
         1 => match &args[0] {
             Value::Object(obj) if obj.is_class(DATETIME_CLASS) => serial_tensor_for_object(obj)?,
             Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
-                let (serials, shape, _) = parse_text_input(&args[0], None)?;
+                let (serials, shape, _) =
+                    parse_text_input_with_runtime(&args[0], None, runtime.as_ref())?;
                 Tensor::new(serials, shape)
                     .map_err(|err| datetime_error(format!("datenum: {err}")))?
             }
@@ -92,6 +115,7 @@ pub(super) async fn datenum_builtin(
             ))
         }
     };
+    work.check()?;
     if tensor::tensor_element_len(&tensor) == 1 {
         Ok(Value::Num(tensor::tensor_value_f64(&tensor, 0)))
     } else {
@@ -102,9 +126,13 @@ pub(super) async fn datenum_builtin(
 #[runmat_macros::runtime_builtin(
     name = "datevec",
     builtin_path = "crate::builtins::datetime",
-    binding_variant = "default"
+    binding_variant = "default",
+    context = true
 )]
-pub(super) async fn datevec_builtin(value: Value) -> crate::BuiltinResult<Value> {
+pub(super) async fn datevec_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    value: Value,
+) -> crate::BuiltinResult<Value> {
     if crate::output_count::current_output_count().is_some_and(|count| count > 6) {
         return Err(datetime_error("datevec: supports at most six outputs"));
     }
@@ -112,7 +140,7 @@ pub(super) async fn datevec_builtin(value: Value) -> crate::BuiltinResult<Value>
     let value = gather_if_needed_async(&value)
         .await
         .map_err(|err| datetime_error(format!("datevec: {}", err.message())))?;
-    let serials = numeric_or_datetime_serial_tensor(value, "datevec")?;
+    let serials = numeric_or_datetime_serial_tensor(runtime.as_ref(), value, "datevec")?;
     let matrix = datevec_matrix_from_serial_tensor(&serials)?;
     if let Some(out_count) = crate::output_count::current_output_count().filter(|count| *count != 1)
     {
@@ -164,31 +192,30 @@ pub(super) async fn datestr_builtin(
         .first()
         .is_some_and(|option| matches!(option, Value::GpuTensor(_)))
     {
-        return Err(datetime_error("datestr: format must be host text"));
+        return Err(datetime_error(
+            "datestr: format must be host text or a scalar double code",
+        ));
     }
     let value = gather_in_runtime(runtime.as_ref(), &value)
         .await
         .map_err(|err| datetime_error(format!("datestr: {}", err.message())))?;
     let rest = gather_retained_args(rest, runtime.as_ref()).await?;
-    let format = rest
-        .first()
-        .map(|value| scalar_text(value, "datestr format"))
-        .transpose()?
-        .unwrap_or_else(|| DEFAULT_DATETIME_FORMAT.to_string());
+    let format = parse_datestr_format(rest.first())?;
     let serials = match &value {
         Value::Tensor(_) => {
             if let Ok(datevec) = tensor_from_datevec_like(value.clone(), "datestr") {
                 datenum_from_datevec_tensor(&datevec, "datestr")?
             } else {
-                numeric_or_datetime_serial_tensor(value, "datestr")?
+                numeric_or_datetime_serial_tensor(runtime.as_ref(), value, "datestr")?
             }
         }
-        _ => numeric_or_datetime_serial_tensor(value, "datestr")?,
+        _ => numeric_or_datetime_serial_tensor(runtime.as_ref(), value, "datestr")?,
     };
     let serial_values = tensor::tensor_values_f64_cow(&serials);
+    let format = format.resolve_default(&serial_values)?;
     let mut rows = Vec::with_capacity(serial_values.len());
     for serial in serial_values.iter() {
-        rows.push(format_serial(*serial, &format)?);
+        rows.push(format.render(*serial)?);
     }
     Ok(Value::CharArray(char_array_from_rows(&rows, "datestr")?))
 }
@@ -227,7 +254,7 @@ pub(super) async fn weekday_builtin(
     let value = gather_in_runtime(runtime.as_ref(), &value)
         .await
         .map_err(|err| datetime_error(format!("weekday: {}", err.message())))?;
-    let serials = numeric_or_datetime_serial_tensor(value, "weekday")?;
+    let serials = numeric_or_datetime_serial_tensor(runtime.as_ref(), value, "weekday")?;
     let serial_values = tensor::tensor_values_f64_cow(&serials);
     let mut nums = Vec::with_capacity(serial_values.len());
     let include_names = crate::output_count::current_output_count() == Some(2);
@@ -332,9 +359,11 @@ pub(super) async fn etime_builtin(t2: Value, t1: Value) -> crate::BuiltinResult<
 #[runmat_macros::runtime_builtin(
     name = "isbetween",
     builtin_path = "crate::builtins::datetime",
-    binding_variant = "default"
+    binding_variant = "default",
+    context = true
 )]
 pub(super) async fn isbetween_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     value: Value,
     lower: Value,
     upper: Value,
@@ -365,9 +394,9 @@ pub(super) async fn isbetween_builtin(
     let upper = gather_if_needed_async(&upper)
         .await
         .map_err(|err| datetime_error(format!("isbetween: {}", err.message())))?;
-    let values = numeric_or_datetime_serial_tensor(value, "isbetween")?;
-    let lower = numeric_or_datetime_serial_tensor(lower, "isbetween")?;
-    let upper = numeric_or_datetime_serial_tensor(upper, "isbetween")?;
+    let values = numeric_or_datetime_serial_tensor(runtime.as_ref(), value, "isbetween")?;
+    let lower = numeric_or_datetime_serial_tensor(runtime.as_ref(), lower, "isbetween")?;
+    let upper = numeric_or_datetime_serial_tensor(runtime.as_ref(), upper, "isbetween")?;
     let (values_data, lower_data, upper_data, shape) =
         implicit_broadcast_three_numeric_tensors(&values, &lower, &upper, "isbetween")?;
     let out = values_data

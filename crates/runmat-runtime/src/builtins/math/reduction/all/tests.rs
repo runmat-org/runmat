@@ -197,7 +197,7 @@ fn all_handles_nan_modes() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn all_char_array_support() {
-    let chars = CharArray::new("a\0c".chars().collect(), 1, 3).unwrap();
+    let chars = CharArray::from_unicode_scalars("a\0c".chars().collect(), 1, 3).unwrap();
     let result =
         all_builtin(Value::CharArray(chars), vec![Value::Int(IntValue::I32(1))]).expect("all");
     match result {

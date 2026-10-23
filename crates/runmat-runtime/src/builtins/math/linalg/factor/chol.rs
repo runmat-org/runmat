@@ -21,6 +21,8 @@ use runmat_builtins::BuiltinIntegerOutputClassRule;
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, NumericDType, NumericScalar, Tensor, Value};
 
+pub(in crate::builtins::math::linalg) mod sparse;
+
 const BUILTIN_NAME: &str = "chol";
 
 #[cfg(test)]
@@ -49,6 +51,134 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 
 fn chol_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     chol_error_with_message(error.message, error)
+}
+
+#[cfg(test)]
+mod sparse_public_tests {
+    use super::*;
+    use crate::context::host_effect::ManagedHostEffectLedger;
+    use crate::context::{
+        ParallelCapability, RuntimeContext, RuntimeContextGuard, RuntimeParallelResources,
+        RuntimeParallelService, RuntimeServicePorts,
+    };
+    use crate::execution::RuntimeExecutionService;
+    use futures::executor::block_on;
+    use runmat_value::SparseTensor;
+    use std::rc::Rc;
+
+    struct Parallel(ManagedHostEffectLedger);
+    impl RuntimeParallelService for Parallel {
+        fn supports(&self, _: ParallelCapability) -> bool {
+            false
+        }
+        fn placement_resources(&self) -> RuntimeParallelResources {
+            let state = self.0.snapshot();
+            RuntimeParallelResources {
+                memory_available_bytes: Some(state.free_bytes()),
+                epoch: state.epoch,
+                ..Default::default()
+            }
+        }
+        fn managed_host_effect_ledger(&self) -> Option<ManagedHostEffectLedger> {
+            Some(self.0.clone())
+        }
+    }
+    fn runtime() -> (RuntimeContext, ManagedHostEffectLedger) {
+        let ledger = ManagedHostEffectLedger::new(4_000_000);
+        let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
+            .with_service_ports(
+                RuntimeServicePorts::default().with_parallel(Rc::new(Parallel(ledger.clone()))),
+            );
+        (runtime, ledger)
+    }
+    fn matrix() -> SparseTensor {
+        SparseTensor::new(
+            3,
+            3,
+            vec![0, 2, 5, 7],
+            vec![0, 1, 0, 1, 2, 1, 2],
+            vec![4.0, 1.0, 1.0, 3.0, 1.0, 1.0, 2.0],
+        )
+        .unwrap()
+    }
+    fn invoke(value: Value, args: Vec<Value>) -> BuiltinResult<Value> {
+        let args = crate::execution::RootedValues::new(args).map_err(|e| e.into_runtime_error())?;
+        block_on(super::chol_builtin(
+            crate::context::legacy::active(),
+            value,
+            args.into(),
+        ))
+    }
+
+    #[test]
+    fn sparse_public_three_output_preserves_sparse_class_and_permutation_identity() {
+        let (runtime, ledger) = runtime();
+        let _active = RuntimeContextGuard::enter(runtime);
+        let _outputs = crate::output_count::push_output_count(Some(3)).unwrap();
+        let result = invoke(Value::SparseTensor(matrix()), vec![Value::from("vector")]).unwrap();
+        let Value::OutputList(outputs) = result else {
+            panic!("expected three outputs")
+        };
+        assert_eq!(outputs.len(), 3);
+        let Value::SparseTensor(factor) = &outputs[0] else {
+            panic!("factor must stay sparse")
+        };
+        assert_eq!((factor.rows, factor.cols), (3, 3));
+        for column in 0..factor.cols {
+            assert!(
+                factor.row_indices[factor.col_ptrs[column]..factor.col_ptrs[column + 1]]
+                    .iter()
+                    .all(|&row| row <= column)
+            );
+        }
+        assert_eq!(outputs[1], Value::Num(0.0));
+        let Value::Tensor(permutation) = &outputs[2] else {
+            panic!("vector form")
+        };
+        let mut values = permutation.materialize_f64();
+        values.sort_by(f64::total_cmp);
+        assert_eq!(&*values, &[1.0, 2.0, 3.0]);
+        assert!(ledger.snapshot().live_claimed_bytes > 0);
+    }
+
+    #[test]
+    fn sparse_public_partial_failure_returns_q_by_n_factor_and_flag() {
+        let (runtime, _) = runtime();
+        let _active = RuntimeContextGuard::enter(runtime);
+        let _outputs = crate::output_count::push_output_count(Some(2)).unwrap();
+        let sparse = SparseTensor::new(
+            2,
+            2,
+            vec![0, 2, 4],
+            vec![0, 1, 0, 1],
+            vec![1.0, 2.0, 2.0, 1.0],
+        )
+        .unwrap();
+        let result = invoke(Value::SparseTensor(sparse), Vec::new()).unwrap();
+        let Value::OutputList(outputs) = result else {
+            panic!("two outputs")
+        };
+        let Value::SparseTensor(factor) = &outputs[0] else {
+            panic!("partial sparse factor")
+        };
+        assert_eq!((factor.rows, factor.cols), (1, 2));
+        assert_eq!(outputs[1], Value::Num(2.0));
+    }
+
+    #[test]
+    fn sparse_factor_without_third_output_does_not_publish_permutation() {
+        let (runtime, _) = runtime();
+        let eval = block_on(sparse::evaluate(
+            matrix(),
+            CholTriangle::Upper,
+            SparsePermutationOutput::Matrix,
+            false,
+            false,
+            &runtime,
+        ))
+        .unwrap();
+        assert!(eval.permutation.is_none());
+    }
 }
 
 fn chol_error_with_message(
@@ -82,11 +212,6 @@ fn chol_internal_error(message: impl Into<String>) -> RuntimeError {
 }
 
 fn with_chol_context(mut error: RuntimeError) -> RuntimeError {
-    if error.message() == "interaction pending..." {
-        return build_runtime_error("interaction pending...")
-            .with_builtin(BUILTIN_NAME)
-            .build();
-    }
     if error.context.builtin.is_none() {
         error.context = error.context.with_builtin(BUILTIN_NAME);
     }
@@ -106,14 +231,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "chol",
+    context = true,
     binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::factor::chol"
 )]
 async fn chol_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     value: Value,
     rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
-    let eval = evaluate(value, rest.view()).await?;
+    if crate::output_count::current_output_count().is_some_and(|count| count > 3)
+        || (crate::output_count::current_output_count() == Some(3)
+            && !matches!(value, Value::SparseTensor(_)))
+    {
+        return Err(chol_error(&CHOL_ERROR_INVALID_ARGUMENT));
+    }
+    let eval = evaluate_in_context(runtime.as_ref(), value, rest.view()).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::output_list(Vec::new()));
@@ -126,6 +259,15 @@ async fn chol_builtin(
         }
         if out_count == 2 {
             return Ok(Value::output_list(vec![eval.factor(), eval.flag()]));
+        }
+        if out_count == 3 {
+            return eval
+                .permutation
+                .clone()
+                .map(|permutation| {
+                    Value::output_list(vec![eval.factor(), eval.flag(), permutation])
+                })
+                .ok_or_else(|| chol_error(&CHOL_ERROR_INVALID_ARGUMENT));
         }
         return Err(chol_error(&CHOL_ERROR_INVALID_ARGUMENT));
     }
@@ -141,6 +283,7 @@ pub struct CholEval {
     factor: Value,
     flag: usize,
     triangle: CholTriangle,
+    permutation: Option<Value>,
 }
 
 impl CholEval {
@@ -183,6 +326,7 @@ impl CholEval {
             factor,
             flag: components.info,
             triangle,
+            permutation: None,
         })
     }
 
@@ -191,6 +335,7 @@ impl CholEval {
             factor: Value::GpuTensor(result.factor),
             flag: result.info as usize,
             triangle,
+            permutation: None,
         }
     }
 }
@@ -202,12 +347,33 @@ pub enum CholTriangle {
     Lower,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SparsePermutationOutput {
+    Matrix,
+    Vector,
+}
+
 /// Compute the Cholesky factorization for the given value and option list.
 pub async fn evaluate(
     value: Value,
     args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<CholEval> {
-    let triangle = parse_triangle(args)?;
+    let runtime = crate::context::legacy::active();
+    evaluate_in_context(runtime.as_ref(), value, args).await
+}
+
+async fn evaluate_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    value: Value,
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<CholEval> {
+    let options = parse_options(args)?;
+    let triangle = options.triangle;
+    if options.explicit_output_form && !matches!(value, Value::SparseTensor(_)) {
+        return Err(chol_invalid_argument(
+            "chol: permutation output form requires sparse input",
+        ));
+    }
     crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
     let integer_input = is_typed_integer_value(&value);
     if integer_input {
@@ -223,6 +389,21 @@ pub async fn evaluate(
         )?;
     }
     match value {
+        Value::SparseTensor(sparse_value) => {
+            let runtime = runtime.ok_or_else(|| {
+                chol_internal_error("chol: sparse factorization requires an active runtime owner")
+            })?;
+            sparse::evaluate(
+                sparse_value,
+                triangle,
+                options.output_form,
+                options.explicit_output_form
+                    || crate::output_count::current_output_count() == Some(3),
+                crate::output_count::current_output_count() == Some(3),
+                runtime,
+            )
+            .await
+        }
         Value::GpuTensor(handle) => {
             let provider = gpu_helpers::exact_provider_for_handle(&handle)
                 .ok_or_else(|| chol_internal_error("chol: no exact owner for resident input"))?;
@@ -388,25 +569,51 @@ async fn evaluate_gpu(
     Ok(None)
 }
 
-fn parse_triangle(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<CholTriangle> {
+struct CholOptions {
+    triangle: CholTriangle,
+    output_form: SparsePermutationOutput,
+    explicit_output_form: bool,
+}
+
+fn parse_options(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<CholOptions> {
     if args.is_empty() {
-        return Ok(CholTriangle::Upper);
+        return Ok(CholOptions {
+            triangle: CholTriangle::Upper,
+            output_form: SparsePermutationOutput::Matrix,
+            explicit_output_form: false,
+        });
     }
-    if args.len() > 1 {
+    if args.len() > 2 {
         return Err(chol_invalid_argument("chol: too many option arguments"));
     }
-    let Some(option) = tensor::value_to_string(&args[0]) else {
-        return Err(chol_invalid_argument(
-            "chol: option must be a string or character vector",
-        ));
+    let mut result = CholOptions {
+        triangle: CholTriangle::Upper,
+        output_form: SparsePermutationOutput::Matrix,
+        explicit_output_form: false,
     };
-    match option.trim().to_ascii_lowercase().as_str() {
-        "upper" => Ok(CholTriangle::Upper),
-        "lower" => Ok(CholTriangle::Lower),
-        other => Err(chol_invalid_argument(format!(
-            "chol: unknown option '{other}'"
-        ))),
+    for argument in args.iter() {
+        let Some(option) = tensor::value_to_string(argument) else {
+            return Err(chol_invalid_argument(
+                "chol: options must be strings or character vectors",
+            ));
+        };
+        match option.trim().to_ascii_lowercase().as_str() {
+            "upper" => result.triangle = CholTriangle::Upper,
+            "lower" => result.triangle = CholTriangle::Lower,
+            "matrix" => {
+                result.output_form = SparsePermutationOutput::Matrix;
+                result.explicit_output_form = true;
+            }
+            "vector" => {
+                result.output_form = SparsePermutationOutput::Vector;
+                result.explicit_output_form = true;
+            }
+            other => Err(chol_invalid_argument(format!(
+                "chol: unknown option '{other}'"
+            )))?,
+        }
     }
+    Ok(result)
 }
 
 const EPS: f64 = 1.0e-12;
@@ -1280,7 +1487,11 @@ pub(crate) mod tests {
     fn chol_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         let rest = crate::execution::RootedValues::new(rest)
             .map_err(|error| error.into_runtime_error())?;
-        block_on(super::chol_builtin(value, rest.into()))
+        block_on(super::chol_builtin(
+            crate::context::legacy::active(),
+            value,
+            rest.into(),
+        ))
     }
 
     fn evaluate(value: Value, args: &[Value]) -> BuiltinResult<CholEval> {

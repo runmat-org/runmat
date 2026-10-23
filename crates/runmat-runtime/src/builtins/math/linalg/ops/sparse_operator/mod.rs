@@ -5,6 +5,7 @@
 //! partially computed Value.
 
 mod product;
+mod cooperative;
 
 use crate::context::host_allocation::{
     HostAllocationError, HostAllocationPlan, HostAllocationReceipt, HostNumericWorkspace,
@@ -53,6 +54,12 @@ impl<T> CscOperator<'_, T> {
 
     pub fn as_slice(&self) -> &[T] {
         self.values
+    }
+
+    /// Borrow one validated column without copying CSC topology or values.
+    pub(in crate::builtins::math::linalg::ops) fn column(&self, column: usize) -> (&[usize], &[T]) {
+        let range = self.col_ptrs[column]..self.col_ptrs[column + 1];
+        (&self.row_indices[range.clone()], &self.values[range])
     }
 }
 

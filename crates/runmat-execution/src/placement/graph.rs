@@ -263,10 +263,13 @@ impl PlacementPlanRequest {
             let mut candidate_arities = Vec::with_capacity(node.candidates.len());
             for candidate in &node.candidates {
                 candidate.descriptor.validate()?;
-                if candidate.descriptor.kind == super::ExecutionCandidateKind::OriginalVmRegion
-                    && (!whole_work_envelope
-                        || candidate.output_facts.is_some()
-                        || candidate.transactional_results)
+                if matches!(
+                    candidate.descriptor.kind,
+                    super::ExecutionCandidateKind::OriginalVmRegion
+                        | super::ExecutionCandidateKind::OriginalNativeRegion
+                ) && (!whole_work_envelope
+                    || candidate.output_facts.is_some()
+                    || candidate.transactional_results)
                 {
                     return Err("original VM region is only a source-ordered whole-work route");
                 }

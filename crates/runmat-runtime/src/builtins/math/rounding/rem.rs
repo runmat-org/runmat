@@ -166,19 +166,23 @@ async fn rem_non_tabular(
         super::binary::require_resident_provider(&rhs, BUILTIN_NAME, &REM_ERROR_INVALID_INPUT)?;
         let lhs = gather_value(lhs).await?;
         let rhs = gather_value(rhs).await?;
-        let published = match super::binary::plan_duration(lhs, rhs, BUILTIN_NAME)
-            .map_err(|error| rem_error_with_detail(&REM_ERROR_INVALID_INPUT, error))?
-        {
-            common_binary::BinaryInputPlan::Values(values) => {
-                let (left, right) = *values;
-                rem_host(left, right)
-            }
-            common_binary::BinaryInputPlan::Structured(plan) => {
-                let result = compute_rem_real(&plan.left, &plan.right)?;
-                super::binary::finish_duration(plan, result, BUILTIN_NAME)
-                    .map_err(|error| rem_error_with_detail(&REM_ERROR_INTERNAL, error.to_string()))
-            }
-        }?;
+        let published =
+            match super::binary::plan_duration(lhs, rhs, BUILTIN_NAME).map_err(|source| {
+                let mut error = rem_error_with_detail(&REM_ERROR_INVALID_INPUT, source.message());
+                error.source = Some(Box::new(source));
+                error
+            })? {
+                common_binary::BinaryInputPlan::Values(values) => {
+                    let (left, right) = *values;
+                    rem_host(left, right)
+                }
+                common_binary::BinaryInputPlan::Structured(plan) => {
+                    let result = compute_rem_real(&plan.left, &plan.right)?;
+                    super::binary::finish_duration(plan, result, BUILTIN_NAME).map_err(|error| {
+                        rem_error_with_detail(&REM_ERROR_INTERNAL, error.to_string())
+                    })
+                }
+            }?;
         return super::unary::root_output(published);
     }
     if matches!(&lhs, Value::Complex(_, _) | Value::ComplexTensor(_))
@@ -366,9 +370,12 @@ fn scalar_real_value(value: &Value) -> Option<f64> {
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
         Value::Tensor(t) if tensor::is_scalar_tensor(t) => Some(tensor::tensor_value_f64(t, 0)),
         Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
-        Value::CharArray(ca) if ca.data().len() == 1 => {
-            Some(ca.data().first().map(|&ch| ch as u32 as f64).unwrap_or(0.0))
-        }
+        Value::CharArray(ca) if ca.data().len() == 1 => Some(
+            ca.data()
+                .first()
+                .map(|&ch| f64::from(ch.raw()))
+                .unwrap_or(0.0),
+        ),
         _ => None,
     }
 }
@@ -395,7 +402,7 @@ fn value_into_real_tensor(value: Value) -> BuiltinResult<Tensor> {
             let data: Vec<f64> = ca
                 .to_column_major()
                 .into_iter()
-                .map(|ch| ch as u32 as f64)
+                .map(|ch| f64::from(ch.raw()))
                 .collect();
             Tensor::new(data, ca.shape).map_err(|e| rem_error_with_detail(&REM_ERROR_INTERNAL, e))
         }

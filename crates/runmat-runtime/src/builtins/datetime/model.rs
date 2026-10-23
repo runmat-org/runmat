@@ -16,6 +16,18 @@ pub(super) fn datetime_error(message: impl Into<String>) -> RuntimeError {
         .build()
 }
 
+pub(super) fn datetime_utf16_error(source: runmat_value::Utf16DecodeError) -> RuntimeError {
+    build_runtime_error("datetime: malformed UTF-16 character input")
+        .with_builtin(BUILTIN_NAME)
+        .with_identifier(
+            DATETIME_ERROR_INVALID_INPUT
+                .identifier
+                .expect("datetime invalid-input descriptor identifier"),
+        )
+        .with_source(source)
+        .build()
+}
+
 pub(super) fn datetime_argument_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
@@ -81,6 +93,7 @@ pub(super) fn datetime_gather_error(
         datetime_error(format!("datetime: {}", source.message()))
     };
     error.source = Some(Box::new(source));
+    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
     error
 }
 
@@ -148,25 +161,15 @@ pub(super) fn ensure_calendar_duration_class_registered() {
     });
 }
 
-pub(super) async fn gather_args(args: &[Value]) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(args.len());
-    for arg in args {
-        out.push(
-            gather_if_needed_async(arg)
-                .await
-                .map_err(|err| datetime_error(format!("datetime: {}", err.message())))?,
-        );
-    }
-    Ok(out)
-}
-
 pub(super) fn scalar_text(value: &Value, context: &str) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.as_str().to_owned()),
         Value::StringArray(array) if array.data().len() == 1 => {
             Ok(array.data()[0].as_str().to_owned())
         }
-        Value::CharArray(array) if array.rows == 1 => Ok(array.data().iter().collect()),
+        Value::CharArray(array) if array.rows == 1 => {
+            runmat_value::decode_utf16_code_units(array.data()).map_err(datetime_utf16_error)
+        }
         _ => Err(datetime_error(format!(
             "datetime: {context} must be a string scalar or character vector"
         ))),
@@ -233,7 +236,10 @@ pub(super) fn validate_authoritative_integer_storage(
     let Some(storage) = tensor.integer_storage() else {
         return Ok(());
     };
-    for value in storage.exact_values() {
+    for index in 0..storage.len() {
+        let value = storage
+            .value_at(index)
+            .expect("index is within integer storage");
         let Some(value) = value.try_to_i64() else {
             return Err(datetime_error(format!(
                 "datetime: {context} integer value is outside the supported calendar range"
@@ -258,7 +264,10 @@ pub(super) fn validate_authoritative_serial_storage(
     let Some(storage) = tensor.integer_storage() else {
         return Ok(());
     };
-    for value in storage.exact_values() {
+    for index in 0..storage.len() {
+        let value = storage
+            .value_at(index)
+            .expect("index is within integer storage");
         let Some(value) = value.try_to_i64() else {
             return Err(datetime_error(format!(
                 "datetime: {context} integer serial is outside the supported serial-date range"
@@ -292,15 +301,17 @@ pub(super) fn serial_tensor_from_value(value: Value, context: &str) -> BuiltinRe
     Tensor::new(values, shape).map_err(|err| datetime_error(format!("datetime: {err}")))
 }
 
-pub(super) fn format_for_object(obj: &ObjectInstance) -> String {
-    match obj.properties().get(FORMAT_FIELD) {
+pub(super) fn format_for_object(obj: &ObjectInstance) -> BuiltinResult<String> {
+    Ok(match obj.properties().get(FORMAT_FIELD) {
         Some(Value::String(text)) => text.as_str().to_owned(),
         Some(Value::StringArray(array)) if array.data().len() == 1 => {
             array.data()[0].as_str().to_owned()
         }
-        Some(Value::CharArray(array)) if array.rows == 1 => array.data().iter().collect(),
+        Some(Value::CharArray(array)) if array.rows == 1 => {
+            runmat_value::decode_utf16_code_units(array.data()).map_err(datetime_utf16_error)?
+        }
         _ => DEFAULT_DATETIME_FORMAT.to_string(),
-    }
+    })
 }
 
 pub(crate) fn serial_tensor_for_object(obj: &ObjectInstance) -> BuiltinResult<Tensor> {

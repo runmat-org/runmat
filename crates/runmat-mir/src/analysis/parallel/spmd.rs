@@ -526,7 +526,15 @@ fn contract(id: runmat_types::CollectiveId, operation: CollectiveOperation) -> C
 
 fn visit_statement_rvalues(statement: &MirStmt, operation: &mut impl FnMut(&MirRvalue)) {
     match &statement.kind {
-        MirStmtKind::Assign { value, .. }
+        MirStmtKind::PrepareFixedAssignment(owner) => {
+            for step in owner.steps() {
+                if let crate::MirExpressionStep::Let { value, .. } = step {
+                    visit_rvalue(value, operation);
+                }
+            }
+        }
+        MirStmtKind::PreparedAssign { value, .. }
+        | MirStmtKind::Assign { value, .. }
         | MirStmtKind::MultiAssign { value, .. }
         | MirStmtKind::SequenceAssign { value, .. }
         | MirStmtKind::Expr(value) => visit_rvalue(value, operation),

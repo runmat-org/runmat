@@ -3,18 +3,18 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::ir::*;
 use crate::{NativeCodegenError, NativeCodegenResult};
 use runmat_mir::{BasicBlockId, MirLocalId, MirOutputTarget, MirStmtKind};
-use runmat_types::{CapabilitySet, EffectSet, FunctionId, RegionContract};
+use runmat_types::{FunctionId, RegionContract};
 
 pub(super) fn lower_function(
     function: FunctionId,
     mir_body_digest: runmat_execution::Digest,
     input: &super::assembly::NativeLoweringInput<'_>,
+    analysis: &runmat_mir::analysis::AnalysisStore,
     metadata: &runmat_mir::MirFunctionMetadata,
     retained_callable_parent: Option<runmat_hir::FunctionId>,
     body: &runmat_mir::MirBody,
 ) -> NativeCodegenResult<NativeFunction> {
     let assembly = input.mir;
-    let analysis = input.analysis;
     let binding_names = input.binding_names;
     let regions = &input.manifest.regions;
     body.validate_expression_regions().map_err(|error| {
@@ -238,6 +238,23 @@ pub(super) fn lower_function(
 
     let mut blocks = Vec::with_capacity(body.blocks.len());
     let expected_sites = super::inventory::expected_sites(ctx.portable_function, body)?;
+    let operation_contracts = analysis
+        .operation_contracts
+        .iter()
+        .filter(|contract| contract.site.point.function == ctx.portable_function)
+        .cloned()
+        .collect::<Vec<_>>();
+    if operation_contracts
+        .iter()
+        .map(|contract| contract.site.clone())
+        .ne(expected_sites.iter().cloned())
+    {
+        return Err(NativeCodegenError::new(
+            "native.lowering.operation_contract_coverage",
+            "analysis operation contracts do not exactly cover canonical MIR sites",
+        )
+        .at_function(function));
+    }
     for block in &body.blocks {
         let parameters = parameter_sets.get(&block.id).cloned().ok_or_else(|| {
             NativeCodegenError::new(
@@ -269,18 +286,16 @@ pub(super) fn lower_function(
             let before = ctx.point(block.id, position)?;
             let after = ctx.point(block.id, position + 1)?;
             let source = ctx.source_location(statement.span)?;
-            let (effects, capabilities) = ctx.effect_delta(before, after);
-            let analyzed_requirements = super::operation::OperationRequirements {
-                effects,
-                capabilities,
-            };
             let mut produced = Vec::new();
             if let Some((value, output_locals)) = statement_rvalue_outputs(&statement.kind) {
                 let result = rvalue_result(&statement.kind)?;
-                let requirements = super::operation::merge_requirements(
-                    super::operation::declared_requirements(value),
-                    analyzed_requirements.clone(),
-                );
+                let operation_site = NativeMirSite {
+                    point: before,
+                    phase: NativeSitePhase::Rvalue,
+                    ordinal: 0,
+                    construct: runmat_mir::rvalue_construct_kind(value),
+                };
+                let requirements = ctx.operation_contract(&operation_site)?;
                 let mut instruction = super::operation::lower_rvalue(
                     &mut ctx,
                     super::operation::OperationSite {
@@ -307,17 +322,13 @@ pub(super) fn lower_function(
             }
 
             let output_roots = statement_output_roots(&statement.kind);
-            let statement_requirements = if statement_rvalue_outputs(&statement.kind).is_some() {
-                super::operation::OperationRequirements {
-                    effects: EffectSet::default(),
-                    capabilities: CapabilitySet::default(),
-                }
-            } else {
-                super::operation::merge_requirements(
-                    super::operation::declared_statement_requirements(&statement.kind),
-                    analyzed_requirements,
-                )
+            let statement_site = NativeMirSite {
+                point: before,
+                phase: NativeSitePhase::Statement,
+                ordinal: 0,
+                construct: runmat_mir::statement_construct_kind(&statement.kind),
             };
+            let statement_requirements = ctx.operation_contract(&statement_site)?;
             let mut instruction = super::operation::lower_statement(
                 &mut ctx,
                 super::operation::OperationSite {
@@ -425,6 +436,7 @@ pub(super) fn lower_function(
         entry: checked_block(entry.id, function)?,
         blocks,
         expression_continuation_geometry,
+        operation_contracts,
         expected_sites,
     })
 }
@@ -472,7 +484,9 @@ pub(super) fn lower_argument_validations(
 
 fn rvalue_result(statement: &MirStmtKind) -> NativeCodegenResult<NativeRvalueResult> {
     Ok(match statement {
-        MirStmtKind::Assign { .. } => NativeRvalueResult::Assignment,
+        MirStmtKind::Assign { .. } | MirStmtKind::PreparedAssign { .. } => {
+            NativeRvalueResult::Assignment
+        }
         MirStmtKind::MultiAssign { targets, .. } => {
             let _ = u32::try_from(targets.targets.len()).map_err(|_| {
                 NativeCodegenError::new(
@@ -495,7 +509,8 @@ fn rvalue_result(statement: &MirStmtKind) -> NativeCodegenResult<NativeRvalueRes
                 "statement output has no Native IR rvalue role",
             ))
         }
-        MirStmtKind::PlaceMutation(_)
+        MirStmtKind::PrepareFixedAssignment(_)
+        | MirStmtKind::PlaceMutation(_)
         | MirStmtKind::CaptureSequence { .. }
         | MirStmtKind::WorkspaceEffect { .. }
         | MirStmtKind::EnvironmentEffect(_) => {
@@ -511,6 +526,10 @@ fn statement_rvalue_outputs(
     statement: &MirStmtKind,
 ) -> Option<(&runmat_mir::MirRvalue, Vec<Option<MirLocalId>>)> {
     match statement {
+        MirStmtKind::PreparedAssign { preparation, value } => Some((
+            value,
+            vec![super::operation::root_local(&preparation.mutation.place)],
+        )),
         MirStmtKind::Assign { place, value } => {
             Some((value, vec![super::operation::root_local(place)]))
         }
@@ -543,7 +562,8 @@ fn statement_rvalue_outputs(
                 .into_iter()
                 .collect(),
         )),
-        MirStmtKind::PlaceMutation(_)
+        MirStmtKind::PrepareFixedAssignment(_)
+        | MirStmtKind::PlaceMutation(_)
         | MirStmtKind::CaptureSequence { .. }
         | MirStmtKind::WorkspaceEffect { .. }
         | MirStmtKind::EnvironmentEffect(_) => None,
@@ -566,6 +586,15 @@ fn expression_produces_value(value: &runmat_mir::MirRvalue) -> bool {
 
 fn statement_output_roots(statement: &MirStmtKind) -> Vec<MirLocalId> {
     let roots = match statement {
+        MirStmtKind::PreparedAssign { preparation, .. } => {
+            super::operation::root_local(&preparation.mutation.place)
+                .into_iter()
+                .collect()
+        }
+        MirStmtKind::PrepareFixedAssignment(preparation) => match preparation.output() {
+            Some(runmat_mir::MirFixedSelectorDestination::Scalar(local)) => vec![local],
+            Some(runmat_mir::MirFixedSelectorDestination::Sequence(_)) | None => Vec::new(),
+        },
         MirStmtKind::Assign { place, .. } => {
             super::operation::root_local(place).into_iter().collect()
         }

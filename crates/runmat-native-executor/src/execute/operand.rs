@@ -1,7 +1,6 @@
 use runmat_mir::{MirConstant, MirOperand, MirRvalue};
 use runmat_runtime::execution::RootedValueLease;
 use runmat_runtime::native::NativeValueRef;
-use runmat_runtime::sequence::ResolveValueSequence;
 use runmat_value::Value;
 
 fn sequence_resolution_context(
@@ -111,39 +110,55 @@ pub(super) fn evaluate_rvalue(
                 values
             } else {
                 let base = materialize_operand(state, base)?;
-                let roots = RootedValueLease::for_values(std::iter::once(&base))
-                    .map_err(|error| NativeExecutorError::from(error.into_runtime_error()))?;
+                let roots = RootedValueLease::for_values_iterator_in_context(
+                    std::iter::once(&base),
+                    &state.runtime,
+                )?;
                 let runtime = state.runtime.clone();
-                let name = state.function.name.clone();
-                let member = member.0.clone();
-                super::call_suspension::begin_sequence_read(
-                    state,
-                    stage,
-                    Box::pin(async move {
-                        let sequence =
-                            runmat_runtime::object::resolve::read_member_sequence_with_context(
-                                Some(&runtime),
-                                base,
-                                member,
-                                false,
-                                Some(&name),
+                let functions = std::sync::Arc::clone(&state.functions);
+                let function = state.function.portable_id;
+                let member =
+                    runmat_runtime::call::argument_text::copy_str(&member.0, Some(&runtime))?;
+                super::call_suspension::begin_sequence_read(state, stage, || async move {
+                    let caller = functions
+                        .iter()
+                        .find(|candidate| candidate.portable_id == function)
+                        .ok_or_else(|| {
+                            NativeExecutorError::Host(
+                                "member read lost canonical caller metadata".into(),
                             )
-                            .await?;
-                        drop(roots);
-                        Ok(sequence)
-                    }),
-                )?
+                        })?;
+                    let sequence =
+                        runmat_runtime::object::resolve::read_member_sequence_text_with_context(
+                            Some(&runtime),
+                            base,
+                            member,
+                            false,
+                            Some(&caller.name),
+                        )
+                        .await?;
+                    drop(roots);
+                    Ok(sequence)
+                })?
             };
-            values.with_owned_sequence(|sequence| {
-                let values = sequence.resolve(
+            if *sequence_use == runmat_types::SequenceUse::RequireSingle {
+                return values
+                    .try_into_single()?
+                    .with_owned(|value| Ok(vec![state.arena.insert(value)]));
+            }
+            if *sequence_use == runmat_types::SequenceUse::ExpandAll {
+                return Ok(values
+                    .try_into_values()?
+                    .map(|value| state.arena.insert(value))
+                    .collect());
+            }
+            Ok(values
+                .resolve_values(
                     *sequence_use,
                     sequence_resolution_context(*sequence_use, requested_outputs),
-                )?;
-                Ok(super::call_suspension::own_output_storage(values)?
-                    .into_iter()
-                    .map(|value| state.arena.insert(value))
-                    .collect())
-            })
+                )?
+                .map(|value| state.arena.insert(value))
+                .collect())
         }
         MirRvalue::DynamicMember {
             base,
@@ -161,44 +176,55 @@ pub(super) fn evaluate_rvalue(
             } else {
                 let base = materialize_operand(state, base)?;
                 let member = materialize_operand(state, member)?;
-                let roots = RootedValueLease::for_values([&base, &member].into_iter())
-                    .map_err(|error| NativeExecutorError::from(error.into_runtime_error()))?;
-                let member = String::try_from(&member).map_err(|error| {
-                    NativeExecutorError::from(runmat_runtime::runtime_error::semantic_error(
-                        "DynamicFieldName",
-                        error,
-                    ))
-                })?;
+                let roots = RootedValueLease::for_values_iterator_in_context(
+                    [&base, &member].into_iter(),
+                    &state.runtime,
+                )?;
+                let member =
+                    runmat_runtime::call::argument_text::convert(&member, Some(&state.runtime))?;
                 let runtime = state.runtime.clone();
-                let name = state.function.name.clone();
-                super::call_suspension::begin_sequence_read(
-                    state,
-                    stage,
-                    Box::pin(async move {
-                        let sequence =
-                            runmat_runtime::object::resolve::read_member_sequence_with_context(
-                                Some(&runtime),
-                                base,
-                                member,
-                                false,
-                                Some(&name),
+                let functions = std::sync::Arc::clone(&state.functions);
+                let function = state.function.portable_id;
+                super::call_suspension::begin_sequence_read(state, stage, || async move {
+                    let caller = functions
+                        .iter()
+                        .find(|candidate| candidate.portable_id == function)
+                        .ok_or_else(|| {
+                            NativeExecutorError::Host(
+                                "dynamic member read lost canonical caller metadata".into(),
                             )
-                            .await?;
-                        drop(roots);
-                        Ok(sequence)
-                    }),
-                )?
+                        })?;
+                    let sequence =
+                        runmat_runtime::object::resolve::read_member_sequence_text_with_context(
+                            Some(&runtime),
+                            base,
+                            member,
+                            false,
+                            Some(&caller.name),
+                        )
+                        .await?;
+                    drop(roots);
+                    Ok(sequence)
+                })?
             };
-            values.with_owned_sequence(|sequence| {
-                let values = sequence.resolve(
+            if *sequence_use == runmat_types::SequenceUse::RequireSingle {
+                return values
+                    .try_into_single()?
+                    .with_owned(|value| Ok(vec![state.arena.insert(value)]));
+            }
+            if *sequence_use == runmat_types::SequenceUse::ExpandAll {
+                return Ok(values
+                    .try_into_values()?
+                    .map(|value| state.arena.insert(value))
+                    .collect());
+            }
+            Ok(values
+                .resolve_values(
                     *sequence_use,
                     sequence_resolution_context(*sequence_use, requested_outputs),
-                )?;
-                Ok(super::call_suspension::own_output_storage(values)?
-                    .into_iter()
-                    .map(|value| state.arena.insert(value))
-                    .collect())
-            })
+                )?
+                .map(|value| state.arena.insert(value))
+                .collect())
         }
         MirRvalue::WorkspaceFirstStaticProperty {
             workspace_name,
@@ -251,6 +277,11 @@ pub(super) fn evaluate_rvalue(
                     component_count,
                 )?;
                 return Ok(vec![state.arena.insert(value)]);
+            }
+            if state.contextual_index_extents.is_empty()
+                && super::mutation::has_fixed_end_context(state)
+            {
+                return super::mutation::resolve_fixed_end(state).map(|value| vec![value]);
             }
             let extent = state
                 .contextual_index_extents

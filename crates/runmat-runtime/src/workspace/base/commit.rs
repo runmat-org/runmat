@@ -155,7 +155,9 @@ impl BaseWorkspaceState {
                     ),
                 }
             }
-            storage.commit_unbounded_pending();
+            storage
+                .commit_unbounded_pending()
+                .map_err(BaseWorkspaceError::HostAllocation)?;
         }
         Ok(PreparedDirectCommit {
             base_revision,

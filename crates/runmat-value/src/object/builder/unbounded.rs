@@ -60,6 +60,9 @@ impl UnboundedObjectBuilder {
     pub fn replace_memmap_receiver(&mut self, value: super::super::MemmapReceiverState) {
         self.native_payload = Some(NativeObjectPayload::memmap_receiver_unbounded(value));
     }
+    pub fn replace_numeric_factor_data(&mut self, value: super::super::NumericFactorData) {
+        self.native_payload = Some(NativeObjectPayload::numeric_factor_unbounded(value));
+    }
     /// Consume an explicitly unbounded object generation as a property
     /// sequence. Class and object-only metadata are retired with the builder;
     /// child values move exactly once into the caller's replacement owner.

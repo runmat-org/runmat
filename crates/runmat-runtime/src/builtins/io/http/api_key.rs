@@ -9,6 +9,7 @@ pub(super) enum ApiKeyError {
     InvalidName,
     InvalidValue,
     MissingName,
+    Encoding(runmat_value::Utf16DecodeError),
     InvalidHeaderName(InvalidHeaderName),
     InvalidHeaderValue(InvalidHeaderValue),
 }
@@ -23,6 +24,7 @@ impl fmt::Display for ApiKeyError {
                 formatter.write_str("KeyValue must be a text, numeric, or logical scalar")
             }
             Self::MissingName => formatter.write_str("KeyValue requires a nonempty KeyName"),
+            Self::Encoding(_) => formatter.write_str("API key text contains malformed UTF-16"),
             Self::InvalidHeaderName(_) => {
                 formatter.write_str("KeyName is not a valid HTTP header name")
             }
@@ -38,6 +40,7 @@ impl std::error::Error for ApiKeyError {
         match self {
             Self::InvalidHeaderName(source) => Some(source),
             Self::InvalidHeaderValue(source) => Some(source),
+            Self::Encoding(source) => Some(source),
             _ => None,
         }
     }
@@ -101,7 +104,7 @@ impl PreparedApiKey {
             .and_then(|field| source.fields.get(field))
         {
             Some(value) if skip_resident && crate::dispatcher::value_contains_gpu(value) => None,
-            Some(value) => Some(text_scalar(value).ok_or(ApiKeyError::InvalidName)?),
+            Some(value) => Some(text_scalar(value)?.ok_or(ApiKeyError::InvalidName)?),
             None => Some(String::new()),
         };
         let value = match self
@@ -110,7 +113,7 @@ impl PreparedApiKey {
             .and_then(|field| source.fields.get(field))
         {
             Some(value) if skip_resident && crate::dispatcher::value_contains_gpu(value) => None,
-            Some(value) => Some(key_value(value).ok_or(ApiKeyError::InvalidValue)?),
+            Some(value) => Some(key_value(value)?.ok_or(ApiKeyError::InvalidValue)?),
             None => Some(String::new()),
         };
         Ok((name, value))
@@ -137,26 +140,32 @@ fn validate_components(
     }
 }
 
-fn text_scalar(value: &Value) -> Option<String> {
+fn text_scalar(value: &Value) -> Result<Option<String>, ApiKeyError> {
     match value {
-        Value::String(value) => Some(value.as_str().to_owned()),
-        Value::CharArray(value) if value.rows == 1 => Some(value.data().iter().collect()),
-        Value::StringArray(value) if value.data().len() == 1 => {
-            Some(value.data()[0].as_str().to_owned())
+        Value::String(value) => Ok(Some(value.as_str().to_owned())),
+        Value::CharArray(value) if value.rows == 1 => {
+            runmat_value::decode_utf16_code_units(value.data())
+                .map(Some)
+                .map_err(ApiKeyError::Encoding)
         }
-        _ => None,
+        Value::StringArray(value) if value.data().len() == 1 => {
+            Ok(Some(value.data()[0].as_str().to_owned()))
+        }
+        _ => Ok(None),
     }
 }
 
-fn key_value(value: &Value) -> Option<String> {
+fn key_value(value: &Value) -> Result<Option<String>, ApiKeyError> {
     match value {
-        Value::Num(value) => Some(value.to_string()),
-        Value::Int(value) => Some(value.decimal_string()),
-        Value::Bool(value) => Some(value.to_string()),
+        Value::Num(value) => Ok(Some(value.to_string())),
+        Value::Int(value) => Ok(Some(value.decimal_string())),
+        Value::Bool(value) => Ok(Some(value.to_string())),
         Value::Tensor(value) if crate::builtins::common::tensor::is_scalar_tensor(value) => {
-            value.numeric_value_at(0).map(numeric_scalar)
+            Ok(value.numeric_value_at(0).map(numeric_scalar))
         }
-        Value::LogicalArray(value) if value.len() == 1 => Some((value.data[0] != 0).to_string()),
+        Value::LogicalArray(value) if value.len() == 1 => {
+            Ok(Some((value.data[0] != 0).to_string()))
+        }
         _ => text_scalar(value),
     }
 }

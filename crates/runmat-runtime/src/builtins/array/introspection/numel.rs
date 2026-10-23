@@ -136,7 +136,7 @@ mod tests {
         );
         let cell = CellArray::new(vec![Value::Num(0.0); 6], 2, 3).unwrap();
         assert_eq!(call(Value::Cell(cell), vec![]).unwrap(), Value::Num(6.0));
-        let chars = CharArray::new("RunMat".chars().collect(), 1, 6).unwrap();
+        let chars = CharArray::from_unicode_scalars("RunMat".chars().collect(), 1, 6).unwrap();
         assert_eq!(
             call(Value::CharArray(chars), vec![]).unwrap(),
             Value::Num(6.0)

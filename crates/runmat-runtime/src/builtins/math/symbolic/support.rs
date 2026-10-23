@@ -236,26 +236,43 @@ pub(crate) fn symbolic_expr_to_value(expr: SymbolicExpr) -> Value {
     Value::Symbolic(expr)
 }
 
-pub(crate) fn symbolic_variable_name_from_value(value: &Value) -> Option<String> {
-    match value {
+pub(crate) fn symbolic_variable_name_from_value(
+    value: &Value,
+) -> Result<Option<String>, runmat_value::Utf16DecodeError> {
+    Ok(match value {
         Value::Symbolic(expr) => expr.variable_name().map(ToOwned::to_owned),
-        _ => text_scalar(value).map(|text| text.trim().to_string()),
+        _ => text_scalar(value)?.map(|text| text.trim().to_string()),
     }
-    .filter(|name| is_valid_symbolic_identifier(name))
+    .filter(|name| is_valid_symbolic_identifier(name)))
 }
 
 pub(crate) fn empty_return_value() -> Value {
     Value::Tensor(Tensor::zeros(vec![0, 0]))
 }
 
-pub(crate) fn text_scalar(value: &Value) -> Option<String> {
-    match value {
+pub(crate) fn text_scalar(value: &Value) -> Result<Option<String>, runmat_value::Utf16DecodeError> {
+    if !is_text_scalar(value) {
+        return Ok(None);
+    }
+    Ok(match value {
         Value::String(text) => Some(text.as_str().to_owned()),
-        Value::CharArray(chars) if chars.rows == 1 => Some(chars.data().iter().collect()),
+        Value::CharArray(chars) => Some(runmat_value::decode_utf16_code_units(chars.data())?),
         Value::StringArray(array) if array.data().len() == 1 => {
             Some(array.data()[0].as_str().to_owned())
         }
         _ => None,
+    })
+}
+
+/// Geometry-only admission, before a caller allocates text or expression nodes.
+pub(crate) fn is_text_scalar(value: &Value) -> bool {
+    match value {
+        Value::String(_) => true,
+        Value::StringArray(a) => a.data().len() == 1,
+        Value::CharArray(a) => {
+            a.rows == 1 && a.shape.iter().skip(2).all(|&d| d == 1) && a.validate_layout().is_ok()
+        }
+        _ => false,
     }
 }
 
@@ -267,6 +284,33 @@ pub(crate) fn is_valid_identifier(name: &str) -> bool {
 mod tests {
     use super::*;
     use runmat_value::IntegerStorage;
+
+    #[test]
+    fn scalar_text_preserves_rows_but_never_concatenates_character_pages() {
+        let row = runmat_value::CharArray::new_row("left");
+        assert_eq!(
+            text_scalar(&Value::CharArray(row.clone()))
+                .unwrap()
+                .as_deref(),
+            Some("left")
+        );
+        let pages =
+            runmat_value::CharArray::from_unicode_scalars_with_shape(vec!['x', 'y'], vec![1, 1, 2])
+                .unwrap();
+        assert!(text_scalar(&Value::CharArray(pages)).unwrap().is_none());
+        let mut inconsistent = row;
+        inconsistent.cols = 1;
+        assert!(text_scalar(&Value::CharArray(inconsistent))
+            .unwrap()
+            .is_none());
+        let malformed = runmat_value::CharArray::from_code_units(
+            vec![runmat_value::Utf16CodeUnit::from_raw(0xd800)],
+            1,
+            1,
+        )
+        .unwrap();
+        assert!(text_scalar(&Value::CharArray(malformed)).is_err());
+    }
 
     #[test]
     fn symbolic_scalar_reads_typed_integer_tensor_storage_exactly() {

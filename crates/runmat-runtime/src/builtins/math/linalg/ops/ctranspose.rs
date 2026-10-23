@@ -295,10 +295,10 @@ fn ctranspose_char_array(ca: CharArray) -> BuiltinResult<CharArray> {
     let rows = ca.rows;
     let cols = ca.cols;
     if ca.data().is_empty() {
-        return CharArray::new(Vec::new(), cols, rows)
+        return CharArray::from_code_units(Vec::new(), cols, rows)
             .map_err(|e| internal_error(format!("{NAME}: {e}")));
     }
-    let mut out = vec!['\0'; ca.data().len()];
+    let mut out = vec![runmat_value::Utf16CodeUnit::from_raw(0); ca.data().len()];
     for r in 0..rows {
         for c in 0..cols {
             let src = r * cols + c;
@@ -308,7 +308,7 @@ fn ctranspose_char_array(ca: CharArray) -> BuiltinResult<CharArray> {
             }
         }
     }
-    CharArray::new(out, cols, rows).map_err(|e| internal_error(format!("{NAME}: {e}")))
+    CharArray::from_code_units(out, cols, rows).map_err(|e| internal_error(format!("{NAME}: {e}")))
 }
 
 fn ctranspose_string_array(sa: StringArray) -> BuiltinResult<StringArray> {
@@ -792,13 +792,13 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn ctranspose_char_matrix() {
-        let ca = CharArray::new("runmat".chars().collect(), 2, 3).unwrap();
+        let ca = CharArray::from_unicode_scalars("runmat".chars().collect(), 2, 3).unwrap();
         let value = call_ctranspose(Value::CharArray(ca)).expect("ctranspose");
         match value.value() {
             Value::CharArray(out) => {
                 assert_eq!(out.rows, 3);
                 assert_eq!(out.cols, 2);
-                assert_eq!(out.data(), vec!['r', 'm', 'u', 'a', 'n', 't']);
+                assert_eq!(out.data(), runmat_value::encode_utf16_code_units("rmuant"));
             }
             other => panic!("expected char array, got {other:?}"),
         }

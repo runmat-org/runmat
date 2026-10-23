@@ -1,10 +1,8 @@
-use std::collections::HashMap;
-
 use runmat_hir::{
     ExprId, HirError, HirExpr, HirExprKind, HirPlace, HirSequenceTarget, IndexComponent,
 };
 
-use crate::{MirOperand, MirStmt};
+use crate::MirStmt;
 
 use super::super::MirLoweringContext;
 use super::expression::{cache_expr, prepare_expr_prefix};
@@ -14,7 +12,7 @@ pub(super) fn prepare_sequence_prefix(
     target: &HirSequenceTarget,
     awaited: ExprId,
     output: &mut Vec<MirStmt>,
-    replacements: &mut HashMap<ExprId, MirOperand>,
+    replacements: &mut crate::lowering::AwaitReplacements,
 ) -> Result<bool, HirError> {
     match target {
         HirSequenceTarget::Member { base, .. } => {
@@ -34,7 +32,7 @@ pub(super) fn prepare_place_prefix(
     place: &HirPlace,
     awaited: ExprId,
     output: &mut Vec<MirStmt>,
-    replacements: &mut HashMap<ExprId, MirOperand>,
+    replacements: &mut crate::lowering::AwaitReplacements,
 ) -> Result<bool, HirError> {
     match place {
         HirPlace::Binding(_) => Ok(false),
@@ -56,7 +54,7 @@ fn prepare_indexed(
     indexing: &runmat_hir::IndexingSemantics,
     awaited: ExprId,
     output: &mut Vec<MirStmt>,
-    replacements: &mut HashMap<ExprId, MirOperand>,
+    replacements: &mut crate::lowering::AwaitReplacements,
 ) -> Result<bool, HirError> {
     if prepare_place_expr_prefix(ctx, base, awaited, output, replacements)? {
         return Ok(true);
@@ -78,7 +76,7 @@ fn prepare_ordered(
     member: Option<&HirExpr>,
     awaited: ExprId,
     output: &mut Vec<MirStmt>,
-    replacements: &mut HashMap<ExprId, MirOperand>,
+    replacements: &mut crate::lowering::AwaitReplacements,
 ) -> Result<bool, HirError> {
     if prepare_place_expr_prefix(ctx, base, awaited, output, replacements)? {
         return Ok(true);
@@ -97,7 +95,7 @@ fn prepare_place_expr_prefix(
     expr: &HirExpr,
     awaited: ExprId,
     output: &mut Vec<MirStmt>,
-    replacements: &mut HashMap<ExprId, MirOperand>,
+    replacements: &mut crate::lowering::AwaitReplacements,
 ) -> Result<bool, HirError> {
     match &expr.kind {
         HirExprKind::Binding(_) => Ok(false),

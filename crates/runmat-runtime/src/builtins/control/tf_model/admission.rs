@@ -459,6 +459,30 @@ mod tests {
             let error = block_on(super::super::ss_poles_from_object_async(&object, "pole"))
                 .expect_err("inexact resident state matrix");
             assert_eq!(error.identifier(), Some("RunMat:pole:InvalidModel"));
+            assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 8);
+
+            // Exactness is significant-bit based, not an abs(value)<=2^53
+            // cutoff. This wider integer must still pass one owning gather.
+            let exact = [1_u64 << 54];
+            let resident = provider
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::U64(&exact),
+                    shape: &[1, 1],
+                })
+                .expect("exact wide resident state matrix");
+            let exact_object =
+                ss_object([("A", Value::GpuTensor(resident)), ("Ts", Value::Num(0.0))]);
+            provider.reset_telemetry();
+            let (poles, sample) = block_on(super::super::ss_poles_from_object_async(
+                &exact_object,
+                "pole",
+            ))
+            .expect("exact wide resident state matrix is supported");
+            assert_eq!(poles.len(), 1);
+            assert_eq!(poles[0].re, exact[0] as f64);
+            assert_eq!(poles[0].im, 0.0);
+            assert_eq!(sample, 0.0);
             assert_eq!(provider.telemetry_snapshot().download_bytes, 8);
 
             let value = [1_u64];

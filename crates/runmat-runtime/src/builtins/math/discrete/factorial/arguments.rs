@@ -18,7 +18,7 @@ pub(super) fn parse_output_template(
     match args.len() {
         0 => Ok(OutputTemplate::Default),
         2 if matches!(
-            keyword_of(args.get(0).expect("keyword")).as_deref(),
+            keyword_of(args.get(0).expect("keyword"))?.as_deref(),
             Some("like")
         ) =>
         {
@@ -31,7 +31,7 @@ pub(super) fn parse_output_template(
             ))
         }
         1 if matches!(
-            keyword_of(args.get(0).expect("keyword")).as_deref(),
+            keyword_of(args.get(0).expect("keyword"))?.as_deref(),
             Some("like")
         ) =>
         {

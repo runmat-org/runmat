@@ -35,6 +35,29 @@ impl AccelProvider for TrackingProvider {
     fn device_id(&self) -> u32 {
         self.inner.device_id()
     }
+    fn capability_snapshot(&self) -> runmat_accelerate_api::ProviderCapabilitySnapshot {
+        self.inner.capability_snapshot()
+    }
+    fn capability_snapshot_ref(
+        &self,
+    ) -> Option<&runmat_accelerate_api::ProviderCapabilitySnapshot> {
+        self.inner.capability_snapshot_ref()
+    }
+    fn placement_resources(&self) -> runmat_execution::ProviderResourceSnapshot {
+        self.inner.placement_resources()
+    }
+    fn query_feasibility(
+        &self,
+        query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+    ) -> runmat_accelerate_api::ProviderFeasibility {
+        self.inner.query_feasibility(query)
+    }
+    fn estimate_cost(
+        &self,
+        query: &runmat_accelerate_api::ProviderCostQuery,
+    ) -> Option<runmat_accelerate_api::ProviderCostEstimate> {
+        self.inner.estimate_cost(query)
+    }
     fn unary_sin<'a>(
         &'a self,
         input: &'a GpuTensorHandle,

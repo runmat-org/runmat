@@ -16,11 +16,12 @@ fn rows(value: Value) -> Vec<String> {
     };
     (0..array.rows)
         .map(|row| {
-            (0..array.cols)
-                .map(|column| array.data()[row * array.cols + column])
-                .collect::<String>()
-                .trim_end()
-                .to_string()
+            runmat_value::decode_utf16_code_units(
+                &array.data()[row * array.cols..(row + 1) * array.cols],
+            )
+            .expect("valid UTF-16 fixture")
+            .trim_end()
+            .to_string()
         })
         .collect()
 }
@@ -88,8 +89,12 @@ fn strict_mode_uses_a_unix_character_vector() {
         panic!("expected character array");
     };
     assert_eq!(listing.rows, 1);
-    assert!(listing.data().iter().collect::<String>().contains("a.txt"));
-    assert!(listing.data().iter().collect::<String>().contains("b.txt"));
+    assert!(runmat_value::decode_utf16_code_units(listing.data())
+        .expect("valid UTF-16 fixture")
+        .contains("a.txt"));
+    assert!(runmat_value::decode_utf16_code_units(listing.data())
+        .expect("valid UTF-16 fixture")
+        .contains("b.txt"));
 }
 
 #[test]
@@ -107,7 +112,9 @@ fn output_and_character_shape_admission_precede_enumeration() {
         runmat_builtins::LS_ERROR_TOO_MANY_OUTPUTS.identifier
     );
     drop(outputs);
-    let pages = runmat_value::CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap();
+    let pages =
+        runmat_value::CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 1, 2])
+            .unwrap();
     assert_eq!(
         run(vec![Value::CharArray(pages)]).unwrap_err().identifier(),
         runmat_builtins::LS_ERROR_NAME.identifier

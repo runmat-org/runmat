@@ -24,6 +24,7 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
     store.diagnostics.extend(program.diagnostics.clone());
     store.dependencies = analysis_dependencies(&store);
     store.program_points.clear();
+    store.operation_contracts.clear();
     store.fusion_stage_contracts.clear();
     store.regions.clear();
     store.functions.clear();
@@ -64,6 +65,16 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
             super::constructor_entry::instance_output_local(assembly, body),
             &program.summaries,
         );
+        let mut operation_effects = runmat_types::EffectSet::default();
+        let mut operation_capabilities = runmat_types::CapabilitySet::default();
+        for contract in &flow.operation_contracts {
+            operation_effects
+                .0
+                .extend(contract.effects.0.iter().copied());
+            operation_capabilities
+                .0
+                .extend(contract.capabilities.0.iter().copied());
+        }
         let convergence = if !flow.converged || program.nonconverged.contains(function) {
             FunctionConvergence::DynamicRecursion
         } else if flow.widened || program.widened.contains(function) {
@@ -93,10 +104,17 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
             ));
         liveness_by_function.insert(*function, liveness);
         store.program_points.extend(flow.points);
+        store.operation_contracts.extend(flow.operation_contracts);
         let summary = program
             .summaries
             .get(function)
             .expect("interprocedural summary exists for every body");
+        operation_effects
+            .0
+            .extend(summary.effects.0.iter().copied());
+        operation_capabilities
+            .0
+            .extend(summary.capabilities.0.iter().copied());
         if !flow.converged || program.nonconverged.contains(function) {
             let span = assembly
                 .functions
@@ -120,7 +138,7 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
             function: program_function,
             callable: CallableFact {
                 identity: Some(CallableIdentity::BoundFunction(*function)),
-                capabilities: summary.capabilities.clone(),
+                capabilities: operation_capabilities.clone(),
                 parameters: program
                     .parameters
                     .get(function)
@@ -135,13 +153,16 @@ pub fn analyze_assembly(assembly: &MirAssembly) -> AnalysisStore {
                 captures_complete: true,
             },
             outputs: summary.outputs.clone(),
-            effects: summary.effects.clone(),
-            capabilities: summary.capabilities.clone(),
+            effects: operation_effects,
+            capabilities: operation_capabilities,
             convergence,
         });
     }
 
     store.program_points.sort_by_key(|point| point.point);
+    store
+        .operation_contracts
+        .sort_by(|left, right| left.site.cmp(&right.site));
     store
         .fusion_stage_contracts
         .sort_by_key(|contract| contract.point);

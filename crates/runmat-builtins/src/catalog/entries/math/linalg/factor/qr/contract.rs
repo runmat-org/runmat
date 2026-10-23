@@ -178,7 +178,64 @@ pub const QR_INPUTS_A_OPTION_OPTION: [BuiltinParamDescriptor; 3] = [
     },
 ];
 
-pub const QR_SIGNATURES: [BuiltinSignatureDescriptor; 9] = [
+const SPARSE_S: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "S",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Sparse single or double coefficient matrix.",
+};
+const SPARSE_B: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "B",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Dense or sparse floating right-hand sides with the same row count as S.",
+};
+const SPARSE_OPTION: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "option",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Option token (0, econ, matrix, or vector).",
+};
+const SPARSE_OPTION2: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "option2",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Second option token (0, econ, matrix, or vector).",
+};
+const SPARSE_C: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "C",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description:
+        "Dense Q' * B, truncated to the economy height when selected; Q is not materialized.",
+};
+const SPARSE_R: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "R",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Sparse upper triangular or trapezoidal factor in the coefficient class.",
+};
+const SPARSE_P: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "P",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Sparse double permutation matrix or dense one-based double column index vector.",
+};
+pub const QR_INPUTS_SB: [BuiltinParamDescriptor; 2] = [SPARSE_S, SPARSE_B];
+pub const QR_INPUTS_SB_OPTION: [BuiltinParamDescriptor; 3] = [SPARSE_S, SPARSE_B, SPARSE_OPTION];
+pub const QR_INPUTS_SB_OPTIONS: [BuiltinParamDescriptor; 4] =
+    [SPARSE_S, SPARSE_B, SPARSE_OPTION, SPARSE_OPTION2];
+pub const QR_OUTPUT_CR: [BuiltinParamDescriptor; 2] = [SPARSE_C, SPARSE_R];
+pub const QR_OUTPUT_CRP: [BuiltinParamDescriptor; 3] = [SPARSE_C, SPARSE_R, SPARSE_P];
+
+pub const QR_SIGNATURES: [BuiltinSignatureDescriptor; 15] = [
     BuiltinSignatureDescriptor {
         label: "R = qr(A)",
         inputs: &QR_INPUTS_A,
@@ -223,6 +280,36 @@ pub const QR_SIGNATURES: [BuiltinSignatureDescriptor; 9] = [
         label: "[Q, R, P] = qr(A, option1, option2)",
         inputs: &QR_INPUTS_A_OPTION_OPTION,
         outputs: &QR_OUTPUT_QRP,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[C, R] = qr(S, B)",
+        inputs: &QR_INPUTS_SB,
+        outputs: &QR_OUTPUT_CR,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[C, R] = qr(S, B, option)",
+        inputs: &QR_INPUTS_SB_OPTION,
+        outputs: &QR_OUTPUT_CR,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[C, R] = qr(S, B, option1, option2)",
+        inputs: &QR_INPUTS_SB_OPTIONS,
+        outputs: &QR_OUTPUT_CR,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[C, R, P] = qr(S, B)",
+        inputs: &QR_INPUTS_SB,
+        outputs: &QR_OUTPUT_CRP,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[C, R, P] = qr(S, B, option)",
+        inputs: &QR_INPUTS_SB_OPTION,
+        outputs: &QR_OUTPUT_CRP,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[C, R, P] = qr(S, B, option1, option2)",
+        inputs: &QR_INPUTS_SB_OPTIONS,
+        outputs: &QR_OUTPUT_CRP,
     },
 ];
 

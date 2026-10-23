@@ -70,16 +70,16 @@ pub(super) fn datenum_from_datevec_tensor(tensor: &Tensor, context: &str) -> Bui
 pub(super) fn char_array_from_rows(rows: &[String], context: &str) -> BuiltinResult<CharArray> {
     let width = rows
         .iter()
-        .map(|row| row.chars().count())
+        .map(|row| row.encode_utf16().count())
         .max()
         .unwrap_or(0);
-    let mut data = vec![' '; rows.len().saturating_mul(width)];
+    let mut data = vec![Utf16CodeUnit::from_raw(b' ' as u16); rows.len().saturating_mul(width)];
     for (row_idx, row) in rows.iter().enumerate() {
-        for (col, ch) in row.chars().enumerate() {
-            data[row_idx * width + col] = ch;
+        for (col, unit) in row.encode_utf16().enumerate() {
+            data[row_idx * width + col] = Utf16CodeUnit::from_raw(unit);
         }
     }
-    CharArray::new(data, rows.len(), width)
+    CharArray::from_code_units(data, rows.len(), width)
         .map_err(|err| datetime_error(format!("{context}: {err}")))
 }
 
@@ -303,13 +303,14 @@ pub(super) fn holiday_set_for_range(start_key: i64, end_key: i64) -> BuiltinResu
 }
 
 pub(super) fn holiday_set_from_optional_or_default(
+    runtime: Option<&crate::context::RuntimeContext>,
     value: Option<Value>,
     context: &str,
     start_key: i64,
     end_key: i64,
 ) -> BuiltinResult<HashSet<i64>> {
     if let Some(value) = value {
-        let serials = numeric_or_datetime_serial_tensor(value, context)?;
+        let serials = numeric_or_datetime_serial_tensor(runtime, value, context)?;
         let values = tensor::tensor_values_f64_cow(&serials);
         if values.is_empty() {
             return holiday_set_for_range(start_key, end_key);

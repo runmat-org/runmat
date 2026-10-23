@@ -117,7 +117,8 @@ fn client() -> Value {
 
 fn char_selector(shape: Vec<usize>) -> Value {
     Value::CharArray(
-        CharArray::new_with_shape("clients".chars().collect(), shape).expect("selector shape"),
+        CharArray::from_unicode_scalars_with_shape("clients".chars().collect(), shape)
+            .expect("selector shape"),
     )
 }
 

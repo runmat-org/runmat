@@ -42,8 +42,8 @@ impl AccelProvider for Provider {
         input: &GpuTensorHandle,
         _: usize,
         spacing: ProviderTrapezoidSpacing<'_>,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        match self.fault {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        let result: anyhow::Result<_> = (|| match self.fault {
             Fault::Failure => Err(anyhow::Error::new(std::io::Error::new(
                 std::io::ErrorKind::BrokenPipe,
                 "cumtrapz execution failed",
@@ -57,7 +57,10 @@ impl AccelProvider for Provider {
                 };
                 Ok(handle.with_view(handle.view().clone())?)
             }
-        }
+        })();
+        result.map(Some).map_err(|source| {
+            runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+        })
     }
 }
 
@@ -76,8 +79,11 @@ fn cumulative_integration_retires_spacing_on_execution_failure_and_alias_rejecti
             .unwrap();
         let x = Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap();
         let error = futures::executor::block_on(cumtrapz_builtin(
+            None,
             Value::Tensor(x),
-            vec![Value::GpuTensor(input.handle.clone())],
+            crate::builtins::common::test_support::builtin_arguments(vec![Value::GpuTensor(
+                input.handle.clone(),
+            )]),
         ))
         .unwrap_err();
         assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
@@ -94,7 +100,7 @@ fn cumulative_integration_retires_spacing_on_execution_failure_and_alias_rejecti
                 assert_eq!(cause.kind(), std::io::ErrorKind::BrokenPipe);
                 assert_eq!(cause.to_string(), "cumtrapz execution failed");
             }
-            _ => assert!(error.message().contains("malformed or aliased")),
+            _ => assert_eq!(error.identifier(), CUMTRAPZ_ERROR_INTERNAL.identifier),
         }
         let uploads = provider.uploads.lock().unwrap();
         assert_eq!(uploads.len(), 1);

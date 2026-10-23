@@ -3,7 +3,11 @@ use super::*;
 #[test]
 fn saveas_rejects_unsupported_extensions_and_explicit_format_wins() {
     let _guard = setup();
-    let fig = figure_builtin(vec![]).expect("figure");
+    let fig = figure_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    )
+    .expect("figure");
     let jpg_err = block_on(saveas_builtin(vec![
         Value::Num(fig),
         Value::String("plot.jpg".into()),
@@ -30,7 +34,11 @@ fn saveas_png_uses_shared_renderer_capability_before_file_effects() {
         "/figures",
     ));
     let _filesystem = runmat_filesystem::replace_provider(filesystem.clone());
-    let figure = figure_builtin(vec![]).expect("figure");
+    let figure = figure_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    )
+    .expect("figure");
 
     let error = block_on(saveas_builtin(vec![
         Value::Num(figure),
@@ -55,7 +63,11 @@ fn saveas_png_uses_shared_renderer_capability_before_file_effects() {
 #[test]
 fn openfig_reuse_returns_the_session_owned_open_copy() {
     let _guard = setup();
-    let figure = figure_builtin(vec![]).expect("source figure");
+    let figure = figure_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    )
+    .expect("source figure");
     let path = temp_path("reuse");
     let _ = std::fs::remove_file(&path);
     block_on(savefig_builtin(vec![
@@ -82,7 +94,11 @@ fn openfig_reuse_returns_the_session_owned_open_copy() {
 #[test]
 fn openfig_reuse_does_not_cross_runtime_sessions() {
     let _guard = setup();
-    let figure = figure_builtin(vec![]).expect("source figure");
+    let figure = figure_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    )
+    .expect("source figure");
     let path = temp_path("reuse_sessions");
     let _ = std::fs::remove_file(&path);
     block_on(savefig_builtin(vec![
@@ -132,8 +148,16 @@ fn openfig_reuse_does_not_cross_runtime_sessions() {
 #[test]
 fn openfig_reuse_reimports_a_complete_bundle_after_one_copy_closes() {
     let _guard = setup();
-    let first = figure_builtin(vec![]).expect("first source figure");
-    let second = figure_builtin(vec![]).expect("second source figure");
+    let first = figure_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    )
+    .expect("first source figure");
+    let second = figure_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    )
+    .expect("second source figure");
     let path = temp_path("reuse_partial_close");
     let _ = std::fs::remove_file(&path);
     block_on(savefig_builtin(vec![
@@ -181,7 +205,11 @@ fn openfig_reuse_reimports_a_complete_bundle_after_one_copy_closes() {
 #[test]
 fn openfig_validates_the_complete_archive_before_importing_any_figure() {
     let _guard = setup();
-    let figure = figure_builtin(vec![]).expect("source figure");
+    let figure = figure_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    )
+    .expect("source figure");
     let source = clone_figure(FigureHandle::from(figure as u32)).expect("source snapshot");
     let valid = block_on(export_figure_snapshot(&source, SAVEFIG)).expect("valid scene payload");
     let archive = block_on(encode_figure_bundle(

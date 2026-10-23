@@ -14,7 +14,6 @@ use runmat_value::{
 };
 
 use crate::builtins::common::tensor;
-use crate::builtins::strings::common::char_row_to_string;
 use crate::console::{record_console_line, ConsoleStream};
 use crate::gather_if_needed_async;
 

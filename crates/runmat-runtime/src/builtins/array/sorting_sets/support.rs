@@ -1,27 +1,7 @@
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, IntegerElementType};
-use runmat_builtins::{
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerScalarDoubleRule,
-};
 use runmat_value::{ComplexTensor, IntegerStorage, Tensor, Value};
 
 use crate::builtins::common::gpu_helpers;
-
-pub(super) const BINARY_SET_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "A accepts every real integer class; unlike nondouble numeric inputs must use the same class, while double is the documented cross-class exception.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "B",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "B accepts every real integer class; unlike nondouble numeric inputs must use the same class, while double is the documented cross-class exception.",
-    },
-];
 
 pub(super) fn is_unsupported_set_gpu_integer(handle: &GpuTensorHandle) -> bool {
     matches!(

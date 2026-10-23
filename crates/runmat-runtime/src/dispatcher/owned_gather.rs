@@ -17,6 +17,15 @@ pub async fn gather_if_needed_owned_async(
     value: Value,
     budget: Option<&mut CpuCooperationBudget>,
 ) -> Result<Value, RuntimeError> {
+    let runtime = crate::context::legacy::active();
+    if super::managed_gather::is_managed(runtime.as_ref())? {
+        return super::managed_gather::owned(
+            value,
+            runtime.as_ref().expect("managed gather context"),
+            budget,
+        )
+        .await;
+    }
     gather_owned(value, budget).await
 }
 

@@ -111,8 +111,68 @@ struct HostProbeFacts {
     host: MeasuredNativeProbeFacts,
     linked_runtime: runmat_execution::Digest,
     linked_catalog: runmat_execution::Digest,
-    source_evaluation_service_abi: runmat_execution::Digest,
+    service_abis: Vec<CanonicalServiceAbi>,
     archive: Option<InspectedNativeArchiveFacts>,
+}
+
+#[derive(serde::Serialize)]
+struct CanonicalServiceAbi {
+    kind: runmat_execution::host::NativeDeploymentServiceKind,
+    abi: runmat_execution::Digest,
+}
+
+fn canonical_service_abis() -> Vec<CanonicalServiceAbi> {
+    use runmat_execution::host::{
+        native_clock_service_abi, native_host_callback_service_abi,
+        native_hosted_dynamic_dispatch_abi, native_local_service_abi, native_network_service_abi,
+        native_source_evaluation_service_abi, native_ui_service_abi, NativeDeploymentServiceKind,
+    };
+    use runmat_types::EffectKind;
+
+    let mut facts = vec![
+        CanonicalServiceAbi {
+            kind: NativeDeploymentServiceKind::SourceEvaluation,
+            abi: native_source_evaluation_service_abi(),
+        },
+        CanonicalServiceAbi {
+            kind: NativeDeploymentServiceKind::Effect(EffectKind::Clock),
+            abi: native_clock_service_abi(),
+        },
+        CanonicalServiceAbi {
+            kind: NativeDeploymentServiceKind::Effect(EffectKind::Network),
+            abi: native_network_service_abi(),
+        },
+        CanonicalServiceAbi {
+            kind: NativeDeploymentServiceKind::Effect(EffectKind::UserInterface),
+            abi: native_ui_service_abi(),
+        },
+        CanonicalServiceAbi {
+            kind: NativeDeploymentServiceKind::Effect(EffectKind::HostCallback),
+            abi: native_host_callback_service_abi(),
+        },
+        CanonicalServiceAbi {
+            kind: NativeDeploymentServiceKind::HostedDynamicDispatch,
+            abi: native_hosted_dynamic_dispatch_abi(),
+        },
+    ];
+    facts.extend(
+        [
+            EffectKind::WorkspaceRead,
+            EffectKind::WorkspaceWrite,
+            EffectKind::EnvironmentRead,
+            EffectKind::EnvironmentWrite,
+            EffectKind::FilesystemRead,
+            EffectKind::FilesystemWrite,
+            EffectKind::Randomness,
+        ]
+        .into_iter()
+        .map(|effect| CanonicalServiceAbi {
+            kind: NativeDeploymentServiceKind::Effect(effect),
+            abi: native_local_service_abi(),
+        }),
+    );
+    facts.sort_unstable_by_key(|fact| fact.kind);
+    facts
 }
 
 /// Actual host-linked Runtime facts plus optional bounded target-archive
@@ -172,12 +232,11 @@ fn run_host_probe_facts(
         })
         .transpose()?;
     let facts = HostProbeFacts {
-        schema_version: 1,
+        schema_version: 2,
         host: measured(target, probe)?,
         linked_runtime: runmat_runtime::native::linked_runtime_fingerprint(),
         linked_catalog: runmat_runtime::native::linked_catalog_fingerprint(),
-        source_evaluation_service_abi: runmat_execution::host::native_source_evaluation_service_abi(
-        ),
+        service_abis: canonical_service_abis(),
         archive,
     };
     println!(
@@ -331,6 +390,19 @@ struct SelectedArguments {
     numerical_evidence: Option<PathBuf>,
     manifest_out: PathBuf,
     component_root: PathBuf,
+    linker_tree_metadata: Option<PathBuf>,
+    linker_tree_blobs: Option<PathBuf>,
+    sysroot_tree_metadata: Option<PathBuf>,
+    sysroot_tree_blobs: Option<PathBuf>,
+    build_tree_grant: Option<PathBuf>,
+    native_archive_declaration: Option<PathBuf>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ContentAddressedArchiveInput {
+    id: runmat_execution_artifact::target_pack::ComponentId,
+    path: PathBuf,
 }
 
 fn run_selected(arguments: impl Iterator<Item = std::ffi::OsString>) -> Result<(), String> {
@@ -353,12 +425,102 @@ fn run_selected(arguments: impl Iterator<Item = std::ffi::OsString>) -> Result<(
         .as_ref()
         .map(|path| read_bounded(path, MAX_COMPONENT_BYTES))
         .transpose()?;
-    let produced = runmat_aot::target_pack::build_hosted_target_pack(
-        archive,
-        numerical_backend,
-        numerical_evidence,
-        declaration,
-    )
+    let tree_paths = [
+        arguments.linker_tree_metadata.as_ref(),
+        arguments.linker_tree_blobs.as_ref(),
+        arguments.sysroot_tree_metadata.as_ref(),
+        arguments.sysroot_tree_blobs.as_ref(),
+        arguments.build_tree_grant.as_ref(),
+        arguments.native_archive_declaration.as_ref(),
+    ];
+    let content_addressed = tree_paths.iter().all(|path| path.is_some());
+    if !content_addressed && tree_paths.iter().any(|path| path.is_some()) {
+        return Err("content-addressed selected packs require both tree metadata/blob roots and an explicit storage grant".into());
+    }
+    let produced = if content_addressed {
+        let grant: runmat_aot::link::NativeStorageGrant = serde_json::from_slice(&read_bounded(
+            arguments.build_tree_grant.as_ref().expect("checked"),
+            1024 * 1024,
+        )?)
+        .map_err(|error| format!("decode explicit build-tree storage grant: {error}"))?;
+        grant.archive.validate()?;
+        let mut materialization =
+            runmat_aot::target_pack::ContentAddressedMaterialization::default();
+        let linker = runmat_aot::target_pack::load_physical_hosted_tree(
+            arguments.linker_tree_metadata.as_ref().expect("checked"),
+            arguments.linker_tree_blobs.as_ref().expect("checked"),
+            grant,
+            &mut materialization,
+        )
+        .map_err(|error| error.to_string())?;
+        let sysroot = runmat_aot::target_pack::load_physical_hosted_tree(
+            arguments.sysroot_tree_metadata.as_ref().expect("checked"),
+            arguments.sysroot_tree_blobs.as_ref().expect("checked"),
+            grant,
+            &mut materialization,
+        )
+        .map_err(|error| error.to_string())?;
+        let archive_declaration = arguments
+            .native_archive_declaration
+            .as_ref()
+            .expect("checked");
+        let archive_base = archive_declaration
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."));
+        let archive_inputs: Vec<ContentAddressedArchiveInput> = serde_json::from_slice(
+            &read_bounded(archive_declaration, 1024 * 1024)?,
+        )
+        .map_err(|error| format!("decode native implementation archive inventory: {error}"))?;
+        if archive_inputs.len() as u64 > grant.archive.max_files
+            || archive_inputs.len() as u64 > grant.archive.max_entries
+            || archive_inputs
+                .windows(2)
+                .any(|pair| pair[0].id >= pair[1].id)
+        {
+            return Err(
+                "native implementation archive inventory exceeds its count grant or is not sorted and unique"
+                    .into(),
+            );
+        }
+        let mut native_archives = Vec::with_capacity(archive_inputs.len());
+        for input in archive_inputs {
+            let path = if input.path.is_relative() {
+                archive_base.join(input.path)
+            } else {
+                input.path
+            };
+            native_archives.push(runmat_aot::target_pack::ContentAddressedNativeArchive {
+                id: input.id,
+                bytes: runmat_aot::target_pack::read_physical_native_archive(
+                    &path,
+                    &grant,
+                    &mut materialization,
+                )
+                .map_err(|error| error.to_string())?,
+            });
+        }
+        runmat_aot::target_pack::build_content_addressed_target_pack(
+            archive,
+            numerical_backend,
+            numerical_evidence,
+            declaration,
+            runmat_aot::target_pack::ContentAddressedPackBuildInputs {
+                linker,
+                sysroot,
+                native_archives,
+            },
+        )
+    } else {
+        eprintln!(
+            "runmat-aot-pack: producing hosted build inputs; this artifact cannot satisfy deterministic-deployed selection"
+        );
+        runmat_aot::target_pack::build_hosted_target_pack(
+            archive,
+            numerical_backend,
+            numerical_evidence,
+            declaration,
+        )
+    }
     .map_err(|error| error.to_string())?;
     let manifest = produced
         .manifest
@@ -387,6 +549,12 @@ fn parse_selected_arguments(
     let mut numerical_evidence = None;
     let mut manifest_out = None;
     let mut component_root = None;
+    let mut linker_tree_metadata = None;
+    let mut linker_tree_blobs = None;
+    let mut sysroot_tree_metadata = None;
+    let mut sysroot_tree_blobs = None;
+    let mut build_tree_grant = None;
+    let mut native_archive_declaration = None;
     while let Some(argument) = arguments.next() {
         let argument = argument
             .into_string()
@@ -402,6 +570,12 @@ fn parse_selected_arguments(
             "--numerical-evidence" => &mut numerical_evidence,
             "--manifest-out" => &mut manifest_out,
             "--component-root" => &mut component_root,
+            "--linker-tree-metadata" => &mut linker_tree_metadata,
+            "--linker-tree-blobs" => &mut linker_tree_blobs,
+            "--sysroot-tree-metadata" => &mut sysroot_tree_metadata,
+            "--sysroot-tree-blobs" => &mut sysroot_tree_blobs,
+            "--build-tree-grant" => &mut build_tree_grant,
+            "--native-archive-declaration" => &mut native_archive_declaration,
             _ => return Err(format!("unknown selected pack argument `{argument}`")),
         };
         if slot.replace(path).is_some() {
@@ -415,6 +589,12 @@ fn parse_selected_arguments(
         numerical_evidence,
         manifest_out: manifest_out.ok_or("--manifest-out is required")?,
         component_root: component_root.ok_or("--component-root is required")?,
+        linker_tree_metadata,
+        linker_tree_blobs,
+        sysroot_tree_metadata,
+        sysroot_tree_blobs,
+        build_tree_grant,
+        native_archive_declaration,
     })
 }
 

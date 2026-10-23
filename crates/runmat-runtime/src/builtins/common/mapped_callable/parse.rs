@@ -8,7 +8,14 @@ impl MappedCallable {
         match value {
             Value::String(text) => Self::parse_text(&text),
             Value::CharArray(value) if value.rows == 1 => {
-                Self::parse_text(&value.data().iter().collect::<String>())
+                let text = value.try_row_string().map_err(|source| {
+                    CallableParseError::Runtime(crate::runtime_error::semantic_error_with_source(
+                        "InvalidCallable",
+                        "callable name contains malformed UTF-16",
+                        source,
+                    ))
+                })?;
+                Self::parse_text(&text.expect("row character value has text"))
             }
             Value::CharArray(_) => Err(CallableParseError::CharacterNameMustBeRow),
             Value::StringArray(value) if value.data().len() == 1 => {

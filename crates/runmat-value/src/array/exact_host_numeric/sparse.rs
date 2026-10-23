@@ -2,10 +2,31 @@
 
 use super::*;
 use crate::{
-    ComplexElement, HostComplexBuffer, HostIndexBuffer, HostNumericBuffer, SparseCscValidation,
-    SparseTensor,
+    ComplexElement, HostComplexBuffer, HostNumericBuffer, SparseCscValidation, SparseTensor,
 };
 use std::num::NonZeroUsize;
+
+#[derive(Debug)]
+pub enum ExactHostSparsePublicationError {
+    Allocation(ExactHostNumericAllocationError),
+    Invalid(String),
+}
+impl std::fmt::Display for ExactHostSparsePublicationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Allocation(error) => write!(f, "{error}"),
+            Self::Invalid(error) => write!(f, "{error}"),
+        }
+    }
+}
+impl std::error::Error for ExactHostSparsePublicationError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Allocation(error) => Some(error),
+            Self::Invalid(_) => None,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExactHostSparseClass {
@@ -28,56 +49,6 @@ impl ExactHostSparseClass {
             Self::Logical => 2,
             Self::Numeric(_) | Self::Complex(_) => 3,
         }
-    }
-}
-
-struct ExactIndexAllocation {
-    allocation: AdoptedHostAllocation,
-    len: usize,
-}
-
-impl ExactIndexAllocation {
-    fn requested_bytes(len: usize) -> Result<usize, ExactHostNumericAllocationError> {
-        Layout::array::<usize>(len)
-            .map_err(|_| ExactHostNumericAllocationError::LayoutOverflow)?
-            .size()
-            .checked_add(Layout::new::<RustExactRelease>().size())
-            .and_then(|bytes| bytes.checked_add(HostIndexBuffer::exact_metadata_bytes()))
-            .ok_or(ExactHostNumericAllocationError::LayoutOverflow)
-    }
-
-    fn new(
-        len: usize,
-        permit: &dyn ExactHostAllocationPermit,
-    ) -> Result<Self, ExactHostNumericAllocationError> {
-        let layout = Layout::array::<usize>(len)
-            .map_err(|_| ExactHostNumericAllocationError::LayoutOverflow)?;
-        let claim = permit.reserve_exact_claim(Self::requested_bytes(len)?)?;
-        let release = RustExactRelease::try_new(layout, claim)?;
-        let pointer = if layout.size() == 0 {
-            NonNull::<usize>::dangling().cast()
-        } else {
-            NonNull::new(unsafe { alloc_zeroed(layout) })
-                .ok_or(ExactHostNumericAllocationError::AllocationFailed)?
-        };
-        let provenance = HostAllocationProvenance {
-            allocator: Cow::Borrowed("runmat.exact-host-sparse-index.v1"),
-            byte_length: layout.size(),
-            capacity_bytes: layout.size(),
-            alignment: layout.align(),
-        };
-        let allocation = unsafe { AdoptedHostAllocation::new_owned(pointer, provenance, release) };
-        Ok(Self { allocation, len })
-    }
-
-    fn as_mut_slice(&mut self) -> &mut [usize] {
-        unsafe {
-            std::slice::from_raw_parts_mut(self.allocation.pointer().as_ptr().cast(), self.len)
-        }
-    }
-
-    fn into_buffer(self) -> Result<HostIndexBuffer, String> {
-        HostIndexBuffer::try_adopt_exact(self.allocation, self.len)
     }
 }
 
@@ -175,14 +146,34 @@ impl ExactComplexAllocation {
         }
     }
 
-    fn into_buffer(self) -> Result<ReadyValues, String> {
+    fn set_f32(&mut self, index: usize, value: ComplexElement<f32>) -> Result<(), String> {
+        let Self::F32(allocation, len) = self else {
+            return Err("sparse output is not single-precision complex".into());
+        };
+        if index >= *len {
+            return Err("sparse complex value index exceeds admitted nnz".into());
+        }
+        // SAFETY: the builder exclusively owns this initialized native F32
+        // complex allocation, and the index was checked against its length.
+        unsafe {
+            allocation
+                .pointer()
+                .as_ptr()
+                .cast::<ComplexElement<f32>>()
+                .add(index)
+                .write(value);
+        }
+        Ok(())
+    }
+
+    fn into_buffer(self) -> Result<ReadyValues, ExactHostNumericAllocationError> {
         match self {
             Self::F32(allocation, len) => {
-                HostComplexBuffer::<f32>::try_adopt_exact(allocation, len)
+                HostComplexBuffer::<f32>::try_adopt_exact_fallible(allocation, len)
                     .map(ReadyValues::ComplexF32)
             }
             Self::F64(allocation, len) => {
-                HostComplexBuffer::<f64>::try_adopt_exact(allocation, len)
+                HostComplexBuffer::<f64>::try_adopt_exact_fallible(allocation, len)
                     .map(ReadyValues::ComplexF64)
             }
         }
@@ -206,8 +197,8 @@ pub struct ExactHostSparseTensorAllocation {
     rows: usize,
     cols: usize,
     nnz: usize,
-    col_ptrs: ExactIndexAllocation,
-    row_indices: ExactIndexAllocation,
+    col_ptrs: ExactHostIndexBufferAllocation,
+    row_indices: ExactHostIndexBufferAllocation,
     values: Values,
 }
 
@@ -234,8 +225,8 @@ impl ExactHostSparseTensorAllocation {
         let pointers = cols
             .checked_add(1)
             .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
-        let mut bytes = ExactIndexAllocation::requested_bytes(pointers)?
-            .checked_add(ExactIndexAllocation::requested_bytes(nnz)?)
+        let mut bytes = ExactHostIndexBufferAllocation::requested_bytes(pointers)?
+            .checked_add(ExactHostIndexBufferAllocation::requested_bytes(nnz)?)
             .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
         let values = match class {
             ExactHostSparseClass::Logical => 0,
@@ -263,8 +254,8 @@ impl ExactHostSparseTensorAllocation {
         let pointers = cols
             .checked_add(1)
             .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
-        let col_ptrs = ExactIndexAllocation::new(pointers, permit)?;
-        let row_indices = ExactIndexAllocation::new(nnz, permit)?;
+        let col_ptrs = ExactHostIndexBufferAllocation::new(pointers, permit)?;
+        let row_indices = ExactHostIndexBufferAllocation::new(nnz, permit)?;
         let values = match class {
             ExactHostSparseClass::Logical => Values::Logical,
             ExactHostSparseClass::Numeric(dtype) => {
@@ -311,6 +302,19 @@ impl ExactHostSparseTensorAllocation {
         }
     }
 
+    /// Writes native components without a floating precision conversion,
+    /// preserving their bit patterns during lossless value transport.
+    pub fn set_complex_f32_value(
+        &mut self,
+        index: usize,
+        value: ComplexElement<f32>,
+    ) -> Result<(), String> {
+        match &mut self.values {
+            Values::Complex(values) => values.set_f32(index, value),
+            _ => Err("sparse output is not complex".into()),
+        }
+    }
+
     pub fn set_complex_value(&mut self, index: usize, real: f64, imag: f64) -> Result<(), String> {
         match &mut self.values {
             Values::Complex(values) => values.set(index, real, imag),
@@ -319,19 +323,31 @@ impl ExactHostSparseTensorAllocation {
     }
 
     pub fn into_validation(self) -> Result<PreparedExactSparseTensor, String> {
-        let col_ptrs = self.col_ptrs.into_buffer()?;
-        let row_indices = self.row_indices.into_buffer()?;
+        self.into_validation_fallible()
+            .map_err(|error| error.to_string())
+    }
+
+    /// Preserve physical header/publication failures as typed causes. The
+    /// original string adapter remains an ordinary compatibility boundary.
+    pub fn into_validation_fallible(
+        self,
+    ) -> Result<PreparedExactSparseTensor, ExactHostSparsePublicationError> {
+        use ExactHostSparsePublicationError::{Allocation, Invalid};
+        let col_ptrs = self.col_ptrs.into_buffer_fallible().map_err(Allocation)?;
+        let row_indices = self
+            .row_indices
+            .into_buffer_fallible()
+            .map_err(Allocation)?;
         let values = match self.values {
             Values::Logical => ReadyValues::Logical,
-            Values::Numeric(values) => ReadyValues::Numeric(
-                values
-                    .try_into_host_buffer()
-                    .map_err(|error| error.to_string())?,
-            ),
-            Values::Complex(values) => values.into_buffer()?,
+            Values::Numeric(values) => {
+                ReadyValues::Numeric(values.try_into_host_buffer().map_err(Allocation)?)
+            }
+            Values::Complex(values) => values.into_buffer().map_err(Allocation)?,
         };
         let validation =
-            SparseCscValidation::new(self.rows, self.cols, col_ptrs, row_indices, self.nnz)?;
+            SparseCscValidation::new(self.rows, self.cols, col_ptrs, row_indices, self.nnz)
+                .map_err(Invalid)?;
         Ok(PreparedExactSparseTensor { validation, values })
     }
 }

@@ -9,8 +9,10 @@ mod predicates;
 mod selectors;
 mod shared;
 mod timetable;
+mod constructors;
 
 pub use self::analytics::*;
+pub use self::constructors::*;
 pub use self::conversion::*;
 pub use self::descriptor_objects::*;
 pub use self::indexing::*;
@@ -27,4 +29,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(predicates::ENTRIES.iter().copied());
     values.extend(selectors::ENTRIES.iter().copied());
     timetable::extend_entries(values);
+    values.extend(constructors::ENTRIES.iter().copied());
 }

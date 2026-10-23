@@ -41,6 +41,12 @@ impl FreadInputType {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FreadInputSource {
+    Numeric(FreadInputType),
+    EncodedCharacter,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FreadOutputKind {
     Numeric(NumericClass),
     Char,
@@ -48,7 +54,7 @@ pub enum FreadOutputKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FreadPrecisionSpec {
-    pub input: FreadInputType,
+    pub input: FreadInputSource,
     pub output: FreadOutputKind,
     pub repeat: usize,
 }
@@ -56,7 +62,7 @@ pub struct FreadPrecisionSpec {
 impl Default for FreadPrecisionSpec {
     fn default() -> Self {
         Self {
-            input: FreadInputType::UInt8,
+            input: FreadInputSource::Numeric(FreadInputType::UInt8),
             output: FreadOutputKind::Numeric(NumericClass::Double),
             repeat: 1,
         }
@@ -106,10 +112,11 @@ enum InputSpelling {
 }
 
 impl InputSpelling {
-    fn input(self) -> FreadInputType {
+    fn input(self) -> FreadInputSource {
         match self {
-            Self::Numeric(input) => input,
-            Self::UnsignedCharacterAlias | Self::Char => FreadInputType::UInt8,
+            Self::Numeric(input) => FreadInputSource::Numeric(input),
+            Self::UnsignedCharacterAlias => FreadInputSource::Numeric(FreadInputType::UInt8),
+            Self::Char => FreadInputSource::EncodedCharacter,
         }
     }
 

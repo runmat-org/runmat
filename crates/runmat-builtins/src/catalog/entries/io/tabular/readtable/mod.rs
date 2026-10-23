@@ -1,14 +1,12 @@
 mod inference;
+mod documentation;
 use crate::*;
 pub const READTABLE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     audience: BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "readtable" },
     category: "io/tabular",
-    documentation: BuiltinDocumentation {
-        summary: "Import tabular text or spreadsheet data into a table.",
-        ..BuiltinDocumentation::EMPTY
-    },
+    documentation: documentation::DOCUMENTATION,
     descriptor: &READTABLE_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Incomplete,

@@ -1,5 +1,6 @@
 mod dependency;
 mod function;
+mod operation_contract;
 mod program_point;
 mod projection;
 mod region;
@@ -7,6 +8,7 @@ mod version;
 
 pub use dependency::*;
 pub use function::*;
+pub use operation_contract::*;
 pub use program_point::*;
 pub use region::*;
 pub use version::*;
@@ -17,13 +19,16 @@ use serde::{Deserialize, Serialize};
 /// Complete, portable semantic result for one MIR assembly.
 ///
 /// Program-point facts and function summaries are the sole value-analysis
-/// authority. Consumers select facts by stable program identity and point.
+/// authority. Operation contracts are the complete per-site effect and
+/// capability authority. Consumers select both by stable program identity.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AnalysisStore {
     pub revision: AnalysisRevision,
     pub dependencies: Vec<AnalysisDependency>,
     pub program_points: Vec<ProgramPointFacts>,
+    #[serde(default)]
+    pub operation_contracts: Vec<MirOperationContract>,
     #[serde(default)]
     pub fusion_stage_contracts: Vec<super::FusionStageContract>,
     pub regions: Vec<RegionAnalysis>,
@@ -39,6 +44,7 @@ impl Default for AnalysisStore {
             revision: AnalysisRevision::current(),
             dependencies: Vec::new(),
             program_points: Vec::new(),
+            operation_contracts: Vec::new(),
             fusion_stage_contracts: Vec::new(),
             regions: Vec::new(),
             parallel: runmat_types::ParallelManifest::empty(),
@@ -50,6 +56,14 @@ impl Default for AnalysisStore {
 }
 
 impl AnalysisStore {
+    /// Canonical payload bytes used by the executable Analysis component and
+    /// every downstream projection binding. Keeping the codec at the semantic
+    /// owner prevents native consumers from inventing a parallel identity.
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, String> {
+        let value = serde_json::to_value(self).map_err(|error| error.to_string())?;
+        serde_json::to_vec(&value).map_err(|error| error.to_string())
+    }
+
     /// Resolve a compiler coordinate through its canonical self binding, never
     /// by interpreting a portable ordinal as a compiler/session index.
     pub fn function_for_local(&self, local: runmat_types::FunctionId) -> Option<&FunctionAnalysis> {
@@ -75,6 +89,13 @@ impl AnalysisStore {
             .binary_search_by_key(&point, |facts| facts.point)
             .ok()
             .map(|index| &self.program_points[index])
+    }
+
+    pub fn operation_contract_at(&self, site: &MirOperationSite) -> Option<&MirOperationContract> {
+        self.operation_contracts
+            .binary_search_by(|contract| contract.site.cmp(site))
+            .ok()
+            .map(|index| &self.operation_contracts[index])
     }
 
     pub(crate) fn local_facts_at(

@@ -86,7 +86,7 @@ fn power_matrix_broadcast() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn power_char_array() {
-    let chars = CharArray::new("AZ".chars().collect(), 1, 2).unwrap();
+    let chars = CharArray::from_unicode_scalars("AZ".chars().collect(), 1, 2).unwrap();
     let result =
         power_builtin(Value::CharArray(chars), Value::Num(2.0), Vec::new()).expect("power");
     match result {

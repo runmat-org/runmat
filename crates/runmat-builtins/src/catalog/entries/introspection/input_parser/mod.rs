@@ -1,6 +1,7 @@
 //! Canonical contracts for the existing inputParser handle implementation.
 use crate::*;
 mod contract;
+mod documentation;
 mod inference;
 pub use contract::*;
 
@@ -8,6 +9,7 @@ struct Definition {
     name: &'static str,
     summary: &'static str,
     keywords: &'static [&'static str],
+    documentation: Option<BuiltinDocumentation>,
     descriptor: &'static BuiltinDescriptor,
     infer: fn(&runmat_types::CallRequest, &BuiltinCatalogEntry) -> runmat_types::CallInference,
 }
@@ -18,34 +20,28 @@ const fn entry(definition: Definition) -> BuiltinCatalogEntry {
         provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
         identity: BuiltinCatalogIdentity { name: definition.name },
         category: "introspection",
-        documentation: BuiltinDocumentation {
-            authority: BuiltinDocumentationAuthority::Catalog,
-            title: Some(definition.name),
-            slug: Some(definition.name),
-            summary: definition.summary,
-            description: "inputParser supports case-sensitive named parameters with defaults. addParameter registers a parameter and rejects duplicates. parse accepts complete name-value pairs, rejects unknown names, uses the last supplied value for duplicates, and publishes Results only after validation. The current implementation does not support validators, positional parameters, or parser configuration options.",
-            keywords: definition.keywords,
-            related: &["inputParser", "addParameter", "parse"],
-            examples: &[BuiltinExample {
-                id: "named-default", title: "Parse a named parameter",
-                program: "p = inputParser(); addParameter(p, 'Count', 2); parse(p, 'Count', 5); result = p.Results.Count;",
-                display_output: None,
-                compatibility: BuiltinExampleCompatibility::Matlab,
-                harness: BuiltinExampleHarness::Portable,
-                fixture: BuiltinExampleFixture::None,
-                requirements: BuiltinExampleRequirements::NONE,
-                verification: BuiltinExampleVerification::Assertions { source: "assert(result == 5);" },
-            }, BuiltinExample {
-                id: "omitted-default", title: "Use the registered default when the name is omitted",
-                program: "p = inputParser(); addParameter(p, 'scale', 2); parse(p); result = p.Results.scale;",
-                display_output: None,
-                compatibility: BuiltinExampleCompatibility::Matlab,
-                harness: BuiltinExampleHarness::Portable,
-                fixture: BuiltinExampleFixture::None,
-                requirements: BuiltinExampleRequirements::NONE,
-                verification: BuiltinExampleVerification::Assertions { source: "assert(result == 2);" },
-            }],
-            ..BuiltinDocumentation::EMPTY
+        documentation: match definition.documentation {
+            Some(documentation) => documentation,
+            None => BuiltinDocumentation {
+                authority: BuiltinDocumentationAuthority::Catalog,
+                title: Some(definition.name),
+                slug: Some(definition.name),
+                summary: definition.summary,
+                description: "inputParser supports case-sensitive named parameters with defaults. addParameter registers a parameter and rejects duplicates. parse accepts complete name-value pairs, rejects unknown names, uses the last supplied value for duplicates, and publishes Results only after validation. The current implementation does not support validators, positional parameters, or parser configuration options.",
+                keywords: definition.keywords,
+                related: &["inputParser", "addParameter", "parse"],
+                examples: &[BuiltinExample {
+                    id: "named-default", title: "Parse a named parameter",
+                    program: "p = inputParser(); addParameter(p, 'Count', 2); parse(p, 'Count', 5); result = p.Results.Count;",
+                    display_output: None,
+                    compatibility: BuiltinExampleCompatibility::Matlab,
+                    harness: BuiltinExampleHarness::Portable,
+                    fixture: BuiltinExampleFixture::None,
+                    requirements: BuiltinExampleRequirements::NONE,
+                    verification: BuiltinExampleVerification::Assertions { source: "assert(result == 5);" },
+                }],
+                ..BuiltinDocumentation::EMPTY
+            },
         },
         descriptor: definition.descriptor,
         contract: BuiltinContractDeclaration {
@@ -87,6 +83,7 @@ const fn entry(definition: Definition) -> BuiltinCatalogEntry {
 
 pub const INPUT_PARSER_CATALOG_ENTRY: BuiltinCatalogEntry = entry(Definition {
     name: "inputParser",
+    documentation: Some(documentation::DOCUMENTATION),
     summary: "Create a parser for MATLAB-style name-value arguments.",
     keywords: &["inputParser", "name-value", "arguments", "varargin"],
     descriptor: &INPUT_PARSER_DESCRIPTOR,
@@ -94,6 +91,7 @@ pub const INPUT_PARSER_CATALOG_ENTRY: BuiltinCatalogEntry = entry(Definition {
 });
 pub const ADD_PARAMETER_CATALOG_ENTRY: BuiltinCatalogEntry = entry(Definition {
     name: "addParameter",
+    documentation: None,
     summary: "Register an inputParser name-value parameter and default.",
     keywords: &["inputParser", "addParameter", "name-value", "varargin"],
     descriptor: &ADD_PARAMETER_DESCRIPTOR,
@@ -101,6 +99,7 @@ pub const ADD_PARAMETER_CATALOG_ENTRY: BuiltinCatalogEntry = entry(Definition {
 });
 pub const PARSE_CATALOG_ENTRY: BuiltinCatalogEntry = entry(Definition {
     name: "parse",
+    documentation: None,
     summary: "Parse name-value arguments with an inputParser.",
     keywords: &["inputParser", "parse", "name-value", "varargin"],
     descriptor: &PARSE_DESCRIPTOR,

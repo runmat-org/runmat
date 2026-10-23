@@ -238,7 +238,7 @@ fn tanh_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let data = ca
         .data()
         .iter()
-        .map(|&ch| (ch as u32 as f64).tanh())
+        .map(|&ch| (u32::from(ch.raw()) as f64).tanh())
         .collect::<Vec<_>>();
     let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
         .map_err(|e| tanh_error_with_detail(&TANH_ERROR_INTERNAL, e))?;
@@ -462,7 +462,7 @@ pub(crate) mod tests {
     #[test]
     fn tanh_char_array_roundtrip() {
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let chars = CharArray::new("Az".chars().collect(), 1, 2).unwrap();
+        let chars = CharArray::from_unicode_scalars("Az".chars().collect(), 1, 2).unwrap();
         let result = tanh_builtin(Value::CharArray(chars)).expect("tanh");
         match result {
             Value::Tensor(t) => {

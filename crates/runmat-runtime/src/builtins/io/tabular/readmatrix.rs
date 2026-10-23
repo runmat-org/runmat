@@ -577,7 +577,14 @@ async fn parse_treat_as_missing(value: &Value) -> BuiltinResult<Vec<String>> {
     while let Some(value) = stack.pop() {
         match value {
             Value::String(s) => out.push(s.into_string_unbounded()),
-            Value::CharArray(ca) if ca.rows == 1 => out.push(ca.data().iter().collect::<String>()),
+            Value::CharArray(ca) if ca.rows == 1 => out.push(
+                crate::builtins::io::utf16::decode_utf16_with_error(ca.data(), || {
+                    readmatrix_error_with(
+                        &READMATRIX_ERROR_OPTION_VALUE,
+                        "readmatrix: TreatAsMissing contains malformed UTF-16 text",
+                    )
+                })?,
+            ),
             Value::StringArray(sa) => {
                 out.extend(sa.data().iter().map(|text| text.as_str().to_owned()))
             }
@@ -876,9 +883,9 @@ enum OutputTemplate {
     Like(Value),
 }
 
-mod range;
 mod admission;
 mod column;
+mod range;
 use column::MatrixFieldColumn;
 #[cfg(test)]
 use range::parse_range_numeric;

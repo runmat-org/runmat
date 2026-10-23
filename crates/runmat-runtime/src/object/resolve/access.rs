@@ -3,17 +3,7 @@ use super::*;
 pub(super) fn require_single_rooted_sequence(
     sequence: RootedValueSequence,
 ) -> Result<RootedValue, RuntimeError> {
-    sequence.try_map_owned(
-        |sequence| {
-            let values = sequence.resolve(
-                runmat_types::SequenceUse::RequireSingle,
-                crate::sequence::SequenceResolutionContext::default(),
-            )?;
-            Ok(crate::sequence::into_first_output(values)?
-                .expect("one required output was resolved"))
-        },
-        |error| error.into_runtime_error(),
-    )
+    sequence.try_into_single()
 }
 
 pub(super) fn mex(identifier: &str, message: &str) -> RuntimeError {

@@ -1,5 +1,5 @@
 use crate::builtins::common::tensor;
-use runmat_value::{IntValue, NumericScalar, Value};
+use runmat_value::{IntValue, NumericScalar, Utf16CodeUnit, Value};
 
 use super::UniformScalarError;
 
@@ -12,7 +12,7 @@ pub(super) enum ClassifiedValue {
     ComplexF64((f64, f64)),
     ComplexF32((f32, f32)),
     IntegerComplex(IntValue, IntValue),
-    Char(char),
+    Char(Utf16CodeUnit),
 }
 
 pub(super) fn value(value: &Value) -> Result<ClassifiedValue, UniformScalarError> {
@@ -36,7 +36,11 @@ pub(super) fn value(value: &Value) -> Result<ClassifiedValue, UniformScalarError
             complex(real, imaginary)
         }
         Value::CharArray(value) if value.rows * value.cols == 1 => Ok(ClassifiedValue::Char(
-            value.data().first().copied().unwrap_or('\0'),
+            value
+                .data()
+                .first()
+                .copied()
+                .unwrap_or(Utf16CodeUnit::from_raw(0)),
         )),
         _ => Err(UniformScalarError::NON_SCALAR),
     }

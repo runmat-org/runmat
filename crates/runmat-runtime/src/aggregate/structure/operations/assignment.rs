@@ -4,6 +4,62 @@ use crate::indexing::plan::IndexPlan;
 /// Schema and RHS arity are validated by the indexing adapter. Duplicate
 /// destination indices use the final RHS occurrence, as ordinary assignment.
 pub fn assign(base: &Value, rhs: &Value, plan: &IndexPlan) -> Result<Value, RuntimeError> {
+    let runtime = crate::context::legacy::active();
+    assign_in_context(runtime.as_ref(), base, rhs, plan)
+}
+
+pub(crate) fn assign_in_context(
+    runtime: Option<&RuntimeContext>,
+    base: &Value,
+    rhs: &Value,
+    plan: &IndexPlan,
+) -> Result<Value, RuntimeError> {
+    assign_with_schema(runtime, base, rhs, plan, Schema::Strict).map(raw)
+}
+
+#[derive(Clone, Copy)]
+enum Schema {
+    Strict,
+    InitializingMemberPath,
+}
+
+/// Only a captured, initializing member path may add fields while writing its
+/// selected structure child back. Ordinary structure-array assignment remains
+/// schema-strict at its existing indexing adapter.
+pub(crate) fn assign_initializing_in_context(
+    runtime: Option<&RuntimeContext>,
+    base: &Value,
+    rhs: &Value,
+    plan: &IndexPlan,
+) -> Result<RootedValue, RuntimeError> {
+    let owner = crate::indexing::plan::admission::Owner::new(runtime)?;
+    if plan.indices.is_empty() {
+        let unchanged = RootedValue::in_optional_context(base.clone(), runtime)?;
+        owner.check()?;
+        return Ok(unchanged);
+    }
+    shape(base)?;
+    let rhs_shape = shape(rhs)?;
+    if !matches!(rhs, Value::Struct(_)) && count(rhs_shape)? != plan.indices.len() {
+        return Err(invalid(
+            "structure path writeback has an invalid replacement count",
+        ));
+    }
+    if names(base).any(|name| !has_field(rhs, name)) {
+        return Err(invalid(
+            "structure path writeback cannot remove existing fields",
+        ));
+    }
+    assign_with_schema(runtime, base, rhs, plan, Schema::InitializingMemberPath)
+}
+
+fn assign_with_schema(
+    runtime: Option<&RuntimeContext>,
+    base: &Value,
+    rhs: &Value,
+    plan: &IndexPlan,
+    schema: Schema,
+) -> Result<RootedValue, RuntimeError> {
     let source_shape = shape(base)?;
     if source_shape
         .iter()
@@ -12,8 +68,7 @@ pub fn assign(base: &Value, rhs: &Value, plan: &IndexPlan) -> Result<Value, Runt
     {
         return Err(invalid("structure growth cannot shrink a dimension"));
     }
-    let runtime = crate::context::legacy::active();
-    let _roots = match runtime.as_ref() {
+    let _roots = match runtime {
         Some(runtime) => crate::execution::RootedValueLease::for_value_slices_in_context(
             &[std::slice::from_ref(base), std::slice::from_ref(rhs)],
             runtime,
@@ -25,7 +80,7 @@ pub fn assign(base: &Value, rhs: &Value, plan: &IndexPlan) -> Result<Value, Runt
         }
     };
     let length = count(&plan.base_shape)?;
-    let mut positions = Scratch::new(runtime.as_ref(), length)?;
+    let mut positions = Scratch::new(runtime, length)?;
     for offset in (0..length).step_by(4096) {
         let end = length.min(offset.saturating_add(4096));
         positions.values_mut()[offset..end].fill(usize::MAX);
@@ -41,8 +96,11 @@ pub fn assign(base: &Value, rhs: &Value, plan: &IndexPlan) -> Result<Value, Runt
             .ok_or_else(|| invalid("structure assignment index is out of bounds"))? = source;
     }
     positions.checkpoint()?;
-    let fill = if count(source_shape)? < length {
-        Some(empty(runtime.as_ref())?)
+    let extending = matches!(schema, Schema::InitializingMemberPath);
+    let fill = if count(source_shape)? < length
+        || (extending && names(rhs).any(|name| !has_field(base, name)))
+    {
+        Some(empty(runtime)?)
     } else {
         None
     };
@@ -56,49 +114,80 @@ pub fn assign(base: &Value, rhs: &Value, plan: &IndexPlan) -> Result<Value, Runt
             };
             return field(rhs, name, source);
         }
-        let mut remainder = destination;
-        let mut source = 0usize;
-        let mut stride = 1usize;
-        for (axis, &extent) in plan.base_shape.iter().enumerate() {
-            let coordinate = remainder % extent;
-            remainder /= extent;
-            let old_extent = source_shape.get(axis).copied().unwrap_or(1);
-            if coordinate >= old_extent {
-                return fill
-                    .as_ref()
-                    .ok_or_else(|| invalid("structure growth default is missing"));
+        if let Some(source) = source_index(destination, source_shape, &plan.base_shape)? {
+            if has_field(base, name) {
+                return field(base, name, source);
             }
-            source = source
-                .checked_add(
-                    coordinate
-                        .checked_mul(stride)
-                        .ok_or_else(|| invalid("structure growth index overflow"))?,
-                )
-                .ok_or_else(|| invalid("structure growth index overflow"))?;
-            stride = stride
-                .checked_mul(old_extent)
-                .ok_or_else(|| invalid("structure growth stride overflow"))?;
         }
-        field(base, name, source)
+        fill.as_ref()
+            .ok_or_else(|| invalid("structure growth default is missing"))
     };
-    let output = match base {
-        Value::Struct(base) => construct_generated_structure(
-            runtime.as_ref(),
-            base.field_names(),
-            &plan.base_shape,
-            value,
-        ),
-        Value::StructArray(base) => construct_generated_structure(
-            runtime.as_ref(),
-            base.field_names(),
-            &plan.base_shape,
-            value,
-        ),
-        _ => Err(invalid("structure assignment requires a structure")),
-    }?;
+    let fields = names(base).chain(names(rhs).filter(|name| extending && !has_field(base, name)));
+    let output = construct_generated_structure(runtime, fields, &plan.base_shape, value)?;
     positions.checkpoint()?;
-    Ok(raw(output))
+    Ok(output)
 }
+
+pub(super) fn names(value: &Value) -> impl Iterator<Item = &str> + Clone {
+    let scalar = match value {
+        Value::Struct(value) => Some(value.field_names()),
+        _ => None,
+    };
+    let array = match value {
+        Value::StructArray(value) => Some(value.field_names()),
+        _ => None,
+    };
+    scalar
+        .into_iter()
+        .flatten()
+        .chain(array.into_iter().flatten())
+}
+
+fn has_field(value: &Value, name: &str) -> bool {
+    match value {
+        Value::Struct(value) => value.fields.contains_key(name),
+        Value::StructArray(value) => value.column_owner(name).is_some(),
+        _ => false,
+    }
+}
+
+/// Canonical column-major relocation for growth. Both projection and final
+/// assignment use this mapping; missing coordinates are new empty elements.
+pub(super) fn source_index(
+    destination: usize,
+    source_shape: &[usize],
+    destination_shape: &[usize],
+) -> Result<Option<usize>, RuntimeError> {
+    let mut remainder = destination;
+    let mut source = 0usize;
+    let mut stride = 1usize;
+    for (axis, &extent) in destination_shape.iter().enumerate() {
+        if extent == 0 {
+            return Err(invalid("structure assignment index is out of bounds"));
+        }
+        let coordinate = remainder % extent;
+        remainder /= extent;
+        let old_extent = source_shape.get(axis).copied().unwrap_or(1);
+        if coordinate >= old_extent {
+            return Ok(None);
+        }
+        source = source
+            .checked_add(
+                coordinate
+                    .checked_mul(stride)
+                    .ok_or_else(|| invalid("structure growth index overflow"))?,
+            )
+            .ok_or_else(|| invalid("structure growth index overflow"))?;
+        stride = stride
+            .checked_mul(old_extent)
+            .ok_or_else(|| invalid("structure growth stride overflow"))?;
+    }
+    if remainder != 0 {
+        return Err(invalid("structure assignment index is out of bounds"));
+    }
+    Ok(Some(source))
+}
+
 pub(super) fn shape(value: &Value) -> Result<&[usize], RuntimeError> {
     match value {
         Value::Struct(_) => Ok(&[1, 1]),
@@ -120,7 +209,7 @@ pub(super) fn field<'a>(
     };
     value.ok_or_else(|| invalid("structure field or index is missing"))
 }
-fn empty(runtime: Option<&RuntimeContext>) -> Result<Value, RuntimeError> {
+pub(crate) fn empty(runtime: Option<&RuntimeContext>) -> Result<Value, RuntimeError> {
     let shape = [0, 0];
     let dtype = runmat_value::NumericDType::F64;
     let bytes = HostAllocationPlan::retained_tensor_bytes(dtype, &shape)

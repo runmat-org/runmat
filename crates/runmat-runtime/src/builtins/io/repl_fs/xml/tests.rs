@@ -266,12 +266,16 @@ fn xmlwrite_accepts_scalar_string_array_and_rejects_nonscalar_text() {
 
 #[test]
 fn paged_character_text_rejects_but_trailing_singletons_remain_valid() {
-    let paged = runmat_value::CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap();
+    let paged =
+        runmat_value::CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 1, 2])
+            .unwrap();
     let error = run(xmlread_builtin(None, vec![Value::CharArray(paged)])).unwrap_err();
     assert!(error.message().contains("filename must be a string scalar"));
-    let trailing =
-        runmat_value::CharArray::new_with_shape("<root/>".chars().collect(), vec![1, 7, 1])
-            .unwrap();
+    let trailing = runmat_value::CharArray::from_unicode_scalars_with_shape(
+        "<root/>".chars().collect(),
+        vec![1, 7, 1],
+    )
+    .unwrap();
     assert_eq!(
         run(xmlwrite_builtin(None, vec![Value::CharArray(trailing)])).unwrap(),
         char_value("<root/>")

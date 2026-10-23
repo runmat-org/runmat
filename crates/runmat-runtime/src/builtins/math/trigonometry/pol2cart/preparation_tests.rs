@@ -10,9 +10,6 @@ use std::{cell::RefCell, rc::Rc};
 type Calls = Rc<RefCell<Vec<(usize, Option<usize>)>>>;
 struct Service(Calls);
 impl RuntimeAccelerationService for Service {
-    fn supports_operation(&self, _: &str) -> bool {
-        true
-    }
     fn prepare_admitted(
         &self,
         _: RuntimeContext,

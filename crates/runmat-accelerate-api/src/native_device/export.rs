@@ -29,6 +29,10 @@ pub fn export_native_device_buffer(
     handle: &GpuTensorHandle,
     access: NativeDeviceAccess,
 ) -> anyhow::Result<OwnedNativeDeviceBuffer> {
+    anyhow::ensure!(
+        crate::provider_is_authorized(provider),
+        "native export provider is not selected or authorized by this session"
+    );
     crate::observe_execution_device_effect(crate::ExecutionDeviceEffect::RawNativeExport);
     if crate::handle_is_transposed(handle) {
         return Err(crate::unsupported_provider_operation(

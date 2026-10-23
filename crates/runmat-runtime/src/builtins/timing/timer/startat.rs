@@ -18,14 +18,16 @@ pub(super) async fn start_at_absolute(
     args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<()> {
     let (handles, receiver_shape) = receiver_handles(runtime, receiver)?;
-    let timing = runtime.service_ports().timing();
+    let timing = runtime.service_ports().timing()?;
     let now = timing.wall_time_since_epoch();
-    let reference = timing.local_datetime_at_epoch(now).ok_or_else(|| {
-        timer_error(
-            &TIMER_ERROR_INVALID_INPUT,
-            "startat: host-local calendar is unavailable for this wall-clock instant",
-        )
-    })?;
+    let reference = crate::context::RuntimeCalendarInstant::from_epoch_duration(now)
+        .and_then(|instant| timing.local_datetime_at_instant(instant))
+        .ok_or_else(|| {
+            timer_error(
+                &TIMER_ERROR_INVALID_INPUT,
+                "startat: host-local calendar is unavailable for this wall-clock instant",
+            )
+        })?;
     let serials =
         crate::builtins::datetime::timer_firing_arguments(Some(runtime), args, reference)?;
     let serial_values = serials.materialize_f64();
@@ -41,18 +43,21 @@ pub(super) async fn start_at_absolute(
         let serial_index = if scalar { 0 } else { index };
         let naive = crate::builtins::datetime::naive_from_datenum(serial_values[serial_index])
             .map_err(|error| startat_date_error(error))?;
-        let epoch = timing.local_datetime_to_epoch(naive).ok_or_else(|| {
+        let epoch = timing.local_datetime_to_instant(naive).ok_or_else(|| {
             timer_error(
                 &TIMER_ERROR_INVALID_INPUT,
                 "startat: firing time is ambiguous, nonexistent, or outside the host timezone range",
             )
         })?;
-        let delay = epoch.checked_sub(now).ok_or_else(|| {
-            timer_error(
-                &TIMER_ERROR_INVALID_INPUT,
-                "startat: firing time is in the past",
-            )
-        })?;
+        let delay = epoch
+            .to_epoch_duration()
+            .and_then(|epoch| epoch.checked_sub(now))
+            .ok_or_else(|| {
+                timer_error(
+                    &TIMER_ERROR_INVALID_INPUT,
+                    "startat: firing time is in the past",
+                )
+            })?;
         if delay > MAX_STARTAT_DELAY {
             return Err(timer_error(
                 &TIMER_ERROR_INVALID_INPUT,

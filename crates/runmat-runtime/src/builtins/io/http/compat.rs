@@ -1,9 +1,9 @@
 //! URL, download, and mail compatibility helpers.
 
-#[path = "compat/websave_helpers.rs"]
-mod websave_helpers;
 #[path = "compat/sendmail_helpers.rs"]
 mod sendmail_helpers;
+#[path = "compat/websave_helpers.rs"]
+mod websave_helpers;
 use sendmail_helpers::*;
 use websave_helpers::*;
 
@@ -64,7 +64,14 @@ async fn gather_args(
 fn scalar_text(value: &Value, name: &str, arg: &str) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.as_str().to_owned()),
-        Value::CharArray(array) if array.rows == 1 => Ok(array.data().iter().collect()),
+        Value::CharArray(array) if array.rows == 1 => {
+            crate::builtins::io::utf16::decode_utf16_with_error(array.data(), || {
+                compat_error(
+                    name,
+                    format!("{name}: {arg} contains malformed UTF-16 text"),
+                )
+            })
+        }
         Value::StringArray(array) if array.data().len() == 1 => {
             Ok(array.data()[0].as_str().to_owned())
         }
@@ -94,23 +101,26 @@ async fn urlencode_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult
         return Err(urlencode_error(UrlencodeFailure::WrongArity));
     }
     // Admit only host text before any provider or aggregate traversal.
-    let text =
-        url_text_input(&args[0]).ok_or_else(|| urlencode_error(UrlencodeFailure::InvalidText))?;
+    let text = url_text_input(&args[0], || urlencode_error(UrlencodeFailure::InvalidText))?
+        .ok_or_else(|| urlencode_error(UrlencodeFailure::InvalidText))?;
     Ok(char_value(&percent_encode(&text)))
 }
 
-fn url_text_input(value: &Value) -> Option<String> {
+fn url_text_input(
+    value: &Value,
+    failure: impl FnOnce() -> RuntimeError,
+) -> BuiltinResult<Option<String>> {
     match value {
-        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::String(text) => Ok(Some(text.as_str().to_owned())),
         Value::CharArray(array)
             if array.rows == 1 && array.shape.iter().skip(2).all(|extent| *extent == 1) =>
         {
-            Some(array.data().iter().collect())
+            crate::builtins::io::utf16::decode_utf16_with_error(array.data(), failure).map(Some)
         }
         Value::StringArray(array) if array.data().len() == 1 => {
-            Some(array.data()[0].as_str().to_owned())
+            Ok(Some(array.data()[0].as_str().to_owned()))
         }
-        _ => None,
+        _ => Ok(None),
     }
 }
 
@@ -148,8 +158,8 @@ async fn urldecode_builtin(args: crate::call::BuiltinArguments) -> BuiltinResult
     if args.len() != 1 {
         return Err(urldecode_error(UrldecodeFailure::WrongArity));
     }
-    let text =
-        url_text_input(&args[0]).ok_or_else(|| urldecode_error(UrldecodeFailure::InvalidText))?;
+    let text = url_text_input(&args[0], || urldecode_error(UrldecodeFailure::InvalidText))?
+        .ok_or_else(|| urldecode_error(UrldecodeFailure::InvalidText))?;
     Ok(char_value(&percent_decode(&text)?))
 }
 
@@ -289,7 +299,7 @@ async fn sendmail_builtin(
     let (recipients, subject, body) = parse_sendmail_args(args.view())?;
     let message = format_mail_message(&recipients, &subject, &body);
 
-    let outbox = std::env::var("RUNMAT_SENDMAIL_OUTBOX").ok();
+    let outbox = crate::builtins::common::env::optional_var("RUNMAT_SENDMAIL_OUTBOX")?;
     if let Some(outbox) = outbox {
         let folder = PathBuf::from(outbox);
         vfs::create_dir_all_async(&folder).await.map_err(|err| {
@@ -328,9 +338,11 @@ async fn sendmail_builtin(
         ));
     }
 
-    let smtp_server = read_smtp_server(context)
-        .await?
-        .or_else(|| std::env::var("RUNMAT_SMTP_SERVER").ok());
+    let smtp_server = if let Some(server) = read_smtp_server(context).await? {
+        Some(server)
+    } else {
+        crate::builtins::common::env::optional_var("RUNMAT_SMTP_SERVER")?
+    };
     if let Some(server) = smtp_server.filter(|server| !server.trim().is_empty()) {
         return Err(sendmail_error(
             SendmailFailure::Smtp,

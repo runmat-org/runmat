@@ -55,7 +55,12 @@ fn scalar_text(value: &Value, name: &str, arg: &str) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.as_str().to_owned()),
         Value::CharArray(array) if array.rows == 1 && effective_rank(&array.shape) <= 2 => {
-            Ok(array.data().iter().collect())
+            crate::builtins::io::utf16::decode_utf16_with_error(array.data(), || {
+                archive_error(
+                    name,
+                    format!("{name}: {arg} must contain valid UTF-16 text"),
+                )
+            })
         }
         Value::StringArray(array) if array.data().len() == 1 => {
             Ok(array.data()[0].as_str().to_owned())

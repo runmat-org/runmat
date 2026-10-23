@@ -98,7 +98,8 @@ mod tests {
     #[test]
     fn controls_reject_character_pages_but_keep_scalar_padding_semantics() {
         let page = Value::CharArray(
-            CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).expect("page"),
+            CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 1, 2])
+                .expect("page"),
         );
         assert!(scalar_text(&page, "setpref", "group").is_err());
         assert!(preference_names(&page, "setpref").is_err());
@@ -106,7 +107,8 @@ mod tests {
         assert!(preference_names(&cell, "setpref").is_err());
 
         let trailing_singletons = Value::CharArray(
-            CharArray::new_with_shape(vec!['a', 'b', ' '], vec![1, 3, 1]).expect("row"),
+            CharArray::from_unicode_scalars_with_shape(vec!['a', 'b', ' '], vec![1, 3, 1])
+                .expect("row"),
         );
         assert_eq!(
             scalar_text(&trailing_singletons, "setpref", "group").unwrap(),

@@ -1,10 +1,16 @@
-//! One native-precision linear-operator view over canonical dense or CSC
-//! storage. Borrowing and matrix-vector products never convert or copy a
-//! coefficient payload. The current PCG kernel is synchronous; callable
-//! operators require a separate asynchronous execution adapter.
+//! One native-precision operator view over inline scalar, dense or CSC
+//! storage. Ordinary and task-turn-cooperative products share the same native
+//! scalar arithmetic and never copy an array coefficient payload.
 
 mod dense;
-pub(in crate::builtins::math::linalg::ops) mod scalar;
+mod scalar_view;
+pub(in crate::builtins::math::linalg) use scalar_view::NativeScalarView;
+mod cooperative;
+mod converted;
+mod symmetry;
+pub(in crate::builtins::math::linalg) use converted::{ProductOrientation, SourceScalar};
+pub(in crate::builtins::math::linalg) use cooperative::{CooperativeOperatorError, OperatorWork};
+pub(in crate::builtins::math::linalg) mod scalar;
 
 pub use dense::{DenseLinearOperator, DenseOperator};
 
@@ -19,6 +25,7 @@ pub type LinearOperatorError = SparseOperatorError;
 
 #[derive(Clone, Copy)]
 pub enum TypedLinearOperator<'a, T> {
+    Scalar(T),
     Dense(DenseOperator<'a, T>),
     Sparse(CscOperator<'a, T>),
 }
@@ -26,6 +33,7 @@ pub enum TypedLinearOperator<'a, T> {
 impl<T> TypedLinearOperator<'_, T> {
     pub fn rows(&self) -> usize {
         match self {
+            Self::Scalar(_) => 1,
             Self::Dense(view) => view.rows(),
             Self::Sparse(view) => view.rows(),
         }
@@ -33,12 +41,14 @@ impl<T> TypedLinearOperator<'_, T> {
 
     pub fn cols(&self) -> usize {
         match self {
+            Self::Scalar(_) => 1,
             Self::Dense(view) => view.cols(),
             Self::Sparse(view) => view.cols(),
         }
     }
 }
 
+#[derive(Clone, Copy)]
 pub enum LinearOperator<'a> {
     RealF32(TypedLinearOperator<'a, f32>),
     RealF64(TypedLinearOperator<'a, f64>),
@@ -47,12 +57,29 @@ pub enum LinearOperator<'a> {
 }
 
 impl<'a> LinearOperator<'a> {
+    pub(in crate::builtins::math::linalg) async fn borrow_cooperatively(
+        value: &'a Value,
+        context: &RuntimeContext,
+    ) -> Result<Self, CooperativeOperatorError> {
+        match value {
+            Value::SparseTensor(sparse) => Ok(Self::from_sparse(
+                SparseLinearOperator::borrow_cooperatively(sparse, context).await?,
+            )),
+            _ => Self::borrow_with_context(value, context)
+                .map_err(CooperativeOperatorError::Operator),
+        }
+    }
+
     pub fn borrow_with_context(
         value: &'a Value,
         context: &RuntimeContext,
     ) -> Result<Self, LinearOperatorError> {
         HostAllocationReceipt::policy(Some(context))?;
         match value {
+            Value::Num(value) => Ok(Self::RealF64(TypedLinearOperator::Scalar(*value))),
+            Value::Complex(real, imaginary) => Ok(Self::ComplexF64(TypedLinearOperator::Scalar(
+                ComplexElement(*real, *imaginary),
+            ))),
             Value::SparseTensor(sparse) => Ok(Self::from_sparse(
                 SparseLinearOperator::borrow_with_context(sparse, context)?,
             )),
@@ -68,6 +95,10 @@ impl<'a> LinearOperator<'a> {
 
     pub fn borrow_unbounded(value: &'a Value) -> Result<Self, LinearOperatorError> {
         match value {
+            Value::Num(value) => Ok(Self::RealF64(TypedLinearOperator::Scalar(*value))),
+            Value::Complex(real, imaginary) => Ok(Self::ComplexF64(TypedLinearOperator::Scalar(
+                ComplexElement(*real, *imaginary),
+            ))),
             Value::SparseTensor(sparse) => Ok(Self::from_sparse(
                 SparseLinearOperator::borrow_unbounded(sparse)?,
             )),
@@ -136,6 +167,9 @@ macro_rules! product_methods {
                 context: &RuntimeContext,
             ) -> Result<(), LinearOperatorError> {
                 match self {
+                    Self::Scalar(value) => {
+                        scalar_view::product(*value, input, output, Some(context), false)
+                    }
                     Self::Dense(view) => view.apply_into(input, output, context),
                     Self::Sparse(view) => view.apply_into(input, output, context),
                 }
@@ -147,6 +181,7 @@ macro_rules! product_methods {
                 output: &mut [$scalar],
             ) -> Result<(), LinearOperatorError> {
                 match self {
+                    Self::Scalar(value) => scalar_view::product(*value, input, output, None, false),
                     Self::Dense(view) => view.apply_into_unbounded(input, output),
                     Self::Sparse(view) => view.apply_into_unbounded(input, output),
                 }
@@ -159,6 +194,9 @@ macro_rules! product_methods {
                 context: &RuntimeContext,
             ) -> Result<(), LinearOperatorError> {
                 match self {
+                    Self::Scalar(value) => {
+                        scalar_view::product(*value, input, output, Some(context), false)
+                    }
                     Self::Dense(view) => view.apply_transpose_into(input, output, context),
                     Self::Sparse(view) => view.apply_transpose_into(input, output, context),
                 }
@@ -170,6 +208,7 @@ macro_rules! product_methods {
                 output: &mut [$scalar],
             ) -> Result<(), LinearOperatorError> {
                 match self {
+                    Self::Scalar(value) => scalar_view::product(*value, input, output, None, false),
                     Self::Dense(view) => view.apply_transpose_into_unbounded(input, output),
                     Self::Sparse(view) => view.apply_transpose_into_unbounded(input, output),
                 }
@@ -182,6 +221,9 @@ macro_rules! product_methods {
                 context: &RuntimeContext,
             ) -> Result<(), LinearOperatorError> {
                 match self {
+                    Self::Scalar(value) => {
+                        scalar_view::product(*value, input, output, Some(context), true)
+                    }
                     Self::Dense(view) => view.apply_adjoint_into(input, output, context),
                     Self::Sparse(view) => view.apply_adjoint_into(input, output, context),
                 }
@@ -193,6 +235,7 @@ macro_rules! product_methods {
                 output: &mut [$scalar],
             ) -> Result<(), LinearOperatorError> {
                 match self {
+                    Self::Scalar(value) => scalar_view::product(*value, input, output, None, true),
                     Self::Dense(view) => view.apply_adjoint_into_unbounded(input, output),
                     Self::Sparse(view) => view.apply_adjoint_into_unbounded(input, output),
                 }

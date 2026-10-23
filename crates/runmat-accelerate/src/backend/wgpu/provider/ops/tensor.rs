@@ -7,7 +7,7 @@ impl WgpuProvider {
         dim: usize,
         order: SortOrder,
         comparison: SortComparison,
-    ) -> Result<SortResult> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<SortResult> {
         let host = self.download_exec(handle).await?;
         let shape = host.shape.clone();
         let (values, indices) = sort_host_tensor(&host.data, &host.shape, dim, order, comparison)?;
@@ -30,7 +30,7 @@ impl WgpuProvider {
         handle: &GpuTensorHandle,
         columns: &[SortRowsColumnSpec],
         comparison: SortComparison,
-    ) -> Result<SortResult> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<SortResult> {
         let host = self.download_exec(handle).await?;
         let SortRowsHostOutputs {
             values,
@@ -55,7 +55,7 @@ impl WgpuProvider {
         &self,
         handle: &GpuTensorHandle,
         options: &UniqueOptions,
-    ) -> Result<UniqueResult> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<UniqueResult> {
         let host = self.download_exec(handle).await?;
         let HostTensorOwned { data, shape, .. } = host;
         let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("unique: {e}"))?;
@@ -63,9 +63,9 @@ impl WgpuProvider {
             runmat_runtime::builtins::array::sorting_sets::unique::unique_numeric_from_tensor(
                 tensor, options,
             )
-            .map_err(|err| anyhow!("unique: {err}"))?;
+            .map_err(runmat_accelerate_api::ProviderExecutionError::from_source)?;
         eval.into_numeric_unique_result()
-            .map_err(|err| anyhow!("unique: {err}"))
+            .map_err(runmat_accelerate_api::ProviderExecutionError::from_source)
     }
 
     pub(crate) async fn ismember_exec(
@@ -73,12 +73,15 @@ impl WgpuProvider {
         a: &GpuTensorHandle,
         b: &GpuTensorHandle,
         options: &IsMemberOptions,
-    ) -> Result<IsMemberResult> {
-        ensure!(
-            runmat_accelerate_api::handle_integer_type(a).is_none()
-                && runmat_accelerate_api::handle_integer_type(b).is_none(),
-            "ismember: resident integer inputs require exact runtime fallback"
-        );
+    ) -> runmat_accelerate_api::ProviderExecutionResult<IsMemberResult> {
+        if !(runmat_accelerate_api::handle_integer_type(a).is_none()
+            && runmat_accelerate_api::handle_integer_type(b).is_none())
+        {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "ismember: resident integer inputs require exact runtime fallback",
+            )
+            .into());
+        }
         let host_a = self.download_exec(a).await?;
         let host_b = self.download_exec(b).await?;
         let tensor_a =
@@ -91,9 +94,9 @@ impl WgpuProvider {
                 tensor_b,
                 options.rows,
             )
-            .map_err(|err| anyhow!("ismember: {err}"))?;
+            .map_err(runmat_accelerate_api::ProviderExecutionError::from_source)?;
         eval.into_numeric_ismember_result()
-            .map_err(|err| anyhow!("ismember: {err}"))
+            .map_err(runmat_accelerate_api::ProviderExecutionError::from_source)
     }
 
     pub(crate) async fn union_exec(
@@ -101,12 +104,15 @@ impl WgpuProvider {
         a: &GpuTensorHandle,
         b: &GpuTensorHandle,
         options: &UnionOptions,
-    ) -> Result<UnionResult> {
-        ensure!(
-            runmat_accelerate_api::handle_integer_type(a).is_none()
-                && runmat_accelerate_api::handle_integer_type(b).is_none(),
-            "union: resident integer inputs require exact runtime fallback"
-        );
+    ) -> runmat_accelerate_api::ProviderExecutionResult<UnionResult> {
+        if !(runmat_accelerate_api::handle_integer_type(a).is_none()
+            && runmat_accelerate_api::handle_integer_type(b).is_none())
+        {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "union: resident integer inputs require exact runtime fallback",
+            )
+            .into());
+        }
         let host_a = self.download_exec(a).await?;
         let host_b = self.download_exec(b).await?;
         let tensor_a = Tensor::new(host_a.data, host_a.shape).map_err(|e| anyhow!("union: {e}"))?;
@@ -115,9 +121,9 @@ impl WgpuProvider {
             runmat_runtime::builtins::array::sorting_sets::union::union_numeric_from_tensors(
                 tensor_a, tensor_b, options,
             )
-            .map_err(|err| anyhow!("union: {err}"))?;
+            .map_err(runmat_accelerate_api::ProviderExecutionError::from_source)?;
         eval.into_numeric_union_result()
-            .map_err(|err| anyhow!("union: {err}"))
+            .map_err(runmat_accelerate_api::ProviderExecutionError::from_source)
     }
 
     pub(crate) async fn setdiff_exec(
@@ -125,12 +131,15 @@ impl WgpuProvider {
         a: &GpuTensorHandle,
         b: &GpuTensorHandle,
         options: &SetdiffOptions,
-    ) -> Result<SetdiffResult> {
-        ensure!(
-            runmat_accelerate_api::handle_integer_type(a).is_none()
-                && runmat_accelerate_api::handle_integer_type(b).is_none(),
-            "setdiff: resident integer inputs require exact runtime fallback"
-        );
+    ) -> runmat_accelerate_api::ProviderExecutionResult<SetdiffResult> {
+        if !(runmat_accelerate_api::handle_integer_type(a).is_none()
+            && runmat_accelerate_api::handle_integer_type(b).is_none())
+        {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "setdiff: resident integer inputs require exact runtime fallback",
+            )
+            .into());
+        }
         let host_a = self.download_exec(a).await?;
         let host_b = self.download_exec(b).await?;
         let tensor_a =
@@ -141,9 +150,9 @@ impl WgpuProvider {
             runmat_runtime::builtins::array::sorting_sets::setdiff::setdiff_numeric_from_tensors(
                 tensor_a, tensor_b, options,
             )
-            .map_err(|err| anyhow!("setdiff: {err}"))?;
+            .map_err(runmat_accelerate_api::ProviderExecutionError::from_source)?;
         eval.into_numeric_setdiff_result()
-            .map_err(|err| anyhow!("setdiff: {err}"))
+            .map_err(runmat_accelerate_api::ProviderExecutionError::from_source)
     }
 
     pub(crate) fn reshape_exec(

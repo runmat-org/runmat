@@ -108,7 +108,13 @@ fn real_linalg_fallback_preserves_physical_source_class() {
 #[test]
 #[ignore = "requires provisioned WGPU adapter; run with --ignored"]
 fn host_factor_hooks_preserve_native_class_and_complex_eigen_spectrum() {
-    let provider = provider();
+    // Register exactly this physical owner for the public Runtime fallback.
+    // This fixture-only static lifetime is the existing registry contract.
+    let provider: &'static WgpuProvider = Box::leak(Box::new(provider()));
+    let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ));
     for precision in [ProviderPrecision::F32, ProviderPrecision::F64] {
         let single = [4.0_f32, 0.0, 0.0, 9.0];
         let double = [4.0_f64, 0.0, 0.0, 9.0];
@@ -176,17 +182,53 @@ fn host_factor_hooks_preserve_native_class_and_complex_eigen_spectrum() {
                 storage: GpuTensorStorage::Real,
             })
             .unwrap();
-        let eig = futures::executor::block_on(provider.eig_exec(&rotation, false)).unwrap();
-        for output in [&eig.eigenvalues, &eig.diagonal, &eig.right] {
+        let hook = futures::executor::block_on(runmat_accelerate_api::AccelProvider::eig(
+            provider, &rotation, false,
+        ))
+        .unwrap_err();
+        assert!(hook.is_unsupported());
+        let eig = futures::executor::block_on(
+            runmat_runtime::builtins::math::linalg::factor::eig::evaluate_in_context(
+                Some(&runtime),
+                Value::GpuTensor(rotation.clone()),
+                runmat_runtime::call::FunctionArgumentView::from_slice(&[]),
+                false,
+            ),
+        )
+        .unwrap();
+        for value in [eig.eigenvalues(), eig.diagonal_matrix(), eig.right()] {
+            let Value::GpuTensor(output) = value else {
+                panic!("public eig lost resident factor");
+            };
             assert_eq!(
-                runmat_accelerate_api::handle_precision(output),
+                runmat_accelerate_api::handle_precision(&output),
                 Some(precision)
             );
             assert_eq!(
-                runmat_accelerate_api::handle_storage(output),
+                runmat_accelerate_api::handle_storage(&output),
                 GpuTensorStorage::ComplexInterleaved
             );
             assert!(!output.shares_allocation_with(&rotation));
+        }
+        let Value::GpuTensor(values) = eig.eigenvalues() else {
+            unreachable!()
+        };
+        let spectrum =
+            futures::executor::block_on(provider.download_numeric_exec(&values)).unwrap();
+        match spectrum.data {
+            HostNumericDataOwned::F32(values) => {
+                assert_eq!(values.len(), 4);
+                assert!(values
+                    .chunks_exact(2)
+                    .all(|pair| pair[0].abs() < 1e-5 && (pair[1].abs() - 1.0).abs() < 1e-5));
+            }
+            HostNumericDataOwned::F64(values) => {
+                assert_eq!(values.len(), 4);
+                assert!(values
+                    .chunks_exact(2)
+                    .all(|pair| pair[0].abs() < 1e-10 && (pair[1].abs() - 1.0).abs() < 1e-10));
+            }
+            _ => panic!("eig changed the native floating class"),
         }
     }
 }

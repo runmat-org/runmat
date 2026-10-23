@@ -32,7 +32,7 @@ pub const VALIDATE_FUNCTION_SIGNATURES_JSON_CATALOG_ENTRY: BuiltinCatalogEntry =
             preparation: BuiltinOperandPreparation::RuntimeOwned,
             portability: BuiltinPortability::NativeAndWasm,
             accelerator: BuiltinAcceleratorPolicy::Forbidden,
-            residency: BuiltinResidencyPolicy::PreserveInputs,
+            residency: BuiltinResidencyPolicy::Host,
             fusion: BuiltinFusionPolicy::Boundary,
             distributed: BuiltinDistributedPolicy::InspectHandles,
         },

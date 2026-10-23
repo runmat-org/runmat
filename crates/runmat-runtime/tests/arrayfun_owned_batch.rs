@@ -10,10 +10,10 @@ use runmat_value::{ComplexTensor, IntegerStorage, LogicalArray, NumericDType, Te
 #[path = "support/retained_provider.rs"]
 mod retained_provider;
 
-#[path = "arrayfun_owned_batch/lifecycle.rs"]
-mod lifecycle;
 #[path = "arrayfun_owned_batch/division_fallback.rs"]
 mod division_fallback;
+#[path = "arrayfun_owned_batch/lifecycle.rs"]
+mod lifecycle;
 
 fn provider() -> &'static InProcessProvider {
     retained_provider::retained_test_provider!(PROVIDER: InProcessProvider = InProcessProvider::new())
@@ -211,7 +211,7 @@ fn stateful_scoped_service_cannot_replace_an_admitted_batch() {
     fn replacement(
         _: runmat_runtime::builtin::RuntimeBuiltinInvocation<'_>,
     ) -> RuntimeBuiltinFuture {
-        Box::pin(async {
+        runmat_runtime::builtin::admitted_builtin_future(None, "fixture", async {
             let sequence = runmat_value::ValueSequence::single(Value::Num(99.0))
                 .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?;
             runmat_runtime::execution::RootedValueSequence::new(sequence)

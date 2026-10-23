@@ -11,6 +11,8 @@ use crate::{
 
 #[derive(Clone, Debug, Error)]
 pub enum ExecutionServiceError {
+    #[error("owned CPU control allocation failed: {0}")]
+    HostAllocation(#[source] crate::context::host_allocation::HostAllocationError),
     #[error("execution handle belongs to a different scope")]
     ForeignScope,
     #[error("execution handle is unknown or stale")]
@@ -37,6 +39,7 @@ impl PartialEq for ExecutionServiceError {
     fn eq(&self, other: &Self) -> bool {
         use ExecutionServiceError as Error;
         match (self, other) {
+            (Error::HostAllocation(a), Error::HostAllocation(b)) => a == b,
             (Error::ForeignScope, Error::ForeignScope)
             | (Error::UnknownHandle, Error::UnknownHandle)
             | (Error::Cancelled, Error::Cancelled)
@@ -61,10 +64,18 @@ impl Eq for ExecutionServiceError {}
 impl ExecutionServiceError {
     /// Present invocation-local service failures in their owning session's
     /// namespace instead of the parallel service API's default namespace.
-    pub(crate) fn into_runtime_error_in_context(
+    pub fn into_runtime_error_in_context(
         self,
         runtime: Option<&crate::context::RuntimeContext>,
     ) -> RuntimeError {
+        if let Self::HostAllocation(cause) = self {
+            return crate::context::host_allocation::host_allocation_runtime_error(
+                runtime,
+                "RunMat:Execution:CpuControl",
+                "owned CPU control allocation",
+                cause,
+            );
+        }
         let cancelled = matches!(self, Self::Cancelled);
         let mut error = self.into_runtime_error();
         if cancelled {
@@ -82,6 +93,14 @@ impl ExecutionServiceError {
     /// outcomes and user-visible runtime errors.
     pub fn into_runtime_error(self) -> RuntimeError {
         match self {
+            Self::HostAllocation(cause) => {
+                crate::context::host_allocation::host_allocation_runtime_error(
+                    None,
+                    "RunMat:Execution:CpuControl",
+                    "owned CPU control allocation",
+                    cause,
+                )
+            }
             Self::LocalizedRuntimeFailure(error) => RuntimeError::from_shared_original(error),
             Self::RuntimeFailure(failure) => {
                 decode_runtime_failure(*failure).unwrap_or_else(|message| {
@@ -101,11 +120,16 @@ impl ExecutionServiceError {
                 Self::UnknownHandle.to_string(),
                 Self::UnknownHandle,
             ),
-            Self::Cancelled => crate::runtime_error::semantic_error_with_source(
-                "RunMat:parallel:Cancelled",
-                Self::Cancelled.to_string(),
-                Self::Cancelled,
-            ),
+            Self::Cancelled => {
+                let mut error = crate::runtime_error::semantic_error_with_source(
+                    "RunMat:parallel:Cancelled",
+                    Self::Cancelled.to_string(),
+                    Self::Cancelled,
+                );
+                error.failure_origin =
+                    crate::runtime_error::RuntimeFailureOrigin::ExecutionControlCancellation;
+                error
+            }
             Self::WorkerLost(message) => crate::runtime_error::semantic_error_with_source(
                 "RunMat:parallel:WorkerLost",
                 format!("execution worker was lost: {message}"),

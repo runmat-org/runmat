@@ -5,8 +5,8 @@ use runmat_package::NormalizedRelativePath;
 use super::invalid;
 use crate::AotResult;
 
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum NativeLoaderReferenceKind {
     ElfInterpreter,
     ElfDynamic { tag: u64 },
@@ -15,14 +15,16 @@ pub enum NativeLoaderReferenceKind {
     PeDelayImport,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NativeLoaderReference {
     pub kind: NativeLoaderReferenceKind,
     /// Raw identifier bytes, without lossy UTF-8 conversion or path rewriting.
     pub value: Vec<u8>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NativeLoaderImage {
     pub path: NormalizedRelativePath,
     /// Original command order, including repeated references and search paths.

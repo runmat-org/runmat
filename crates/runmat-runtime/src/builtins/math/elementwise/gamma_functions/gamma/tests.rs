@@ -147,7 +147,7 @@ fn logical_char_string_and_complex_inputs_are_rejected() {
     for value in [
         Value::Bool(true),
         Value::LogicalArray(LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap()),
-        Value::CharArray(CharArray::new(vec!['A', 'Z'], 1, 2).unwrap()),
+        Value::CharArray(CharArray::from_unicode_scalars(vec!['A', 'Z'], 1, 2).unwrap()),
         Value::from("text"),
         Value::Complex(1.0, 1.0),
         Value::ComplexTensor(ComplexTensor::new(vec![(1.0, 0.0)], vec![1, 1]).unwrap()),

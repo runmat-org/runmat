@@ -239,7 +239,10 @@ fn option_name(value: &Value) -> BuiltinResult<std::borrow::Cow<'_, str>> {
     match value {
         Value::String(s) => Ok(std::borrow::Cow::Borrowed(s.as_str())),
         Value::CharArray(ca) if ca.rows == 1 => {
-            Ok(std::borrow::Cow::Owned(ca.data().iter().collect()))
+            crate::builtins::common::text::decode_utf16_with_error(ca.data(), || {
+                jsonencode_error(&JSONENCODE_ERROR_OPTION_NAME)
+            })
+            .map(std::borrow::Cow::Owned)
         }
         Value::StringArray(sa) if sa.data().len() == 1 => {
             Ok(std::borrow::Cow::Borrowed(sa.data()[0].as_str()))
@@ -285,7 +288,10 @@ fn coerce_bool(value: &Value) -> BuiltinResult<bool> {
             _ => Err(jsonencode_error(&JSONENCODE_ERROR_OPTION_VALUE)),
         },
         Value::CharArray(ca) if ca.rows == 1 => {
-            parse_bool_string(&ca.data().iter().collect::<String>())
+            let text = crate::builtins::common::text::decode_utf16_with_error(ca.data(), || {
+                jsonencode_error(&JSONENCODE_ERROR_OPTION_VALUE)
+            })?;
+            parse_bool_string(&text)
         }
         Value::String(s) => parse_bool_string(s),
         Value::StringArray(sa) if sa.data().len() == 1 => parse_bool_string(&sa.data()[0]),

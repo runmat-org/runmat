@@ -101,6 +101,73 @@ fn managed_transforms_preserve_column_order_shape_and_original_column_claims() {
     };
     assert_eq!(joined.shape(), &[2, 4]);
     assert_eq!(numbers(&joined), vec![1., 2., 3., 4., 1., 2., 3., 4.]);
+    {
+        use crate::object::indexing::ObjectIndexComponent;
+        use crate::sequence::{
+            AssignmentStepSpec, SequenceDestinationBuilder, SequenceEndpointSpec,
+        };
+        let baseline = ledger.snapshot();
+        let root = Value::StructArray(source.clone());
+        let selectors = crate::object::indexing::array_in_context(Some(&runtime), 2, |axis| {
+            Ok(ObjectIndexComponent::Value(Value::Num(if axis == 0 {
+                3.
+            } else {
+                2.
+            })))
+        })
+        .unwrap();
+        let mut builder = SequenceDestinationBuilder::new_in_context(&runtime, &root)
+            .unwrap()
+            .with_assignment_creation(
+                runmat_types::AssignmentCreationPolicy::CreateStructFieldPath,
+            );
+        futures::executor::block_on(builder.push_step_in_context(
+            &runtime,
+            AssignmentStepSpec::Parentheses { selectors },
+            None,
+        ))
+        .unwrap();
+        let prepared = futures::executor::block_on(builder.finish_in_context(
+            &runtime,
+            SequenceEndpointSpec::Fixed {
+                step: AssignmentStepSpec::Member("extra".into()),
+                mutation: runmat_types::PlaceMutationKind::MemberAssign,
+            },
+        ))
+        .unwrap();
+        let updated = futures::executor::block_on(prepared.assign_fixed_in_context(
+            &runtime,
+            root,
+            Value::Num(13.),
+            None,
+        ))
+        .unwrap();
+        let Value::StructArray(updated_array) = updated.value() else {
+            panic!("grown structure")
+        };
+        assert_eq!(updated_array.shape(), &[3, 2]);
+        let values = updated_array.field_values("value").unwrap();
+        assert_eq!(&values[..2], &[Value::Num(1.), Value::Num(2.)]);
+        assert_eq!(&values[3..5], &[Value::Num(3.), Value::Num(4.)]);
+        assert!(matches!(&values[2],Value::Tensor(value) if value.is_empty()));
+        assert!(matches!(&values[5],Value::Tensor(value) if value.is_empty()));
+        let extra = updated_array.field_values("extra").unwrap();
+        assert_eq!(extra[5], Value::Num(13.));
+        assert!(extra[..5]
+            .iter()
+            .all(|value| matches!(value,Value::Tensor(value) if value.is_empty())));
+        assert_eq!(source.shape(), &[2, 2]);
+        assert!(source.field_values("extra").is_none());
+        drop(updated);
+        assert_eq!(
+            ledger.snapshot().live_reserved_bytes,
+            baseline.live_reserved_bytes
+        );
+        assert_eq!(
+            ledger.snapshot().live_claimed_bytes,
+            baseline.live_claimed_bytes
+        );
+    }
     drop((permuted, flipped, shifted, repeated, joined, source));
     assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
 }

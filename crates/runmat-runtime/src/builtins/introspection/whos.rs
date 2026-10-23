@@ -172,7 +172,7 @@ pub(crate) mod tests {
             .and_then(|value| match value {
                 Value::String(s) => Some(s.to_string()),
                 Value::CharArray(ca) if ca.rows == 1 => {
-                    Some(ca.data().iter().collect::<String>().trim().to_string())
+                    ca.row_string().map(|text| text.trim().to_string())
                 }
                 _ => None,
             })
@@ -213,22 +213,24 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn char_array_from_rows(rows: &[&str]) -> CharArray {
-        let cols = rows.iter().map(|s| s.len()).max().unwrap_or(0);
+        let cols = rows
+            .iter()
+            .map(|text| text.encode_utf16().count())
+            .max()
+            .unwrap_or(0);
         let mut data = Vec::with_capacity(rows.len() * cols.max(1));
         for row in rows {
             let mut chars: Vec<char> = row.chars().collect();
-            while chars.len() < cols {
-                chars.push(' ');
-            }
+            chars.extend(std::iter::repeat_n(' ', cols - row.encode_utf16().count()));
             if cols == 0 {
                 continue;
             }
             data.extend(chars);
         }
         if cols == 0 {
-            CharArray::new(Vec::new(), rows.len(), 0).expect("char array")
+            CharArray::from_code_units(Vec::new(), rows.len(), 0).expect("char array")
         } else {
-            CharArray::new(data, rows.len(), cols).expect("char array")
+            CharArray::from_unicode_scalars(data, rows.len(), cols).expect("char array")
         }
     }
 

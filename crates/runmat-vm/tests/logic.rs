@@ -258,14 +258,14 @@ fn append_preserves_text_output_precedence_through_vm_dispatch() {
         Value::CharArray(array)
             if array.rows == 1
                 && array.cols == 11
-                && array.data().iter().collect::<String>() == "Hello World"
+                && runmat_value::decode_utf16_code_units(array.data()).expect("valid UTF-16 text fixture") == "Hello World"
     ));
     assert!(matches!(
         &vars[1],
         Value::Cell(cell)
             if cell.shape == vec![1, 2]
-                && matches!(&cell.data()[0], Value::CharArray(array) if array.data().iter().collect::<String>() == "alpha ")
-                && matches!(&cell.data()[1], Value::CharArray(array) if array.data().iter().collect::<String>() == "beta ")
+                && matches!(&cell.data()[0], Value::CharArray(array) if runmat_value::decode_utf16_code_units(array.data()).expect("valid UTF-16 text fixture") == "alpha ")
+                && matches!(&cell.data()[1], Value::CharArray(array) if runmat_value::decode_utf16_code_units(array.data()).expect("valid UTF-16 text fixture") == "beta ")
     ));
     assert!(matches!(
         &vars[2],
@@ -1959,7 +1959,7 @@ fn mixed_concatenation_precedence_and_nd_shapes_flow_through_vm_dispatch() {
         &vars[4],
         Value::CharArray(array)
             if array.shape == vec![1, 2, 2]
-                && array.data().iter().collect::<String>() == "abcd"
+                && runmat_value::decode_utf16_code_units(array.data()).expect("valid UTF-16 text fixture") == "abcd"
     ));
     assert!(matches!(
         &vars[5],
@@ -2871,7 +2871,8 @@ fn blanks_all_integer_length_classes_execute_through_compiled_dispatch() {
         assert!(matches!(
             &vars[1],
             Value::CharArray(chars)
-                if chars.shape == vec![1, 3] && chars.data() == vec![' ', ' ', ' ']
+                if chars.shape == vec![1, 3]
+                    && chars.data().iter().map(|unit| unit.raw()).eq("   ".encode_utf16())
         ));
     }
     let vars = execute_source("a = blanks(int16(-3));").expect("negative integer length");

@@ -4,7 +4,7 @@ use runmat_value::Value;
 use crate::{NativeExecutorError, NativeExecutorResult};
 
 use super::super::state::HostState;
-use super::{CallCompletion, CompletedPayload, CompletionFuture, PendingCall};
+use super::{CallCompletion, CompletedPayload, PendingCall};
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "short_circuit_truth/tests.rs"]
@@ -78,7 +78,7 @@ pub(in crate::execute) fn begin_short_circuit_truth(
         ShortCircuitTruthStage::Left => "short-circuit left operand",
         ShortCircuitTruthStage::Right { .. } => "short-circuit right operand",
     };
-    let future: CompletionFuture = Box::pin(async move {
+    let future = super::admit_completion_with(state, move || async move {
         let truth = runtime
             .scope(runmat_runtime::condition::logical_truth_from_value(
                 value.value(),
@@ -89,8 +89,7 @@ pub(in crate::execute) fn begin_short_circuit_truth(
             stage,
             truth,
         }))
-    });
-    let future = super::scope_completion(state, future);
+    })?;
     state.pending_call = Some(PendingCall {
         request,
         continuation,

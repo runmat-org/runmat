@@ -101,7 +101,7 @@ fn erfcinv_preserves_rank_zero_and_rank_one_single_tensors() {
 fn rejects_logical_integer_and_char_inputs() {
     assert!(erfcinv_builtin(Value::Bool(true)).is_err());
     assert!(erfcinv_builtin(Value::Int(IntValue::U8(2))).is_err());
-    let chars = CharArray::new(vec!['\0', '\u{1}'], 1, 2).unwrap();
+    let chars = CharArray::from_unicode_scalars(vec!['\0', '\u{1}'], 1, 2).unwrap();
     assert!(erfcinv_builtin(Value::CharArray(chars)).is_err());
 }
 

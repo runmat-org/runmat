@@ -175,7 +175,10 @@ fn scalar_character_results_materialize_as_a_character_array() {
     let Value::CharArray(result) = result else {
         panic!("expected character array");
     };
-    assert_eq!(result.to_column_major(), vec!['a', 'b']);
+    assert_eq!(
+        result.to_column_major(),
+        runmat_value::encode_utf16_code_units("ab")
+    );
     assert_eq!(result.shape, vec![2, 1]);
 }
 

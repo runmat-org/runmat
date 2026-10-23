@@ -370,7 +370,13 @@ fn parse_mode(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<Conv
         0 => Ok(ConvMode::Full),
         1 => {
             let super::common::convolution::ConvolutionSelectorText::Text(text) =
-                super::common::convolution::convolution_selector_text(&args[0])
+                super::common::convolution::convolution_selector_text(&args[0]).map_err(
+                    |source| {
+                        let mut error = conv_error(&CONV_ERROR_SHAPE_INVALID);
+                        error.source = Some(Box::new(source));
+                        error
+                    },
+                )?
             else {
                 return Err(conv_error(&CONV_ERROR_SHAPE_INVALID));
             };

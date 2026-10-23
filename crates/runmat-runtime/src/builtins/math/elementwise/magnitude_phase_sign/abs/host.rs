@@ -137,9 +137,8 @@ pub(super) fn abs_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
 
 pub(super) fn abs_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let data = ca
-        .data()
-        .iter()
-        .map(|&ch| ch as u32 as f64)
+        .iter_column_major()
+        .map(|ch| f64::from(ch.raw()))
         .collect::<Vec<_>>();
     let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
         .map_err(|e| OPERATION.error(&ABS_ERROR_INTERNAL, e))?;

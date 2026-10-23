@@ -40,21 +40,21 @@ pub(crate) fn foreign_callback_request_rooted(
             let identity = crate::callable_identity_for_handle_name(name).0;
             CallableTarget::Resolved {
                 fallback_policy: fallback_policy(&identity),
-                identity,
+                identity: identity.into(),
             }
         }
         Value::ExternalFunctionHandle(name) => {
             let identity = crate::external_callable_identity_for_name(name);
             CallableTarget::Resolved {
                 fallback_policy: fallback_policy(&identity),
-                identity,
+                identity: identity.into(),
             }
         }
         Value::MethodFunctionHandle(name) => {
             let identity = CallableIdentity::Method(MethodId(name.name().to_owned()));
             CallableTarget::Resolved {
                 fallback_policy: fallback_policy(&identity),
-                identity,
+                identity: identity.into(),
             }
         }
         Value::BoundFunctionHandle(handle) => {
@@ -75,7 +75,7 @@ pub(crate) fn foreign_callback_request_rooted(
                         crate::callable_identity_for_handle_name(&closure.function_name).0;
                     CallableTarget::CapturedResolved {
                         fallback_policy: fallback_policy(&identity),
-                        identity,
+                        identity: identity.into(),
                         closure: retained,
                     }
                 }
@@ -91,7 +91,7 @@ pub(crate) fn foreign_callback_request_rooted(
     let display_name = match &target {
         CallableTarget::Resolved { identity, .. }
         | CallableTarget::CapturedResolved { identity, .. } => {
-            crate::call::identity::strict_callable_display_name(identity)
+            crate::call::identity::strict_callable_display_name(identity.as_identity())
         }
         _ => None,
     };

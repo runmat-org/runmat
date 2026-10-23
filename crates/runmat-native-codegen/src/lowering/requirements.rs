@@ -141,11 +141,13 @@ pub(super) fn reject_predeclared_capabilities(
 
 fn statement_value(statement: &runmat_mir::MirStmtKind) -> Option<&runmat_mir::MirRvalue> {
     match statement {
-        runmat_mir::MirStmtKind::Assign { value, .. }
+        runmat_mir::MirStmtKind::PreparedAssign { value, .. }
+        | runmat_mir::MirStmtKind::Assign { value, .. }
         | runmat_mir::MirStmtKind::MultiAssign { value, .. }
         | runmat_mir::MirStmtKind::SequenceAssign { value, .. }
         | runmat_mir::MirStmtKind::Expr(value) => Some(value),
-        runmat_mir::MirStmtKind::PlaceMutation(_)
+        runmat_mir::MirStmtKind::PrepareFixedAssignment(_)
+        | runmat_mir::MirStmtKind::PlaceMutation(_)
         | runmat_mir::MirStmtKind::StatementOutput(_)
         | runmat_mir::MirStmtKind::CaptureSequence { .. }
         | runmat_mir::MirStmtKind::WorkspaceEffect { .. }

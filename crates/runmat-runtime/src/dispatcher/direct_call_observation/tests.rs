@@ -335,7 +335,7 @@ fn strcmp_two_outputs_rejects_before_admission_without_feedback() {
 
 fn pending_after_admission(invocation: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
     let sink = invocation.call_observation;
-    Box::pin(async move {
+    crate::builtin::admitted_builtin_future(None, "fixture", async move {
         if let Some(sink) = sink {
             sink.admit(
                 crate::builtins::strings::core::strcmp::ScalarStringCompareWorkload {
@@ -446,17 +446,25 @@ fn cancellation_after_selection_drops_feedback_without_failure() {
     assert_eq!(placement.probe_drops.load(Ordering::SeqCst), 1);
 }
 
-struct FiniteMemory;
+struct FiniteMemory(crate::context::host_effect::ManagedHostEffectLedger);
 impl crate::context::RuntimeParallelService for FiniteMemory {
     fn supports(&self, _: crate::context::ParallelCapability) -> bool {
         false
     }
 
     fn placement_resources(&self) -> crate::context::RuntimeParallelResources {
+        let snapshot = self.0.snapshot();
         crate::context::RuntimeParallelResources {
-            memory_available_bytes: Some(1),
+            memory_available_bytes: Some(snapshot.free_bytes()),
+            epoch: snapshot.epoch,
             ..Default::default()
         }
+    }
+
+    fn managed_host_effect_ledger(
+        &self,
+    ) -> Option<crate::context::host_effect::ManagedHostEffectLedger> {
+        Some(self.0.clone())
     }
 }
 
@@ -465,11 +473,12 @@ impl crate::context::RuntimeParallelService for FiniteMemory {
 fn unknown_peak_under_finite_memory_declines_sample_not_execution() {
     let binding = strcmp_binding();
     let (runtime, scoped, placement) = harness(binding);
+    let ledger = crate::context::host_effect::ManagedHostEffectLedger::new(64 * 1_024);
     let runtime = runtime.with_service_ports(
         RuntimeServicePorts::default()
             .with_builtin(scoped)
             .with_placement(placement.clone())
-            .with_parallel(Rc::new(FiniteMemory)),
+            .with_parallel(Rc::new(FiniteMemory(ledger))),
     );
     let result = run(
         &runtime,

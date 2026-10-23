@@ -18,6 +18,7 @@ struct ProcessDispatchControl {
 
 static PROCESS_DISPATCH_CONTROL: Mutex<Option<ProcessDispatchControl>> = Mutex::new(None);
 static PROCESS_DISPATCH_TEST_LOCK: Mutex<()> = Mutex::new(());
+const NESTED_PROCESS_DEPTH: usize = 64;
 
 struct ProcessLeafRetirement;
 
@@ -35,7 +36,7 @@ fn pending_process_builtin(
         .expect("process dispatch control lock")
         .take()
         .expect("process dispatch control");
-    Box::pin(async move {
+    runmat_runtime::builtin::admitted_builtin_future(None, "fixture", async move {
         let _retirement = ProcessLeafRetirement;
         eprintln!("vm-process-dispatch phase: leaf entered before reach notification");
         control.reached.send(()).expect("test still receives entry");
@@ -189,7 +190,7 @@ fn process_stack_builtin_can_suspend_on_a_bounded_native_thread_stack() {
 
 #[test]
 fn nested_process_stack_calls_reach_a_pending_leaf_on_a_bounded_native_thread_stack() {
-    run_process_fixture_on_bounded_stack(12);
+    run_process_fixture_on_bounded_stack(NESTED_PROCESS_DEPTH);
 }
 
 #[test]
@@ -216,7 +217,7 @@ fn nested_process_stack_calls_retire_a_pending_leaf_on_drop() {
             .with_service_ports(
                 RuntimeServicePorts::default().with_builtin(Rc::new(ProcessBuiltinService)),
             );
-            let bytecode = nested_process_bytecode(12);
+            let bytecode = nested_process_bytecode(NESTED_PROCESS_DEPTH);
             let mut vars = Vec::new();
             let mut pending = Box::pin(interpret_with_vars_in_context(
                 &bytecode,

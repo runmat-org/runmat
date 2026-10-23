@@ -94,7 +94,7 @@ pub(crate) fn infer_mir_call_with_arguments(
         }
     }
 
-    if let Some(name) = static_name(call) {
+    if let Some(name) = catalog_builtin_name(call) {
         if let Some(entry) = runmat_builtins::builtin_catalog_entry_by_name(&name) {
             if matches!(
                 entry.contract.maturity,
@@ -111,6 +111,8 @@ pub(crate) fn infer_mir_call_with_arguments(
             }
             return runmat_builtins::infer_catalog_call(entry, &request);
         }
+    }
+    if let Some(name) = static_name(call) {
         if let Some(inference) = super::infer_legacy_builtin(&name, &request) {
             return inference;
         }
@@ -122,10 +124,21 @@ pub(crate) fn infer_mir_call_with_arguments(
         }
     }
 
-    infer_call(
-        &CallContract::dynamic(DynamicReason::UnresolvedCallable),
-        &request,
-    )
+    // Unknown output geometry alone does not describe an unresolved target's
+    // effects. Preserve dynamic dispatch even when a producer supplies a
+    // narrower coarse declaration for the call site.
+    let mut contract = CallContract::dynamic(DynamicReason::UnresolvedCallable);
+    contract.effects.0.insert(runmat_types::EffectKind::Unknown);
+    infer_call(&contract, &request)
+}
+
+fn catalog_builtin_name(call: &MirCall) -> Option<String> {
+    match &call.callee {
+        MirCallee::Static(CallableIdentity::Builtin(builtin)) if !builtin.0.is_empty() => {
+            Some(builtin.0.clone())
+        }
+        _ => None,
+    }
 }
 
 fn bound_function(call: &MirCall) -> Option<FunctionId> {

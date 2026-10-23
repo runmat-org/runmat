@@ -50,7 +50,7 @@ impl GroupColumn {
     pub(crate) fn atom(&self, row: usize) -> VariableResult<&KeyAtom> {
         self.atoms
             .get(row)
-            .ok_or_else(|| "grouping row is out of bounds".to_string())
+            .ok_or_else(|| "grouping row is out of bounds".into())
     }
 
     pub(crate) fn atoms(&self) -> &[KeyAtom] {
@@ -63,7 +63,8 @@ impl GroupColumn {
             return Err(format!(
                 "replacement grouping variable has {rows} rows; expected {}",
                 self.rows
-            ));
+            )
+            .into());
         }
         self.atoms = observations::atoms(&value, rows)?;
         self.value = ColumnValue::Owned(value);
@@ -109,10 +110,9 @@ pub(crate) fn columns_from_value(
                 }
                 Err(cell) => {
                     for index in 0..cell.data().len() {
-                        let value = cell
-                            .data_owner()
-                            .retain_value_at(index)
-                            .map_err(|error| error.to_string())?;
+                        let value = cell.data_owner().retain_value_at(index).map_err(|error| {
+                            super::VariableError::with_source(error.to_string(), error)
+                        })?;
                         columns.extend(super::retained::columns(
                             &format!("{base_name}{}", index + 1),
                             value,

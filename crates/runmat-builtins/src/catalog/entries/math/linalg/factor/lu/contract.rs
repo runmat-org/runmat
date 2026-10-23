@@ -107,7 +107,60 @@ pub const LU_INPUTS_A_MODE: [BuiltinParamDescriptor; 2] = [
     },
 ];
 
-pub const LU_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
+const SPARSE_S: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "S",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Sparse single or double matrix, real or complex, square or rectangular.",
+};
+const SPARSE_THRESHOLD: BuiltinParamDescriptor = BuiltinParamDescriptor {name:"thresh",ty:BuiltinParamType::NumericArray,arity:BuiltinParamArity::Required,default:None,description:"Floating pivot threshold in [0,1]; a scalar with up to three outputs or one/two-element vector with four or five outputs."};
+const SPARSE_FORM: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "outputForm",
+    ty: BuiltinParamType::StringScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "matrix or vector permutation output format.",
+};
+const SPARSE_L: BuiltinParamDescriptor = BuiltinParamDescriptor {name:"L",ty:BuiltinParamType::NumericArray,arity:BuiltinParamArity::Required,default:None,description:"Sparse m-by-min(m,n) lower factor; with two outputs it includes the inverse row permutation."};
+const SPARSE_U: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "U",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Sparse min(m,n)-by-n upper factor, including legitimate zero pivots.",
+};
+const SPARSE_P: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "P",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Sparse double row permutation matrix or one-based dense double column vector.",
+};
+const SPARSE_Q: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "Q",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Sparse double column permutation matrix or one-based dense double column vector.",
+};
+const SPARSE_D: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "D",
+    ty: BuiltinParamType::NumericArray,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description: "Real sparse diagonal row scaling in the coefficient floating class.",
+};
+pub const LU_INPUTS_S: [BuiltinParamDescriptor; 1] = [SPARSE_S];
+pub const LU_INPUTS_S_FORM: [BuiltinParamDescriptor; 2] = [SPARSE_S, SPARSE_FORM];
+pub const LU_INPUTS_S_THRESHOLD: [BuiltinParamDescriptor; 2] = [SPARSE_S, SPARSE_THRESHOLD];
+pub const LU_INPUTS_S_THRESHOLD_FORM: [BuiltinParamDescriptor; 3] =
+    [SPARSE_S, SPARSE_THRESHOLD, SPARSE_FORM];
+pub const LU_OUTPUT_LUPQ: [BuiltinParamDescriptor; 4] = [SPARSE_L, SPARSE_U, SPARSE_P, SPARSE_Q];
+pub const LU_OUTPUT_LUPQD: [BuiltinParamDescriptor; 5] =
+    [SPARSE_L, SPARSE_U, SPARSE_P, SPARSE_Q, SPARSE_D];
+
+pub const LU_SIGNATURES: [BuiltinSignatureDescriptor; 20] = [
     BuiltinSignatureDescriptor {
         label: "LU = lu(A)",
         inputs: &LU_INPUTS_A,
@@ -138,13 +191,83 @@ pub const LU_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
         inputs: &LU_INPUTS_A_MODE,
         outputs: &LU_OUTPUT_LUP,
     },
+    BuiltinSignatureDescriptor {
+        label: "[L,U,P,Q] = lu(S)",
+        inputs: &LU_INPUTS_S,
+        outputs: &LU_OUTPUT_LUPQ,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[L,U,P,Q] = lu(S,outputForm)",
+        inputs: &LU_INPUTS_S_FORM,
+        outputs: &LU_OUTPUT_LUPQ,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[L,U,P,Q,D] = lu(S)",
+        inputs: &LU_INPUTS_S,
+        outputs: &LU_OUTPUT_LUPQD,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[L,U,P,Q,D] = lu(S,outputForm)",
+        inputs: &LU_INPUTS_S_FORM,
+        outputs: &LU_OUTPUT_LUPQD,
+    },
+    BuiltinSignatureDescriptor {
+        label: "LU = lu(S,thresh)",
+        inputs: &LU_INPUTS_S_THRESHOLD,
+        outputs: &LU_OUTPUT_COMBINED,
+    },
+    BuiltinSignatureDescriptor {
+        label: "LU = lu(S,thresh,outputForm)",
+        inputs: &LU_INPUTS_S_THRESHOLD_FORM,
+        outputs: &LU_OUTPUT_COMBINED,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[L,U] = lu(S,thresh)",
+        inputs: &LU_INPUTS_S_THRESHOLD,
+        outputs: &LU_OUTPUT_LU,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[L,U] = lu(S,thresh,outputForm)",
+        inputs: &LU_INPUTS_S_THRESHOLD_FORM,
+        outputs: &LU_OUTPUT_LU,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[L,U,P] = lu(S,thresh)",
+        inputs: &LU_INPUTS_S_THRESHOLD,
+        outputs: &LU_OUTPUT_LUP,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[L,U,P] = lu(S,thresh,outputForm)",
+        inputs: &LU_INPUTS_S_THRESHOLD_FORM,
+        outputs: &LU_OUTPUT_LUP,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[L,U,P,Q] = lu(S,thresh)",
+        inputs: &LU_INPUTS_S_THRESHOLD,
+        outputs: &LU_OUTPUT_LUPQ,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[L,U,P,Q] = lu(S,thresh,outputForm)",
+        inputs: &LU_INPUTS_S_THRESHOLD_FORM,
+        outputs: &LU_OUTPUT_LUPQ,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[L,U,P,Q,D] = lu(S,thresh)",
+        inputs: &LU_INPUTS_S_THRESHOLD,
+        outputs: &LU_OUTPUT_LUPQD,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[L,U,P,Q,D] = lu(S,thresh,outputForm)",
+        inputs: &LU_INPUTS_S_THRESHOLD_FORM,
+        outputs: &LU_OUTPUT_LUPQD,
+    },
 ];
 
 pub const LU_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.LU.INVALID_ARGUMENT",
     identifier: Some("RunMat:lu:InvalidArgument"),
     when: "Option arguments or requested output count are invalid.",
-    message: "lu currently supports at most three outputs",
+    message: "lu: invalid options or requested output count (dense supports at most three; sparse at most five)",
 };
 
 pub const LU_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {

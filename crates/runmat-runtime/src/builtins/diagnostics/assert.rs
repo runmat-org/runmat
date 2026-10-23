@@ -177,7 +177,8 @@ fn evaluate_condition(value: Value) -> crate::BuiltinResult<ConditionOutcome> {
             evaluate_complex_tensor(&tensor)
         }
         Value::CharArray(chars) => {
-            if !chars.data().is_empty() && chars.data().iter().all(|character| *character != '\0') {
+            if !chars.data().is_empty() && chars.data().iter().all(|character| character.raw() != 0)
+            {
                 Ok(ConditionOutcome::Pass)
             } else {
                 Ok(ConditionOutcome::Fail)
@@ -349,7 +350,7 @@ async fn normalize_formatting_arguments(
 }
 
 fn value_is_identifier(value: &Value) -> crate::BuiltinResult<bool> {
-    if let Some(text) = string_scalar_opt(value) {
+    if let Some(text) = string_scalar_opt(value)? {
         if text.contains(':') {
             return Ok(true);
         }
@@ -438,7 +439,14 @@ fn string_scalar_from_value(
         Value::String(text) => Ok(text.clone()),
         Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].clone()),
         Value::CharArray(char_array) if char_array.rows == 1 => {
-            Ok(char_array.data().iter().collect::<String>().into())
+            Ok(runmat_value::decode_utf16_code_units(char_array.data())
+                .map_err(|source| {
+                    let mut error =
+                        assert_error_with_message(source.to_string(), &ASSERT_ERROR_INVALID_INPUT);
+                    error.source = Some(Box::new(source));
+                    error
+                })?
+                .into())
         }
         _ => Err(assert_error_with_message(
             context,
@@ -447,15 +455,22 @@ fn string_scalar_from_value(
     }
 }
 
-fn string_scalar_opt(value: &Value) -> Option<runmat_value::Utf8Text> {
-    match value {
+fn string_scalar_opt(value: &Value) -> crate::BuiltinResult<Option<runmat_value::Utf8Text>> {
+    Ok(match value {
         Value::String(text) => Some(text.clone()),
         Value::StringArray(array) if array.data().len() == 1 => Some(array.data()[0].clone()),
-        Value::CharArray(char_array) if char_array.rows == 1 => {
-            Some(char_array.data().iter().collect::<String>().into())
-        }
+        Value::CharArray(char_array) if char_array.rows == 1 => Some(
+            runmat_value::decode_utf16_code_units(char_array.data())
+                .map_err(|source| {
+                    let mut error =
+                        assert_error_with_message(source.to_string(), &ASSERT_ERROR_INVALID_INPUT);
+                    error.source = Some(Box::new(source));
+                    error
+                })?
+                .into(),
+        ),
         _ => None,
-    }
+    })
 }
 
 #[cfg(test)]
@@ -509,6 +524,26 @@ pub(crate) mod tests {
         let err = assert_builtin(vec![Value::LogicalArray(logical)])
             .expect_err("empty condition should fail");
         assert_eq!(err.identifier(), Some(assert_default_identifier()));
+    }
+
+    #[test]
+    fn assert_character_truth_uses_raw_utf16_units() {
+        let nonzero = runmat_value::CharArray::from_code_units(
+            vec![runmat_value::Utf16CodeUnit::from_raw(0xD800)],
+            1,
+            1,
+        )
+        .expect("raw surrogate character");
+        assert_builtin(vec![Value::CharArray(nonzero)])
+            .expect("every nonzero raw character unit is true");
+
+        let zero = runmat_value::CharArray::from_code_units(
+            vec![runmat_value::Utf16CodeUnit::from_raw(0)],
+            1,
+            1,
+        )
+        .expect("raw zero character");
+        assert!(assert_builtin(vec![Value::CharArray(zero)]).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -648,12 +683,14 @@ pub(crate) mod tests {
 
     #[test]
     fn assert_real_condition_conversion_rejects_nan_and_accepts_character_vectors() {
-        let chars = runmat_value::CharArray::new(vec!['o', 'k'], 1, 2).expect("chars");
+        let chars =
+            runmat_value::CharArray::from_unicode_scalars(vec!['o', 'k'], 1, 2).expect("chars");
         assert_builtin(vec![Value::CharArray(chars)]).expect("nonzero character codes pass");
 
         for chars in [
-            runmat_value::CharArray::new(Vec::new(), 1, 0).expect("empty"),
-            runmat_value::CharArray::new(vec!['o', '\0'], 1, 2).expect("zero character"),
+            runmat_value::CharArray::from_code_units(Vec::new(), 1, 0).expect("empty"),
+            runmat_value::CharArray::from_unicode_scalars(vec!['o', '\0'], 1, 2)
+                .expect("zero character"),
         ] {
             let err =
                 assert_builtin(vec![Value::CharArray(chars)]).expect_err("condition should fail");

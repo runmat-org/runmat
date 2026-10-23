@@ -1,22 +1,18 @@
 //! Word encoding compatibility objects and word/index lookup helpers.
+pub use runmat_builtins::{
+    IND2WORD_DESCRIPTOR, IND2WORD_ERROR_IND2WORD_INVALID_INPUT as ERROR_IND2WORD_INVALID_INPUT,
+    IND2WORD_EXTENSIONS, IND2WORD_INTEGER_CAPABILITIES, IND2WORD_NONVECTOR_EXTENSION,
+    IND2WORD_RESIDENT_EXTENSION, IND2WORD_TYPED_INTEGER_EXTENSION, IS_VOCABULARY_WORD_DESCRIPTOR,
+    IS_VOCABULARY_WORD_ERROR_IS_VOCABULARY_WORD_INVALID_INPUT as ERROR_IS_VOCABULARY_WORD_INVALID_INPUT,
+    IS_VOCABULARY_WORD_INTEGER_AUDIT, WORD2IND_DESCRIPTOR,
+    WORD2IND_ERROR_WORD2IND_INVALID_INPUT as ERROR_WORD2IND_INVALID_INPUT, WORD2IND_INTEGER_AUDIT,
+};
 use runmat_types::MemberAccess;
 
-use runmat_builtins::{
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerAuditDescriptor,
-    BuiltinIntegerAuditKind, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
 use runmat_value::IntValue;
 use std::collections::HashMap;
 
 use runmat_builtins::WORD_ENCODING_ERROR_INVALID_INPUT;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
-};
 pub use runmat_builtins::{
     WORD_ENCODING_DESCRIPTOR, WORD_ENCODING_EXTENSIONS, WORD_ENCODING_INTEGER_CAPABILITIES,
     WORD_ENCODING_INTEGER_MAX_WORDS_EXTENSION,
@@ -37,267 +33,8 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult};
 pub const WORD_ENCODING_CLASS: runmat_types::StaticClassIdentity =
     runmat_types::StaticClassIdentity::new("wordEncoding");
 
-const IND2WORD_TYPED_INTEGER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "ind2word-typed-integer-indices",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "ind2word with a typed-integer index vector is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Ind2wordTypedIntegerExtension"),
-};
-const IND2WORD_NONVECTOR_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "ind2word-nonvector-indices",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "ind2word with matrix or multidimensional indices is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Ind2wordNonvectorExtension"),
-};
-const IND2WORD_RESIDENT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "ind2word-resident-indices",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "ind2word with resident indices is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Ind2wordResidentExtension"),
-};
-pub const IND2WORD_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    IND2WORD_TYPED_INTEGER_EXTENSION,
-    IND2WORD_NONVECTOR_EXTENSION,
-    IND2WORD_RESIDENT_EXTENSION,
-];
-const IND2WORD_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "M",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The current public reference specifies positive integer values but does not publish a native numeric class table; typed-integer vectors are therefore gated and read from authoritative integer storage.",
-    }];
-pub const IND2WORD_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "words = ind2word(enc, integer_M)",
-        inputs: &IND2WORD_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "The public form uses a host positive-integer vector and returns a string vector. RunMat gates typed-integer and resident forms independently, reads typed indices exactly from their native class, and always returns host strings.",
-    }];
-
 static WORD_ENCODING_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
     crate::class_registry::ClassRegistration::new(WORD_ENCODING_CLASS);
-
-const OUT_INDICES: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "M",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Word encoding indices, with NaN for words outside the vocabulary.",
-}];
-
-const OUT_WORDS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "words",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Words mapped from encoding indices.",
-}];
-
-const OUT_LOGICAL: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tf",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Logical membership mask.",
-}];
-
-const IN_WORDS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "enc",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "wordEncoding object.",
-    },
-    BuiltinParamDescriptor {
-        name: "words",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Words to map to indices.",
-    },
-];
-
-const IN_WORDS_REST: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "enc",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "wordEncoding object.",
-    },
-    BuiltinParamDescriptor {
-        name: "words",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Words to map to indices.",
-    },
-    BuiltinParamDescriptor {
-        name: "NameValue",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name-value options: IgnoreCase.",
-    },
-];
-
-const IN_INDICES: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "enc",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "wordEncoding object.",
-    },
-    BuiltinParamDescriptor {
-        name: "M",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Positive integer word encoding indices.",
-    },
-];
-
-const IN_VOCABULARY_WORDS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "embOrEnc",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "wordEmbedding or wordEncoding object.",
-    },
-    BuiltinParamDescriptor {
-        name: "words",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Words to test.",
-    },
-];
-
-const IN_VOCABULARY_WORDS_REST: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "embOrEnc",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "wordEmbedding or wordEncoding object.",
-    },
-    BuiltinParamDescriptor {
-        name: "words",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Words to test.",
-    },
-    BuiltinParamDescriptor {
-        name: "NameValue",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name-value options: IgnoreCase.",
-    },
-];
-
-const ERROR_WORD2IND_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.WORD2IND.INVALID_INPUT",
-    identifier: Some("RunMat:word2ind:InvalidInput"),
-    when: "Inputs do not match a supported word2ind form.",
-    message: "word2ind received invalid input",
-};
-
-const ERROR_IND2WORD_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.IND2WORD.INVALID_INPUT",
-    identifier: Some("RunMat:ind2word:InvalidInput"),
-    when: "Inputs do not match a supported ind2word form.",
-    message: "ind2word received invalid input",
-};
-
-const ERROR_IS_VOCABULARY_WORD_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISVOCABULARYWORD.INVALID_INPUT",
-    identifier: Some("RunMat:isVocabularyWord:InvalidInput"),
-    when: "Inputs do not match a supported isVocabularyWord form.",
-    message: "isVocabularyWord received invalid input",
-};
-
-const WORD2IND_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_WORD2IND_INVALID_INPUT];
-const IND2WORD_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_IND2WORD_INVALID_INPUT];
-const IS_VOCABULARY_WORD_ERRORS: [BuiltinErrorDescriptor; 1] =
-    [ERROR_IS_VOCABULARY_WORD_INVALID_INPUT];
-
-fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Unknown
-}
-
-pub const WORD2IND_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[
-        BuiltinSignatureDescriptor {
-            label: "M = word2ind(enc, words)",
-            inputs: &IN_WORDS,
-            outputs: &OUT_INDICES,
-        },
-        BuiltinSignatureDescriptor {
-            label: "M = word2ind(enc, words, 'IgnoreCase', true)",
-            inputs: &IN_WORDS_REST,
-            outputs: &OUT_INDICES,
-        },
-    ],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &WORD2IND_ERRORS,
-};
-pub const WORD2IND_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "word2ind accepts a wordEncoding object, textual words, and a logical IgnoreCase option. It returns double indices or NaN; integer and resident numeric word/control inputs are invalid and reject before provider access.",
-};
-
-pub const IND2WORD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[BuiltinSignatureDescriptor {
-        label: "words = ind2word(enc, M)",
-        inputs: &IN_INDICES,
-        outputs: &OUT_WORDS,
-    }],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &IND2WORD_ERRORS,
-};
-
-pub const IS_VOCABULARY_WORD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[
-        BuiltinSignatureDescriptor {
-            label: "tf = isVocabularyWord(emb, words)",
-            inputs: &IN_VOCABULARY_WORDS,
-            outputs: &OUT_LOGICAL,
-        },
-        BuiltinSignatureDescriptor {
-            label: "tf = isVocabularyWord(enc, words)",
-            inputs: &IN_VOCABULARY_WORDS,
-            outputs: &OUT_LOGICAL,
-        },
-        BuiltinSignatureDescriptor {
-            label: "tf = isVocabularyWord(___, 'IgnoreCase', true)",
-            inputs: &IN_VOCABULARY_WORDS_REST,
-            outputs: &OUT_LOGICAL,
-        },
-    ],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &IS_VOCABULARY_WORD_ERRORS,
-};
-pub const IS_VOCABULARY_WORD_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "isVocabularyWord accepts vocabulary objects, textual words, and logical options; integer and resident numeric values are invalid and reject before provider access.",
-    };
 
 #[runtime_builtin(
     name = "wordEncoding",
@@ -331,82 +68,99 @@ async fn word_encoding_builtin(
 
 #[runtime_builtin(
     name = "word2ind",
-    category = "strings/text_analytics",
-    summary = "Map words to indices in a wordEncoding object.",
-    keywords = "word2ind,wordEncoding,text analytics,indices,vocabulary",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::text_analytics::encoding::WORD2IND_DESCRIPTOR),
-    integer_audit(crate::builtins::strings::text_analytics::encoding::WORD2IND_INTEGER_AUDIT),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::text_analytics::encoding"
 )]
-async fn word2ind_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    if args.iter().skip(1).any(|value| {
-        crate::builtins::common::validation::value_contains_native_integer_class(value)
-            || value_contains_resident(value)
-    }) {
-        return Err(encoding_error(
+async fn word2ind_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::WORD2IND_DESCRIPTOR,
+        &runmat_builtins::WORD2IND_ERROR_TOO_MANY_OUTPUTS,
+        "word2ind",
+    )?;
+    let work = super::model_admission::UnboundedModelWork::admit(runtime.as_ref(), "word2ind")?;
+    work.finish(
+        async {
+            if args.iter().skip(1).any(|value| {
+                crate::builtins::common::validation::value_contains_native_integer_class(value)
+                    || value_contains_resident(value)
+            }) {
+                return Err(encoding_error(
             "word2ind",
             "word2ind: words and option names must be host text and IgnoreCase must be logical",
         ));
-    }
-    let gathered = gather_args(args, "word2ind").await?;
-    let (object, words, options) = parse_word2ind_args(gathered)?;
-    let encoding = word_encoding_from_object(&object, "word2ind")?;
-    let lookup = build_word_lookup(&encoding.vocabulary, options.ignore_case);
-    let indices = words
-        .words
-        .into_iter()
-        .map(|word| {
-            let key = if options.ignore_case {
-                word.to_lowercase()
-            } else {
-                word
-            };
-            lookup
-                .get(&key)
-                .map(|idx| (*idx + 1) as f64)
-                .unwrap_or(f64::NAN)
-        })
-        .collect::<Vec<_>>();
-    Tensor::new(indices, words.shape)
-        .map(Value::Tensor)
-        .map_err(|err| encoding_error("word2ind", err))
+            }
+            let gathered = gather_args(&args, runtime.as_ref(), "word2ind").await?;
+            work.check()?;
+            let (object, words, options) = parse_word2ind_args(gathered.view())?;
+            let encoding = word_encoding_from_object(&object, "word2ind")?;
+            let lookup = build_word_lookup(&encoding.vocabulary, options.ignore_case);
+            let indices = words
+                .words
+                .into_iter()
+                .map(|word| {
+                    let key = if options.ignore_case {
+                        word.to_lowercase()
+                    } else {
+                        word
+                    };
+                    lookup
+                        .get(&key)
+                        .map(|idx| (*idx + 1) as f64)
+                        .unwrap_or(f64::NAN)
+                })
+                .collect::<Vec<_>>();
+            Tensor::new(indices, words.shape)
+                .map(Value::Tensor)
+                .map_err(|err| encoding_error("word2ind", err))
+        }
+        .await,
+    )
 }
 
 #[runtime_builtin(
     name = "ind2word",
-    category = "strings/text_analytics",
-    summary = "Map wordEncoding indices back to words.",
-    keywords = "ind2word,wordEncoding,text analytics,indices,vocabulary",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::text_analytics::encoding::IND2WORD_DESCRIPTOR),
-    extensions(crate::builtins::strings::text_analytics::encoding::IND2WORD_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::strings::text_analytics::encoding::IND2WORD_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::text_analytics::encoding"
 )]
-async fn ind2word_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    ensure_ind2word_extensions(&args)?;
-    let gathered = gather_args(args, "ind2word").await?;
-    let (object, indices) = parse_ind2word_args(gathered)?;
-    let encoding = word_encoding_from_object(&object, "ind2word")?;
-    let words = indices
-        .values
-        .into_iter()
-        .map(|idx| {
-            let word_idx = positive_index(idx, encoding.vocabulary.len(), "ind2word")?;
-            Ok(encoding.vocabulary[word_idx].clone())
-        })
-        .collect::<BuiltinResult<Vec<_>>>()?;
-    StringArray::new(words, indices.shape)
-        .map(Value::StringArray)
-        .map_err(|err| encoding_error("ind2word", err))
+async fn ind2word_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::IND2WORD_DESCRIPTOR,
+        &runmat_builtins::IND2WORD_ERROR_TOO_MANY_OUTPUTS,
+        "ind2word",
+    )?;
+    let work = super::model_admission::UnboundedModelWork::admit(runtime.as_ref(), "ind2word")?;
+    work.finish(
+        async {
+            ensure_ind2word_extensions(args.view())?;
+            let gathered = gather_args(&args, runtime.as_ref(), "ind2word").await?;
+            work.check()?;
+            let (object, indices) = parse_ind2word_args(gathered.view())?;
+            let encoding = word_encoding_from_object(&object, "ind2word")?;
+            let words = indices
+                .values
+                .into_iter()
+                .map(|idx| {
+                    let word_idx = positive_index(idx, encoding.vocabulary.len(), "ind2word")?;
+                    Ok(encoding.vocabulary[word_idx].clone())
+                })
+                .collect::<BuiltinResult<Vec<_>>>()?;
+            StringArray::new(words, indices.shape)
+                .map(Value::StringArray)
+                .map_err(|err| encoding_error("ind2word", err))
+        }
+        .await,
+    )
 }
 
-fn ensure_ind2word_extensions(args: &[Value]) -> BuiltinResult<()> {
+fn ensure_ind2word_extensions(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
     if args.len() != 2 {
         return Ok(());
     }
@@ -453,26 +207,32 @@ fn is_vector_shape(shape: &[usize]) -> bool {
 
 #[runtime_builtin(
     name = "isVocabularyWord",
-    category = "strings/text_analytics",
-    summary = "Test whether words are in a wordEmbedding or wordEncoding vocabulary.",
-    keywords = "isVocabularyWord,wordEmbedding,wordEncoding,text analytics,vocabulary",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::text_analytics::encoding::IS_VOCABULARY_WORD_DESCRIPTOR),
-    integer_audit(
-        crate::builtins::strings::text_analytics::encoding::IS_VOCABULARY_WORD_INTEGER_AUDIT
-    ),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::text_analytics::encoding"
 )]
-async fn is_vocabulary_word_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn is_vocabulary_word_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::IS_VOCABULARY_WORD_DESCRIPTOR,
+        &runmat_builtins::IS_VOCABULARY_WORD_ERROR_TOO_MANY_OUTPUTS,
+        "isVocabularyWord",
+    )?;
+    let work =
+        super::model_admission::UnboundedModelWork::admit(runtime.as_ref(), "isVocabularyWord")?;
+    work.finish(async {
+
     if args.iter().any(value_contains_resident) {
         return Err(encoding_error(
             "isVocabularyWord",
             "isVocabularyWord: provider-resident numeric inputs are not vocabulary objects, words, or controls",
         ));
     }
-    let gathered = gather_args(args, "isVocabularyWord").await?;
-    let (object, words, options) = parse_is_vocabulary_word_args(gathered)?;
+    let gathered = gather_args(&args, runtime.as_ref(), "isVocabularyWord").await?;
+ work.check()?;
+    let (object, words, options) = parse_is_vocabulary_word_args(gathered.view())?;
     let vocabulary = if object.is_class(WORD_ENCODING_CLASS) {
         word_encoding_from_object(&object, "isVocabularyWord")?.vocabulary
     } else if object.is_class(WORD_EMBEDDING_CLASS) {
@@ -502,6 +262,7 @@ async fn is_vocabulary_word_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     LogicalArray::new(flags, words.shape)
         .map(Value::LogicalArray)
         .map_err(|err| encoding_error("isVocabularyWord", err))
+ }.await)
 }
 
 fn value_contains_resident(value: &Value) -> bool {
@@ -517,18 +278,21 @@ fn value_contains_resident(value: &Value) -> bool {
     }
 }
 
-async fn gather_args(args: Vec<Value>, fn_name: &str) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(args.len());
-    for arg in args {
-        out.push(gather_encoding_value(&arg, fn_name).await?);
-    }
-    Ok(out)
+async fn gather_args(
+    args: &crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+    fn_name: &str,
+) -> BuiltinResult<crate::call::BuiltinArguments> {
+    let work = super::model_admission::UnboundedModelWork::admit(runtime, fn_name)?;
+    args.try_map_preserving_roots_async(args.len(), runtime, async |index| {
+        work.wait(gather_encoding_value(&args[index], fn_name))
+            .await
+    })
+    .await
 }
 
-async fn gather_encoding_value(value: &Value, fn_name: &str) -> BuiltinResult<Value> {
-    gather_if_needed_async(value)
-        .await
-        .map_err(|err| encoding_error(fn_name, format!("{fn_name}: failed to gather input: {err}")))
+async fn gather_encoding_value(value: &Value, _fn_name: &str) -> BuiltinResult<Value> {
+    gather_if_needed_async(value).await
 }
 
 #[derive(Clone, Debug)]
@@ -768,7 +532,7 @@ struct LookupOptions {
 }
 
 fn parse_word2ind_args(
-    args: Vec<Value>,
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<(ObjectInstance, WordInput, LookupOptions)> {
     if args.len() < 2 {
         return Err(encoding_error(
@@ -778,12 +542,12 @@ fn parse_word2ind_args(
     }
     let object = object_arg(&args[0], "word2ind", "wordEncoding")?;
     let words = word_input_from_value(&args[1], "word2ind")?;
-    let options = parse_lookup_options(&args[2..], "word2ind")?;
+    let options = parse_lookup_options(args.range(2..)?, "word2ind")?;
     Ok((object, words, options))
 }
 
 fn parse_is_vocabulary_word_args(
-    args: Vec<Value>,
+    args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<(ObjectInstance, WordInput, LookupOptions)> {
     if args.len() < 2 {
         return Err(encoding_error(
@@ -797,11 +561,13 @@ fn parse_is_vocabulary_word_args(
         "wordEmbedding or wordEncoding",
     )?;
     let words = word_input_from_value(&args[1], "isVocabularyWord")?;
-    let options = parse_lookup_options(&args[2..], "isVocabularyWord")?;
+    let options = parse_lookup_options(args.range(2..)?, "isVocabularyWord")?;
     Ok((object, words, options))
 }
 
-fn parse_ind2word_args(args: Vec<Value>) -> BuiltinResult<(ObjectInstance, NumericInput)> {
+fn parse_ind2word_args(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<(ObjectInstance, NumericInput)> {
     if args.len() != 2 {
         return Err(encoding_error(
             "ind2word",
@@ -823,7 +589,10 @@ fn object_arg(value: &Value, fn_name: &str, expected: &str) -> BuiltinResult<Obj
     }
 }
 
-fn parse_lookup_options(args: &[Value], fn_name: &str) -> BuiltinResult<LookupOptions> {
+fn parse_lookup_options(
+    args: crate::call::FunctionArgumentView<'_>,
+    fn_name: &str,
+) -> BuiltinResult<LookupOptions> {
     if !args.len().is_multiple_of(2) {
         return Err(encoding_error(
             fn_name,
@@ -866,16 +635,13 @@ fn word_input_from_value(value: &Value, fn_name: &str) -> BuiltinResult<WordInpu
             shape: array.shape.to_vec(),
         }),
         Value::CharArray(array) if array.rows <= 1 => Ok(WordInput {
-            words: vec![char_row_to_string(array)],
+            words: vec![char_row_to_string(array, 0, fn_name)?],
             shape: vec![1, 1],
         }),
         Value::CharArray(array) => {
             let mut words = Vec::with_capacity(array.rows);
             for row in 0..array.rows {
-                let mut text = String::with_capacity(array.cols);
-                for col in 0..array.cols {
-                    text.push(array.data()[row + col * array.rows]);
-                }
+                let text = char_row_to_string(array, row, fn_name)?;
                 words.push(text.trim_end().to_string());
             }
             Ok(WordInput {
@@ -1101,8 +867,19 @@ fn int_value_to_f64(value: &runmat_value::IntValue) -> f64 {
     }
 }
 
-fn char_row_to_string(array: &CharArray) -> String {
-    array.data().iter().collect()
+fn char_row_to_string(array: &CharArray, row: usize, fn_name: &str) -> BuiltinResult<String> {
+    if array.rows == 0 {
+        return Ok(String::new());
+    }
+    crate::builtins::strings::common::char_row_to_string_slice(array.data(), array.cols, row)
+        .map_err(|source| {
+            let mut diagnostic = encoding_error(
+                fn_name,
+                format!("{fn_name}: malformed UTF-16 character input"),
+            );
+            diagnostic.source = Some(Box::new(source));
+            diagnostic
+        })
 }
 
 fn encoding_error(fn_name: &str, message: impl Into<String>) -> crate::RuntimeError {
@@ -1122,7 +899,47 @@ fn encoding_error(fn_name: &str, message: impl Into<String>) -> crate::RuntimeEr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_value::{CellArray, IntegerStorage};
+    use runmat_value::{CellArray, IntegerStorage, Utf16CodeUnit};
+
+    #[test]
+    fn word_input_reads_row_major_utf16_without_cross_row_surrogates() {
+        let rows = CharArray::from_code_units(
+            vec![
+                Utf16CodeUnit::from_raw('A' as u16),
+                Utf16CodeUnit::from_raw('B' as u16),
+                Utf16CodeUnit::from_raw('C' as u16),
+                Utf16CodeUnit::from_raw('D' as u16),
+            ],
+            2,
+            2,
+        )
+        .expect("character rows");
+        let words = word_input_from_value(&Value::CharArray(rows), "wordEncoding")
+            .expect("row-major words");
+        assert_eq!(words.words, vec!["AB".to_string(), "CD".to_string()]);
+
+        let empty = CharArray::from_code_units(Vec::new(), 0, 3).expect("0-by-3 character array");
+        let empty_words = word_input_from_value(&Value::CharArray(empty), "wordEncoding")
+            .expect("empty geometry");
+        assert_eq!(empty_words.words, vec![String::new()]);
+
+        let split_pair = CharArray::from_code_units(
+            vec![
+                Utf16CodeUnit::from_raw(0xD83D),
+                Utf16CodeUnit::from_raw(0xDE42),
+            ],
+            2,
+            1,
+        )
+        .expect("raw units");
+        let error = word_input_from_value(&Value::CharArray(split_pair), "wordEncoding")
+            .err()
+            .expect("surrogates cannot join across rows");
+        assert_eq!(
+            error.identifier(),
+            WORD_ENCODING_ERROR_INVALID_INPUT.identifier
+        );
+    }
 
     fn poisoned_integer_scalar(storage: IntegerStorage) -> Value {
         let tensor = Tensor::new_integer(storage, vec![1, 1]).expect("integer tensor");
@@ -1327,12 +1144,15 @@ mod tests {
             )
             .unwrap(),
         );
-        let out = word2ind_builtin(vec![
-            enc,
-            words,
-            Value::String("IgnoreCase".into()),
-            Value::Bool(true),
-        ])
+        let out = word2ind_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                enc,
+                words,
+                Value::String("IgnoreCase".into()),
+                Value::Bool(true),
+            ]),
+        )
         .await
         .unwrap();
         let Value::Tensor(indices) = out else {
@@ -1347,10 +1167,13 @@ mod tests {
 
     #[tokio::test]
     async fn word2ind_rejects_integer_words_before_object_validation() {
-        let error = word2ind_builtin(vec![
-            Value::String("not an object".into()),
-            Value::Int(IntValue::U8(1)),
-        ])
+        let error = word2ind_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::String("not an object".into()),
+                Value::Int(IntValue::U8(1)),
+            ]),
+        )
         .await
         .expect_err("integer words are outside the text-only surface");
         assert!(error.message().contains("must be host text"));
@@ -1370,10 +1193,13 @@ mod tests {
         )
         .await
         .unwrap();
-        let out = ind2word_builtin(vec![
-            enc.clone(),
-            Value::Tensor(Tensor::new(vec![1.0, 3.0], vec![1, 2]).unwrap()),
-        ])
+        let out = ind2word_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                enc.clone(),
+                Value::Tensor(Tensor::new(vec![1.0, 3.0], vec![1, 2]).unwrap()),
+            ]),
+        )
         .await
         .unwrap();
         let Value::StringArray(words) = out else {
@@ -1382,9 +1208,12 @@ mod tests {
         assert_eq!(words.shape, vec![1, 2]);
         assert_eq!(words.data(), vec!["red", "green"]);
 
-        let err = ind2word_builtin(vec![enc, Value::Num(4.0)])
-            .await
-            .unwrap_err();
+        let err = ind2word_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![enc, Value::Num(4.0)]),
+        )
+        .await
+        .unwrap_err();
         assert!(err.to_string().contains("exceeds vocabulary"), "{err}");
     }
 
@@ -1411,10 +1240,13 @@ mod tests {
                 vec!["red".to_string(), "blue".to_string()],
             ),
         ] {
-            let value = futures::executor::block_on(ind2word_builtin(vec![
-                enc.clone(),
-                Value::Tensor(indices),
-            ]))
+            let value = futures::executor::block_on(ind2word_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    enc.clone(),
+                    Value::Tensor(indices),
+                ]),
+            ))
             .expect("ind2word low-rank input");
             let Value::StringArray(words) = value else {
                 panic!("expected string array")
@@ -1436,19 +1268,25 @@ mod tests {
 
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-            let integer_error = futures::executor::block_on(ind2word_builtin(vec![
-                enc.clone(),
-                poisoned_integer_vector(IntegerStorage::U64(vec![1]), 1),
-            ]))
+            let integer_error = futures::executor::block_on(ind2word_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    enc.clone(),
+                    poisoned_integer_vector(IntegerStorage::U64(vec![1]), 1),
+                ]),
+            ))
             .unwrap_err();
             assert_eq!(
                 integer_error.identifier(),
                 Some("RunMat:compatibility:Ind2wordTypedIntegerExtension")
             );
-            let matrix_error = futures::executor::block_on(ind2word_builtin(vec![
-                enc.clone(),
-                Value::Tensor(Tensor::new(vec![1.0, 2.0, 1.0, 2.0], vec![2, 2]).unwrap()),
-            ]))
+            let matrix_error = futures::executor::block_on(ind2word_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    enc.clone(),
+                    Value::Tensor(Tensor::new(vec![1.0, 2.0, 1.0, 2.0], vec![2, 2]).unwrap()),
+                ]),
+            ))
             .unwrap_err();
             assert_eq!(
                 matrix_error.identifier(),
@@ -1457,10 +1295,13 @@ mod tests {
         }
 
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let wide = futures::executor::block_on(ind2word_builtin(vec![
-            enc.clone(),
-            poisoned_integer_vector(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), 1),
-        ]))
+        let wide = futures::executor::block_on(ind2word_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                enc.clone(),
+                poisoned_integer_vector(IntegerStorage::U64(vec![(1_u64 << 53) + 1]), 1),
+            ]),
+        ))
         .unwrap_err();
         assert!(wide.message().contains("exceeds vocabulary"));
 
@@ -1470,10 +1311,13 @@ mod tests {
                 .expect("resident indices");
             runmat_accelerate::fusion_residency::mark(&handle);
             let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-            let error = futures::executor::block_on(ind2word_builtin(vec![
-                enc.clone(),
-                Value::GpuTensor(handle.clone()),
-            ]))
+            let error = futures::executor::block_on(ind2word_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    enc.clone(),
+                    Value::GpuTensor(handle.clone()),
+                ]),
+            ))
             .unwrap_err();
             assert_eq!(
                 error.identifier(),
@@ -1498,12 +1342,15 @@ mod tests {
         let words = Value::StringArray(
             StringArray::new(vec!["runmat".into(), "cpu".into()], vec![1, 2]).unwrap(),
         );
-        let out = is_vocabulary_word_builtin(vec![
-            enc,
-            words,
-            Value::String("IgnoreCase".into()),
-            Value::Bool(true),
-        ])
+        let out = is_vocabulary_word_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                enc,
+                words,
+                Value::String("IgnoreCase".into()),
+                Value::Bool(true),
+            ]),
+        )
         .await
         .unwrap();
         let Value::LogicalArray(mask) = out else {

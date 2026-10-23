@@ -3,11 +3,10 @@ use crate::{
     MirStatementOutput, MirStatementOutputLabel, MirStatementOutputSource, MirStmt, MirStmtKind,
 };
 use runmat_hir::{
-    AssignmentShapePolicy, EnvironmentEffect, ExprId, HirError, HirExpr, HirExprKind,
-    HirSequenceTarget, HirStmt, HirStmtKind, OutputTarget, PlaceMutationKind, RequestedOutputCount,
-    Span, WorkspaceEffect,
+    AssignmentShapePolicy, EnvironmentEffect, HirError, HirExpr, HirExprKind, HirSequenceTarget,
+    HirStmt, HirStmtKind, OutputTarget, PlaceMutationKind, RequestedOutputCount, Span,
+    WorkspaceEffect,
 };
-use std::collections::HashMap;
 
 use super::{
     expr::lower_expr_with_replacements,
@@ -18,25 +17,37 @@ use super::{
 pub(crate) fn lower_stmt_with_replacements(
     ctx: &MirLoweringContext,
     stmt: &HirStmt,
-    await_replacements: &HashMap<ExprId, crate::MirOperand>,
+    await_replacements: &crate::lowering::AwaitReplacements,
+    prepared_assignment: Option<&crate::MirPreparedAssignment>,
 ) -> Result<Vec<MirStmt>, HirError> {
     Ok(match &stmt.kind {
         HirStmtKind::Assign(place, expr, suppressed) => {
             let mut stmts = Vec::new();
-            let place = lower_place_with_replacements(ctx, place, &mut stmts, await_replacements)?;
+            let retained = prepared_assignment.filter(|prepared| prepared.source_statement == stmt.id);
+            let (place, preparation) = if let Some(prepared) = retained {
+                (prepared.mutation.place.clone(), Some(prepared.clone()))
+            } else if let Some((prepared, phases)) = super::fixed_target::lower_completed(ctx, stmt, await_replacements)? {
+                stmts.extend(phases);
+                (prepared.mutation.place.clone(), Some(prepared))
+            } else {
+                let mut target_steps = Vec::new();
+                let place = lower_place_with_replacements(ctx, place, &mut target_steps, await_replacements)?;
+                stmts.extend(target_steps);
+                (place, None)
+            };
             let value = lower_expr_with_replacements(ctx, expr, &mut stmts, await_replacements)?;
             stmts.extend(effect_stmts_for_rvalue(&value, stmt.span));
             let deletion = is_empty_array_deletion_place(&place, expr);
-            if !matches!(place, crate::MirPlace::Local(_)) || deletion {
+            if preparation.is_none() && (!matches!(place, crate::MirPlace::Local(_)) || deletion) {
                 stmts.push(MirStmt {
                     kind: MirStmtKind::PlaceMutation(place_mutation(place.clone(), deletion)),
                     span: stmt.span,
                 });
             }
             stmts.push(MirStmt {
-                kind: MirStmtKind::Assign {
-                    place: place.clone(),
-                    value,
+                kind: match preparation {
+                    Some(preparation) => MirStmtKind::PreparedAssign { preparation, value },
+                    None => MirStmtKind::Assign { place: place.clone(), value },
                 },
                 span: stmt.span,
             });
@@ -198,6 +209,56 @@ pub(crate) fn lower_stmt_with_replacements(
     })
 }
 
+pub(super) fn assignment_target_requires_preparation(target: &runmat_hir::HirPlace) -> bool {
+    fn indexed(indexing: &runmat_hir::IndexingSemantics) -> bool {
+        indexing.components.iter().any(|component| {
+            matches!(component,
+            runmat_hir::IndexComponent::Expr(value) if value.expands_call_argument_sequence())
+        })
+    }
+    fn expression(value: &HirExpr) -> bool {
+        match &value.kind {
+            HirExprKind::Index(base, indexing) => indexed(indexing) || expression(base),
+            HirExprKind::Member { base, .. } | HirExprKind::MemberDynamic { base, .. } => {
+                expression(base)
+            }
+            _ => false,
+        }
+    }
+    let expands = match target {
+        runmat_hir::HirPlace::Index(base, indexing)
+        | runmat_hir::HirPlace::IndexCell(base, indexing) => indexed(indexing) || expression(base),
+        runmat_hir::HirPlace::Member(base, _) | runmat_hir::HirPlace::MemberDynamic(base, _) => {
+            expression(base)
+        }
+        runmat_hir::HirPlace::Binding(_) => false,
+    };
+    fn depth(value: &HirExpr) -> usize {
+        match &value.kind {
+            HirExprKind::Index(base, _)
+            | HirExprKind::Member { base, .. }
+            | HirExprKind::MemberDynamic { base, .. } => depth(base) + 1,
+            _ => 0,
+        }
+    }
+    let prefix_depth = match target {
+        runmat_hir::HirPlace::Index(base, _)
+        | runmat_hir::HirPlace::IndexCell(base, _)
+        | runmat_hir::HirPlace::Member(base, _)
+        | runmat_hir::HirPlace::MemberDynamic(base, _) => depth(base),
+        runmat_hir::HirPlace::Binding(_) => 0,
+    };
+    expands || prefix_depth != 0
+}
+
+pub(super) fn prepare_expanding_assignment(
+    ctx: &MirLoweringContext,
+    statement: &HirStmt,
+    replacements: &crate::lowering::AwaitReplacements,
+) -> Result<Option<(crate::MirPreparedAssignment, Vec<MirStmt>)>, HirError> {
+    super::fixed_target::lower_completed(ctx, statement, replacements)
+}
+
 fn output_for_place(ctx: &MirLoweringContext, place: &MirPlace) -> Option<MirStatementOutput> {
     let root = match place {
         MirPlace::Local(local) => *local,
@@ -216,7 +277,7 @@ fn lower_place_with_replacements(
     ctx: &MirLoweringContext,
     place: &runmat_hir::HirPlace,
     stmts: &mut Vec<MirStmt>,
-    await_replacements: &HashMap<ExprId, crate::MirOperand>,
+    await_replacements: &crate::lowering::AwaitReplacements,
 ) -> Result<crate::MirPlace, HirError> {
     use runmat_hir::HirPlace;
     Ok(match place {
@@ -262,7 +323,7 @@ fn lower_sequence_target(
     ctx: &MirLoweringContext,
     target: &HirSequenceTarget,
     stmts: &mut Vec<MirStmt>,
-    await_replacements: &HashMap<ExprId, crate::MirOperand>,
+    await_replacements: &crate::lowering::AwaitReplacements,
 ) -> Result<crate::MirSequenceTarget, HirError> {
     use super::expr::lower_operand_with_replacements;
     use super::place::lower_expr_place_with_replacements;
@@ -349,7 +410,7 @@ fn environment_effect_from_builtin(
     }
 }
 
-fn place_mutation(place: crate::MirPlace, deletion: bool) -> MirPlaceMutation {
+pub(super) fn place_mutation(place: crate::MirPlace, deletion: bool) -> MirPlaceMutation {
     MirPlaceMutation {
         kind: mutation_kind_for_place(&place, deletion),
         creation_policy: place.assignment_creation_policy(deletion),
@@ -364,6 +425,9 @@ fn mutation_kind_for_place(place: &crate::MirPlace, deletion: bool) -> PlaceMuta
     }
     match place {
         crate::MirPlace::Local(_) | crate::MirPlace::Binding(_) => PlaceMutationKind::BindOrAssign,
+        crate::MirPlace::Index(_, indexing) if indexing.kind == runmat_hir::IndexKind::Brace => {
+            PlaceMutationKind::CellAssign
+        }
         crate::MirPlace::Index(_, _) => PlaceMutationKind::IndexedAssign,
         crate::MirPlace::Member(_, _) | crate::MirPlace::DynamicMember(_, _) => {
             PlaceMutationKind::MemberAssign
@@ -375,7 +439,7 @@ fn is_empty_array_expr(expr: &HirExpr) -> bool {
     matches!(&expr.kind, HirExprKind::Tensor(rows) if rows.is_empty() || rows.iter().all(Vec::is_empty))
 }
 
-fn is_empty_array_deletion_place(place: &crate::MirPlace, expr: &HirExpr) -> bool {
+pub(super) fn is_empty_array_deletion_place(place: &crate::MirPlace, expr: &HirExpr) -> bool {
     if !is_empty_array_expr(expr) {
         return false;
     }
@@ -414,9 +478,12 @@ fn lower_output_target(
             stmts.extend(temps);
             MirOutputTarget::Place(place)
         }
-        OutputTarget::Sequence(target) => {
-            MirOutputTarget::Sequence(lower_sequence_target(ctx, target, stmts, &HashMap::new())?)
-        }
+        OutputTarget::Sequence(target) => MirOutputTarget::Sequence(lower_sequence_target(
+            ctx,
+            target,
+            stmts,
+            &crate::lowering::AwaitReplacements::default(),
+        )?),
         OutputTarget::Discard => MirOutputTarget::Discard,
     })
 }

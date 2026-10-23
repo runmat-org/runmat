@@ -292,19 +292,25 @@ fn delete_accepts_char_array() {
         .iter()
         .map(|p| p.to_string_lossy().to_string())
         .collect();
-    let max_len = path_strings.iter().map(|s| s.len()).max().unwrap();
+    let max_len = path_strings
+        .iter()
+        .map(|text| text.encode_utf16().count())
+        .max()
+        .unwrap();
     let mut data: Vec<char> = Vec::with_capacity(path_strings.len() * max_len);
 
     for (path, path_string) in paths.iter().zip(path_strings.iter()) {
         File::create(path).expect("create file");
         let mut chars: Vec<char> = path_string.chars().collect();
-        while chars.len() < max_len {
-            chars.push(' ');
-        }
+        chars.extend(std::iter::repeat_n(
+            ' ',
+            max_len - path_string.encode_utf16().count(),
+        ));
         data.extend(&chars);
     }
 
-    let char_array = CharArray::new(data, path_strings.len(), max_len).expect("char array");
+    let char_array =
+        CharArray::from_unicode_scalars(data, path_strings.len(), max_len).expect("char array");
     delete_builtin(vec![Value::CharArray(char_array)]).expect("delete");
 
     for path in paths {
@@ -366,7 +372,7 @@ fn delete_errors_on_string_array_empty_element() {
 #[test]
 fn delete_errors_on_char_array_blank_row() {
     let data = vec![' '; 4];
-    let char_array = CharArray::new(data, 1, 4).expect("char matrix");
+    let char_array = CharArray::from_unicode_scalars(data, 1, 4).expect("char matrix");
     let err = delete_builtin(vec![Value::CharArray(char_array)]).expect_err("blank row");
     assert_eq!(err.identifier(), ident(&DELETE_ERROR_EMPTY_FILENAME));
 }

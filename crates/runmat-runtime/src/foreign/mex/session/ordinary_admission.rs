@@ -113,27 +113,36 @@ impl MexRuntimeSession {
 
     pub fn ordinary_name_observer(self: &Rc<Self>) -> Rc<NativeNameObserver> {
         let owner = Rc::clone(self);
-        Rc::new(move |name| {
+        Rc::new(move |runtime, name| {
             let owner = Rc::clone(&owner);
-            Box::pin(async move {
-                owner
-                    .observe_search_path_name(&name)
-                    .await
-                    .map(|selection| {
-                        selection.and_then(|selection| match selection {
-                            MexNameSelection::SearchPath(candidate) => {
-                                let (path, origin) = candidate.into_parts();
-                                Some(NativeNameFact {
-                                    path,
-                                    origin: Some(origin),
-                                    installed: false,
-                                    installed_artifact: None,
-                                })
-                            }
-                            MexNameSelection::Installed { .. } => None,
+            crate::user_functions::admit_native_name_observation_with(
+                &runtime,
+                move || async move {
+                    owner
+                        .observe_search_path_name(&name)
+                        .await
+                        .map_err(|error| {
+                            error.into_identified_runtime_error(
+                                "MEX function resolution",
+                                "RunMat:FunctionResolution",
+                            )
                         })
-                    })
-            })
+                        .map(|selection| {
+                            selection.and_then(|selection| match selection {
+                                MexNameSelection::SearchPath(candidate) => {
+                                    let (path, origin) = candidate.into_parts();
+                                    Some(NativeNameFact {
+                                        path,
+                                        origin: Some(origin),
+                                        installed: false,
+                                        installed_artifact: None,
+                                    })
+                                }
+                                MexNameSelection::Installed { .. } => None,
+                            })
+                        })
+                },
+            )
         })
     }
 
@@ -179,7 +188,10 @@ impl MexRuntimeSession {
                 )))
             }
             Err(error) => {
-                return ControlFlow::Break(Err(runtime_error("FunctionResolution", error)))
+                return ControlFlow::Break(Err(error.into_identified_runtime_error(
+                    "MEX function resolution",
+                    "RunMat:FunctionResolution",
+                )))
             }
         };
         ControlFlow::Break(
@@ -244,7 +256,12 @@ impl MexRuntimeSession {
                 )))
             }
             Ok(Some(MexNameSelection::Installed { .. })) => unreachable!("search-path-only owner"),
-            Err(error) => return Some(Err(runtime_error("FunctionResolution", error))),
+            Err(error) => {
+                return Some(Err(error.into_identified_runtime_error(
+                    "MEX function resolution",
+                    "RunMat:FunctionResolution",
+                )))
+            }
         };
         if selection != expected_selection {
             return Some(Err(runtime_error(
@@ -379,7 +396,12 @@ impl MexRuntimeSession {
         }
         let selected_now = match self.observe_search_path_name(name).await {
             Ok(selected) => selected,
-            Err(error) => return Some(Err(runtime_error("FunctionResolution", error))),
+            Err(error) => {
+                return Some(Err(error.into_identified_runtime_error(
+                    "MEX function resolution",
+                    "RunMat:FunctionResolution",
+                )))
+            }
         };
         let same_selection = matches!(
             selected_now.as_ref(),

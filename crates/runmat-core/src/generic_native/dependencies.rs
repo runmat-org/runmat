@@ -197,6 +197,12 @@ fn visit_rvalue(value: &MirRvalue, out: &mut ReferencedFunctions) {
 
 fn visit_statement(statement: &MirStmt, out: &mut ReferencedFunctions) {
     match &statement.kind {
+        MirStmtKind::PrepareFixedAssignment(owner) => {
+            visit_preparation_steps(owner.steps(), out);
+            owner.visit_expression_regions(|region| visit_preparation_steps(region.steps(), out));
+            owner.visit_external_operands(|operand| visit_operand(operand, out));
+        }
+        MirStmtKind::PreparedAssign { value, .. } => visit_rvalue(value, out),
         MirStmtKind::Assign { place, value } => {
             visit_place(place, out);
             visit_rvalue(value, out);

@@ -14,7 +14,7 @@ pub(super) fn convert(array: CharArray, dimensions: &[usize]) -> crate::BuiltinR
             let indices = indices?;
             let rows = plan.slice_shape.first().copied().unwrap_or(1);
             let columns = plan.slice_shape.get(1).copied().unwrap_or(1);
-            let mut data = vec!['\0'; indices.len()];
+            let mut data = vec![runmat_value::Utf16CodeUnit::from_raw(0); indices.len()];
             for (slice_linear, index) in indices.iter().enumerate() {
                 let row = index % array.rows.max(1);
                 let column = index / array.rows.max(1);
@@ -32,7 +32,7 @@ pub(super) fn convert(array: CharArray, dimensions: &[usize]) -> crate::BuiltinR
                     .get(source_offset)
                     .ok_or_else(|| error::internal("character index is out of bounds"))?;
             }
-            CharArray::new(data, rows, columns)
+            CharArray::from_code_units(data, rows, columns)
                 .map(Value::CharArray)
                 .map_err(error::internal)
         })

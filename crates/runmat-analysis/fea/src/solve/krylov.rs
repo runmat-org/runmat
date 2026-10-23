@@ -23,9 +23,10 @@ pub(crate) struct GmresResult {
     pub breakdown: bool,
 }
 
-/// Restarted GMRES on the shared sparse layer for operators supplied as closures (callers that
-/// precondition compose `A M⁻¹` themselves). Operator failures propagate unchanged; cancellation
-/// and breakdown are reported in the result.
+/// Restarted GMRES on the shared sparse recurrence for operators supplied as closures (callers
+/// that precondition compose `A M⁻¹` themselves). The true relative residual is formed when the
+/// Arnoldi estimate passes and certifies convergence. Operator failures propagate unchanged;
+/// cancellation and breakdown are reported in the result.
 pub(crate) fn restarted_gmres<E>(
     right_hand_side: &[f64],
     initial: &[f64],
@@ -33,11 +34,11 @@ pub(crate) fn restarted_gmres<E>(
     apply: impl Fn(&[f64]) -> Result<Vec<f64>, E>,
     cancelled: impl Fn() -> bool,
 ) -> Result<Option<GmresResult>, E> {
-    use runmat_sparse_solvers::krylov::{
-        block_on, gmres_async, gmres_workspace_len, ApplyStatus, GmresOptions, KrylovOps,
-        KrylovOptions, PreconditionerSide, StopFlag,
+    use runmat_sparse_solvers::krylov::gmres::{
+        self, GmresGeometry, GmresMode, GmresOperations, GmresParameters, PreconditionerSide,
+        ResidualCheck,
     };
-    use runmat_sparse_solvers::{SolverError, SolverResult};
+    use runmat_sparse_solvers::krylov::{block_on, ApplyStatus, KrylovFailure, ScalarArithmetic};
     let size = right_hand_side.len();
     if size == 0
         || initial.len() != size
@@ -49,83 +50,118 @@ pub(crate) fn restarted_gmres<E>(
     {
         return Ok(None);
     }
-    struct ClosureOps<'a, E, A: Fn(&[f64]) -> Result<Vec<f64>, E>, C: Fn() -> bool> {
+    enum Stop<E> {
+        Operator(E),
+        Dimension,
+        Cancelled,
+    }
+    struct ClosureOperations<'a, E, A: Fn(&[f64]) -> Result<Vec<f64>, E>, C: Fn() -> bool> {
         apply: &'a A,
         cancelled: &'a C,
-        failure: Option<E>,
-        observed_cancellation: bool,
     }
-    impl<E, A: Fn(&[f64]) -> Result<Vec<f64>, E>, C: Fn() -> bool> KrylovOps<f64> for ClosureOps<'_, E, A, C> {
-        async fn apply_operator(&mut self, x: &[f64], y: &mut [f64]) -> SolverResult<ApplyStatus> {
-            match (self.apply)(x) {
-                Ok(values) if values.len() == y.len() => {
-                    y.copy_from_slice(&values);
-                    Ok(ApplyStatus::Applied)
-                }
-                Ok(_) => Err(SolverError::Dimension("operator output length".into())),
-                Err(error) => {
-                    self.failure = Some(error);
-                    Err(SolverError::Operator("operator application failed".into()))
-                }
+    impl<E, A: Fn(&[f64]) -> Result<Vec<f64>, E>, C: Fn() -> bool> GmresOperations<f64>
+        for ClosureOperations<'_, E, A, C>
+    {
+        type Error = Stop<E>;
+        async fn coefficient(&mut self, input: &[f64], output: &mut [f64]) -> Result<(), Stop<E>> {
+            let values = (self.apply)(input).map_err(Stop::Operator)?;
+            if values.len() != output.len() {
+                return Err(Stop::Dimension);
             }
+            output.copy_from_slice(&values);
+            Ok(())
         }
-        async fn apply_preconditioner(&mut self, r: &[f64], z: &mut [f64]) -> SolverResult<ApplyStatus> {
-            z.copy_from_slice(r);
+        async fn precondition(
+            &mut self,
+            input: &[f64],
+            output: &mut [f64],
+            _intermediate: &mut [f64],
+        ) -> Result<ApplyStatus, Stop<E>> {
+            output.copy_from_slice(input);
             Ok(ApplyStatus::Applied)
         }
-        fn has_preconditioner(&self) -> bool {
-            false
-        }
-        async fn checkpoint(&mut self, _iteration: usize, _relative: f64) -> SolverResult<()> {
+        fn checkpoint(&mut self) -> Result<(), Stop<E>> {
             if (self.cancelled)() {
-                self.observed_cancellation = true;
-                return Err(SolverError::Cancelled);
+                return Err(Stop::Cancelled);
             }
             Ok(())
         }
+        async fn cooperate(&mut self, _completed: u64) -> Result<(), Stop<E>> {
+            Ok(())
+        }
     }
-    let options = KrylovOptions {
-        rtol: policy.relative_tolerance,
-        max_iterations: policy.maximum_iterations,
-        ..Default::default()
+    if right_hand_side.iter().all(|value| *value == 0.0) {
+        // The exact solution of the nonsingular system, whatever the initial guess.
+        return Ok(Some(GmresResult {
+            solution: vec![0.0; size],
+            iterations: 0,
+            residual_norm: 0.0,
+            relative_residual: crate::solve::convergence::relative_residual(0.0, 0.0),
+            converged: true,
+            cancelled: false,
+            breakdown: false,
+        }));
+    }
+    let restart = policy.restart.min(size).max(1);
+    let max_outer = policy.maximum_iterations.max(1).div_ceil(restart);
+    let Some(geometry) = GmresGeometry::checked(size, restart, max_outer) else {
+        return Ok(None);
     };
-    let gmres = GmresOptions {
-        restart: policy.restart.min(size).max(1),
-        side: PreconditionerSide::Right,
+    let mut native = vec![0.0; geometry.native_elements];
+    let mut complex = vec![
+        runmat_sparse_solvers::c64::new(0.0, 0.0);
+        geometry.hessenberg_elements + geometry.complex_small_elements
+    ];
+    let mut real = vec![0.0; geometry.real_small_elements + geometry.history_elements];
+    let Some(mut work) = geometry.project(&mut native, &mut complex, &mut real) else {
+        return Ok(None);
     };
-    let mut work = vec![0.0; gmres_workspace_len(size, &options, &gmres)];
-    let mut solution = initial.to_vec();
-    let mut ops = ClosureOps {
+    let mut operations = ClosureOperations {
         apply: &apply,
         cancelled: &cancelled,
-        failure: None,
-        observed_cancellation: false,
     };
-    let outcome = block_on(gmres_async(&mut ops, right_hand_side, &mut solution, &options, &gmres, &mut work));
-    if let Some(error) = ops.failure.take() {
-        return Err(error);
-    }
+    let outcome = block_on(gmres::solve_with::<f64, ScalarArithmetic, _>(
+        right_hand_side,
+        Some(initial),
+        GmresParameters {
+            restart,
+            max_outer,
+            tolerance: policy.relative_tolerance,
+        },
+        GmresMode {
+            side: PreconditionerSide::Right,
+            residual_check: ResidualCheck::OnEstimate,
+            step_limit: Some(policy.maximum_iterations.max(1)),
+        },
+        &mut work,
+        &mut [],
+        &mut operations,
+    ));
+    let solution = work.x.to_vec();
     let reference_norm = runmat_sparse_solvers::par::norm2(right_hand_side);
-    let residual_of = |solution: &[f64]| -> Result<f64, E> {
-        let applied = apply(solution)?;
-        Ok(right_hand_side
-            .iter()
-            .zip(&applied)
-            .map(|(b, a)| (b - a) * (b - a))
-            .sum::<f64>()
-            .sqrt())
-    };
-    let (iterations, converged, breakdown) = match &outcome {
-        Ok(report) => (
-            report.iterations,
-            report.converged(),
-            report.flag == StopFlag::Breakdown,
+    let (iterations, converged, breakdown, cancelled, residual_norm) = match outcome {
+        Ok(outcome) => (
+            outcome.steps,
+            outcome.flag == 0,
+            outcome.flag == 4,
+            false,
+            if reference_norm > 0.0 { outcome.relres * reference_norm } else { outcome.relres },
         ),
-        Err(_) => (0, false, false),
-    };
-    let residual_norm = match &outcome {
-        Ok(report) => report.residual_norm,
-        Err(_) => residual_of(&solution)?,
+        Err(KrylovFailure::Operation(Stop::Operator(error))) => return Err(error),
+        Err(KrylovFailure::Operation(Stop::Dimension) | KrylovFailure::Invalid(_)) => {
+            return Ok(None)
+        }
+        Err(KrylovFailure::Operation(Stop::Cancelled)) => {
+            let applied = apply(&solution)?;
+            let residual = runmat_sparse_solvers::par::norm2(
+                &right_hand_side
+                    .iter()
+                    .zip(&applied)
+                    .map(|(b, a)| b - a)
+                    .collect::<Vec<_>>(),
+            );
+            (0, false, false, true, residual)
+        }
     };
     if !residual_norm.is_finite() {
         return Ok(None);
@@ -136,8 +172,8 @@ pub(crate) fn restarted_gmres<E>(
         iterations: u32::try_from(iterations).unwrap_or(u32::MAX),
         residual_norm,
         relative_residual: crate::solve::convergence::relative_residual(residual_norm, reference),
-        converged: converged && !ops.observed_cancellation,
-        cancelled: ops.observed_cancellation,
+        converged,
+        cancelled,
         breakdown,
     }))
 }

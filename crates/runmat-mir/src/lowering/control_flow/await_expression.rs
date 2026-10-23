@@ -1,15 +1,14 @@
-use std::collections::HashMap;
-
-use runmat_hir::{ExprId, HirError, HirExpr, HirExprKind, Span};
+use runmat_hir::{HirError, HirExpr, HirExprKind, Span};
 
 use crate::{
-    BasicBlock, BasicBlockId, MirLocalId, MirOperand, MirPlace, MirTerminator, MirTerminatorKind,
+    BasicBlock, BasicBlockId, MirFixedSelectorDestination, MirOperand, MirPlace, MirTerminator,
+    MirTerminatorKind,
 };
 
 use super::{first_unlowered_await, ControlFlowBuilder};
 use crate::lowering::{
-    await_preparation::expression::prepare_expr_prefix,
-    conditional_await::conditional_await_guard_in_expr, expr::lower_operand_with_replacements,
+    await_preparation::expression::{operand_in_context, prepare_expr_prefix_in_context},
+    conditional_await::conditional_await_guard_in_expr,
     MirLoweringContext,
 };
 
@@ -17,9 +16,10 @@ use crate::lowering::{
 mod blocks;
 
 #[derive(Clone, Copy)]
-pub(super) struct ExpressionTarget {
+pub(super) struct ExpressionTarget<'a> {
     pub block: BasicBlockId,
-    pub destination: MirLocalId,
+    pub destination: MirFixedSelectorDestination,
+    pub selector: Option<crate::lowering::fixed_target::SelectorRegionContext<'a>>,
     pub continuation: BasicBlockId,
     pub span: Span,
 }
@@ -29,9 +29,11 @@ impl ControlFlowBuilder {
         &mut self,
         ctx: &MirLoweringContext,
         expression: &HirExpr,
-        target: ExpressionTarget,
-        replacements: &HashMap<ExprId, MirOperand>,
+        target: ExpressionTarget<'_>,
+        replacements: &crate::lowering::AwaitReplacements,
     ) -> Result<BasicBlock, HirError> {
+        self.catch_scopes
+            .insert(target.block, self.active_catches.clone());
         let mut statements = Vec::new();
         let Some(await_expr) = first_unlowered_await(expression, replacements) else {
             return blocks::finish_expression(ctx, expression, target, replacements, statements);
@@ -42,15 +44,16 @@ impl ControlFlowBuilder {
             &self.active_conditional_awaits,
         ) {
             let mut prepared = replacements.clone();
-            prepare_expr_prefix(
+            prepare_expr_prefix_in_context(
                 ctx,
                 expression,
                 guard.expression.id,
                 &mut statements,
                 &mut prepared,
+                target.selector,
             )?;
             let condition =
-                lower_operand_with_replacements(ctx, guard.left, &mut statements, &prepared)?;
+                operand_in_context(ctx, guard.left, &mut statements, &prepared, target.selector)?;
             prepared.insert(guard.left.id, condition.clone());
             let guarded_result = ctx.fresh_temp(guard.expression.span);
             let mut joined = prepared.clone();
@@ -67,12 +70,15 @@ impl ControlFlowBuilder {
             )?;
             self.blocks.push(joined_block);
             let skipped_id = self.fresh_block();
+            self.catch_scopes
+                .insert(skipped_id, self.active_catches.clone());
             self.blocks.push(blocks::skipped_guard(
                 skipped_id,
                 guard.skipped_value,
                 guarded_result,
                 joined_id,
                 guard.expression.span,
+                target.selector,
             ));
             self.active_conditional_awaits.insert(guard.expression.id);
             let evaluated_id = self.fresh_block();
@@ -81,7 +87,8 @@ impl ControlFlowBuilder {
                 guard.expression,
                 ExpressionTarget {
                     block: evaluated_id,
-                    destination: guarded_result,
+                    destination: MirFixedSelectorDestination::Scalar(guarded_result),
+                    selector: target.selector,
                     continuation: joined_id,
                     span: target.span,
                 },
@@ -107,15 +114,21 @@ impl ControlFlowBuilder {
             unreachable!()
         };
         let mut prepared = replacements.clone();
-        prepare_expr_prefix(
+        prepare_expr_prefix_in_context(
             ctx,
             expression,
             await_expr.id,
             &mut statements,
             &mut prepared,
+            target.selector,
         )?;
-        let future =
-            lower_operand_with_replacements(ctx, future_expression, &mut statements, &prepared)?;
+        let future = operand_in_context(
+            ctx,
+            future_expression,
+            &mut statements,
+            &prepared,
+            target.selector,
+        )?;
         let awaited_result = ctx.fresh_temp(await_expr.span);
         prepared.insert(await_expr.id, MirOperand::Local(awaited_result));
         let resume = self.fresh_block();

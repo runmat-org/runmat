@@ -22,18 +22,18 @@ fn resident_only_line_metadata_and_invalid_controls_do_not_read_coordinates() {
         block_on(adapter.request_device(&wgpu::DeviceDescriptor::default(), None))
             .expect("this hardware gate requires an actual WGPU device");
     let access = runmat_accelerate_api::WgpuDeviceAccess::new(device, queue);
-    let short_source = Arc::new(
-        access
-            .with_shared(|emission| {
-                emission.device().create_buffer(&wgpu::BufferDescriptor {
+    let short_source = access
+        .with_shared(|emission| {
+            runmat_accelerate_api::WgpuBufferOwner::new(emission.device().create_buffer(
+                &wgpu::BufferDescriptor {
                     label: Some("graphics-property-short-resident-source"),
                     size: 4,
                     usage: wgpu::BufferUsages::COPY_SRC,
                     mapped_at_creation: false,
-                })
-            })
-            .expect("create resident-only source"),
-    );
+                },
+            ))
+        })
+        .expect("create resident-only source");
     runmat_plot::install_shared_wgpu_context(runmat_plot::SharedWgpuContext {
         instance,
         access,

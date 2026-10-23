@@ -14,6 +14,13 @@ use summary::{summarize_groups, summarize_groups_value, SummaryMethod};
 pub(in crate::builtins::table) use grpstats::grpstats_impl;
 
 pub fn sortrows_table(value: Value, rest: &[Value]) -> BuiltinResult<(Value, Tensor)> {
+    sortrows_table_view(value, crate::call::FunctionArgumentView::from_slice(rest))
+}
+
+pub(crate) fn sortrows_table_view(
+    value: Value,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<(Value, Tensor)> {
     let object = into_table_object(value, "sortrows")?;
     let names = table_variable_names_from_object(&object)?;
     let sort_spec = SortSpec::parse(rest, &names)?;
@@ -61,7 +68,7 @@ pub(in crate::builtins::table) struct SortKey {
 }
 
 impl SortSpec {
-    fn parse(rest: &[Value], names: &[String]) -> BuiltinResult<Self> {
+    fn parse(rest: crate::call::FunctionArgumentView<'_>, names: &[String]) -> BuiltinResult<Self> {
         let mut keys = if rest.is_empty() {
             names
                 .iter()
@@ -145,7 +152,7 @@ pub(in crate::builtins::table) fn compare_table_cells(
                 .partial_cmp(&double_value_at(&tensor, b).unwrap_or(f64::NAN))
                 .unwrap_or(Ordering::Greater))
         }
-        other => Ok(cell_key_string(other, a).cmp(&cell_key_string(other, b))),
+        other => Ok(cell_key_string(other, a)?.cmp(&cell_key_string(other, b)?)),
     }
 }
 
@@ -235,14 +242,17 @@ fn integer_sign_and_magnitude(value: &IntValue) -> (bool, u64) {
     }
 }
 
-pub(in crate::builtins::table) fn cell_group_atom(value: &Value, row: usize) -> GroupAtom {
-    match value {
+pub(in crate::builtins::table) fn cell_group_atom(
+    value: &Value,
+    row: usize,
+) -> BuiltinResult<GroupAtom> {
+    Ok(match value {
         Value::Tensor(tensor) => {
             if let Some(storage) = tensor.integer_storage() {
-                return storage
+                return Ok(storage
                     .value_at(row)
                     .map(GroupAtom::Integer)
-                    .unwrap_or(GroupAtom::Missing);
+                    .unwrap_or(GroupAtom::Missing));
             }
             tensor
                 .get2(row, 0)
@@ -294,8 +304,8 @@ pub(in crate::builtins::table) fn cell_group_atom(value: &Value, row: usize) -> 
                 _ => GroupAtom::Missing,
             }
         }
-        other => text_group_atom(cell_key_string(other, row)),
-    }
+        other => text_group_atom(cell_key_string(other, row)?),
+    })
 }
 
 fn number_group_atom(value: f64) -> GroupAtom {
@@ -375,8 +385,8 @@ pub(in crate::builtins::table) fn pivot_impl(
     let mut col_seen = BTreeMap::<Vec<GroupAtom>, ()>::new();
     let mut buckets = BTreeMap::<(Vec<GroupAtom>, Vec<GroupAtom>), Vec<usize>>::new();
     for row in 0..height {
-        let row_key = group_key_for_row(&variables, &row_names, row);
-        let col_key = group_key_for_row(&variables, &col_names, row);
+        let row_key = group_key_for_row(&variables, &row_names, row)?;
+        let col_key = group_key_for_row(&variables, &col_names, row)?;
         if !row_first_index.contains_key(&row_key) {
             row_first_index.insert(row_key.clone(), row);
             row_order.push(row_key.clone());
@@ -436,15 +446,12 @@ pub(in crate::builtins::table) fn group_key_for_row(
     variables: &StructValue,
     names: &[String],
     row: usize,
-) -> Vec<GroupAtom> {
+) -> BuiltinResult<Vec<GroupAtom>> {
     names
         .iter()
-        .map(|name| {
-            variables
-                .fields
-                .get(name)
-                .map(|value| cell_group_atom(value, row))
-                .unwrap_or(GroupAtom::Missing)
+        .map(|name| match variables.fields.get(name) {
+            Some(value) => cell_group_atom(value, row),
+            None => Ok(GroupAtom::Missing),
         })
         .collect()
 }
@@ -563,14 +570,11 @@ pub(in crate::builtins::table) fn groupsummary_impl(
     for row in 0..height {
         let key = group_names
             .iter()
-            .map(|name| {
-                variables
-                    .fields
-                    .get(name)
-                    .map(|value| cell_group_atom(value, row))
-                    .unwrap_or(GroupAtom::Missing)
+            .map(|name| match variables.fields.get(name) {
+                Some(value) => cell_group_atom(value, row),
+                None => Ok(GroupAtom::Missing),
             })
-            .collect::<Vec<_>>();
+            .collect::<BuiltinResult<Vec<_>>>()?;
         if include_missing || !key.iter().any(group_atom_is_missing) {
             groups.entry(key).or_default().push(row);
         }
@@ -610,14 +614,17 @@ pub(in crate::builtins::table) fn groupsummary_impl(
     table_from_columns(out_names, out_columns)
 }
 
-pub(in crate::builtins::table) fn cell_key_string(value: &Value, row: usize) -> String {
-    match value {
+pub(in crate::builtins::table) fn cell_key_string(
+    value: &Value,
+    row: usize,
+) -> BuiltinResult<String> {
+    Ok(match value {
         Value::Tensor(tensor) => {
             if let Some(storage) = tensor.integer_storage() {
-                return storage
+                return Ok(storage
                     .value_at(row)
                     .map(|value| format_integer_key(&value))
-                    .unwrap_or_default();
+                    .unwrap_or_default());
             }
             tensor
                 .get2(row, 0)
@@ -651,12 +658,13 @@ pub(in crate::builtins::table) fn cell_key_string(value: &Value, row: usize) -> 
         Value::Object(obj) if obj.is_class(CATEGORICAL_CLASS) => {
             categorical_label_at(obj, row).unwrap_or_default()
         }
-        Value::Cell(cell) => cell
-            .get(row, 0)
-            .map(|item| cell_to_text(&item))
-            .unwrap_or_default(),
+        Value::Cell(cell) => cell_to_text(
+            &cell
+                .get(row, 0)
+                .map_err(|error| invalid_index(format!("table cell index is invalid: {error}")))?,
+        )?,
         other => format!("{other}"),
-    }
+    })
 }
 
 fn double_value_at(tensor: &Tensor, index: usize) -> Option<f64> {
@@ -675,8 +683,8 @@ mod tests {
             Tensor::new_integer(IntegerStorage::U64(vec![large, large + 1]), vec![2, 1]).unwrap(),
         );
 
-        let first = cell_group_atom(&value, 0);
-        let second = cell_group_atom(&value, 1);
+        let first = cell_group_atom(&value, 0).unwrap();
+        let second = cell_group_atom(&value, 1).unwrap();
         assert_ne!(first, second);
         assert_eq!(compare_table_cells(&value, 0, 1).unwrap(), Ordering::Less);
         assert_eq!(group_atom_label(&second), (large + 1).to_string());
@@ -688,7 +696,7 @@ mod tests {
         let tensor = Tensor::new_integer(IntegerStorage::U64(vec![large]), vec![1, 1]).unwrap();
 
         assert_eq!(
-            cell_key_string(&Value::Tensor(tensor), 0),
+            cell_key_string(&Value::Tensor(tensor), 0).unwrap(),
             "9007199254740993"
         );
     }

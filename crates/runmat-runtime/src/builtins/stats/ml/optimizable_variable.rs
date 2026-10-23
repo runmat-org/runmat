@@ -178,7 +178,12 @@ fn char_row_to_string(
             descriptor,
         ));
     }
-    Ok(chars.data().iter().collect())
+    crate::builtins::stats::decode_utf16_with_error(chars.data(), || {
+        error(
+            format!("optimizableVariable: {label} must be valid UTF-16 text"),
+            descriptor,
+        )
+    })
 }
 
 fn parse_bool(value: &Value, label: &str) -> BuiltinResult<bool> {

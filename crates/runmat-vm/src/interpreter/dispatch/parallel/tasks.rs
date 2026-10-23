@@ -116,13 +116,8 @@ pub(super) fn create_future(
     let builtin = matches!(
         &invocation,
         runmat_runtime::execution::DeferredInvocation::Callable(descriptor)
-            if matches!(descriptor.as_ref(), runmat_runtime::call::descriptor::CallableDescriptor {
-                target: runmat_runtime::call::descriptor::CallableTarget::Resolved {
-                    identity: runmat_hir::CallableIdentity::Builtin(_),
-                    ..
-                },
-                ..
-            })
+            if matches!(&descriptor.target, runmat_runtime::call::descriptor::CallableTarget::Resolved { identity, .. }
+                if matches!(identity.as_identity(), runmat_hir::CallableIdentity::Builtin(_)))
     );
     let program = if !context.runtime.execution().requires_program_capture() {
         runmat_runtime::execution::DeferredProgram::Local
@@ -157,7 +152,7 @@ pub(super) fn create_future(
             };
             let descriptor = *descriptor;
             let runmat_runtime::call::descriptor::CallableTarget::Resolved {
-                identity: runmat_hir::CallableIdentity::Builtin(name),
+                identity,
                 fallback_policy: runmat_hir::CallableFallbackPolicy::None,
             } = descriptor.target
             else {
@@ -166,8 +161,14 @@ pub(super) fn create_future(
                     "graph builtin requires an exact selected catalog target",
                 ));
             };
+            let runmat_hir::CallableIdentity::Builtin(name) = identity.as_identity() else {
+                return Err(crate::interpreter::errors::mex(
+                    "ExecutionProgram",
+                    "graph builtin requires an exact selected catalog target",
+                ));
+            };
             invocation = runmat_runtime::execution::DeferredInvocation::Program {
-                callable: runmat_execution::ProgramCallable::Builtin { name },
+                callable: runmat_execution::ProgramCallable::Builtin { name: name.clone() },
                 context: runmat_execution::ProgramInvocationContext::Direct,
                 arguments: descriptor.args,
                 requested_outputs: descriptor.requested_outputs,
@@ -233,7 +234,7 @@ fn callable_capabilities(
     }
     let identity = match &descriptor.target {
         CallableTarget::Resolved { identity, .. }
-        | CallableTarget::CapturedResolved { identity, .. } => identity,
+        | CallableTarget::CapturedResolved { identity, .. } => identity.as_identity(),
         _ => {
             return Err(crate::interpreter::errors::mex(
                 "ExecutionProgram",
@@ -278,21 +279,15 @@ fn bind_selected_semantic_target(
     use runmat_hir::CallableIdentity;
     use runmat_runtime::call::descriptor::CallableTarget;
 
-    let function = match &descriptor.target {
-        CallableTarget::Resolved {
-            identity:
-                CallableIdentity::BoundFunction(function)
-                | CallableIdentity::AnonymousFunction(function)
-                | CallableIdentity::ExternalFunction { function, .. },
-            ..
-        }
-        | CallableTarget::CapturedResolved {
-            identity:
-                CallableIdentity::BoundFunction(function)
-                | CallableIdentity::AnonymousFunction(function)
-                | CallableIdentity::ExternalFunction { function, .. },
-            ..
-        } => *function,
+    let identity = match &descriptor.target {
+        CallableTarget::Resolved { identity, .. }
+        | CallableTarget::CapturedResolved { identity, .. } => identity.as_identity(),
+        _ => return Ok(()),
+    };
+    let function = match identity {
+        CallableIdentity::BoundFunction(function)
+        | CallableIdentity::AnonymousFunction(function)
+        | CallableIdentity::ExternalFunction { function, .. } => *function,
         _ => return Ok(()),
     };
     let binding = registry.exact_bound_binding(function).ok_or_else(|| {

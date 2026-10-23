@@ -2,7 +2,8 @@
 //! exact provider proposal leaves the session stream unchanged and permits the
 //! separately admitted host-mediated candidate; an effectful failure cannot.
 
-use super::{gpu, gpu_query};
+use super::gpu;
+use crate::builtins::common::gpu_helpers::query_metadata;
 use crate::builtins::common::{
     gpu_helpers, random_args::validate_constructor_gpu_output_protecting,
 };
@@ -140,13 +141,19 @@ pub(crate) fn try_fixed_work(
         preparation_shape_ranks: &[],
         preparation_representation_slots: 0,
     };
-    let query_bytes = gpu_query::requested_bytes("randi", &footprint)?;
-    let _query_receipt = match gpu_query::admit(runtime.as_ref(), query_bytes) {
+    let query_bytes = query_metadata::requested_bytes("randi", &footprint)?;
+    let _query_receipt = match query_metadata::admit(runtime.as_ref(), query_bytes) {
         Ok(receipt) => receipt,
         Err(HostAllocationError::Resource(HostEffectAllocationError::ExceedsCapacity)) => {
             return Ok(None);
         }
-        Err(cause) => return Err(gpu_query::admission_error("randi", runtime.as_ref(), cause)),
+        Err(cause) => {
+            return Err(query_metadata::admission_error(
+                "randi",
+                runtime.as_ref(),
+                cause,
+            ))
+        }
     };
     let query = ProviderFeasibilityQuery {
         operation: ProviderOperationIdentity::new(PROVIDER_GPU_INTEGER_OPERATION),

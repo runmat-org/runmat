@@ -37,7 +37,9 @@ fn value_as_f64(value: &Value) -> Option<f64> {
 
 fn value_as_char_row(value: &Value) -> Option<String> {
     match value {
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data().iter().collect()),
+        Value::CharArray(ca) if ca.rows == 1 => Some(
+            runmat_value::decode_utf16_code_units(ca.data()).expect("valid UTF-16 text fixture"),
+        ),
         _ => None,
     }
 }

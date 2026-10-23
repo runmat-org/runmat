@@ -42,6 +42,8 @@ Compiled programs and packaged extensions carry their host requirements with the
 
 The scheduler leases specific devices to a worker attempt. Runtime provider selection is restricted to those leases, while kernel selection remains the responsibility of the provider on that worker. A provider with the right name but a different version or ABI does not satisfy the requirement. When CUDA and WGPU expose separate views of the same physical GPU, those views share one allocation identity, so the scheduler cannot assign the hardware to two concurrent exclusive leases.
 
+Remote accelerator inventory requires a positive declared device-memory capacity. A provider without that capacity remains available for local execution but is not advertised for remotely scheduled work. A maximum buffer size is not a total device-memory budget.
+
 Device-resident values remain local to their node, process generation, worker attempt, provider, and device lease. Portable job inputs and results cannot contain those references. RunMat materializes or transfers a value through an explicit supported boundary instead of sending a process-local handle to another worker. Browser workers reject native-code and unsupported accelerator artifacts during admission.
 
 ## Submit Jobs and Tests
@@ -59,10 +61,7 @@ runmat job show RUN_ID
 runmat job attach RUN_ID
 ```
 
-Omit `--detach` to wait for completion. With `--json`, a waited submission emits one terminal JSON
-document; a detached submission emits one run document for later lifecycle operations. RunMat does
-not mix submission and terminal objects on standard output. Script entrypoints accept no positional
-inputs. To invoke a source file's declared function with string inputs, select it explicitly:
+Omit `--detach` to wait for completion. With `--json`, a waited submission emits one terminal JSON document; a detached submission emits one run document for later lifecycle operations. RunMat does not mix submission and terminal objects on standard output. Script entrypoints accept no positional inputs. To invoke a source file's declared function with string inputs, select it explicitly:
 
 ```bash
 runmat job submit functions/evaluate_case.m \

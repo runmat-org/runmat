@@ -1720,8 +1720,8 @@ impl AccelProvider for TestProvider {
         &'a self,
         handle: &'a GpuTensorHandle,
         options: &'a UniqueOptions,
-    ) -> AccelProviderFuture<'a, UniqueResult> {
-        Box::pin(async move {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, Option<UniqueResult>> {
+        let pending = async move {
             let (data, shape) = self.pull(handle)?;
             let tensor =
                 Tensor::new(data, shape).map_err(|e| anyhow!("unique (test provider): {e}"))?;
@@ -1729,9 +1729,16 @@ impl AccelProvider for TestProvider {
                 runmat_runtime::builtins::array::sorting_sets::unique::unique_numeric_from_tensor(
                     tensor, options,
                 )
-                .map_err(|err| anyhow!("unique (test provider): {err}"))?;
+                .map_err(runmat_accelerate_api::ProviderExecutionError::from_source)?;
             eval.into_numeric_unique_result()
-                .map_err(|err| anyhow!("unique (test provider): {err}"))
+                .map_err(runmat_accelerate_api::ProviderExecutionError::from_source)
+        };
+        Box::pin(async move {
+            pending.await.map(Some).map_err(
+                |cause: runmat_accelerate_api::ProviderExecutionError| {
+                    cause.with_unproven_effects()
+                },
+            )
         })
     }
 
@@ -5002,9 +5009,11 @@ fn fused_reduction_scalar_report_tail_matches_expected() {
         let rendered_value = vars
             .iter()
             .filter_map(|value| match value {
-                Value::CharArray(chars) => {
-                    chars.data().iter().collect::<String>().trim().parse().ok()
-                }
+                Value::CharArray(chars) => runmat_value::decode_utf16_code_units(chars.data())
+                    .expect("valid UTF-16 text fixture")
+                    .trim()
+                    .parse()
+                    .ok(),
                 _ => None,
             })
             .find(|value: &f64| (*value - expected).abs() <= tol)
@@ -5052,9 +5061,11 @@ fn fused_reduction_scalar_single_report_tail_matches_expected() {
         let rendered_value = vars
             .iter()
             .filter_map(|value| match value {
-                Value::CharArray(chars) => {
-                    chars.data().iter().collect::<String>().trim().parse().ok()
-                }
+                Value::CharArray(chars) => runmat_value::decode_utf16_code_units(chars.data())
+                    .expect("valid UTF-16 text fixture")
+                    .trim()
+                    .parse()
+                    .ok(),
                 _ => None,
             })
             .find(|value: &f64| (*value - expected).abs() <= tol)
@@ -5112,7 +5123,8 @@ fn fused_reduction_scalar_branch_report_tail_matches_expected() {
         let s_index = stores.pop().expect("store index for s");
 
         let rendered = match vars.get(s_index).expect("value for s") {
-            Value::CharArray(chars) => chars.data().iter().collect::<String>(),
+            Value::CharArray(chars) => runmat_value::decode_utf16_code_units(chars.data())
+                .expect("valid UTF-16 text fixture"),
             other => panic!("expected char array report, got {other:?}"),
         };
         let rendered_value: f64 = rendered.trim().parse().expect("parse rendered scalar");

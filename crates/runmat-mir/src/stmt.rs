@@ -5,6 +5,12 @@ use runmat_types::{
 };
 use serde::{Deserialize, Serialize};
 
+mod fixed_preparation;
+pub use fixed_preparation::{
+    MirFixedPreparation, MirFixedPreparationPhase, MirFixedPreparationState,
+    MirFixedSelectorDestination,
+};
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MirStmt {
     pub kind: MirStmtKind,
@@ -65,6 +71,12 @@ impl MirStmtKind {
             }
         }
         match self {
+            MirStmtKind::PrepareFixedAssignment(preparation) => {
+                preparation.visit_direct_expression_regions_dyn(visitor);
+            }
+            MirStmtKind::PreparedAssign { value, .. } => {
+                value.visit_direct_expression_regions_dyn(visitor)
+            }
             MirStmtKind::CaptureSequence { source, .. } => {
                 source.visit_direct_expression_regions_dyn(visitor)
             }
@@ -133,6 +145,10 @@ impl MirStmtKind {
             }
         }
         match self {
+            MirStmtKind::PrepareFixedAssignment(preparation) => {
+                preparation.visit_direct_expression_regions_dyn(visitor)
+            }
+            MirStmtKind::PreparedAssign { .. } => {}
             MirStmtKind::CaptureSequence { source, .. } => {
                 source.visit_direct_expression_regions_dyn(visitor)
             }
@@ -170,6 +186,9 @@ impl MirStmtKind {
         visitor: &mut dyn FnMut(&[crate::MirExpressionStep]),
     ) {
         match self {
+            MirStmtKind::PrepareFixedAssignment(preparation) => {
+                preparation.visit_preparation_steps_dyn(visitor);
+            }
             MirStmtKind::CaptureSequence { source, .. } => {
                 source.visit_direct_expression_steps_dyn(visitor)
             }
@@ -195,6 +214,10 @@ impl MirStmt {
             }
         }
         match &self.kind {
+            MirStmtKind::PrepareFixedAssignment(preparation) => {
+                preparation.visit_external_operands(&mut *visitor)
+            }
+            MirStmtKind::PreparedAssign { value, .. } => value.visit_outer_operands_dyn(visitor),
             MirStmtKind::CaptureSequence { source, .. } => source.visit_outer_operands_dyn(visitor),
             MirStmtKind::Assign { place, value } => {
                 visit_place(place, visitor);
@@ -229,6 +252,13 @@ impl MirStmt {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum MirStmtKind {
+    PrepareFixedAssignment(MirFixedPreparation),
+    /// Ordinary one-output assignment to an already retained destination.
+    /// Selector/receiver preparation is owned only by the matching producer.
+    PreparedAssign {
+        preparation: MirPreparedAssignment,
+        value: MirRvalue,
+    },
     CaptureSequence {
         destination: MirSequenceLocalId,
         source: MirExpansionSource,
@@ -282,6 +312,169 @@ pub struct MirPlaceMutation {
     pub kind: PlaceMutationKind,
     pub creation_policy: AssignmentCreationPolicy,
     pub shape_policy: AssignmentShapePolicy,
+}
+
+/// One source occurrence in this function, not a textual-place identity.
+/// The invocation-owned prepared destination is matched to this entire typed
+/// contract; its selectors are never evaluated by the consumer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MirPreparedAssignment {
+    pub source_statement: runmat_hir::StmtId,
+    pub mutation: MirPlaceMutation,
+    pub steps: Vec<crate::MirExpressionStep>,
+}
+
+impl MirPreparedAssignment {
+    pub fn validate(&self) -> Result<(), String> {
+        self.validate_contract(false)
+    }
+
+    pub fn validate_phased(&self) -> Result<(), String> {
+        if !self.steps.is_empty() {
+            return Err("phased fixed assignment cannot retain eager target work".into());
+        }
+        self.validate_contract(true)
+    }
+
+    fn validate_contract(&self, phased: bool) -> Result<(), String> {
+        use runmat_types::{IndexKind, PlaceMutationKind};
+        let place = &self.mutation.place;
+        if !place.requires_prepared_assignment() {
+            return Err(
+                "prepared fixed assignment requires expanding selectors or an indexed member path"
+                    .into(),
+            );
+        }
+        let delete = self.mutation.kind == PlaceMutationKind::Delete;
+        let expected = match place {
+            MirPlace::Member(_, _) | MirPlace::DynamicMember(_, _) => {
+                PlaceMutationKind::MemberAssign
+            }
+            MirPlace::Index(_, indexing) if indexing.kind == IndexKind::Brace => {
+                PlaceMutationKind::CellAssign
+            }
+            MirPlace::Index(_, _) => {
+                if delete {
+                    PlaceMutationKind::Delete
+                } else {
+                    PlaceMutationKind::IndexedAssign
+                }
+            }
+            _ => return Err("prepared fixed assignment requires a nonlocal endpoint".into()),
+        };
+        if self.mutation.kind != expected {
+            return Err("prepared fixed assignment mutation disagrees with its endpoint".into());
+        }
+        let canonical = place.assignment_creation_policy(delete);
+        if self.mutation.creation_policy != canonical
+            && (delete || self.mutation.creation_policy != AssignmentCreationPolicy::ExistingOnly)
+        {
+            return Err(
+                "prepared fixed assignment creation authority disagrees with its target".into(),
+            );
+        }
+        fn validate_place(place: &MirPlace, phased: bool) -> Result<(), String> {
+            match place {
+                MirPlace::Member(base, _) | MirPlace::DynamicMember(base, _) => {
+                    validate_place(base, phased)
+                }
+                MirPlace::Index(base, indexing) => {
+                    validate_place(base, phased)?;
+                    if phased {
+                        for component in &indexing.components {
+                            match component {
+                                crate::MirIndexComponent::Colon
+                                | crate::MirIndexComponent::Expr(crate::MirOperand::Local(_)) => {}
+                                crate::MirIndexComponent::Expansion(region)
+                                    if region.steps.is_empty()
+                                        && matches!(
+                                            region.argument,
+                                            crate::MirCallArg::CapturedSequence(_)
+                                        ) => {}
+                                _ => return Err(
+                                    "phased target descriptor contains executable selector work"
+                                        .into(),
+                                ),
+                            }
+                        }
+                        return Ok(());
+                    }
+                    indexing
+                        .validate_target_selectors()
+                        .map_err(|error| error.to_string())
+                }
+                _ => Ok(()),
+            }
+        }
+        validate_place(place, phased)?;
+        crate::expression_region::validate_preparation_steps(&self.steps)?;
+        if self.steps.iter().any(|step| matches!(step, crate::MirExpressionStep::Let { value, .. } if value.contains_unscoped_end())) {
+            return Err("prepared fixed assignment contains end without its own indexing receiver".into());
+        }
+        Ok(())
+    }
+
+    pub fn visit_operands_mut(&mut self, mut visitor: impl FnMut(&mut crate::MirOperand)) {
+        for step in &mut self.steps {
+            match step {
+                crate::MirExpressionStep::Let { value, .. } => {
+                    value.visit_operands_mut(&mut visitor)
+                }
+                crate::MirExpressionStep::CaptureSequence { source, .. } => {
+                    source.visit_operands_mut(&mut visitor)
+                }
+            }
+        }
+        crate::rvalue::visit_place_operands_mut(&mut self.mutation.place, &mut visitor);
+    }
+
+    pub fn visit_operands(&self, mut visitor: impl FnMut(&crate::MirOperand)) {
+        for step in &self.steps {
+            match step {
+                crate::MirExpressionStep::Let { value, .. } => value.visit_operands(&mut visitor),
+                crate::MirExpressionStep::CaptureSequence { source, .. } => {
+                    source.visit_operands(&mut visitor)
+                }
+            }
+        }
+        crate::rvalue::visit_place_operands(&self.mutation.place, &mut visitor);
+    }
+
+    /// Private selector temporaries are not invocation-frame inputs.
+    pub fn visit_external_operands(&self, mut visitor: impl FnMut(&crate::MirOperand)) {
+        let mut defined = std::collections::BTreeSet::new();
+        for step in &self.steps {
+            if let crate::MirExpressionStep::Let { local, .. } = step {
+                defined.insert(*local);
+            }
+        }
+        self.visit_direct_expression_regions_dyn(&mut |region| {
+            defined.extend(region.defined_locals());
+            region.visit_nested_regions(&mut |nested| defined.extend(nested.defined_locals()));
+        });
+        self.visit_operands(|operand| {
+            if !matches!(operand, crate::MirOperand::Local(local) if defined.contains(local)) {
+                visitor(operand);
+            }
+        });
+    }
+
+    fn visit_direct_expression_regions_dyn(
+        &self,
+        visitor: &mut dyn FnMut(crate::MirExpressionRegionRef<'_>),
+    ) {
+        for step in &self.steps {
+            match step {
+                crate::MirExpressionStep::Let { value, .. } => {
+                    value.visit_direct_expression_regions_dyn(visitor)
+                }
+                crate::MirExpressionStep::CaptureSequence { source, .. } => {
+                    source.visit_direct_expression_regions_dyn(visitor)
+                }
+            }
+        }
+        self.mutation.place.visit_selector_regions(visitor);
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -345,6 +538,20 @@ pub enum MirSequenceTarget {
 pub enum SequenceRootCreation {
     Existing,
     EmptyCell,
+    /// Ordinary fixed-RHS assignment retains its already-admitted original
+    /// creation policy; this is not destination-cardinality output selection.
+    Ordinary(runmat_types::AssignmentCreationPolicy),
+    OrdinaryCell,
+    OrdinaryContainer(runmat_types::AssignmentChildCreation),
+}
+
+impl SequenceRootCreation {
+    pub fn retains_original_receiver(self) -> bool {
+        matches!(
+            self,
+            Self::Ordinary(_) | Self::OrdinaryCell | Self::OrdinaryContainer(_)
+        )
+    }
 }
 
 impl MirSequenceTarget {

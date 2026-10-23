@@ -1,5 +1,4 @@
 use std::future::Future;
-use std::pin::Pin;
 
 use runmat_runtime::execution::{RootedValueSequence, RootedValues};
 use runmat_runtime::native::NativeValueRef;
@@ -8,7 +7,7 @@ use runmat_value::Value;
 use crate::{NativeExecutorError, NativeExecutorResult};
 
 use super::super::state::HostState;
-use super::{scope_completion, CallCompletion, CompletionFuture, PendingCall};
+use super::{admit_completion_with, CallCompletion, PendingCall};
 
 pub(in crate::execute) fn begin_lexical_call(
     state: &mut HostState,
@@ -16,7 +15,7 @@ pub(in crate::execute) fn begin_lexical_call(
     future: runmat_runtime::user_functions::LexicalFunctionFuture,
     requested_outputs: usize,
 ) -> NativeExecutorResult<Vec<Value>> {
-    let future: CompletionFuture = Box::pin(async move {
+    let future = super::admit_completion_with(state, move || async move {
         future
             .await
             .map(|result| CallCompletion::Lexical {
@@ -24,8 +23,7 @@ pub(in crate::execute) fn begin_lexical_call(
                 requested_outputs,
             })
             .map_err(NativeExecutorError::from)
-    });
-    let future = scope_completion(state, future);
+    })?;
     let request = state.current_request.ok_or_else(|| {
         NativeExecutorError::Host("pending native call has no active site".into())
     })?;
@@ -41,100 +39,74 @@ pub(in crate::execute) fn begin_lexical_call(
     Err(NativeExecutorError::CallSuspended)
 }
 
-pub(in crate::execute) fn begin_rooted_sequence(
+pub(in crate::execute) fn begin_rooted_sequence<F>(
     state: &mut HostState,
     embedded: Option<super::super::state::EmbeddedOperationIdentity>,
-    future: Pin<
-        Box<
-            dyn Future<Output = Result<RootedValueSequence, runmat_runtime::RuntimeError>>
-                + 'static,
-        >,
-    >,
+    make_future: impl FnOnce() -> F,
     requested_outputs: usize,
-) -> NativeExecutorResult<Vec<Value>> {
-    begin_rooted_sequence_with_roots(state, embedded, Vec::new(), future, requested_outputs)
+) -> NativeExecutorResult<Vec<Value>>
+where
+    F: Future<Output = Result<RootedValueSequence, runmat_runtime::RuntimeError>> + 'static,
+{
+    begin_rooted_sequence_with_roots(state, embedded, Vec::new(), make_future, requested_outputs)
 }
 
-pub(in crate::execute) fn begin_rooted_arguments(
+pub(in crate::execute) fn begin_rooted_arguments<F>(
     state: &mut HostState,
     embedded: Option<super::super::state::EmbeddedOperationIdentity>,
-    future: Pin<
-        Box<dyn Future<Output = Result<RootedValues, runmat_runtime::RuntimeError>> + 'static>,
-    >,
-) -> NativeExecutorResult<Vec<Value>> {
-    begin_arguments(state, embedded, future, CallCompletion::RootedArguments)
-}
-
-pub(super) fn begin_arguments(
-    state: &mut HostState,
-    embedded: Option<super::super::state::EmbeddedOperationIdentity>,
-    future: Pin<
-        Box<dyn Future<Output = Result<RootedValues, runmat_runtime::RuntimeError>> + 'static>,
-    >,
-    completion: fn(RootedValues) -> CallCompletion,
-) -> NativeExecutorResult<Vec<Value>> {
-    let future: CompletionFuture = Box::pin(async move {
-        future
-            .await
-            .map(completion)
-            .map_err(NativeExecutorError::from)
-    });
-    // Do not poll an arbitrary argument expansion under the generated entry
-    // stack. Even a Ready future may execute a deep callback before yielding.
-    let future = scope_completion(state, future);
-    let request = state.current_request.ok_or_else(|| {
-        NativeExecutorError::Host("pending native call has no active site".into())
-    })?;
-    let (continuation, generation) = state.next_suspension_identity()?;
-    state.pending_call = Some(PendingCall {
-        continuation,
-        generation,
-        request,
+    make_future: impl FnOnce() -> F,
+) -> NativeExecutorResult<Vec<Value>>
+where
+    F: Future<Output = Result<RootedValues, runmat_runtime::RuntimeError>> + 'static,
+{
+    begin_arguments(
+        state,
         embedded,
-        retained_roots: Vec::new(),
-        future,
-    });
-    Err(NativeExecutorError::CallSuspended)
+        make_future,
+        CallCompletion::RootedArguments,
+    )
 }
 
-pub(super) fn adopt_rooted_arguments(
+pub(super) fn begin_arguments<F>(
     state: &mut HostState,
-    arguments: RootedValues,
-) -> NativeExecutorResult<Vec<NativeValueRef>> {
-    arguments.with_owned_output_storage(|values| {
-        Ok(super::own_output_storage(values)?
-            .into_iter()
-            .map(|value| state.arena.insert(value))
-            .collect())
-    })
+    embedded: Option<super::super::state::EmbeddedOperationIdentity>,
+    make_future: impl FnOnce() -> F,
+    completion: fn(RootedValues) -> CallCompletion,
+) -> NativeExecutorResult<Vec<Value>>
+where
+    F: Future<Output = Result<RootedValues, runmat_runtime::RuntimeError>> + 'static,
+{
+    begin_owned_completion(state, embedded, Vec::new(), make_future, completion)
 }
 
-pub(in crate::execute) fn begin_rooted_sequence_with_roots(
+/// One request/admission/publication lifecycle for already rooted completions.
+/// The factory is invoked only inside canonical admission, never on replay or
+/// under the generated entry stack; only the closed completion tag differs.
+fn begin_owned_completion<T, F>(
     state: &mut HostState,
     embedded: Option<super::super::state::EmbeddedOperationIdentity>,
     retained_roots: Vec<NativeValueRef>,
-    future: Pin<
-        Box<
-            dyn Future<Output = Result<RootedValueSequence, runmat_runtime::RuntimeError>>
-                + 'static,
-        >,
-    >,
-    requested_outputs: usize,
-) -> NativeExecutorResult<Vec<Value>> {
-    let future: CompletionFuture = Box::pin(async move {
-        future
-            .await
-            .map(|sequence| CallCompletion::RootedSequence {
-                sequence,
-                requested_outputs,
-            })
-            .map_err(NativeExecutorError::from)
-    });
-    // Resume polling only after the native entry callback has unwound.
-    let future = scope_completion(state, future);
+    make_future: impl FnOnce() -> F,
+    completion: impl FnOnce(T) -> CallCompletion + 'static,
+) -> NativeExecutorResult<Vec<Value>>
+where
+    T: 'static,
+    F: Future<Output = Result<T, runmat_runtime::RuntimeError>> + 'static,
+{
     let request = state.current_request.ok_or_else(|| {
         NativeExecutorError::Host("pending native call has no active site".into())
     })?;
+    let future = admit_completion_with(state, move || {
+        let future = make_future();
+        async move {
+            future
+                .await
+                .map(completion)
+                .map_err(NativeExecutorError::from)
+        }
+    })?;
+    // Do not poll an arbitrary rooted operation under the generated entry
+    // stack. Even a Ready future may execute a deep callback before yielding.
     let (continuation, generation) = state.next_suspension_identity()?;
     state.pending_call = Some(PendingCall {
         continuation,
@@ -147,16 +119,73 @@ pub(in crate::execute) fn begin_rooted_sequence_with_roots(
     Err(NativeExecutorError::CallSuspended)
 }
 
+pub(super) fn adopt_rooted_arguments(
+    state: &mut HostState,
+    arguments: RootedValues,
+) -> NativeExecutorResult<Vec<NativeValueRef>> {
+    Ok(arguments
+        .try_into_values()?
+        .map(|value| state.arena.insert(value))
+        .collect())
+}
+
+pub(in crate::execute) fn begin_rooted_sequence_with_roots<F>(
+    state: &mut HostState,
+    embedded: Option<super::super::state::EmbeddedOperationIdentity>,
+    retained_roots: Vec<NativeValueRef>,
+    make_future: impl FnOnce() -> F,
+    requested_outputs: usize,
+) -> NativeExecutorResult<Vec<Value>>
+where
+    F: Future<Output = Result<RootedValueSequence, runmat_runtime::RuntimeError>> + 'static,
+{
+    begin_owned_completion(
+        state,
+        embedded,
+        retained_roots,
+        make_future,
+        move |sequence| CallCompletion::RootedSequence {
+            sequence,
+            requested_outputs,
+        },
+    )
+}
+
 pub(super) fn adopt_rooted_sequence(
     state: &mut HostState,
     sequence: RootedValueSequence,
     requested_outputs: usize,
 ) -> NativeExecutorResult<Vec<NativeValueRef>> {
-    sequence.with_owned_sequence(|sequence| {
-        let values = super::super::call::normalize_sequence_outputs(sequence, requested_outputs)?;
-        Ok(super::own_output_storage(values)?
-            .into_iter()
-            .map(|value| state.arena.insert(value))
-            .collect())
-    })
+    super::super::call::validate_output_arity(sequence.len(), requested_outputs)?;
+    if requested_outputs == 0 {
+        return Ok(Vec::new());
+    }
+    adopt_selected_sequence(state, sequence)
+}
+
+pub(super) fn adopt_selected_sequence(
+    state: &mut HostState,
+    sequence: RootedValueSequence,
+) -> NativeExecutorResult<Vec<NativeValueRef>> {
+    Ok(sequence
+        .try_into_values()?
+        .map(|value| state.arena.insert(value))
+        .collect())
+}
+
+pub(in crate::execute) fn begin_selected_sequence<F>(
+    state: &mut HostState,
+    embedded: Option<super::super::state::EmbeddedOperationIdentity>,
+    make_future: impl FnOnce() -> F,
+) -> NativeExecutorResult<Vec<Value>>
+where
+    F: Future<Output = Result<RootedValueSequence, runmat_runtime::RuntimeError>> + 'static,
+{
+    begin_owned_completion(
+        state,
+        embedded,
+        Vec::new(),
+        make_future,
+        CallCompletion::SelectedSequence,
+    )
 }

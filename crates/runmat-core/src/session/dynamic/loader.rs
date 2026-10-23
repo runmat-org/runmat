@@ -15,7 +15,7 @@ pub(in crate::session) async fn load_dynamic_function(
     requested_outputs: usize,
     phase: runmat_runtime::user_functions::DynamicFunctionLoadPhase,
     input_callsite: Option<runmat_runtime::callsite::CallsiteInfo>,
-    environment: DynamicFunctionEnvironment,
+    environment: Rc<DynamicFunctionEnvironment>,
 ) -> runmat_runtime::user_functions::DynamicFunctionLoadAttempt {
     use std::ops::ControlFlow;
     #[cfg(target_arch = "wasm32")]
@@ -28,16 +28,22 @@ pub(in crate::session) async fn load_dynamic_function(
         source_evaluator,
         #[cfg(not(target_arch = "wasm32"))]
         mex_runtime,
-    } = environment;
+    } = environment.as_ref();
+    let compat = *compat;
+    let top_level_await_enabled = *top_level_await_enabled;
     #[cfg(not(target_arch = "wasm32"))]
     if phase == runmat_runtime::user_functions::DynamicFunctionLoadPhase::BeforeSemantic {
         use runmat_runtime::user_functions::NativeResolutionScope;
         return match runtime.native_resolution_scope() {
             NativeResolutionScope::Selected(route)
             | NativeResolutionScope::SelectedOrdinary { route, .. } => {
-                route
-                    .invoke(runtime.clone(), name, args, requested_outputs)
-                    .await
+                runmat_runtime::user_functions::await_dynamic_function_load(route.invoke(
+                    runtime.clone(),
+                    name,
+                    args,
+                    requested_outputs,
+                ))
+                .await
             }
             NativeResolutionScope::SelectedClosed => ControlFlow::Continue(args),
             NativeResolutionScope::Session => {
@@ -96,9 +102,10 @@ pub(in crate::session) async fn load_dynamic_function(
         Ok(Some(selected)) => selected,
         Ok(None) => return ControlFlow::Continue(args),
         Err(error) => {
-            return ControlFlow::Break(Err(build_runtime_error(error)
-                .with_identifier("RunMat:FunctionResolution")
-                .build()))
+            return ControlFlow::Break(Err(error.into_identified_runtime_error(
+                "function resolution",
+                "RunMat:FunctionResolution",
+            )))
         }
     };
     let path = selected.path().to_path_buf();
@@ -114,6 +121,8 @@ pub(in crate::session) async fn load_dynamic_function(
                             path.display()
                         ))
                         .with_identifier("RunMat:FunctionSourceRead")
+                        .with_source(error)
+                        .with_gpu_gather_retry(runmat_runtime::GpuGatherRetry::Never)
                         .build()
                     })?;
             let path_name = path.to_string_lossy();
@@ -137,6 +146,8 @@ pub(in crate::session) async fn load_dynamic_function(
                     path.display()
                 ))
                 .with_identifier("RunMat:ProjectComposition")
+                .with_source(error)
+                .with_gpu_gather_retry(runmat_runtime::GpuGatherRetry::Never)
                 .build()
             })?;
             let inventory_revision = project_context
@@ -170,7 +181,7 @@ pub(in crate::session) async fn load_dynamic_function(
                 )?;
                 let (super_dependencies, super_dependency_origins, metadata_units) = if let Some(owner) = constructor_owner.as_ref() {
                     runtime.scope(selected_constructor_dependencies(
-                        &cache, entry.admitted.as_ref(), &runtime, owner,
+                        cache, entry.admitted.as_ref(), &runtime, owner,
                         compat, top_level_await_enabled, project_handoff.as_ref(),
                     )).await?
                 } else {
@@ -210,7 +221,7 @@ pub(in crate::session) async fn load_dynamic_function(
                         })?;
                     let selected_runtime = bound.runtime().clone();
                     let admission = super::super::source_evaluation::admit_dynamic_callable(
-                        &source_evaluator,
+                        source_evaluator,
                         &selected_runtime,
                         entry.unit_bytes.as_ref(),
                         entry.entrypoint_origin,
@@ -290,14 +301,14 @@ pub(in crate::session) async fn load_dynamic_function(
                 let selected_runtime = bound.runtime().clone();
                 let (super_dependencies, super_dependency_origins, metadata_units) = if let Some(owner) = constructor_owner.as_ref() {
                     selected_runtime.scope(selected_constructor_dependencies(
-                        &cache, admitted.as_ref(), &selected_runtime, owner,
+                        cache, admitted.as_ref(), &selected_runtime, owner,
                         compat, top_level_await_enabled, project_handoff.as_ref(),
                     )).await?
                 } else {
                     (Vec::new(), HashSet::new(), Vec::new())
                 };
                 let admission = super::super::source_evaluation::admit_dynamic_callable(
-                    &source_evaluator,
+                    source_evaluator,
                     &selected_runtime,
                     unit_bytes.as_ref(),
                     entrypoint_origin,
@@ -555,7 +566,6 @@ pub(in crate::session) async fn load_dynamic_function(
     )
 }
 
-#[derive(Clone)]
 pub(in crate::session) struct DynamicFunctionEnvironment {
     pub(in crate::session) compat: CompatMode,
     pub(in crate::session) top_level_await_enabled: bool,

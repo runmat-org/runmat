@@ -108,7 +108,7 @@ fn complex_single_keeps_its_component_class() {
 
 #[test]
 fn character_blocks_follow_requested_dimension_order() {
-    let input = CharArray::new(vec!['a', 'c', 'e', 'b', 'd', 'f'], 2, 3).unwrap();
+    let input = CharArray::from_unicode_scalars(vec!['a', 'c', 'e', 'b', 'd', 'f'], 2, 3).unwrap();
     let dims = Tensor::new(vec![2.0, 1.0], vec![1, 2]).unwrap();
     let Value::Cell(output) = run(Value::CharArray(input), vec![Value::Tensor(dims)]) else {
         panic!("expected cell");
@@ -117,7 +117,10 @@ fn character_blocks_follow_requested_dimension_order() {
         panic!("expected character block");
     };
     assert_eq!((block.rows, block.cols), (3, 2));
-    assert_eq!(block.data(), vec!['a', 'b', 'c', 'd', 'e', 'f']);
+    assert_eq!(
+        block.data(),
+        runmat_value::encode_utf16_code_units("abcdef")
+    );
 }
 
 #[test]

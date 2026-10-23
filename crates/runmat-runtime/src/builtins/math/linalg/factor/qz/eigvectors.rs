@@ -4,9 +4,30 @@
 //! factorization. Defective pencils may yield dependent columns, but each
 //! requested column must pass its homogeneous residual check.
 
-use faer::{c64, Mat};
+#[cfg(not(all(feature = "blas-lapack", not(target_arch = "wasm32"))))]
+use faer::MatMut;
+use faer::{c64, ColRef, Mat, MatRef};
 
 use super::algorithm::ComplexQz;
+
+/// Borrowed retained triangular pencil, independent of its physical owner.
+pub(in crate::builtins::math::linalg) struct ComplexPencilView<'a> {
+    pub aa: MatRef<'a, c64>,
+    pub bb: MatRef<'a, c64>,
+    pub alpha: ColRef<'a, c64>,
+    pub beta: ColRef<'a, c64>,
+}
+
+impl ComplexQz {
+    fn pencil(&self) -> ComplexPencilView<'_> {
+        ComplexPencilView {
+            aa: self.aa.as_ref(),
+            bb: self.bb.as_ref(),
+            alpha: self.alpha.as_ref(),
+            beta: self.beta.as_ref(),
+        }
+    }
+}
 
 pub(super) fn conj(z: c64) -> c64 {
     c64::new(z.re, -z.im)
@@ -25,21 +46,19 @@ pub(super) fn scaled(z: c64, by: f64) -> c64 {
 }
 
 pub(super) fn divide(numerator: c64, denominator: c64) -> c64 {
-    if denominator.re.abs() >= denominator.im.abs() {
-        let r = denominator.im / denominator.re;
-        let scale = denominator.re + denominator.im * r;
-        c64::new(
-            (numerator.re + numerator.im * r) / scale,
-            (numerator.im - numerator.re * r) / scale,
+    let (real, imag) =
+        crate::builtins::math::linalg::ops::complex_division::divide_finite_components(
+            numerator.re,
+            numerator.im,
+            denominator.re,
+            denominator.im,
         )
-    } else {
-        let r = denominator.re / denominator.im;
-        let scale = denominator.im + denominator.re * r;
-        c64::new(
-            (numerator.re * r + numerator.im) / scale,
-            (numerator.im * r - numerator.re) / scale,
-        )
-    }
+        .unwrap_or_else(|| {
+            let value = num_complex::Complex64::new(numerator.re, numerator.im)
+                / num_complex::Complex64::new(denominator.re, denominator.im);
+            (value.re, value.im)
+        });
+    c64::new(real, imag)
 }
 
 pub(super) fn normalize(vector: &mut [c64]) -> Result<(), &'static str> {
@@ -102,7 +121,7 @@ pub(super) fn homogeneous_row_residual(
 }
 
 fn residual_terms(
-    form: &ComplexQz,
+    form: &ComplexPencilView<'_>,
     position: (usize, usize),
     eigenvalue: (c64, c64),
     scale: f64,
@@ -125,26 +144,34 @@ fn residual_terms(
     }
 }
 
-fn coefficient(form: &ComplexQz, row: usize, col: usize, alpha: c64, beta: c64, scale: f64) -> c64 {
+fn coefficient(
+    form: &ComplexPencilView<'_>,
+    row: usize,
+    col: usize,
+    alpha: c64,
+    beta: c64,
+    scale: f64,
+) -> c64 {
     beta * scaled(form.aa[(row, col)], scale) - alpha * scaled(form.bb[(row, col)], scale)
 }
 
-fn solve_column(
-    form: &ComplexQz,
+fn solve_column_into(
+    form: &ComplexPencilView<'_>,
     selected: usize,
+    eigenvalue: (c64, c64),
     left: bool,
     scale: f64,
-) -> Result<Vec<c64>, &'static str> {
+    vector: &mut [c64],
+) -> Result<(), &'static str> {
     let n = form.aa.nrows();
-    let a = form.alpha[selected];
-    let b = form.beta[selected];
+    let (a, b) = eigenvalue;
     let eig_scale = component_scale(a).max(component_scale(b));
     if eig_scale == 0.0 {
         return Err("indeterminate generalized eigenvalue has no unique eigenvector");
     }
     let alpha = scaled(a, eig_scale);
     let beta = scaled(b, eig_scale);
-    let mut vector = vec![c64::new(0.0, 0.0); n];
+    vector.fill(c64::new(0.0, 0.0));
     vector[selected] = c64::new(1.0, 0.0);
     let threshold = 128.0 * f64::EPSILON * (n as f64).max(1.0);
     if left {
@@ -188,7 +215,7 @@ fn solve_column(
             }
         }
     }
-    normalize(&mut vector)?;
+    normalize(vector)?;
     // A residual in the homogeneous equation is meaningful for finite,
     // infinite, and subnormal beta alike; alpha/beta is never formed here.
     for row in 0..n {
@@ -202,19 +229,109 @@ fn solve_column(
             return Err("generalized eigenvector residual is too large");
         }
     }
-    Ok(vector)
+    Ok(())
 }
 
 fn backtransform(unitary: &Mat<c64>, basis: &[c64]) -> Result<Vec<c64>, &'static str> {
     let n = unitary.nrows();
     let mut result = vec![c64::new(0.0, 0.0); n];
+    backtransform_into(unitary.as_ref(), basis, &mut result, 0..n)?;
+    Ok(result)
+}
+
+fn backtransform_into(
+    unitary: MatRef<'_, c64>,
+    basis: &[c64],
+    result: &mut [c64],
+    support: std::ops::Range<usize>,
+) -> Result<(), &'static str> {
+    let n = unitary.nrows();
+    result.fill(c64::new(0.0, 0.0));
     for row in 0..n {
-        for col in 0..n {
+        for col in support.clone() {
             result[row] += unitary[(row, col)] * basis[col];
         }
     }
-    normalize(&mut result)?;
-    Ok(result)
+    normalize(result)
+}
+
+/// Replace Q/Z by eigenvectors without retaining a second n-by-n matrix.
+/// Right basis columns have support <= selected and are consumed descending;
+/// left columns have support >= selected and are consumed ascending. Therefore
+/// no multiplication can read an overwritten unitary column. The two supplied
+/// n-vectors are the only live numerical scratch after the QZ reduction.
+///
+/// Unlike public QZ, full eig publishes a Schur basis for an indeterminate
+/// alpha=beta=0 pair. No eigenvector uniqueness or unit pairing is claimed for
+/// that pair. Nonzero homogeneous pairs always pass the original residual
+/// test, including any alternative basis used for a defective pencil.
+#[cfg(not(all(feature = "blas-lapack", not(target_arch = "wasm32"))))]
+pub(in crate::builtins::math::linalg) fn complex_eigenvectors_in_place(
+    form: &ComplexPencilView<'_>,
+    mut unitary: MatMut<'_, c64>,
+    left: bool,
+    basis: &mut [c64],
+    product: &mut [c64],
+) -> Result<(), &'static str> {
+    let n = form.aa.nrows();
+    if basis.len() != n || product.len() != n || unitary.nrows() != n || unitary.ncols() != n {
+        return Err("generalized eigenvector workspace dimensions are invalid");
+    }
+    let scale = (0..n)
+        .flat_map(|j| (0..n).map(move |i| (i, j)))
+        .fold(0.0_f64, |m, (i, j)| {
+            m.max(component_scale(form.aa[(i, j)]))
+                .max(component_scale(form.bb[(i, j)]))
+        });
+    let scale = if scale == 0.0 { 1.0 } else { scale };
+    for ordinal in 0..n {
+        let selected = if left { ordinal } else { n - 1 - ordinal };
+        let alpha = form.alpha[selected];
+        let beta = form.beta[selected];
+        let eig_scale = component_scale(alpha).max(component_scale(beta));
+        if eig_scale == 0.0 {
+            basis.fill(c64::new(0.0, 0.0));
+            basis[selected] = c64::new(1.0, 0.0);
+        } else {
+            let mut failure = "generalized eigenvector solve is ill-conditioned";
+            let mut solved = false;
+            // Keep the desired pair; never relabel an eigenvalue to fit a
+            // candidate. A common null block may supply a dependent vector,
+            // but only if its full homogeneous residual actually passes.
+            for candidate in std::iter::once(selected).chain((0..n).filter(|&i| i != selected)) {
+                if (left && candidate < selected) || (!left && candidate > selected) {
+                    continue;
+                }
+                let diagonal = coefficient(
+                    form,
+                    candidate,
+                    candidate,
+                    scaled(alpha, eig_scale),
+                    scaled(beta, eig_scale),
+                    scale,
+                );
+                if magnitude(diagonal) > 128.0 * f64::EPSILON * (n as f64).max(1.0) {
+                    continue;
+                }
+                match solve_column_into(form, candidate, (alpha, beta), left, scale, basis) {
+                    Ok(()) => {
+                        solved = true;
+                        break;
+                    }
+                    Err(error) => failure = error,
+                }
+            }
+            if !solved {
+                return Err(failure);
+            }
+        }
+        let support = if left { selected..n } else { 0..selected + 1 };
+        backtransform_into(unitary.as_ref(), basis, product, support)?;
+        for row in 0..n {
+            unitary[(row, selected)] = product[row];
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn same_homogeneous_eigenvalue(a: c64, b: c64, other_a: c64, other_b: c64) -> bool {
@@ -234,6 +351,7 @@ fn solve_equivalent_column(
     left: bool,
     scale: f64,
 ) -> Result<Vec<c64>, &'static str> {
+    let form = &form.pencil();
     let alpha = form.alpha[selected];
     let beta = form.beta[selected];
     if component_scale(alpha).max(component_scale(beta)) == 0.0 {
@@ -250,8 +368,16 @@ fn solve_equivalent_column(
         if !same_homogeneous_eigenvalue(alpha, beta, form.alpha[candidate], form.beta[candidate]) {
             continue;
         }
-        match solve_column(form, candidate, left, scale) {
-            Ok(vector) => {
+        let mut vector = vec![c64::new(0.0, 0.0); form.aa.nrows()];
+        match solve_column_into(
+            form,
+            candidate,
+            (form.alpha[candidate], form.beta[candidate]),
+            left,
+            scale,
+            &mut vector,
+        ) {
+            Ok(()) => {
                 let satisfies_selected = (0..form.aa.nrows()).all(|row| {
                     homogeneous_row_residual(
                         (0..form.aa.nrows()).map(|col| {

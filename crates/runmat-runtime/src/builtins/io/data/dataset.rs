@@ -217,7 +217,7 @@ async fn dataset_set_attr_builtin(
         async {
             let mut manifest =
                 crate::data::read_manifest_on(owner.filesystem.as_ref(), &owner.root).await?;
-            manifest.attrs.insert(key_text, value_to_json(&value));
+            manifest.attrs.insert(key_text, value_to_json(&value)?);
             manifest.updated_at = now_rfc3339();
             manifest.txn_sequence = manifest.txn_sequence.saturating_add(1);
             crate::data::write_manifest_on(owner.filesystem.as_ref(), &owner.root, &manifest)
@@ -252,7 +252,7 @@ async fn dataset_set_attrs_builtin(
             let mut manifest =
                 crate::data::read_manifest_on(owner.filesystem.as_ref(), &owner.root).await?;
             for (k, v) in &incoming.fields {
-                manifest.attrs.insert(k.to_owned(), value_to_json(v));
+                manifest.attrs.insert(k.to_owned(), value_to_json(v)?);
             }
             manifest.updated_at = now_rfc3339();
             manifest.txn_sequence = manifest.txn_sequence.saturating_add(1);

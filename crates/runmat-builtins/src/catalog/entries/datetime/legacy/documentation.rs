@@ -64,16 +64,16 @@ pub(super) const DATESTR: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
     title: Some("datestr"), slug: Some("datestr"),
     summary: "Format supported dates as character rows.",
-    description: "`datestr(D)` renders supported datetime, serial-date, or date-vector input as a character array with one row per date. An optional text format selects the displayed calendar fields; rows are padded to equal width.",
+    description: "`datestr(D)` renders supported datetime, serial-date, or date-vector input as a character array with one row per date. An optional text format or numeric format code selects the displayed calendar fields; rows are padded to equal width.",
     keywords: &["datestr", "date format", "date string", "datenum"], related: &["datenum", "datetime"],
     sections: &[BuiltinDocumentationSection { heading: "Supported formatting", paragraphs: &[
-        "RunMat uses its current date-format token mapping and defaults to day-month-name plus time. Numeric MATLAB format codes, locale selection, and PivotYear are not yet implemented. A three- or six-column numeric matrix is interpreted as date vectors; other numeric shapes are serial dates. Single-precision and integer numeric inputs require RunMat mode.",
+        "The datestr legacy format language uses lowercase mm for month and uppercase MM for minute; it differs from datetime display formats. Numeric double format codes -1 through 31 are supported. The default omits the time field only when every finite date in the input is exactly midnight; code 0 always includes it. Repeated or incompatible fields are rejected. Locale selection and PivotYear are not yet implemented. A three- or six-column numeric matrix is interpreted as date vectors; other numeric shapes are serial dates. Single-precision and integer numeric date inputs require RunMat mode.",
         "The result is a host character array, not a string array. Its number of rows equals the number of input dates, while the width depends on the format and values.",
     ] }, EXECUTION],
-    examples: &[BuiltinExample { id: "iso-date", title: "Format a serial date", program: "s = datestr(datenum(2024,3,14), 'yyyy-MM-dd');", display_output: Some("2024-03-14"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(strcmp(s, '2024-03-14'));" } }],
+    examples: &[BuiltinExample { id: "iso-date", title: "Format a serial date", program: "s = datestr(datenum(2024,3,14), 'yyyy-mm-dd');", display_output: Some("2024-03-14"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(strcmp(s, '2024-03-14'));" } }],
     example_exemption: None, faqs: &[BuiltinDocumentationFaq { question: "Does datestr return a string array?", answer: "No. It returns a character row or a padded character matrix." }],
     links: &[BuiltinDocumentationLink { label: "MATLAB datestr reference", target: BuiltinDocumentationLinkTarget::External("https://www.mathworks.com/help/matlab/ref/datetime.datestr.html") }, BuiltinDocumentationLink { label: "datenum", target: BuiltinDocumentationLinkTarget::Builtin("datenum") }, SOURCE],
-    media: &[], evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE], verification: TESTS, notes: &["Only current RunMat text-format tokens are supported; integrated examples are pending."] },
+    media: &[], evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE], verification: TESTS, notes: &["Legacy datestr tokens and numeric format codes are implemented; integrated examples remain unexecuted in this source packet."] },
     introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
 };
 

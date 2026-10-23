@@ -25,7 +25,7 @@ pub(super) async fn run(args: crate::call::BuiltinArguments) -> crate::BuiltinRe
 }
 
 fn default_folder() -> crate::BuiltinResult<PathBuf> {
-    let folder = crate::builtins::common::env::temp_dir();
+    let folder = crate::builtins::common::env::temp_dir()?;
     if folder.as_os_str().is_empty() {
         Err(error::builtin(
             IDENTITY,

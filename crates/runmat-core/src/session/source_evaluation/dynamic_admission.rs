@@ -13,7 +13,7 @@ use runmat_vm::{
     proves_no_graph_demand, AdmittedDynamicEval, AdmittedPendingClosure, Bytecode,
     DynamicEvalAdmissionPort, DynamicEvalCompileProduct, DynamicEvalProductAdmission,
     DynamicEvalPublication, FunctionRegistry, PendingClosureAdmissionRequest,
-    SelectedExecutableProduct,
+    SelectedExecutableAttachmentError, SelectedExecutableProduct,
 };
 
 use super::dynamic_identity::{selected_dynamic_source_identity, ProjectSourceIdentityIndex};
@@ -75,7 +75,43 @@ fn invalid(message: impl Into<String>) -> RuntimeError {
         .build()
 }
 
+fn invalid_attachment(error: SelectedExecutableAttachmentError) -> RuntimeError {
+    build_runtime_error(error.to_string())
+        .with_identifier("RunMat:DynamicEval:SelectedProduct")
+        .with_source(error)
+        .build()
+}
+
 impl DynamicEvalProductAdmission for CoreDynamicEvalAdmission {
+    fn selected_semantic_source_binding(
+        &self,
+        runtime: &RuntimeContext,
+        function: FunctionId,
+        expected_owner: &Arc<runmat_value::FunctionDefinitionOwner>,
+    ) -> Result<runmat_value::BoundFunctionBinding, RuntimeError> {
+        let evaluator = self
+            .evaluator
+            .upgrade()
+            .ok_or_else(|| invalid("dynamic source session has ended"))?;
+        evaluator.ensure_runtime_owner(runtime)?;
+        let generation = evaluator.current_generation();
+        let registry = generation.registry()?;
+        let body = registry
+            .get_current(function)
+            .filter(|body| Arc::ptr_eq(&body.definition_owner, expected_owner))
+            .ok_or_else(|| invalid("observed eval source changed its exact definition"))?;
+        let binding = registry
+            .exact_bound_binding(body.function)
+            .filter(|binding| {
+                binding
+                    .authority
+                    .local_definition()
+                    .is_some_and(|lease| lease.matches(expected_owner))
+            })
+            .ok_or_else(|| invalid("observed eval source lacks its exact dependency graph"))?;
+        Ok(binding)
+    }
+
     fn selected_source_output_arity(
         &self,
         binding: &runmat_value::BoundFunctionBinding,
@@ -394,7 +430,7 @@ impl DynamicEvalProductAdmission for CoreDynamicEvalAdmission {
                 current_ids.iter().copied(),
                 selected_product,
             )
-            .map_err(invalid)?;
+            .map_err(invalid_attachment)?;
         active
             .attach_current_selected_static_capture(current_ids.iter().copied(), &capture)
             .map_err(invalid)?;
@@ -916,7 +952,7 @@ impl DynamicEvalProductAdmission for CoreDynamicEvalAdmission {
                 std::iter::once(execution_function),
                 selected_product,
             )
-            .map_err(invalid)?;
+            .map_err(invalid_attachment)?;
         selected
             .attach_current_selected_static_capture(std::iter::once(execution_function), &capture)
             .map_err(invalid)?;

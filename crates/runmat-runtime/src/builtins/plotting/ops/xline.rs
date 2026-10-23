@@ -144,7 +144,14 @@ fn parse_reference_line_options(
 
     let mut idx = 0usize;
     while idx < args.len() {
-        let Some(text) = value_as_string(&args[idx]) else {
+        let Some(text) = value_as_string(&args[idx]).map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                builtin,
+                source.to_string(),
+                source,
+            )
+        })?
+        else {
             return Err(reference_line_error(
                 builtin,
                 "style and option names must be strings",
@@ -160,7 +167,14 @@ fn parse_reference_line_options(
             }
             match lower.as_str() {
                 "labelorientation" => {
-                    let Some(value) = value_as_string(&args[idx + 1]) else {
+                    let Some(value) = value_as_string(&args[idx + 1]).map_err(|source| {
+                        crate::builtins::plotting::plotting_error_with_source(
+                            builtin,
+                            source.to_string(),
+                            source,
+                        )
+                    })?
+                    else {
                         return Err(reference_line_error(
                             builtin,
                             "LabelOrientation must be a string",
@@ -261,11 +275,16 @@ fn visible_from_value(value: &Value) -> Option<bool> {
         Value::Tensor(tensor) if tensor.len() == 1 => {
             visible_from_numeric_scalar(tensor.numeric_value_at(0)?)
         }
-        _ => match value_as_string(value)?.trim().to_ascii_lowercase().as_str() {
-            "on" => Some(true),
-            "off" => Some(false),
-            _ => None,
-        },
+        _ => {
+            if crate::builtins::plotting::style::value_text_equals_ascii(value, "on", true) {
+                Some(true)
+            } else if crate::builtins::plotting::style::value_text_equals_ascii(value, "off", true)
+            {
+                Some(false)
+            } else {
+                None
+            }
+        }
     }
 }
 

@@ -2,9 +2,9 @@
 
 mod materialization;
 mod schema;
-mod validation;
 #[cfg(test)]
 mod tests;
+mod validation;
 
 use materialization::*;
 use schema::*;
@@ -271,11 +271,18 @@ fn parse_statset(
 }
 
 fn text_scalar(value: &Value) -> BuiltinResult<String> {
-    if let Some(text) = keyword_of(value) {
+    if let Some(text) = keyword_of(value)? {
         return Ok(text);
     }
     match value {
-        Value::CharArray(array) if array.rows == 1 => Ok(array.data().iter().collect()),
+        Value::CharArray(array) if array.rows == 1 => {
+            crate::builtins::stats::decode_utf16_with_error(array.data(), || {
+                statset_error(
+                    &STATSET_ERROR_INVALID_OPTION,
+                    "option name is not valid UTF-16 text",
+                )
+            })
+        }
         Value::StringArray(array) if array.data().len() == 1 => {
             Ok(array.data()[0].as_str().to_owned())
         }

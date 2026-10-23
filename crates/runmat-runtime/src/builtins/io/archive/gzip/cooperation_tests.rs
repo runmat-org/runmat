@@ -275,7 +275,11 @@ fn selected_builtin_cancel_or_drop_retires_pending_turn_before_publication() {
                 let Poll::Ready(Err(error)) = poll_once(future.as_mut()) else {
                     panic!("{} cancellation must finish", operation.name());
                 };
-                assert_eq!(error.identifier(), Some("RunMat:parallel:Cancelled"));
+                assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+                assert_eq!(
+                    error.failure_origin,
+                    crate::runtime_error::RuntimeFailureOrigin::ExecutionControlCancellation
+                );
             }
             drop(future);
             assert_eq!(
@@ -335,7 +339,11 @@ fn selected_url_gunzip_cancel_or_drop_retires_codec_turn_before_publication() {
             let Poll::Ready(Err(error)) = poll_once(future.as_mut()) else {
                 panic!("URL gunzip cancellation must finish");
             };
-            assert_eq!(error.identifier(), Some("RunMat:parallel:Cancelled"));
+            assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+            assert_eq!(
+                error.failure_origin,
+                crate::runtime_error::RuntimeFailureOrigin::ExecutionControlCancellation
+            );
         }
         drop(future);
         assert_eq!(fixture.dropped.get(), 1, "selected turn retired");

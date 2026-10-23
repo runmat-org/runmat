@@ -7,7 +7,10 @@ use runmat_time::{duration_ns_saturating, Instant};
 use runmat_value::Value;
 
 mod host_preparation;
+mod native_host;
+mod native_original;
 use host_preparation::{prepare_selected_host_inputs, prepare_vm_outputs};
+use native_host::prepare_native_host;
 
 /// Linear selected-provider receipt held until the VM has published all
 /// ordered stores, adopted the result, and advanced beyond the fused span.
@@ -37,10 +40,10 @@ impl FusionProviderCompletion {
     }
 
     pub fn complete(self, outer_started: Instant) {
-        let Some(lease) = self.right.completion_lease(&self.feedback.runtime) else {
+        let Some(prelude) = self.receipt.default_clock_prelude_since(outer_started) else {
             return;
         };
-        let Some(prelude) = self.receipt.default_clock_prelude_since(outer_started) else {
+        let Some(lease) = self.right.completion_lease(&self.feedback.runtime) else {
             return;
         };
         crate::placement::publish_provider_feedback_vm_full_call(
@@ -50,6 +53,53 @@ impl FusionProviderCompletion {
             lease,
             self.command_contribution,
         );
+    }
+}
+
+/// Native output publication supplies its linear right only after adopting
+/// every output. This carrier owns the real selected receipt, not a timer or
+/// a VM installation manufactured from matching metadata.
+pub(super) struct NativeFusionPublication {
+    pub(super) receipt: ProviderOperationReceipt,
+    pub(super) feedback: LocalPlacementFeedback,
+    pub(super) command_contribution: Option<CommandProviderContribution>,
+    pub(super) identity: (
+        runmat_types::RegionId,
+        runmat_runtime::native::NativeSiteRequest,
+    ),
+}
+
+impl runmat_runtime::numeric_region::service::NativeNumericRegionPublication
+    for NativeFusionPublication
+{
+    fn complete(
+        self: Box<Self>,
+        runtime: &RuntimeContext,
+        right: runmat_runtime::numeric_region::service::NativeNumericRegionRight,
+    ) {
+        if !right.is_current(runtime)
+            || !right.matches(self.identity.0, self.identity.1)
+            || !self.feedback.is_current()
+        {
+            return;
+        }
+        let Self {
+            receipt,
+            feedback,
+            command_contribution,
+            ..
+        } = *self;
+        let Some(prelude) = receipt.default_clock_prelude_since(right.started()) else {
+            return;
+        };
+        if right.is_current(&feedback.runtime) {
+            crate::placement::publish_provider_feedback_full_call(
+                receipt,
+                feedback,
+                prelude,
+                command_contribution,
+            );
+        }
     }
 }
 
@@ -69,6 +119,67 @@ pub struct FusionCpuObservation {
     feedback: Option<Box<LocalPlacementFeedback>>,
     started: Instant,
     vm_completion: Option<Box<VmCpuCompletion>>,
+    native_kind: Option<runmat_runtime::numeric_region::service::NativeNumericRegionCpuKind>,
+    native_original_provider: Option<&'static dyn runmat_accelerate_api::AccelProvider>,
+    native_host_admission: Option<NativeHostAdmission>,
+}
+
+struct NativeHostAdmission {
+    backing: runmat_execution::resource::ExactShared<NativeHostAdmissionBacking>,
+}
+struct NativeHostAdmissionBacking {
+    admission: super::elementwise::host_readback::Admission,
+    // All captured shape/spec/source vector backing retires before its quote.
+    _receipt: Option<runmat_runtime::context::host_allocation::HostAllocationReceipt>,
+    _claim: Option<std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>>,
+}
+pub(super) fn native_host_admission_retained_bytes() -> Option<u64> {
+    let bytes = u64::try_from(runmat_execution::resource::ExactShared::<
+        NativeHostAdmissionBacking,
+    >::requested_bytes())
+    .ok()?;
+    runmat_runtime::context::host_allocation::HostAllocationPlan::retained_metadata_bytes(bytes)
+        .ok()
+}
+impl NativeHostAdmission {
+    fn new(
+        runtime: &RuntimeContext,
+        admission: super::elementwise::host_readback::Admission,
+        receipt: Option<runmat_runtime::context::host_allocation::HostAllocationReceipt>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Self> {
+        use runmat_accelerate_api::ProviderExecutionError;
+        use runmat_runtime::context::host_allocation::{
+            HostAllocationError, HostAllocationPlan, HostAllocationReceipt,
+        };
+        let mut backing = NativeHostAdmissionBacking {
+            admission,
+            _receipt: receipt,
+            _claim: None,
+        };
+        let bytes = u64::try_from(runmat_execution::resource::ExactShared::<
+            NativeHostAdmissionBacking,
+        >::requested_bytes())
+        .map_err(|_| ProviderExecutionError::from_source(HostAllocationError::Overflow))?;
+        let retained = native_host_admission_retained_bytes()
+            .ok_or_else(|| ProviderExecutionError::from_source(HostAllocationError::Overflow))?;
+        let receipt = HostAllocationReceipt::admit(
+            Some(runtime),
+            HostAllocationPlan::new(0, retained).map_err(ProviderExecutionError::from_source)?,
+        )
+        .map_err(ProviderExecutionError::from_source)?;
+        backing._claim = receipt
+            .as_ref()
+            .map(|receipt| receipt.claim_retained_metadata(runtime, bytes))
+            .transpose()
+            .map_err(ProviderExecutionError::from_source)?;
+        runmat_execution::resource::ExactShared::try_new(backing)
+            .map(|backing| Self { backing })
+            .map_err(|_| {
+                ProviderExecutionError::from_source(HostAllocationError::Numeric(
+                    runmat_value::ExactHostNumericAllocationError::AllocationFailed,
+                ))
+            })
+    }
 }
 
 /// The installed VM right is deliberately linear and relatively large. Only
@@ -89,7 +200,97 @@ impl FusionCpuObservation {
             feedback,
             started: Instant::now(),
             vm_completion: None,
+            native_kind: None,
+            native_original_provider: None,
+            native_host_admission: None,
         }
+    }
+
+    pub(super) fn native_selected(
+        feedback: Option<Box<LocalPlacementFeedback>>,
+        native_kind: Option<runmat_runtime::numeric_region::service::NativeNumericRegionCpuKind>,
+        native_original_provider: Option<&'static dyn runmat_accelerate_api::AccelProvider>,
+    ) -> Self {
+        Self {
+            feedback,
+            native_kind,
+            native_original_provider,
+            native_host_admission: None,
+            started: Instant::now(),
+            vm_completion: None,
+        }
+    }
+
+    pub(super) fn attach_native_host_admission(
+        &mut self,
+        runtime: &RuntimeContext,
+        admission: Option<super::elementwise::host_readback::Admission>,
+        receipt: Option<runmat_runtime::context::host_allocation::HostAllocationReceipt>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<()> {
+        if self.native_kind
+            != Some(runmat_runtime::numeric_region::service::NativeNumericRegionCpuKind::Generic)
+        {
+            // Preparation metadata physically retires before its original
+            // funding receipt on vectorized/original/declined selections too.
+            drop(admission);
+            drop(receipt);
+            return Ok(());
+        }
+        self.native_host_admission = admission
+            .map(|admission| NativeHostAdmission::new(runtime, admission, receipt))
+            .transpose()?;
+        Ok(())
+    }
+
+    pub(super) async fn into_native_selection(
+        mut self,
+        runtime: &RuntimeContext,
+        right: runmat_runtime::numeric_region::service::NativeNumericRegionRight,
+        program: &runmat_runtime::numeric_region::service::NativeNumericRegionProgramOwner,
+        inputs: &[Value],
+    ) -> runmat_accelerate_api::ProviderExecutionResult<
+        runmat_runtime::numeric_region::service::NativeNumericRegionOutcome,
+    > {
+        use runmat_runtime::numeric_region::service::{
+            NativeNumericRegionCpuObservation, NativeNumericRegionOutcome,
+        };
+        if let Some(provider) = self.native_original_provider.take() {
+            let observation = native_original::NativeOriginalObservation::admit(
+                runtime,
+                provider,
+                &right,
+                self.feedback.take(),
+            )?;
+            return Ok(NativeNumericRegionOutcome::Original { right, observation });
+        }
+        let Some(kind) = self.native_kind.take() else {
+            self.feedback = None;
+            return Ok(NativeNumericRegionOutcome::Ineligible);
+        };
+        let host = if kind
+            == runmat_runtime::numeric_region::service::NativeNumericRegionCpuKind::Generic
+        {
+            let captured = self.native_host_admission.take().ok_or_else(|| {
+                runmat_accelerate_api::ProviderExecutionError::from_source(
+                    runmat_runtime::runtime_error::semantic_error(
+                        "RunMat:Placement:InvalidNativeRegion",
+                        "selected native source-host candidate has no resource/input owner",
+                    ),
+                )
+            })?;
+            Some(prepare_native_host(runtime, program, &right, inputs, captured).await?)
+        } else {
+            None
+        };
+        Ok(NativeNumericRegionOutcome::NativeCpu {
+            kind,
+            right,
+            host,
+            observation: self
+                .feedback
+                .take()
+                .map(|feedback| feedback as Box<dyn NativeNumericRegionCpuObservation>),
+        })
     }
 
     /// Only the selected VM reduction can attach its one-shot installation
@@ -349,6 +550,28 @@ impl FusionCpuObservation {
             return;
         };
         feedback.observe(duration_ns_saturating(self.started.elapsed()), succeeded);
+    }
+}
+
+impl runmat_runtime::numeric_region::service::NativeNumericRegionCpuObservation
+    for LocalPlacementFeedback
+{
+    fn finish(
+        self: Box<Self>,
+        runtime: &RuntimeContext,
+        right: runmat_runtime::numeric_region::service::NativeNumericRegionRight,
+        succeeded: bool,
+    ) {
+        if right.is_current(runtime)
+            && self.runtime.local_identity() == runtime.local_identity()
+            && self.signature.region == Some(right.identity().0)
+            && self.is_current()
+        {
+            (*self).observe(
+                duration_ns_saturating(right.started().elapsed()).max(1),
+                succeeded,
+            );
+        }
     }
 }
 

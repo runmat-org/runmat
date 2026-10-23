@@ -10,7 +10,8 @@ use std::collections::BTreeMap;
 use crate::tree::{NativeStorageGrant, ResolvedNativeTree};
 use crate::{AotError, AotResult};
 
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NativeLinkExecutionHost {
     pub architecture: NativeArchitecture,
     pub operating_system: NativeOperatingSystem,
@@ -32,8 +33,8 @@ impl NativeLinkExecutionHost {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum NativeLinkAdapter {
     /// The companion linker is also an exact executable in the same admitted
     /// tree; clang may not discover a linker through PATH or a host SDK.
@@ -46,8 +47,13 @@ pub enum NativeLinkAdapter {
 /// Locator identity, not a service or semantic-operation registry. The
 /// framework locator addresses its link image inside the complete framework
 /// tree; staging never flattens its resources or rewrites its install name.
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, serde::Serialize)]
-#[serde(tag = "kind", content = "name", rename_all = "snake_case")]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
+#[serde(
+    tag = "kind",
+    content = "name",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 pub enum NativeHostedDependency {
     Library(String),
     Framework(String),
@@ -55,7 +61,8 @@ pub enum NativeHostedDependency {
 
 /// Recorded identity, NOT an admission/qualification right. This can be
 /// retained with a completed output digest without accepting it as execution.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NativeLinkBuildIdentity {
     pub product: Digest,
     pub execution_host: NativeLinkExecutionHost,

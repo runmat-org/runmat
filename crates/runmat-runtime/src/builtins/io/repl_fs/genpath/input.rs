@@ -51,7 +51,11 @@ async fn text(
     match value {
         Value::String(text) => Ok(text.into_string_unbounded()),
         Value::StringArray(array) => Ok(array.data()[0].as_str().to_owned()),
-        Value::CharArray(chars) => Ok(chars.data().iter().collect()),
+        Value::CharArray(chars) => {
+            crate::builtins::io::utf16::decode_utf16_with_error(chars.data(), || {
+                super::errors::descriptor(type_error)
+            })
+        }
         Value::Tensor(tensor) => numeric_text(&tensor, type_error),
         value @ Value::GpuTensor(_) => {
             let gathered = crate::gather_if_needed_async(&value)

@@ -7,8 +7,8 @@ use runmat_hir::FunctionId;
 use runmat_runtime::build_runtime_error;
 use runmat_runtime::context::RuntimeContext;
 use runmat_vm::{
-    Bytecode, BytecodeSourceRef, FunctionRegistry, SelectedExecutableProduct,
-    SelectedUnitInteropReceipt,
+    Bytecode, BytecodeSourceRef, FunctionRegistry, SelectedExecutableAttachmentError,
+    SelectedExecutableProduct, SelectedUnitInteropReceipt,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -20,6 +20,15 @@ fn source_error(error: impl ToString) -> RunError {
     RunError::Runtime(
         build_runtime_error(error.to_string())
             .with_identifier("RunMat:ExecutableSourceIdentity")
+            .build(),
+    )
+}
+
+fn attachment_error(error: SelectedExecutableAttachmentError) -> RunError {
+    RunError::Runtime(
+        build_runtime_error(error.to_string())
+            .with_identifier("RunMat:ExecutableSourceIdentity")
+            .with_source(error)
             .build(),
     )
 }
@@ -196,19 +205,20 @@ pub(super) fn attach_selected_executable_product(
     let capture = static_capture(Rc::clone(&product), static_targets).map_err(source_error)?;
     executing
         .attach_current_selected_executable_product(ids.iter().copied(), product.clone())
-        .map_err(source_error)?;
+        .map_err(attachment_error)?;
     executing
         .attach_current_selected_static_capture(ids.iter().copied(), &capture)
         .map_err(source_error)?;
     durable
-        .attach_current_selected_executable_product(
+        .attach_published_selected_executable_product(
             ids.iter()
                 .copied()
                 .filter(|id| durable.get_current(*id).is_some())
                 .collect::<Vec<_>>(),
+            executing,
             product.clone(),
         )
-        .map_err(source_error)?;
+        .map_err(attachment_error)?;
     durable
         .attach_current_selected_static_capture(
             ids.iter()
@@ -221,7 +231,7 @@ pub(super) fn attach_selected_executable_product(
     bytecode
         .function_registry
         .attach_current_selected_executable_product(ids.iter().copied(), product)
-        .map_err(source_error)?;
+        .map_err(attachment_error)?;
     bytecode
         .function_registry
         .attach_current_selected_static_capture(ids.iter().copied(), &capture)

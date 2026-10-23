@@ -129,7 +129,7 @@ fn arrayfun_uniform_character_result() {
         Value::CharArray(ca) => {
             assert_eq!(ca.rows, 1);
             assert_eq!(ca.cols, 3);
-            assert_eq!(ca.data(), vec!['A', 'B', 'C']);
+            assert_eq!(ca.data(), runmat_value::encode_utf16_code_units("ABC"));
         }
         other => panic!("expected char array, got {other:?}"),
     }

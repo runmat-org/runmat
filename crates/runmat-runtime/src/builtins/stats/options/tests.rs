@@ -49,7 +49,8 @@ fn statset_builds_custom_options() {
 
 #[test]
 fn statset_character_row_option_values_normalize_to_scalar_text() {
-    let value = Value::CharArray(CharArray::new("off".chars().collect(), 1, 3).unwrap());
+    let value =
+        Value::CharArray(CharArray::from_unicode_scalars("off".chars().collect(), 1, 3).unwrap());
     let options = struct_value(
         block_on(statset_builtin(
             None,

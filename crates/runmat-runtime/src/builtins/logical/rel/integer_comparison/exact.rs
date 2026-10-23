@@ -306,9 +306,9 @@ impl RealOperand<'_> {
                 let in_page = index % page_len;
                 let row = in_page % array.rows;
                 let column = in_page / array.rows;
-                RealValue::Float(f64::from(
-                    array.data()[page_offset + row * array.cols + column] as u32,
-                ))
+                RealValue::Float(f64::from(u32::from(
+                    array.data()[page_offset + row * array.cols + column].raw(),
+                )))
             }
         }
     }

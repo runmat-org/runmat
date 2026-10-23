@@ -242,7 +242,6 @@ fn dependent_property_setter_uses_selected_session_not_unrelated_ambient_session
         original,
         "p".into(),
         Value::Num(9.0),
-        false,
         None,
     ))
     .expect("selected dependent setter");

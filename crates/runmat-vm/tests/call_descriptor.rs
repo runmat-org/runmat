@@ -403,7 +403,10 @@ fn feval_function_handle_qualified_name_classifies_as_external_boundary() {
     else {
         panic!("expected resolved target");
     };
-    assert!(matches!(identity, CallableIdentity::ExternalName(_)));
+    assert!(matches!(
+        identity.as_identity(),
+        CallableIdentity::ExternalName(_)
+    ));
     assert_eq!(*fallback_policy, CallableFallbackPolicy::ExternalBoundary);
 }
 
@@ -422,7 +425,10 @@ fn feval_method_function_handle_classifies_as_method_identity() {
     else {
         panic!("expected resolved target");
     };
-    assert!(matches!(identity, CallableIdentity::Method(_)));
+    assert!(matches!(
+        identity.as_identity(),
+        CallableIdentity::Method(_)
+    ));
     assert_eq!(
         *fallback_policy,
         CallableFallbackPolicy::RuntimeNameResolution
@@ -536,7 +542,10 @@ fn feval_closure_with_embedded_semantic_prefers_embedded_identity() {
                 assert_eq!(requested_outputs, 1);
                 assert_eq!(args.captures(), &[Value::Num(10.0)]);
                 assert_eq!(args.supplied(), &[Value::Num(2.0)]);
-                Box::pin(async { Ok(single_sequence(Value::Num(12.0))) })
+                runmat_runtime::execution::admit_executable_sequence_with(
+                    &_runtime,
+                    move || async move { Ok(single_sequence(Value::Num(12.0))) },
+                )
             },
         );
 
@@ -580,7 +589,7 @@ fn malformed_qualified_function_handle_remains_dynamic_name() {
         panic!("expected resolved target");
     };
     assert!(matches!(
-        identity,
+        identity.as_identity(),
         CallableIdentity::DynamicName(SymbolName(name)) if name == "pkg..remote_inc"
     ));
     assert_eq!(
@@ -605,7 +614,7 @@ fn malformed_qualified_external_function_handle_remains_dynamic_name() {
         panic!("expected resolved target");
     };
     assert!(matches!(
-        identity,
+        identity.as_identity(),
         CallableIdentity::DynamicName(SymbolName(name)) if name == "pkg..remote_inc"
     ));
     assert_eq!(
@@ -630,7 +639,7 @@ fn single_segment_external_function_handle_uses_runtime_name_resolution() {
         panic!("expected resolved target");
     };
     assert!(matches!(
-        identity,
+        identity.as_identity(),
         CallableIdentity::DynamicName(SymbolName(name)) if name == "origin"
     ));
     assert_eq!(
@@ -804,7 +813,10 @@ fn feval_semantic_function_handle_prefers_embedded_function_id() {
                 assert_eq!(requested_outputs, 1);
                 assert!(args.captures().is_empty());
                 assert_eq!(args.supplied(), &[Value::Num(2.0)]);
-                Box::pin(async { Ok(single_sequence(Value::Num(3.0))) })
+                runmat_runtime::execution::admit_executable_sequence_with(
+                    &_runtime,
+                    move || async move { Ok(single_sequence(Value::Num(3.0))) },
+                )
             },
         );
 

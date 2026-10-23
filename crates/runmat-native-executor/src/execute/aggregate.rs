@@ -101,7 +101,7 @@ pub(super) fn evaluate(
                 embedded,
                 super::call_suspension::SemanticOperationKind::TensorAggregate,
                 Vec::new(),
-                future,
+                move || future,
             )?;
             adopt_tensor_result(state, value)
         }

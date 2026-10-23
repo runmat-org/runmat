@@ -40,6 +40,18 @@ pub(super) fn service_error(builtin: &'static str, source: PreferenceServiceErro
     }
 }
 
+/// The selected service is invoked only after public values have completed
+/// preparation. A later failure cannot request whole-builtin gather replay:
+/// the service may already have admitted a storage effect or imported DATA.
+pub(super) fn service_error_after_preparation(
+    builtin: &'static str,
+    source: PreferenceServiceError,
+) -> RuntimeError {
+    let mut error = service_error(builtin, source);
+    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    error
+}
+
 pub(super) fn values_struct(values: impl IntoIterator<Item = (String, Value)>) -> StructValue {
     let mut output = runmat_value::UnboundedStructValueBuilder::new();
     for (name, value) in values {

@@ -99,7 +99,7 @@ async fn validate_startswith_options(
         ));
     }
     if rest.len() == 2 {
-        let option_name = super::text_utils::value_to_owned_string(&rest[0]);
+        let option_name = super::text_utils::value_to_owned_string(&rest[0], BUILTIN_NAME)?;
         if !option_name.is_some_and(|name| name.eq_ignore_ascii_case("IgnoreCase")) {
             return Err(startswith_error_with_message(
                 "startsWith: unknown option; supported option is 'IgnoreCase'",
@@ -402,7 +402,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn startswith_broadcast_pattern_column_vector() {
-        let patterns = CharArray::new(vec!['s', 'n', 'x'], 3, 1).unwrap();
+        let patterns = CharArray::from_unicode_scalars(vec!['s', 'n', 'x'], 3, 1).unwrap();
         let result = run_startswith(
             Value::String("saturn".into()),
             Value::CharArray(patterns),

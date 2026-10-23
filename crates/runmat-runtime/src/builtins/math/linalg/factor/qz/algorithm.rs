@@ -35,6 +35,17 @@ pub(super) struct ComplexQzView<'a> {
     pub beta: ColMut<'a, c64>,
 }
 
+/// Same reduction with an optional accumulated left unitary. Full EVD does
+/// not allocate an unused n-by-n Q when only right vectors were requested.
+pub(in crate::builtins::math::linalg) struct ComplexQzOptionalView<'a> {
+    pub aa: MatMut<'a, c64>,
+    pub bb: MatMut<'a, c64>,
+    pub left: Option<MatMut<'a, c64>>,
+    pub right: MatMut<'a, c64>,
+    pub alpha: ColMut<'a, c64>,
+    pub beta: ColMut<'a, c64>,
+}
+
 pub(super) struct RealQz {
     pub aa: Mat<f64>,
     pub bb: Mat<f64>,
@@ -227,7 +238,7 @@ pub(super) fn complex_qz(mut aa: Mat<c64>, mut bb: Mat<c64>) -> Result<ComplexQz
     })
 }
 
-pub(super) fn complex_qz_scratch(n: usize) -> faer::dyn_stack::StackReq {
+pub(in crate::builtins::math::linalg) fn complex_qz_scratch(n: usize) -> faer::dyn_stack::StackReq {
     let params: GevdParams = faer::auto!(c64);
     gevd::gevd_scratch::<c64>(
         n,
@@ -242,12 +253,31 @@ pub(super) fn complex_qz_in_place(
     form: &mut ComplexQzView<'_>,
     memory: &mut [MaybeUninit<u8>],
 ) -> Result<(), &'static str> {
+    complex_qz_optional_in_place(
+        &mut ComplexQzOptionalView {
+            aa: form.aa.rb_mut(),
+            bb: form.bb.rb_mut(),
+            left: Some(form.left.rb_mut()),
+            right: form.right.rb_mut(),
+            alpha: form.alpha.rb_mut(),
+            beta: form.beta.rb_mut(),
+        },
+        memory,
+    )
+}
+
+pub(in crate::builtins::math::linalg) fn complex_qz_optional_in_place(
+    form: &mut ComplexQzOptionalView<'_>,
+    memory: &mut [MaybeUninit<u8>],
+) -> Result<(), &'static str> {
     let n = form.aa.nrows();
     if form.aa.ncols() != n
         || form.bb.nrows() != n
         || form.bb.ncols() != n
-        || form.left.nrows() != n
-        || form.left.ncols() != n
+        || form
+            .left
+            .as_ref()
+            .is_some_and(|left| left.nrows() != n || left.ncols() != n)
         || form.right.nrows() != n
         || form.right.ncols() != n
         || form.alpha.nrows() != n
@@ -279,7 +309,9 @@ pub(super) fn complex_qz_in_place(
             } else {
                 c64::new(0.0, 0.0)
             };
-            left[(row, col)] = diagonal;
+            if let Some(left) = left.as_mut() {
+                left[(row, col)] = diagonal;
+            }
             right[(row, col)] = diagonal;
         }
     }
@@ -304,7 +336,8 @@ pub(super) fn complex_qz_in_place(
             bb.as_ref(), householder.rb(), faer::Conj::Yes,
             aa.as_mut(), Par::Seq, stack,
         );
-        faer::linalg::householder::apply_block_householder_sequence_on_the_left_in_place_with_conj(
+        if let Some(left) = left.as_mut() {
+            faer::linalg::householder::apply_block_householder_sequence_on_the_left_in_place_with_conj(
             bb.as_ref(),
             householder.rb(),
             faer::Conj::No,
@@ -312,6 +345,7 @@ pub(super) fn complex_qz_in_place(
             Par::Seq,
             stack,
         );
+        }
         for j in 0..n {
             for i in (j + 1)..n {
                 bb[(i, j)] = c64::new(0.0, 0.0);
@@ -321,7 +355,7 @@ pub(super) fn complex_qz_in_place(
     gevd::gen_hessenberg::generalized_hessenberg(
         aa.as_mut(),
         bb.as_mut(),
-        Some(left.as_mut()),
+        left.as_mut().map(|left| left.rb_mut()),
         Some(right.as_mut()),
         Par::Seq,
         stack,
@@ -330,7 +364,7 @@ pub(super) fn complex_qz_in_place(
     gevd::qz_cplx::hessenberg_to_qz(
         aa.as_mut(),
         bb.as_mut(),
-        Some(left.as_mut()),
+        left.as_mut().map(|left| left.rb_mut()),
         Some(right.as_mut()),
         alpha.as_mut(),
         beta.as_mut(),

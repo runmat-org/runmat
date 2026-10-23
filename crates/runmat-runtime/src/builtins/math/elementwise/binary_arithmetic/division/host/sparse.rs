@@ -65,7 +65,7 @@ fn scalar_divisor(value: &Value) -> Option<bool> {
             Some(scalar != 0.0 && !scalar.is_nan())
         }
         Value::LogicalArray(array) if array.data.len() == 1 => Some(array.data[0] != 0),
-        Value::CharArray(array) if array.data().len() == 1 => Some(array.data()[0] != '\0'),
+        Value::CharArray(array) if array.data().len() == 1 => Some(array.data()[0].raw() != 0),
         Value::Complex(real, imag) => {
             Some(real.is_finite() && imag.is_finite() && (*real != 0.0 || *imag != 0.0))
         }

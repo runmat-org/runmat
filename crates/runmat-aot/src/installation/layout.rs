@@ -4,7 +4,8 @@ use runmat_package::NormalizedRelativePath;
 use super::invalid;
 use crate::AotResult;
 
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NativeInstalledComponent {
     pub component: ComponentId,
     pub path: NormalizedRelativePath,
@@ -13,7 +14,8 @@ pub struct NativeInstalledComponent {
 /// Explicit target-relative layout. The complete sysroot is retained beneath
 /// `sysroot`; frameworks, resource directories and link topology are not
 /// flattened or rewritten to accommodate a build-host path.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NativeInstallationLayout {
     pub executable: NormalizedRelativePath,
     pub sysroot: NormalizedRelativePath,

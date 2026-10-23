@@ -1,6 +1,27 @@
 use crate::{MirExpressionStep, MirOperand, MirSequenceLocalId};
 use runmat_types::{IndexKind, IndexResultContext};
 use serde::{Deserialize, Serialize};
+
+/// Transparent source-metadata backing; serialization keeps the established
+/// identity schema, without requiring serde's optional Arc feature in MIR.
+mod retained_fallback {
+    use runmat_types::CallableIdentity;
+    use serde::{Deserialize, Serialize};
+    use std::sync::Arc;
+
+    pub fn serialize<S: serde::Serializer>(
+        value: &Option<Arc<CallableIdentity>>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        value.as_deref().serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<Arc<CallableIdentity>>, D::Error> {
+        Option::<CallableIdentity>::deserialize(deserializer).map(|value| value.map(Arc::new))
+    }
+}
 use std::fmt;
 
 mod dotted_argument;
@@ -22,7 +43,8 @@ pub enum MirSubscriptStep {
     DottedInvoke {
         member: runmat_types::MemberName,
         arguments: Vec<MirDottedInvokeArgument>,
-        semantic_fallback: Option<runmat_types::CallableIdentity>,
+        #[serde(with = "retained_fallback")]
+        semantic_fallback: Option<std::sync::Arc<runmat_types::CallableIdentity>>,
     },
     PreparedDynamicMember(crate::MirPreparedExpressionRegion),
 }
@@ -116,8 +138,18 @@ impl MirSubscriptChain {
     ) {
         for step in &self.steps {
             match step {
-                MirSubscriptStep::Index(indexing) => indexing
-                    .visit_direct_expression_regions_dyn(&mut |region| visitor(region.steps())),
+                MirSubscriptStep::Index(indexing) => {
+                    for component in &indexing.components {
+                        match component {
+                            MirIndexComponent::ContextualExpr(region) => visitor(region.steps()),
+                            MirIndexComponent::PreparedExpr(region) => visitor(region.steps()),
+                            MirIndexComponent::Expansion(region) => {
+                                region.visit_direct_preparation_steps(visitor)
+                            }
+                            MirIndexComponent::Colon | MirIndexComponent::Expr(_) => {}
+                        }
+                    }
+                }
                 MirSubscriptStep::PreparedDynamicMember(region) => visitor(region.steps()),
                 MirSubscriptStep::DottedInvoke { arguments, .. } => {
                     for argument in arguments {
@@ -163,12 +195,16 @@ impl MirSubscriptChain {
 
     pub fn contains_contextual_end(&self) -> bool {
         self.steps.iter().any(|step| match step {
-            MirSubscriptStep::Index(indexing) => indexing
-                .components
+            MirSubscriptStep::Index(indexing) => {
+                indexing.components.iter().any(|component| match component {
+                    MirIndexComponent::ContextualExpr(region) => region.contains_contextual_end(),
+                    MirIndexComponent::Expansion(region) => region.contains_contextual_end(),
+                    _ => false,
+                })
+            }
+            MirSubscriptStep::DottedInvoke { arguments, .. } => arguments
                 .iter()
-                .any(|component| matches!(component, MirIndexComponent::ContextualExpr(region) if region.contains_contextual_end())),
-            MirSubscriptStep::DottedInvoke { arguments, .. } =>
-                arguments.iter().any(MirDottedInvokeArgument::contains_contextual_end),
+                .any(MirDottedInvokeArgument::contains_contextual_end),
             MirSubscriptStep::Member(_)
             | MirSubscriptStep::DynamicMember(_)
             | MirSubscriptStep::PreparedDynamicMember(_) => false,
@@ -285,9 +321,29 @@ fn validate_index_step(indexing: &MirIndexing) -> Result<(), MirSubscriptChainEr
     ) {
         return Err(MirSubscriptChainError::InvalidReadContext);
     }
+    validate_selector_regions(indexing)
+}
+
+fn validate_selector_regions(indexing: &MirIndexing) -> Result<(), MirSubscriptChainError> {
     validate_index_plan(indexing)?;
+    let expanding = indexing
+        .components
+        .iter()
+        .any(|component| matches!(component, MirIndexComponent::Expansion(_)));
+    if expanding && (indexing.kind != IndexKind::Paren || indexing.plan != MirIndexPlan::Slice) {
+        return Err(MirSubscriptChainError::InvalidReadContext);
+    }
+    if expanding
+        && indexing
+            .components
+            .iter()
+            .any(|component| matches!(component, MirIndexComponent::ContextualExpr(_)))
+    {
+        return Err(MirSubscriptChainError::InvalidReadContext);
+    }
     if indexing.components.iter().any(|component| {
         matches!(component, MirIndexComponent::PreparedExpr(region) if region.validate().is_err())
+            || matches!(component, MirIndexComponent::Expansion(region) if indexing.kind != IndexKind::Paren || region.validate().is_err())
     }) {
         return Err(MirSubscriptChainError::InvalidPreparedRegion);
     }
@@ -338,11 +394,33 @@ pub enum MirIndexComponent {
     Expr(MirOperand),
     ContextualExpr(crate::MirExpressionRegion),
     PreparedExpr(crate::MirPreparedExpressionRegion),
+    /// One source argument that may expand into several parentheses selectors.
+    Expansion(MirCallArgumentRegion),
 }
 
 impl MirIndexing {
+    /// Target-only admission never makes a write/deletion usable as a read
+    /// chain. Both execution paths share the same ordered-region invariants.
+    pub fn validate_target_selectors(&self) -> Result<(), MirSubscriptChainError> {
+        if !matches!(
+            self.result_context,
+            IndexResultContext::AssignmentTarget | IndexResultContext::DeletionTarget
+        ) {
+            return Err(MirSubscriptChainError::InvalidPreparedRegion);
+        }
+        if self.result_context == IndexResultContext::DeletionTarget
+            && self.kind != IndexKind::Paren
+        {
+            return Err(MirSubscriptChainError::InvalidPreparedRegion);
+        }
+        validate_selector_regions(self)
+    }
     pub(crate) fn visit_sequence_locals(&self, visitor: &mut dyn FnMut(&MirSequenceLocalId)) {
         for component in &self.components {
+            if let MirIndexComponent::Expansion(region) = component {
+                region.visit_sequence_locals(visitor);
+                continue;
+            }
             let region = match component {
                 MirIndexComponent::ContextualExpr(region) => {
                     crate::MirExpressionRegionRef::Contextual(region)
@@ -350,7 +428,9 @@ impl MirIndexing {
                 MirIndexComponent::PreparedExpr(region) => {
                     crate::MirExpressionRegionRef::Prepared(region)
                 }
-                MirIndexComponent::Colon | MirIndexComponent::Expr(_) => continue,
+                MirIndexComponent::Colon
+                | MirIndexComponent::Expr(_)
+                | MirIndexComponent::Expansion(_) => continue,
             };
             {
                 let local_sequences = region
@@ -386,6 +466,9 @@ impl MirIndexing {
                 MirIndexComponent::PreparedExpr(region) => {
                     visitor(crate::MirExpressionRegionRef::Prepared(region))
                 }
+                MirIndexComponent::Expansion(region) => {
+                    region.visit_expression_regions(&mut *visitor)
+                }
                 MirIndexComponent::Colon | MirIndexComponent::Expr(_) => {}
             }
         }
@@ -420,6 +503,7 @@ impl MirIndexing {
                 match component {
                     MirIndexComponent::ContextualExpr(region) => region.visit_operands_dyn(visitor),
                     MirIndexComponent::PreparedExpr(region) => region.visit_operands_dyn(visitor),
+                    MirIndexComponent::Expansion(region) => region.visit_operands(visitor),
                     MirIndexComponent::Colon | MirIndexComponent::Expr(_) => {}
                 }
             }
@@ -438,6 +522,7 @@ impl MirIndexing {
                     MirIndexComponent::PreparedExpr(region) => {
                         region.visit_external_operands(&mut *visitor)
                     }
+                    MirIndexComponent::Expansion(region) => region.visit_outer_operands(visitor),
                     MirIndexComponent::Colon | MirIndexComponent::Expr(_) => {}
                 }
             }
@@ -464,6 +549,7 @@ impl MirIndexing {
                     MirIndexComponent::PreparedExpr(region) => {
                         region.visit_operands_mut_dyn(visitor)
                     }
+                    MirIndexComponent::Expansion(region) => region.visit_operands_mut(visitor),
                     MirIndexComponent::Colon | MirIndexComponent::Expr(_) => {}
                 }
             }

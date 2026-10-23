@@ -26,12 +26,11 @@ fn path(value: &Value) -> BuiltinResult<PathBuf> {
             if chars.rows == 1
                 && crate::builtins::common::shape::effective_rank(&chars.shape) <= 2 =>
         {
-            chars
-                .data()
-                .iter()
-                .collect::<String>()
-                .trim_end()
-                .to_owned()
+            crate::builtins::io::utf16::decode_utf16_with_error(chars.data(), || {
+                super::error::contract(&runmat_builtins::WHAT_ERROR_FOLDER)
+            })?
+            .trim_end()
+            .to_owned()
         }
         _ => return Err(super::error::contract(&runmat_builtins::WHAT_ERROR_FOLDER)),
     };

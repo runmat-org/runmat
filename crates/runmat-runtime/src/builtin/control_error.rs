@@ -30,5 +30,7 @@ pub(crate) fn builtin_control_error(
                 .build()
         }
     };
-    crate::builtins::common::map_control_flow_with_builtin(error, builtin)
+    let mut error = crate::builtins::common::map_control_flow_with_builtin(error, builtin);
+    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    error
 }

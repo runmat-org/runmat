@@ -1,4 +1,5 @@
 use crate::call::identity::strict_callable_display_name;
+use crate::call::identity::CallableIdentityOwner;
 use crate::runtime_error::semantic_error;
 use crate::RuntimeError;
 use runmat_types::{
@@ -253,12 +254,12 @@ pub enum CallableTarget {
         closure: RetainedClosureValue,
     },
     CapturedResolved {
-        identity: CallableIdentity,
+        identity: CallableIdentityOwner,
         fallback_policy: CallableFallbackPolicy,
         closure: RetainedClosureValue,
     },
     Resolved {
-        identity: CallableIdentity,
+        identity: CallableIdentityOwner,
         fallback_policy: CallableFallbackPolicy,
     },
     FevalForward(Value),
@@ -283,11 +284,33 @@ impl CallableTarget {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct CallableDescriptor {
+pub struct CallableDescriptor<A = Vec<Value>> {
     pub target: CallableTarget,
-    pub args: Vec<Value>,
+    pub args: A,
     pub requested_outputs: usize,
     pub metadata: CallableMetadata,
+}
+
+impl CallableDescriptor {
+    /// Attach the existing rooted owner to a target-only selection. Never
+    /// discard an ordinary descriptor's supplied arguments.
+    pub fn with_retained_arguments(
+        self,
+        args: crate::call::BuiltinArguments,
+    ) -> Result<CallableDescriptor<crate::call::BuiltinArguments>, RuntimeError> {
+        if !self.args.is_empty() {
+            return Err(semantic_error(
+                "CallableArguments",
+                "retained arguments require a target-only descriptor",
+            ));
+        }
+        Ok(CallableDescriptor {
+            target: self.target,
+            args,
+            requested_outputs: self.requested_outputs,
+            metadata: self.metadata,
+        })
+    }
 }
 
 impl CallableDescriptor {
@@ -309,7 +332,7 @@ impl CallableDescriptor {
                 }),
                 args: Vec::new(),
                 requested_outputs,
-                metadata: CallableMetadata::feval(None),
+                metadata: CallableMetadata::feval(Some(handle.name.clone())),
             },
             Value::Closure(closure) => {
                 let retained = RetainedClosureValue::from_read_lease(owner)?;
@@ -325,22 +348,22 @@ impl CallableDescriptor {
                         },
                         args: Vec::new(),
                         requested_outputs,
-                        // The immutable callable generation remains the
-                        // display-name owner.
-                        metadata: CallableMetadata::feval(None),
+                        // Share the immutable generation's admitted text owner;
+                        // diagnostics retain its name without copying bytes.
+                        metadata: CallableMetadata::feval(Some(closure.function_name.clone())),
                     }
                 } else if let Some(function) =
                     function_resolver.resolve_function(&closure.function_name)
                 {
                     Self {
                         target: CallableTarget::CapturedResolved {
-                            identity: CallableIdentity::BoundFunction(function),
+                            identity: CallableIdentity::BoundFunction(function).into(),
                             fallback_policy: CallableFallbackPolicy::None,
                             closure: retained,
                         },
                         args: Vec::new(),
                         requested_outputs,
-                        metadata: CallableMetadata::feval(None),
+                        metadata: CallableMetadata::feval(Some(closure.function_name.clone())),
                     }
                 } else {
                     Self {
@@ -364,7 +387,7 @@ impl CallableDescriptor {
                     None => Self {
                         target: match function_resolver.resolve_function(name.name()) {
                             Some(function) => CallableTarget::Resolved {
-                                identity: CallableIdentity::BoundFunction(function),
+                                identity: CallableIdentity::BoundFunction(function).into(),
                                 fallback_policy: CallableFallbackPolicy::None,
                             },
                             None => CallableTarget::RetainedFevalForward(
@@ -453,17 +476,26 @@ impl CallableDescriptor {
     }
 
     fn resolved_inner(
-        identity: CallableIdentity,
+        identity: CallableIdentityOwner,
         display_name: Option<runmat_value::Utf8Text>,
         fallback_policy: CallableFallbackPolicy,
         args: Vec<Value>,
         requested_outputs: usize,
         mut metadata: CallableMetadata,
     ) -> Self {
-        metadata.display_name = metadata
-            .display_name
-            .or(display_name)
-            .or_else(|| strict_callable_display_name(&identity).map(Into::into));
+        metadata.display_name =
+            metadata
+                .display_name
+                .or(display_name)
+                .or_else(|| match &identity {
+                    CallableIdentityOwner::Owned(identity) => {
+                        strict_callable_display_name(identity).map(Into::into)
+                    }
+                    // A retained caller already has its exact immutable source
+                    // owner; presentation text is supplied independently through
+                    // metadata, never rebuilt by copying identity/name segments.
+                    CallableIdentityOwner::Retained(_) => None,
+                });
         Self {
             target: CallableTarget::Resolved {
                 identity,
@@ -498,7 +530,7 @@ impl CallableDescriptor {
     ) -> Self {
         let name: runmat_value::Utf8Text = name.into();
         Self::resolved_inner(
-            identity,
+            identity.into(),
             Some(name.clone()),
             fallback_policy,
             args,
@@ -564,6 +596,38 @@ impl CallableDescriptor {
         fallback_policy: CallableFallbackPolicy,
         call_kind: CallableCallKind,
     ) -> Self {
+        Self::resolved_with_identity_owner(
+            identity.into(),
+            args,
+            requested_outputs,
+            fallback_policy,
+            call_kind,
+        )
+    }
+
+    pub fn resolved_retained(
+        identity: std::sync::Arc<CallableIdentity>,
+        args: Vec<Value>,
+        requested_outputs: usize,
+        fallback_policy: CallableFallbackPolicy,
+        call_kind: CallableCallKind,
+    ) -> Self {
+        Self::resolved_with_identity_owner(
+            identity.into(),
+            args,
+            requested_outputs,
+            fallback_policy,
+            call_kind,
+        )
+    }
+
+    pub fn resolved_with_identity_owner(
+        identity: CallableIdentityOwner,
+        args: Vec<Value>,
+        requested_outputs: usize,
+        fallback_policy: CallableFallbackPolicy,
+        call_kind: CallableCallKind,
+    ) -> Self {
         Self::resolved_inner(
             identity,
             None,
@@ -594,7 +658,9 @@ impl CallableDescriptor {
                 Self::feval_forward(Value::String(text), args, requested_outputs)
             }
             Value::CharArray(ca) if ca.rows == 1 => {
-                let text: String = ca.data().iter().collect();
+                let Ok(Some(text)) = ca.try_row_string() else {
+                    return Self::feval_forward(Value::CharArray(ca), args, requested_outputs);
+                };
                 if Self::is_at_prefixed_text(&text) {
                     return Self::feval_forward(Value::CharArray(ca), args, requested_outputs);
                 }
@@ -671,7 +737,7 @@ impl CallableDescriptor {
         let (identity, fallback_policy) = Self::resolve_named_target(&name, function_resolver);
         Self {
             target: CallableTarget::CapturedResolved {
-                identity,
+                identity: identity.into(),
                 fallback_policy,
                 closure: RetainedClosureValue::new(closure),
             },
@@ -725,7 +791,8 @@ fn undefined_identity_error(
         (None, None) => String::new(),
     };
     let message = format!(
-        "Undefined function in {}: {identity:?}{location}",
+        "{} in {}{location}",
+        crate::call::identity::undefined_callable_message(identity),
         metadata.call_kind.label()
     );
     match (metadata.source_ref, metadata.source_invocation) {
@@ -744,32 +811,27 @@ fn undefined_identity_error(
 async fn call_builtin_with_requested_outputs(
     runtime: Option<&crate::context::RuntimeContext>,
     name: &str,
-    args: &[Value],
+    args: crate::call::BuiltinArguments,
     requested_outputs: usize,
     callsite: Option<crate::callsite::CallsiteInfo>,
 ) -> Result<crate::execution::RootedValueSequence, RuntimeError> {
-    match runtime {
-        Some(runtime) => {
-            runtime
-                .scope(crate::callsite::with_callsite(
-                    callsite,
-                    crate::call_builtin_sequence_async_with_outputs_in_context(
-                        runtime,
-                        name,
-                        args,
-                        requested_outputs,
-                    ),
-                ))
-                .await?
-        }
-        None => {
-            crate::callsite::with_callsite(
-                callsite,
-                crate::call_builtin_sequence_async_with_outputs(name, args, requested_outputs),
-            )
-            .await?
-        }
+    crate::context::check_active_host()?;
+    let invoke = crate::callsite::with_callsite(
+        callsite,
+        crate::dispatcher::try_call_retained_builtin_sequence_with_outputs(
+            name,
+            args,
+            requested_outputs,
+            runtime,
+        ),
+    );
+    let result = match runtime {
+        Some(runtime) => runtime.scope(invoke).await??,
+        None => invoke.await??,
     }
+    .ok_or_else(|| crate::dispatcher::undefined_builtin_error(name));
+    crate::context::check_active_host()?;
+    result
 }
 
 async fn forward_named_fallback(
@@ -859,6 +921,36 @@ pub fn execute_callable_descriptor_in_context<'a>(
 ) -> impl std::future::Future<Output = Result<crate::execution::RootedValueSequence, RuntimeError>> + 'a
 {
     runtime.scope(execution::execute(Some(runtime), descriptor))
+}
+
+/// Execute the same selected target with its canonical retained argument owner.
+pub fn execute_retained_callable_descriptor(
+    runtime: Option<&crate::context::RuntimeContext>,
+    descriptor: CallableDescriptor<crate::call::BuiltinArguments>,
+) -> impl std::future::Future<Output = Result<crate::execution::RootedValueSequence, RuntimeError>> + '_
+{
+    let work = execution::execute(runtime, descriptor);
+    async move {
+        match runtime {
+            Some(runtime) => runtime.scope(work).await,
+            None => work.await,
+        }
+    }
+}
+/// Optional selection differs only in resolver decline, never in argument ownership.
+pub fn try_execute_retained_callable_descriptor(
+    runtime: Option<&crate::context::RuntimeContext>,
+    descriptor: CallableDescriptor<crate::call::BuiltinArguments>,
+) -> impl std::future::Future<
+    Output = Result<Option<crate::execution::RootedValueSequence>, RuntimeError>,
+> + '_ {
+    let work = execution::try_execute(runtime, descriptor);
+    async move {
+        match runtime {
+            Some(runtime) => runtime.scope(work).await,
+            None => work.await,
+        }
+    }
 }
 
 #[cfg(test)]

@@ -11,9 +11,8 @@ pub(super) fn into_tensor(value: Value) -> BuiltinResult<Tensor> {
     match value {
         Value::CharArray(characters) => {
             let data = characters
-                .data()
-                .iter()
-                .map(|&character| character as u32 as f64)
+                .iter_column_major()
+                .map(|character| f64::from(character.raw()))
                 .collect();
             Tensor::new(data, vec![characters.rows, characters.cols])
                 .map_err(|error| errors::with_detail(&HYPOT_ERROR_INTERNAL, error))
@@ -63,7 +62,7 @@ pub(in super::super) fn scalar(value: &Value) -> Option<f64> {
         Value::CharArray(characters) if characters.rows * characters.cols == 1 => characters
             .data()
             .first()
-            .map(|&character| character as u32 as f64)
+            .map(|&character| f64::from(character.raw()))
             .or(Some(0.0)),
         Value::Complex(real, imaginary) => Some(kernel::complex_magnitude(*real, *imaginary)),
         _ => None,

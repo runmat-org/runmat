@@ -94,7 +94,7 @@ async fn validate_endswith_options(
         ));
     }
     if rest.len() == 2 {
-        let option_name = super::text_utils::value_to_owned_string(&rest[0]);
+        let option_name = super::text_utils::value_to_owned_string(&rest[0], BUILTIN_NAME)?;
         if !option_name.is_some_and(|name| name.eq_ignore_ascii_case("IgnoreCase")) {
             return Err(endswith_error_with_message(
                 "endsWith: unknown option; supported option is 'IgnoreCase'",
@@ -389,7 +389,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn endswith_multiple_patterns_are_alternatives_for_scalar_subject() {
-        let patterns = CharArray::new(vec!['n', 'x', 'r'], 3, 1).unwrap();
+        let patterns = CharArray::from_unicode_scalars(vec!['n', 'x', 'r'], 3, 1).unwrap();
         let result = run_endswith(
             Value::String("saturn".into()),
             Value::CharArray(patterns),

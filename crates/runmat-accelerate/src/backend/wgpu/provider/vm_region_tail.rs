@@ -4,19 +4,37 @@
 //! reattributes a child's measurements.
 
 use super::*;
-use futures::channel::oneshot;
 use runmat_accelerate_api::observation::with_provider_observation;
 use runmat_execution::profiling::with_command_profiling;
 
 impl WgpuProvider {
-    pub(super) async fn observe_vm_region_queue_tail_exec(
+    pub(super) fn region_tail_control_host_bytes(&self) -> Option<u64> {
+        let future = u64::try_from(std::mem::size_of_val(
+            &self.observe_region_queue_tail_exec(self.runtime_device_id, None),
+        ))
+        .ok()?;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            future
+                .checked_add(super::device_control::FundedCompletion::host_bytes()?)?
+                .checked_add(super::observation_progress::reservation_host_upper_bytes()?)
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            future.checked_add(super::core::map_completion_host_upper_bytes()?)
+        }
+    }
+    pub(super) async fn observe_region_queue_tail_exec(
         &self,
         device_id: u32,
+        completion_claim: Option<
+            std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>,
+        >,
     ) -> runmat_accelerate_api::ProviderExecutionResult<()> {
         use runmat_accelerate_api::ProviderExecutionError;
         if device_id != self.runtime_device_id {
             return Err(ProviderExecutionError::from(anyhow!(
-                "VM queue-tail owner differs from the installed provider"
+                "source region queue-tail owner differs from the installed provider"
             )));
         }
         #[cfg(target_arch = "wasm32")]
@@ -34,7 +52,7 @@ impl WgpuProvider {
                     self.with_emission(|emission, pending| -> Result<_> {
                         let buffer = runmat_accelerate_api::WgpuBufferOwner::new(
                             emission.device().create_buffer(&wgpu::BufferDescriptor {
-                                label: Some("runmat-vm-region-completion-fence"),
+                                label: Some("runmat-source-region-completion-fence"),
                                 size: crate::backend::wgpu::dispatch::observation::FENCE_REQUESTED_BYTES,
                                 usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                                 mapped_at_creation: false,
@@ -43,7 +61,7 @@ impl WgpuProvider {
                         let mut encoder = pending.profiled_encoder(
                             emission,
                             &wgpu::CommandEncoderDescriptor {
-                                label: Some("runmat-vm-region-completion-tail"),
+                                label: Some("runmat-source-region-completion-tail"),
                             },
                         );
                         encoder.clear_buffer(&buffer, 0, None);
@@ -54,40 +72,39 @@ impl WgpuProvider {
             })
             .map_err(ProviderExecutionError::from)?
             .map_err(ProviderExecutionError::from)?;
-            let (send, receive) = oneshot::channel();
-            let callback_buffer = buffer.clone();
-            buffer
-                .slice(..)
-                .map_async(wgpu::MapMode::Read, move |status| {
-                    // The callback owns both the map buffer and permit until the
-                    // driver reports terminal map status. Dropping the awaiting
-                    // future cannot unmap early or recycle the capacity.
-                    if status.is_err() {
-                        permit.poison_budget();
-                    }
-                    // Successful callbacks hand the permit to the awaiting
-                    // owner, retaining the charge through gated unmap. On
-                    // cancellation the failed send retires both after this
-                    // terminal callback, never at future drop.
-                    let _ = send.send((status.is_ok(), callback_buffer, permit));
-                });
-            let (mapped, retired_buffer, _permit) = receive
-                .await
-                .map_err(|_| ProviderExecutionError::from(anyhow!("WGPU tail callback dropped")))?;
-            self.access
-                .with_cleanup(|cleanup| cleanup.unmap_buffer(&retired_buffer))
-                .map_err(|error| ProviderExecutionError::from_source(error).after_effect())?;
-            if !mapped {
-                return Err(ProviderExecutionError::from(anyhow!(
-                    "WGPU tail fence map failed"
-                )));
+            let stage = super::allocation_state::AllocationState::own_numeric_download_stage(
+                &self.allocations,
+                Some(buffer),
+                crate::backend::wgpu::dispatch::observation::FENCE_REQUESTED_BYTES,
+                1,
+                completion_claim.clone(),
+                None,
+                Some(permit),
+            )
+            .map_err(|error| ProviderExecutionError::from(error).after_effect())?;
+            let decode = |_: &[u8]| Ok(());
+            match completion_claim {
+                Some(claim) => {
+                    self.map_readback_with_admitted(
+                        stage,
+                        "source region queue tail",
+                        decode,
+                        claim,
+                    )
+                    .await
+                }
+                None => {
+                    self.map_readback_with(stage, "source region queue tail", decode)
+                        .await
+                }
             }
+            .map_err(|error| ProviderExecutionError::from(error).after_effect())?;
             return Ok(());
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
             // Reserve progress before the tail submission. Capacity failure only
-            // withholds this optional observation; source bytecode is never replayed.
+            // withholds this optional observation; source operations is never replayed.
             let reservation = {
                 use runmat_accelerate_api::observation::WgpuObservationProgress;
                 self.observation_progress
@@ -96,7 +113,7 @@ impl WgpuProvider {
                         ProviderExecutionError::from(anyhow!("WGPU progress is absent"))
                     })?
                     .reserve()
-                    .map_err(|error| ProviderExecutionError::from(anyhow!("{error:?}")))?
+                    .map_err(ProviderExecutionError::from_source)?
             };
             let submission = with_command_profiling(None, || {
                 with_provider_observation(None, || {
@@ -104,7 +121,7 @@ impl WgpuProvider {
                         let encoder = pending.profiled_encoder(
                             emission,
                             &wgpu::CommandEncoderDescriptor {
-                                label: Some("runmat-vm-region-completion-tail"),
+                                label: Some("runmat-source-region-completion-tail"),
                             },
                         );
                         pending.submit(emission, encoder)
@@ -114,19 +131,21 @@ impl WgpuProvider {
             .map_err(ProviderExecutionError::from)?
             .map_err(ProviderExecutionError::from)?;
 
-            let (send, receive) = oneshot::channel();
+            let completion = super::device_control::FundedCompletion::new(completion_claim)
+                .map_err(ProviderExecutionError::from)?;
+            let callback = completion.clone();
             reservation
                 .submit(
                     submission,
                     Box::new(move |result| {
-                        let _ = send.send(result);
+                        callback.complete(result);
                     }),
                 )
-                .map_err(|error| ProviderExecutionError::from(anyhow!("{error:?}")))?;
-            receive
+                .map_err(ProviderExecutionError::from_source)?;
+            completion
+                .wait()
                 .await
-                .map_err(|_| ProviderExecutionError::from(anyhow!("WGPU tail progress dropped")))?
-                .map_err(|error| ProviderExecutionError::from(anyhow!("{error:?}")))?;
+                .map_err(ProviderExecutionError::from_source)?;
             Ok(())
         }
     }

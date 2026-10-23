@@ -95,7 +95,7 @@ impl UniformCollector {
                     ));
                 }
 
-                let mut row_major = vec!['\0'; expected];
+                let mut row_major = vec![runmat_value::Utf16CodeUnit::from_raw(0); expected];
                 for col in 0..cols {
                     for row in 0..rows {
                         let col_major_idx = row + col * rows;
@@ -104,7 +104,7 @@ impl UniformCollector {
                     }
                 }
 
-                let array = CharArray::new(row_major, rows, cols)
+                let array = CharArray::from_code_units(row_major, rows, cols)
                     .map_err(|e| arrayfun_internal(format!("arrayfun: {e}")))?;
                 Ok(Value::CharArray(array))
             }

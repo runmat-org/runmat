@@ -2,12 +2,19 @@ use super::*;
 use runmat_builtins::ImreadSourceRoute;
 
 pub(super) fn string_arg(label: &str, value: &Value) -> BuiltinResult<String> {
-    crate::builtins::image::checked_text::scalar_text(value).ok_or_else(|| {
-        imread_error_with_detail(
-            &IMREAD_ERROR_INVALID_ARGUMENT,
-            format!("{label} must be a string scalar or character vector"),
-        )
-    })
+    crate::builtins::image::checked_text::scalar_text(value)
+        .map_err(|source| {
+            let mut error =
+                imread_error_with_detail(&IMREAD_ERROR_INVALID_ARGUMENT, source.to_string());
+            error.source = Some(Box::new(source));
+            error
+        })?
+        .ok_or_else(|| {
+            imread_error_with_detail(
+                &IMREAD_ERROR_INVALID_ARGUMENT,
+                format!("{label} must be a string scalar or character vector"),
+            )
+        })
 }
 
 pub(super) fn parse_format_hint(value: &str) -> BuiltinResult<ImageFormat> {

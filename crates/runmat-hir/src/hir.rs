@@ -292,6 +292,27 @@ impl HirExpr {
         self.span
     }
 
+    /// An argument already marked by HIR's comma-separated-list policy.
+    /// Merely returning several values does not make an ordinary expression
+    /// an expansion; its actual argument sequence context must request it.
+    pub fn expands_call_argument_sequence(&self) -> bool {
+        match &self.kind {
+            HirExprKind::Index(_, indexing) => {
+                indexing.kind == IndexKind::Brace
+                    && indexing.result_context == IndexResultContext::FunctionArgumentExpansion
+            }
+            HirExprKind::Member { sequence_use, .. }
+            | HirExprKind::MemberDynamic { sequence_use, .. } => {
+                *sequence_use == runmat_types::SequenceUse::ExpandAll
+            }
+            HirExprKind::SubscriptChain(chain) => {
+                chain.sequence_use == runmat_types::SequenceUse::ExpandAll
+                    && chain.terminal_expands_sequence()
+            }
+            _ => false,
+        }
+    }
+
     /// Whether an unsuppressed expression has a value for statement echo.
     /// Builtin output policy belongs to the semantic call, not a CLI renderer.
     pub fn emits_statement_output(&self) -> bool {

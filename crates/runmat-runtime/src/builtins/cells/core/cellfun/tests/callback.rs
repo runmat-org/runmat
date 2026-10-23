@@ -24,9 +24,13 @@ fn bound_callback_uses_semantic_identity() {
                 panic!("unexpected callback arguments: {arguments:?}");
             };
             let result = seed + value;
-            Box::pin(async move {
-                crate::sequence::single_value_sequence(Value::Num(result)).and_then(rooted_sequence)
-            })
+            crate::execution::admit_executable_sequence_with(
+                &_runtime.clone(),
+                move || async move {
+                    crate::sequence::single_value_sequence(Value::Num(result))
+                        .and_then(rooted_sequence)
+                },
+            )
         },
     ))
     .expect("call-port scope");

@@ -19,8 +19,6 @@ use crate::builtins::strings::common::{
     contains_numeric_or_resident_text_input, is_missing_string, transform_scalar_borrowed,
     transform_string_array_borrowed,
 };
-#[cfg(test)]
-use crate::builtins::strings::type_resolvers::text_preserve_type;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::strtrim")]
@@ -142,25 +140,32 @@ fn strtrim_char_array(array: CharArray) -> BuiltinResult<Value> {
     }
     let (data, _, rows, cols) = array.into_parts();
 
-    let mut trimmed_rows: Vec<Vec<char>> = Vec::with_capacity(rows);
+    let mut trimmed_rows: Vec<Vec<runmat_value::Utf16CodeUnit>> = Vec::with_capacity(rows);
     let mut target_cols: usize = 0;
     for row in 0..rows {
-        let text = char_row_to_string_slice(&data, cols, row);
+        let text = char_row_to_string_slice(&data, cols, row).map_err(|e| {
+            strtrim_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRTRIM_ERROR_INTERNAL)
+        })?;
         let trimmed = trim_whitespace(&text);
-        let chars: Vec<char> = trimmed.chars().collect();
-        target_cols = target_cols.max(chars.len());
-        trimmed_rows.push(chars);
+        let units = trimmed
+            .encode_utf16()
+            .map(runmat_value::Utf16CodeUnit::from_raw)
+            .collect();
+        target_cols = target_cols.max(trimmed.encode_utf16().count());
+        trimmed_rows.push(units);
     }
 
-    let mut new_data: Vec<char> = Vec::with_capacity(rows * target_cols);
-    for mut chars in trimmed_rows {
-        if chars.len() < target_cols {
-            chars.resize(target_cols, ' ');
-        }
-        new_data.extend(chars);
+    let mut new_data = Vec::with_capacity(rows * target_cols);
+    for mut units in trimmed_rows {
+        let padding = target_cols - units.len();
+        units.extend(std::iter::repeat_n(
+            runmat_value::Utf16CodeUnit::from_raw(b' ' as u16),
+            padding,
+        ));
+        new_data.extend(units);
     }
 
-    CharArray::new(new_data, rows, target_cols)
+    CharArray::from_code_units(new_data, rows, target_cols)
         .map(Value::CharArray)
         .map_err(|e| {
             strtrim_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRTRIM_ERROR_INTERNAL)
@@ -211,11 +216,13 @@ async fn strtrim_cell_element(
             if ca.rows == 0 {
                 return Ok(Value::CharArray(ca));
             }
-            let source = char_row_to_string_slice(ca.data(), ca.cols, 0);
+            let source = char_row_to_string_slice(ca.data(), ca.cols, 0).map_err(|e| {
+                strtrim_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRTRIM_ERROR_INTERNAL)
+            })?;
             let trimmed = trim_whitespace(&source);
             let chars: Vec<char> = trimmed.chars().collect();
-            let cols = chars.len();
-            CharArray::new(chars, ca.rows, cols)
+            let cols = trimmed.encode_utf16().count();
+            CharArray::from_unicode_scalars(chars, ca.rows, cols)
                 .map(Value::CharArray)
                 .map_err(|e| {
                     strtrim_error_with_message(
@@ -243,7 +250,6 @@ fn trim_whitespace_with_mode(text: &str, strict: bool) -> &str {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{ResolveContext, Type};
 
     fn run_strtrim(value: Value) -> BuiltinResult<Value> {
         futures::executor::block_on(strtrim_builtin(None, value))
@@ -290,13 +296,16 @@ pub(crate) mod tests {
     #[test]
     fn strtrim_char_array_multiple_rows() {
         let data: Vec<char> = "  cat  ".chars().chain(" dog   ".chars()).collect();
-        let array = CharArray::new(data, 2, 7).unwrap();
+        let array = CharArray::from_unicode_scalars(data, 2, 7).unwrap();
         let result = run_strtrim(Value::CharArray(array)).expect("strtrim char array");
         match result {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 2);
                 assert_eq!(ca.cols, 3);
-                assert_eq!(ca.data(), vec!['c', 'a', 't', 'd', 'o', 'g']);
+                assert_eq!(
+                    runmat_value::decode_utf16_code_units(ca.data()).unwrap(),
+                    "catdog"
+                );
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -305,7 +314,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strtrim_char_array_all_whitespace_yields_zero_width() {
-        let array = CharArray::new("   ".chars().collect(), 1, 3).unwrap();
+        let array = CharArray::from_unicode_scalars("   ".chars().collect(), 1, 3).unwrap();
         let result = run_strtrim(Value::CharArray(array)).expect("strtrim char whitespace");
         match result {
             Value::CharArray(ca) => {
@@ -429,7 +438,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strtrim_char_array_zero_rows_stable() {
-        let array = CharArray::new(Vec::new(), 0, 0).unwrap();
+        let array = CharArray::from_code_units(Vec::new(), 0, 0).unwrap();
         let result = run_strtrim(Value::CharArray(array.clone())).expect("strtrim 0x0 char");
         assert_eq!(result, Value::CharArray(array));
     }
@@ -463,13 +472,5 @@ pub(crate) mod tests {
     fn strtrim_errors_on_invalid_input() {
         let err = run_strtrim(Value::Num(1.0)).unwrap_err();
         assert!(err.to_string().contains("strtrim"));
-    }
-
-    #[test]
-    fn strtrim_type_preserves_text() {
-        assert_eq!(
-            text_preserve_type(&[Type::String], &ResolveContext::new(Vec::new())),
-            Type::String
-        );
     }
 }

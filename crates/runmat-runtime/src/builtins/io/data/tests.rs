@@ -147,7 +147,7 @@ fn attribute_json_preserves_native_integer_text() {
         runmat_value::IntValue::I64(i64::MIN),
         runmat_value::IntValue::U64(u64::MAX),
     ] {
-        let json = value_to_json(&Value::Int(value.clone()));
+        let json = value_to_json(&Value::Int(value.clone())).unwrap();
         assert_eq!(json.to_string(), value.decimal_string());
     }
 }
@@ -155,7 +155,7 @@ fn attribute_json_preserves_native_integer_text() {
 #[test]
 fn attribute_json_roundtrips_wide_integer_values_without_f64() {
     for value in [IntValue::I64(i64::MIN), IntValue::U64(u64::MAX)] {
-        let json = value_to_json(&Value::Int(value.clone()));
+        let json = value_to_json(&Value::Int(value.clone())).unwrap();
         assert_eq!(json_to_value(&json), Value::Int(value));
     }
 }

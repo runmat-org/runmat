@@ -92,8 +92,9 @@ fn scalar_or_empty_uses_every_dimension() {
         let count = shape.iter().product();
         let value = Value::Tensor(Tensor::new(vec![1.0; count], shape.clone()).unwrap());
         assert_eq!(value_is_scalar_or_empty(&value), expected, "{shape:?}");
-        let chars =
-            Value::CharArray(CharArray::new_with_shape(vec!['x'; count], shape.clone()).unwrap());
+        let chars = Value::CharArray(
+            CharArray::from_unicode_scalars_with_shape(vec!['x'; count], shape.clone()).unwrap(),
+        );
         assert_eq!(value_is_scalar_or_empty(&chars), expected, "char {shape:?}");
         assert_eq!(value_is_empty(&chars), count == 0, "char {shape:?}");
     }

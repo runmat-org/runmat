@@ -1,3 +1,9 @@
+mod stored_component;
+pub(super) use stored_component::map as map_stored_datetime_component;
+pub(in crate::builtins::datetime) use stored_component::SerialView as BorrowedDatetimeSerial;
+pub(super) use stored_component::{map_legacy_component, ComponentKind};
+pub(in crate::builtins::datetime) use stored_component::{PreparedControl, Work as CalendarWork};
+
 use super::capabilities::{
     DATETIME_CLASS, DATETIME_GPU_INPUT_EXTENSION, DATETIME_LOGICAL_INPUT_EXTENSION,
 };
@@ -40,7 +46,7 @@ pub(super) fn component_tensor_from_datetime(
     if out.len() == 1 {
         Ok(Value::Num(out[0]))
     } else {
-        let shape = tensor::default_shape_for(serials.shape(), values.len());
+        let shape = serials.shape().to_vec();
         let tensor =
             Tensor::new(out, shape).map_err(|err| datetime_error(format!("{label}: {err}")))?;
         Ok(Value::Tensor(tensor))
@@ -72,11 +78,13 @@ pub(super) fn is_typed_legacy_numeric(value: &Value) -> bool {
 }
 
 pub(super) async fn prepare_legacy_component_input(
+    work: &super::allocation::UnboundedCalendarWork<'_>,
     builtin: &'static str,
     value: Value,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
     typed_extension: &'static BuiltinExtensionDescriptor,
 ) -> BuiltinResult<(Value, Option<String>)> {
+    work.check()?;
     if rest.len() > 1 {
         return Err(datetime_error(format!(
             "{builtin}: expected at most one component type or legacy date format"
@@ -108,7 +116,8 @@ pub(super) async fn prepare_legacy_component_input(
 
     let value = gather_if_needed_async(&value)
         .await
-        .map_err(|err| datetime_error(format!("{builtin}: {}", err.message())))?;
+        .map_err(|err| crate::builtins::common::map_control_flow_with_builtin(err, builtin))?;
+    work.check()?;
     let option = rest
         .first()
         .map(|value| scalar_text(value, &format!("{builtin} component type or date format")))
@@ -117,6 +126,7 @@ pub(super) async fn prepare_legacy_component_input(
 }
 
 pub(super) fn numeric_component_from_modern_or_legacy(
+    runtime: Option<&crate::context::RuntimeContext>,
     builtin: &'static str,
     value: Value,
     legacy_format: Option<&str>,
@@ -132,7 +142,8 @@ pub(super) fn numeric_component_from_modern_or_legacy(
     }
     let serials = match value {
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
-            let (serials, shape) = parse_legacy_component_text(value, legacy_format, builtin)?;
+            let (serials, shape) =
+                parse_legacy_component_text(runtime, value, legacy_format, builtin)?;
             Tensor::new(serials, shape)
                 .map_err(|err| datetime_error(format!("{builtin}: {err}")))?
         }
@@ -196,13 +207,14 @@ pub(super) fn tensor_or_scalar(data: Vec<f64>, shape: Vec<usize>) -> BuiltinResu
 }
 
 pub(super) fn numeric_or_datetime_serial_tensor(
+    runtime: Option<&crate::context::RuntimeContext>,
     value: Value,
     context: &str,
 ) -> BuiltinResult<Tensor> {
     match &value {
         Value::Object(obj) if obj.is_class(DATETIME_CLASS) => serial_tensor_for_object(obj),
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
-            let (serials, shape, _) = parse_text_input(&value, None)?;
+            let (serials, shape, _) = parse_text_input_with_runtime(&value, None, runtime)?;
             Tensor::new(serials, shape).map_err(|err| datetime_error(format!("{context}: {err}")))
         }
         _ => serial_tensor_from_value(value, context),
@@ -234,15 +246,22 @@ pub(super) fn datevec_matrix_from_serial_tensor(serials: &Tensor) -> BuiltinResu
     Tensor::new(data, vec![rows, 6]).map_err(|err| datetime_error(format!("datevec: {err}")))
 }
 
-pub(super) fn datetime_from_date_only(
-    naive: NaiveDateTime,
-    format: impl Into<String>,
-) -> BuiltinResult<Value> {
-    datetime_object_from_serials(None, vec![datenum_from_naive(naive)], vec![1, 1], format)
-}
-
-pub(super) fn current_naive_local() -> NaiveDateTime {
-    Local::now().naive_local()
+pub(super) fn current_naive_local(
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<NaiveDateTime> {
+    let runtime = runtime
+        .ok_or_else(|| datetime_error("current calendar time requires a runtime context"))?;
+    let timing = runtime.service_ports().timing()?;
+    timing
+        .local_datetime_at_instant(
+            crate::context::RuntimeCalendarInstant::from_epoch_duration(
+                timing.wall_time_since_epoch(),
+            )
+            .ok_or_else(|| datetime_error("current clock is outside the signed calendar range"))?,
+        )
+        .ok_or_else(|| {
+            datetime_error("current calendar time is unavailable under the runtime clock policy")
+        })
 }
 
 pub(super) fn days_in_month(year: i32, month: u32) -> BuiltinResult<u32> {

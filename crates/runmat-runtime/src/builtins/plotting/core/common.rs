@@ -163,8 +163,26 @@ pub fn value_as_f64(value: &Value) -> Option<f64> {
         Value::Tensor(tensor) => tensor::tensor_values_f64(tensor).first().copied(),
         Value::CharArray(chars) => {
             // Treat character arrays as numeric strings when possible.
-            let text: String = chars.data().iter().collect();
-            text.trim().parse::<f64>().ok()
+            let mut units = chars.data().iter().map(|u| u.raw());
+            while units
+                .clone()
+                .next()
+                .is_some_and(|u| char::from_u32(u32::from(u)).is_some_and(char::is_whitespace))
+            {
+                units.next();
+            }
+            while units
+                .clone()
+                .next_back()
+                .is_some_and(|u| char::from_u32(u32::from(u)).is_some_and(char::is_whitespace))
+            {
+                units.next_back();
+            }
+            if units.clone().any(|u| u > 127) {
+                return None;
+            }
+            let text: String = units.map(|u| char::from(u as u8)).collect();
+            text.parse::<f64>().ok()
         }
         Value::String(s) => s.trim().parse::<f64>().ok(),
         _ => None,

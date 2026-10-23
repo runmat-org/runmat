@@ -158,7 +158,14 @@ async fn evaluate_in_context(
         return Err(cheb2ord_error(&CHEB2ORD_ERROR_TOO_MANY_OUTPUTS));
     }
     let analog = if let Some(option) = rest.first() {
-        match option_text(option).as_deref() {
+        match option_text(option)
+            .map_err(|source| {
+                let mut error = cheb2ord_error(&CHEB2ORD_ERROR_INVALID_OPTION);
+                error.source = Some(Box::new(source));
+                error
+            })?
+            .as_deref()
+        {
             Some("s") => true,
             Some(_) => return Err(cheb2ord_error(&CHEB2ORD_ERROR_INVALID_OPTION)),
             None => return Err(cheb2ord_error(&CHEB2ORD_ERROR_INVALID_OPTION)),
@@ -469,6 +476,7 @@ mod tests {
     ) -> BuiltinResult<Value> {
         let _guard = outputs
             .map(|count| crate::output_count::push_output_count(Some(count)))
+            .transpose()
             .expect("output-count scope");
         block_on(evaluate(wp, ws, rp, rs, rest))
     }

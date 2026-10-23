@@ -366,7 +366,14 @@ fn string_scalar(label: &str, value: &Value) -> BuiltinResult<String> {
         Value::StringArray(values) if values.data().len() == 1 => {
             Ok(values.data()[0].as_str().to_owned())
         }
-        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data().iter().collect()),
+        Value::CharArray(chars) if chars.rows == 1 => {
+            runmat_value::decode_utf16_code_units(chars.data()).map_err(|error| {
+                lsq_error_with_detail(
+                    &LSQNONLIN_ERROR_INVALID_ARGUMENT,
+                    format!("{label} contains {error}"),
+                )
+            })
+        }
         other => Err(lsq_error_with_detail(
             &LSQNONLIN_ERROR_INVALID_ARGUMENT,
             format!("{label} must be a character vector or string scalar, got {other:?}"),

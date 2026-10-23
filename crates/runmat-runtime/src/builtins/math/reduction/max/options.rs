@@ -129,7 +129,7 @@ async fn parse_reduction_options(
     let mut idx = 0usize;
     let mut selection_set = !matches!(args.selection, DimSelection::Auto);
     while idx < rest.len() {
-        if let Some(keyword) = keyword_of(&rest[idx]) {
+        if let Some(keyword) = keyword_of(&rest[idx])? {
             match MaxControl::from_public_option(&keyword) {
                 Some(MaxControl::Missing(mode)) => {
                     args.nan_mode = mode;
@@ -184,7 +184,7 @@ fn parse_elementwise_options(
     let mut comparison = ComparisonMethod::Auto;
     let mut idx = 0usize;
     while idx < rest.len() {
-        if let Some(keyword) = keyword_of(&rest[idx]) {
+        if let Some(keyword) = keyword_of(&rest[idx])? {
             match MaxControl::from_public_option(&keyword) {
                 Some(MaxControl::Missing(mode)) => {
                     nan_mode = mode;
@@ -218,7 +218,7 @@ fn parse_elementwise_options(
 }
 
 fn parse_comparison_method(value: &Value) -> BuiltinResult<ComparisonMethod> {
-    let Some(keyword) = keyword_of(value) else {
+    let Some(keyword) = keyword_of(value)? else {
         return Err(max_invalid_argument(
             "max: 'ComparisonMethod' expects a string value",
         ));

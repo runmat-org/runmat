@@ -21,7 +21,7 @@ pub(super) fn is_operator_overload_method(name: &runmat_types::MethodName) -> bo
 async fn try_operator_method_with_outputs(
     runtime: Option<&crate::context::RuntimeContext>,
     receiver: &Value,
-    method_args: Vec<Value>,
+    method_args: crate::call::BuiltinArguments,
     name: &str,
     requested_outputs: usize,
     caller_function_name: Option<&str>,
@@ -49,25 +49,13 @@ async fn try_operator_method_with_outputs(
         else {
             return Ok(None);
         };
-        let result = match runtime {
-            Some(runtime) => {
-                crate::object::protocol::invoke_resolved_object_method_in_context(
-                    runtime,
-                    &method,
-                    method_args,
-                    requested_outputs,
-                )
-                .await
-            }
-            None => {
-                crate::object::protocol::invoke_resolved_object_method(
-                    &method,
-                    method_args,
-                    requested_outputs,
-                )
-                .await
-            }
-        }?;
+        let result = crate::object::protocol::invoke_resolved_object_method_retained(
+            runtime,
+            &method,
+            method_args,
+            requested_outputs,
+        )
+        .await?;
         return Ok(Some(result));
     }
     if let Some(bound) = crate::class_registry::lookup_bound_method(&class_name, &method_name) {
@@ -184,7 +172,7 @@ async fn call_rhs_operator_method_ordered_in_scope(
     try_operator_method_with_outputs(
         runtime,
         &receiver,
-        vec![lhs, rhs],
+        crate::call::BuiltinArguments::from_borrowed(&[lhs, rhs], runtime)?,
         &name,
         requested_outputs,
         caller_function_name,
@@ -222,7 +210,13 @@ pub async fn try_call_object_operator_method(
     arg: Value,
 ) -> Result<OperatorMethodDispatch, RuntimeError> {
     let receiver = base.clone();
-    operator_method_dispatch(None, &receiver, vec![base, arg], method).await
+    operator_method_dispatch(
+        None,
+        &receiver,
+        crate::call::BuiltinArguments::from_borrowed(&[base, arg], None)?,
+        method,
+    )
+    .await
 }
 
 pub async fn try_call_object_operator_method_in_context(
@@ -236,7 +230,7 @@ pub async fn try_call_object_operator_method_in_context(
         .scope(operator_method_dispatch(
             Some(runtime),
             &receiver,
-            vec![base, arg],
+            crate::call::BuiltinArguments::from_borrowed(&[base, arg], Some(runtime))?,
             method,
         ))
         .await
@@ -271,7 +265,13 @@ pub async fn try_call_rhs_object_operator_method_ordered(
     method: &str,
 ) -> Result<OperatorMethodDispatch, RuntimeError> {
     let receiver = rhs.clone();
-    operator_method_dispatch(None, &receiver, vec![lhs, rhs], method).await
+    operator_method_dispatch(
+        None,
+        &receiver,
+        crate::call::BuiltinArguments::from_borrowed(&[lhs, rhs], None)?,
+        method,
+    )
+    .await
 }
 
 pub async fn try_call_rhs_object_operator_method_ordered_in_context(
@@ -285,7 +285,7 @@ pub async fn try_call_rhs_object_operator_method_ordered_in_context(
         .scope(operator_method_dispatch(
             Some(runtime),
             &receiver,
-            vec![lhs, rhs],
+            crate::call::BuiltinArguments::from_borrowed(&[lhs, rhs], Some(runtime))?,
             method,
         ))
         .await
@@ -294,7 +294,7 @@ pub async fn try_call_rhs_object_operator_method_ordered_in_context(
 async fn operator_method_dispatch(
     runtime: Option<&crate::context::RuntimeContext>,
     receiver: &Value,
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
     method: &str,
 ) -> Result<OperatorMethodDispatch, RuntimeError> {
     match try_operator_method_with_outputs(runtime, receiver, args, method, 1, None).await? {

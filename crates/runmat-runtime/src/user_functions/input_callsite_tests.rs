@@ -14,9 +14,9 @@ fn dynamic_probe_returns_the_same_argument_owner_and_keeps_selected_outcomes_ter
     ));
     let _entry = runtime.enter();
     runtime.set_dynamic_function_loader(Some(Rc::new(
-        |_, _, arguments, requested_outputs, phase, _| {
+        |runtime, _, arguments, requested_outputs, phase, _| {
             assert_eq!(requested_outputs, 0);
-            Box::pin(async move {
+            crate::execution::admit_dynamic_function_load_with(&runtime, move || async move {
                 match phase {
                     DynamicFunctionLoadPhase::BeforeSemantic => ControlFlow::Continue(arguments),
                     DynamicFunctionLoadPhase::AfterSemantic => ControlFlow::Break(
@@ -151,20 +151,25 @@ fn scoped_name_binding_does_not_redirect_same_numbered_numeric_call() {
     let _numeric =
         install_local_semantic_function_invoker(std::rc::Rc::new(|_runtime, function, _, _| {
             assert_eq!(function, 17);
-            Box::pin(async {
+            crate::user_functions::admit_user_function_with(_runtime.as_ref(), move || async {
                 crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(22.0))
             })
         }))
         .expect("call-port scope");
     let _bound = install_local_bound_function_invoker(std::rc::Rc::new(
-        move |_, binding, _, _, _lexical_environment| {
+        move |bound_runtime, binding, _, _, _lexical_environment| {
             assert_eq!(binding.function, 17);
             let lease = binding.authority.local_lease(17).expect("selected lease");
             assert!(lease.matches(&leased));
             assert!(!lease.matches(&republished));
-            Box::pin(async {
-                crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(33.0))
-            })
+            crate::execution::admit_executable_sequence_with(
+                &bound_runtime.clone(),
+                move || async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        33.0,
+                    ))
+                },
+            )
         },
     ))
     .expect("call-port scope");
@@ -211,20 +216,24 @@ fn only_caller_private_targets_preempt_before_semantic_loader() {
     let _entry = runtime.enter();
     let loader_calls = Rc::new(Cell::new(0));
     let observed = Rc::clone(&loader_calls);
-    runtime.set_dynamic_function_loader(Some(Rc::new(move |_, _, arguments, _, phase, _| {
-        if phase == DynamicFunctionLoadPhase::BeforeSemantic {
-            observed.set(observed.get() + 1);
-            Box::pin(async {
-                std::ops::ControlFlow::Break(
-                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
-                        44.0,
-                    )),
-                )
-            })
-        } else {
-            Box::pin(async move { std::ops::ControlFlow::Continue(arguments) })
-        }
-    })));
+    runtime.set_dynamic_function_loader(Some(Rc::new(
+        move |runtime, _, arguments, _, phase, _| {
+            if phase == DynamicFunctionLoadPhase::BeforeSemantic {
+                observed.set(observed.get() + 1);
+                crate::execution::admit_dynamic_function_load_with(&runtime, || async {
+                    std::ops::ControlFlow::Break(
+                        crate::user_functions::test_support::rooted_single_value_sequence(
+                            Value::Num(44.0),
+                        ),
+                    )
+                })
+            } else {
+                crate::execution::admit_dynamic_function_load_with(&runtime, move || async move {
+                    std::ops::ControlFlow::Continue(arguments)
+                })
+            }
+        },
+    )));
     let _resolver = install_semantic_function_resolver(Some(Arc::new(|name| {
         matches!(name, "private_current" | "private_leased" | "public_name").then_some(17)
     })))
@@ -248,21 +257,26 @@ fn only_caller_private_targets_preempt_before_semantic_loader() {
     })))
     .expect("call-port scope");
     let _numeric = install_local_semantic_function_invoker(Rc::new(|_runtime, _, _, _| {
-        Box::pin(async {
+        crate::user_functions::admit_user_function_with(_runtime.as_ref(), move || async {
             crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(33.0))
         })
     }))
     .expect("call-port scope");
     let _bound = install_local_bound_function_invoker(Rc::new(
-        move |_, binding, _, _, _lexical_environment| {
+        move |bound_runtime, binding, _, _, _lexical_environment| {
             assert!(binding
                 .authority
                 .local_lease(17)
                 .expect("lease")
                 .matches(&leased));
-            Box::pin(async {
-                crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(55.0))
-            })
+            crate::execution::admit_executable_sequence_with(
+                &bound_runtime.clone(),
+                move || async move {
+                    crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(
+                        55.0,
+                    ))
+                },
+            )
         },
     ))
     .expect("call-port scope");
@@ -294,10 +308,10 @@ fn registered_constructor_loads_only_an_unresolved_declared_source() {
     let _entry = runtime.enter();
     let phases = Rc::new(std::cell::RefCell::new(Vec::new()));
     let observed = Rc::clone(&phases);
-    runtime.set_dynamic_function_loader(Some(Rc::new(move |_, name, _, _, phase, _| {
+    runtime.set_dynamic_function_loader(Some(Rc::new(move |runtime, name, _, _, phase, _| {
         assert!(matches!(name.as_str(), "SourceCtor" | "pkg.SourceCtor"));
         observed.borrow_mut().push(phase.clone());
-        Box::pin(async {
+        crate::execution::admit_dynamic_function_load_with(&runtime, || async {
             std::ops::ControlFlow::Break(
                 crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(7.0)),
             )

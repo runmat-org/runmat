@@ -208,7 +208,7 @@ fn floor_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
 fn floor_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let mut data = Vec::with_capacity(ca.data().len());
     for ch in ca.to_column_major() {
-        data.push(apply_floor_scalar(ch as u32 as f64));
+        data.push(apply_floor_scalar(u32::from(ch.raw()) as f64));
     }
     let tensor = Tensor::new(data, ca.shape)
         .map_err(|e| builtin_error_with_detail(&FLOOR_ERROR_INTERNAL, e))?;
@@ -397,7 +397,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn floor_char_array_to_tensor() {
-        let chars = CharArray::new("AB".chars().collect(), 1, 2).unwrap();
+        let chars = CharArray::from_unicode_scalars("AB".chars().collect(), 1, 2).unwrap();
         let result = floor_builtin(Value::CharArray(chars), Vec::new()).expect("floor");
         match result {
             Value::Tensor(t) => {

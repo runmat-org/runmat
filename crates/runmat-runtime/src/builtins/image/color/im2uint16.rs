@@ -218,12 +218,19 @@ fn parse_indexed_mode(
     let Some(value) = rest.first() else {
         return Ok(ImageIndexMode::Intensity);
     };
-    crate::builtins::image::color::conversion_mode::decode(value).ok_or_else(|| {
-        im2uint16_error_with_detail(
-            &IM2UINT16_ERROR_INVALID_INPUT,
-            "second input must be the text \"indexed\"",
-        )
-    })
+    crate::builtins::image::color::conversion_mode::decode(value)
+        .map_err(|source| {
+            let mut error =
+                im2uint16_error_with_detail(&IM2UINT16_ERROR_INVALID_INPUT, source.to_string());
+            error.source = Some(Box::new(source));
+            error
+        })?
+        .ok_or_else(|| {
+            im2uint16_error_with_detail(
+                &IM2UINT16_ERROR_INVALID_INPUT,
+                "second input must be the text \"indexed\"",
+            )
+        })
 }
 
 fn im2uint16_tensor(tensor: Tensor, mode: ImageIndexMode) -> BuiltinResult<Tensor> {

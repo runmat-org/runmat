@@ -177,8 +177,9 @@ mod tests {
         );
         assert!(crate::data::parse_string(&multiple, "data.open path").is_err());
 
-        let paged =
-            Value::CharArray(CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap());
+        let paged = Value::CharArray(
+            CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap(),
+        );
         let error = crate::data::parse_string(&paged, "data.open path").unwrap_err();
         assert!(error.to_string().contains("expected character row vector"));
     }

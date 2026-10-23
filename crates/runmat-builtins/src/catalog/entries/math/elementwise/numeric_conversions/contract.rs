@@ -129,7 +129,9 @@ macro_rules! define_integer_conversion_contract {
                 portability: BuiltinPortability::NativeAndWasm,
                 accelerator: BuiltinAcceleratorPolicy::Optional,
                 residency: BuiltinResidencyPolicy::PreserveInputs,
-                fusion: BuiltinFusionPolicy::Candidate,
+                // Native provider casts are standalone operations, not an
+                // admitted scalar/structural fusion lowering.
+                fusion: BuiltinFusionPolicy::Boundary,
                 distributed: crate::BuiltinDistributedPolicy::MapUnary,
             },
             link: BuiltinLinkContract {

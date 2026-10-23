@@ -119,7 +119,8 @@ pub(super) fn admit_mask(
     let kind = object
         .properties()
         .get("Type")
-        .and_then(|value| scalar_text(value, "partition type").ok())
+        .map(|value| scalar_text(value, "partition type"))
+        .transpose()?
         .and_then(|name| PartitionKind::from_property_name(&name))
         .ok_or_else(|| invalid_argument("cvpartition: object partition type is invalid"))?;
     let selected_host =

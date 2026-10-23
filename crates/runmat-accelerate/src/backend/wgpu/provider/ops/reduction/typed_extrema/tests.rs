@@ -238,9 +238,9 @@ async fn actual_allocated_extrema_failures_are_terminal_and_keep_source() {
         observed_bytes.set(buffer.size());
         observed_owner.set(runmat_accelerate_api::WgpuBufferOwner::as_ptr(buffer) as usize);
         #[cfg(not(target_arch = "wasm32"))]
-        let weak = std::sync::Arc::downgrade(buffer);
+        let weak = runmat_accelerate_api::WgpuBufferOwner::downgrade(buffer);
         #[cfg(target_arch = "wasm32")]
-        let weak = std::rc::Rc::downgrade(buffer);
+        let weak = runmat_accelerate_api::WgpuBufferOwner::downgrade(buffer);
         *observed_weak.borrow_mut() = Some(weak);
         Err(anyhow::Error::new(std::io::Error::new(
             std::io::ErrorKind::BrokenPipe,

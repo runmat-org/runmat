@@ -373,7 +373,6 @@ mod tests {
                     model,
                     "Numerator".into(),
                     numerator,
-                    false,
                     None,
                     |_, _| {},
                 ))

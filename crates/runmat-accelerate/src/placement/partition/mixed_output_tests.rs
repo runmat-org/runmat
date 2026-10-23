@@ -16,8 +16,9 @@ fn candidate(identity: &str, location: CandidateExecutionLocation) -> PlacementG
     let provider = matches!(location, CandidateExecutionLocation::Provider { .. });
     let device_id = match location {
         CandidateExecutionLocation::Provider { device_id } => device_id,
-        CandidateExecutionLocation::VmRegion { device_id } => device_id,
-        CandidateExecutionLocation::Host => 0,
+        CandidateExecutionLocation::VmRegion { device_id }
+        | CandidateExecutionLocation::NativeRegion { device_id } => device_id,
+        CandidateExecutionLocation::Host | CandidateExecutionLocation::NativeSource => 0,
     };
     PlacementGraphCandidate {
         descriptor: ExecutionCandidateDescriptor {

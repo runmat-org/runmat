@@ -77,3 +77,179 @@ fn callable_unknown_invalid_and_discarded_output() {
         .diagnostics
         .is_empty());
 }
+
+#[test]
+fn lifecycle_operations_have_canonical_executable_contracts() {
+    for entry in [&CANCEL_CATALOG_ENTRY, &ON_CLEANUP_DELETE_CATALOG_ENTRY] {
+        assert_eq!(entry.bindings.len(), 1);
+        assert_eq!(entry.bindings[0].variant, "default");
+        assert_eq!(
+            entry.bindings[0].availability,
+            BuiltinBindingAvailability::Required
+        );
+        assert_eq!(
+            entry.link.execution_stack,
+            ExecutionStackRequirement::Process
+        );
+        assert_eq!(
+            entry.placement.portability,
+            BuiltinPortability::NativeAndWasm
+        );
+        assert_eq!(
+            entry.placement.preparation,
+            BuiltinOperandPreparation::RuntimeOwned
+        );
+        assert_eq!(
+            entry.placement.accelerator,
+            BuiltinAcceleratorPolicy::Forbidden
+        );
+        assert_eq!(entry.placement.fusion, BuiltinFusionPolicy::Boundary);
+        assert_eq!(entry.placement.residency, BuiltinResidencyPolicy::Host);
+        assert_eq!(
+            entry.placement.distributed,
+            BuiltinDistributedPolicy::Unsupported
+        );
+        assert_eq!(entry.contract.purity, BuiltinPurity::Impure);
+        assert!(entry.suppress_auto_output);
+        assert!(ENTRIES
+            .iter()
+            .any(|candidate| candidate.identity.name == entry.identity.name));
+        let inferred = crate::catalog::inference::infer_catalog_call(
+            entry,
+            &request(vec![ValueFact::unknown(DynamicReason::RuntimeValue)], 1),
+        );
+        assert!(inferred.diagnostics.is_empty());
+        assert_eq!(
+            inferred.outputs[0],
+            ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Real,
+            }))
+        );
+        assert!(inferred.effects.0.contains(&EffectKind::HostCallback));
+        assert!(inferred.effects.0.contains(&EffectKind::MayThrow));
+        for outputs in [0, 2] {
+            let result = crate::catalog::inference::infer_catalog_call(
+                entry,
+                &request(
+                    vec![ValueFact::unknown(DynamicReason::RuntimeValue)],
+                    outputs,
+                ),
+            );
+            if outputs == 0 {
+                assert!(result.outputs.is_empty());
+                assert!(result.diagnostics.is_empty());
+            } else {
+                assert!(!result.diagnostics.is_empty());
+            }
+        }
+        assert!(
+            !crate::catalog::inference::infer_catalog_call(entry, &request(vec![], 1))
+                .diagnostics
+                .is_empty()
+        );
+        let integer = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::UInt64,
+            domain: NumericDomain::Real,
+        }));
+        assert!(
+            !crate::catalog::inference::infer_catalog_call(entry, &request(vec![integer], 1))
+                .diagnostics
+                .is_empty()
+        );
+    }
+    assert_eq!(
+        CANCEL_DESCRIPTOR.completion_policy,
+        BuiltinCompletionPolicy::Public
+    );
+    assert_eq!(
+        ON_CLEANUP_DELETE_DESCRIPTOR.completion_policy,
+        BuiltinCompletionPolicy::HiddenInternal
+    );
+    assert_eq!(
+        CANCEL_CATALOG_ENTRY.contract.async_behavior,
+        BuiltinAsyncBehavior::NeverSuspends
+    );
+    assert!(!CANCEL_CATALOG_ENTRY.documentation.examples.is_empty());
+    assert!(CANCEL_CATALOG_ENTRY
+        .documentation
+        .example_exemption
+        .is_none());
+    assert!(ON_CLEANUP_DELETE_CATALOG_ENTRY
+        .documentation
+        .example_exemption
+        .is_some());
+    assert!(ON_CLEANUP_DELETE_CATALOG_ENTRY
+        .contract
+        .effect_set()
+        .0
+        .contains(&EffectKind::Unknown));
+    assert_eq!(
+        ON_CLEANUP_DELETE_CATALOG_ENTRY.contract.async_behavior,
+        BuiltinAsyncBehavior::MaySuspend
+    );
+}
+
+#[test]
+fn cancel_facts_accept_typed_execution_and_wrapped_task_identities() {
+    let output = ValueSequenceFact::dynamic();
+    for kind in [
+        ValueKindFact::Execution(ExecutionFact::Future {
+            output: output.clone(),
+            state: FutureStateFact::Unknown,
+        }),
+        ValueKindFact::Execution(ExecutionFact::Task {
+            output: output.clone(),
+            spawn_safety: SpawnSafetyFact::SpawnSafe,
+        }),
+        ValueKindFact::Execution(ExecutionFact::Job { output }),
+    ] {
+        let argument = ValueFact::scalar(kind);
+        assert!(crate::catalog::inference::infer_catalog_call(
+            &CANCEL_CATALOG_ENTRY,
+            &request(vec![argument.clone()], 1)
+        )
+        .diagnostics
+        .is_empty());
+        assert!(!crate::catalog::inference::infer_catalog_call(
+            &ON_CLEANUP_DELETE_CATALOG_ENTRY,
+            &request(vec![argument], 1)
+        )
+        .diagnostics
+        .is_empty());
+    }
+    for (class, handle, shape) in [
+        ("onCleanup", Some(true), ShapeFact::Scalar),
+        (
+            "parallel.FevalFuture",
+            Some(false),
+            ShapeFact::from(vec![Some(1), Some(3)]),
+        ),
+        ("parallel.FevalOnAllFuture", Some(false), ShapeFact::Scalar),
+    ] {
+        let argument = ValueFact::proven(
+            ValueKindFact::Object(ObjectFact {
+                class: None,
+                runtime_class: Some(StaticClassIdentity::new(class).owned()),
+                properties: Default::default(),
+                properties_complete: false,
+                handle_semantics: handle,
+            }),
+            shape,
+            StorageFact::Opaque,
+        );
+        assert!(crate::catalog::inference::infer_catalog_call(
+            &CANCEL_CATALOG_ENTRY,
+            &request(vec![argument], 1)
+        )
+        .diagnostics
+        .is_empty());
+    }
+    let pool = ValueFact::scalar(ValueKindFact::Execution(ExecutionFact::Pool));
+    assert!(!crate::catalog::inference::infer_catalog_call(
+        &CANCEL_CATALOG_ENTRY,
+        &request(vec![pool], 1)
+    )
+    .diagnostics
+    .is_empty());
+}

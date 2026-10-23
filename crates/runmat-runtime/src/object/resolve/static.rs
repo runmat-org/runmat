@@ -64,14 +64,11 @@ pub fn load_static_member(
         Ok(Value::Object(value.finish()))
     } else {
         let qualified = external_qualified_display_name(cls.display_name(), field);
-        if runmat_builtins::builtin_functions()
-            .iter()
-            .any(|b| b.name == qualified)
-        {
+        if let Some(builtin) = crate::dispatcher::observed_dispatch_builtin_name(&qualified) {
             Ok(Value::Closure(Closure::from_data(
                 runmat_value::ClosureData {
                     lexical_environment: None,
-                    function_name: qualified.into(),
+                    function_name: builtin.0.into(),
                     binding: None,
                     source_role: runmat_types::FunctionSourceRole::Method,
                     source_file: None,

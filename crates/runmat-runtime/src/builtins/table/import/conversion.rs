@@ -404,16 +404,16 @@ pub(in crate::builtins::table) fn import_char_column(strings: Vec<String>) -> Bu
     let rows = strings.len();
     let cols = strings
         .iter()
-        .map(|text| text.chars().count())
+        .map(|text| text.encode_utf16().count())
         .max()
         .unwrap_or(0);
-    let mut data = vec![' '; rows * cols];
+    let mut data = vec![runmat_value::Utf16CodeUnit::from_raw(b' ' as u16); rows * cols];
     for (row, text) in strings.iter().enumerate() {
-        for (col, ch) in text.chars().enumerate() {
-            data[row * cols + col] = ch;
+        for (col, unit) in text.encode_utf16().enumerate() {
+            data[row * cols + col] = runmat_value::Utf16CodeUnit::from_raw(unit);
         }
     }
-    CharArray::new(data, rows, cols)
+    CharArray::from_code_units(data, rows, cols)
         .map(Value::CharArray)
         .map_err(|err| invalid_variable(format!("readtable: {err}")))
 }
@@ -438,10 +438,12 @@ pub(in crate::builtins::table) fn import_categorical_column(
     options: &ReadTableOptions,
 ) -> BuiltinResult<Value> {
     let strings = import_text_values(values, options);
-    categorical_from_args(vec![Value::StringArray(
-        StringArray::new(strings.clone(), vec![strings.len(), 1])
-            .map_err(|err| invalid_variable(format!("readtable: {err}")))?,
-    )])
+    categorical_from_args(crate::call::FunctionArgumentView::from_slice(&[
+        Value::StringArray(
+            StringArray::new(strings.clone(), vec![strings.len(), 1])
+                .map_err(|err| invalid_variable(format!("readtable: {err}")))?,
+        ),
+    ]))
 }
 
 pub(in crate::builtins::table) fn import_datetime_column(

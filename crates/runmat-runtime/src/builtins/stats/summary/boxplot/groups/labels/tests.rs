@@ -142,7 +142,8 @@ fn cooperative_label_decode_cancels_within_nested_cell_before_completion() {
 
 #[test]
 fn character_and_categorical_labels_keep_sync_async_policy_and_errors() {
-    let chars = Value::CharArray(CharArray::new(vec!['A', '1', 'B', '2'], 2, 2).unwrap());
+    let chars =
+        Value::CharArray(CharArray::from_unicode_scalars(vec!['A', '1', 'B', '2'], 2, 2).unwrap());
     let expected = group_labels(&chars, 2).unwrap();
     let mut cooperation = super::super::super::cooperation::BoxplotCooperation::new(None);
     let actual =

@@ -2,12 +2,10 @@
 //! owns a bounded subset of the call grammar so its polling frame does not
 //! become part of the general instruction dispatch frame.
 
+use super::super::future::control;
 use super::super::*;
-use std::future::Future;
-use std::pin::Pin;
 
-type CallFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<Option<DispatchHandled>, RuntimeError>> + 'a>>;
+type CallFuture<'a> = control::ControlDispatchFuture<'a>;
 
 #[derive(Clone, Copy)]
 enum OutputPublication {
@@ -31,7 +29,7 @@ pub(in crate::interpreter::dispatch) struct CallDispatchContext<'a> {
     pub stack: &'a mut crate::interpreter::stack::InterpreterStack,
     pub vars: &'a mut crate::interpreter::vars::InterpreterVars,
     pub sequence_register: &'a mut SequenceState,
-    pub context: &'a mut crate::bytecode::program::ExecutionContext,
+    pub context: &'a crate::bytecode::program::ExecutionContext,
     pub try_stack: &'a mut Vec<crate::interpreter::state::ActiveTryHandler>,
     pub last_exception: &'a mut Option<runmat_value::MException>,
     pub imports: &'a Vec<(Vec<String>, bool)>,
@@ -95,15 +93,18 @@ fn suspend_user(ctx: CallDispatchContext<'_>) -> CallFuture<'_> {
 
 #[inline(never)]
 fn suspend_workspace(ctx: CallDispatchContext<'_>) -> CallFuture<'_> {
-    Box::pin(workspace::dispatch(ctx))
+    let context = ctx.context;
+    control::admit(&context.runtime, move || workspace::dispatch(ctx))
 }
 
 #[inline(never)]
 fn suspend_expanded(ctx: CallDispatchContext<'_>) -> CallFuture<'_> {
-    Box::pin(expanded::dispatch(ctx))
+    let context = ctx.context;
+    control::admit(&context.runtime, move || expanded::dispatch(ctx))
 }
 
 #[inline(never)]
 fn suspend_method(ctx: CallDispatchContext<'_>) -> CallFuture<'_> {
-    Box::pin(method::dispatch(ctx))
+    let context = ctx.context;
+    control::admit(&context.runtime, move || method::dispatch(ctx))
 }

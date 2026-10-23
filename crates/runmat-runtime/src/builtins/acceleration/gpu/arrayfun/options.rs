@@ -27,7 +27,7 @@ impl Invocation {
         let mut uniform_output_explicit = false;
         let mut error_handler = None;
 
-        while let Some(option) = trailing_option(inputs.view()) {
+        while let Some(option) = trailing_option(inputs.view())? {
             let value = inputs.pop().ok_or_else(|| {
                 arrayfun_flow("arrayfun: option name requires a corresponding value")
             })?;
@@ -75,14 +75,23 @@ enum OptionName {
     Unknown(String),
 }
 
-fn trailing_option(values: crate::call::FunctionArgumentView<'_>) -> Option<OptionName> {
-    let candidate = values.len().checked_sub(2)?;
-    let name = extract_string(values.get(candidate)?)?;
-    Some(match name.trim().to_ascii_lowercase().as_str() {
+fn trailing_option(
+    values: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Option<OptionName>> {
+    let Some(index) = values.len().checked_sub(2) else {
+        return Ok(None);
+    };
+    let Some(value) = values.get(index) else {
+        return Ok(None);
+    };
+    let Some(name) = extract_string(value)? else {
+        return Ok(None);
+    };
+    Ok(Some(match name.trim().to_ascii_lowercase().as_str() {
         "uniformoutput" => OptionName::UniformOutput,
         "errorhandler" => OptionName::ErrorHandler,
         _ => OptionName::Unknown(name),
-    })
+    }))
 }
 
 fn ensure_text_callable_policy(value: &Value) -> BuiltinResult<()> {
@@ -120,11 +129,17 @@ pub(super) fn parse_uniform_output(value: Value) -> BuiltinResult<bool> {
     }
 }
 
-pub(super) fn extract_string(value: &Value) -> Option<String> {
-    match value {
+pub(super) fn extract_string(value: &Value) -> BuiltinResult<Option<String>> {
+    Ok(match value {
         Value::String(s) => Some(s.as_str().to_owned()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data().iter().collect()),
+        Value::CharArray(ca) if ca.rows == 1 => Some(
+            runmat_value::decode_utf16_code_units(ca.data()).map_err(|source| {
+                let mut error = arrayfun_flow(source.to_string());
+                error.source = Some(Box::new(source));
+                error
+            })?,
+        ),
         Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].as_str().to_owned()),
         _ => None,
-    }
+    })
 }

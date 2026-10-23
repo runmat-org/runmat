@@ -118,7 +118,7 @@ async fn perform_wait(runtime: &RuntimeContext, wait: PauseWait) -> Result<(), R
                 // `pause(0)` is a useful yield point in simulation loops.
                 return runtime
                     .cpu_cooperation()
-                    .await_cancellable(runtime.service_ports().timing().sleep(Duration::ZERO))
+                    .await_cancellable(runtime.service_ports().timing()?.sleep(Duration::ZERO))
                     .await
                     .map_err(crate::execution::ExecutionServiceError::into_runtime_error)?;
             }
@@ -134,7 +134,7 @@ async fn perform_wait(runtime: &RuntimeContext, wait: PauseWait) -> Result<(), R
             }
             runtime
                 .cpu_cooperation()
-                .await_cancellable(runtime.service_ports().timing().sleep(duration))
+                .await_cancellable(runtime.service_ports().timing()?.sleep(duration))
                 .await
                 .map_err(crate::execution::ExecutionServiceError::into_runtime_error)??;
             #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
@@ -183,7 +183,13 @@ async fn classify_argument(arg: &Value) -> Result<PauseArgument, RuntimeError> {
             if ca.rows == 0 || ca.data().is_empty() {
                 Ok(PauseArgument::Wait(PauseWait::Default))
             } else if ca.rows == 1 {
-                let text: String = ca.data().iter().collect();
+                let text =
+                    crate::builtins::common::text::decode_utf16_with_error(ca.data(), || {
+                        pause_error_with_message(
+                            "pause: argument is not valid UTF-16 text",
+                            &PAUSE_ERROR_INVALID_ARG,
+                        )
+                    })?;
                 parse_command(&text)
             } else {
                 Err(pause_error_with_message(
@@ -361,7 +367,9 @@ pub(crate) mod tests {
 
     fn char_array_to_string(value: Value) -> String {
         match value {
-            Value::CharArray(ca) if ca.rows == 1 => ca.data().iter().collect(),
+            Value::CharArray(ca) if ca.rows == 1 => {
+                runmat_value::decode_utf16_code_units(ca.data()).unwrap()
+            }
             other => panic!("expected char array, got {other:?}"),
         }
     }
@@ -699,21 +707,19 @@ pub(crate) mod tests {
             fn wall_time_since_epoch(&self) -> Duration {
                 Duration::ZERO
             }
-            fn local_datetime_to_epoch(&self, local: chrono::NaiveDateTime) -> Option<Duration> {
-                let utc = local.and_utc();
-                Some(Duration::new(
-                    u64::try_from(utc.timestamp()).ok()?,
-                    utc.timestamp_subsec_nanos(),
+            fn local_datetime_to_instant(
+                &self,
+                local: chrono::NaiveDateTime,
+            ) -> Option<crate::context::RuntimeCalendarInstant> {
+                Some(crate::context::RuntimeCalendarInstant::from_naive_utc(
+                    local,
                 ))
             }
-            fn local_datetime_at_epoch(&self, epoch: Duration) -> Option<chrono::NaiveDateTime> {
-                Some(
-                    chrono::DateTime::from_timestamp(
-                        i64::try_from(epoch.as_secs()).ok()?,
-                        epoch.subsec_nanos(),
-                    )?
-                    .naive_utc(),
-                )
+            fn local_datetime_at_instant(
+                &self,
+                instant: crate::context::RuntimeCalendarInstant,
+            ) -> Option<chrono::NaiveDateTime> {
+                instant.at_fixed_offset(0)
             }
             fn process_cpu_seconds(&self) -> Option<f64> {
                 Some(0.0)

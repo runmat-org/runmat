@@ -18,7 +18,7 @@ pub(super) fn empty_value(prototype: Option<&Value>) -> crate::BuiltinResult<Val
         Some(Value::StringArray(_)) => StringArray::new(Vec::new(), vec![0, 0])
             .map(Value::StringArray)
             .map_err(error::internal),
-        Some(Value::CharArray(_)) => CharArray::new(Vec::new(), 0, 0)
+        Some(Value::CharArray(_)) => CharArray::from_code_units(Vec::new(), 0, 0)
             .map(Value::CharArray)
             .map_err(error::internal),
         Some(Value::Cell(_)) => {

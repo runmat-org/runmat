@@ -95,7 +95,10 @@ async fn parse_shape(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResu
             .await
             .map_err(remap_string_empty_flow)?;
 
-        if let Some(keyword) = keyword_of(&arg_host) {
+        if let Some(keyword) = keyword_of(&arg_host).map_err(|mut error| {
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            remap_string_empty_flow(error)
+        })? {
             if keyword.as_str() == "like" {
                 if like_shape.is_some() {
                     return Err(string_empty_error(&STRING_EMPTY_ERROR_LIKE_DUPLICATE));

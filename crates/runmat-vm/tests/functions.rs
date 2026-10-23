@@ -27,6 +27,86 @@ fn scoped_provider() -> runmat_accelerate_api::ThreadProviderGuard {
     runmat_accelerate_api::ThreadProviderGuard::set(Some(provider))
 }
 
+fn has_bound_expanded_subscript(
+    bytecode: &runmat_vm::Bytecode,
+    selection: runmat_types::SequenceUse,
+) -> bool {
+    bytecode.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::ReadSubscriptPath { steps, selection: actual, .. }
+            if *actual == selection
+                && matches!(steps.as_slice(), [runmat_vm::BytecodeSubscriptStep::Parentheses { selectors }]
+                    if matches!(selectors.as_slice(), [runmat_vm::BytecodeSubscriptSelector::Expansion(_)]))
+    ))
+}
+
+fn assert_prepared_indexed_store(bytecode: &runmat_vm::Bytecode) {
+    use runmat_vm::{BytecodeSubscriptStep, Instr};
+    let begin = bytecode
+        .instructions
+        .iter()
+        .enumerate()
+        .find_map(|(index, instruction)| match instruction {
+            Instr::BeginFixedAssignment {
+                source_statement,
+                root_slot,
+            } => Some((index, source_statement, root_slot)),
+            _ => None,
+        })
+        .expect("indexed member store captures its original receiver");
+    let finish = bytecode
+        .instructions
+        .iter()
+        .enumerate()
+        .skip(begin.0 + 1)
+        .find_map(|(index, instruction)| match instruction {
+            Instr::FinishFixedAssignmentTarget {
+                endpoint: BytecodeSubscriptStep::Parentheses { selectors },
+                selector_context: Some(count),
+                mutation: runmat_types::PlaceMutationKind::IndexedAssign,
+            } if *count == 1 && selectors.len() == 1 => Some(index),
+            _ => None,
+        })
+        .expect("typed indexed endpoint preserves its selector receipt");
+    let commit = bytecode
+        .instructions
+        .iter()
+        .enumerate()
+        .skip(finish + 1)
+        .find_map(|(index, instruction)| match instruction {
+            Instr::CommitFixedAssignment {
+                source_statement,
+                root_slot,
+            } if source_statement == begin.1 && root_slot == begin.2 => Some(index),
+            _ => None,
+        })
+        .expect("commit consumes the same source occurrence and receiver");
+    assert!(bytecode.instructions[finish..commit]
+        .iter()
+        .any(|instruction| matches!(instruction, Instr::CaptureScalarSequence)));
+}
+
+fn has_single_selector_subscript_call(
+    bytecode: &runmat_vm::Bytecode,
+    selection: runmat_types::SequenceUse,
+) -> bool {
+    bytecode.instructions.iter().any(|instruction| matches!(
+        instruction,
+        runmat_vm::Instr::ReadSubscriptPath { steps, selection: actual, to_sequence_register: false, .. }
+            if *actual == selection
+                && matches!(steps.as_slice(), [runmat_vm::BytecodeSubscriptStep::Parentheses { selectors }]
+                    if selectors.len() == 1)
+    ))
+}
+
+fn has_exception_identifier(values: &[runmat_value::Value], identifier: &str) -> bool {
+    let expected = runmat_value::CharArray::new_row(identifier);
+    values.iter().any(|value| {
+        matches!(value,
+        runmat_value::Value::CharArray(actual) if actual == &expected)
+    })
+}
+
 fn execute_source(source: &str) -> runmat_runtime::execution::RootedValues {
     let bytecode = compile_source(source).expect("compile source");
     interpret(&bytecode).expect("execute bytecode")
@@ -35,6 +115,12 @@ fn execute_source(source: &str) -> runmat_runtime::execution::RootedValues {
 fn execute_source_with_extensions(source: &str) -> runmat_runtime::execution::RootedValues {
     let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     execute_source(source)
+}
+
+fn execute_source_with_base_workspace(source: &str) -> runmat_runtime::execution::RootedValues {
+    let bytecode = compile_source(source).expect("compile source");
+    test_helpers::interpret_with_base_workspace(&bytecode)
+        .expect("execute with selected base owner")
 }
 
 fn execute_source_with_catalog(
@@ -108,7 +194,10 @@ fn cell_char_row_values(value: &runmat_value::Value) -> Option<((usize, usize), 
         .data()
         .iter()
         .map(|entry| match entry {
-            runmat_value::Value::CharArray(chars) => Some(chars.data().iter().collect::<String>()),
+            runmat_value::Value::CharArray(chars) => Some(
+                runmat_value::decode_utf16_code_units(chars.data())
+                    .expect("valid UTF-16 text fixture"),
+            ),
             _ => None,
         })
         .collect::<Option<Vec<_>>>()?;
@@ -970,8 +1059,9 @@ fn unresolved_qualified_external_handle_zero_output_direct_call_uses_typed_instr
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc")
     ));
-    assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 0)
+    assert!(has_single_selector_subscript_call(
+        &bytecode,
+        runmat_types::SequenceUse::Discard
     ));
     let err = interpret(&bytecode)
         .expect_err("unresolved qualified zero-output direct handle call should fail");
@@ -991,8 +1081,9 @@ fn unresolved_qualified_external_handle_multi_output_direct_call_uses_typed_inst
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc")
     ));
-    assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 2)
+    assert!(has_single_selector_subscript_call(
+        &bytecode,
+        runmat_types::SequenceUse::SelectPrefix { count: 2 }
     ));
     let err = interpret(&bytecode)
         .expect_err("unresolved qualified multi-output direct handle call should fail");
@@ -1012,11 +1103,10 @@ fn unresolved_qualified_external_handle_expand_zero_output_direct_call_uses_type
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc")
     ));
-    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
-        instr,
-        runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
-            if *out_count == 0 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
-    )));
+    assert!(has_bound_expanded_subscript(
+        &bytecode,
+        runmat_types::SequenceUse::Discard
+    ));
     let err = interpret(&bytecode)
         .expect_err("unresolved qualified expanded zero-output direct handle call should fail");
     assert_eq!(
@@ -1035,11 +1125,10 @@ fn unresolved_qualified_external_handle_expand_direct_call_uses_typed_instructio
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc")
     ));
-    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
-        instr,
-        runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
-            if *out_count == 1 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
-    )));
+    assert!(has_bound_expanded_subscript(
+        &bytecode,
+        runmat_types::SequenceUse::RequireSingle
+    ));
     let err = interpret(&bytecode)
         .expect_err("unresolved qualified expanded direct handle call should fail");
     assert_eq!(
@@ -1058,11 +1147,10 @@ fn unresolved_qualified_external_handle_expand_multi_output_direct_call_uses_typ
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc")
     ));
-    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
-        instr,
-        runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
-            if *out_count == 2 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
-    )));
+    assert!(has_bound_expanded_subscript(
+        &bytecode,
+        runmat_types::SequenceUse::SelectPrefix { count: 2 }
+    ));
     let err = interpret(&bytecode)
         .expect_err("unresolved qualified expanded multi-output direct handle call should fail");
     assert_eq!(
@@ -1106,8 +1194,9 @@ fn unresolved_nested_qualified_external_handle_zero_output_direct_call_uses_type
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.sub.remote")
     ));
-    assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 0)
+    assert!(has_single_selector_subscript_call(
+        &bytecode,
+        runmat_types::SequenceUse::Discard
     ));
     let err = interpret(&bytecode).expect_err(
         "unresolved nested qualified external handle zero-output direct call should fail",
@@ -1128,8 +1217,9 @@ fn unresolved_nested_qualified_external_handle_multi_output_direct_call_uses_typ
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.sub.remote")
     ));
-    assert!(bytecode.instructions.iter().any(
-        |instr| matches!(instr, runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 2)
+    assert!(has_single_selector_subscript_call(
+        &bytecode,
+        runmat_types::SequenceUse::SelectPrefix { count: 2 }
     ));
     let err = interpret(&bytecode).expect_err(
         "unresolved nested qualified external handle multi-output direct call should fail",
@@ -1151,11 +1241,10 @@ fn unresolved_nested_qualified_external_handle_expand_zero_output_direct_call_us
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.sub.remote")
     ));
-    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
-        instr,
-        runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
-            if *out_count == 0 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
-    )));
+    assert!(has_bound_expanded_subscript(
+        &bytecode,
+        runmat_types::SequenceUse::Discard
+    ));
     let err = interpret(&bytecode).expect_err(
         "unresolved nested qualified external handle expanded zero-output direct call should fail",
     );
@@ -1175,11 +1264,10 @@ fn unresolved_nested_qualified_external_handle_expand_direct_call_uses_typed_ins
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.sub.remote")
     ));
-    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
-        instr,
-        runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
-            if *out_count == 1 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
-    )));
+    assert!(has_bound_expanded_subscript(
+        &bytecode,
+        runmat_types::SequenceUse::RequireSingle
+    ));
     let err = interpret(&bytecode)
         .expect_err("unresolved nested qualified external handle expanded direct call should fail");
     assert_eq!(
@@ -1199,11 +1287,10 @@ fn unresolved_nested_qualified_external_handle_expand_multi_output_direct_call_u
     assert!(bytecode.instructions.iter().any(
         |instr| matches!(instr, runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.sub.remote")
     ));
-    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
-        instr,
-        runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
-            if *out_count == 2 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
-    )));
+    assert!(has_bound_expanded_subscript(
+        &bytecode,
+        runmat_types::SequenceUse::SelectPrefix { count: 2 }
+    ));
     let err = interpret(&bytecode).expect_err(
         "unresolved nested qualified external handle expanded multi-output direct call should fail",
     );
@@ -1801,7 +1888,7 @@ fn dynamic_workspace_evalin_caller_from_function_targets_vm_script_workspace() {
 
 #[test]
 fn assignin_compiled_transfer_preserves_all_integer_classes_exactly() {
-    let vars = execute_source(
+    let vars = execute_source_with_base_workspace(
         "assignin('base','ai_i8',int8([-128 127])); assignin('base','ai_i16',int16([-32768 32767])); assignin('base','ai_i32',int32([-2147483648 2147483647])); assignin('base','ai_i64',int64([-7 9])); assignin('base','ai_u8',uint8([0 255])); assignin('base','ai_u16',uint16([0 65535])); assignin('base','ai_u32',uint32([0 4294967295])); base = uint64(9007199254740992); assignin('base','ai_u64',base + uint64([1 2]));",
     );
     for expected in [
@@ -1830,7 +1917,7 @@ fn assignin_compiled_transfer_preserves_all_integer_classes_exactly() {
 #[test]
 fn assignin_preserves_resident_integer_provider_ownership() {
     let _provider_guard = scoped_provider();
-    let vars = execute_source(
+    let vars = execute_source_with_base_workspace(
         "base = uint64(9007199254740992); source_gpu = gpuArray([base + uint64(1) intmax('uint64')]); assignin('base','assigned_gpu',source_gpu); copied = evalin('base','gather(assigned_gpu)');",
     );
     let resident_handles = vars
@@ -1901,8 +1988,9 @@ fn dynamic_workspace_invalid_selector_errors_are_catchable() {
         end
     "#,
     );
-    assert!(vars.iter().any(
-        |v| matches!(v, runmat_value::Value::String(s) if s == "RunMat:DynamicWorkspaceSelector")
+    assert!(has_exception_identifier(
+        &vars,
+        "RunMat:DynamicWorkspaceSelector"
     ));
 }
 
@@ -2080,9 +2168,7 @@ fn arity_check_helper_errors_are_catchable() {
         end
     "#;
     let vars = execute_source(program);
-    assert!(vars
-        .iter()
-        .any(|v| { matches!(v, runmat_value::Value::String(s) if s == "RunMat:TooManyInputs") }));
+    assert!(has_exception_identifier(&vars, "RunMat:TooManyInputs"));
 }
 
 #[test]
@@ -2115,9 +2201,7 @@ fn dynamic_narginchk_errors_are_catchable() {
         end
     "#;
     let vars = execute_source(program);
-    assert!(vars
-        .iter()
-        .any(|v| { matches!(v, runmat_value::Value::String(s) if s == "RunMat:TooManyInputs") }));
+    assert!(has_exception_identifier(&vars, "RunMat:TooManyInputs"));
 }
 
 #[test]
@@ -2151,9 +2235,7 @@ fn dynamic_nargoutchk_errors_are_catchable() {
         end
     "#;
     let vars = execute_source(program);
-    assert!(vars
-        .iter()
-        .any(|v| { matches!(v, runmat_value::Value::String(s) if s == "RunMat:TooManyOutputs") }));
+    assert!(has_exception_identifier(&vars, "RunMat:TooManyOutputs"));
 }
 
 #[test]
@@ -2171,10 +2253,10 @@ fn inputname_reports_direct_caller_argument_names() {
     "#;
     let vars = execute_source_with_catalog(source, "/tmp/runmat_vm_inputname_probe.m");
     assert!(vars.iter().any(|v| {
-        matches!(v, runmat_value::Value::CharArray(chars) if chars.data().iter().collect::<String>() == "alpha")
+        matches!(v, runmat_value::Value::CharArray(chars) if runmat_value::decode_utf16_code_units(chars.data()).expect("valid UTF-16 text fixture") == "alpha")
     }), "expected alpha character row; vars={vars:?}");
     assert!(vars.iter().any(|v| {
-        matches!(v, runmat_value::Value::CharArray(chars) if chars.data().iter().collect::<String>() == "beta")
+        matches!(v, runmat_value::Value::CharArray(chars) if runmat_value::decode_utf16_code_units(chars.data()).expect("valid UTF-16 text fixture") == "beta")
     }), "expected beta character row; vars={vars:?}");
     let empty_strings = vars
         .iter()
@@ -2198,7 +2280,7 @@ fn inputname_reports_feval_caller_argument_names() {
     "#;
     let vars = execute_source_with_catalog(source, "/tmp/runmat_vm_inputname_feval_probe.m");
     assert!(vars.iter().any(|v| {
-        matches!(v, runmat_value::Value::CharArray(chars) if chars.data().iter().collect::<String>() == "beta")
+        matches!(v, runmat_value::Value::CharArray(chars) if runmat_value::decode_utf16_code_units(chars.data()).expect("valid UTF-16 text fixture") == "beta")
     }), "expected beta character row; vars={vars:?}");
     assert!(vars
         .iter()
@@ -2479,6 +2561,12 @@ fn too_many_outputs_and_varargout_mismatch() {
     let expr_tmo = "[x1,x2] = 1;";
     let err_expr = execute_source_result(expr_tmo).err().unwrap();
     assert_eq!(err_expr.identifier(), Some("RunMat:TooManyOutputs"));
+
+    let caught = execute_source(
+        "x1=9; x2=10; try; [x1,x2]=1; catch e; caught_id=e.identifier; end; unchanged=x1+x2;",
+    );
+    assert!(has_exception_identifier(&caught, "RunMat:TooManyOutputs"));
+    assert!(has_num(&caught, 19.));
 
     // The builtin owns its output diagnostic; user functions and expressions
     // above retain the executor's generic output-count identifier.
@@ -3020,12 +3108,16 @@ fn min_max_builtin_multi_assign_execute() {
 }
 
 #[test]
-fn cummin_cummax_builtin_reject_undocumented_second_output() {
-    for (builtin, source) in [
-        ("cummax", "[values,indices] = cummax([2 1 3]);"),
-        ("cummin", "[values,indices] = cummin([2 1 3]);"),
+fn cummin_cummax_builtin_return_documented_indices_and_reject_third_output() {
+    for (builtin, expected_values, expected_indices) in [
+        ("cummax", [2., 2., 3.], [1., 1., 3.]),
+        ("cummin", [2., 1., 1.], [1., 2., 2.]),
     ] {
-        let error = execute_source_result(source).expect_err("second output must be rejected");
+        let values = execute_source(&format!("[values,indices] = {builtin}([2 1 3]);"));
+        assert!(has_numeric_tensor(&values, &expected_values));
+        assert!(has_numeric_tensor(&values, &expected_indices));
+        let error = execute_source_result(&format!("[values,indices,extra] = {builtin}([2 1 3]);"))
+            .expect_err("third output must be rejected");
         assert_eq!(
             error.identifier(),
             Some(if builtin == "cummax" {
@@ -3198,7 +3290,8 @@ fn sprintf_inline_cast_argument_formats_value() {
     let vars = execute_source(program);
     assert!(vars.iter().any(|value| {
         if let runmat_value::Value::CharArray(chars) = value {
-            let rendered: String = chars.data().iter().collect();
+            let rendered: String = runmat_value::decode_utf16_code_units(chars.data())
+                .expect("valid UTF-16 text fixture");
             rendered == "Value: 3.1400"
         } else {
             false
@@ -3214,8 +3307,26 @@ fn member_get_set_and_method_call_skeleton() {
         .iter()
         .any(|v| matches!(v, runmat_value::Value::Num(n) if (*n - 3.0).abs() < f64::EPSILON)));
 
-    // call Point.move which exists as example method: dx=1,dy=2
-    let input2 = "obj = new_object('Point'); obj = setfield(obj,'x',5); obj = setfield(obj,'y',7); obj = call_method(obj, 'move', 1, 2); rx = getfield(obj,'x'); ry = getfield(obj,'y');";
+    // Install a real source-owned method, not the former process-global
+    // example Point.move registration.
+    let input2 = r#"
+        classdef PointMethodFixture
+            properties
+                x
+                y
+            end
+            methods
+                function obj = move(obj, dx, dy)
+                    obj.x = obj.x + dx;
+                    obj.y = obj.y + dy;
+                end
+            end
+        end
+        obj = new_object('PointMethodFixture');
+        obj = setfield(obj,'x',5); obj = setfield(obj,'y',7);
+        obj = call_method(obj, 'move', 1, 2);
+        rx = getfield(obj,'x'); ry = getfield(obj,'y');
+    "#;
     let vars2 = execute_source_with_extensions(input2);
     assert!(vars2
         .iter()
@@ -3274,13 +3385,7 @@ fn indexed_member_store_back_executes() {
 fn indexed_member_vector_store_back_lowers_to_slice_instruction() {
     let source = "s.a = [10 20 30 40]; idx = [2 4]; s.a(idx) = 99; y = s.a(4);";
     let bytecode = compile_source(source).expect("compile indexed member vector store");
-    assert!(
-        bytecode.instructions.iter().any(|instr| matches!(
-            instr,
-            runmat_vm::Instr::StoreSlice(..) | runmat_vm::Instr::StoreSliceDelete(..)
-        )),
-        "indexed member vector assignment should lower through StoreSlice*"
-    );
+    assert_prepared_indexed_store(&bytecode);
     assert!(
         !bytecode.instructions.iter().any(|instr| matches!(
             instr,
@@ -3298,13 +3403,7 @@ fn indexed_member_vector_store_back_lowers_to_slice_instruction() {
 fn indexed_member_logical_store_back_lowers_to_slice_instruction() {
     let source = "s.a = [1 2 3 4]; mask = logical([1 0 1 0]); s.a(mask) = 0; y = s.a(3);";
     let bytecode = compile_source(source).expect("compile indexed member logical store");
-    assert!(
-        bytecode.instructions.iter().any(|instr| matches!(
-            instr,
-            runmat_vm::Instr::StoreSlice(..) | runmat_vm::Instr::StoreSliceDelete(..)
-        )),
-        "indexed member logical assignment should lower through StoreSlice*"
-    );
+    assert_prepared_indexed_store(&bytecode);
     assert!(
         !bytecode.instructions.iter().any(|instr| matches!(
             instr,
@@ -3322,13 +3421,7 @@ fn indexed_member_logical_store_back_lowers_to_slice_instruction() {
 fn indexed_base_member_vector_store_back_lowers_to_slice_instruction() {
     let source = "s = struct('a', {[10 20 30 40], [1 2 3 4]}); idx = [2 4]; s(2).a(idx) = 99; t = s(2); y = getfield(t, 'a'); z = y(4);";
     let bytecode = compile_source(source).expect("compile indexed-base member vector store");
-    assert!(
-        bytecode.instructions.iter().any(|instr| matches!(
-            instr,
-            runmat_vm::Instr::StoreSlice(..) | runmat_vm::Instr::StoreSliceDelete(..)
-        )),
-        "indexed-base member vector assignment should lower through StoreSlice*"
-    );
+    assert_prepared_indexed_store(&bytecode);
     let vars = interpret(&bytecode).expect("execute indexed-base member vector store");
     assert!(vars
         .iter()
@@ -3339,13 +3432,7 @@ fn indexed_base_member_vector_store_back_lowers_to_slice_instruction() {
 fn indexed_base_member_logical_store_back_lowers_to_slice_instruction() {
     let source = "s = struct('a', {[1 2 3 4], [5 6 7 8]}); mask = logical([1 0 1 0]); s(2).a(mask) = 0; t = s(2); y = getfield(t, 'a'); z = y(3);";
     let bytecode = compile_source(source).expect("compile indexed-base member logical store");
-    assert!(
-        bytecode.instructions.iter().any(|instr| matches!(
-            instr,
-            runmat_vm::Instr::StoreSlice(..) | runmat_vm::Instr::StoreSliceDelete(..)
-        )),
-        "indexed-base member logical assignment should lower through StoreSlice*"
-    );
+    assert_prepared_indexed_store(&bytecode);
     let vars = interpret(&bytecode).expect("execute indexed-base member logical store");
     assert!(vars
         .iter()
@@ -3356,13 +3443,7 @@ fn indexed_base_member_logical_store_back_lowers_to_slice_instruction() {
 fn indexed_dynamic_member_vector_store_back_lowers_to_slice_instruction() {
     let source = "s.a = [10 20 30 40]; f = 'a'; idx = [2 4]; s.(f)(idx) = 99; y = s.(f)(4);";
     let bytecode = compile_source(source).expect("compile indexed dynamic member vector store");
-    assert!(
-        bytecode.instructions.iter().any(|instr| matches!(
-            instr,
-            runmat_vm::Instr::StoreSlice(..) | runmat_vm::Instr::StoreSliceDelete(..)
-        )),
-        "indexed dynamic-member vector assignment should lower through StoreSlice*"
-    );
+    assert_prepared_indexed_store(&bytecode);
     assert!(
         !bytecode.instructions.iter().any(|instr| matches!(
             instr,
@@ -3381,13 +3462,7 @@ fn indexed_dynamic_member_logical_store_back_lowers_to_slice_instruction() {
     let source =
         "s.a = [1 2 3 4]; f = 'a'; mask = logical([1 0 1 0]); s.(f)(mask) = 0; y = s.(f)(3);";
     let bytecode = compile_source(source).expect("compile indexed dynamic member logical store");
-    assert!(
-        bytecode.instructions.iter().any(|instr| matches!(
-            instr,
-            runmat_vm::Instr::StoreSlice(..) | runmat_vm::Instr::StoreSliceDelete(..)
-        )),
-        "indexed dynamic-member logical assignment should lower through StoreSlice*"
-    );
+    assert_prepared_indexed_store(&bytecode);
     assert!(
         !bytecode.instructions.iter().any(|instr| matches!(
             instr,
@@ -3463,13 +3538,7 @@ fn cell_member_store_back_executes() {
 fn indexed_cell_member_vector_store_back_lowers_to_slice_instruction() {
     let source = "C = {struct('a', [10 20 30 40])}; idx = [2 4]; C{1}.a(idx) = 99; y = C{1}.a(4);";
     let bytecode = compile_source(source).expect("compile indexed cell member vector store");
-    assert!(
-        bytecode.instructions.iter().any(|instr| matches!(
-            instr,
-            runmat_vm::Instr::StoreSlice(..) | runmat_vm::Instr::StoreSliceDelete(..)
-        )),
-        "indexed cell-member vector assignment should lower through StoreSlice*"
-    );
+    assert_prepared_indexed_store(&bytecode);
     assert!(
         !bytecode.instructions.iter().any(|instr| matches!(
             instr,
@@ -3488,13 +3557,7 @@ fn indexed_cell_member_logical_store_back_lowers_to_slice_instruction() {
     let source =
         "C = {struct('a', [1 2 3 4])}; mask = logical([1 0 1 0]); C{1}.a(mask) = 0; y = C{1}.a(3);";
     let bytecode = compile_source(source).expect("compile indexed cell member logical store");
-    assert!(
-        bytecode.instructions.iter().any(|instr| matches!(
-            instr,
-            runmat_vm::Instr::StoreSlice(..) | runmat_vm::Instr::StoreSliceDelete(..)
-        )),
-        "indexed cell-member logical assignment should lower through StoreSlice*"
-    );
+    assert_prepared_indexed_store(&bytecode);
     assert!(
         !bytecode.instructions.iter().any(|instr| matches!(
             instr,
@@ -3717,10 +3780,10 @@ fn function_handle_index_zero_output_executes() {
         )),
         "semantic function handle zero-output index calls should carry semantic identity"
     );
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
-        instr,
-        runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 0
-    )));
+    assert!(has_single_selector_subscript_call(
+        &bytecode,
+        runmat_types::SequenceUse::Discard
+    ));
 
     interpret(&bytecode).expect("semantic handle zero-output index call should execute");
 }
@@ -3734,10 +3797,10 @@ fn function_handle_index_multi_output_executes() {
         instr,
         runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "pair"
     )));
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
-        instr,
-        runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 2
-    )));
+    assert!(has_single_selector_subscript_call(
+        &bytecode,
+        runmat_types::SequenceUse::SelectPrefix { count: 2 }
+    ));
 
     let vars = interpret(&bytecode).expect("execute semantic handle multi-output");
     assert!(has_num(&vars, 5.0));
@@ -3751,14 +3814,101 @@ fn function_handle_expand_single_output_executes() {
         instr,
         runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "inc"
     )));
-    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
-        instr,
-        runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
-            if *out_count == 1 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
-    )));
+    assert!(has_bound_expanded_subscript(
+        &bytecode,
+        runmat_types::SequenceUse::RequireSingle
+    ));
 
     let vars = interpret(&bytecode).expect("execute semantic handle expanded single-output");
     assert!(has_num(&vars, 3.0));
+
+    let array = compile_source("A = [29, 30]; C = {2}; x = A(C{:});")
+        .expect("compile receiver-selected expanded array indexing");
+    assert!(has_bound_expanded_subscript(
+        &array,
+        runmat_types::SequenceUse::RequireSingle,
+    ));
+    let vars = interpret(&array).expect("execute expanded array selector");
+    assert!(has_num(&vars, 30.0));
+
+    // The two struct members are independent row/column selectors, not one
+    // array-valued index. Keep the actual receiver's complete path intact.
+    for (case, source) in [
+        "A=[11,12,13;21,22,23]; S=struct('idx',{2,3}); y=A(S.idx);",
+        "A=[11,12,13;21,22,23]; S=struct('idx',{2,3}); name='idx'; y=A(S.(name));",
+        "A=[11,12,13;21,22,23]; S=struct('idx',{2,3}); y=A(S(1:2).idx);",
+        "A=[11,12,13;21,22,23]; S=struct('idx',{2,3}); holder=struct('data',A); y=(holder.data)(S.idx);",
+        "A=[11,12,13;21,22,23]; S=struct('idx',{2,3}); y=(A+0)(S.idx);",
+    ].into_iter().enumerate() {
+        let bytecode = compile_source(source).expect("compile receiver-selected member CSL");
+        if case == 3 {
+            assert!(bytecode.instructions.iter().any(|instruction| matches!(instruction,
+                runmat_vm::Instr::ReadSubscriptPath { steps, selection: runmat_types::SequenceUse::RequireSingle, .. }
+                    if matches!(steps.as_slice(), [runmat_vm::BytecodeSubscriptStep::Member(member), runmat_vm::BytecodeSubscriptStep::Parentheses { selectors }]
+                        if member == &runmat_hir::MemberName::from("data") && matches!(selectors.as_slice(), [runmat_vm::BytecodeSubscriptSelector::Expansion(_)])))));
+        } else {
+            assert!(has_bound_expanded_subscript(&bytecode, runmat_types::SequenceUse::RequireSingle));
+        }
+        let vars = interpret(&bytecode).expect("execute member CSL as two selectors");
+        assert!(has_num(&vars, 23.0), "independent A(2,3) oracle for {source}");
+    }
+    let callable = compile_source("h=@plus; S=struct('idx',{2,3}); y=h(S.idx);")
+        .expect("compile member CSL callable arguments");
+    let vars = interpret(&callable).expect("execute member CSL callable arguments");
+    assert!(has_num(&vars, 5.0));
+
+    let explicit_member_feval =
+        compile_source("A=[11,12,13;21,22,23]; S=struct('idx',{2,3}); y=feval(A,S.idx);")
+            .expect("compile explicit member CSL feval");
+    assert!(explicit_member_feval
+        .instructions
+        .iter()
+        .any(|instruction| matches!(
+            instruction,
+            runmat_vm::Instr::CallFevalExpandMultiOutput(_, 1)
+        )));
+    interpret(&explicit_member_feval)
+        .expect_err("explicit feval must not index its noncallable target");
+
+    let member = compile_source("s = struct('field', [29, 30]); C = {2}; x = (s.field)(C{:});")
+        .expect("compile full member-and-expanded-selector path");
+    assert!(member.instructions.iter().any(|instr| matches!(
+        instr,
+        runmat_vm::Instr::ReadSubscriptPath { steps, selection: runmat_types::SequenceUse::RequireSingle, .. }
+            if matches!(steps.as_slice(), [runmat_vm::BytecodeSubscriptStep::Member(name), runmat_vm::BytecodeSubscriptStep::Parentheses { selectors }]
+                if name == &runmat_hir::MemberName::from("field") && matches!(selectors.as_slice(), [runmat_vm::BytecodeSubscriptSelector::Expansion(_)]))
+    )));
+    let vars = interpret(&member).expect("execute full expanded subscript path");
+    assert!(has_num(&vars, 30.0));
+
+    let dotted = compile_source("s = struct('field', [29, 30]); C = {2}; x = s.field(C{:});")
+        .expect("compile ordinary dotted invocation syntax");
+    assert!(has_captured_cell_dotted_call(&dotted.instructions, 1));
+    assert!(dotted.instructions.iter().any(|instruction| matches!(instruction,
+        runmat_vm::Instr::ReadSubscriptPath { steps, .. }
+            if matches!(steps.as_slice(), [runmat_vm::BytecodeSubscriptStep::DottedInvoke { member, .. }] if member == &runmat_hir::MemberName::from("field")))));
+    let vars = interpret(&dotted).expect("execute ordinary dotted field invocation");
+    assert!(has_num(&vars, 30.0));
+
+    let text = compile_source("A = 'ab'; C = {2}; x = A(C{:});")
+        .expect("compile receiver-selected expanded character indexing");
+    assert!(has_bound_expanded_subscript(
+        &text,
+        runmat_types::SequenceUse::RequireSingle,
+    ));
+    let vars = interpret(&text).expect("execute expanded character selector");
+    assert!(vars.iter().any(|value| matches!(value,
+        runmat_value::Value::CharArray(array)
+            if array.try_row_string().ok().flatten().as_deref() == Some("b")
+    )));
+
+    let explicit_feval = compile_source("A = [29, 30]; C = {2}; x = feval(A, C{:});")
+        .expect("compile explicit feval with expanded noncallable input");
+    assert!(explicit_feval
+        .instructions
+        .iter()
+        .any(|instr| matches!(instr, runmat_vm::Instr::CallFevalExpandMultiOutput(_, 1))));
+    interpret(&explicit_feval).expect_err("explicit feval must not index an array receiver");
 }
 
 #[test]
@@ -3769,11 +3919,10 @@ fn function_handle_expand_zero_output_executes() {
         instr,
         runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "inc"
     )));
-    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
-        instr,
-        runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
-            if *out_count == 0 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
-    )));
+    assert!(has_bound_expanded_subscript(
+        &bytecode,
+        runmat_types::SequenceUse::Discard
+    ));
 
     interpret(&bytecode).expect("execute semantic handle expanded zero-output");
 }
@@ -3787,11 +3936,10 @@ fn function_handle_expand_multi_output_executes() {
         instr,
         runmat_vm::Instr::CreateBoundFunctionHandle(_, name, _) if name == "pair"
     )));
-    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
-        instr,
-        runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
-            if *out_count == 2 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
-    )));
+    assert!(has_bound_expanded_subscript(
+        &bytecode,
+        runmat_types::SequenceUse::SelectPrefix { count: 2 }
+    ));
 
     let vars = interpret(&bytecode).expect("execute semantic handle expanded multi-output");
     assert!(has_num(&vars, 5.0));
@@ -3831,10 +3979,10 @@ fn unresolved_external_function_handle_index_zero_output_errors_with_identifier(
         instr,
         runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc"
     )));
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
-        instr,
-        runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 0
-    )));
+    assert!(has_single_selector_subscript_call(
+        &bytecode,
+        runmat_types::SequenceUse::Discard
+    ));
 
     let err = interpret(&bytecode)
         .expect_err("unresolved external handle zero-output index call should fail");
@@ -3855,10 +4003,10 @@ fn unresolved_external_function_handle_index_multi_output_errors_with_identifier
         instr,
         runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc"
     )));
-    assert!(bytecode.instructions.iter().any(|instr| matches!(
-        instr,
-        runmat_vm::Instr::CallFevalMulti(argc, out_count) if *argc == 1 && *out_count == 2
-    )));
+    assert!(has_single_selector_subscript_call(
+        &bytecode,
+        runmat_types::SequenceUse::SelectPrefix { count: 2 }
+    ));
 
     let err = interpret(&bytecode)
         .expect_err("unresolved external handle multi-output index call should fail");
@@ -3879,11 +4027,10 @@ fn unresolved_external_function_handle_expand_index_call_errors_with_identifier(
         instr,
         runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc"
     )));
-    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
-        instr,
-        runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
-            if *out_count == 1 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
-    )));
+    assert!(has_bound_expanded_subscript(
+        &bytecode,
+        runmat_types::SequenceUse::RequireSingle
+    ));
 
     let err = interpret(&bytecode)
         .expect_err("unresolved external expanded-handle index call should fail");
@@ -3904,11 +4051,10 @@ fn unresolved_external_function_handle_expand_index_zero_output_errors_with_iden
         instr,
         runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc"
     )));
-    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
-        instr,
-        runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
-            if *out_count == 0 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
-    )));
+    assert!(has_bound_expanded_subscript(
+        &bytecode,
+        runmat_types::SequenceUse::Discard
+    ));
 
     let err = interpret(&bytecode)
         .expect_err("unresolved external expanded-handle zero-output index call should fail");
@@ -3929,11 +4075,10 @@ fn unresolved_external_function_handle_expand_index_multi_output_errors_with_ide
         instr,
         runmat_vm::Instr::CreateFunctionHandle(name) if name == "pkg.remote_inc"
     )));
-    assert!(bytecode.instructions.iter().enumerate().any(|(call_index, instr)| matches!(
-        instr,
-        runmat_vm::Instr::CallFevalExpandMultiOutput(specs, out_count)
-            if *out_count == 2 && specs.len() == 1 && is_expand_all_cell_contents(&bytecode.instructions[..call_index], &specs[0], 0)
-    )));
+    assert!(has_bound_expanded_subscript(
+        &bytecode,
+        runmat_types::SequenceUse::SelectPrefix { count: 2 }
+    ));
 
     let err = interpret(&bytecode)
         .expect_err("unresolved external expanded-handle multi-output index call should fail");
@@ -3967,9 +4112,10 @@ fn method_syntax_with_semantic_function_callee_executes_directly() {
         runmat_vm::Instr::ReadSubscriptPath { steps, .. }
             if matches!(steps.as_slice(), [runmat_vm::BytecodeSubscriptStep::DottedInvoke {
                 member,
-                semantic_fallback: Some(runmat_types::CallableIdentity::BoundFunction(id)),
+                semantic_fallback: Some(identity),
                 ..
-            }] if member.0 == "bump" && *id == function)
+            }] if member.0 == "bump" && matches!(identity.as_ref(),
+                runmat_types::CallableIdentity::BoundFunction(id) if *id == function))
     )));
     let vars = interpret(&bytecode).expect("semantic method-style call executes");
     assert!(vars
@@ -4078,7 +4224,8 @@ fn compiled_cell_container_integer_cohort_preserves_native_storage() {
         runmat_value::Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_993))
     )));
     assert!(vars.iter().any(
-        |value| matches!(value, runmat_value::Value::CharArray(chars) if chars.data() == vec!['A', 'B'])
+        |value| matches!(value, runmat_value::Value::CharArray(chars)
+            if chars.data().iter().map(|unit| unit.raw()).eq("AB".encode_utf16()))
     ));
 }
 
@@ -4918,7 +5065,7 @@ fn typed_complex_integer_jsonencode_script_surface_preserves_exact_components() 
         vars.iter().any(|value| matches!(
             value,
             runmat_value::Value::CharArray(chars)
-                if chars.data().iter().collect::<String>()
+                if runmat_value::decode_utf16_code_units(chars.data()).expect("valid UTF-16 text fixture")
                     == "{\"real\":18446744073709551615,\"imag\":9223372036854775808}"
         )),
         "jsonencode must use exact typed-complex integer components: {vars:?}"
@@ -6485,11 +6632,15 @@ fn containers_map_dot_properties() {
     let vars = execute_source(program);
 
     assert!(vars.iter().any(|v| match v {
-        runmat_value::Value::CharArray(ca) => ca.data().iter().collect::<String>() == "char",
+        runmat_value::Value::CharArray(ca) =>
+            runmat_value::decode_utf16_code_units(ca.data()).expect("valid UTF-16 text fixture")
+                == "char",
         _ => false,
     }));
     assert!(vars.iter().any(|v| match v {
-        runmat_value::Value::CharArray(ca) => ca.data().iter().collect::<String>() == "any",
+        runmat_value::Value::CharArray(ca) =>
+            runmat_value::decode_utf16_code_units(ca.data()).expect("valid UTF-16 text fixture")
+                == "any",
         _ => false,
     }));
     assert!(vars
@@ -6543,7 +6694,8 @@ fn string_array_literal_concat_index_and_compare() {
                 }
             }
             runmat_value::Value::CharArray(ca) => {
-                let s: String = ca.data().iter().collect();
+                let s: String = runmat_value::decode_utf16_code_units(ca.data())
+                    .expect("valid UTF-16 text fixture");
                 if s == "ccc" {
                     saw_x = true;
                 }

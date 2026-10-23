@@ -195,6 +195,16 @@ impl Compiler {
             .components
             .iter()
             .any(|component| matches!(component, MirIndexComponent::ContextualExpr(_)));
+        if contextual
+            && indexing
+                .components
+                .iter()
+                .any(|component| matches!(component, MirIndexComponent::Expansion(_)))
+        {
+            return Err(self
+                .compile_error("receiver-relative end cannot share an index list with variable-width expansion")
+                .with_identifier(IDENT_MIR_INDEX_CONTEXT_INVALID));
+        }
         if contextual {
             self.emit(Instr::BeginSubscriptEndReceiver {
                 prefix: prefix.to_vec(),
@@ -214,6 +224,19 @@ impl Compiler {
                     self.compile_mir_prepared_expression_region(region)?;
                     selectors.push(BytecodeSubscriptSelector::Value);
                     operand_count += 1;
+                }
+                MirIndexComponent::Expansion(region) => {
+                    self.compile_mir_expression_steps(&region.steps)?;
+                    self.compile_mir_call_arg(&region.argument)?;
+                    let (mut specs, _) =
+                        self.mir_call_arg_specs(std::slice::from_ref(&region.argument))?;
+                    let spec = specs.remove(0);
+                    operand_count = operand_count
+                        .checked_add(spec.stack_operand_count())
+                        .ok_or_else(|| {
+                            self.compile_error("expanded index operand count overflows")
+                        })?;
+                    selectors.push(BytecodeSubscriptSelector::Expansion(spec));
                 }
                 MirIndexComponent::ContextualExpr(region) => {
                     let previous = self

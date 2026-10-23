@@ -1,4 +1,6 @@
 //! Domain facts for opaque, value-semantic decomposition objects.
+mod constructor;
+
 use crate::catalog::inference::{argument_error, finish_fixed};
 use crate::BuiltinCatalogEntry;
 use runmat_types::*;
@@ -36,9 +38,10 @@ fn object() -> ValueFact {
     let mut result = ValueFact::proven(
         ValueKindFact::Object(ObjectFact {
             class: None,
-            runtime_class: Some(StaticClassIdentity::new("decomposition").owned()),
+            runtime_class: Some(runmat_types::standard::DECOMPOSITION.owned()),
             properties,
-            properties_complete: true,
+            // RankTolerance and Triangle are conditional properties.
+            properties_complete: false,
             handle_semantics: Some(false),
         }),
         ShapeFact::Scalar,
@@ -50,7 +53,7 @@ fn object() -> ValueFact {
 
 fn is_object(value: &ValueFact) -> bool {
     matches!(&value.kind, ValueKindFact::Object(fact)
-        if fact.runtime_class.as_ref() == Some(&StaticClassIdentity::new("decomposition").owned()))
+        if fact.runtime_class.as_ref() == Some(&runmat_types::standard::DECOMPOSITION.owned()))
 }
 
 fn arity(request: &CallRequest, count: usize) -> Vec<InferenceDiagnostic> {
@@ -78,77 +81,7 @@ fn receiver(request: &CallRequest, index: usize, diagnostics: &mut Vec<Inference
 }
 
 pub(super) fn constructor(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
-    let mut diagnostics = Vec::new();
-    if let Some(matrix) = request.arguments.first() {
-        if !matches!(
-            matrix.kind,
-            ValueKindFact::Numeric(_) | ValueKindFact::Logical | ValueKindFact::Unknown
-        ) || matrix.storage == StorageFact::Sparse
-            || matrix.shape.known_dims().is_some_and(|dims| dims.len() > 2)
-        {
-            diagnostics.push(argument_error(
-                "RM-DECOMPOSITION-MATRIX",
-                "expected a dense two-dimensional numeric matrix",
-                0,
-            ));
-        }
-        if let Some(kind) = request.literals.literal_string_at(1) {
-            if ![
-                "auto",
-                "lu",
-                "qr",
-                "chol",
-                "triangular",
-                "diagonal",
-                "checkcondition",
-                "ranktolerance",
-            ]
-            .contains(&kind.as_str())
-            {
-                diagnostics.push(argument_error(
-                    "RM-DECOMPOSITION-TYPE",
-                    "unsupported decomposition type or option",
-                    1,
-                ));
-            }
-            if ["lu", "chol", "triangular", "diagonal"].contains(&kind.as_str()) {
-                if let Some(dims) = matrix.shape.known_dims() {
-                    if dims.len() == 2
-                        && dims[0].is_some()
-                        && dims[1].is_some()
-                        && dims[0] != dims[1]
-                    {
-                        diagnostics.push(argument_error(
-                            "RM-DECOMPOSITION-SQUARE",
-                            "selected decomposition type requires a square matrix",
-                            0,
-                        ));
-                    }
-                }
-            }
-        }
-        for index in 1..request.arguments.len() {
-            if request.literals.literal_string_at(index).as_deref() == Some("ranktolerance")
-                && request
-                    .literals
-                    .numeric_at(index + 1)
-                    .is_some_and(|n| n < 0.0 || n.is_nan())
-            {
-                diagnostics.push(argument_error(
-                    "RM-DECOMPOSITION-TOLERANCE",
-                    "RankTolerance must be nonnegative",
-                    index + 1,
-                ));
-            }
-        }
-    } else {
-        diagnostics.push(argument_error(
-            "RM-DECOMPOSITION-ARITY",
-            "expected a coefficient matrix",
-            0,
-        ));
-    }
-    finish_fixed(entry, request, object(), diagnostics)
+    constructor::infer(request, entry)
 }
 
 pub(super) fn unary(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
@@ -209,95 +142,4 @@ pub(super) fn property(request: &CallRequest, entry: &BuiltinCatalogEntry) -> Ca
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    fn request(arguments: Vec<ValueFact>) -> CallRequest {
-        CallRequest {
-            arguments,
-            literals: LiteralContext::default(),
-            outputs: OutputSelection::default(),
-        }
-    }
-    fn matrix(rows: usize, cols: usize) -> ValueFact {
-        ValueFact::proven(
-            ValueKindFact::Numeric(NumericFact {
-                class: NumericClass::UInt64,
-                domain: NumericDomain::Real,
-            }),
-            ShapeFact::from(vec![Some(rows), Some(cols)]),
-            StorageFact::Dense,
-        )
-    }
-    #[test]
-    fn known_and_unknown_coefficients_return_host_value_objects() {
-        for input in [
-            matrix(0, 3),
-            matrix(2, 2),
-            ValueFact::unknown(DynamicReason::RuntimeValue),
-        ] {
-            let result = constructor(
-                &request(vec![input]),
-                &super::super::DECOMPOSITION_CATALOG_ENTRY,
-            );
-            assert!(is_object(&result.outputs[0]));
-            assert_eq!(result.outputs[0].residency, ResidencyFact::Host);
-            assert_eq!(result.outputs[0].shape, ShapeFact::Scalar);
-        }
-    }
-    #[test]
-    fn options_and_invalid_inputs_are_checked() {
-        let mut req = request(vec![matrix(2, 3), ValueFact::scalar(ValueKindFact::String)]);
-        req.literals = LiteralContext::new(vec![
-            LiteralValue::Unknown,
-            LiteralValue::String("chol".into()),
-        ]);
-        assert!(
-            !constructor(&req, &super::super::DECOMPOSITION_CATALOG_ENTRY)
-                .diagnostics
-                .is_empty()
-        );
-        req.literals.literal_args[1] = LiteralValue::String("qr".into());
-        assert!(
-            constructor(&req, &super::super::DECOMPOSITION_CATALOG_ENTRY)
-                .diagnostics
-                .is_empty()
-        );
-        assert!(
-            !constructor(&request(vec![]), &super::super::DECOMPOSITION_CATALOG_ENTRY)
-                .diagnostics
-                .is_empty()
-        );
-        assert!(!constructor(
-            &request(vec![ValueFact::scalar(ValueKindFact::String)]),
-            &super::super::DECOMPOSITION_CATALOG_ENTRY
-        )
-        .diagnostics
-        .is_empty());
-    }
-    #[test]
-    fn right_division_does_not_confuse_scaling_with_solving() {
-        let entry = &super::super::DECOMPOSITION_MRDIVIDE_CATALOG_ENTRY;
-        let scaled = right_divide(&request(vec![object(), matrix(1, 1)]), entry);
-        assert!(is_object(&scaled.outputs[0]));
-        let solved = right_divide(&request(vec![matrix(1, 2), object()]), entry);
-        assert_eq!(solved.outputs[0].kind, ValueKindFact::Unknown);
-        assert_eq!(solved.outputs[0].residency, ResidencyFact::Unknown);
-    }
-    #[test]
-    fn output_selection_retains_validation() {
-        let mut req = request(vec![]);
-        req.outputs = OutputSelection::new(RequestedOutputCount::Exactly(0));
-        assert!(
-            !constructor(&req, &super::super::DECOMPOSITION_CATALOG_ENTRY)
-                .diagnostics
-                .is_empty()
-        );
-        req.arguments.push(matrix(1, 1));
-        req.outputs = OutputSelection::new(RequestedOutputCount::Exactly(2));
-        assert!(
-            !constructor(&req, &super::super::DECOMPOSITION_CATALOG_ENTRY)
-                .diagnostics
-                .is_empty()
-        );
-    }
-}
+mod tests;

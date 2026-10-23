@@ -1,6 +1,7 @@
 use super::*;
 use runmat_builtins::{
-    GETPREF_DESCRIPTOR, GETPREF_GROUP_QUERY_EXTENSION, GETPREF_INTEGER_CAPABILITIES,
+    BuiltinIntegerBackendRule, BuiltinIntegerOutputClassRule, GETPREF_DESCRIPTOR,
+    GETPREF_GROUP_QUERY_EXTENSION, GETPREF_INTEGER_CAPABILITIES,
 };
 
 #[test]

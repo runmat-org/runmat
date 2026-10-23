@@ -3,8 +3,7 @@
 
 use super::builtin_error;
 use crate::builtins::common::{
-    random,
-    random::gpu_upload::{after_stream_commit, GpuChildHostUpload},
+    gpu_helpers::host_upload::GpuHostUpload, random, random::gpu_effect::after_stream_commit,
 };
 use crate::context::host_allocation::{HostAllocationPlan, HostNumericWorkspace};
 use crate::{build_runtime_error, BuiltinResult};
@@ -50,7 +49,7 @@ impl PermutationSamples {
 async fn sample(
     n: usize,
     k: usize,
-    upload: &GpuChildHostUpload<'_>,
+    upload: &GpuHostUpload<'_>,
 ) -> BuiltinResult<PermutationSamples> {
     let mut cooperation = upload
         .runtime()
@@ -209,7 +208,7 @@ pub(super) async fn like(source: &GpuTensorHandle, n: usize, k: usize) -> Builti
     let compute_scratch = exact_bytes
         .checked_sub(native_bytes)
         .ok_or_else(|| builtin_error("randperm: sample metadata underflow"))?;
-    let mut upload = GpuChildHostUpload::prepare(
+    let mut upload = GpuHostUpload::prepare(
         "randperm",
         source,
         &shape,

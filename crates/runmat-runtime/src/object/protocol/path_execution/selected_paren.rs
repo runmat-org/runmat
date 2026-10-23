@@ -33,6 +33,7 @@ pub(super) fn supports(base: &Value, step: Option<&ObjectSubscript>) -> bool {
 }
 
 pub(super) async fn execute(
+    runtime: Option<&crate::context::RuntimeContext>,
     base: Value,
     step: ObjectSubscript,
 ) -> Result<RootedValue, RuntimeError> {
@@ -63,25 +64,22 @@ pub(super) async fn execute(
             ),
         });
     }
-    let arguments = components
-        .into_iter()
-        .map(|component| match component {
-            ObjectIndexComponent::Value(value) => value,
-            ObjectIndexComponent::Colon => unreachable!("colon rejected before indexing"),
-        })
-        .collect::<Vec<_>>();
+    let arguments = super::callable::component_arguments(runtime, components)?;
     match (kind, base) {
         (SelectedParenKind::SymbolicFunction, Value::Symbolic(expr)) => {
             let (name, parameters) = expr
                 .function_reference_signature()
                 .expect("classified symbolic function reference");
             RootedValue::new(crate::indexing::symbolic::apply_function_reference(
-                name, parameters, &arguments,
+                name,
+                parameters,
+                arguments.values(),
             )?)
             .map_err(|error| error.into_runtime_error())
         }
         (SelectedParenKind::ForeignResource, Value::Foreign(reference)) => {
-            crate::foreign::index_foreign_resource(reference, arguments).await
+            crate::foreign::index_foreign_resource_retained(runtime, reference, arguments.into())
+                .await
         }
         _ => unreachable!("selected parentheses kind matches its receiver"),
     }

@@ -62,22 +62,25 @@ pub(super) fn apply(mutations: &[EnvironmentMutation]) -> Result<(), MutationErr
     for mutation in mutations {
         let result = panic::catch_unwind(AssertUnwindSafe(|| match &mutation.value {
             EnvironmentValue::Set(value) => set(&mutation.name, value),
-            EnvironmentValue::Remove => crate::builtins::common::env::remove_var(&mutation.name),
+            EnvironmentValue::Remove => {
+                crate::builtins::common::env::try_remove_var(&mutation.name)
+            }
         }));
-        if let Err(payload) = result {
-            return Err(MutationError::Host(panic_message(payload)));
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => return Err(MutationError::Host(error.to_string())),
+            Err(payload) => return Err(MutationError::Host(panic_message(payload))),
         }
     }
     Ok(())
 }
 
-fn set(name: &str, value: &str) {
+fn set(name: &str, value: &str) -> std::io::Result<()> {
     #[cfg(target_os = "windows")]
     if value.is_empty() {
-        crate::builtins::common::env::remove_var(name);
-        return;
+        return crate::builtins::common::env::try_remove_var(name);
     }
-    crate::builtins::common::env::set_var(name, value);
+    crate::builtins::common::env::try_set_var(name, value)
 }
 
 fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {

@@ -163,18 +163,25 @@ fn ensure_writable(info: &FileInfo) -> BuiltinResult<()> {
     }
 }
 
-pub(super) fn match_stream_label(value: &Value) -> Option<SpecialStream> {
+pub(super) fn match_stream_label(value: &Value) -> BuiltinResult<Option<SpecialStream>> {
     let candidate = match value {
         Value::String(s) => s.trim().to_string(),
         Value::CharArray(ca) if ca.rows == 1 => {
-            ca.data().iter().collect::<String>().trim().to_string()
+            crate::builtins::io::utf16::decode_utf16_with_error(ca.data(), || {
+                fprintf_error_with_detail(
+                    &FPRINTF_ERROR_INVALID_INPUT,
+                    "fprintf: stream label contains malformed UTF-16 text",
+                )
+            })?
+            .trim()
+            .to_string()
         }
         Value::StringArray(sa) if sa.data().len() == 1 => sa.data()[0].trim().to_string(),
-        _ => return None,
+        _ => return Ok(None),
     };
-    match candidate.to_ascii_lowercase().as_str() {
+    Ok(match candidate.to_ascii_lowercase().as_str() {
         "stdout" => Some(SpecialStream::Stdout),
         "stderr" => Some(SpecialStream::Stderr),
         _ => None,
-    }
+    })
 }

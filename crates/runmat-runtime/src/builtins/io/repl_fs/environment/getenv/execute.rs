@@ -28,7 +28,13 @@ pub(super) fn run(
 fn all(
     runtime: Option<&crate::context::RuntimeContext>,
 ) -> crate::BuiltinResult<crate::execution::RootedValue> {
-    let mut entries = crate::builtins::common::env::vars();
+    let mut entries = crate::builtins::common::env::try_vars().map_err(|detail| {
+        error::message(
+            IDENTITY,
+            &GETENV_ERROR_INTERNAL,
+            format!("{}: {detail}", GETENV_ERROR_INTERNAL.message),
+        )
+    })?;
     entries.sort_unstable_by(|left, right| left.0.cmp(&right.0));
     dictionary::from_pairs(runtime, entries).map_err(|detail| {
         error::message(
@@ -43,6 +49,11 @@ fn one(value: &Value) -> crate::BuiltinResult<Value> {
     let names = EnvironmentNames::decode(value).map_err(|kind| match kind {
         NameError::InvalidType => error::builtin(IDENTITY, &GETENV_ERROR_INVALID_NAME),
         NameError::InvalidCellElement => error::builtin(IDENTITY, &GETENV_ERROR_CELL_ELEMENT),
+        NameError::Encoding(source) => {
+            let mut error = error::builtin(IDENTITY, &GETENV_ERROR_INVALID_NAME);
+            error.source = Some(Box::new(source));
+            error
+        }
     })?;
     for feature in names.features() {
         let extension = match feature {

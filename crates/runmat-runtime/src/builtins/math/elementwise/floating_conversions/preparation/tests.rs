@@ -30,9 +30,6 @@ struct Service {
     replace: bool,
 }
 impl RuntimeAccelerationService for Service {
-    fn supports_operation(&self, _: &str) -> bool {
-        true
-    }
     fn prepare_admitted(
         &self,
         _: RuntimeContext,
@@ -141,7 +138,7 @@ fn invalid_options_prototypes_and_output_counts_never_prepare() {
             vec![
                 Value::Num(1.0),
                 Value::CharArray(
-                    runmat_value::CharArray::new_with_shape(
+                    runmat_value::CharArray::from_unicode_scalars_with_shape(
                         "like".chars().collect(),
                         vec![1, 2, 2],
                     )

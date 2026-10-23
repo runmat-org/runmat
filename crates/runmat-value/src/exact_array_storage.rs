@@ -565,27 +565,27 @@ impl<T> ExactArrayStorage<T> {
 /// Character payloads may be read by value without cloning a child owner.
 /// A shared exact alias stays live until iteration ends; a unique owner moves
 /// its original vector and retained claim into the iterator.
-pub enum ExactCharIntoIter {
-    Owned(ExactArrayIntoIter<char>),
+pub enum ExactUtf16CodeUnitIntoIter {
+    Owned(ExactArrayIntoIter<crate::Utf16CodeUnit>),
     Shared {
-        owner: ExactArrayStorage<char>,
+        owner: ExactArrayStorage<crate::Utf16CodeUnit>,
         index: usize,
     },
 }
 
-impl ExactArrayStorage<char> {
-    pub fn into_char_iter(self) -> ExactCharIntoIter {
+impl ExactArrayStorage<crate::Utf16CodeUnit> {
+    pub fn into_code_unit_iter(self) -> ExactUtf16CodeUnitIntoIter {
         match self.try_into_owned() {
-            Ok(owned) => ExactCharIntoIter::Owned(owned.into_iter()),
-            Err(owner) => ExactCharIntoIter::Shared { owner, index: 0 },
+            Ok(owned) => ExactUtf16CodeUnitIntoIter::Owned(owned.into_iter()),
+            Err(owner) => ExactUtf16CodeUnitIntoIter::Shared { owner, index: 0 },
         }
     }
 }
 
-impl Iterator for ExactCharIntoIter {
-    type Item = char;
+impl Iterator for ExactUtf16CodeUnitIntoIter {
+    type Item = crate::Utf16CodeUnit;
 
-    fn next(&mut self) -> Option<char> {
+    fn next(&mut self) -> Option<crate::Utf16CodeUnit> {
         match self {
             Self::Owned(values) => values.next(),
             Self::Shared { owner, index } => {
@@ -605,8 +605,8 @@ impl Iterator for ExactCharIntoIter {
     }
 }
 
-impl ExactSizeIterator for ExactCharIntoIter {}
-impl std::iter::FusedIterator for ExactCharIntoIter {}
+impl ExactSizeIterator for ExactUtf16CodeUnitIntoIter {}
+impl std::iter::FusedIterator for ExactUtf16CodeUnitIntoIter {}
 
 impl<T: Clone> Clone for ExactArrayStorage<T> {
     fn clone(&self) -> Self {
@@ -789,12 +789,30 @@ impl<T> IntoIterator for OwnedExactArrayValues<T> {
     }
 }
 
+impl<T> AsRef<[T]> for OwnedExactArrayValues<T> {
+    fn as_ref(&self) -> &[T] {
+        self.as_slice()
+    }
+}
+impl<T> AsMut<[T]> for OwnedExactArrayValues<T> {
+    fn as_mut(&mut self) -> &mut [T] {
+        self.as_mut_slice()
+    }
+}
+
 /// The original vector backing is freed before its retained claim refunds,
 /// including early iterator drop and partial consumption.
 #[derive(Debug)]
 pub struct ExactArrayIntoIter<T> {
     values: std::vec::IntoIter<T>,
     _claim: Option<ExactHostAllocationClaim>,
+}
+
+impl<T> ExactArrayIntoIter<T> {
+    /// Borrow the remaining already-owned physical slots without copying.
+    pub fn as_slice(&self) -> &[T] {
+        self.values.as_slice()
+    }
 }
 
 pub type OutputListIntoIter = ExactArrayIntoIter<Value>;

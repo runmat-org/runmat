@@ -107,7 +107,6 @@ fn strict_handle_stores_preserve_identity_nan_and_access_controls() {
                 Value::HandleObject(handle.clone()),
                 "Value".into(),
                 Value::Num(9.0),
-                false,
                 None,
                 |_, _| {},
             )
@@ -129,7 +128,6 @@ fn strict_handle_stores_preserve_identity_nan_and_access_controls() {
                     Value::HandleObject(handle.clone()),
                     name.into(),
                     Value::Num(7.0),
-                    false,
                     None,
                     |_, _| {},
                 )
@@ -160,7 +158,6 @@ fn strict_handle_stores_preserve_identity_nan_and_access_controls() {
                     Value::HandleObject(dead),
                     "Value".into(),
                     Value::Num(0.0),
-                    false,
                     None,
                     |_, _| {}
                 )
@@ -203,7 +200,6 @@ fn suspended_handle_setter_roots_arguments_until_cancellation() {
             Value::HandleObject(receiver),
             "Dependent".into(),
             Value::HandleObject(rhs),
-            false,
             None,
             |_, _| {},
         ));
@@ -245,36 +241,39 @@ fn dependent_handle_setter_receives_original_receiver_and_keeps_reentrant_change
                     observed.fetch_add(1, Ordering::SeqCst);
                     let receiver = args[0].clone();
                     let rhs = args[1].clone();
-                    Box::pin(async move {
-                        let Value::HandleObject(handle) = &receiver else {
-                            panic!("original handle receiver, not Object snapshot")
-                        };
-                        assert_eq!(handle.target, expected);
-                        runmat_gc::gc_collect_major().unwrap();
-                        assert!(
-                            runmat_gc::gc_clone_value(&payload_target).is_ok(),
-                            "setter RHS rooted during callback"
-                        );
-                        store_member(
-                            receiver.clone(),
-                            "Other".into(),
-                            Value::Num(88.0),
-                            false,
-                            None,
-                            |_, _| {},
-                        )
-                        .await?;
-                        store_member(receiver, "Value".into(), rhs, false, None, |_, _| {}).await?;
-                        runmat_runtime::execution::RootedValueSequence::new(ValueSequence::empty())
+                    runmat_runtime::user_functions::admit_user_function_with(
+                        _runtime.as_ref(),
+                        move || async move {
+                            let Value::HandleObject(handle) = &receiver else {
+                                panic!("original handle receiver, not Object snapshot")
+                            };
+                            assert_eq!(handle.target, expected);
+                            runmat_gc::gc_collect_major().unwrap();
+                            assert!(
+                                runmat_gc::gc_clone_value(&payload_target).is_ok(),
+                                "setter RHS rooted during callback"
+                            );
+                            store_member(
+                                receiver.clone(),
+                                "Other".into(),
+                                Value::Num(88.0),
+                                None,
+                                |_, _| {},
+                            )
+                            .await?;
+                            store_member(receiver, "Value".into(), rhs, None, |_, _| {}).await?;
+                            runmat_runtime::execution::RootedValueSequence::new(
+                                ValueSequence::empty(),
+                            )
                             .map_err(|error| error.into_runtime_error())
-                    })
+                        },
+                    )
                 }),
             );
             let result = store_member(
                 Value::HandleObject(handle.clone()),
                 "Dependent".into(),
                 Value::HandleObject(payload),
-                false,
                 None,
                 |_, _| {},
             )
@@ -330,7 +329,6 @@ fn dependent_value_setter_still_returns_one_replacement() {
             Value::Object(ObjectInstance::new("PropertyValue")),
             "Dependent".into(),
             Value::Num(8.0),
-            false,
             None,
             |_, _| {},
         )
@@ -381,7 +379,6 @@ fn dynamic_stores_and_private_setter_admission_use_registered_metadata() {
                 Value::HandleObject(handle.clone()),
                 "Dynamic".into(),
                 Value::Num(12.0),
-                false,
                 None,
                 |_, _| {},
             )
@@ -393,7 +390,6 @@ fn dynamic_stores_and_private_setter_admission_use_registered_metadata() {
                     Value::HandleObject(handle.clone()),
                     name.into(),
                     Value::Num(2.0),
-                    false,
                     None,
                     |_, _| {},
                 )
@@ -405,7 +401,6 @@ fn dynamic_stores_and_private_setter_admission_use_registered_metadata() {
                     Value::HandleObject(handle.clone()),
                     name.into(),
                     Value::Num(6.0),
-                    false,
                     Some("Restricted.set.Dependent"),
                     |_, _| {},
                 )
@@ -425,7 +420,6 @@ fn dynamic_stores_and_private_setter_admission_use_registered_metadata() {
                 Value::HandleObject(handle.clone()),
                 "ProtectedDynamic".into(),
                 Value::Num(10.0),
-                false,
                 Some("RestrictedChild.set.Dependent"),
                 |_, _| {},
             )
@@ -437,7 +431,6 @@ fn dynamic_stores_and_private_setter_admission_use_registered_metadata() {
                     Value::HandleObject(handle.clone()),
                     "PrivateDynamic".into(),
                     Value::Num(10.0),
-                    false,
                     Some("RestrictedChild.set.Dependent"),
                     |_, _| {}
                 )
@@ -450,7 +443,6 @@ fn dynamic_stores_and_private_setter_admission_use_registered_metadata() {
                 Value::HandleObject(handle.clone()),
                 "Dependent".into(),
                 Value::Num(3.0),
-                false,
                 None,
                 |_, _| {},
             )
@@ -461,7 +453,6 @@ fn dynamic_stores_and_private_setter_admission_use_registered_metadata() {
                 Value::HandleObject(handle),
                 "Unknown".into(),
                 Value::Num(3.0),
-                false,
                 None,
                 |_, _| {}
             )
@@ -482,16 +473,12 @@ fn dependent_property_without_setter_never_creates_backing_storage() {
                 Value::Object(ObjectInstance::new("ReadOnlyDependent")),
                 Value::HandleObject(handle.clone()),
             ] {
-                let error = store_member(
-                    value,
-                    "Dependent".into(),
-                    Value::Num(9.0),
-                    false,
-                    None,
-                    |_, _| panic!("no write before no-setter rejection"),
-                )
-                .await
-                .unwrap_err();
+                let error =
+                    store_member(value, "Dependent".into(), Value::Num(9.0), None, |_, _| {
+                        panic!("no write before no-setter rejection")
+                    })
+                    .await
+                    .unwrap_err();
                 assert_eq!(error.identifier(), Some("RunMat:PropertyReadOnly"));
             }
             runmat_gc::gc_with_value(&handle.target, |value| {
@@ -545,18 +532,20 @@ fn overloaded_assignment_runs_once_and_listener_writes_remain_unsupported() {
                     assert_eq!(receiver.target, expected);
                     assert_eq!(args.iter().next_back(), Some(&Value::Num(7.0)));
                     let result = args[0].clone();
-                    Box::pin(async move {
-                        let sequence = runmat_runtime::sequence::single_value_sequence(result)?;
-                        runmat_runtime::execution::RootedValueSequence::new(sequence)
-                            .map_err(|error| error.into_runtime_error())
-                    })
+                    runmat_runtime::user_functions::admit_user_function_with(
+                        _runtime.as_ref(),
+                        move || async move {
+                            let sequence = runmat_runtime::sequence::single_value_sequence(result)?;
+                            runmat_runtime::execution::RootedValueSequence::new(sequence)
+                                .map_err(|error| error.into_runtime_error())
+                        },
+                    )
                 }),
             );
             let result = store_member(
                 Value::HandleObject(handle.clone()),
                 "NotAProperty".into(),
                 Value::Num(7.0),
-                false,
                 None,
                 |_, _| {},
             )
@@ -585,7 +574,6 @@ fn overloaded_assignment_runs_once_and_listener_writes_remain_unsupported() {
                 Value::Listener(listener),
                 "Enabled".into(),
                 Value::Bool(false),
-                false,
                 None,
                 |_, _| {},
             )

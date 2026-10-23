@@ -14,7 +14,7 @@ pub use candidate::{
 pub use cost::{
     CandidateCostEvidence, CandidateCostUnavailable, CandidateObservationEvidence,
     EstimateConfidence, EstimateSource, ExecutionCostComponents, ExecutionCostEstimate,
-    ObservedCandidateDuration,
+    ObservedCandidateDuration, PreparationPaybackEvidence, PreparationPaybackUnavailable,
 };
 pub use decision::{
     CompactSelectedExecutionCandidate, PlacementDecision, PlacementExecutionAuthorityRevision,
@@ -35,5 +35,5 @@ pub use resource::{
 pub use whole_work::{
     WholeWorkCandidate, WholeWorkConstraint, WholeWorkDecision, WholeWorkDecisionKind,
     WholeWorkObservation, WholeWorkObservationOutcome, WholeWorkPlacementRequest,
-    WholeWorkPlacementRequestRef,
+    WholeWorkPlacementRequestRef, WholeWorkRouteIdentity,
 };

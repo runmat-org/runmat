@@ -57,6 +57,13 @@ pub fn axis_scale_builtin(
 
 pub fn scale_mode_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<AxisScaleMode> {
     let scale = value_as_string(value)
+        .map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                builtin,
+                source.to_string(),
+                source,
+            )
+        })?
         .ok_or_else(|| plotting_error(builtin, format!("{builtin}: scale must be a string")))?;
     match scale.trim().to_ascii_lowercase().as_str() {
         "linear" => Ok(AxisScaleMode::Linear),

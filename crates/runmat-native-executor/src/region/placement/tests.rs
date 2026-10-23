@@ -7,7 +7,7 @@ use std::rc::Rc;
 fn native_region_revision_uses_host_authority_not_provider_namespace() {
     let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
     let signature = signature(&runtime, &plan(), &[&Value::Num(1.)]);
-    let digest = Digest::sha256(b"host-only");
+    let digest = Digest::sha256(b"native-source-owner");
     assert_eq!(
         signature.revision.authority,
         PlacementExecutionAuthorityRevision::HostService(digest)
@@ -22,13 +22,6 @@ fn native_region_revision_uses_host_authority_not_provider_namespace() {
 }
 
 #[test]
-fn unrepresentable_output_demand_is_rejected_without_a_memory_budget() {
-    // `choose_region` checks this before constructing a placement request;
-    // an absent budget does not turn arithmetic overflow into unknown demand.
-    assert_eq!(checked_output_bytes(u64::MAX, 2), None);
-    assert_eq!(checked_output_bytes(8, 2), Some(16));
-}
-#[test]
 fn absent_authority_is_unavailable_without_disabling_future_choices() {
     let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
     assert!(matches!(
@@ -37,7 +30,7 @@ fn absent_authority_is_unavailable_without_disabling_future_choices() {
     ));
 }
 #[test]
-fn selected_candidates_report_success_or_failure_exactly_once() {
+fn unbound_source_and_abandoned_cpu_never_report_false_host_samples() {
     let probe = Rc::new(Probe::default());
     let runtime = runtime(&probe);
     let plan = plan();
@@ -45,16 +38,23 @@ fn selected_candidates_report_success_or_failure_exactly_once() {
         panic!("generic")
     };
     observation.complete();
+    assert!(probe.feedback.borrow().is_empty());
     probe.vectorized.set(true);
+    let RegionPlacement::Vectorized(observation) = choose(&runtime, &plan, &Value::Num(1.)) else {
+        panic!("vectorized")
+    };
+    observation.complete();
     let RegionPlacement::Vectorized(observation) = choose(&runtime, &plan, &Value::Num(1.)) else {
         panic!("vectorized")
     };
     drop(observation);
     let feedback = probe.feedback.borrow();
-    assert_eq!(feedback.len(), 2);
+    assert_eq!(feedback.len(), 1);
     assert!(feedback[0].succeeded);
-    assert!(!feedback[1].succeeded);
-    assert_ne!(feedback[0].candidate, feedback[1].candidate);
+    assert_eq!(
+        feedback[0].kind,
+        ExecutionCandidateKind::VectorizedNativeCpu
+    );
     assert!(feedback.iter().all(|sample| sample.total_elapsed_ns > 0));
 }
 #[test]
@@ -65,11 +65,14 @@ fn changed_shapes_and_resource_epochs_are_reconsidered_after_generic_choice() {
     let runtime = runtime(&probe);
     let plan = plan();
     let first = Value::Tensor(runmat_value::Tensor::new(vec![1.; 2], vec![1, 2]).unwrap());
-    let RegionPlacement::Generic(observation) = choose(&runtime, &plan, &first) else {
-        panic!("memory pressure")
-    };
-    observation.complete();
-    probe.memory.set(Some(10000));
+    assert!(matches!(
+        choose(&runtime, &plan, &first),
+        RegionPlacement::Unavailable
+    ));
+    // This graph-only fixture has no managed host ledger/selection owner.
+    // It must not fabricate finite authority. Actual managed paths have their
+    // existing separate Runtime/Accelerate ledger-backed oracles.
+    probe.memory.set(None);
     probe.epoch.set(1);
     let RegionPlacement::Vectorized(observation) = choose(&runtime, &plan, &first) else {
         panic!("capacity recovered")
@@ -81,12 +84,11 @@ fn changed_shapes_and_resource_epochs_are_reconsidered_after_generic_choice() {
     };
     observation.complete();
     let requests = probe.requests.borrow();
-    assert_eq!(requests.len(), 3);
-    assert_eq!(requests[0].signature, requests[1].signature);
-    assert_ne!(requests[0].resources, requests[1].resources);
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0].resources.epoch, 1);
     assert_ne!(
-        requests[1].signature.runtime_facts,
-        requests[2].signature.runtime_facts
+        requests[0].signature.runtime_facts,
+        requests[1].signature.runtime_facts
     );
-    assert_eq!(probe.feedback.borrow().len(), 3);
+    assert_eq!(probe.feedback.borrow().len(), 2);
 }

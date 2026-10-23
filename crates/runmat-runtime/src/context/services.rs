@@ -17,7 +17,16 @@ use std::sync::Arc;
 pub type RuntimeServiceFuture<T> = Pin<Box<dyn Future<Output = T> + 'static>>;
 
 mod call;
+mod selected_external;
+mod selected_local;
+mod selected_network;
+mod selected_timing;
 pub use call::{RuntimeCallRequest, RuntimeCallRouter, RuntimeCallService};
+pub use selected_external::{
+    NativeLinkedCallbackPort, NativeLinkedDynamicPort, NativeLinkedHostPorts,
+};
+pub use selected_local::RuntimeSelectedLocalServices;
+use selected_timing::RuntimeTimingPort;
 
 /// Invocation-scoped builtin authority used by exact compiled products.
 /// When installed, the dispatcher must not fall back to process-global
@@ -441,6 +450,31 @@ fn base_namespace_capability_error(operation: &'static str) -> RuntimeError {
 /// compose this port explicitly for the session.
 pub trait RuntimeBaseWorkspaceService {
     fn owner(&self) -> crate::workspace::BaseWorkspaceOwner;
+
+    fn invocation_projection(
+        &self,
+    ) -> Option<std::rc::Rc<crate::workspace::BaseWorkspaceProjectionService>> {
+        None
+    }
+
+    /// Publish one base write under the selected service's invocation owner.
+    /// Standalone hosts retain the canonical direct-owner implementation;
+    /// Core installs its observed projection for a running source request.
+    fn assign_logical_ref_with_context(
+        &self,
+        variables: &crate::workspace::session::SessionVariableAuthority,
+        context: &RuntimeContext,
+        name: &str,
+        value: &Value,
+    ) -> Result<(), RuntimeError> {
+        crate::workspace::assign_logical_base_value_ref_with_context(
+            &self.owner(),
+            variables,
+            context,
+            name,
+            value,
+        )
+    }
 }
 
 pub trait RuntimeObjectService {
@@ -600,7 +634,28 @@ pub trait RuntimeErrorService {
 }
 
 pub trait RuntimeAccelerationService {
-    fn supports_operation(&self, operation: &str) -> bool;
+    fn numeric_region_capability(
+        &self,
+    ) -> Option<crate::numeric_region::service::NumericRegionCapability> {
+        None
+    }
+
+    fn execute_numeric_region(
+        &self,
+        context: super::RuntimeContext,
+        request: crate::numeric_region::service::NativeNumericRegionRequest,
+    ) -> Result<
+        crate::execution::RuntimeContinuationFuture<
+            'static,
+            crate::numeric_region::service::NativeNumericRegionOutcome,
+        >,
+        RuntimeError,
+    > {
+        crate::execution::admit_native_continuation_with(&context, || async move {
+            drop(request);
+            Ok(crate::numeric_region::service::NativeNumericRegionOutcome::Ineligible)
+        })
+    }
 
     /// Transitional transfer-ownership preparation for an already selected
     /// inventory implementation. Never applies to canonical or overridden calls.
@@ -861,6 +916,14 @@ pub trait RuntimeHostEffectResourceService {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+enum UnsupportedWholeWorkSelection {
+    #[error("ordinary whole-work selection is not implemented")]
+    Ordinary,
+    #[error("managed whole-work selection is not implemented")]
+    Managed,
+}
+
 /// Session-owned execution-placement authority. The runtime exposes only
 /// executor-neutral contracts; candidate generation and policy remain in their
 /// owning executor/acceleration crates.
@@ -969,8 +1032,28 @@ pub trait RuntimePlacementService {
         Err(
             crate::build_runtime_error("whole-work placement is unavailable")
                 .with_identifier("RunMat:Placement:Unavailable")
+                .with_source(UnsupportedWholeWorkSelection::Ordinary)
                 .build(),
         )
+    }
+
+    fn try_select_whole_work(
+        &self,
+        request: runmat_execution::WholeWorkPlacementRequest,
+    ) -> Result<Option<RuntimeWholeWorkSelection>, RuntimeError> {
+        match self.select_whole_work(request) {
+            Ok(selected) => Ok(Some(selected)),
+            Err(error)
+                if std::error::Error::source(&error)
+                    .and_then(|source| source.downcast_ref::<UnsupportedWholeWorkSelection>())
+                    .is_some_and(|source| {
+                        matches!(source, UnsupportedWholeWorkSelection::Ordinary)
+                    }) =>
+            {
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
     }
 
     /// Select already admitted routes borrowed from their owning invocation.
@@ -998,8 +1081,28 @@ pub trait RuntimePlacementService {
         Err(
             crate::build_runtime_error("managed whole-work placement is unavailable")
                 .with_identifier("RunMat:Placement:InsufficientResourceEvidence")
+                .with_source(UnsupportedWholeWorkSelection::Managed)
                 .build(),
         )
+    }
+
+    fn try_select_whole_work_borrowed_managed(
+        &self,
+        request: runmat_execution::WholeWorkPlacementRequestRef<'_>,
+    ) -> Result<Option<RuntimeManagedWholeWorkSelection>, RuntimeError> {
+        match self.select_whole_work_borrowed_managed(request) {
+            Ok(selected) => Ok(Some(selected)),
+            Err(error)
+                if std::error::Error::source(&error)
+                    .and_then(|source| source.downcast_ref::<UnsupportedWholeWorkSelection>())
+                    .is_some_and(|source| {
+                        matches!(source, UnsupportedWholeWorkSelection::Managed)
+                    }) =>
+            {
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
     }
 
     /// A managed selector may retain one finite in-flight observation lease.
@@ -1596,10 +1699,15 @@ pub struct RuntimeServicePorts {
     spmd: Option<Rc<dyn RuntimeSpmdService>>,
     distributed: Option<Rc<dyn RuntimeDistributedService>>,
     collective: Option<Rc<dyn RuntimeCollectiveService>>,
-    timing: Rc<dyn RuntimeTimingService>,
+    timing: RuntimeTimingPort,
     local_tasks: Option<Rc<dyn super::RuntimeLocalTaskService>>,
     source_evaluation: Option<Rc<dyn super::RuntimeSourceEvaluationService>>,
     selected_source_evaluation: Option<runmat_execution::host::VerifiedNativeServiceIssuer>,
+    selected_local: Option<Rc<RuntimeSelectedLocalServices>>,
+    selected_network: Option<selected_network::RuntimeSelectedNetworkService>,
+    selected_ui: Option<selected_external::SelectedHostPort>,
+    selected_callback: Option<selected_external::SelectedCallbackPort>,
+    selected_dynamic: Option<selected_external::SelectedDynamicPort>,
     blocking_cpu: Option<Rc<dyn crate::execution::RuntimeBlockingCpuService>>,
     owned_builtin_work: Option<Rc<dyn crate::execution::RuntimeOwnedBuiltinWorkService>>,
     callable_artifacts: Option<Rc<dyn super::RuntimeCallableArtifactService>>,
@@ -1609,6 +1717,24 @@ pub struct RuntimeServicePorts {
 
 impl Default for RuntimeServicePorts {
     fn default() -> Self {
+        Self::with_initial_timing(RuntimeTimingPort::Hosted(super::timing::platform_service()))
+    }
+}
+
+impl RuntimeServicePorts {
+    /// Selected deterministic construction never instantiates an ambient
+    /// clock, even transiently before the admitted factory is installed.
+    pub(crate) fn selected_unavailable() -> Self {
+        Self::with_initial_timing(RuntimeTimingPort::SelectedUnavailable)
+    }
+
+    /// Create the ambient timing owner only after a verified HostedNative
+    /// Clock selection. Other selected programs never instantiate it.
+    pub(crate) fn selected_with_hosted_clock() -> Self {
+        Self::with_initial_timing(RuntimeTimingPort::Hosted(super::timing::platform_service()))
+    }
+
+    fn with_initial_timing(timing: RuntimeTimingPort) -> Self {
         Self {
             call: None,
             builtin: None,
@@ -1634,10 +1760,15 @@ impl Default for RuntimeServicePorts {
             spmd: None,
             distributed: None,
             collective: None,
-            timing: super::timing::platform_service(),
+            timing,
             local_tasks: None,
             source_evaluation: None,
             selected_source_evaluation: None,
+            selected_local: None,
+            selected_network: None,
+            selected_ui: None,
+            selected_callback: None,
+            selected_dynamic: None,
             #[cfg(not(target_arch = "wasm32"))]
             blocking_cpu: Some(crate::execution::native_default_blocking_cpu_service()),
             #[cfg(target_arch = "wasm32")]
@@ -1689,6 +1820,11 @@ impl std::fmt::Debug for RuntimeServicePorts {
             "selected_source_evaluation",
             &self.selected_source_evaluation.is_some(),
         );
+        debug.field("selected_local", &self.selected_local.is_some());
+        debug.field("selected_network", &self.selected_network.is_some());
+        debug.field("selected_ui", &self.selected_ui.is_some());
+        debug.field("selected_callback", &self.selected_callback.is_some());
+        debug.field("selected_dynamic", &self.selected_dynamic.is_some());
         debug.field("blocking_cpu", &self.blocking_cpu.is_some());
         debug.field("owned_builtin_work", &self.owned_builtin_work.is_some());
         debug.field("callable_artifacts", &self.callable_artifacts.is_some());
@@ -1784,29 +1920,72 @@ impl RuntimeServicePorts {
     }
 
     pub fn with_timing(mut self, service: Rc<dyn RuntimeTimingService>) -> Self {
-        self.timing = service;
+        self.timing = match self.timing {
+            RuntimeTimingPort::Hosted(_) => RuntimeTimingPort::Hosted(service),
+            RuntimeTimingPort::SelectedUnavailable | RuntimeTimingPort::Selected { .. } => {
+                RuntimeTimingPort::SelectedUnavailable
+            }
+        };
         self
     }
 
-    pub fn timing(&self) -> &Rc<dyn RuntimeTimingService> {
-        &self.timing
+    /// Restrict a selected invocation before its exact Clock is installed.
+    /// Generic timing injection cannot remove this restriction.
+    pub fn without_timing(mut self) -> Self {
+        self.timing = RuntimeTimingPort::SelectedUnavailable;
+        self
     }
-    port_accessors!(
-        with_call,
-        call,
-        require_call,
-        call,
-        RuntimeCallService,
-        Call
-    );
-    port_accessors!(
-        with_builtin,
-        builtin,
-        require_builtin,
-        builtin,
-        RuntimeBuiltinService,
-        Builtin
-    );
+
+    pub fn timing(&self) -> Result<&Rc<dyn RuntimeTimingService>, crate::RuntimeError> {
+        match &self.timing {
+            RuntimeTimingPort::Hosted(service) | RuntimeTimingPort::Selected { service, .. } => {
+                Ok(service)
+            }
+            RuntimeTimingPort::SelectedUnavailable => Err(crate::build_runtime_error(
+                "Clock is not admitted for this selected invocation",
+            )
+            .with_identifier("RunMat:Clock:ServiceUnavailable")
+            .build()),
+        }
+    }
+    pub fn with_call(mut self, service: Rc<dyn RuntimeCallService>) -> Self {
+        self.call = Some(service);
+        self
+    }
+
+    pub fn call(&self) -> Option<&Rc<dyn RuntimeCallService>> {
+        self.selected_callback
+            .as_ref()
+            .map(|selected| &selected.call)
+            .or(self.call.as_ref())
+    }
+
+    pub fn require_call(
+        &self,
+        operation: impl Into<String>,
+    ) -> Result<&Rc<dyn RuntimeCallService>, RuntimeCapabilityError> {
+        self.call()
+            .ok_or_else(|| RuntimeCapabilityError::new(RuntimeCapability::Call, operation))
+    }
+    pub fn with_builtin(mut self, service: Rc<dyn RuntimeBuiltinService>) -> Self {
+        self.builtin = Some(service);
+        self
+    }
+
+    pub fn builtin(&self) -> Option<&Rc<dyn RuntimeBuiltinService>> {
+        self.selected_dynamic
+            .as_ref()
+            .map(|selected| &selected.service)
+            .or(self.builtin.as_ref())
+    }
+
+    pub fn require_builtin(
+        &self,
+        operation: impl Into<String>,
+    ) -> Result<&Rc<dyn RuntimeBuiltinService>, RuntimeCapabilityError> {
+        self.builtin()
+            .ok_or_else(|| RuntimeCapabilityError::new(RuntimeCapability::Builtin, operation))
+    }
     port_accessors!(
         with_workspace,
         workspace,
@@ -1913,6 +2092,10 @@ impl RuntimeServicePorts {
     pub fn without_graphics_presentation(mut self) -> Self {
         self.graphics_presentation = None;
         self.graphics_callbacks = None;
+        if let Some(selected) = &mut self.selected_ui {
+            selected.graphics = None;
+            selected.callbacks = None;
+        }
         self
     }
 
@@ -1934,7 +2117,11 @@ impl RuntimeServicePorts {
     }
 
     pub fn graphics_callback_queue(&self) -> Option<&super::WeakRuntimeGraphicsCallbackQueue> {
-        self.graphics_callbacks.as_ref()
+        if let Some(selected) = &self.selected_ui {
+            selected.callbacks.as_ref()
+        } else {
+            self.graphics_callbacks.as_ref()
+        }
     }
     port_accessors!(
         with_object,
@@ -1944,30 +2131,74 @@ impl RuntimeServicePorts {
         RuntimeObjectService,
         Object
     );
-    port_accessors!(
-        with_host,
-        host,
-        require_host,
-        host,
-        RuntimeHostService,
-        Host
-    );
-    port_accessors!(
-        with_graphics_presentation,
-        graphics_presentation,
-        require_graphics_presentation,
-        graphics_presentation,
-        RuntimeGraphicsPresentationService,
-        GraphicsPresentation
-    );
-    port_accessors!(
-        with_http,
-        http,
-        require_http,
-        http,
-        RuntimeHttpService,
-        Http
-    );
+    pub fn with_host(mut self, service: Rc<dyn RuntimeHostService>) -> Self {
+        self.host = Some(service);
+        self
+    }
+
+    pub fn host(&self) -> Option<&Rc<dyn RuntimeHostService>> {
+        self.selected_ui
+            .as_ref()
+            .map(|selected| &selected.host)
+            .or(self.host.as_ref())
+    }
+
+    pub fn require_host(
+        &self,
+        operation: impl Into<String>,
+    ) -> Result<&Rc<dyn RuntimeHostService>, RuntimeCapabilityError> {
+        self.host()
+            .ok_or_else(|| RuntimeCapabilityError::new(RuntimeCapability::Host, operation))
+    }
+
+    pub fn with_graphics_presentation(
+        mut self,
+        service: Rc<dyn RuntimeGraphicsPresentationService>,
+    ) -> Self {
+        self.graphics_presentation = Some(service);
+        self
+    }
+
+    pub fn graphics_presentation(&self) -> Option<&Rc<dyn RuntimeGraphicsPresentationService>> {
+        if let Some(selected) = &self.selected_ui {
+            selected.graphics.as_ref()
+        } else {
+            self.graphics_presentation.as_ref()
+        }
+    }
+
+    pub fn require_graphics_presentation(
+        &self,
+        operation: impl Into<String>,
+    ) -> Result<&Rc<dyn RuntimeGraphicsPresentationService>, RuntimeCapabilityError> {
+        self.graphics_presentation().ok_or_else(|| {
+            RuntimeCapabilityError::new(RuntimeCapability::GraphicsPresentation, operation)
+        })
+    }
+    pub fn with_http(mut self, service: Rc<dyn RuntimeHttpService>) -> Self {
+        self.http = Some(service);
+        self
+    }
+
+    pub fn http(&self) -> Option<&Rc<dyn RuntimeHttpService>> {
+        self.http.as_ref()
+    }
+
+    pub fn require_http(
+        &self,
+        operation: impl Into<String>,
+    ) -> Result<&Rc<dyn RuntimeHttpService>, RuntimeCapabilityError> {
+        let operation = operation.into();
+        if !self.selected_http_matches() {
+            return Err(RuntimeCapabilityError::new(
+                RuntimeCapability::Http,
+                operation,
+            ));
+        }
+        self.http
+            .as_ref()
+            .ok_or_else(|| RuntimeCapabilityError::new(RuntimeCapability::Http, operation))
+    }
     #[cfg(not(target_arch = "wasm32"))]
     port_accessors!(
         with_process,
@@ -1993,7 +2224,30 @@ impl RuntimeServicePorts {
         RuntimeUserPathService,
         UserPath
     );
-    port_accessors!(with_tcp, tcp, require_tcp, tcp, RuntimeTcpService, Tcp);
+    pub fn with_tcp(mut self, service: Rc<dyn RuntimeTcpService>) -> Self {
+        self.tcp = Some(service);
+        self
+    }
+
+    pub fn tcp(&self) -> Option<&Rc<dyn RuntimeTcpService>> {
+        self.tcp.as_ref()
+    }
+
+    pub fn require_tcp(
+        &self,
+        operation: impl Into<String>,
+    ) -> Result<&Rc<dyn RuntimeTcpService>, RuntimeCapabilityError> {
+        let operation = operation.into();
+        if !self.selected_tcp_matches() {
+            return Err(RuntimeCapabilityError::new(
+                RuntimeCapability::Tcp,
+                operation,
+            ));
+        }
+        self.tcp
+            .as_ref()
+            .ok_or_else(|| RuntimeCapabilityError::new(RuntimeCapability::Tcp, operation))
+    }
     port_accessors!(
         with_error,
         error,
@@ -2104,6 +2358,82 @@ impl RuntimeServicePorts {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn optional_whole_work_defaults_are_typed_and_do_not_hide_spoofed_errors() {
+        use runmat_execution::*;
+        struct DefaultSelector;
+        struct SpoofSelector;
+        macro_rules! graph_only {
+            () => {
+                fn plan(&self, _: PlacementPlanRequest) -> Result<PlacementDecision, RuntimeError> {
+                    panic!("not part of optional whole-work selection")
+                }
+                fn observe(&self, _: PlacementFeedback) -> Result<(), RuntimeError> {
+                    Ok(())
+                }
+                fn invalidate(&self, _: PlacementInvalidation) {}
+            };
+        }
+        impl RuntimePlacementService for DefaultSelector {
+            graph_only!();
+        }
+        impl RuntimePlacementService for SpoofSelector {
+            graph_only!();
+            fn select_whole_work(
+                &self,
+                _: WholeWorkPlacementRequest,
+            ) -> Result<RuntimeWholeWorkSelection, RuntimeError> {
+                Err(crate::build_runtime_error("custom ordinary failure")
+                    .with_identifier("RunMat:Placement:Unavailable")
+                    .build())
+            }
+            fn select_whole_work_borrowed_managed(
+                &self,
+                _: WholeWorkPlacementRequestRef<'_>,
+            ) -> Result<RuntimeManagedWholeWorkSelection, RuntimeError> {
+                Err(crate::build_runtime_error("custom managed failure")
+                    .with_identifier("RunMat:Placement:InsufficientResourceEvidence")
+                    .build())
+            }
+        }
+        let digest = Digest::sha256(b"optional-whole-work-default-fixture");
+        let request = WholeWorkPlacementRequest {
+            signature: PlacementSignature {
+                region: None,
+                operation: "optional.default.fixture".into(),
+                runtime_facts: digest,
+                provider_provenance: None,
+                graph_output_authority: None,
+                revision: PlacementRevision {
+                    program: None,
+                    catalog: digest,
+                    compiler: digest,
+                    authority: PlacementExecutionAuthorityRevision::HostService(digest),
+                    policy: digest,
+                },
+            },
+            constraint: WholeWorkConstraint::AnyLegal,
+            candidates: Vec::new(),
+            resources: PlacementResourceSnapshot::default(),
+            deterministic: true,
+            require_transactional_results: true,
+        };
+        assert!(DefaultSelector
+            .try_select_whole_work(request.clone())
+            .unwrap()
+            .is_none());
+        assert!(DefaultSelector
+            .try_select_whole_work_borrowed_managed(request.as_ref())
+            .unwrap()
+            .is_none());
+        assert!(
+            matches!(SpoofSelector.try_select_whole_work(request.clone()), Err(error) if error.message == "custom ordinary failure")
+        );
+        assert!(
+            matches!(SpoofSelector.try_select_whole_work_borrowed_managed(request.as_ref()), Err(error) if error.message == "custom managed failure")
+        );
+    }
 
     #[derive(Default)]
     struct ValueOnlyWorkspace {

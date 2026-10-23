@@ -86,7 +86,7 @@ fn uniform_collector_rejects_different_noninteger_classes() {
     for second in [
         Value::Num(1.0),
         Value::Tensor(Tensor::from_f32(vec![1.0], vec![1, 1]).expect("single")),
-        Value::CharArray(CharArray::new(vec!['1'], 1, 1).expect("char")),
+        Value::CharArray(CharArray::from_unicode_scalars(vec!['1'], 1, 1).expect("char")),
     ] {
         let mut collector = UniformCollector::Pending;
         collector.push(&Value::Bool(true)).expect("logical");

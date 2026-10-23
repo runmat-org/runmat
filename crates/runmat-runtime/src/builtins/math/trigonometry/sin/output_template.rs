@@ -13,7 +13,7 @@ pub(super) fn parse_output_template(
     match args.len() {
         0 => Ok(OutputTemplate::Default),
         1 => {
-            if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
+            if matches!(keyword_of(&args[0])?.as_deref(), Some("like")) {
                 Err(sin_error_with_detail(
                     &SIN_ERROR_INVALID_OPTION,
                     "expected prototype after 'like'",
@@ -26,7 +26,7 @@ pub(super) fn parse_output_template(
             }
         }
         2 => {
-            if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
+            if matches!(keyword_of(&args[0])?.as_deref(), Some("like")) {
                 Ok(OutputTemplate::Like(args[1].clone()))
             } else {
                 Err(sin_error_with_detail(

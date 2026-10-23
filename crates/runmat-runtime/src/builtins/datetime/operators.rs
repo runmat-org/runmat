@@ -1,17 +1,18 @@
-use super::capabilities::{BUILTIN_NAME, DATETIME_CLASS, FORMAT_FIELD};
+use super::capabilities::{BUILTIN_NAME, FORMAT_FIELD};
 use super::*;
 use crate::execution::RootedValue;
 
 #[runmat_macros::runtime_builtin(
     name = "datetick",
-    builtin_path = "crate::builtins::datetime",
-    category = "plotting",
-    summary = "Accept MATLAB date-axis formatting calls for compatibility.",
-    keywords = "datetick,plot,date axis"
+    binding_variant = "default",
+    context = true,
+    builtin_path = "crate::builtins::datetime"
 )]
-pub(super) async fn datetick_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let _args = gather_args(&args).await?;
-    Ok(Value::Num(0.0))
+pub(super) async fn datetick_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    remaining::tick(runtime.as_ref(), args).await
 }
 
 #[runmat_macros::runtime_builtin(
@@ -54,7 +55,7 @@ pub(super) async fn datetime_read_step(
             };
             let field = scalar_text(&payload, "field selector")?;
             match field.as_str() {
-                FORMAT_FIELD => RootedValue::new(Value::string(format_for_object(&object)))
+                FORMAT_FIELD => RootedValue::new(Value::string(format_for_object(&object)?))
                     .map_err(|error| error.into_runtime_error()),
                 _ => Err(datetime_error(format!(
                     "datetime.subsref: unsupported datetime property '{field}'"
@@ -149,182 +150,148 @@ pub(super) async fn datetime_write_step(
     RootedValue::in_optional_context(value, runtime)
 }
 
-pub(super) fn datetime_binary_serials(
-    lhs: Value,
-    rhs: Value,
-    context: &str,
-) -> BuiltinResult<(Tensor, Tensor, Vec<usize>, String)> {
-    let lhs_serials = serials_from_datetime_value(&lhs)?;
-    let rhs_serials = match &rhs {
-        Value::Object(obj) if obj.is_class(DATETIME_CLASS) => serial_tensor_for_object(obj)?,
-        _ => serial_tensor_from_value(rhs, context)?,
-    };
-    let (left, right, shape) =
-        tensor::binary_numeric_tensors(&lhs_serials, &rhs_serials, context, BUILTIN_NAME)?;
-    let left_tensor = Tensor::new(left, shape.clone())
-        .map_err(|err| datetime_error(format!("{context}: {err}")))?;
-    let right_tensor = Tensor::new(right, shape.clone())
-        .map_err(|err| datetime_error(format!("{context}: {err}")))?;
-    Ok((
-        left_tensor,
-        right_tensor,
-        shape,
-        datetime_format_from_value(&lhs),
-    ))
-}
+#[path = "operators/binary.rs"]
+mod binary;
 
-pub(super) fn compare_datetime(
-    lhs: Value,
-    rhs: Value,
-    op: &str,
-    cmp: impl Fn(f64, f64) -> bool,
-) -> BuiltinResult<Value> {
-    let (left, right, shape, _) = datetime_binary_serials(lhs, rhs, op)?;
-    let left_values = tensor::tensor_values_f64_cow(&left);
-    let right_values = tensor::tensor_values_f64_cow(&right);
-    let out = left_values
-        .iter()
-        .zip(right_values.iter())
-        .map(|(a, b)| if cmp(*a, *b) { 1.0 } else { 0.0 })
-        .collect::<Vec<_>>();
-    tensor_or_scalar(out, shape)
+// Shared stored-component comparison: exact infinities compare equal, NaN
+// never does, and finite components retain the existing calendar tolerance.
+fn calendar_component_equal(left: f64, right: f64) -> bool {
+    left == right || (left - right).abs() <= 1e-12
 }
-
 #[runmat_macros::runtime_builtin(
     name = "datetime.eq",
-    descriptor(crate::builtins::datetime::DATETIME_BINARY_DESCRIPTOR),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::datetime"
 )]
-pub(super) async fn datetime_eq(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    compare_datetime(lhs, rhs, "eq", |a, b| (a - b).abs() <= 1e-12)
+pub(super) async fn datetime_eq(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    binary::execute(
+        runtime.as_ref(),
+        args.view(),
+        runmat_builtins::DatetimeBinaryOperation::Eq,
+    )
 }
 
 #[runmat_macros::runtime_builtin(
     name = "datetime.ne",
-    descriptor(crate::builtins::datetime::DATETIME_BINARY_DESCRIPTOR),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::datetime"
 )]
-pub(super) async fn datetime_ne(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    compare_datetime(lhs, rhs, "ne", |a, b| (a - b).abs() > 1e-12)
+pub(super) async fn datetime_ne(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    binary::execute(
+        runtime.as_ref(),
+        args.view(),
+        runmat_builtins::DatetimeBinaryOperation::Ne,
+    )
 }
 
 #[runmat_macros::runtime_builtin(
     name = "datetime.lt",
-    descriptor(crate::builtins::datetime::DATETIME_BINARY_DESCRIPTOR),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::datetime"
 )]
-pub(super) async fn datetime_lt(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    compare_datetime(lhs, rhs, "lt", |a, b| a < b)
+pub(super) async fn datetime_lt(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    binary::execute(
+        runtime.as_ref(),
+        args.view(),
+        runmat_builtins::DatetimeBinaryOperation::Lt,
+    )
 }
 
 #[runmat_macros::runtime_builtin(
     name = "datetime.le",
-    descriptor(crate::builtins::datetime::DATETIME_BINARY_DESCRIPTOR),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::datetime"
 )]
-pub(super) async fn datetime_le(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    compare_datetime(lhs, rhs, "le", |a, b| a <= b)
+pub(super) async fn datetime_le(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    binary::execute(
+        runtime.as_ref(),
+        args.view(),
+        runmat_builtins::DatetimeBinaryOperation::Le,
+    )
 }
 
 #[runmat_macros::runtime_builtin(
     name = "datetime.gt",
-    descriptor(crate::builtins::datetime::DATETIME_BINARY_DESCRIPTOR),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::datetime"
 )]
-pub(super) async fn datetime_gt(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    compare_datetime(lhs, rhs, "gt", |a, b| a > b)
+pub(super) async fn datetime_gt(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    binary::execute(
+        runtime.as_ref(),
+        args.view(),
+        runmat_builtins::DatetimeBinaryOperation::Gt,
+    )
 }
 
 #[runmat_macros::runtime_builtin(
     name = "datetime.ge",
-    descriptor(crate::builtins::datetime::DATETIME_BINARY_DESCRIPTOR),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::datetime"
 )]
-pub(super) async fn datetime_ge(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    compare_datetime(lhs, rhs, "ge", |a, b| a >= b)
+pub(super) async fn datetime_ge(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    binary::execute(
+        runtime.as_ref(),
+        args.view(),
+        runmat_builtins::DatetimeBinaryOperation::Ge,
+    )
 }
 
 #[runmat_macros::runtime_builtin(
     name = "datetime.plus",
-    descriptor(crate::builtins::datetime::DATETIME_BINARY_DESCRIPTOR),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::datetime"
 )]
-pub(super) async fn datetime_plus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let lhs_serials = serials_from_datetime_value(&lhs)?;
-    if is_calendar_duration_object(&rhs) {
-        let (months, days) = calendar_duration_tensors_from_value(&rhs)?;
-        let (serials, shape) =
-            apply_calendar_duration_to_serials(&lhs_serials, &months, &days, 1.0, "plus")?;
-        return datetime_object_from_serials(
-            None,
-            serials,
-            shape,
-            datetime_format_from_value(&lhs),
-        );
-    }
-    let rhs_numeric = if crate::builtins::duration::is_duration_object(&rhs) {
-        crate::builtins::duration::duration_tensor_from_duration_value(&rhs)?
-    } else {
-        serial_tensor_from_value(rhs, "plus")?
-    };
-    let (left, right, shape) =
-        tensor::binary_numeric_tensors(&lhs_serials, &rhs_numeric, "plus", BUILTIN_NAME)?;
-    let serials = left
-        .iter()
-        .zip(right.iter())
-        .map(|(a, b)| a + b)
-        .collect::<Vec<_>>();
-    datetime_object_from_serials(None, serials, shape, datetime_format_from_value(&lhs))
+pub(super) async fn datetime_plus(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    binary::execute(
+        runtime.as_ref(),
+        args.view(),
+        runmat_builtins::DatetimeBinaryOperation::Plus,
+    )
 }
 
 #[runmat_macros::runtime_builtin(
     name = "datetime.minus",
-    descriptor(crate::builtins::datetime::DATETIME_BINARY_DESCRIPTOR),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::datetime"
 )]
-pub(super) async fn datetime_minus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let lhs_serials = serials_from_datetime_value(&lhs)?;
-    match &rhs {
-        _ if is_calendar_duration_object(&rhs) => {
-            let (months, days) = calendar_duration_tensors_from_value(&rhs)?;
-            let (serials, shape) =
-                apply_calendar_duration_to_serials(&lhs_serials, &months, &days, -1.0, "minus")?;
-            datetime_object_from_serials(None, serials, shape, datetime_format_from_value(&lhs))
-        }
-        _ if crate::builtins::duration::is_duration_object(&rhs) => {
-            let rhs_days = crate::builtins::duration::duration_tensor_from_duration_value(&rhs)?;
-            let (left, right, shape) =
-                tensor::binary_numeric_tensors(&lhs_serials, &rhs_days, "minus", BUILTIN_NAME)?;
-            let serials = left
-                .iter()
-                .zip(right.iter())
-                .map(|(a, b)| a - b)
-                .collect::<Vec<_>>();
-            datetime_object_from_serials(None, serials, shape, datetime_format_from_value(&lhs))
-        }
-        Value::Object(obj) if obj.is_class(DATETIME_CLASS) => {
-            let rhs_serials = serial_tensor_for_object(obj)?;
-            let (left, right, shape) =
-                tensor::binary_numeric_tensors(&lhs_serials, &rhs_serials, "minus", BUILTIN_NAME)?;
-            let deltas = left
-                .iter()
-                .zip(right.iter())
-                .map(|(a, b)| a - b)
-                .collect::<Vec<_>>();
-            tensor_or_scalar(deltas, shape)
-        }
-        _ => {
-            let rhs_numeric = serial_tensor_from_value(rhs, "minus")?;
-            let (left, right, shape) =
-                tensor::binary_numeric_tensors(&lhs_serials, &rhs_numeric, "minus", BUILTIN_NAME)?;
-            let serials = left
-                .iter()
-                .zip(right.iter())
-                .map(|(a, b)| a - b)
-                .collect::<Vec<_>>();
-            datetime_object_from_serials(None, serials, shape, datetime_format_from_value(&lhs))
-        }
-    }
+pub(super) async fn datetime_minus(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    binary::execute(
+        runtime.as_ref(),
+        args.view(),
+        runmat_builtins::DatetimeBinaryOperation::Minus,
+    )
 }
 
 pub(super) fn combine_calendar_durations(
@@ -366,87 +333,73 @@ pub(super) fn combine_calendar_durations(
     calendar_duration_object_from_components(runtime, months, days, shape)
 }
 
+#[path = "operators/remaining.rs"]
+pub(super) mod remaining;
+
 #[runmat_macros::runtime_builtin(
     name = "calendarDuration.plus",
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::datetime"
 )]
-pub(super) async fn calendar_duration_plus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    if is_datetime_object(&rhs) {
-        let (months, days) = calendar_duration_tensors_from_value(&lhs)?;
-        let rhs_serials = serials_from_datetime_value(&rhs)?;
-        let (serials, shape) =
-            apply_calendar_duration_to_serials(&rhs_serials, &months, &days, 1.0, "plus")?;
-        return datetime_object_from_serials(
-            None,
-            serials,
-            shape,
-            datetime_format_from_value(&rhs),
-        );
-    }
-    combine_calendar_durations(None, &lhs, &rhs, 1.0, "plus")
+pub(super) async fn calendar_duration_plus(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
+    remaining::calendar(
+        runtime.as_ref(),
+        args.view(),
+        runmat_builtins::CalendarResidualOperation::Plus,
+    )
 }
 
 #[runmat_macros::runtime_builtin(
     name = "calendarDuration.minus",
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::datetime"
 )]
-pub(super) async fn calendar_duration_minus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    combine_calendar_durations(None, &lhs, &rhs, -1.0, "minus")
+pub(super) async fn calendar_duration_minus(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
+    remaining::calendar(
+        runtime.as_ref(),
+        args.view(),
+        runmat_builtins::CalendarResidualOperation::Minus,
+    )
 }
 
 #[runmat_macros::runtime_builtin(
     name = "calendarDuration.eq",
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::datetime"
 )]
-pub(super) async fn calendar_duration_eq(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let (lhs_months, lhs_days) = calendar_duration_tensors_from_value(&lhs)?;
-    let (rhs_months, rhs_days) = calendar_duration_tensors_from_value(&rhs)?;
-    let (left_months, right_months, shape) =
-        tensor::binary_numeric_tensors(&lhs_months, &rhs_months, "eq", BUILTIN_NAME)?;
-    let (left_days, right_days, day_shape) =
-        tensor::binary_numeric_tensors(&lhs_days, &rhs_days, "eq", BUILTIN_NAME)?;
-    if day_shape != shape {
-        return Err(datetime_error(
-            "eq: calendarDuration operands must have matching component sizes",
-        ));
-    }
-    let out = left_months
-        .iter()
-        .zip(right_months.iter())
-        .zip(left_days.iter().zip(right_days.iter()))
-        .map(|((lm, rm), (ld, rd))| {
-            if (lm - rm).abs() <= 1e-12 && (ld - rd).abs() <= 1e-12 {
-                1.0
-            } else {
-                0.0
-            }
-        })
-        .collect::<Vec<_>>();
-    tensor_or_scalar(out, shape)
+pub(super) async fn calendar_duration_eq(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
+    remaining::calendar(
+        runtime.as_ref(),
+        args.view(),
+        runmat_builtins::CalendarResidualOperation::Eq,
+    )
 }
 
 #[runmat_macros::runtime_builtin(
     name = "calendarDuration.ne",
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::datetime"
 )]
-pub(super) async fn calendar_duration_ne(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
-    let eq = calendar_duration_eq(lhs, rhs).await?;
-    match eq {
-        Value::Num(value) => Ok(Value::Num(if value == 0.0 { 1.0 } else { 0.0 })),
-        Value::Tensor(tensor) => {
-            let shape = tensor.shape().to_vec();
-            let values = tensor::tensor_into_values_f64(tensor);
-            Ok(Value::Tensor(
-                Tensor::new(
-                    values
-                        .into_iter()
-                        .map(|value| if value == 0.0 { 1.0 } else { 0.0 })
-                        .collect(),
-                    shape,
-                )
-                .map_err(|err| datetime_error(format!("ne: {err}")))?,
-            ))
-        }
-        other => Ok(other),
-    }
+pub(super) async fn calendar_duration_ne(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<crate::execution::RootedValue> {
+    remaining::calendar(
+        runtime.as_ref(),
+        args.view(),
+        runmat_builtins::CalendarResidualOperation::Ne,
+    )
 }

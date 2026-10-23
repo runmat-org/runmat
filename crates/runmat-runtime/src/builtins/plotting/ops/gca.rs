@@ -57,7 +57,9 @@ fn gca_with_runtime(
     }
 
     if rest.len() == 1 {
-        if let Some(mode) = value_as_string(&rest[0]) {
+        if let Some(mode) = value_as_string(&rest[0]).map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source("gca", source.to_string(), source)
+        })? {
             if mode.trim().eq_ignore_ascii_case("struct") {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &GCA_STRUCT_OUTPUT_EXTENSION,

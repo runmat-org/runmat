@@ -67,47 +67,23 @@ fn native_compilation_digest_is_stable_and_tracks_semantic_binding_layout() {
 fn native_compilation_digest_tracks_exact_retained_vm_capture() {
     runmat_gc::gc_test_context(|| {
         let mut session = RunMatSession::with_options(false, false).unwrap();
-        let original = block_on(session.compile_executable_unit(
+        let source = |revision, value| {
             ExecutableSource::new(
-                "native-capture-digest@1",
+                revision,
                 "capture.m",
-                "result = helper();\nfunction result = helper()\nresult = Inf;\nend",
-            ),
-            None,
-        ))
-        .unwrap();
-        let mut bytecode = original.bytecode().clone();
-        let mut replaced = false;
-        for function in bytecode.function_registry.functions.values_mut() {
-            for instruction in &mut function.instructions {
-                if let runmat_vm::Instr::LoadConst(value) = instruction {
-                    if *value == f64::INFINITY {
-                        *value = f64::NAN;
-                        replaced = true;
-                    }
-                }
-            }
-        }
-        assert!(replaced, "fixture has a retained nonfinite constant");
-        let changed = crate::ExecutableUnit::new(
-            original.source().clone(),
-            original.revision().clone(),
-            original.source_map().clone(),
-            original.mir().clone(),
-            original.analysis().clone(),
-            bytecode,
+                format!("result = helper();\nfunction result = helper()\nresult = {value};\nend"),
+            )
+        };
+        let original = block_on(
+            session.compile_executable_unit(source("native-capture-digest@inf", "Inf"), None),
         )
         .unwrap();
-        // Deliberately vary only the retained VM payload, leaving the MIR,
-        // analysis and semantic binding names unchanged.
-        assert_eq!(
-            serde_json::to_value(original.mir()).unwrap(),
-            serde_json::to_value(changed.mir()).unwrap()
-        );
-        assert_eq!(
-            serde_json::to_value(original.analysis()).unwrap(),
-            serde_json::to_value(changed.analysis()).unwrap()
-        );
+        let changed = block_on(
+            session.compile_executable_unit(source("native-capture-digest@nan", "NaN"), None),
+        )
+        .unwrap();
+        // Each retained VM payload must come from its own sealed authored
+        // program. Editing bytecode after MIR projection is not admissible.
         assert_eq!(original.binding_names(), changed.binding_names());
         assert_ne!(
             runmat_vm::encode_interpreter_program_v2(original.functions()).unwrap(),

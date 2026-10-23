@@ -1,13 +1,14 @@
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { inputFile } from "./manifest.mjs";
+import { inputFile, safePath } from "./manifest.mjs";
+import { readDocumentationExport } from "../development/builtin-migration/documentation-export.mjs";
 export const readJson = (file) => JSON.parse(readFileSync(file, "utf8"));
 export function copyInput(source, output, sourcePath, outputPath = sourcePath) {
     const target = join(output, outputPath);
     mkdirSync(dirname(target), { recursive: true });
     copyFileSync(inputFile(source, sourcePath), target);
 }
-export function collectDocuments(source, output, validate) {
+export function collectDocuments(source, output, validate, builtinDocumentationPath, productionDocumentation) {
     const catalog = readJson(join(source, "docs/catalog.json"));
     validate("document", catalog);
     const ids = new Set();
@@ -18,25 +19,19 @@ export function collectDocuments(source, output, validate) {
         copyInput(source, output, document.path, "documents/" + document.path);
     }
     writeFileSync(join(output, "documents.json"), JSON.stringify(catalog, null, 2) + "\n");
-}
-/** Builtin reference pages come from the one builtin documentation producer
- * (`export_builtin_documentation`), which merges catalog-owned documentation with the
- * remaining legacy sidecars. Copying `docs/builtins/reference` alone would drop every
- * builtin whose documentation has moved into the catalog. */
-export function collectBuiltinReferences(documentationPath, output) {
-    const exported = readJson(documentationPath);
-    if (exported.schema_version !== 2 || !Array.isArray(exported.builtins))
-        throw new Error("Unsupported builtin documentation export schema");
+    const exported = productionDocumentation ?? readDocumentationExport({ repository: source, exportPath: builtinDocumentationPath });
     const names = new Set();
-    mkdirSync(join(output, "builtins/reference"), { recursive: true });
-    for (const document of exported.builtins) {
+    const documents = exported.builtins.map(document => {
         const name = document.module_stem;
-        if (typeof name !== "string" || !/^[A-Za-z0-9_.]+$/.test(name))
-            throw new Error(`Invalid builtin documentation name: ${name}`);
-        if (names.has(name.toLowerCase()))
-            throw new Error(`Duplicate builtin documentation: ${name}`);
+        if (typeof name !== "string" || name.includes("/") || name.includes("\\") || /[\x00-\x1f]/u.test(name))
+            throw new Error("Invalid exported builtin document filename");
+        safePath(name);
+        if (names.has(name.toLowerCase())) throw new Error(`Duplicate builtin document filename: ${name}`);
         names.add(name.toLowerCase());
+        return { name, document };
+    }).sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
+    mkdirSync(join(output, "builtins/reference"), { recursive: true });
+    for (const { name, document } of documents) {
         writeFileSync(join(output, "builtins/reference", name + ".json"), JSON.stringify(document, null, 2) + "\n");
     }
-    return names.size;
 }

@@ -78,7 +78,7 @@ pub fn duration_string_array(value: &Value) -> BuiltinResult<Option<StringArray>
         return Ok(None);
     }
     let days = duration_tensor_from_duration_value(value)?;
-    let format = format_for_object(obj);
+    let format = format_for_object(obj)?;
     let day_values = tensor::tensor_values_f64_cow(&days);
     let mut strings = Vec::with_capacity(day_values.len());
     for value in day_values.iter() {
@@ -158,17 +158,17 @@ pub fn duration_char_array(value: &Value) -> BuiltinResult<Option<CharArray>> {
     let width = array
         .data()
         .iter()
-        .map(|text| text.len())
+        .map(|text| text.encode_utf16().count())
         .max()
         .unwrap_or(0);
     let rows = array.data().len();
-    let mut data = vec![' '; rows * width];
+    let mut data = vec![runmat_value::Utf16CodeUnit::from_raw(b' ' as u16); rows * width];
     for (row, text) in array.data().iter().enumerate() {
-        for (col, ch) in text.chars().enumerate() {
-            data[row * width + col] = ch;
+        for (col, unit) in text.encode_utf16().enumerate() {
+            data[row * width + col] = runmat_value::Utf16CodeUnit::from_raw(unit);
         }
     }
-    let out = CharArray::new(data, rows, width)
+    let out = CharArray::from_code_units(data, rows, width)
         .map_err(|err| duration_error(DurationErrorKind::Internal, format!("duration: {err}")))?;
     Ok(Some(out))
 }

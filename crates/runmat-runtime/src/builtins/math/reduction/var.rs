@@ -182,7 +182,7 @@ async fn parse_arguments(
     while idx < args.len() {
         let arg = &args[idx];
 
-        if let Some(keyword) = keyword_of(arg) {
+        if let Some(keyword) = keyword_of(arg)? {
             match DispersionControl::from_var_public_option(&keyword) {
                 Some(DispersionControl::Missing(mode)) => {
                     nan_mode = mode;
@@ -322,7 +322,7 @@ fn parse_normalization_scalar(value: f64) -> BuiltinResult<NormParse> {
 }
 
 async fn parse_axes(value: &Value) -> BuiltinResult<Option<VarAxes>> {
-    if let Some(keyword) = keyword_of(value) {
+    if let Some(keyword) = keyword_of(value)? {
         if matches!(
             DispersionControl::from_var_public_option(&keyword),
             Some(DispersionControl::All)

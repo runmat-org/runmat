@@ -96,7 +96,9 @@ fn aliases_use_one_installed_group_snapshot_and_canonical_text_geometry() {
     let mut values = PreferenceValues::new();
     values.insert(
         "SMTP_Server".into(),
-        Value::CharArray(CharArray::new_with_shape(vec!['x', 'y'], vec![1, 1, 2]).unwrap()),
+        Value::CharArray(
+            CharArray::from_unicode_scalars_with_shape(vec!['x', 'y'], vec![1, 1, 2]).unwrap(),
+        ),
     );
     values.insert(
         "SMTPServer".into(),
@@ -194,7 +196,8 @@ fn preference_read_is_unpolled_effect_free_and_cancellation_suppresses_publicati
 fn invalid_arguments_reject_before_installed_preference_service() {
     let (runtime, calls) = context(Reply::Values(None));
     let paged = Value::CharArray(
-        CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).expect("paged subject"),
+        CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 1, 2])
+            .expect("paged subject"),
     );
     let error = run(sendmail_builtin(
         Some(runtime),

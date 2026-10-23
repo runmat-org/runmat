@@ -26,7 +26,7 @@ pub(crate) fn convert_variadic(
 
 pub(crate) fn string_scalar_to_chars(text: &str) -> CharArray {
     if text.is_empty() || crate::builtins::strings::common::is_missing_string(text) {
-        CharArray::new(Vec::new(), 0, 0).expect("valid empty character array")
+        CharArray::from_code_units(Vec::new(), 0, 0).expect("valid empty character array")
     } else {
         CharArray::new_row(text)
     }

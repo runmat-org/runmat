@@ -12,8 +12,6 @@ mod host_output;
 mod owning_tests;
 
 use crate::build_runtime_error;
-#[cfg(test)]
-use crate::builtins::array::type_resolvers::row_vector_type;
 use crate::builtins::common::random;
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::spec::{
@@ -21,10 +19,6 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-#[cfg(test)]
-use runmat_builtins::ResolveContext;
-#[cfg(test)]
-use runmat_builtins::Type;
 
 const MAX_SAFE_INTEGER: u64 = 1 << 53;
 
@@ -48,17 +42,6 @@ fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message)
         .with_builtin("randperm")
         .build()
-}
-
-#[cfg(test)]
-fn randperm_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    if args.is_empty() {
-        return Type::Unknown;
-    }
-    if args.iter().any(|arg| matches!(arg, Type::String)) {
-        return Type::Unknown;
-    }
-    row_vector_type(ctx)
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::randperm")]
@@ -188,7 +171,7 @@ impl ParsedRandPerm {
         let mut idx = 1;
         while idx < args.len() {
             let arg = args[idx].clone();
-            if let Some(keyword) = keyword_of(&arg) {
+            if let Some(keyword) = keyword_of(&arg)? {
                 match keyword.as_str() {
                     "like" => {
                         crate::compatibility::ensure_builtin_extension_enabled(
@@ -441,16 +424,6 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn randperm_type_is_row_vector() {
-        assert_eq!(
-            randperm_type(&[Type::Num], &ResolveContext::new(Vec::new())),
-            Type::Tensor {
-                shape: Some(vec![Some(1), None])
-            }
-        );
-    }
-
-    #[test]
     fn randperm_size_arguments_read_typed_integer_storage_exactly() {
         let n = Tensor::new_integer(IntegerStorage::U64(vec![5]), vec![1, 1]).expect("n");
         assert_eq!(
@@ -672,6 +645,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn automatic_like_permutation_uses_ordered_cpu_stream() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = random::test_guard();
         random::reset_rng();
         test_support::with_test_provider(|provider| {

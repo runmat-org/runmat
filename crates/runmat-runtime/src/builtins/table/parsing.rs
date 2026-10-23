@@ -3,7 +3,14 @@ use super::*;
 pub(super) fn scalar_text(value: &Value, context: &str) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.to_string()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data().iter().collect()),
+        Value::CharArray(ca) if ca.rows == 1 => runmat_value::decode_utf16_code_units(ca.data())
+            .map_err(|error| {
+                table_error_with_source(
+                    &TABLE_ERROR_INVALID_ARGUMENT,
+                    format!("table: {context} is not valid UTF-16 text: {error}"),
+                    error,
+                )
+            }),
         Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].to_string()),
         _ => Err(invalid_argument(format!(
             "table: {context} must be a string scalar or character vector"
@@ -145,7 +152,16 @@ pub(super) fn option_value_is_empty(value: &Value) -> bool {
 pub(super) fn string_list(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
         Value::String(text) => Ok(vec![text.to_string()]),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(vec![ca.data().iter().collect()]),
+        Value::CharArray(ca) if ca.rows == 1 => {
+            Ok(vec![runmat_value::decode_utf16_code_units(ca.data())
+                .map_err(|error| {
+                    table_error_with_source(
+                        &TABLE_ERROR_INVALID_ARGUMENT,
+                        format!("table string list contains invalid UTF-16 text: {error}"),
+                        error,
+                    )
+                })?])
+        }
         Value::StringArray(array) => Ok(array.data().iter().map(ToString::to_string).collect()),
         Value::Cell(cell) => {
             let mut out = Vec::with_capacity(cell.data().len());

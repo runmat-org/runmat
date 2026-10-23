@@ -1,7 +1,16 @@
 use super::*;
 
 pub(super) fn label_vector(value: Value, name: &str) -> BuiltinResult<LabelVector> {
-    labels_from_value(value, name).map_err(|err| fitclinear_invalid(err.message))
+    labels_from_value(value, name).map_err(|err| {
+        let message = err.message.clone();
+        let mut builder = build_runtime_error(message)
+            .with_builtin(FITCLINEAR_NAME)
+            .with_source(err);
+        if let Some(identifier) = ERROR_FITCLINEAR_INVALID_ARGUMENT.identifier {
+            builder = builder.with_identifier(identifier);
+        }
+        builder.build()
+    })
 }
 
 pub(super) fn labels_from_value(value: Value, name: &str) -> BuiltinResult<LabelVector> {
@@ -41,7 +50,10 @@ pub(super) fn labels_from_value(value: Value, name: &str) -> BuiltinResult<Label
             kind: LabelKind::Text,
         }),
         Value::CharArray(array) => Ok(LabelVector {
-            labels: char_rows(&array).into_iter().map(|text| ClassLabel::Text(text.into())).collect(),
+            labels: char_rows(&array)?
+                .into_iter()
+                .map(|text| ClassLabel::Text(text.into()))
+                .collect(),
             kind: LabelKind::Text,
         }),
         Value::StringArray(array) => {
@@ -58,7 +70,7 @@ pub(super) fn labels_from_value(value: Value, name: &str) -> BuiltinResult<Label
         Value::Cell(cell) => {
             let mut labels = Vec::with_capacity(cell.data().len());
             for item in cell.data().iter() {
-                labels.push(ClassLabel::Text(scalar_text(item).ok_or_else(|| {
+                labels.push(ClassLabel::Text(predict_scalar_text(item)?.ok_or_else(|| {
                     predict_invalid(format!("predict: {name} cell entries must be text"))
                 })?.into()));
             }

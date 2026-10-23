@@ -48,7 +48,7 @@ fn read(path: ObjectSubscriptPath, base: Value) -> crate::execution::RootedValue
 fn brace_path(index: crate::object::indexing::ObjectIndexComponent) -> ObjectSubscriptPath {
     ObjectSubscriptPath::new(vec![ObjectSubscript::braces(
         crate::object::indexing::ObjectIndexSelector::IndexValues {
-            components: vec![index],
+            components: runmat_value::ExactArrayStorage::shared_unbounded(vec![index]),
         },
     )])
     .expect("brace path")
@@ -92,7 +92,9 @@ fn brace_read_and_argument_expansion_keep_distinct_noncell_errors() {
 fn intermediate_brace_read_requires_exactly_one_cell_value() {
     let path = ObjectSubscriptPath::new(vec![
         ObjectSubscript::braces(crate::object::indexing::ObjectIndexSelector::IndexValues {
-            components: vec![crate::object::indexing::ObjectIndexComponent::Colon],
+            components: runmat_value::ExactArrayStorage::shared_unbounded(vec![
+                crate::object::indexing::ObjectIndexComponent::Colon,
+            ]),
         }),
         ObjectSubscript::member("payload"),
     ])
@@ -125,10 +127,13 @@ fn callable_selected_from_cell_uses_parentheses_as_one_invocation() {
     let path = |arguments: Vec<ObjectIndexComponent>| {
         ObjectSubscriptPath::new(vec![
             ObjectSubscript::braces(ObjectIndexSelector::IndexValues {
-                components: vec![Value::Num(1.0).into()],
+                components: runmat_value::ExactArrayStorage::shared_unbounded(vec![Value::Num(
+                    1.0,
+                )
+                .into()]),
             }),
             ObjectSubscript::parentheses(ObjectIndexSelector::IndexValues {
-                components: arguments,
+                components: runmat_value::ExactArrayStorage::shared_unbounded(arguments),
             }),
         ])
         .expect("cell callable path")
@@ -159,16 +164,20 @@ fn callable_selected_from_cell_uses_parentheses_as_one_invocation() {
 
     let indexed_result = ObjectSubscriptPath::new(vec![
         ObjectSubscript::braces(ObjectIndexSelector::IndexValues {
-            components: vec![Value::Num(1.0).into()],
+            components: runmat_value::ExactArrayStorage::shared_unbounded(vec![
+                Value::Num(1.0).into()
+            ]),
         }),
         ObjectSubscript::parentheses(ObjectIndexSelector::IndexValues {
-            components: vec![Value::Tensor(
+            components: runmat_value::ExactArrayStorage::shared_unbounded(vec![Value::Tensor(
                 Tensor::new(vec![1.0, 4.0], vec![1, 2]).expect("input tensor"),
             )
-            .into()],
+            .into()]),
         }),
         ObjectSubscript::parentheses(ObjectIndexSelector::IndexValues {
-            components: vec![Value::Num(2.0).into()],
+            components: runmat_value::ExactArrayStorage::shared_unbounded(vec![
+                Value::Num(2.0).into()
+            ]),
         }),
     ])
     .expect("call result index path");
@@ -233,12 +242,17 @@ fn selected_symbolic_and_foreign_parentheses_keep_their_existing_owners() {
     use runmat_types::{ForeignAffinity, ForeignLifetime, ForeignOwnership, ForeignTypeIdentity};
     use runmat_value::{ForeignRef, ForeignResourceKey, SymbolicExpr};
 
-    let path = |components| {
+    let path = |components: Vec<ObjectIndexComponent>| {
         ObjectSubscriptPath::new(vec![
             ObjectSubscript::braces(ObjectIndexSelector::IndexValues {
-                components: vec![Value::Num(1.0).into()],
+                components: runmat_value::ExactArrayStorage::shared_unbounded(vec![Value::Num(
+                    1.0,
+                )
+                .into()]),
             }),
-            ObjectSubscript::parentheses(ObjectIndexSelector::IndexValues { components }),
+            ObjectSubscript::parentheses(ObjectIndexSelector::IndexValues {
+                components: components.into(),
+            }),
         ])
         .expect("selected item path")
     };
@@ -548,7 +562,9 @@ fn ordinary_adjacent_member_and_parentheses_are_not_method_provenance() {
     let path = ObjectSubscriptPath::new(vec![
         ObjectSubscript::member("samples"),
         ObjectSubscript::parentheses(crate::object::indexing::ObjectIndexSelector::IndexValues {
-            components: vec![Value::Num(1.0).into()],
+            components: runmat_value::ExactArrayStorage::shared_unbounded(vec![
+                Value::Num(1.0).into()
+            ]),
         }),
     ])
     .expect("ordinary path");

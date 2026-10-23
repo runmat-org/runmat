@@ -16,7 +16,11 @@ fn await_stage<F: Future>(started: oneshot::Receiver<()>, call: Pin<&mut F>) {
 }
 
 fn selected_figure() -> f64 {
-    let figure = figure_builtin(vec![]).expect("figure");
+    let figure = figure_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    )
+    .expect("figure");
     block_on(plot_builtin(vec![Value::Tensor(tensor(&[1.0, 4.0, 2.0]))])).expect("plot scene");
     figure
 }

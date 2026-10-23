@@ -202,12 +202,17 @@ mod tests {
 
     #[test]
     fn paged_character_name_rejected_but_trailing_singleton_admitted() {
-        let paged = runmat_value::CharArray::new_with_shape("ab".chars().collect(), vec![1, 1, 2])
-            .expect("paged char");
+        let paged = runmat_value::CharArray::from_unicode_scalars_with_shape(
+            "ab".chars().collect(),
+            vec![1, 1, 2],
+        )
+        .expect("paged char");
         assert!(parse_diary_arg(&Value::CharArray(paged)).is_err());
-        let trailing =
-            runmat_value::CharArray::new_with_shape("log".chars().collect(), vec![1, 3, 1])
-                .expect("trailing singleton");
+        let trailing = runmat_value::CharArray::from_unicode_scalars_with_shape(
+            "log".chars().collect(),
+            vec![1, 3, 1],
+        )
+        .expect("trailing singleton");
         assert_eq!(
             parse_diary_arg(&Value::CharArray(trailing)).expect("supported row"),
             DiaryCommand::Filename("log".into())

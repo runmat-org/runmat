@@ -1,12 +1,12 @@
 use super::*;
 use std::rc::Rc;
 
+mod preparation;
+mod request_scope;
 #[path = "run/selected_class_product.rs"]
 mod selected_class_product;
 #[path = "run/selected_source_owner.rs"]
 mod selected_source_owner;
-mod request_scope;
-mod preparation;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn entrypoint_target_function(
@@ -68,7 +68,7 @@ impl RunMatSession {
         #[cfg(not(target_arch = "wasm32"))]
         self.runtime_context
             .set_native_name_observer(Some(self.mex_runtime.name_observer()));
-        let dynamic_environment = super::dynamic::DynamicFunctionEnvironment {
+        let dynamic_environment = Rc::new(super::dynamic::DynamicFunctionEnvironment {
             compat: self.compat_mode,
             top_level_await_enabled: self.top_level_await_enabled,
             cache: Rc::clone(&self.dynamic_function_cache),
@@ -76,31 +76,38 @@ impl RunMatSession {
             source_evaluator: Rc::clone(&self.source_evaluator),
             #[cfg(not(target_arch = "wasm32"))]
             mex_runtime: std::rc::Rc::clone(&self.mex_runtime),
-        };
+        });
         let class_environment = dynamic_environment.clone();
         let class_resolver: std::rc::Rc<runmat_runtime::context::CurrentClassProductResolver> =
             std::rc::Rc::new(move |runtime, class| {
-                Box::pin(super::dynamic::resolve_current_class_product(
-                    runtime,
-                    class,
-                    class_environment.clone(),
-                ))
+                let environment = Rc::clone(&class_environment);
+                runmat_runtime::context::admit_current_class_product_with(
+                    &runtime.clone(),
+                    move || {
+                        super::dynamic::resolve_current_class_product(runtime, class, environment)
+                    },
+                )
             });
         self.runtime_context
             .set_current_class_product_resolver(Some(class_resolver));
         let loader: std::rc::Rc<runmat_runtime::user_functions::DynamicFunctionLoader> =
             std::rc::Rc::new(
                 move |runtime, name, args, requested_outputs, phase, input_callsite| {
-                    let environment = dynamic_environment.clone();
-                    Box::pin(super::dynamic::load_dynamic_function(
-                        runtime,
-                        name,
-                        args,
-                        requested_outputs,
-                        phase,
-                        input_callsite,
-                        environment,
-                    ))
+                    let environment = Rc::clone(&dynamic_environment);
+                    runmat_runtime::execution::admit_dynamic_function_load_with(
+                        &runtime.clone(),
+                        move || {
+                            super::dynamic::load_dynamic_function(
+                                runtime,
+                                name,
+                                args,
+                                requested_outputs,
+                                phase,
+                                input_callsite,
+                                environment,
+                            )
+                        },
+                    )
                 },
             );
         self.runtime_context
@@ -114,8 +121,10 @@ impl RunMatSession {
                 let dynamic_function_cache = Rc::clone(&dynamic_function_cache);
                 #[cfg(not(target_arch = "wasm32"))]
                 let mex_runtime = std::rc::Rc::clone(&mex_runtime);
-                Box::pin(async move {
-                    if !matches!(
+                runmat_runtime::execution::admit_domain_continuation_with(
+                    &runtime.clone(),
+                    move || async move {
+                        if !matches!(
                         request,
                         runmat_runtime::user_functions::DynamicFunctionClearRequest::NativeExtensions
                     ) {
@@ -131,16 +140,16 @@ impl RunMatSession {
                             runmat_runtime::user_functions::DynamicFunctionClearRequest::NativeExtensions => {}
                         }
                     }
-                    #[cfg(not(target_arch = "wasm32"))]
-                    mex_runtime
-                        .clear_gracefully(&request, runtime.clone())
-                        .await?;
-                    // A successful typed function clear invalidates its
-                    // selected session's persistent bindings. Do this after
-                    // fallible module retirement so a failed clear cannot
-                    // erase live function state.
-                    let authority = runtime.session_variable_authority();
-                    match &request {
+                        #[cfg(not(target_arch = "wasm32"))]
+                        mex_runtime
+                            .clear_gracefully(&request, runtime.clone())
+                            .await?;
+                        // A successful typed function clear invalidates its
+                        // selected session's persistent bindings. Do this after
+                        // fallible module retirement so a failed clear cannot
+                        // erase live function state.
+                        let authority = runtime.session_variable_authority();
+                        match &request {
                         runmat_runtime::user_functions::DynamicFunctionClearRequest::All => {
                             authority.clear_all_persistents()?;
                         }
@@ -149,8 +158,9 @@ impl RunMatSession {
                         }
                         runmat_runtime::user_functions::DynamicFunctionClearRequest::NativeExtensions => {}
                     }
-                    Ok(())
-                })
+                        Ok(())
+                    },
+                )
             });
         self.runtime_context
             .set_dynamic_function_clearer(Some(clearer));
@@ -159,30 +169,33 @@ impl RunMatSession {
         let refresher: std::rc::Rc<runmat_runtime::user_functions::DynamicFunctionRefresher> =
             std::rc::Rc::new(move |runtime, _request| {
                 let cache = Rc::clone(&refresh_cache);
-                Box::pin(async move {
-                    // This refresh is one invocation-owned cache mutation.
-                    // Yield/cancel before changing either revision or entries;
-                    // the two mutations then form one short synchronous step.
-                    runtime
-                        .cpu_cooperation()
-                        .checkpoint(1)
-                        .await
-                        .map_err(|source| source.into_runtime_error())?;
-                    // RunMat has one live source cache, not a separate persisted
-                    // matlabroot/toolbox cache. All four public requests refresh
-                    // its lookup revision and compiled source entries; none
-                    // unload a MEX module or clear workspace values.
-                    if let Some(path) = runtime.search_path() {
-                        path.refresh_generation().map_err(|source| {
-                            build_runtime_error(format!("rehash: {source}"))
-                                .with_builtin("rehash")
-                                .with_source(source)
-                                .build()
-                        })?;
-                    }
-                    cache.clear();
-                    Ok(())
-                })
+                runmat_runtime::execution::admit_domain_continuation_with(
+                    &runtime.clone(),
+                    move || async move {
+                        // This refresh is one invocation-owned cache mutation.
+                        // Yield/cancel before changing either revision or entries;
+                        // the two mutations then form one short synchronous step.
+                        runtime
+                            .cpu_cooperation()
+                            .checkpoint(1)
+                            .await
+                            .map_err(|source| source.into_runtime_error())?;
+                        // RunMat has one live source cache, not a separate persisted
+                        // matlabroot/toolbox cache. All four public requests refresh
+                        // its lookup revision and compiled source entries; none
+                        // unload a MEX module or clear workspace values.
+                        if let Some(path) = runtime.search_path() {
+                            path.refresh_generation().map_err(|source| {
+                                build_runtime_error(format!("rehash: {source}"))
+                                    .with_builtin("rehash")
+                                    .with_source(source)
+                                    .build()
+                            })?;
+                        }
+                        cache.clear();
+                        Ok(())
+                    },
+                )
             });
         self.runtime_context
             .set_dynamic_function_refresher(Some(refresher));
@@ -217,6 +230,8 @@ impl RunMatSession {
                 self.project_handoff.clone(),
                 #[cfg(not(target_arch = "wasm32"))]
                 self.local_tasks.child_scope_factory(),
+                #[cfg(not(target_arch = "wasm32"))]
+                Some(self.mex_runtime.native_lane_child_factory()),
             ),
         );
         self.configure_dynamic_function_services();
@@ -241,6 +256,8 @@ impl RunMatSession {
         .map_err(|error| {
             RunError::Runtime(
                 build_runtime_error(format!("project composition failed: {error}"))
+                    .with_source(error)
+                    .with_gpu_gather_retry(runmat_runtime::GpuGatherRetry::Never)
                     .with_identifier("RunMat:ProjectComposition")
                     .build(),
             )
@@ -765,11 +782,17 @@ impl RunMatSession {
         #[cfg(not(target_arch = "wasm32"))]
         let mut native_loop_backedges = std::collections::BTreeMap::new();
 
+        let observed_base = std::rc::Rc::new(
+            runmat_runtime::workspace::BaseWorkspaceService::new(self.base_workspace.clone())
+                .with_invocation_projection(workspace_projection.clone())
+                .map_err(RunError::Runtime)?,
+        );
         let execution_runtime = execution_runtime.clone().with_service_ports(
             execution_runtime
                 .service_ports()
                 .clone()
-                .with_workspace(workspace_projection.clone()),
+                .with_workspace(workspace_projection.clone())
+                .with_base_workspace(observed_base),
         );
 
         // Check if this is an expression statement (ends with Pop)
@@ -1728,6 +1751,8 @@ async fn source_input_text(
                             source_path.display()
                         ))
                         .with_identifier("RunMat:SourceReadFailed")
+                        .with_source(err)
+                        .with_gpu_gather_retry(runmat_runtime::GpuGatherRetry::Never)
                         .build(),
                     ));
                 }
@@ -1775,6 +1800,8 @@ async fn resolve_path_source_input(
                     "failed to resolve current working directory while resolving source path '{path}': {err}"
                 ))
                 .with_identifier("RunMat:SourceResolveFailed")
+                .with_source(err)
+                .with_gpu_gather_retry(runmat_runtime::GpuGatherRetry::Never)
                 .build(),
             )
         })?;
@@ -1782,29 +1809,33 @@ async fn resolve_path_source_input(
         let source_path = std::path::PathBuf::from(path);
         let candidate = crate::diagnostic_path::resolve_against_base(path, &cwd);
 
-        if let Ok(metadata) = runmat_filesystem::metadata_async(&candidate).await {
-            if metadata.is_file() {
-                return Ok(
-                    runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(
-                        &candidate,
-                    )
-                    .await,
-                );
-            }
+        if runmat_runtime::builtins::common::path_search::path_is_file(&candidate)
+            .await
+            .map_err(|error| RunError::Runtime(error.into_runtime_error("source resolution")))?
+        {
+            return runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(
+                &candidate,
+            )
+            .await
+            .map_err(|error| RunError::Runtime(error.into_runtime_error("source resolution")));
         }
 
         if source_path.extension().is_none() {
             for extension in ["p", "m"] {
                 let with_ext = candidate.with_extension(extension);
-                if let Ok(metadata) = runmat_filesystem::metadata_async(&with_ext).await {
-                    if metadata.is_file() {
-                        return Ok(
-                            runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(
-                                &with_ext,
-                            )
-                            .await,
-                        );
-                    }
+                if runmat_runtime::builtins::common::path_search::path_is_file(&with_ext)
+                    .await
+                    .map_err(|error| {
+                        RunError::Runtime(error.into_runtime_error("source resolution"))
+                    })?
+                {
+                    return runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(
+                        &with_ext,
+                    )
+                    .await
+                    .map_err(|error| {
+                        RunError::Runtime(error.into_runtime_error("source resolution"))
+                    });
                 }
             }
         }
@@ -1826,7 +1857,9 @@ async fn resolve_path_source_input(
         } else {
             cwd.join(resolved)
         };
-        Ok(runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(&resolved).await)
+        runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(&resolved)
+            .await
+            .map_err(|error| RunError::Runtime(error.into_runtime_error("source resolution")))
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -1839,35 +1872,45 @@ async fn resolve_path_source_input(
                     "failed to resolve current working directory while resolving source path '{path}': {err}"
                 ))
                 .with_identifier("RunMat:SourceResolveFailed")
+                .with_source(err)
+                .with_gpu_gather_retry(runmat_runtime::GpuGatherRetry::Never)
                 .build(),
             )
         })?;
         let source_path = PathBuf::from(path);
         let candidate = crate::diagnostic_path::resolve_against_base(path, &cwd);
 
-        if let Ok(metadata) = runmat_filesystem::metadata_async(&candidate).await {
-            if metadata.is_file() {
-                return Ok(
-                    runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(
-                        &candidate,
-                    )
-                    .await,
-                );
-            }
+        if runmat_runtime::builtins::common::path_search::path_is_file(&candidate)
+            .await
+            .map_err(|error| RunError::Runtime(error.into_runtime_error("source resolution")))?
+        {
+            return Ok(
+                runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(&candidate)
+                    .await
+                    .map_err(|error| {
+                        RunError::Runtime(error.into_runtime_error("source resolution"))
+                    })?,
+            );
         }
 
         if source_path.extension().is_none() {
             for extension in ["p", "m"] {
                 let with_ext = candidate.with_extension(extension);
-                if let Ok(metadata) = runmat_filesystem::metadata_async(&with_ext).await {
-                    if metadata.is_file() {
-                        return Ok(
-                            runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(
-                                &with_ext,
-                            )
-                            .await,
-                        );
-                    }
+                if runmat_runtime::builtins::common::path_search::path_is_file(&with_ext)
+                    .await
+                    .map_err(|error| {
+                        RunError::Runtime(error.into_runtime_error("source resolution"))
+                    })?
+                {
+                    return Ok(
+                        runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(
+                            &with_ext,
+                        )
+                        .await
+                        .map_err(|error| {
+                            RunError::Runtime(error.into_runtime_error("source resolution"))
+                        })?,
+                    );
                 }
             }
         }

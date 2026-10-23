@@ -719,13 +719,18 @@ fn extract_mode(extras: &mut crate::call::BuiltinArguments) -> BuiltinResult<Con
 }
 
 fn parse_mode_value(value: &Value) -> BuiltinResult<Option<Conv2Mode>> {
-    let text = match super::common::convolution::convolution_selector_text(value) {
-        super::common::convolution::ConvolutionSelectorText::Text(text) => text,
-        super::common::convolution::ConvolutionSelectorText::MalformedText => {
-            return Err(conv2_error(&CONV2_ERROR_SHAPE_INVALID))
-        }
-        super::common::convolution::ConvolutionSelectorText::NotText => return Ok(None),
-    };
+    let text =
+        match super::common::convolution::convolution_selector_text(value).map_err(|source| {
+            let mut error = conv2_error(&CONV2_ERROR_SHAPE_INVALID);
+            error.source = Some(Box::new(source));
+            error
+        })? {
+            super::common::convolution::ConvolutionSelectorText::Text(text) => text,
+            super::common::convolution::ConvolutionSelectorText::MalformedText => {
+                return Err(conv2_error(&CONV2_ERROR_SHAPE_INVALID))
+            }
+            super::common::convolution::ConvolutionSelectorText::NotText => return Ok(None),
+        };
     let mode = Conv2Mode::decode(&text).ok_or_else(|| conv2_error(&CONV2_ERROR_SHAPE_INVALID))?;
     Ok(Some(mode))
 }
@@ -1502,9 +1507,11 @@ pub(crate) mod tests {
             .expect_err("fourth input must be shape text");
             assert_eq!(error.identifier(), CONV2_ERROR_SHAPE_INVALID.identifier);
         }
-        let nd_text =
-            runmat_value::CharArray::new_with_shape("same".chars().collect(), vec![1, 4, 1])
-                .expect("N-D character shape");
+        let nd_text = runmat_value::CharArray::from_unicode_scalars_with_shape(
+            "same".chars().collect(),
+            vec![1, 4, 1],
+        )
+        .expect("N-D character shape");
         let error = conv2_builtin(
             Value::Tensor(tensor_from_rows(2, 1, &[1.0, 2.0])),
             Value::Tensor(tensor_from_rows(1, 2, &[1.0, 3.0])),

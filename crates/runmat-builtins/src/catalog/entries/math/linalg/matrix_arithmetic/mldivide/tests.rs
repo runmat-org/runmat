@@ -31,3 +31,38 @@ fn infers_left_solve_shape() {
         ShapeFact::from(vec![Some(2), Some(4)])
     );
 }
+
+#[test]
+fn sparse_complete_solve_inference_preserves_native_class_and_solution_geometry() {
+    for class in [NumericClass::Single, NumericClass::Double] {
+        for domain in [NumericDomain::Real, NumericDomain::Complex] {
+            for (m, n) in [(3, 2), (2, 3), (2, 2), (0, 3), (2, 0)] {
+                let kind = ValueKindFact::Numeric(NumericFact { class, domain });
+                let request = CallRequest {
+                    arguments: vec![
+                        ValueFact::proven(
+                            kind.clone(),
+                            ShapeFact::from(vec![Some(m), Some(n)]),
+                            StorageFact::Sparse,
+                        ),
+                        ValueFact::proven(
+                            kind.clone(),
+                            ShapeFact::from(vec![Some(m), Some(2)]),
+                            StorageFact::Dense,
+                        ),
+                    ],
+                    literals: LiteralContext::default(),
+                    outputs: OutputSelection::new(RequestedOutputCount::One),
+                };
+                let inferred = infer_catalog_call(&MLDIVIDE_CATALOG_ENTRY, &request);
+                assert!(inferred.diagnostics.is_empty());
+                assert_eq!(
+                    inferred.outputs[0].shape,
+                    ShapeFact::from(vec![Some(n), Some(2)])
+                );
+                assert_eq!(inferred.outputs[0].kind, kind);
+                assert_eq!(inferred.outputs[0].storage, StorageFact::Dense);
+            }
+        }
+    }
+}

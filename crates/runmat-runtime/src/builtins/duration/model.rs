@@ -179,7 +179,14 @@ pub(super) fn scalar_text(value: &Value, context: &str) -> BuiltinResult<String>
         Value::StringArray(array) if array.data().len() == 1 => {
             Ok(array.data()[0].as_str().to_owned())
         }
-        Value::CharArray(array) if array.rows == 1 => Ok(array.data().iter().collect()),
+        Value::CharArray(array) if array.rows == 1 => Ok(runmat_value::decode_utf16_code_units(
+            array.data(),
+        )
+        .map_err(|source| {
+            let mut error = duration_error(DurationErrorKind::InvalidArgument, source.to_string());
+            error.source = Some(Box::new(source));
+            error
+        })?),
         _ => Err(duration_error(
             DurationErrorKind::InvalidArgument,
             format!("duration: {context} must be a string scalar or character vector"),
@@ -242,15 +249,22 @@ pub(super) fn component_tensor(value: Value, context: &str) -> BuiltinResult<Ten
         .map_err(|err| duration_error(DurationErrorKind::Internal, format!("duration: {err}")))
 }
 
-pub(super) fn format_for_object(obj: &ObjectInstance) -> String {
-    match obj.properties().get(FORMAT_FIELD) {
+pub(super) fn format_for_object(obj: &ObjectInstance) -> BuiltinResult<String> {
+    Ok(match obj.properties().get(FORMAT_FIELD) {
         Some(Value::String(text)) => text.as_str().to_owned(),
         Some(Value::StringArray(array)) if array.data().len() == 1 => {
             array.data()[0].as_str().to_owned()
         }
-        Some(Value::CharArray(array)) if array.rows == 1 => array.data().iter().collect(),
+        Some(Value::CharArray(array)) if array.rows == 1 => {
+            runmat_value::decode_utf16_code_units(array.data()).map_err(|source| {
+                let mut error =
+                    duration_error(DurationErrorKind::InvalidFormat, source.to_string());
+                error.source = Some(Box::new(source));
+                error
+            })?
+        }
         _ => DEFAULT_DURATION_FORMAT.to_string(),
-    }
+    })
 }
 
 pub(crate) fn duration_tensor_from_duration_value(value: &Value) -> BuiltinResult<Tensor> {
@@ -278,10 +292,10 @@ pub(crate) fn duration_tensor_from_duration_value(value: &Value) -> BuiltinResul
     }
 }
 
-pub(crate) fn duration_format_from_value(value: &Value) -> String {
+pub(crate) fn duration_format_from_value(value: &Value) -> BuiltinResult<String> {
     match value {
         Value::Object(obj) if obj.is_class(DURATION_CLASS) => format_for_object(obj),
-        _ => DEFAULT_DURATION_FORMAT.to_string(),
+        _ => Ok(DEFAULT_DURATION_FORMAT.to_string()),
     }
 }
 

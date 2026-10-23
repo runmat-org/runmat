@@ -158,14 +158,19 @@ fn ensure_compatibility(
             "range",
         )?;
     }
-    if rest.iter().any(|value| {
-        crate::builtins::common::random_args::keyword_of(value).is_some_and(|keyword| {
+    let mut explicit_nan_flag = false;
+    for value in rest.iter() {
+        if crate::builtins::common::random_args::keyword_of(value)?.is_some_and(|keyword| {
             matches!(
                 keyword.to_ascii_lowercase().as_str(),
                 "omitnan" | "includenan"
             )
-        })
-    }) {
+        }) {
+            explicit_nan_flag = true;
+            break;
+        }
+    }
+    if explicit_nan_flag {
         crate::compatibility::ensure_builtin_extension_enabled(
             &EXPLICIT_NANFLAG_EXTENSION,
             "range",
@@ -256,7 +261,11 @@ fn parse_nan_flag(value: &Value) -> crate::BuiltinResult<Option<NanMode>> {
             Some(std::borrow::Cow::Borrowed(sa.data()[0].as_str()))
         }
         Value::CharArray(ca) if ca.rows == 1 => Some(std::borrow::Cow::Owned(
-            ca.data().iter().collect::<String>(),
+            runmat_value::decode_utf16_code_units(ca.data()).map_err(|source| {
+                let mut error = builtin_error(format!("range: invalid flag text: {source}"));
+                error.source = Some(Box::new(source));
+                error
+            })?,
         )),
         _ => None,
     };
@@ -278,7 +287,11 @@ fn is_all_flag(value: &Value) -> crate::BuiltinResult<bool> {
             Some(std::borrow::Cow::Borrowed(sa.data()[0].as_str()))
         }
         Value::CharArray(ca) if ca.rows == 1 => Some(std::borrow::Cow::Owned(
-            ca.data().iter().collect::<String>(),
+            runmat_value::decode_utf16_code_units(ca.data()).map_err(|source| {
+                let mut error = builtin_error(format!("range: invalid flag text: {source}"));
+                error.source = Some(Box::new(source));
+                error
+            })?,
         )),
         _ => None,
     };

@@ -14,6 +14,25 @@ impl NativeExpressionContinuationGeometry {
     pub fn for_blocks(blocks: &[NativeBlock]) -> Option<Self> {
         let mut region_capacity = 0usize;
         let mut retained_input_capacity = 0usize;
+        // The one verified fixed destination slot can coexist with any RHS
+        // site: original arena generation, bound RHS, and completed root
+        // publication. Selector values use the destination's exact Runtime
+        // root leases, not additional source-quoted arena references.
+        let persistent_fixed_references = if blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .any(|instruction| {
+                matches!(
+                    &instruction.operation,
+                    super::super::NativeOperation::Statement(
+                        runmat_mir::MirStmtKind::PrepareFixedAssignment(_)
+                    )
+                )
+            }) {
+            3usize
+        } else {
+            0
+        };
         for instruction in blocks.iter().flat_map(|block| &block.instructions) {
             let mut operands = Some(0usize);
             let mut regions = Some(0usize);
@@ -58,7 +77,10 @@ impl NativeExpressionContinuationGeometry {
         }
         Some(Self {
             region_capacity: u32::try_from(region_capacity).ok()?,
-            retained_input_capacity: u32::try_from(retained_input_capacity).ok()?,
+            retained_input_capacity: u32::try_from(
+                retained_input_capacity.checked_add(persistent_fixed_references)?,
+            )
+            .ok()?,
         })
     }
 }
@@ -87,6 +109,13 @@ fn operation_cursor_regions(operation: &super::super::NativeOperation) -> Option
 
 fn statement_cursor_regions(statement: &runmat_mir::MirStmtKind) -> Option<usize> {
     match statement {
+        runmat_mir::MirStmtKind::PrepareFixedAssignment(phase) => match phase.selector_region() {
+            Some(region) => 1usize
+                .checked_add(expression_steps_cursor_regions(&region.steps)?)?
+                .checked_add(call_argument_cursor_regions(&region.argument)?),
+            None => Some(0),
+        },
+        runmat_mir::MirStmtKind::PreparedAssign { .. } => Some(1),
         runmat_mir::MirStmtKind::Assign { place, value } => {
             place_cursor_regions(place)?.checked_add(rvalue_cursor_regions(value)?)
         }
@@ -173,6 +202,9 @@ fn indexing_cursor_regions(indexing: &runmat_mir::MirIndexing) -> Option<usize> 
                 runmat_mir::MirIndexComponent::PreparedExpr(region) => {
                     expression_steps_cursor_regions(region.steps())?
                 }
+                runmat_mir::MirIndexComponent::Expansion(region) => 1usize
+                    .checked_add(expression_steps_cursor_regions(&region.steps)?)?
+                    .checked_add(call_argument_cursor_regions(&region.argument)?)?,
                 runmat_mir::MirIndexComponent::Colon | runmat_mir::MirIndexComponent::Expr(_) => 0,
             };
             count.checked_add(nested)

@@ -40,7 +40,9 @@ fn cell_names_and_values_use_semantic_order_and_keep_all_dimensions() {
 
 #[test]
 fn nd_characters_are_not_silently_truncated_as_names_or_values() {
-    let chars = Value::CharArray(CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap());
+    let chars = Value::CharArray(
+        CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap(),
+    );
     assert!(EnvironmentNames::decode(&chars).is_err());
     assert!(EnvironmentValues::decode(&chars).is_err());
     let cells = Value::Cell(CellArray::new(vec![chars], 1, 1).unwrap());
@@ -50,7 +52,9 @@ fn nd_characters_are_not_silently_truncated_as_names_or_values() {
 
 #[test]
 fn trailing_singleton_dimensions_still_describe_a_character_row() {
-    let chars = Value::CharArray(CharArray::new_with_shape(vec!['a', 'b'], vec![1, 2, 1]).unwrap());
+    let chars = Value::CharArray(
+        CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 2, 1]).unwrap(),
+    );
     let names = EnvironmentNames::decode(&chars).unwrap();
     assert_eq!(names.names(), &["ab"]);
     assert!(EnvironmentValues::decode(&chars).is_ok());

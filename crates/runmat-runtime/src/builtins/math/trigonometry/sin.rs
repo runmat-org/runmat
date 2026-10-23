@@ -340,7 +340,7 @@ fn sin_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let data = ca
         .data()
         .iter()
-        .map(|&ch| (ch as u32 as f64).sin())
+        .map(|&ch| (u32::from(ch.raw()) as f64).sin())
         .collect::<Vec<_>>();
     let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
         .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))?;
@@ -583,7 +583,7 @@ pub(crate) mod tests {
     #[test]
     fn sin_char_array_roundtrip() {
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let chars = CharArray::new("abc".chars().collect(), 1, 3).unwrap();
+        let chars = CharArray::from_unicode_scalars("abc".chars().collect(), 1, 3).unwrap();
         let result = block_on(sin_builtin(
             None,
             Value::CharArray(chars),

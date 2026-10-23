@@ -6,6 +6,15 @@ pub enum WgpuObservationProgressError {
     Capacity,
     Stopped,
 }
+impl std::fmt::Display for WgpuObservationProgressError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Capacity => "WGPU progress capacity is exhausted",
+            Self::Stopped => "WGPU progress owner has stopped",
+        })
+    }
+}
+impl std::error::Error for WgpuObservationProgressError {}
 
 pub trait WgpuObservationProgress: Send + Sync {
     /// Reserve before allocating a fence or submitting/map-registering work.

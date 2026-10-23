@@ -1930,13 +1930,16 @@ mod tests {
                 let sum_dim1 = block_on(provider.reduce_integer_sum_native_dim(&input, 1))
                     .expect("sum native dim 1");
                 let prod_dim0 = block_on(provider.reduce_integer_prod_native_dim(&input, 0))
-                    .expect("prod native dim 0");
+                    .expect("prod native dim 0")
+                    .expect("provider accepted numerical operation");
                 let prod_dim1 = block_on(provider.reduce_integer_prod_native_dim(&input, 1))
-                    .expect("prod native dim 1");
+                    .expect("prod native dim 1")
+                    .expect("provider accepted numerical operation");
                 let sum_global =
                     block_on(provider.reduce_integer_sum_native(&input)).expect("sum native all");
-                let prod_global =
-                    block_on(provider.reduce_integer_prod_native(&input)).expect("prod native all");
+                let prod_global = block_on(provider.reduce_integer_prod_native(&input))
+                    .expect("prod native all")
+                    .expect("provider accepted numerical operation");
                 assert_eq!(
                     block_on(provider.download_integer_exec(&sum_dim0))
                         .expect("download sum dim 0")
@@ -2087,7 +2090,8 @@ mod tests {
         let unsigned_sum = block_on(provider.reduce_integer_sum_native_dim(&unsigned, 0))
             .expect("unsigned packed sum");
         let unsigned_prod = block_on(provider.reduce_integer_prod_native_dim(&unsigned, 0))
-            .expect("unsigned packed product");
+            .expect("unsigned packed product")
+            .expect("provider accepted numerical operation");
         assert_eq!(
             block_on(provider.download_integer_exec(&signed_sum))
                 .expect("download signed sum")
@@ -2122,7 +2126,8 @@ mod tests {
         let sum = block_on(provider.reduce_integer_sum_native_dim(&input, 0))
             .expect("sum native empty dimension");
         let prod = block_on(provider.reduce_integer_prod_native_dim(&input, 0))
-            .expect("prod native empty dimension");
+            .expect("prod native empty dimension")
+            .expect("provider accepted numerical operation");
         assert_eq!(
             block_on(provider.download_integer_exec(&sum))
                 .expect("download empty sum")
@@ -2154,8 +2159,9 @@ mod tests {
         let sum_cols = block_on(provider.reduce_integer_sum_native_dim(&input, 1))
             .expect("sum across second dimension");
         let sum_all = block_on(provider.reduce_integer_sum_native(&input)).expect("sum all dims");
-        let prod_all =
-            block_on(provider.reduce_integer_prod_native(&input)).expect("prod all dims");
+        let prod_all = block_on(provider.reduce_integer_prod_native(&input))
+            .expect("prod all dims")
+            .expect("provider accepted numerical operation");
         assert_eq!(
             block_on(provider.download_integer_exec(&sum_pages))
                 .expect("download page sum")
@@ -2197,20 +2203,20 @@ mod tests {
                 shape: &[3, 2],
             })
             .expect("upload native integer scan input");
-        let cumsum = provider
-            .integer_cumsum_scan(
-                &input,
-                0,
-                runmat_accelerate_api::ProviderScanDirection::Forward,
-            )
-            .expect("native integer cumsum");
-        let cumprod = provider
-            .integer_cumprod_scan(
-                &input,
-                0,
-                runmat_accelerate_api::ProviderScanDirection::Reverse,
-            )
-            .expect("native integer cumprod reverse");
+        let cumsum = block_on(provider.integer_cumsum_scan(
+            &input,
+            0,
+            runmat_accelerate_api::ProviderScanDirection::Forward,
+        ))
+        .unwrap()
+        .expect("native integer cumsum");
+        let cumprod = block_on(provider.integer_cumprod_scan(
+            &input,
+            0,
+            runmat_accelerate_api::ProviderScanDirection::Reverse,
+        ))
+        .unwrap()
+        .expect("native integer cumprod reverse");
         assert_eq!(
             block_on(provider.download_integer_exec(&cumsum))
                 .expect("download cumsum")
@@ -2244,20 +2250,22 @@ mod tests {
                 shape: &[2, 3, 2],
             })
             .expect("upload packed native integer scan input");
-        let mins = provider
-            .integer_cummin_scan(
-                &input,
-                1,
-                runmat_accelerate_api::ProviderScanDirection::Forward,
-            )
-            .expect("native integer cummin");
-        let maxes = provider
-            .integer_cummax_scan(
-                &input,
-                2,
-                runmat_accelerate_api::ProviderScanDirection::Reverse,
-            )
-            .expect("native integer cummax reverse");
+        let mins = block_on(provider.integer_cummin_scan(
+            &input,
+            1,
+            runmat_accelerate_api::ProviderScanDirection::Forward,
+            runmat_accelerate_api::ProviderExtremaDemand::ValuesOnly,
+        ))
+        .unwrap()
+        .expect("native integer cummin");
+        let maxes = block_on(provider.integer_cummax_scan(
+            &input,
+            2,
+            runmat_accelerate_api::ProviderScanDirection::Reverse,
+            runmat_accelerate_api::ProviderExtremaDemand::ValuesOnly,
+        ))
+        .unwrap()
+        .expect("native integer cummax reverse");
         assert_eq!(
             block_on(provider.download_integer_exec(&mins.values))
                 .expect("download cummin")
@@ -2306,20 +2314,20 @@ mod tests {
                         shape: &[2, 2],
                     })
                     .expect("upload scan values");
-                let cumsum = provider
-                    .integer_cumsum_scan(
-                        &scan,
-                        0,
-                        runmat_accelerate_api::ProviderScanDirection::Forward,
-                    )
-                    .expect("cumsum all-class");
-                let cumprod = provider
-                    .integer_cumprod_scan(
-                        &scan,
-                        1,
-                        runmat_accelerate_api::ProviderScanDirection::Reverse,
-                    )
-                    .expect("cumprod all-class");
+                let cumsum = block_on(provider.integer_cumsum_scan(
+                    &scan,
+                    0,
+                    runmat_accelerate_api::ProviderScanDirection::Forward,
+                ))
+                .unwrap()
+                .expect("cumsum all-class");
+                let cumprod = block_on(provider.integer_cumprod_scan(
+                    &scan,
+                    1,
+                    runmat_accelerate_api::ProviderScanDirection::Reverse,
+                ))
+                .unwrap()
+                .expect("cumprod all-class");
                 assert_eq!(
                     block_on(provider.download_integer_exec(&cumsum))
                         .expect("download cumsum")
@@ -2348,20 +2356,22 @@ mod tests {
                         shape: &[2, 2],
                     })
                     .expect("upload tie values");
-                let cummax = provider
-                    .integer_cummax_scan(
-                        &ties,
-                        0,
-                        runmat_accelerate_api::ProviderScanDirection::Forward,
-                    )
-                    .expect("cummax ties");
-                let cummin = provider
-                    .integer_cummin_scan(
-                        &ties,
-                        1,
-                        runmat_accelerate_api::ProviderScanDirection::Reverse,
-                    )
-                    .expect("cummin ties");
+                let cummax = block_on(provider.integer_cummax_scan(
+                    &ties,
+                    0,
+                    runmat_accelerate_api::ProviderScanDirection::Forward,
+                    runmat_accelerate_api::ProviderExtremaDemand::ValuesOnly,
+                ))
+                .unwrap()
+                .expect("cummax ties");
+                let cummin = block_on(provider.integer_cummin_scan(
+                    &ties,
+                    1,
+                    runmat_accelerate_api::ProviderScanDirection::Reverse,
+                    runmat_accelerate_api::ProviderExtremaDemand::ValuesOnly,
+                ))
+                .unwrap()
+                .expect("cummin ties");
                 assert_eq!(
                     block_on(provider.download_integer_exec(&cummax.values))
                         .expect("download cummax values")
@@ -2421,34 +2431,36 @@ mod tests {
                         shape: &[0, 2],
                     })
                     .expect("upload empty integer scan values");
-                let cumsum = provider
-                    .integer_cumsum_scan(
-                        &input,
-                        0,
-                        runmat_accelerate_api::ProviderScanDirection::Forward,
-                    )
-                    .expect("empty cumsum");
-                let cumprod = provider
-                    .integer_cumprod_scan(
-                        &input,
-                        0,
-                        runmat_accelerate_api::ProviderScanDirection::Reverse,
-                    )
-                    .expect("empty cumprod");
-                let cummin = provider
-                    .integer_cummin_scan(
-                        &input,
-                        0,
-                        runmat_accelerate_api::ProviderScanDirection::Forward,
-                    )
-                    .expect("empty cummin");
-                let cummax = provider
-                    .integer_cummax_scan(
-                        &input,
-                        0,
-                        runmat_accelerate_api::ProviderScanDirection::Reverse,
-                    )
-                    .expect("empty cummax");
+                let cumsum = block_on(provider.integer_cumsum_scan(
+                    &input,
+                    0,
+                    runmat_accelerate_api::ProviderScanDirection::Forward,
+                ))
+                .unwrap()
+                .expect("empty cumsum");
+                let cumprod = block_on(provider.integer_cumprod_scan(
+                    &input,
+                    0,
+                    runmat_accelerate_api::ProviderScanDirection::Reverse,
+                ))
+                .unwrap()
+                .expect("empty cumprod");
+                let cummin = block_on(provider.integer_cummin_scan(
+                    &input,
+                    0,
+                    runmat_accelerate_api::ProviderScanDirection::Forward,
+                    runmat_accelerate_api::ProviderExtremaDemand::ValuesOnly,
+                ))
+                .unwrap()
+                .expect("empty cummin");
+                let cummax = block_on(provider.integer_cummax_scan(
+                    &input,
+                    0,
+                    runmat_accelerate_api::ProviderScanDirection::Reverse,
+                    runmat_accelerate_api::ProviderExtremaDemand::ValuesOnly,
+                ))
+                .unwrap()
+                .expect("empty cummax");
                 assert_eq!(cumsum.shape(), vec![0, 2]);
                 assert_eq!(cumprod.shape(), vec![0, 2]);
                 assert_eq!(cummin.values.shape(), vec![0, 2]);
@@ -2672,7 +2684,10 @@ mod tests {
             .expect("upload uint64");
 
         let sum = block_on(provider.reduce_integer_sum_native(&signed)).expect("native int64 sum");
-        let prod = block_on(provider.reduce_prod(&unsigned)).expect("public uint64 prod");
+        assert!(block_on(provider.reduce_prod(&unsigned)).unwrap().is_none());
+        let prod = block_on(provider.reduce_integer_prod_native(&unsigned))
+            .expect("native uint64 prod")
+            .expect("provider accepted numerical operation");
         let mean = block_on(provider.reduce_mean_dim(&unsigned, 0))
             .expect("public uint64 mean")
             .expect("admitted integer mean");

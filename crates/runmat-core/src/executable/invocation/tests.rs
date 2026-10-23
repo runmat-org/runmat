@@ -43,16 +43,17 @@ async fn caller_cancellation_stops_running_original_script_and_scope_is_restored
     );
     let next = session
         .compile_executable_unit(
-            ExecutableSource::new("after-control", "next.m", "ans = 42;"),
+            ExecutableSource::new(
+                "after-control",
+                "next.m",
+                "function y = next(); y = 42; end",
+            ),
             None,
         )
         .await
         .unwrap();
-    let invocation = ProcedureInvocation {
-        target: ProcedureTarget::Entrypoint,
-        arguments: crate::ProcedureArguments::Source(vec![]),
-        requested_outputs: 1,
-    };
+    let mut invocation = ProcedureInvocation::function("next", vec![]);
+    invocation.requested_outputs = 1;
     assert_eq!(
         session
             .invoke_executable(&next, invocation, &InvocationControl::default())
@@ -75,9 +76,29 @@ async fn deadline_stops_running_original_script_with_distinct_reason() {
         .await
         .unwrap_err();
     assert_eq!(session.stats().total_executions, before + 1);
-    assert!(
-        matches!(error, RunError::Runtime(ref error) if error.identifier() == Some("RunMat:ExecutionDeadline"))
+    let RunError::Runtime(error) = error else {
+        panic!("deadline changed error domain: {error:?}");
+    };
+    assert_eq!(error.identifier(), Some("RunMat:ExecutionDeadline"));
+    assert_eq!(
+        error.failure_origin(),
+        runmat_runtime::runtime_error::RuntimeFailureOrigin::ExecutionControlCancellation
     );
+    assert_eq!(
+        error.gpu_gather_retry(),
+        runmat_runtime::runtime_error::GpuGatherRetry::Never
+    );
+    let original = std::error::Error::source(&error)
+        .and_then(|source| source.downcast_ref::<runmat_runtime::RuntimeError>())
+        .expect("original VM cancellation remains owned");
+    assert_eq!(original.failure_origin(), error.failure_origin());
+    assert_eq!(original.gpu_gather_retry(), error.gpu_gather_retry());
+    assert!(matches!(
+        std::error::Error::source(original).and_then(|source| {
+            source.downcast_ref::<runmat_runtime::execution::ExecutionServiceError>()
+        }),
+        Some(runmat_runtime::execution::ExecutionServiceError::Cancelled)
+    ));
 }
 
 #[tokio::test]

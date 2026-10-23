@@ -236,6 +236,7 @@ pub mod standard {
     pub const TIMETABLE: StaticClassIdentity = StaticClassIdentity::new("timetable");
     pub const CATEGORICAL: StaticClassIdentity = StaticClassIdentity::new("categorical");
     pub const DICTIONARY: StaticClassIdentity = StaticClassIdentity::new("dictionary");
+    pub const DECOMPOSITION: StaticClassIdentity = StaticClassIdentity::new("decomposition");
     pub const DATETIME: StaticClassIdentity = StaticClassIdentity::new("datetime");
     pub const DURATION: StaticClassIdentity = StaticClassIdentity::new("duration");
     pub const DL_ARRAY: StaticClassIdentity = StaticClassIdentity::new("dlarray");

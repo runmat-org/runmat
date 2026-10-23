@@ -39,6 +39,16 @@ pub fn decode_durable_value(payload: &ValuePayload) -> Result<Value, ValueCodecE
     decode_durable_inline_value(payload)
 }
 
+/// Check a stored payload without constructing its Runtime value. Preference
+/// document admission uses this before accepting a transaction; the selected
+/// reader constructs the value once under its invocation owner.
+pub fn validate_durable_payload(payload: &ValuePayload) -> Result<(), ValueCodecError> {
+    require_durable(payload, "$")?;
+    payload
+        .validate_for_durable_storage(runmat_execution::value::ValueLimits::default())
+        .map_err(|error| ValueCodecError::invalid("$", error.to_string()))
+}
+
 pub(super) fn require_durable(payload: &ValuePayload, path: &str) -> Result<(), ValueCodecError> {
     let ValuePayload::Inline(value) = payload else {
         return Err(ValueCodecError::unsupported(

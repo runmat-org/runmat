@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 
-use runmat_execution::Digest;
+use runmat_execution::{placement::PreparationPaybackEvidence, Digest};
 use runmat_hir::FunctionId;
 use runmat_jit::{
     entry::{EntryKey, EntryPublications, EntryRegistry, PublishedEntry},
@@ -13,9 +13,11 @@ use runmat_jit::{
 };
 
 use crate::ExecutableUnit;
-mod diagnostics;
 #[cfg(test)]
 mod diagnostic_tests;
+mod diagnostics;
+#[cfg(test)]
+mod preparation_tests;
 
 /// Core-owned publication boundary for generic-native products in one session.
 /// JIT owns cells and dependency matching; Core supplies authoritative program,
@@ -147,10 +149,39 @@ impl GenericNativeCache {
         preferred_function: Option<&str>,
         profile: Option<&RepresentationProfile>,
     ) -> Result<EntryPublications, runmat_runtime::RuntimeError> {
-        let key = entry_key(unit, preferred_function)?;
+        let Some(key) = ready_entry_key(unit, preferred_function) else {
+            return Ok(EntryPublications::default());
+        };
         Ok(self
             .entries
-            .publications(&key, profile.map(|profile| profile.digest)))
+            .publications_borrowed(key.as_str(), profile.map(|profile| profile.digest)))
+    }
+
+    /// Resolve both entry-owned alternatives from the pre-preparation snapshot.
+    /// A fresh specialization must not hide an existing generic publication,
+    /// and a profileless invocation must never acquire specialized authority.
+    pub(crate) fn ready_routes(
+        &mut self,
+        unit: &ExecutableUnit,
+        preferred_function: Option<&str>,
+        profile: Option<Digest>,
+        initial: EntryPublications,
+    ) -> Result<[Option<PublishedEntry>; 2], runmat_runtime::RuntimeError> {
+        let Some(key) = ready_entry_key(unit, preferred_function) else {
+            return Ok([None, None]);
+        };
+        Ok([
+            self.entries
+                .resolve_current_borrowed(key.as_str(), &self.dependencies, None),
+            profile.and_then(|profile| {
+                self.entries.resolve_current_borrowed(
+                    key.as_str(),
+                    &self.dependencies,
+                    Some(profile),
+                )
+            }),
+        ]
+        .map(|entry| entry.filter(|entry| initial.contains(entry))))
     }
 
     /// Recheck the product selected by whole-work placement immediately before
@@ -162,14 +193,17 @@ impl GenericNativeCache {
         preferred_function: Option<&str>,
         selected: &PublishedEntry,
     ) -> Result<bool, runmat_runtime::RuntimeError> {
-        self.observe_unit_dependencies(unit, preferred_function)?;
-        let current = self.dependencies.snapshot_all();
-        let key = entry_key(unit, preferred_function)?;
+        let Some(key) = ready_entry_key(unit, preferred_function) else {
+            return Ok(false);
+        };
         let ready = match selected.tier {
-            runmat_jit::entry::PublishedTier::Generic => self.entries.resolve(&key, &current),
-            runmat_jit::entry::PublishedTier::Specialized { profile } => {
-                self.entries.resolve_specialized(&key, profile, &current)
+            runmat_jit::entry::PublishedTier::Generic => {
+                self.entries
+                    .resolve_current_borrowed(key.as_str(), &self.dependencies, None)
             }
+            runmat_jit::entry::PublishedTier::Specialized { profile } => self
+                .entries
+                .resolve_current_borrowed(key.as_str(), &self.dependencies, Some(profile)),
         };
         Ok(ready.is_some_and(|ready| {
             ready.publication == selected.publication
@@ -235,11 +269,39 @@ impl GenericNativeCache {
         RepresentationProfile::from_facts(facts, self.tiering.config().max_profile_bytes).ok()
     }
 
+    #[cfg(test)]
     pub(crate) fn resolve_or_schedule(
         &mut self,
         unit: &ExecutableUnit,
         preferred_function: Option<&str>,
         invocation_profile: Option<&RepresentationProfile>,
+    ) -> Result<Option<PublishedEntry>, runmat_runtime::RuntimeError> {
+        self.resolve_or_schedule_with_evidence(unit, preferred_function, invocation_profile, None)
+    }
+
+    pub(crate) fn resolve_or_schedule_with_placement(
+        &mut self,
+        invocation: super::placement::ReadyInvocation<'_>,
+        profile: Option<&RepresentationProfile>,
+        runtime: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<Option<PublishedEntry>, runmat_runtime::RuntimeError> {
+        self.resolve_or_schedule_with_evidence(
+            invocation.unit,
+            invocation.preferred_function,
+            profile,
+            Some((runtime, invocation)),
+        )
+    }
+
+    fn resolve_or_schedule_with_evidence(
+        &mut self,
+        unit: &ExecutableUnit,
+        preferred_function: Option<&str>,
+        invocation_profile: Option<&RepresentationProfile>,
+        placement: Option<(
+            &runmat_runtime::context::RuntimeContext,
+            super::placement::ReadyInvocation<'_>,
+        )>,
     ) -> Result<Option<PublishedEntry>, runmat_runtime::RuntimeError> {
         let dependency_keys = self.observe_unit_dependencies(unit, preferred_function)?;
         let current = self.dependencies.snapshot_all();
@@ -339,6 +401,19 @@ impl GenericNativeCache {
             (TierDecision::CompileSpecialized { profile, mode }, Some(invocation_profile))
                 if profile == invocation_profile.digest =>
             {
+                if let Some(((runtime, invocation), quote)) =
+                    placement.zip(self.entries.preparation_quote(&key, profile, &current))
+                {
+                    if matches!(super::placement::repreparation_evidence(runtime, invocation, &quote)?,
+                        PreparationPaybackEvidence::NonImproving { confidence, .. }
+                            if confidence >= runmat_execution::EstimateConfidence::Medium)
+                    {
+                        // This is a fresh statistics query, not a permanent
+                        // failed-compilation mark. Stale/changed evidence
+                        // returns to the existing bounded exploration gate.
+                        return Ok(self.entries.resolve(&key, &current));
+                    }
+                }
                 let compilation = CompilationKey {
                     entry: key.clone(),
                     tier: CompilationTier::Specialized(profile),
@@ -854,6 +929,52 @@ fn entry_key(
         authored_entry_key(unit, preferred_function).0,
         digest
     )))
+}
+
+/// A ready lookup cannot create a fresh compilation fingerprint or allocate
+/// the registry key. The fixed request envelope declines oversized names.
+struct ReadyEntryKey {
+    bytes: [u8; 1024],
+    length: usize,
+}
+impl std::fmt::Write for ReadyEntryKey {
+    fn write_str(&mut self, text: &str) -> std::fmt::Result {
+        let end = self.length.checked_add(text.len()).ok_or(std::fmt::Error)?;
+        let target = self
+            .bytes
+            .get_mut(self.length..end)
+            .ok_or(std::fmt::Error)?;
+        target.copy_from_slice(text.as_bytes());
+        self.length = end;
+        Ok(())
+    }
+}
+impl ReadyEntryKey {
+    fn as_str(&self) -> &str {
+        std::str::from_utf8(&self.bytes[..self.length]).expect("formatted UTF8 key")
+    }
+}
+fn ready_entry_key(
+    unit: &ExecutableUnit,
+    preferred_function: Option<&str>,
+) -> Option<ReadyEntryKey> {
+    use std::fmt::Write;
+    let digest = unit.cached_native_compilation_digest()?;
+    let revision = unit.revision().program_revision.identity_digest().ok()?;
+    let mut key = ReadyEntryKey {
+        bytes: [0; 1024],
+        length: 0,
+    };
+    write!(
+        &mut key,
+        "{}|{}|{}|{}",
+        revision,
+        unit.revision().source_digest,
+        preferred_function.unwrap_or("<entrypoint>"),
+        digest
+    )
+    .ok()?;
+    Some(key)
 }
 
 fn function_revision(

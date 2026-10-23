@@ -11,7 +11,8 @@ use std::path::PathBuf;
 /// not unmeasured linker execution/scratch or runtime allocation authority.
 /// Tree entries include unique implicit ancestors; enclosing callers charge
 /// their wrapper directories, manifest and bounded publication overhead.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NativeStorageGrant {
     pub archive: ArchiveLimits,
     /// Maximum bytes of one tree/installation metadata record; this is not a

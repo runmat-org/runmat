@@ -1169,7 +1169,7 @@ pub(crate) mod tests {
     #[test]
     fn norm_order_char_array_inf() {
         let tensor = Tensor::new(vec![2.0, -7.0, 4.0], vec![3, 1]).unwrap();
-        let chars = CharArray::new("Inf".chars().collect(), 1, 3).unwrap();
+        let chars = CharArray::from_unicode_scalars("Inf".chars().collect(), 1, 3).unwrap();
         let value =
             norm_builtin(Value::Tensor(tensor), vec![Value::CharArray(chars)]).expect("norm");
         match value {

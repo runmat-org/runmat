@@ -118,7 +118,10 @@ pub(super) fn integer_complex(
     Ok(())
 }
 
-pub(super) fn character(values: &mut Vec<char>, value: ClassifiedValue) -> BuiltinResult<()> {
+pub(super) fn character(
+    values: &mut Vec<runmat_value::Utf16CodeUnit>,
+    value: ClassifiedValue,
+) -> BuiltinResult<()> {
     let ClassifiedValue::Char(value) = value else {
         return Err(heterogeneous());
     };

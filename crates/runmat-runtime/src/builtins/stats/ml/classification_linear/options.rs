@@ -25,7 +25,7 @@ pub(super) fn decode_fit_option(
 ) -> BuiltinResult<FitclinearAction> {
     Ok(match named.identity {
         FitclinearOption::Learner => {
-            let text = scalar_text(value)
+            let text = scalar_text(value)?
                 .ok_or_else(|| fitclinear_invalid("fitclinear: Learner must be text"))?;
             FitclinearAction::Learner(match text.to_ascii_lowercase().as_str() {
                 "svm" => Learner::Svm,
@@ -39,7 +39,7 @@ pub(super) fn decode_fit_option(
         }
         FitclinearOption::Lambda => FitclinearAction::Lambda(numeric_vector(value, "Lambda")?),
         FitclinearOption::Regularization => {
-            let text = scalar_text(value)
+            let text = scalar_text(value)?
                 .ok_or_else(|| fitclinear_invalid("fitclinear: Regularization must be text"))?;
             FitclinearAction::Regularization(match text.to_ascii_lowercase().as_str() {
                 "ridge" => Regularization::Ridge,
@@ -52,7 +52,7 @@ pub(super) fn decode_fit_option(
             })
         }
         FitclinearOption::Solver => {
-            let text = scalar_text(value)
+            let text = scalar_text(value)?
                 .ok_or_else(|| fitclinear_invalid("fitclinear: Solver must be text"))?;
             FitclinearAction::Solver(FitclinearSolver::from_public_name(&text).ok_or_else(
                 || {
@@ -64,7 +64,7 @@ pub(super) fn decode_fit_option(
             )?)
         }
         FitclinearOption::ObservationsIn => {
-            let text = scalar_text(value)
+            let text = scalar_text(value)?
                 .ok_or_else(|| fitclinear_invalid("fitclinear: ObservationsIn must be text"))?;
             FitclinearAction::ObservationsIn(match text.to_ascii_lowercase().as_str() {
                 "rows" => ObservationsIn::Rows,
@@ -84,18 +84,18 @@ pub(super) fn decode_fit_option(
             FitclinearAction::PredictorNames(text_list(value, "PredictorNames")?)
         }
         FitclinearOption::ResponseName => FitclinearAction::ResponseName(
-            scalar_text(value)
+            scalar_text(value)?
                 .ok_or_else(|| fitclinear_invalid("fitclinear: ResponseName must be text"))?,
         ),
         FitclinearOption::Weights => {
-            FitclinearAction::Weights(if let Some(name) = scalar_text(value) {
+            FitclinearAction::Weights(if let Some(name) = scalar_text(value)? {
                 WeightSpec::Variable(name)
             } else {
                 WeightSpec::Values(numeric_vector(value, "Weights")?)
             })
         }
         FitclinearOption::Prior => {
-            let prior = if let Some(text) = scalar_text(value) {
+            let prior = if let Some(text) = scalar_text(value)? {
                 match text.to_ascii_lowercase().as_str() {
                     "empirical" => None,
                     "uniform" => Some(vec![0.5, 0.5]),
@@ -111,7 +111,7 @@ pub(super) fn decode_fit_option(
             FitclinearAction::Prior(prior)
         }
         FitclinearOption::ScoreTransform => {
-            let text = scalar_text(value)
+            let text = scalar_text(value)?
                 .ok_or_else(|| fitclinear_invalid("fitclinear: ScoreTransform must be text"))?;
             FitclinearAction::ScoreTransform(match text.to_ascii_lowercase().as_str() {
                 "none" => ScoreTransform::None,

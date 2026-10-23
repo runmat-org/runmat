@@ -44,7 +44,7 @@ fn invoke(invocation: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
         .borrow_mut()
         .take()
         .expect("no handler replay");
-    Box::pin(async move {
+    runmat_runtime::builtin::admitted_builtin_future(None, "fixture", async move {
         reached.send(()).expect("reached receiver remains live");
         pending
             .await

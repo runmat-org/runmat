@@ -21,6 +21,8 @@ pub(super) enum Failure {
     MapPoisoned,
     Cache,
     Provenance,
+    /// Cleanup admission refused before the destroy closure was entered.
+    DestroyAdmission,
     Unwind,
 }
 
@@ -36,7 +38,23 @@ pub(super) enum Phase {
     },
 }
 
+impl Phase {
+    pub(super) fn retirement_start(self, explicit_reset: bool) -> Option<Stage> {
+        match self {
+            Self::Live => Some(Stage::Cache),
+            Self::Failed {
+                stage: Stage::Resource,
+                failure: Failure::DestroyAdmission,
+                disposition: Disposition::Retained,
+            } if explicit_reset => Some(Stage::Resource),
+            _ => None,
+        }
+    }
+}
+
 pub(super) struct Record {
+    /// Immutable even after the physical payload is detached for retirement.
+    pub(super) scope: Option<runmat_accelerate_api::DeviceAllocationScope>,
     pub(super) registration_slot: Option<runmat_execution::resource::ProviderRegistrationSlot>,
     pub(super) phase: Phase,
     pub(super) entry: Option<BufferEntry>,

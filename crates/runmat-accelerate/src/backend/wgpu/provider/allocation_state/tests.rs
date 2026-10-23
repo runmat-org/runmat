@@ -14,6 +14,49 @@ fn empty_state() -> AllocationState {
     )
 }
 
+#[test]
+fn reset_retry_resumes_only_proven_pre_destroy_admission_failure() {
+    let retry = Phase::Failed {
+        stage: Stage::Resource,
+        failure: Failure::DestroyAdmission,
+        disposition: Disposition::Retained,
+    };
+    assert_eq!(retry.retirement_start(true), Some(Stage::Resource));
+    assert_eq!(retry.retirement_start(false), None);
+    assert_eq!(Phase::Live.retirement_start(true), Some(Stage::Cache));
+    for stage in [
+        Stage::Cache,
+        Stage::Provenance,
+        Stage::Resource,
+        Stage::Complete,
+    ] {
+        for failure in [
+            Failure::MapPoisoned,
+            Failure::Cache,
+            Failure::Provenance,
+            Failure::Unwind,
+            Failure::DestroyAdmission,
+        ] {
+            for disposition in [
+                Disposition::Retained,
+                Disposition::Uncertain,
+                Disposition::Released,
+            ] {
+                let phase = Phase::Failed {
+                    stage,
+                    failure,
+                    disposition,
+                };
+                if phase != retry {
+                    assert_eq!(phase.retirement_start(true), None);
+                }
+            }
+        }
+        assert_eq!(Phase::Retiring(stage).retirement_start(true), None);
+        assert_eq!(Phase::Registering(stage).retirement_start(true), None);
+    }
+}
+
 #[cfg(all(not(target_arch = "wasm32"), target_pointer_width = "64"))]
 #[test]
 #[ignore = "requires a WGPU adapter and RUNMAT_WGPU_FORCE_PRECISION=f32"]
@@ -134,6 +177,7 @@ fn nonowning_identifiers_cannot_acquire_or_validate_unpublished_records() {
         state.buffers.lock().unwrap().insert(
             id,
             Record {
+                scope: None,
                 registration_slot: None,
                 phase,
                 entry: None,

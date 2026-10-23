@@ -59,7 +59,8 @@ fn datetime_comparisons_and_format_assignment_work() {
         .any(|value| matches!(value, Value::Num(n) if (*n - 1.0).abs() < f64::EPSILON)));
     assert!(vars.iter().any(|value| match value {
         Value::CharArray(array) => {
-            let rendered: String = array.data().iter().collect();
+            let rendered: String = runmat_value::decode_utf16_code_units(array.data())
+                .expect("valid UTF-16 text fixture");
             rendered.trim_end() == "2024-01-01"
         }
         _ => false,
@@ -101,7 +102,7 @@ fn datetime_legacy_conversion_helpers_execute_in_scripts() {
          v = datevec(n); \
          w = weekday(n); \
          e = eomday(2024, 2); \
-         s = datestr(n, 'yyyy-MM-dd'); \
+         s = datestr(n, 'yyyy-mm-dd'); \
          ok = isbetween(n, n - 1, n + 1);",
     )
     .unwrap();
@@ -114,7 +115,8 @@ fn datetime_legacy_conversion_helpers_execute_in_scripts() {
         .any(|value| matches!(value, Value::Num(n) if (*n - 29.0).abs() < f64::EPSILON)));
     assert!(vars.iter().any(|value| match value {
         Value::CharArray(array) => {
-            let rendered: String = array.data().iter().collect();
+            let rendered: String = runmat_value::decode_utf16_code_units(array.data())
+                .expect("valid UTF-16 text fixture");
             rendered.trim_end() == "2024-03-14"
         }
         _ => false,
@@ -136,7 +138,8 @@ fn calendar_duration_helpers_execute_in_scripts() {
 
     assert!(vars.iter().any(|value| match value {
         Value::CharArray(array) => {
-            let rendered: String = array.data().iter().collect();
+            let rendered: String = runmat_value::decode_utf16_code_units(array.data())
+                .expect("valid UTF-16 text fixture");
             rendered.trim_end() == "2024-02-29"
         }
         _ => false,

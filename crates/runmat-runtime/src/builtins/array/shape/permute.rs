@@ -757,14 +757,18 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permute_char_array_transpose() {
-        let ca = CharArray::new("abcd".chars().collect(), 2, 2).unwrap();
+        let ca = CharArray::from_unicode_scalars("abcd".chars().collect(), 2, 2).unwrap();
         let order = tensor(&[2.0, 1.0], &[1, 2]);
         let value = permute_builtin(Value::CharArray(ca), Value::Tensor(order)).expect("permute");
         match value {
             Value::CharArray(out) => {
                 assert_eq!(out.rows, 2);
                 assert_eq!(out.cols, 2);
-                assert_eq!(out.data().iter().collect::<String>(), "acbd");
+                assert_eq!(
+                    runmat_value::decode_utf16_code_units(out.data())
+                        .expect("valid UTF-16 fixture text"),
+                    "acbd"
+                );
             }
             _ => panic!("expected char array"),
         }
@@ -773,7 +777,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn permute_char_array_requires_two_dims() {
-        let ca = CharArray::new("abcd".chars().collect(), 2, 2).unwrap();
+        let ca = CharArray::from_unicode_scalars("abcd".chars().collect(), 2, 2).unwrap();
         let order = tensor(&[1.0], &[1, 1]);
         let err =
             permute_builtin(Value::CharArray(ca), Value::Tensor(order)).expect_err("should fail");

@@ -1,7 +1,7 @@
 use crate::*;
 
 #[test]
-fn promoted_runtime_leaves_keep_focused_contracts_and_legacy_documentation_authority() {
+fn promoted_runtime_leaves_keep_focused_contracts_and_catalog_documentation_authority() {
     for (name, signatures, extensions, integer_forms) in [
         ("dataTipTextRow", 2, 2, 3),
         ("datacursormode", 3, 3, 3),
@@ -21,8 +21,8 @@ fn promoted_runtime_leaves_keep_focused_contracts_and_legacy_documentation_autho
         assert_eq!(entry.bindings.len(), 1, "{name}");
         assert_eq!(
             entry.documentation.authority,
-            BuiltinDocumentationAuthority::LegacySidecar,
-            "moving execution contracts must not claim documentation migration: {name}"
+            BuiltinDocumentationAuthority::Catalog,
+            "reviewed prose owners must retain canonical documentation authority: {name}"
         );
     }
     assert_eq!(READCELL_DESCRIPTOR.signatures[0].inputs[0].name, "filename");

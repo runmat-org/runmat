@@ -93,7 +93,14 @@ pub(super) fn string_property(
 ) -> BuiltinResult<String> {
     match object.properties().get(name) {
         Some(Value::String(value)) => Ok(value.as_str().to_owned()),
-        Some(Value::CharArray(chars)) if chars.rows == 1 => Ok(chars.data().iter().collect()),
+        Some(Value::CharArray(chars)) if chars.rows == 1 => {
+            crate::builtins::stats::decode_utf16_with_error(chars.data(), || {
+                invalid_for(
+                    builtin,
+                    format!("{builtin}: ProbabilityDistribution {name} is not valid UTF-16 text"),
+                )
+            })
+        }
         _ => Err(invalid_for(
             builtin,
             format!("{builtin}: ProbabilityDistribution object is missing {name}"),
@@ -131,7 +138,7 @@ pub(super) fn parse_distribution_name_for(
     builtin: &'static str,
     value: &Value,
 ) -> BuiltinResult<DistributionKind> {
-    let keyword = keyword_of(value).ok_or_else(|| {
+    let keyword = keyword_of(value)?.ok_or_else(|| {
         invalid_for(
             builtin,
             format!("{builtin}: distribution name must be a string scalar"),

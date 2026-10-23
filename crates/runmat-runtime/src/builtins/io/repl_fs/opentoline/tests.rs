@@ -92,7 +92,8 @@ fn option_and_host_position_admission_precede_any_resident_download() {
         OPENTOLINE_ERROR_POSITION.identifier
     );
     let pages = Value::CharArray(
-        runmat_value::CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap(),
+        runmat_value::CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 1, 2])
+            .unwrap(),
     );
     assert!(filename_arg(&pages).is_err());
 }

@@ -39,6 +39,17 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     if routes.1 {
         result.capabilities.0.insert(CapabilityRequirement::Network);
     }
+    if routes == (false, true) {
+        // A TCP-only route cannot invoke figure deletion callbacks. Retain
+        // the conservative callback effects when graphics remains possible.
+        for effect in [
+            EffectKind::UserInterface,
+            EffectKind::HostCallback,
+            EffectKind::Unknown,
+        ] {
+            result.effects.0.remove(&effect);
+        }
+    }
     result
 }
 

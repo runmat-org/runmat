@@ -26,7 +26,15 @@ const FORMAT: BuiltinParamDescriptor = BuiltinParamDescriptor {
     ty: BuiltinParamType::StringScalar,
     arity: BuiltinParamArity::Optional,
     default: None,
-    description: "RunMat date-format text; unsupported MATLAB numeric format codes are rejected.",
+    description: "Legacy date-format text (mm is month; MM is minute).",
+};
+const FORMAT_CODE: BuiltinParamDescriptor = BuiltinParamDescriptor {
+    name: "formatCode",
+    ty: BuiltinParamType::NumericScalar,
+    arity: BuiltinParamArity::Required,
+    default: None,
+    description:
+        "Host real double scalar integer from -1 through 31; -1 selects the whole-input default.",
 };
 const YEAR: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "Y",
@@ -186,6 +194,7 @@ const COMPONENTS_SIX: [BuiltinParamDescriptor; 6] = [
     },
 ];
 const DATE_FORMAT: [BuiltinParamDescriptor; 2] = [DATE, FORMAT];
+const DATE_FORMAT_CODE: [BuiltinParamDescriptor; 2] = [DATE, FORMAT_CODE];
 const DATE_FORM: [BuiltinParamDescriptor; 2] = [DATE, DAY_FORM];
 const DATE_ONLY: [BuiltinParamDescriptor; 1] = [DATE];
 const VECTOR_ONLY: [BuiltinParamDescriptor; 1] = [VECTOR];
@@ -241,6 +250,11 @@ pub(super) const DATESTR: BuiltinDescriptor = BuiltinDescriptor {
         BuiltinSignatureDescriptor {
             label: "DateString = datestr(D,format)",
             inputs: &DATE_FORMAT,
+            outputs: &CHAR_OUT,
+        },
+        BuiltinSignatureDescriptor {
+            label: "DateString = datestr(D,formatCode)",
+            inputs: &DATE_FORMAT_CODE,
             outputs: &CHAR_OUT,
         },
     ],

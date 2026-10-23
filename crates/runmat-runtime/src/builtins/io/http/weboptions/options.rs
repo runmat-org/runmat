@@ -279,8 +279,8 @@ fn canonical_query_parameters(value: &Value) -> BuiltinResult<Value> {
 }
 
 pub(super) fn validate_credentials(options: &StructValue) -> BuiltinResult<()> {
-    let username = string_field(options, "Username").unwrap_or_default();
-    let password = string_field(options, "Password").unwrap_or_default();
+    let username = string_field(options, "Username")?.unwrap_or_default();
+    let password = string_field(options, "Password")?.unwrap_or_default();
     if !password.trim().is_empty() && username.trim().is_empty() {
         return Err(weboptions_error_with(
             &WEBOPTIONS_ERROR_INVALID_CREDENTIALS,
@@ -290,13 +290,26 @@ pub(super) fn validate_credentials(options: &StructValue) -> BuiltinResult<()> {
     Ok(())
 }
 
-fn string_field(options: &StructValue, field: &str) -> Option<String> {
-    options.fields.get(field).and_then(|value| match value {
-        Value::String(text) => Some(text.as_str().to_owned()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data().iter().collect::<String>()),
-        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].as_str().to_owned()),
-        _ => None,
-    })
+fn string_field(options: &StructValue, field: &str) -> BuiltinResult<Option<String>> {
+    let Some(value) = options.fields.get(field) else {
+        return Ok(None);
+    };
+    match value {
+        Value::String(text) => Ok(Some(text.as_str().to_owned())),
+        Value::CharArray(ca) if ca.rows == 1 => {
+            crate::builtins::io::utf16::decode_utf16_with_error(ca.data(), || {
+                weboptions_error_with(
+                    &WEBOPTIONS_ERROR_INVALID_OPTION_VALUE,
+                    format!("weboptions: {field} contains malformed UTF-16 text"),
+                )
+            })
+            .map(Some)
+        }
+        Value::StringArray(sa) if sa.data().len() == 1 => {
+            Ok(Some(sa.data()[0].as_str().to_owned()))
+        }
+        _ => Ok(None),
+    }
 }
 
 fn numeric_scalar(
@@ -325,7 +338,11 @@ pub(super) fn expect_string_scalar(
 ) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.as_str().to_owned()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data().iter().collect()),
+        Value::CharArray(ca) if ca.rows == 1 => {
+            crate::builtins::io::utf16::decode_utf16_with_error(ca.data(), || {
+                weboptions_error_with(error, context)
+            })
+        }
         Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].as_str().to_owned()),
         _ => Err(weboptions_error_with(error, context)),
     }

@@ -2,7 +2,7 @@ use super::*;
 use crate::{format_number, ExactArrayStorage, Utf8Text};
 use num_bigint::BigInt;
 use num_integer::Integer;
-use num_traits::{One, Signed, ToPrimitive, Zero};
+use num_traits::{One, Signed, Zero};
 use std::collections::BTreeSet;
 use std::fmt;
 
@@ -468,13 +468,7 @@ impl SymbolicExpr {
             SymbolicExpr::Rational {
                 numerator,
                 denominator,
-            } => {
-                if denominator.is_zero() {
-                    None
-                } else {
-                    Some(numerator.to_f64()? / denominator.to_f64()?)
-                }
-            }
+            } => rational_to_f64(numerator, denominator),
             SymbolicExpr::DecimalLiteral { value, .. } => (!value.is_nan()).then_some(*value),
             SymbolicExpr::Variable(_) => None,
             SymbolicExpr::FunctionReference(_, _)
@@ -1121,6 +1115,25 @@ mod tests {
             SymbolicExpr::constant(f64::NAN).numeric_constant_value(),
             None
         );
+        let large = BigInt::one() << 4096usize;
+        for (numerator, denominator, expected) in [
+            (
+                &large + BigInt::one(),
+                (&large << 1usize) + BigInt::from(3),
+                0.5,
+            ),
+            (
+                -(&large + BigInt::one()),
+                (&large << 1usize) + BigInt::from(3),
+                -0.5,
+            ),
+            (BigInt::one(), BigInt::one() << 1074usize, f64::from_bits(1)),
+            (large.clone(), BigInt::one(), f64::INFINITY),
+        ] {
+            let value = SymbolicExpr::rational(numerator, denominator).expect("valid rational");
+            assert_eq!(value.numeric_constant_value(), Some(expected));
+        }
+        assert_eq!(rational_to_f64(&BigInt::one(), &BigInt::zero()), None);
     }
 
     #[test]

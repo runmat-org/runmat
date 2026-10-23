@@ -32,7 +32,7 @@ fn empty_and_nonscalar_names_have_distinct_errors() {
     let empty = run(target.clone(), vec![Value::from("")]).unwrap_err();
     assert_eq!(empty.identifier(), Some("RunMat:rmfield:FieldNameEmpty"));
 
-    let matrix = CharArray::new(vec!['a', 'b'], 2, 1).unwrap();
+    let matrix = CharArray::from_unicode_scalars(vec!['a', 'b'], 2, 1).unwrap();
     let invalid = run(target, vec![Value::CharArray(matrix)]).unwrap_err();
     assert_eq!(invalid.identifier(), Some("RunMat:rmfield:FieldNameType"));
 }

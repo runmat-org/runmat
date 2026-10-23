@@ -318,7 +318,7 @@ fn plus_complex_inputs() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn plus_char_input() {
-    let chars = CharArray::new("ABC".chars().collect(), 1, 3).unwrap();
+    let chars = CharArray::from_unicode_scalars("ABC".chars().collect(), 1, 3).unwrap();
     let result =
         plus_builtin(Value::CharArray(chars), Value::Num(2.0), Vec::new()).expect("char plus");
     match result {

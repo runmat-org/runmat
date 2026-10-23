@@ -159,3 +159,5 @@ pub const RSF2CSF_CATALOG_ENTRY: BuiltinCatalogEntry =
         residency: BuiltinResidencyPolicy::Host,
         maturity: BuiltinContractMaturity::Complete,
     });
+
+pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[&RSF2CSF_CATALOG_ENTRY];

@@ -6,7 +6,11 @@ use futures::executor::block_on;
 fn host_line() -> f64 {
     let x = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("x"));
     let y = Value::Tensor(Tensor::new(vec![3.0, 4.0], vec![1, 2]).expect("y"));
-    let Value::Num(handle) = block_on(line_builtin(vec![x, y])).expect("line") else {
+    let Value::Num(handle) = block_on(line_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![x, y]),
+    ))
+    .expect("line") else {
         panic!("expected graphics handle");
     };
     handle
@@ -20,11 +24,11 @@ fn x_data(handle: f64) -> Value {
 fn host_scatter() -> f64 {
     let x = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("x"));
     let y = Value::Tensor(Tensor::new(vec![3.0, 4.0], vec![1, 2]).expect("y"));
-    block_on(crate::builtins::plotting::scatter::scatter_builtin(
-        x,
-        y,
-        Vec::new(),
-    ))
+    block_on(crate::builtins::plotting::scatter::scatter_builtin(None, {
+        let mut coordinates = vec![x, y];
+        coordinates.extend(Vec::new());
+        crate::builtins::common::test_support::builtin_arguments(coordinates)
+    }))
     .expect("scatter")
 }
 
@@ -33,7 +37,11 @@ fn host_line3() -> f64 {
         .into_iter()
         .map(|values| Value::Tensor(Tensor::new(values, vec![1, 2]).expect("coordinate")))
         .collect();
-    block_on(crate::builtins::plotting::plot3::plot3_builtin(inputs)).expect("plot3")
+    block_on(crate::builtins::plotting::plot3::plot3_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(inputs),
+    ))
+    .expect("plot3")
 }
 
 #[path = "host.rs"]

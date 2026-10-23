@@ -1,15 +1,14 @@
 //! MATLAB-compatible `sphere` builtin.
-
-use runmat_builtins::shape_rules::element_count_if_known;
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    LiteralValue, ResolveContext, Type,
+    SPHERE_DEFAULT_N as DEFAULT_N, SPHERE_MAX_COORDINATE_ELEMENTS as MAX_COORDINATE_ELEMENTS,
+    SPHERE_WHOLE_COUNT_TOLERANCE,
 };
+pub use runmat_builtins::{
+    SPHERE_ERROR_ARG_COUNT, SPHERE_ERROR_INTERNAL, SPHERE_ERROR_INVALID_N,
+    SPHERE_ERROR_OUTPUT_COUNT, SPHERE_ERROR_TOO_LARGE, SPHERE_TYPED_N_EXTENSION,
+};
+
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::SurfacePlot;
 use runmat_value::{IntValue, Tensor, Value};
@@ -23,179 +22,6 @@ use crate::builtins::plotting::state::{render_active_plot, PlotRenderOptions};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "sphere";
-const DEFAULT_N: usize = 20;
-const MAX_COORDINATE_ELEMENTS: usize = 4_000_000;
-
-const SPHERE_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
-const SPHERE_INPUTS_N: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "n",
-    ty: BuiltinParamType::IntegerScalar,
-    arity: BuiltinParamArity::Optional,
-    default: Some("20"),
-    description: "Number of surface faces per dimension; outputs have size (n+1)-by-(n+1).",
-}];
-
-const SPHERE_OUTPUT_X: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "X coordinates on the unit sphere.",
-}];
-const SPHERE_OUTPUT_XY: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinates on the unit sphere.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y coordinates on the unit sphere.",
-    },
-];
-const SPHERE_OUTPUT_XYZ: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinates on the unit sphere.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y coordinates on the unit sphere.",
-    },
-    BuiltinParamDescriptor {
-        name: "Z",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Z coordinates on the unit sphere.",
-    },
-];
-
-const SPHERE_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
-    BuiltinSignatureDescriptor {
-        label: "sphere()",
-        inputs: &SPHERE_INPUTS_NONE,
-        outputs: &[],
-    },
-    BuiltinSignatureDescriptor {
-        label: "sphere(n)",
-        inputs: &SPHERE_INPUTS_N,
-        outputs: &[],
-    },
-    BuiltinSignatureDescriptor {
-        label: "X = sphere()",
-        inputs: &SPHERE_INPUTS_NONE,
-        outputs: &SPHERE_OUTPUT_X,
-    },
-    BuiltinSignatureDescriptor {
-        label: "X = sphere(n)",
-        inputs: &SPHERE_INPUTS_N,
-        outputs: &SPHERE_OUTPUT_X,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[X,Y] = sphere()",
-        inputs: &SPHERE_INPUTS_NONE,
-        outputs: &SPHERE_OUTPUT_XY,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[X,Y] = sphere(n)",
-        inputs: &SPHERE_INPUTS_N,
-        outputs: &SPHERE_OUTPUT_XY,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[X,Y,Z] = sphere()",
-        inputs: &SPHERE_INPUTS_NONE,
-        outputs: &SPHERE_OUTPUT_XYZ,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[X,Y,Z] = sphere(n)",
-        inputs: &SPHERE_INPUTS_N,
-        outputs: &SPHERE_OUTPUT_XYZ,
-    },
-];
-
-const SPHERE_ERROR_OUTPUT_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPHERE.OUTPUT_COUNT",
-    identifier: Some("RunMat:sphere:OutputCount"),
-    when: "More than three outputs are requested.",
-    message: "sphere: too many output arguments; maximum is 3",
-};
-const SPHERE_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPHERE.ARG_COUNT",
-    identifier: Some("RunMat:sphere:InvalidArgument"),
-    when: "More than one input argument is supplied.",
-    message: "sphere: expected zero or one input argument",
-};
-const SPHERE_ERROR_INVALID_N: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPHERE.INVALID_N",
-    identifier: Some("RunMat:sphere:InvalidArgument"),
-    when: "The n argument is not a finite non-negative integer scalar.",
-    message: "sphere: n must be a finite non-negative integer scalar",
-};
-const SPHERE_ERROR_TOO_LARGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPHERE.N_TOO_LARGE",
-    identifier: Some("RunMat:sphere:OutOfMemory"),
-    when: "The requested coordinate grid is too large for RunMat's bounded allocation policy.",
-    message: "sphere: requested grid is too large",
-};
-const SPHERE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPHERE.INTERNAL",
-    identifier: Some("RunMat:sphere:Internal"),
-    when: "Coordinate tensor construction or plotting fails unexpectedly.",
-    message: "sphere: internal operation failed",
-};
-const SPHERE_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    SPHERE_ERROR_OUTPUT_COUNT,
-    SPHERE_ERROR_ARG_COUNT,
-    SPHERE_ERROR_INVALID_N,
-    SPHERE_ERROR_TOO_LARGE,
-    SPHERE_ERROR_INTERNAL,
-];
-
-pub const SPHERE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SPHERE_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SPHERE_ERRORS,
-};
-
-const SPHERE_TYPED_N_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "sphere-typed-face-count",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "sphere with a typed-integer face count is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:SphereTypedFaceCountExtension"),
-};
-pub const SPHERE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [SPHERE_TYPED_N_EXTENSION];
-const SPHERE_INTEGER_N_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "n",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The compatibility target calls n a positive integer but does not enumerate typed storage classes. RunMat accepts every exact nonnegative integer class behind a compatibility gate; ordinary host double integer values remain documented behavior.",
-    }];
-pub const SPHERE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "[X,Y,Z] = sphere(integer_n)",
-        inputs: &SPHERE_INTEGER_N_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The typed face count is a gated RunMat extension. It is decoded exactly, checked against allocation bounds, and controls only output shape; coordinate generation and statement-form plotting use host double values.",
-    }];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::sphere")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -224,54 +50,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "sphere materializes coordinate tensors and terminates fusion chains.",
 };
 
-fn sphere_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    match args {
-        [] => Type::tensor_with_shape(vec![DEFAULT_N + 1, DEFAULT_N + 1]),
-        [arg] => sphere_n_type(arg, ctx),
-        _ => Type::Unknown,
-    }
-}
-
-fn sphere_n_type(arg: &Type, ctx: &ResolveContext) -> Type {
-    if let Some(n) = sphere_literal_n(ctx) {
-        if let Some(size) = n.checked_add(1) {
-            return Type::Tensor {
-                shape: Some(vec![Some(size), Some(size)]),
-            };
-        }
-        return Type::Unknown;
-    }
-
-    match arg {
-        Type::Num | Type::Int | Type::Bool => Type::Tensor {
-            shape: Some(vec![None, None]),
-        },
-        Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
-            let element_count = element_count_if_known(shape);
-            if element_count != Some(1) && element_count.is_some() {
-                Type::Unknown
-            } else {
-                Type::Tensor {
-                    shape: Some(vec![None, None]),
-                }
-            }
-        }
-        Type::Tensor { shape: None } | Type::Logical { shape: None } => Type::Tensor {
-            shape: Some(vec![None, None]),
-        },
-        Type::Unknown => Type::Unknown,
-        _ => Type::Unknown,
-    }
-}
-
-fn sphere_literal_n(ctx: &ResolveContext) -> Option<usize> {
-    match ctx.literal_args.first() {
-        Some(LiteralValue::Number(value)) => parse_n_number(*value).ok(),
-        Some(LiteralValue::Bool(value)) => Some(usize::from(*value)),
-        _ => None,
-    }
-}
-
 fn sphere_error(
     descriptor: &'static BuiltinErrorDescriptor,
     detail: impl AsRef<str>,
@@ -286,18 +64,23 @@ fn sphere_error(
 
 #[runtime_builtin(
     name = "sphere",
-    category = "plotting",
-    summary = "Generate or plot unit-sphere coordinate grids.",
-    keywords = "sphere,plotting,3d,surface,unit sphere",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(sphere_type),
-    descriptor(crate::builtins::plotting::sphere::SPHERE_DESCRIPTOR),
-    extensions(crate::builtins::plotting::sphere::SPHERE_EXTENSIONS),
-    integer_capabilities(crate::builtins::plotting::sphere::SPHERE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::sphere"
 )]
-async fn sphere_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+pub async fn sphere_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "sphere")?;
+    let _arguments = args.fork();
+    work.finish(sphere_impl(args, &work).await)
+}
+
+async fn sphere_impl(
+    args: crate::call::BuiltinArguments,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> crate::BuiltinResult<Value> {
     if matches!(crate::output_count::current_output_count(), Some(n) if n > 3) {
         return Err(sphere_error(
             &SPHERE_ERROR_OUTPUT_COUNT,
@@ -305,7 +88,7 @@ async fn sphere_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
 
-    if let [value] = args.as_slice() {
+    if let Some(value) = args.first().filter(|_| args.len() == 1) {
         if crate::builtins::common::validation::value_has_native_integer_class(value) {
             crate::compatibility::ensure_builtin_extension_enabled(
                 &SPHERE_TYPED_N_EXTENSION,
@@ -314,9 +97,9 @@ async fn sphere_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         }
     }
 
-    let n = match args.as_slice() {
-        [] => DEFAULT_N,
-        [value] => parse_n_value(value).await?,
+    let n = match args.len() {
+        0 => DEFAULT_N,
+        1 => parse_n_value(&args[0]).await?,
         _ => {
             return Err(sphere_error(
                 &SPHERE_ERROR_ARG_COUNT,
@@ -327,7 +110,8 @@ async fn sphere_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
     if is_plot_form_call() {
         let (x, y, z) = make_sphere_tensors(n, true, true, true)?;
-        render_sphere_plot(x, y, z)?;
+        work.check()?;
+        render_sphere_plot(x, y, z, work)?;
         return Ok(Value::output_list(Vec::new()));
     }
 
@@ -370,7 +154,12 @@ fn build_output(n: usize) -> BuiltinResult<Value> {
     }
 }
 
-fn render_sphere_plot(x: Tensor, y: Tensor, z: Tensor) -> BuiltinResult<()> {
+fn render_sphere_plot(
+    x: Tensor,
+    y: Tensor,
+    z: Tensor,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> BuiltinResult<()> {
     let x_grid = tensor_to_plot_grid(x)?;
     let y_grid = tensor_to_plot_grid(y)?;
     let z_grid = tensor_to_plot_grid(z)?;
@@ -382,6 +171,7 @@ fn render_sphere_plot(x: Tensor, y: Tensor, z: Tensor) -> BuiltinResult<()> {
         axis_equal: true,
         ..Default::default()
     };
+    work.check()?;
     let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         figure.add_surface_plot_on_axes(plot.take().expect("sphere plot consumed once"), axes);
         Ok(())
@@ -391,10 +181,19 @@ fn render_sphere_plot(x: Tensor, y: Tensor, z: Tensor) -> BuiltinResult<()> {
         if crate::builtins::plotting::state::presentation_unavailable(&err) {
             return Ok(());
         }
-        return Err(sphere_error(
+        let mapped = sphere_error(
             &SPHERE_ERROR_INTERNAL,
             format!("could not render sphere surface: {}", err.message),
-        ));
+        );
+        return Err(build_runtime_error(mapped.message)
+            .with_builtin(BUILTIN_NAME)
+            .with_identifier(
+                SPHERE_ERROR_INTERNAL
+                    .identifier
+                    .expect("sphere internal identifier"),
+            )
+            .with_source(err)
+            .build());
     }
     Ok(())
 }
@@ -439,7 +238,7 @@ fn parse_n_number(raw: f64) -> BuiltinResult<usize> {
         return Err(sphere_error(&SPHERE_ERROR_INVALID_N, "n must be finite"));
     }
     let rounded = raw.round();
-    if (rounded - raw).abs() > 1e-6
+    if (rounded - raw).abs() > SPHERE_WHOLE_COUNT_TOLERANCE
         || rounded < 0.0
         || rounded > usize::MAX as f64
         || (usize::BITS == 64 && rounded == usize::MAX as f64)
@@ -572,10 +371,18 @@ fn sphere_phi(row: usize, n: usize) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    async fn sphere_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+        super::sphere_builtin(
+            crate::context::legacy::active(),
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )
+        .await
+    }
+
     use futures::executor::block_on;
 
     fn call(args: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::sphere_builtin(args))
+        block_on(sphere_builtin(args))
     }
 
     fn output_tensors(value: Value) -> Vec<Tensor> {
@@ -746,20 +553,32 @@ mod tests {
 
     #[test]
     fn sphere_type_infers_default_and_literal_shapes() {
-        assert_eq!(
-            sphere_type(&[], &ResolveContext::new(Vec::new())),
-            Type::Tensor {
-                shape: Some(vec![Some(21), Some(21)]),
-            }
-        );
-        assert_eq!(
-            sphere_type(
-                &[Type::Num],
-                &ResolveContext::new(vec![LiteralValue::Number(4.0)])
+        use runmat_types::*;
+        for (arguments, literals, size) in [
+            (vec![], vec![], 21),
+            (
+                vec![ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                    class: NumericClass::Double,
+                    domain: NumericDomain::Real,
+                }))],
+                vec![LiteralValue::Number(4.0)],
+                5,
             ),
-            Type::Tensor {
-                shape: Some(vec![Some(5), Some(5)]),
-            }
-        );
+        ] {
+            let request = CallRequest {
+                arguments,
+                literals: LiteralContext::new(literals),
+                outputs: OutputSelection::new(RequestedOutputCount::Exactly(3)),
+            };
+            let result = runmat_builtins::infer_catalog_call(
+                &runmat_builtins::SPHERE_CATALOG_ENTRY,
+                &request,
+            );
+            assert!(result.diagnostics.is_empty());
+            assert_eq!(result.outputs.len(), 3);
+            assert!(result.outputs.iter().all(|fact| fact.shape
+                == ShapeFact::from(vec![Some(size), Some(size)])
+                && fact.residency == ResidencyFact::Host));
+        }
     }
 }

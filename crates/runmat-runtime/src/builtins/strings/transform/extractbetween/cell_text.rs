@@ -26,10 +26,10 @@ impl<'a> TextCellScalar<'a> {
         }
     }
 
-    pub(super) fn text(&self) -> String {
+    pub(super) fn text(&self) -> Result<String, runmat_value::Utf16DecodeError> {
         match self {
-            Self::String(text) => (*text).to_string(),
-            Self::Char(array) if array.rows == 0 => String::new(),
+            Self::String(text) => Ok((*text).to_string()),
+            Self::Char(array) if array.rows == 0 => Ok(String::new()),
             Self::Char(array) => char_row_to_string_slice(array.data(), array.cols, 0),
         }
     }

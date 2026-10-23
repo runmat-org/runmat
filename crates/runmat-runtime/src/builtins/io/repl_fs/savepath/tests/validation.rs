@@ -70,7 +70,7 @@ fn rejects_empty_and_non_scalar_text_before_writing() {
         runmat_builtins::SAVEPATH_ERROR_ARGUMENT_TYPE.identifier
     );
 
-    let chars = CharArray::new("abcd".chars().collect(), 2, 2).expect("chars");
+    let chars = CharArray::from_unicode_scalars("abcd".chars().collect(), 2, 2).expect("chars");
     let char_error =
         super::support::run(vec![Value::CharArray(chars)], 1, true).expect_err("char matrix");
     assert_eq!(
@@ -121,11 +121,12 @@ fn accepts_trailing_singletons_but_rejects_character_pages_without_writing() {
         .to_string_lossy()
         .into_owned();
     let chars: Vec<char> = filename.chars().collect();
-    let row = CharArray::new_with_shape(chars.clone(), vec![1, chars.len(), 1]).unwrap();
+    let units = filename.encode_utf16().count();
+    let row = CharArray::from_unicode_scalars_with_shape(chars.clone(), vec![1, units, 1]).unwrap();
     let result = super::support::run(vec![Value::CharArray(row)], 1, false).unwrap();
     assert_eq!(super::support::status(&result), 0.0);
     assert!(directory.path().join("pathdef.m").is_file());
-    let page = CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap();
+    let page = CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap();
     assert_eq!(
         super::support::run(vec![Value::CharArray(page)], 1, false)
             .unwrap_err()

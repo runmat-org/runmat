@@ -1,11 +1,12 @@
 //! A selected native batch continues through separately admitted, physically
 //! acknowledged retry batches. Only completion publishes its numeric output.
 
-use super::super::{gpu, gpu_query, gpu_upload::after_stream_commit};
+use super::super::{gpu, gpu_effect::after_stream_commit};
 use super::progress::validate_progress;
 use super::selection::{batch_calibration, batch_query, SelectedInitialNativeBatch};
 use super::{error, provider_error};
 use crate::builtins::common::gpu_helpers;
+use crate::builtins::common::gpu_helpers::query_metadata;
 use crate::context::host_allocation::{
     provider_registration_host_quote, HostAllocationPlan, HostAllocationReceipt,
 };
@@ -120,16 +121,17 @@ pub(crate) async fn execute_selected(
                 preparation_shape_ranks: &[],
                 preparation_representation_slots: 0,
             };
-            let query_bytes = gpu_query::requested_bytes("randi", &footprint).map_err(|cause| {
-                if pending.is_some() {
-                    after_stream_commit("randi", cause)
-                } else {
-                    cause
-                }
-            })?;
+            let query_bytes =
+                query_metadata::requested_bytes("randi", &footprint).map_err(|cause| {
+                    if pending.is_some() {
+                        after_stream_commit("randi", cause)
+                    } else {
+                        cause
+                    }
+                })?;
             let _query_receipt =
-                gpu_query::admit(runtime.as_ref(), query_bytes).map_err(|cause| {
-                    let cause = gpu_query::admission_error("randi", runtime.as_ref(), cause);
+                query_metadata::admit(runtime.as_ref(), query_bytes).map_err(|cause| {
+                    let cause = query_metadata::admission_error("randi", runtime.as_ref(), cause);
                     if pending.is_some() {
                         after_stream_commit("randi", cause)
                     } else {

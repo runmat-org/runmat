@@ -1,6 +1,5 @@
 use crate::bytecode::program::ExecutionContext;
 use crate::bytecode::EmitLabel;
-use crate::interpreter::errors::mex;
 use crate::interpreter::stack::{pop2, pop_value};
 use crate::interpreter::vars::InterpreterVars;
 use crate::runtime::workspace::{admit_declared_global_slot_write, workspace_slot_value};
@@ -103,8 +102,7 @@ pub fn load_char_row(
     stack: &mut crate::interpreter::stack::InterpreterStack,
     value: String,
 ) -> Result<(), RuntimeError> {
-    let ca = CharArray::new(value.chars().collect(), 1, value.chars().count())
-        .map_err(|e| mex("CharError", &e))?;
+    let ca = CharArray::new_row(&value);
     stack.try_push(Value::CharArray(ca))
 }
 

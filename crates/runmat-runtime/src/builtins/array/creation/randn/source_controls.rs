@@ -118,8 +118,11 @@ fn keyword_is(control: ValueControlRef<'_>, expected: &str) -> bool {
                 && array
                     .data()
                     .iter()
-                    .zip(expected.chars())
-                    .all(|(actual, expected)| actual.eq_ignore_ascii_case(&expected))
+                    .zip(expected.bytes())
+                    .all(|(actual, expected)| {
+                        u8::try_from(actual.raw())
+                            .is_ok_and(|actual| actual.eq_ignore_ascii_case(&expected))
+                    })
         }
         _ => false,
     }

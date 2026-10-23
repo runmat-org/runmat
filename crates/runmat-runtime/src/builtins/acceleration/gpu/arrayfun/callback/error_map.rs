@@ -26,7 +26,7 @@ pub(super) fn call(error: CallableCallError) -> crate::RuntimeError {
     match error {
         CallableCallError::Runtime(error) => error,
         CallableCallError::UndefinedExternal { identity } => arrayfun_error_with_message(
-            format!("Undefined function for callable identity {identity:?}"),
+            crate::call::identity::undefined_callable_message(&identity),
             &ARRAYFUN_ERROR_UNDEFINED_FUNCTION,
         ),
         CallableCallError::SemanticUnavailable {

@@ -66,7 +66,10 @@ pub(super) const fn entry(
             portability: BuiltinPortability::NativeAndWasm,
             accelerator: BuiltinAcceleratorPolicy::Optional,
             residency: BuiltinResidencyPolicy::Dynamic,
-            fusion: BuiltinFusionPolicy::Candidate,
+            fusion: match rule {
+                MatrixArithmeticInferenceRule::Multiply => BuiltinFusionPolicy::Candidate,
+                _ => BuiltinFusionPolicy::Boundary,
+            },
             distributed: BuiltinDistributedPolicy::MaterializeArguments,
         },
         link: BuiltinLinkContract {

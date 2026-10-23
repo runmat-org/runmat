@@ -9,8 +9,8 @@ use runmat_value::{ExactHostLogicalTensorAllocation, NumericScalar, Value};
 
 const CHECKPOINT_CHUNK: usize = 4096;
 
-mod complex;
 mod character;
+mod complex;
 pub(super) use character::character;
 pub(super) use complex::complex;
 
@@ -484,8 +484,17 @@ mod tests {
             &context,
             1,
             FunctionArgumentView::from_slice(&[
-                Value::CharArray(CharArray::new_row("ab")),
-                Value::Num(67.0),
+                Value::CharArray(
+                    CharArray::from_code_units(
+                        [0xD800, 0xDC00]
+                            .map(runmat_value::Utf16CodeUnit::from_raw)
+                            .to_vec(),
+                        1,
+                        2,
+                    )
+                    .unwrap(),
+                ),
+                Value::Num(65535.0),
             ]),
         )
         .unwrap();
@@ -493,9 +502,17 @@ mod tests {
             panic!("character output")
         };
         assert_eq!(chars.shape(), &[1, 3]);
-        assert_eq!(chars.data().iter().collect::<String>(), "abC");
-        let rank_one = CharArray::new_with_shape(vec!['x', 'y'], vec![2]).unwrap();
-        let empty = CharArray::new_with_shape(Vec::new(), Vec::new()).unwrap();
+        assert_eq!(
+            chars
+                .data()
+                .iter()
+                .map(|unit| unit.raw())
+                .collect::<Vec<_>>(),
+            vec![0xD800, 0xDC00, 0xFFFF]
+        );
+        assert_eq!(std::mem::size_of_val(chars.data()), 6);
+        let rank_one = CharArray::from_unicode_scalars_with_shape(vec!['x', 'y'], vec![2]).unwrap();
+        let empty = CharArray::from_unicode_scalars_with_shape(Vec::new(), Vec::new()).unwrap();
         let normalized = character(
             &context,
             1,
@@ -510,7 +527,11 @@ mod tests {
             panic!("normalized character output")
         };
         assert_eq!(normalized_chars.shape(), &[1, 3]);
-        assert_eq!(normalized_chars.data().iter().collect::<String>(), "xyz");
+        assert_eq!(
+            runmat_value::decode_utf16_code_units(normalized_chars.data())
+                .expect("valid UTF-16 fixture text"),
+            "xyz"
+        );
         let ordinary = super::super::cat_host_values(
             1,
             crate::builtins::common::test_support::builtin_arguments(vec![
@@ -528,13 +549,22 @@ mod tests {
             Some(runtime(&ledger)),
             Value::Num(2.0),
             crate::builtins::common::test_support::builtin_arguments(vec![
-                Value::CharArray(CharArray::new_row("ab")),
-                Value::Num(67.0),
+                Value::CharArray(
+                    CharArray::from_code_units(
+                        [0xD800, 0xDC00]
+                            .map(runmat_value::Utf16CodeUnit::from_raw)
+                            .to_vec(),
+                        1,
+                        2,
+                    )
+                    .unwrap(),
+                ),
+                Value::Num(65535.0),
             ]),
         ))
         .unwrap();
         assert!(
-            matches!(&selected, Value::CharArray(chars) if chars.data().iter().collect::<String>() == "abC")
+            matches!(&selected, Value::CharArray(chars) if chars.data().iter().map(|unit|unit.raw()).collect::<Vec<_>>() == vec![0xD800,0xDC00,0xFFFF])
         );
 
         assert!(ledger.snapshot().live_claimed_bytes > 0);

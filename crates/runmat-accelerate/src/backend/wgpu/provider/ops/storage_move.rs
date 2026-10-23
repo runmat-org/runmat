@@ -1,10 +1,10 @@
 //! Bit-preserving storage moves use the allocation's physical element type,
 //! independently of the provider's arithmetic precision.
 use super::*;
-#[path = "storage_move/permutation.rs"]
-mod permutation;
 #[path = "storage_move/flip.rs"]
 mod flip;
+#[path = "storage_move/permutation.rs"]
+mod permutation;
 
 impl WgpuProvider {
     pub(super) fn get_entry_for_bitwise_move(
@@ -30,7 +30,26 @@ impl WgpuProvider {
         len: usize,
         allocated_bytes: u64,
     ) -> Result<GpuTensorHandle> {
-        self.register_numeric_buffer_produced(
+        self.register_storage_move_buffer_admitted(
+            buffer,
+            source,
+            shape,
+            len,
+            allocated_bytes,
+            None,
+        )
+    }
+
+    pub(super) fn register_storage_move_buffer_admitted(
+        &self,
+        buffer: runmat_accelerate_api::WgpuBufferOwner,
+        source: &BufferEntry,
+        shape: Vec<usize>,
+        len: usize,
+        allocated_bytes: u64,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> Result<GpuTensorHandle> {
+        self.register_numeric_buffer_produced_admitted(
             buffer,
             NumericBufferRegistration {
                 shape,
@@ -41,6 +60,7 @@ impl WgpuProvider {
                 usage: BufferUsageClass::Generic,
             },
             source.logical,
+            admission,
         )
     }
 }

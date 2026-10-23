@@ -36,7 +36,7 @@ macro_rules! define_integer_conversion_builtin {
             elementwise: None,
             reduction: None,
             emits_nan: false,
-            notes: "Resident integer conversion uses provider-native storage; fusion can target the typed provider hook when supported.",
+            notes: "Resident integer conversion uses the standalone typed provider hook. No scalar or structural fusion lowering is admitted.",
         };
 
         #[runmat_macros::runtime_builtin(

@@ -225,7 +225,7 @@ impl RealNumericView<'_> {
                 .numeric_value_at(index)
                 .expect("numeric view index validated by length"),
             Self::Logical(value) => NumericScalar::U8(u8::from(value.data[index] != 0)),
-            Self::Char(value) => NumericScalar::U32(value.data()[index] as u32),
+            Self::Char(value) => NumericScalar::U32(u32::from(value.data()[index].raw())),
             Self::Sparse(value) => sparse_numeric_value_at(value, index),
         }
     }

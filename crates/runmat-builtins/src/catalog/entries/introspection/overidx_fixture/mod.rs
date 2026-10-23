@@ -6,6 +6,8 @@ use runmat_types::{CallContract, CallInference, CallRequest, DynamicReason};
 
 mod contract;
 pub use contract::*;
+mod legacy_methods;
+pub use legacy_methods::*;
 
 fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut contract = CallContract::dynamic(DynamicReason::DynamicDispatch);
@@ -110,7 +112,12 @@ pub const OVERIDX_SUBSASGN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEn
     suppress_auto_output: false,
 };
 
-pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[
+const INDEXING_ENTRIES: &[&BuiltinCatalogEntry] = &[
     &OVERIDX_SUBSREF_CATALOG_ENTRY,
     &OVERIDX_SUBSASGN_CATALOG_ENTRY,
 ];
+
+pub(super) fn extend_entries(values: &mut Vec<&'static BuiltinCatalogEntry>) {
+    values.extend(INDEXING_ENTRIES.iter().copied());
+    values.extend(legacy_methods::ENTRIES.iter().copied());
+}

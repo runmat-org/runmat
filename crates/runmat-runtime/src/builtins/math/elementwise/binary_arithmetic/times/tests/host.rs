@@ -298,7 +298,7 @@ fn times_preserves_empty_complex_single_class() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn times_char_input() {
-    let chars = CharArray::new("ABC".chars().collect(), 1, 3).unwrap();
+    let chars = CharArray::from_unicode_scalars("ABC".chars().collect(), 1, 3).unwrap();
     let result =
         times_builtin(Value::CharArray(chars), Value::Num(2.0), Vec::new()).expect("char times");
     match result {

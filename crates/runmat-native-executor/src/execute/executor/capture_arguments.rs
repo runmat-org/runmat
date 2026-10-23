@@ -207,6 +207,7 @@ mod tests {
                     region_capacity: 0,
                     retained_input_capacity: 0,
                 },
+            operation_contracts: vec![],
             expected_sites: vec![],
         }
     }

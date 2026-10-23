@@ -26,9 +26,10 @@ pub(super) fn parse(
     let input = args.first().expect("validated single input");
     match input {
         Value::String(text) => Ok(PathInputs::Scalar(path(text, builtin)?)),
-        Value::CharArray(chars) if character_is_row(chars) => {
-            Ok(PathInputs::Scalar(path(&character_row(chars), builtin)?))
-        }
+        Value::CharArray(chars) if character_is_row(chars) => Ok(PathInputs::Scalar(path(
+            &character_row(chars, path_error, builtin)?,
+            builtin,
+        )?)),
         Value::StringArray(array) => Ok(PathInputs::Shaped {
             paths: array
                 .data()
@@ -42,7 +43,7 @@ pub(super) fn parse(
                 .iter_column_major()
                 .map(|value| match value {
                     Value::CharArray(chars) if character_is_row(chars) => {
-                        path(&character_row(chars), builtin)
+                        path(&character_row(chars, path_error, builtin)?, builtin)
                     }
                     _ => Err(descriptor_error(path_error, builtin)),
                 })
@@ -63,14 +64,15 @@ fn path(text: &str, builtin: &'static str) -> BuiltinResult<PathBuf> {
         })
 }
 
-fn character_row(chars: &CharArray) -> String {
-    chars
-        .data()
-        .iter()
-        .take(chars.cols)
-        .collect::<String>()
-        .trim_end()
-        .to_owned()
+fn character_row(
+    chars: &CharArray,
+    error: &'static BuiltinErrorDescriptor,
+    builtin: &'static str,
+) -> BuiltinResult<String> {
+    crate::builtins::io::utf16::decode_utf16_with_error(&chars.data()[..chars.cols], || {
+        descriptor_error(error, builtin)
+    })
+    .map(|text| text.trim_end().to_owned())
 }
 
 fn character_is_row(chars: &CharArray) -> bool {

@@ -4,7 +4,9 @@ use std::borrow::Cow;
 
 use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
-use runmat_value::{CellArray, CharArray, StringArray, Tensor, Value};
+use runmat_value::{
+    decode_utf16_code_units, CellArray, CharArray, StringArray, Tensor, Utf16CodeUnit, Value,
+};
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
@@ -111,7 +113,7 @@ fn str2double_char_array(array: CharArray) -> BuiltinResult<Value> {
     for row in 0..rows {
         let start = row * cols;
         let end = start + cols;
-        let row_text: String = array.data()[start..end].iter().collect();
+        let row_text = decode_chars(&array.data()[start..end])?;
         values.push(parse_numeric_scalar(&row_text));
     }
     let tensor = Tensor::new(values, vec![rows, 1])
@@ -132,7 +134,7 @@ fn str2double_cell_array(cell: CellArray) -> BuiltinResult<Value> {
                     parse_numeric_scalar(&sa.data()[0])
                 }
                 Value::CharArray(char_vec) if char_vec.rows == 1 => {
-                    let row_text: String = char_vec.data().iter().collect();
+                    let row_text = decode_chars(char_vec.data())?;
                     parse_numeric_scalar(&row_text)
                 }
                 Value::CharArray(_) => {
@@ -146,6 +148,18 @@ fn str2double_cell_array(cell: CellArray) -> BuiltinResult<Value> {
     let tensor = Tensor::new(values, vec![rows, cols])
         .map_err(|_| str2double_error(&STR2DOUBLE_ERROR_INTERNAL))?;
     Ok(tensor::tensor_into_value(tensor))
+}
+
+fn decode_chars(units: &[Utf16CodeUnit]) -> BuiltinResult<String> {
+    decode_utf16_code_units(units).map_err(|source| {
+        let mut builder = build_runtime_error("str2double: malformed UTF-16 character input")
+            .with_builtin(BUILTIN_NAME)
+            .with_source(source);
+        if let Some(identifier) = STR2DOUBLE_ERROR_INVALID_INPUT.identifier {
+            builder = builder.with_identifier(identifier);
+        }
+        builder.build()
+    })
 }
 
 fn parse_numeric_scalar(text: &str) -> f64 {
@@ -227,7 +241,7 @@ pub(crate) mod tests {
     #[test]
     fn str2double_char_array_multiple_rows() {
         let data: Vec<char> = vec!['4', '2', ' ', ' ', '1', '0', '0', ' '];
-        let array = CharArray::new(data, 2, 4).unwrap();
+        let array = CharArray::from_unicode_scalars(data, 2, 4).unwrap();
         let result = str2double_builtin(Value::CharArray(array)).expect("str2double");
         match result {
             Value::Tensor(tensor) => {
@@ -242,7 +256,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn str2double_char_array_empty_rows() {
-        let array = CharArray::new(Vec::new(), 0, 0).unwrap();
+        let array = CharArray::from_code_units(Vec::new(), 0, 0).unwrap();
         let result = str2double_builtin(Value::CharArray(array)).expect("str2double");
         match result {
             Value::Tensor(tensor) => {

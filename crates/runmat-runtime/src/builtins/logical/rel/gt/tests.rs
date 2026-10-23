@@ -145,7 +145,7 @@ fn gt_vector_broadcast() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn gt_char_array_against_numeric() {
-    let chars = CharArray::new(vec!['A', 'B', 'C'], 1, 3).unwrap();
+    let chars = CharArray::from_unicode_scalars(vec!['A', 'B', 'C'], 1, 3).unwrap();
     let tensor = Tensor::new(vec![65.0, 65.0, 65.0], vec![1, 3]).unwrap();
     let result = run_gt(Value::CharArray(chars), Value::Tensor(tensor)).expect("gt");
     match result {

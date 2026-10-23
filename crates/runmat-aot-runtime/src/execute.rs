@@ -8,12 +8,15 @@ use runmat_execution_artifact::target_test::{
 use runmat_native_executor::execute::NativeWorkspaceInput;
 use runmat_types::ProgramPointId;
 
-use crate::{input::LinkedAotProcessInput, AotProcessInput};
+use crate::{
+    input::{LinkedAotProcessInput, LinkedAotProcessParts},
+    AotProcessInput,
+};
 
-#[path = "execute/linked_selected.rs"]
-mod linked_selected;
 #[path = "execute/acceleration.rs"]
 mod acceleration;
+#[path = "execute/linked_selected.rs"]
+mod linked_selected;
 #[path = "execute/target_test.rs"]
 mod target_test;
 
@@ -36,12 +39,33 @@ impl InvocationMode<'_> {
 }
 
 pub fn execute(input: AotProcessInput) -> Result<(), String> {
-    execute_with_linked_authority(input, false, std::ptr::null(), None).map(|_| ())
+    execute_with_linked_authority(
+        input,
+        false,
+        std::ptr::null(),
+        std::ptr::null(),
+        crate::input::LinkedExternalFactories::absent(),
+        None,
+    )
+    .map(|_| ())
 }
 
 pub(crate) fn execute_linked(input: LinkedAotProcessInput) -> Result<(), String> {
-    let (input, source_service_factory) = input.into_parts();
-    execute_with_linked_authority(input, true, source_service_factory, None).map(|_| ())
+    let LinkedAotProcessParts {
+        input,
+        source_service_factory,
+        network_service_factory,
+        external_factories,
+    } = input.into_parts();
+    execute_with_linked_authority(
+        input,
+        true,
+        source_service_factory,
+        network_service_factory,
+        external_factories,
+        None,
+    )
+    .map(|_| ())
 }
 
 pub(crate) fn execute_linked_test(
@@ -49,15 +73,29 @@ pub(crate) fn execute_linked_test(
     header: &NativePairedProductHeader,
     request: &NativeTargetTestRequest,
 ) -> Result<NativeTargetTestResult, String> {
-    let (input, source_service_factory) = input.into_parts();
-    execute_with_linked_authority(input, true, source_service_factory, Some((header, request)))?
-        .ok_or_else(|| "target-test execution omitted its receiver result".into())
+    let LinkedAotProcessParts {
+        input,
+        source_service_factory,
+        network_service_factory,
+        external_factories,
+    } = input.into_parts();
+    execute_with_linked_authority(
+        input,
+        true,
+        source_service_factory,
+        network_service_factory,
+        external_factories,
+        Some((header, request)),
+    )?
+    .ok_or_else(|| "target-test execution omitted its receiver result".into())
 }
 
 fn execute_with_linked_authority(
     input: AotProcessInput,
     verified_link: bool,
     source_service_factory: *const std::ffi::c_void,
+    network_service_factory: *const std::ffi::c_void,
+    external_factories: crate::input::LinkedExternalFactories,
     test: Option<(&NativePairedProductHeader, &NativeTargetTestRequest)>,
 ) -> Result<Option<NativeTargetTestResult>, String> {
     let _console_forwarder = if test.is_some() {
@@ -91,8 +129,27 @@ fn execute_with_linked_authority(
     } else {
         InvocationMode::Application
     };
-    let linked_selected =
-        linked_selected::admit(&program, &assembly, verified_link, source_service_factory)?;
+    let linked_selected = linked_selected::admit(
+        &program,
+        &assembly,
+        verified_link,
+        source_service_factory,
+        network_service_factory,
+        external_factories,
+    )?;
+    let local_service_inputs = mode.test().map_or(&program.local_service_inputs, |test| {
+        &test.request.local_service_inputs
+    });
+    let selected_invocation = linked_selected
+        .as_ref()
+        .map(|_| match mode.test() {
+            Some(test) => test
+                .request
+                .digest_for(&test.header.binding)
+                .map_err(|error| error.to_string()),
+            None => Ok(runmat_execution::Digest::sha256(&input.program)),
+        })
+        .transpose()?;
     if program.foreign_policy.is_none()
         && (!interop.foreign_types.is_empty()
             || !interop.adapters.is_empty()
@@ -142,11 +199,60 @@ fn execute_with_linked_authority(
         &java_id,
         &python_id,
     )?;
+    let async_runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| format!("standalone async runtime initialization failed: {error}"))?;
     let mut runtime = runmat_runtime::source_context::bind_portable_source_map_v2(
-        standalone_runtime(&assembly.program),
+        standalone_runtime(
+            &assembly.program,
+            linked_selected
+                .as_ref()
+                .map(|selected| selected.product.binding()),
+            local_service_inputs.as_ref(),
+        )?,
         &program.source_map,
     )
     .map_err(|error| format!("standalone source binding failed: {error}"))?;
+    let mut _external_host_owners = Vec::new();
+    if let Some(selected) = &linked_selected {
+        let issuers = selected
+            .services
+            .iter()
+            .filter(|issuer| issuer.binding().kind.is_local_effect_service())
+            .cloned()
+            .collect();
+        runtime = crate::local_service::install(
+            runtime,
+            selected.product.binding(),
+            selected_invocation.expect("selected invocation was derived"),
+            issuers,
+            local_service_inputs,
+        )?;
+        if let Some(random) = local_service_inputs
+            .as_ref()
+            .and_then(|inputs| inputs.random.as_ref())
+        {
+            runtime
+                .install_selected_random_inputs(random)
+                .map_err(|error| format!("selected random stream installation failed: {error}"))?;
+        }
+        if let Some(issuer) = selected.services.iter().find(|issuer| {
+            issuer.binding().kind
+                == runmat_execution::host::NativeDeploymentServiceKind::Effect(
+                    runmat_types::EffectKind::Network,
+                )
+        }) {
+            runtime = crate::network_service::install(
+                runtime,
+                selected.product.binding(),
+                selected_invocation.expect("selected invocation was derived"),
+                issuer,
+                network_service_factory,
+                async_runtime.handle(),
+            )?;
+        }
+    }
     let test_ledger = mode.test().map(|test| {
         let (managed, ledger) = test.install_resources(runtime.clone());
         runtime = managed;
@@ -159,11 +265,45 @@ fn execute_with_linked_authority(
         .with_local_tasks(local_tasks.submission_port(runtime.local_identity()))
         .with_call(Rc::new(runmat_runtime::context::RuntimeCallRouter));
     runtime = runtime.with_service_ports(ports);
+    // Application inputs are authenticated by the linked program bytes;
+    // tests bind their explicit override to the full per-attempt request.
+    let clock_inputs = mode.test().map_or_else(
+        || program.clock_inputs.clone(),
+        |test| test.request.clock_inputs.clone(),
+    );
+    let clock_issuer = linked_selected.as_ref().and_then(|selected| {
+        selected.services.iter().find(|issuer| {
+            issuer.binding().kind
+                == runmat_execution::host::NativeDeploymentServiceKind::Effect(
+                    runmat_types::EffectKind::Clock,
+                )
+        })
+    });
+    let clock_invocation = if let Some(issuer) = clock_issuer {
+        let invocation = selected_invocation.expect("selected clock has an invocation");
+        let identity = runmat_execution::host::NativeClockInvocationIdentity::new(
+            invocation,
+            clock_inputs.as_ref(),
+        )
+        .map_err(|error| error.to_string())?;
+        runtime =
+            crate::clock_service::install(runtime, issuer.clone(), identity.clone(), clock_inputs)?;
+        Some(identity)
+    } else {
+        None
+    };
     #[cfg(feature = "source-evaluation")]
-    let (mut runtime, source_evaluation_owner) = if let Some(issuer) = linked_selected
-        .as_ref()
-        .and_then(|selected| selected.source_evaluation.clone())
-    {
+    let (mut runtime, source_evaluation_owner) = if let Some(issuer) =
+        linked_selected.as_ref().and_then(|selected| {
+            selected
+                .services
+                .iter()
+                .find(|issuer| {
+                    issuer.binding().kind
+                        == runmat_execution::host::NativeDeploymentServiceKind::SourceEvaluation
+                })
+                .cloned()
+        }) {
         let (runtime, owner) = crate::source_service::install(runtime, issuer)?;
         (runtime, Some(owner))
     } else {
@@ -175,6 +315,51 @@ fn execute_with_linked_authority(
     if let Some(builtins) = crate::builtin::resolve(&program, input.builtin_resolver)? {
         let ports = runtime.service_ports().clone().with_builtin(builtins);
         runtime = runtime.with_service_ports(ports);
+    }
+    if let Some(selected) = &linked_selected {
+        let invocation = selected_invocation.expect("selected invocation was derived");
+        if let Some(issuer) = selected.services.iter().find(|issuer| {
+            issuer.binding().kind
+                == runmat_execution::host::NativeDeploymentServiceKind::Effect(
+                    runmat_types::EffectKind::UserInterface,
+                )
+        }) {
+            let (installed, owner) = crate::external_service::install_host(
+                runtime,
+                selected.product.binding(),
+                invocation,
+                issuer,
+                external_factories.ui,
+            )?;
+            runtime = installed;
+            _external_host_owners.push(owner);
+        }
+        if let Some(issuer) = selected.services.iter().find(|issuer| {
+            issuer.binding().kind
+                == runmat_execution::host::NativeDeploymentServiceKind::Effect(
+                    runmat_types::EffectKind::HostCallback,
+                )
+        }) {
+            runtime = crate::external_service::install_callback(
+                runtime,
+                selected.product.binding(),
+                invocation,
+                issuer,
+                external_factories.callback,
+            )?;
+        }
+        if let Some(issuer) = selected.services.iter().find(|issuer| {
+            issuer.binding().kind
+                == runmat_execution::host::NativeDeploymentServiceKind::HostedDynamicDispatch
+        }) {
+            runtime = crate::external_service::install_dynamic(
+                runtime,
+                selected.product.binding(),
+                invocation,
+                issuer,
+                external_factories.dynamic,
+            )?;
+        }
     }
     let foreign = Rc::new(runmat_runtime::foreign::ForeignRuntime::new(
         runmat_runtime::foreign::ForeignPlatform::Native,
@@ -240,6 +425,8 @@ fn execute_with_linked_authority(
     let executable = runmat_native_executor::NativeExecutable::linked(entrypoints)
         .map_err(|error| format!("standalone native entrypoints are invalid: {error}"))?;
     let options = runmat_native_executor::NativeExecutorOptions {
+        selected_clock_invocation: clock_invocation,
+        selected_local_invocation: selected_invocation,
         program_capture: Some(input.program.clone()),
         interpreter_resume_points: resume_points,
         ..runmat_native_executor::NativeExecutorOptions::default()
@@ -251,7 +438,7 @@ fn execute_with_linked_authority(
                 executable,
                 options,
                 &linked.product,
-                linked.source_evaluation.clone(),
+                linked.services.clone(),
             ),
             None => {
                 runmat_native_executor::NativeExecutor::bind(assembly.clone(), executable, options)
@@ -260,10 +447,6 @@ fn execute_with_linked_authority(
         .map_err(|error| format!("standalone native host initialization failed: {error}"))?,
     );
 
-    let async_runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| format!("standalone async runtime initialization failed: {error}"))?;
     // Keep the original session owner through foreign teardown and terminal
     // rendering. ContextFuture performs the existing nonblocking final drain
     // after inner destruction on success, error, or abandonment.
@@ -480,13 +663,41 @@ fn execution_diagnostic(
 /// launching process's configuration or an embedding caller's active context.
 fn standalone_runtime(
     program: &runmat_execution::ProgramRevision,
-) -> runmat_runtime::context::RuntimeContext {
+    selected: Option<&runmat_execution::host::NativeSelectedProductBinding>,
+    local_inputs: Option<&runmat_execution::host::NativeLocalServiceInputs>,
+) -> Result<runmat_runtime::context::RuntimeContext, String> {
     use runmat_execution::LanguageCompatibilityMode;
     use runmat_runtime::context::{RuntimeContext, RuntimeLanguageMode};
 
-    let runtime = RuntimeContext::new(Rc::new(
-        runmat_runtime::execution::RuntimeExecutionService::new(),
-    ))
+    let execution = Rc::new(runmat_runtime::execution::RuntimeExecutionService::new());
+    let runtime = if let Some(binding) = selected {
+        let environment_read_selected = binding.services.iter().any(|service| {
+            service.kind
+                == runmat_execution::host::NativeDeploymentServiceKind::Effect(
+                    runmat_types::EffectKind::EnvironmentRead,
+                )
+        });
+        let hosted =
+            binding.profile == runmat_execution::host::NativeDeploymentProfile::HostedNative;
+        let hosted_clock = hosted
+            && binding.services.iter().any(|service| {
+                service.kind
+                    == runmat_execution::host::NativeDeploymentServiceKind::Effect(
+                        runmat_types::EffectKind::Clock,
+                    )
+            });
+        RuntimeContext::selected_native_base(
+            execution,
+            local_inputs
+                .and_then(|inputs| inputs.environment.as_ref())
+                .map(|environment| &environment.variables),
+            hosted && environment_read_selected,
+            hosted_clock,
+        )
+        .map_err(|error| format!("selected native environment construction failed: {error}"))?
+    } else {
+        RuntimeContext::new(execution)
+    }
     .with_program_revision(Some(program.clone()));
     let mode = match program.compatibility_mode() {
         LanguageCompatibilityMode::RunMat => RuntimeLanguageMode::RunMat,
@@ -495,7 +706,7 @@ fn standalone_runtime(
     };
     runtime.set_language_mode(mode);
     runtime.set_runmat_extensions_enabled(matches!(mode, RuntimeLanguageMode::RunMat));
-    crate::program::install_acceleration_services(runtime)
+    Ok(crate::program::install_acceleration_services(runtime))
 }
 
 #[cfg(test)]

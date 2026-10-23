@@ -36,11 +36,11 @@ impl LoweringCtx {
                     } else {
                         IndexResultContext::ReadSingle
                     };
-                    crate::HirSubscriptStep::Index(self.lower_indexing_with_context(
-                        indices,
-                        kind,
-                        result_context,
-                    )?)
+                    crate::HirSubscriptStep::Index(if kind == IndexKind::Paren {
+                        self.lower_parentheses_arguments(indices)?
+                    } else {
+                        self.lower_indexing_with_context(indices, kind, result_context)?
+                    })
                 }
                 AstSubscriptStep::Member(member) => {
                     crate::HirSubscriptStep::Member(MemberName(member.to_owned()))

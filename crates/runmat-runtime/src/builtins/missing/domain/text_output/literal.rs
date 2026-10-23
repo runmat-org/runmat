@@ -2,25 +2,28 @@
 
 use crate::context::host_allocation::{HostAllocationError, HostAllocationReceipt};
 use crate::context::RuntimeContext;
-use runmat_value::{ExactArrayInitializationError, ExactHostAllocationPermit, Utf8Text};
-
-use super::initialization_error;
+use runmat_value::{
+    ExactArrayInitializationError, ExactHostAllocationPermit, Utf16TextCopyError, Utf8Text,
+};
 
 #[derive(Clone, Copy)]
 pub(in crate::builtins::missing::domain) enum TextLiteral<'a> {
     Utf8(&'a str),
-    Chars(&'a [char]),
+    Chars(&'a [runmat_value::Utf16CodeUnit]),
 }
 
 impl TextLiteral<'_> {
     pub(super) fn requested_bytes(
         self,
         runtime: &RuntimeContext,
-    ) -> Result<usize, HostAllocationError> {
+    ) -> Result<usize, Utf16TextCopyError<HostAllocationError>> {
         match self {
-            Self::Utf8(text) => Utf8Text::requested_bytes_for_capacity(text.len())
-                .map_err(HostAllocationError::Numeric),
-            Self::Chars(chars) => Utf8Text::requested_bytes_for_chars_with(chars, |_| {
+            Self::Utf8(text) => {
+                Utf8Text::requested_bytes_for_capacity(text.len()).map_err(|cause| {
+                    Utf16TextCopyError::Checkpoint(HostAllocationError::Numeric(cause))
+                })
+            }
+            Self::Chars(chars) => Utf8Text::requested_bytes_for_utf16_with(chars, |_| {
                 if runtime.is_cancelled() {
                     Err(HostAllocationError::Cancelled)
                 } else {
@@ -28,7 +31,12 @@ impl TextLiteral<'_> {
                 }
             })
             .map(|(_, bytes)| bytes)
-            .map_err(initialization_error),
+            .map_err(|error| match error {
+                ExactArrayInitializationError::Allocation(cause) => {
+                    Utf16TextCopyError::Checkpoint(HostAllocationError::Numeric(cause))
+                }
+                ExactArrayInitializationError::Element(cause) => cause,
+            }),
         }
     }
 
@@ -37,13 +45,24 @@ impl TextLiteral<'_> {
         permit: &dyn ExactHostAllocationPermit,
         receipt: &HostAllocationReceipt,
         runtime: &RuntimeContext,
-    ) -> Result<Utf8Text, ExactArrayInitializationError<HostAllocationError>> {
+    ) -> Result<Utf8Text, ExactArrayInitializationError<Utf16TextCopyError<HostAllocationError>>>
+    {
         match self {
             Self::Utf8(text) => {
                 Utf8Text::try_copy_str_exact_with(text, permit, |_| receipt.checkpoint(runtime))
+                    .map_err(|error| match error {
+                        ExactArrayInitializationError::Allocation(cause) => {
+                            ExactArrayInitializationError::Allocation(cause)
+                        }
+                        ExactArrayInitializationError::Element(cause) => {
+                            ExactArrayInitializationError::Element(Utf16TextCopyError::Checkpoint(
+                                cause,
+                            ))
+                        }
+                    })
             }
             Self::Chars(chars) => {
-                Utf8Text::try_copy_chars_exact_with(chars, permit, |_| receipt.checkpoint(runtime))
+                Utf8Text::try_copy_utf16_exact_with(chars, permit, |_| receipt.checkpoint(runtime))
             }
         }
     }

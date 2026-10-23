@@ -47,7 +47,12 @@ fn multiple_grouping_vectors_return_one_label_column_each() {
                         .into_iter()
                         .map(|character| {
                             Value::CharArray(
-                                runmat_value::CharArray::new(vec![character], 1, 1).unwrap(),
+                                runmat_value::CharArray::from_unicode_scalars(
+                                    vec![character],
+                                    1,
+                                    1,
+                                )
+                                .unwrap(),
                             )
                         })
                         .collect(),
@@ -100,7 +105,11 @@ fn multiple_grouping_vectors_return_one_label_column_each() {
                 panic!("cellstr labels must retain their class");
             };
             assert_eq!((values.rows, values.cols), (2, 1));
-            for (value, expected) in values.data().iter().zip(['a', 'b']) {
+            for (value, expected) in values
+                .data()
+                .iter()
+                .zip(runmat_value::encode_utf16_code_units("ab"))
+            {
                 assert!(matches!(value, Value::CharArray(chars) if chars.data() == [expected]));
             }
         } else {
@@ -119,7 +128,11 @@ fn multiple_grouping_vectors_return_one_label_column_each() {
                 let Value::Cell(values) = &retained[0] else {
                     panic!("original shared cellstr must remain intact");
                 };
-                for (value, expected) in values.data().iter().zip(['b', 'a', 'b']) {
+                for (value, expected) in values
+                    .data()
+                    .iter()
+                    .zip(runmat_value::encode_utf16_code_units("bab"))
+                {
                     assert!(matches!(value, Value::CharArray(chars) if chars.data() == [expected]));
                 }
             } else {

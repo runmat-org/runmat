@@ -202,7 +202,7 @@ fn property_text(map: Value, name: &str) -> String {
     let Value::CharArray(chars) = value.value() else {
         panic!("expected char property");
     };
-    chars.data().iter().collect()
+    runmat_value::decode_utf16_code_units(chars.data()).expect("valid UTF-16 fixture")
 }
 
 #[test]

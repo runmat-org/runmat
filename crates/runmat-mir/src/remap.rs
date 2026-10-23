@@ -185,6 +185,17 @@ fn remap_indexing(indexing: &mut MirIndexing, remap: &RemapContext<'_>) -> Resul
                 })?;
                 remap_operand(region.result_mut(), remap);
             }
+            MirIndexComponent::Expansion(region) => {
+                for step in &mut region.steps {
+                    match step {
+                        crate::MirExpressionStep::Let { value, .. } => remap_rvalue(value, remap)?,
+                        crate::MirExpressionStep::CaptureSequence { source, .. } => {
+                            remap_expansion_source(source, remap)?
+                        }
+                    }
+                }
+                remap_call_arg(&mut region.argument, remap)?;
+            }
             MirIndexComponent::Colon => {}
         }
     }
@@ -205,7 +216,24 @@ fn remap_chain(
                 ..
             } => {
                 if let Some(identity) = semantic_fallback {
-                    remap_identity(identity, remap);
+                    // Compiler metadata mutation creates a new backing only
+                    // when the function ID actually changes. Dispatch merely
+                    // retains the already immutable source owner.
+                    let changed = match identity.as_ref() {
+                        CallableIdentity::BoundFunction(function)
+                        | CallableIdentity::AnonymousFunction(function) => {
+                            mapped(*function, remap) != *function
+                        }
+                        CallableIdentity::ExternalFunction { function, .. }
+                            if matches!(remap.policy, RemapPolicy::ClosedUnit) =>
+                        {
+                            mapped(*function, remap) != *function
+                        }
+                        _ => false,
+                    };
+                    if changed {
+                        remap_identity(std::sync::Arc::make_mut(identity), remap);
+                    }
                 }
                 for argument in arguments {
                     match argument {
@@ -356,6 +384,26 @@ fn remap_rvalue(value: &mut MirRvalue, remap: &RemapContext<'_>) -> Result<(), S
 
 fn remap_statement(statement: &mut MirStmt, remap: &RemapContext<'_>) -> Result<(), String> {
     match &mut statement.kind {
+        MirStmtKind::PrepareFixedAssignment(owner) => {
+            remap_prepared_assignment(&mut owner.assignment, remap)?;
+            if let crate::MirFixedPreparationPhase::EvaluateSelector { region, .. } =
+                &mut owner.phase
+            {
+                for step in &mut region.steps {
+                    match step {
+                        crate::MirExpressionStep::Let { value, .. } => remap_rvalue(value, remap)?,
+                        crate::MirExpressionStep::CaptureSequence { source, .. } => {
+                            remap_expansion_source(source, remap)?
+                        }
+                    }
+                }
+                remap_call_arg(&mut region.argument, remap)?;
+            }
+        }
+        MirStmtKind::PreparedAssign { preparation, value } => {
+            remap_prepared_assignment(preparation, remap)?;
+            remap_rvalue(value, remap)?;
+        }
         MirStmtKind::Assign { place, value } => {
             remap_place(place, remap)?;
             remap_rvalue(value, remap)?;
@@ -394,6 +442,22 @@ fn remap_statement(statement: &mut MirStmt, remap: &RemapContext<'_>) -> Result<
         MirStmtKind::StatementOutput(_)
         | MirStmtKind::WorkspaceEffect { .. }
         | MirStmtKind::EnvironmentEffect(_) => {}
+    }
+    Ok(())
+}
+
+fn remap_prepared_assignment(
+    owner: &mut crate::MirPreparedAssignment,
+    remap: &RemapContext<'_>,
+) -> Result<(), String> {
+    remap_place(&mut owner.mutation.place, remap)?;
+    for step in &mut owner.steps {
+        match step {
+            crate::MirExpressionStep::Let { value, .. } => remap_rvalue(value, remap)?,
+            crate::MirExpressionStep::CaptureSequence { source, .. } => {
+                remap_expansion_source(source, remap)?
+            }
+        }
     }
     Ok(())
 }

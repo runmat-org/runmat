@@ -1,7 +1,7 @@
 //! Original-generation object literal construction from already-rooted inputs.
 
-pub(crate) mod replacement;
 mod initialization;
+pub(crate) mod replacement;
 pub(crate) use initialization::ObjectNativeInitialization;
 
 use crate::context::{
@@ -37,7 +37,7 @@ pub(crate) fn construct_object_from_fields_with_native<'a, I>(
     runtime: Option<&RuntimeContext>,
     class_name: &str,
     properties: I,
-    native: Option<ObjectNativeInitialization>,
+    native: Option<ObjectNativeInitialization<'_>>,
 ) -> Result<RootedValue, RuntimeError>
 where
     I: Iterator<Item = (&'a str, &'a Value)> + Clone,
@@ -122,7 +122,7 @@ fn construct_object_with_metadata_in_context<'a, I>(
     class_name: &str,
     properties: I,
     selected: Option<Rc<SelectedObjectClassFacts>>,
-    native: Option<ObjectNativeInitialization>,
+    native: Option<ObjectNativeInitialization<'_>>,
 ) -> Result<RootedValue, RuntimeError>
 where
     I: Iterator<Item = (&'a str, &'a Value)> + Clone,
@@ -132,6 +132,15 @@ where
         .map_err(|source| allocation(runtime, HostAllocationError::Numeric(source)))?;
     let mut physical = quote.requested_bytes;
     let mut claims = quote.retained_claims;
+    if let Some(native) = native.as_ref() {
+        let (bytes, native_claims) = native.additional_quote();
+        physical = physical
+            .checked_add(bytes)
+            .ok_or_else(|| allocation(runtime, HostAllocationError::Overflow))?;
+        claims = claims
+            .checked_add(native_claims)
+            .ok_or_else(|| allocation(runtime, HostAllocationError::Overflow))?;
+    }
     for (name, _) in properties.clone() {
         let bytes = Utf8Text::requested_bytes_for_capacity(name.len())
             .map_err(|source| allocation(runtime, HostAllocationError::Numeric(source)))?;
@@ -181,7 +190,10 @@ where
             }
         }
         if let Some(native) = native {
-            if !native.install_exact(&mut builder) {
+            if !native
+                .install_exact(&mut builder, &permit)
+                .map_err(|source| allocation(runtime, HostAllocationError::Numeric(source)))?
+            {
                 return Err(crate::runtime_error::semantic_error(
                     "ObjectConstruction",
                     "native object owner was already initialized",

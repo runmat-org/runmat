@@ -1,6 +1,6 @@
 use super::*;
 use futures::executor::block_on;
-use runmat_value::IntegerStorage;
+use runmat_value::{CharArray, IntegerStorage, Utf16CodeUnit};
 
 fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
     Value::Tensor(Tensor::new(data, shape).unwrap())
@@ -131,7 +131,10 @@ fn kfold_partition_exposes_balanced_masks() {
 #[test]
 fn numeric_group_order_keeps_seed_repeatability_and_each_class_covered() {
     assert_eq!(
-        char_row_labels(runmat_value::CharArray::new(vec!['a', '1', 'b', '2'], 2, 2).unwrap()),
+        char_row_labels(
+            runmat_value::CharArray::from_unicode_scalars(vec!['a', '1', 'b', '2'], 2, 2).unwrap()
+        )
+        .unwrap(),
         vec![
             Some(PartitionLabel::Text("a1".into())),
             Some(PartitionLabel::Text("b2".into())),
@@ -333,6 +336,33 @@ fn typed_stratify_aliases_have_one_runtime_decoder() {
         "Stratify"
     )
     .is_err());
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn scalar_controls_do_not_fuse_surrogates_across_character_rows() {
+    let rows = Value::CharArray(
+        CharArray::from_code_units(
+            vec![
+                Utf16CodeUnit::from_raw(0xd83d),
+                Utf16CodeUnit::from_raw(0xde80),
+            ],
+            2,
+            1,
+        )
+        .expect("valid two-row character array"),
+    );
+    let bool_error = scalar_bool(&rows, "Stratify").expect_err("two rows are not a scalar");
+    assert_eq!(
+        bool_error.identifier(),
+        Some("RunMat:cvpartition:InvalidArgument")
+    );
+    let text_error =
+        scalar_text(&rows, "partition kind").expect_err("two rows are not a text scalar");
+    assert_eq!(
+        text_error.identifier(),
+        Some("RunMat:cvpartition:InvalidArgument")
+    );
 }
 
 #[test]

@@ -365,7 +365,14 @@ fn scalar_text(value: &Value, context: &str) -> BuiltinResult<runmat_value::Utf8
         Value::String(text) => Ok(text.clone()),
         Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].clone()),
         Value::CharArray(array) if array.rows == 1 => {
-            Ok(array.data().iter().collect::<String>().into())
+            Ok(runmat_value::decode_utf16_code_units(array.data())
+                .map_err(|source| {
+                    let mut error =
+                        ss_error_with_detail(&SS_ERROR_INVALID_OPTION, source.to_string());
+                    error.source = Some(Box::new(source));
+                    error
+                })?
+                .into())
         }
         other => Err(ss_error_with_detail(
             &SS_ERROR_INVALID_OPTION,

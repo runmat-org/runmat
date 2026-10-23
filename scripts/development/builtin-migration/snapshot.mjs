@@ -10,10 +10,20 @@ import { filesUnder } from "./source-scan.mjs";
 export function sourceSnapshot(repository, roots, revision = null) {
   const canonicalRoots = [...new Set(roots)].sort(compareCodePoint);
   const indexModes = repositoryIndexModes(repository, canonicalRoots);
-  const files = [...new Set(canonicalRoots.flatMap((root) => {
+  const explicitFiles = canonicalRoots.filter((root) => {
     const absolute = path.join(repository, root);
-    return fs.existsSync(absolute) && fs.lstatSync(absolute).isFile() ? [root] : filesUnder(repository, root);
-  }))].sort(compareCodePoint);
+    return fs.existsSync(absolute) && fs.lstatSync(absolute).isFile();
+  });
+  // Git defines directory-root source membership, excluding ignored generated
+  // outputs and host metadata. Tracked files remain binding even if ignored;
+  // unignored new files and explicitly named ignored files still fail the
+  // index-membership check below rather than disappearing from the evidence.
+  const candidates = indexModes === null
+    ? canonicalRoots.flatMap((root) => explicitFiles.includes(root) ? [root] : filesUnder(repository, root))
+    : [...indexModes.keys(), ...repositoryUntrackedFiles(repository, canonicalRoots), ...explicitFiles];
+  const files = [...new Set(candidates)]
+    .filter((sourcePath) => fs.existsSync(path.join(repository, sourcePath)))
+    .sort(compareCodePoint);
   const entries = files.map((sourcePath) => {
     const absolute = path.join(repository, sourcePath);
     const stat = fs.lstatSync(absolute);
@@ -116,6 +126,21 @@ function repositoryIndexModes(repository, roots) {
     result.set(match[3], match[1]);
   }
   return result;
+}
+
+function repositoryUntrackedFiles(repository, roots) {
+  if (roots.length === 0) return [];
+  try {
+    return execFileSync("git", ["ls-files", "--others", "--exclude-standard", "-z", "--", ...roots], {
+      cwd: repository,
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "pipe"],
+    }).split("\0").filter(Boolean);
+  } catch (error) {
+    const detail = error?.stderr?.trim() || error.message;
+    throw new Error(`Source snapshot could not read untracked source membership: ${detail}`);
+  }
 }
 
 export function repositoryRevision(repository) {

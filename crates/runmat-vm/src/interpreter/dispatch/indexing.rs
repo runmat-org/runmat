@@ -1,10 +1,7 @@
 use crate::interpreter::vars::InterpreterVars;
-use runmat_runtime::builtins::common::tensor::tensor_values_f64_cow;
 use runmat_runtime::call::arguments::expand_brace_values;
 use runmat_runtime::execution::{RootedValue, RootedValueSequence};
-use runmat_runtime::indexing::plan::{
-    build_assignment_plan, build_index_plan, build_sparse_assignment_plan,
-};
+use runmat_runtime::indexing::plan::build_index_plan;
 use runmat_runtime::indexing::read_linear as idx_read_linear;
 use runmat_runtime::indexing::read_slice as idx_read_slice;
 use runmat_runtime::indexing::selectors::{
@@ -24,6 +21,34 @@ use runmat_value::{CellArray, Value};
 
 mod scalar_read_and_cell;
 mod scalar_store;
+
+/// Admit the exact selector window while every source operand is still on
+/// the stack. The separate root lease follows moved values through awaits.
+fn extract_selector_operands(
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    runtime: &runmat_runtime::context::RuntimeContext,
+    count: usize,
+    has_rhs: bool,
+) -> Result<
+    (
+        runmat_value::OutputListStorage,
+        runmat_runtime::execution::RootedValueLease,
+    ),
+    RuntimeError,
+> {
+    let trailing = usize::from(has_rhs);
+    let width = count.checked_add(trailing).and_then(|n| n.checked_add(1));
+    let start = width
+        .and_then(|width| stack.len().checked_sub(width))
+        .ok_or_else(|| crate::interpreter::errors::mex("StackUnderflow", "stack underflow"))?;
+    let roots = runmat_runtime::execution::RootedValueLease::for_values_iterator_in_context(
+        stack.as_slice()[start..].iter(),
+        runtime,
+    )?;
+    let values =
+        stack.try_extract_output_range_in_context(start + 1, stack.len() - trailing, runtime)?;
+    Ok((values, roots))
+}
 mod slice_read;
 mod slice_store;
 
@@ -33,10 +58,6 @@ fn map_slice_plan_error(context: &str, err: RuntimeError) -> RuntimeError {
         builder = builder.with_identifier(identifier.to_string());
     }
     builder.build()
-}
-
-fn map_slice_shape_error(context: &str, err: impl std::fmt::Display) -> RuntimeError {
-    crate::interpreter::errors::mex("ShapeMismatch", &format!("{context}: {err}"))
 }
 
 fn root_value(value: Value) -> Result<RootedValue, RuntimeError> {
@@ -57,20 +78,6 @@ fn resolve_single_sequence(sequence: RootedValueSequence) -> Result<RootedValue,
     )
 }
 
-fn logical_value_from_tensor(t: runmat_value::Tensor) -> Result<Value, RuntimeError> {
-    let logical_data: Vec<u8> = tensor_values_f64_cow(&t)
-        .iter()
-        .map(|&v| if v != 0.0 { 1 } else { 0 })
-        .collect();
-    if logical_data.len() <= 1 {
-        Ok(Value::Bool(logical_data.first().copied().unwrap_or(0) != 0))
-    } else {
-        let logical = runmat_value::LogicalArray::new(logical_data, t.shape().to_vec())
-            .map_err(|e| map_slice_shape_error("slice assign", e))?;
-        Ok(Value::LogicalArray(logical))
-    }
-}
-
 fn map_cell_scalar_selector_error(err: RuntimeError) -> RuntimeError {
     match err.identifier() {
         Some("RunMat:ScalarIndexRequired") => {
@@ -84,6 +91,7 @@ fn map_cell_scalar_selector_error(err: RuntimeError) -> RuntimeError {
 }
 
 fn object_slice_selector(
+    runtime: &runmat_runtime::context::RuntimeContext,
     dims: usize,
     colon_mask: u32,
     end_mask: u32,
@@ -96,20 +104,23 @@ fn object_slice_selector(
         ));
     }
     let mut values = numeric.iter();
-    let mut components = Vec::with_capacity(dims);
-    for dimension in 0..dims {
-        if colon_mask & (1_u32 << dimension) != 0 {
-            components.push(ObjectIndexComponent::Colon);
-        } else {
-            let value = values.next().ok_or_else(|| {
-                crate::interpreter::errors::mex(
-                    "MalformedObjectSelector",
-                    "object selector is missing an indexed component",
-                )
-            })?;
-            components.push(ObjectIndexComponent::Value(value.clone()));
-        }
-    }
+    let components = runmat_runtime::context::host_allocation::initialize_host_array(
+        Some(runtime),
+        dims,
+        |dimension| {
+            if colon_mask & (1_u32 << dimension) != 0 {
+                Ok(ObjectIndexComponent::Colon)
+            } else {
+                let value = values.next().ok_or_else(|| {
+                    crate::interpreter::errors::mex(
+                        "MalformedObjectSelector",
+                        "object selector is missing an indexed component",
+                    )
+                })?;
+                Ok(ObjectIndexComponent::Value(value.clone()))
+            }
+        },
+    )?;
     if values.next().is_some() {
         return Err(crate::interpreter::errors::mex(
             "MalformedObjectSelector",
@@ -119,34 +130,25 @@ fn object_slice_selector(
     Ok(ObjectIndexSelector::IndexValues { components })
 }
 
+fn object_index_components(
+    runtime: &runmat_runtime::context::RuntimeContext,
+    indices: Vec<Value>,
+) -> Result<runmat_value::ExactArrayStorage<ObjectIndexComponent>, RuntimeError> {
+    let count = indices.len();
+    let mut indices = indices.into_iter();
+    runmat_runtime::context::host_allocation::initialize_host_array(Some(runtime), count, |_| {
+        Ok(indices.next().expect("exact selector count").into())
+    })
+}
+
 async fn read_scalar_like_slice(
+    runtime: &runmat_runtime::context::RuntimeContext,
     base: &Value,
     dims: usize,
     colon_mask: u32,
     end_mask: u32,
     numeric: &[Value],
 ) -> Result<Value, RuntimeError> {
-    if let Value::LogicalArray(la) = base {
-        let data: Vec<f64> = la
-            .data
-            .iter()
-            .map(|&b| if b != 0 { 1.0 } else { 0.0 })
-            .collect();
-        let tensor = runmat_value::Tensor::new(data, la.shape.clone())
-            .map_err(|e| map_slice_shape_error("slice", e))?;
-        let sliced = if dims == 1 {
-            idx_read_slice::read_tensor_slice_1d(&tensor, colon_mask, end_mask, numeric).await?
-        } else {
-            idx_read_slice::read_tensor_slice_nd(&tensor, dims, colon_mask, end_mask, numeric)
-                .await?
-        };
-        return match sliced {
-            Value::Tensor(t) => logical_value_from_tensor(t),
-            Value::Num(n) => Ok(Value::Bool(n != 0.0)),
-            other => Ok(other),
-        };
-    }
-
     if dims != 1 {
         return Err(crate::interpreter::errors::mex(
             "SliceNonTensor",
@@ -159,15 +161,19 @@ async fn read_scalar_like_slice(
             "Slicing only supported on tensors",
         ));
     }
-    let selectors = build_slice_selectors(1, colon_mask, end_mask, numeric, &[1usize]).await?;
-    let linear_indices: Vec<f64> = match selectors.first() {
-        Some(SliceSelector::Scalar(index)) => vec![*index as f64],
-        Some(SliceSelector::Indices(indices)) => {
-            indices.iter().map(|&index| index as f64).collect()
-        }
-        Some(SliceSelector::LinearIndices { values, .. }) => {
-            values.iter().map(|&index| index as f64).collect()
-        }
+    let selectors = runmat_runtime::indexing::selectors::build_slice_selectors_in_context(
+        runtime,
+        1,
+        colon_mask,
+        end_mask,
+        numeric,
+        &[1usize],
+    )
+    .await?;
+    let count = match selectors.first() {
+        Some(SliceSelector::Scalar(_)) => 1,
+        Some(SliceSelector::Indices(indices)) => indices.len(),
+        Some(SliceSelector::LinearIndices { values, .. }) => values.len(),
         Some(SliceSelector::Colon) | None => {
             return Err(crate::interpreter::errors::mex(
                 "SliceNonTensor",
@@ -175,6 +181,18 @@ async fn read_scalar_like_slice(
             ));
         }
     };
+    let linear_indices = runmat_runtime::context::host_allocation::initialize_host_array(
+        Some(runtime),
+        count,
+        |ordinal| {
+            Ok(match selectors.first() {
+                Some(SliceSelector::Scalar(index)) => *index as f64,
+                Some(SliceSelector::Indices(indices)) => indices[ordinal] as f64,
+                Some(SliceSelector::LinearIndices { values, .. }) => values[ordinal] as f64,
+                _ => unreachable!("selector kind checked before exact metadata construction"),
+            })
+        },
+    )?;
     if matches!(base, Value::Symbolic(_)) {
         if linear_indices.len() == 1 && linear_indices[0] == 1.0 {
             return Ok(base.clone());
@@ -220,30 +238,59 @@ fn missing_member_index_overload_error(base: &Value, op: ObjectIndexOp) -> Optio
 async fn assign_object_scalar_indices(
     runtime: &runmat_runtime::context::RuntimeContext,
     base: Value,
-    indices: Vec<usize>,
+    indices: &[usize],
     rhs: Value,
     delete: bool,
 ) -> Result<RootedValue, RuntimeError> {
-    let _roots = crate::call::root_values([&base, &rhs])?;
+    let _roots = runmat_runtime::execution::RootedValueLease::for_values_iterator_in_context(
+        [&base, &rhs].into_iter(),
+        runtime,
+    )?;
     let resolution = resolve_object_index_protocol(&base, ObjectIndexOp::Subsasgn, None)?;
     if let Some(method) = resolution {
-        let path = ObjectSubscriptPath::single(ObjectSubscript::parentheses(
-            ObjectIndexSelector::ScalarIndices { indices },
-        ));
-        return runmat_runtime::object::protocol::invoke_resolved_object_assignment_in_context(
+        let components = runmat_runtime::context::host_allocation::initialize_host_array(
+            Some(runtime),
+            indices.len(),
+            |ordinal| {
+                Ok(ObjectIndexComponent::Value(Value::Num(
+                    indices[ordinal] as f64,
+                )))
+            },
+        )?;
+        let path = ObjectSubscriptPath::single_in_context(
+            Some(runtime),
+            ObjectSubscript::parentheses(ObjectIndexSelector::IndexValues { components }),
+        )?;
+        return runmat_runtime::object::protocol::invoke_resolved_object_assignment_sequence_in_context(
             runtime,
             &method,
             base,
             path,
-            runmat_runtime::sequence::into_unbounded_values(
-                runmat_runtime::call::arguments::adapt_legacy_builtin_result(rhs)?,
-            )?,
+            runmat_runtime::call::arguments::adapt_legacy_builtin_result(rhs)?,
         )
         .await;
     }
-    root_value(runmat_runtime::indexing::object::assign_scalar_indices(
-        base, &indices, rhs, delete,
-    )?)
+    if delete {
+        RootedValue::in_context(
+            runmat_runtime::indexing::object::delete_scalar_indices_in_context(
+                Some(runtime),
+                base,
+                indices,
+                &rhs,
+            )?,
+            runtime,
+        )
+    } else {
+        RootedValue::in_context(
+            runmat_runtime::indexing::object::assign_scalar_indices_in_context(
+                Some(runtime),
+                base,
+                indices,
+                rhs,
+            )?,
+            runtime,
+        )
+    }
 }
 
 async fn invoke_object_brace_read(
@@ -254,10 +301,12 @@ async fn invoke_object_brace_read(
 ) -> Result<RootedValue, RuntimeError> {
     let _roots = crate::call::root_values(indices.iter().chain(std::iter::once(&base)))?;
     let resolution = resolve_object_index_protocol(&base, ObjectIndexOp::Subsref, None)?;
-    let path =
-        ObjectSubscriptPath::single(ObjectSubscript::braces(ObjectIndexSelector::IndexValues {
-            components: indices.into_iter().map(Into::into).collect(),
-        }));
+    let path = ObjectSubscriptPath::single_in_context(
+        Some(runtime),
+        ObjectSubscript::braces(ObjectIndexSelector::IndexValues {
+            components: object_index_components(runtime, indices)?,
+        }),
+    )?;
     let sequence = invoke_resolved_object_index_path_method_in_context(
         runtime,
         &resolution,
@@ -283,10 +332,12 @@ async fn invoke_object_brace_assignment(
             "class does not define subsasgn for brace assignment",
         ));
     };
-    let path =
-        ObjectSubscriptPath::single(ObjectSubscript::braces(ObjectIndexSelector::IndexValues {
-            components: indices.into_iter().map(Into::into).collect(),
-        }));
+    let path = ObjectSubscriptPath::single_in_context(
+        Some(runtime),
+        ObjectSubscript::braces(ObjectIndexSelector::IndexValues {
+            components: object_index_components(runtime, indices)?,
+        }),
+    )?;
     runmat_runtime::object::protocol::invoke_resolved_object_assignment_in_context(
         runtime,
         &method,
@@ -327,9 +378,9 @@ async fn resolve_cell_indices(values: &[Value]) -> Result<Vec<usize>, RuntimeErr
         .await
         .map_err(map_cell_scalar_selector_error)?;
     let mut indices = Vec::with_capacity(selectors.len());
-    for selector in selectors {
+    for selector in &selectors {
         match selector {
-            SliceSelector::Scalar(index) => indices.push(index),
+            SliceSelector::Scalar(index) => indices.push(*index),
             _ => {
                 return Err(crate::interpreter::errors::mex(
                     "CellIndexType",
@@ -347,13 +398,6 @@ fn gather_cell_with_plan(
 ) -> Result<Value, RuntimeError> {
     let indices: Vec<usize> = plan.indices.iter().map(|idx| (*idx as usize) + 1).collect();
     runmat_runtime::object::cell::gather_cell_paren_linear_indices(ca, &indices, &plan.output_shape)
-}
-
-fn gather_struct_array_with_plan(
-    array: &runmat_value::StructArray,
-    plan: &runmat_runtime::indexing::plan::IndexPlan,
-) -> Result<Value, RuntimeError> {
-    runmat_runtime::indexing::structure::read_with_plan(array, plan)
 }
 
 fn pop_index_values(
@@ -701,11 +745,12 @@ pub async fn paren_index_sequence(
     ) {
         let resolution = resolve_object_index_protocol(&base, ObjectIndexOp::Subsref, None)?;
         if resolution.is_some() {
-            let path = ObjectSubscriptPath::single(ObjectSubscript::parentheses(
-                ObjectIndexSelector::IndexValues {
-                    components: raw_indices.into_iter().map(Into::into).collect(),
-                },
-            ));
+            let path = ObjectSubscriptPath::single_in_context(
+                Some(runtime),
+                ObjectSubscript::parentheses(ObjectIndexSelector::IndexValues {
+                    components: object_index_components(runtime, raw_indices)?,
+                }),
+            )?;
             return invoke_resolved_object_index_path_method_in_context(
                 runtime,
                 &resolution,
@@ -784,11 +829,28 @@ pub async fn paren_index_sequence(
             }
         }
         _ => {
-            if let Some(shape) = runmat_runtime::indexing::value::shape(&base) {
+            if let Some(shape) = runmat_runtime::indexing::value::shape_borrowed(&base) {
                 let selectors =
-                    build_slice_selectors(raw_indices.len(), 0, 0, &raw_indices, &shape).await?;
-                let plan = build_index_plan(&selectors, raw_indices.len(), &shape)?;
-                runmat_runtime::indexing::value::read_with_plan(base, &plan)
+                    runmat_runtime::indexing::selectors::build_slice_selectors_in_context(
+                        runtime,
+                        raw_indices.len(),
+                        0,
+                        0,
+                        &raw_indices,
+                        shape.as_slice(),
+                    )
+                    .await?;
+                let plan = runmat_runtime::indexing::plan::build_index_plan_in_context(
+                    runtime,
+                    &selectors,
+                    raw_indices.len(),
+                    shape.as_slice(),
+                )?;
+                runmat_runtime::indexing::value::read_with_plan_in_context(
+                    Some(runtime),
+                    base,
+                    &plan,
+                )
             } else {
                 let indices = linear_index_values(&raw_indices).await?;
                 idx_read_linear::generic_index(&base, &indices).await
@@ -1012,7 +1074,21 @@ mod tests {
         let tensor = Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX]), vec![1, 2])
             .expect("typed integer tensor");
 
-        let value = super::logical_value_from_tensor(tensor).expect("logical conversion");
+        let plan = runmat_runtime::indexing::plan::IndexPlan::new(
+            vec![0, 1],
+            vec![1, 2],
+            vec![2],
+            1,
+            vec![1, 2],
+        );
+        let value =
+            runmat_runtime::indexing::write_slice::assign_logical_with_plan_host_in_context(
+                None,
+                runmat_value::LogicalArray::new(vec![0, 0], vec![1, 2]).unwrap(),
+                &plan,
+                &Value::Tensor(tensor),
+            )
+            .expect("canonical typed logical assignment");
         assert_eq!(
             value,
             Value::LogicalArray(

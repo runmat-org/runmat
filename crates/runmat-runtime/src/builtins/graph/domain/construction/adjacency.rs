@@ -1,5 +1,5 @@
 use super::super::class_registry::TriangleMode;
-use super::super::parsing::{canonical, parse_node_names, parse_string_vector, scalar_text};
+use super::super::parsing::{canonical, parse_node_names, scalar_text};
 use super::*;
 use crate::builtins::common::tensor;
 
@@ -16,9 +16,11 @@ pub(in crate::builtins::graph::domain) fn is_adjacency_form(
         }
         _ => false,
     }) && (args.len() == 1
-        || args
-            .get(1)
-            .is_some_and(|arg| parse_string_vector(arg).is_ok() || scalar_text(arg).is_some()))
+        || args.get(1).is_some_and(|arg| {
+            matches!(arg, Value::String(_) | Value::CharArray(_))
+                || matches!(arg,Value::StringArray(a) if super::super::parsing::is_vector_shape(&a.shape))
+                || matches!(arg,Value::Cell(a) if super::super::parsing::is_vector_shape(&a.shape))
+        }))
 }
 
 pub(super) fn graph_from_adjacency(
@@ -71,7 +73,7 @@ pub(super) fn graph_from_adjacency(
     let mut mode = TriangleMode::Full;
     let mut node_names = None;
     if let Some(arg) = args.get(1) {
-        if let Some(text) = scalar_text(arg) {
+        if let Some(text) = scalar_text(arg).map_err(|source| graph_error(name, source))? {
             match canonical(&text).as_str() {
                 "upper" => mode = TriangleMode::Upper,
                 "lower" => mode = TriangleMode::Lower,

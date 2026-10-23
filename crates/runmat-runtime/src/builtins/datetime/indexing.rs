@@ -11,7 +11,7 @@ pub(super) async fn datetime_indexing(
             "datetime.subsref: receiver must be a datetime object",
         ));
     };
-    let format = format_for_object(&object);
+    let format = format_for_object(&object)?;
     let serials = serial_tensor_for_object(&object)?;
 
     let Value::Cell(cell) = payload else {

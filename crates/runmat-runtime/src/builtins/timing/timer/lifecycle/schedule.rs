@@ -20,7 +20,7 @@ pub(super) async fn run_timer_callbacks(
         return Ok(());
     }
     sleep_until(runtime, config.start_delay).await?;
-    let timing = runtime.service_ports().timing().clone();
+    let timing = runtime.service_ports().timing()?.clone();
     let mut cooperation = runtime.cpu_cooperation();
     let mut scheduled = 0usize;
     let mut executed = 0usize;
@@ -135,7 +135,7 @@ pub(super) fn still_running(runtime: &RuntimeContext, handle: &HandleRef, genera
 async fn sleep_until(runtime: &RuntimeContext, duration: Duration) -> BuiltinResult<()> {
     runtime
         .cpu_cooperation()
-        .await_cancellable(runtime.service_ports().timing().sleep(duration))
+        .await_cancellable(runtime.service_ports().timing()?.sleep(duration))
         .await
         .map_err(crate::execution::ExecutionServiceError::into_runtime_error)??;
     Ok(())

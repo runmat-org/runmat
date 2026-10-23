@@ -70,22 +70,19 @@ pub(crate) fn parse_positive_db(
     Ok(parsed)
 }
 
-pub(crate) fn option_text(value: &Value) -> Option<String> {
-    match value {
+pub(crate) fn option_text(value: &Value) -> Result<Option<String>, runmat_value::Utf16DecodeError> {
+    Ok(match value {
         Value::String(text) => Some(text.trim().to_ascii_lowercase()),
         Value::StringArray(array) if array.data().len() == 1 => {
             Some(array.data()[0].trim().to_ascii_lowercase())
         }
         Value::CharArray(chars) if chars.rows <= 1 => Some(
-            chars
-                .data()
-                .iter()
-                .collect::<String>()
+            runmat_value::decode_utf16_code_units(chars.data())?
                 .trim()
                 .to_ascii_lowercase(),
         ),
         _ => None,
-    }
+    })
 }
 
 pub(crate) fn classify_kind(wp: &[f64], ws: &[f64]) -> Result<FilterKind, String> {

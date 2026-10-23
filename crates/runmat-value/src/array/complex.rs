@@ -5,9 +5,84 @@ use super::*;
 /// The explicit C representation makes this layout suitable for in-process
 /// foreign buffer leases. Callers must still use the owning buffer APIs for
 /// lifetime and mutation; this type establishes element layout only.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
 #[repr(C)]
 pub struct ComplexElement<T>(pub T, pub T);
+
+/// Non-growing unique borrow of both canonical complex components. Acquiring
+/// it never detaches either component from its physical allocation claim.
+pub struct UniqueHostComplexMutation<'a> {
+    storage: UniqueComplexStorage<'a>,
+}
+enum UniqueComplexStorage<'a> {
+    F32(&'a mut [ComplexElement<f32>]),
+    F64(&'a mut [ComplexElement<f64>]),
+    Integer {
+        real: UniqueHostNumericMutation<'a>,
+        imag: UniqueHostNumericMutation<'a>,
+    },
+}
+impl UniqueHostComplexMutation<'_> {
+    pub fn set_value(
+        &mut self,
+        index: usize,
+        real: NumericScalar,
+        imag: NumericScalar,
+    ) -> Result<(), String> {
+        match &mut self.storage {
+            UniqueComplexStorage::F32(values) => {
+                let real = real.materialize_f32();
+                let imag = imag.materialize_f32();
+                *values
+                    .get_mut(index)
+                    .ok_or_else(|| format!("ComplexTensor index {index} out of bounds"))? =
+                    ComplexElement(real, imag);
+                Ok(())
+            }
+            UniqueComplexStorage::F64(values) => {
+                *values
+                    .get_mut(index)
+                    .ok_or_else(|| format!("ComplexTensor index {index} out of bounds"))? =
+                    ComplexElement(real.materialize_f64(), imag.materialize_f64());
+                Ok(())
+            }
+            UniqueComplexStorage::Integer {
+                real: target_real,
+                imag: target_imag,
+            } => {
+                target_real.set_value(index, real)?;
+                target_imag.set_value(index, imag)
+            }
+        }
+    }
+}
+
+impl<T: std::ops::Add<Output = T>> std::ops::Add for ComplexElement<T> {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self {
+        Self(self.0 + rhs.0, self.1 + rhs.1)
+    }
+}
+
+impl<T: std::ops::Sub<Output = T>> std::ops::Sub for ComplexElement<T> {
+    type Output = Self;
+    fn sub(self, rhs: Self) -> Self {
+        Self(self.0 - rhs.0, self.1 - rhs.1)
+    }
+}
+
+impl<
+        T: Copy + std::ops::Add<Output = T> + std::ops::Sub<Output = T> + std::ops::Mul<Output = T>,
+    > std::ops::Mul for ComplexElement<T>
+{
+    type Output = Self;
+    fn mul(self, rhs: Self) -> Self {
+        Self(
+            self.0 * rhs.0 - self.1 * rhs.1,
+            self.0 * rhs.1 + self.1 * rhs.0,
+        )
+    }
+}
 
 impl<T> From<(T, T)> for ComplexElement<T> {
     fn from((real, imaginary): (T, T)) -> Self {
@@ -369,6 +444,24 @@ impl ComplexTensor {
             ComplexStorage::F32(values) => values.try_as_mut_slice_unique(),
             ComplexStorage::F64(_) | ComplexStorage::Integer(_) => None,
         }
+    }
+
+    /// Borrow the complete existing payload uniquely, or decline without COW.
+    /// Both integer component borrows are acquired before any mutation.
+    pub fn try_unique_numeric_mutation(&mut self) -> Option<UniqueHostComplexMutation<'_>> {
+        let storage = match &mut self.storage {
+            ComplexStorage::F32(values) => {
+                UniqueComplexStorage::F32(values.try_as_mut_slice_unique()?)
+            }
+            ComplexStorage::F64(values) => {
+                UniqueComplexStorage::F64(values.try_as_mut_slice_unique()?)
+            }
+            ComplexStorage::Integer(storage) => UniqueComplexStorage::Integer {
+                real: storage.real.try_unique_mutation()?,
+                imag: storage.imag.try_unique_mutation()?,
+            },
+        };
+        Some(UniqueHostComplexMutation { storage })
     }
 
     /// Borrow native double-precision elements without an implicit COW copy.

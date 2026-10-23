@@ -17,12 +17,18 @@ use crate::{
 };
 use runmat_value::{SharedShape, StructArray, StructValue, Value};
 
-mod transform;
-mod concatenate;
 mod assignment;
+mod assignment_prefix;
+mod concatenate;
 #[cfg(test)]
 mod tests;
+mod transform;
 pub use assignment::assign;
+pub(crate) use assignment::assign_in_context;
+pub(crate) use assignment::assign_initializing_in_context;
+pub(crate) use assignment::empty as empty_numeric_in_context;
+pub(crate) use assignment_prefix::project_initializing_in_context;
+pub(crate) use assignment_prefix::{selected_structure_element, SelectedStructureElement};
 pub use concatenate::concatenate;
 pub(crate) use concatenate::concatenate_arguments;
 pub use transform::{circular_shift, flip, permute, reshape, tile};
@@ -141,33 +147,45 @@ pub fn select_by_index(
     shape: &[usize],
     source: impl Fn(usize) -> Option<usize>,
 ) -> Result<Value, RuntimeError> {
+    let runtime = crate::context::legacy::active();
+    select_by_index_in_context(runtime.as_ref(), array, shape, source)
+}
+
+pub(crate) fn select_by_index_in_context(
+    runtime: Option<&RuntimeContext>,
+    array: &StructArray,
+    shape: &[usize],
+    source: impl Fn(usize) -> Option<usize>,
+) -> Result<Value, RuntimeError> {
     for index in 0..count(shape)? {
         if source(index).is_none_or(|index| index >= array.len()) {
             return Err(invalid("structure selection index or shape is invalid"));
         }
     }
-    let runtime = crate::context::legacy::active();
     let original = Value::StructArray(array.clone());
-    let _roots = replacement::lease(&original, runtime.as_ref())?;
-    construct_generated_structure(
-        runtime.as_ref(),
-        array.field_names(),
-        shape,
-        |name, index| {
-            array
-                .field_values(name)
-                .and_then(|values| source(index).and_then(|index| values.get(index)))
-                .ok_or_else(|| invalid("structure selection lost a field"))
-        },
-    )
+    let _roots = replacement::lease(&original, runtime)?;
+    construct_generated_structure(runtime, array.field_names(), shape, |name, index| {
+        array
+            .field_values(name)
+            .and_then(|values| source(index).and_then(|index| values.get(index)))
+            .ok_or_else(|| invalid("structure selection lost a field"))
+    })
     .map(raw)
 }
 
 pub fn replicate_scalar(value: &StructValue, shape: &[usize]) -> Result<Value, RuntimeError> {
     let runtime = crate::context::legacy::active();
+    replicate_scalar_in_context(runtime.as_ref(), value, shape)
+}
+
+pub(crate) fn replicate_scalar_in_context(
+    runtime: Option<&RuntimeContext>,
+    value: &StructValue,
+    shape: &[usize],
+) -> Result<Value, RuntimeError> {
     let original = Value::Struct(value.clone());
-    let _roots = replacement::lease(&original, runtime.as_ref())?;
-    construct_generated_structure(runtime.as_ref(), value.field_names(), shape, |name, _| {
+    let _roots = replacement::lease(&original, runtime)?;
+    construct_generated_structure(runtime, value.field_names(), shape, |name, _| {
         value
             .fields
             .get(name)
@@ -200,25 +218,64 @@ pub fn remove(
     select(array, indices.values(), shape)
 }
 pub fn empty_like(base: &Value, shape: &[usize]) -> Result<Value, RuntimeError> {
+    let runtime = crate::context::legacy::active();
+    empty_like_in_context(runtime.as_ref(), base, shape)
+}
+
+pub(crate) fn empty_like_in_context(
+    runtime: Option<&RuntimeContext>,
+    base: &Value,
+    shape: &[usize],
+) -> Result<Value, RuntimeError> {
     if count(shape)? != 0 {
         return Err(invalid(
             "empty structure destination must have zero elements",
         ));
     }
-    let runtime = crate::context::legacy::active();
-    let _roots = replacement::lease(base, runtime.as_ref())?;
+    let _roots = replacement::lease(base, runtime)?;
     let value = |_: &str, _: usize| Err(invalid("empty structure initializer was called"));
     match base {
         Value::Struct(base) => {
-            construct_generated_structure(runtime.as_ref(), base.field_names(), shape, value)
-                .map(raw)
+            construct_generated_structure(runtime, base.field_names(), shape, value).map(raw)
         }
         Value::StructArray(base) => {
-            construct_generated_structure(runtime.as_ref(), base.field_names(), shape, value)
-                .map(raw)
+            construct_generated_structure(runtime, base.field_names(), shape, value).map(raw)
         }
         _ => Err(invalid("structure value expected")),
     }
+}
+
+/// Project directly from sorted unique source removals. No survivor table or
+/// field/payload copy is needed before the one canonical final constructor.
+pub(crate) fn remove_sorted_in_context(
+    runtime: Option<&RuntimeContext>,
+    array: &StructArray,
+    removed: &[usize],
+    shape: &[usize],
+) -> Result<Value, RuntimeError> {
+    if removed.last().is_some_and(|&index| index >= array.len())
+        || removed.windows(2).any(|pair| pair[0] >= pair[1])
+        || array.len().checked_sub(removed.len()) != Some(count(shape)?)
+    {
+        return Err(invalid(
+            "structure deletion index or output shape is invalid",
+        ));
+    }
+    select_by_index_in_context(runtime, array, shape, |ordinal| {
+        // removed[i] - i is the number of retained elements before that
+        // removal. Rank-select is logarithmic and repeatable across fields.
+        let mut low = 0;
+        let mut high = removed.len();
+        while low < high {
+            let middle = low + (high - low) / 2;
+            if removed[middle] - middle <= ordinal {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+        ordinal.checked_add(low)
+    })
 }
 /// Owned structural projection for transforms that preserve GC identities
 /// (for example string-to-character and missing-value classification). The

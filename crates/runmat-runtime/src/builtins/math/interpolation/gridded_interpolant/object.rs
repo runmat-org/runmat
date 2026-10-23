@@ -67,7 +67,13 @@ pub(super) fn object_to_spec(value: &Value) -> BuiltinResult<InterpolantSpec> {
         }
         _ => return Err(internal("object is missing Values")),
     };
-    let method = match object.properties().get(METHOD).and_then(text_from_value) {
+    let method = match object
+        .properties()
+        .get(METHOD)
+        .map(text_from_value)
+        .transpose()?
+        .flatten()
+    {
         Some(name) => parse_interp_method(MethodKeyword::parse(&name).ok_or_else(|| {
             invalid(format!(
                 "unknown interpolation method '{}'",
@@ -79,7 +85,9 @@ pub(super) fn object_to_spec(value: &Value) -> BuiltinResult<InterpolantSpec> {
     let extrapolation = match object
         .properties()
         .get(EXTRAPOLATION_METHOD)
-        .and_then(text_from_value)
+        .map(text_from_value)
+        .transpose()?
+        .flatten()
     {
         Some(name) => parse_extrap_method(MethodKeyword::parse(&name).ok_or_else(|| {
             invalid(format!(
@@ -99,7 +107,7 @@ pub(super) fn object_to_spec(value: &Value) -> BuiltinResult<InterpolantSpec> {
 }
 
 pub(super) fn gridded_member(obj: Value, payload: Value) -> BuiltinResult<Value> {
-    let field = text_from_value(&payload).ok_or_else(|| invalid("property name must be text"))?;
+    let field = text_from_value(&payload)?.ok_or_else(|| invalid("property name must be text"))?;
     let Value::Object(object) = obj else {
         return Err(invalid("receiver must be a griddedInterpolant object"));
     };

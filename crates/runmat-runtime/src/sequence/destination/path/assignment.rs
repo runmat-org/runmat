@@ -32,7 +32,7 @@ impl PreparedSequenceDestination {
         builder.finish(endpoint).await
     }
 
-    pub const fn cardinality(&self) -> usize {
+    pub fn cardinality(&self) -> usize {
         match &self.kind {
             PreparedDestinationKind::Structural { endpoint, .. } => endpoint.cardinality(),
             PreparedDestinationKind::ObjectProtocol(destination) => destination.cardinality,
@@ -45,6 +45,8 @@ impl PreparedSequenceDestination {
         values: Vec<Value>,
         caller: Option<&str>,
     ) -> Result<RootedValue, RuntimeError> {
+        let values = runmat_value::ValueSequence::comma_separated(values)
+            .map_err(crate::sequence::sequence_error_to_runtime)?;
         self.assign_with_context(None, root, values, caller).await
     }
 
@@ -55,6 +57,22 @@ impl PreparedSequenceDestination {
         values: Vec<Value>,
         caller: Option<&str>,
     ) -> Result<RootedValue, RuntimeError> {
+        let values = runmat_value::ValueSequence::comma_separated(values)
+            .map_err(crate::sequence::sequence_error_to_runtime)?;
+        self.assign_with_context(Some(context), root, values, caller)
+            .await
+    }
+
+    /// Ordinary one-output assignment keeps its RHS inline in the canonical
+    /// sequence carrier; it does not manufacture a one-element heap vector.
+    pub async fn assign_fixed_in_context(
+        self,
+        context: &crate::context::RuntimeContext,
+        root: Value,
+        rhs: Value,
+        caller: Option<&str>,
+    ) -> Result<RootedValue, RuntimeError> {
+        let values = crate::sequence::single_value_sequence(rhs)?;
         self.assign_with_context(Some(context), root, values, caller)
             .await
     }
@@ -63,7 +81,7 @@ impl PreparedSequenceDestination {
         self,
         context: Option<&crate::context::RuntimeContext>,
         root: Value,
-        values: Vec<Value>,
+        values: runmat_value::ValueSequence,
         caller: Option<&str>,
     ) -> Result<RootedValue, RuntimeError> {
         let Self {
@@ -71,17 +89,24 @@ impl PreparedSequenceDestination {
             _retained_roots,
             _source_roots,
         } = self;
-        let _inputs = RootedValueLease::for_values(std::iter::once(&root).chain(values.iter()))
-            .map_err(|error| error.into_runtime_error())?;
+        let _inputs = match context {
+            Some(runtime) => RootedValueLease::for_values_iterator_in_context(
+                std::iter::once(&root).chain(values.iter()),
+                runtime,
+            )?,
+            None => RootedValueLease::for_values(std::iter::once(&root).chain(values.iter()))
+                .map_err(|error| error.into_runtime_error())?,
+        };
         match kind {
             PreparedDestinationKind::Structural { steps, endpoint } => {
                 super::structural::assign_path(
                     context,
                     root,
-                    steps.into(),
+                    steps.into_iter(),
                     endpoint,
                     values,
                     caller,
+                    _inputs,
                 )
                 .await
             }
@@ -94,7 +119,7 @@ impl PreparedSequenceDestination {
                     endpoint,
                     path,
                     cardinality,
-                } = *destination;
+                } = allocator_api2::boxed::Box::into_inner(destination);
                 if values.len() != cardinality {
                     return Err(semantic_error(
                         "CommaSeparatedListAssignmentArity",
@@ -115,13 +140,17 @@ impl PreparedSequenceDestination {
                 super::object_assignment::assign_object_path(
                     context,
                     root,
-                    prefix.into(),
+                    prefix.into_iter(),
                     expected_class,
                     suffix_steps,
                     endpoint,
                     path,
+                    crate::builtins::introspection::object_indexing::PreparedObjectAssignmentCardinality {
+                        count: cardinality, method: cardinality_method,
+                    },
                     values,
                     caller,
+                    _inputs,
                 )
                 .await
             }

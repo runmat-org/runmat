@@ -7,6 +7,92 @@ use runmat_execution::{
     ResourceByteBound,
 };
 
+pub(crate) struct RegionTailAdmission {
+    pub(crate) claim:
+        Option<std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>>,
+}
+pub(crate) fn admit_region_tail(
+    runtime: &runmat_runtime::context::RuntimeContext,
+    provider: &dyn AccelProvider,
+) -> ProviderExecutionResult<Option<RegionTailAdmission>> {
+    use runmat_runtime::context::host_allocation::{HostAllocationPlan, HostAllocationReceipt};
+    let Some(bytes) = provider
+        .region_queue_tail_resources()
+        .and_then(|tail| tail.completion_control_host_bytes)
+    else {
+        // Unknown optional completion must withhold observation, not execute an
+        // unquoted callback or turn unavailable host storage into zero bytes.
+        return Ok(None);
+    };
+    let retained = HostAllocationPlan::retained_metadata_bytes(bytes)
+        .map_err(ProviderExecutionError::from_source)?;
+    let receipt = HostAllocationReceipt::admit(
+        Some(runtime),
+        HostAllocationPlan::new(0, retained).map_err(ProviderExecutionError::from_source)?,
+    )
+    .map_err(ProviderExecutionError::from_source)?;
+    let claim = receipt
+        .as_ref()
+        .map(|receipt| receipt.claim_retained_metadata(runtime, bytes))
+        .transpose()
+        .map_err(ProviderExecutionError::from_source)?;
+    Ok(Some(RegionTailAdmission { claim }))
+}
+
+/// One shared physical audit owner. VM/native callers retain their distinct
+/// source completion rights; this allocation grants neither of those rights.
+pub(crate) fn admit_region_audit(
+    runtime: &runmat_runtime::context::RuntimeContext,
+    provider: &'static dyn AccelProvider,
+) -> ProviderExecutionResult<Option<runmat_accelerate_api::observation::SourceRegionRouteAudit>> {
+    use runmat_accelerate_api::observation::SourceRegionRouteAudit;
+    use runmat_runtime::context::host_allocation::{
+        HostAllocationError, HostAllocationPlan, HostAllocationReceipt,
+    };
+    let Some(access) = provider.wgpu_device_access().cloned() else {
+        return Ok(None);
+    };
+    let bytes = SourceRegionRouteAudit::backing_bytes()
+        .ok_or_else(|| ProviderExecutionError::from_source(HostAllocationError::Overflow))?;
+    let retained = HostAllocationPlan::retained_metadata_bytes(bytes)
+        .map_err(ProviderExecutionError::from_source)?;
+    let receipt = HostAllocationReceipt::admit(
+        Some(runtime),
+        HostAllocationPlan::new(0, retained).map_err(ProviderExecutionError::from_source)?,
+    )
+    .map_err(ProviderExecutionError::from_source)?;
+    let claim = receipt
+        .as_ref()
+        .map(|receipt| receipt.claim_retained_metadata(runtime, bytes))
+        .transpose()
+        .map_err(ProviderExecutionError::from_source)?;
+    SourceRegionRouteAudit::try_new(provider, access, claim)
+        .map(Some)
+        .map_err(ProviderExecutionError::from_source)
+}
+pub(super) fn charge_region_tail_host_demand(
+    demand: &mut CandidateResourceDemand,
+    tail: runmat_accelerate_api::ProviderRegionTailResources,
+) -> Option<()> {
+    use runmat_execution::ResourceBoundUnavailable;
+    let tail = tail.completion_control_host_bytes.and_then(|bytes| {
+        runmat_runtime::context::host_allocation::HostAllocationPlan::retained_metadata_bytes(bytes)
+            .ok()
+    });
+    demand.provider_host_workspace = match (demand.provider_host_workspace, tail) {
+        (Some(ResourceByteBound::Known(existing)), Some(tail)) => {
+            Some(ResourceByteBound::Known(existing.checked_add(tail)?))
+        }
+        (Some(unavailable @ ResourceByteBound::Unavailable(_)), _) => Some(unavailable),
+        (_, None) => Some(ResourceByteBound::Unavailable(
+            ResourceBoundUnavailable::NoScratchBound,
+        )),
+        // The enclosing candidate's unmodeled host domain remains unmodeled.
+        (None, Some(_)) => None,
+    };
+    Some(())
+}
+
 pub(crate) struct PreparedImageStages {
     pub(super) session: ImageNormalizeStageSession,
     semantic_identity: Digest,
@@ -98,7 +184,7 @@ impl PreparedImageStages {
     pub(crate) fn resources_with_observation_and_tail(
         &self,
         observation: Option<runmat_accelerate_api::observation::ProviderObservationOverhead>,
-        tail: Option<runmat_accelerate_api::ProviderVmRegionTailResources>,
+        tail: Option<runmat_accelerate_api::ProviderRegionTailResources>,
     ) -> Result<CandidateResourceDemand, Box<runmat_runtime::RuntimeError>> {
         let mut demand = self.resources_with_observation(observation)?;
         if let Some(tail) = tail {
@@ -106,18 +192,20 @@ impl PreparedImageStages {
             demand = demand
                 .with_provider_observation_peak(tail.provider_scratch_bytes)
                 .ok_or_else(observation_overflow)?;
+            charge_region_tail_host_demand(&mut demand, tail).ok_or_else(observation_overflow)?;
         }
         Ok(demand)
     }
 
     pub(crate) fn resource_demand_with_tail(
         &self,
-        tail: Option<runmat_accelerate_api::ProviderVmRegionTailResources>,
+        tail: Option<runmat_accelerate_api::ProviderRegionTailResources>,
     ) -> Option<CandidateResourceDemand> {
         let mut demand = self.resource_demand();
         if let Some(tail) = tail {
             demand.queue_slots = demand.queue_slots.max(tail.queue_slots);
             demand = demand.with_provider_observation_peak(tail.provider_scratch_bytes)?;
+            charge_region_tail_host_demand(&mut demand, tail)?;
         }
         Some(demand)
     }

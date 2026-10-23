@@ -16,7 +16,7 @@ pub(in crate::builtins::stats::ml) fn parse_metric_name(
     let Some(first) = args.first() else {
         return Ok(DistanceMetricKind::Euclidean);
     };
-    let text = keyword_of(first)
+    let text = keyword_of(first)?
         .ok_or_else(|| distance_error(caller, format!("{caller}: distance metric must be text")))?;
     DistanceMetricKind::from_keyword(&text).ok_or_else(|| {
         distance_error(

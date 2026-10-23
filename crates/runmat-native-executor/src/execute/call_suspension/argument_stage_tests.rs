@@ -18,23 +18,19 @@ fn expanded_call_inputs_never_become_final_outputs_at_an_unscoped_site() {
             let polls = Rc::new(Cell::new(0));
             let observed = Rc::clone(&polls);
             assert!(matches!(
-                begin_expanded_call_arguments(
-                    &mut state,
-                    None,
-                    Box::pin(async move {
-                        futures::future::poll_fn(move |cx| {
-                            observed.set(observed.get() + 1);
-                            if first_poll_pending && observed.get() == 1 {
-                                cx.waker().wake_by_ref();
-                                Poll::Pending
-                            } else {
-                                Poll::Ready(())
-                            }
-                        })
-                        .await;
-                        Ok(rooted)
+                begin_expanded_call_arguments(&mut state, None, || async move {
+                    futures::future::poll_fn(move |cx| {
+                        observed.set(observed.get() + 1);
+                        if first_poll_pending && observed.get() == 1 {
+                            cx.waker().wake_by_ref();
+                            Poll::Pending
+                        } else {
+                            Poll::Ready(())
+                        }
                     })
-                ),
+                    .await;
+                    Ok(rooted)
+                }),
                 Err(NativeExecutorError::CallSuspended)
             ));
             assert_eq!(polls.get(), 0, "entry must not poll argument expansion");
@@ -71,16 +67,12 @@ fn failed_expansion_retains_its_runtime_identifier_without_publishing_outputs() 
         let request = request();
         state.current_request = Some(request);
         assert!(matches!(
-            begin_expanded_call_arguments(
-                &mut state,
-                None,
-                Box::pin(async {
-                    Err(runmat_runtime::runtime_error::semantic_error(
-                        "ArgumentExpansionFailure",
-                        "expansion failed before call dispatch",
-                    ))
-                })
-            ),
+            begin_expanded_call_arguments(&mut state, None, || async {
+                Err(runmat_runtime::runtime_error::semantic_error(
+                    "ArgumentExpansionFailure",
+                    "expansion failed before call dispatch",
+                ))
+            }),
             Err(NativeExecutorError::CallSuspended)
         ));
         let pending = state.pending_call.as_ref().expect("pending failure");

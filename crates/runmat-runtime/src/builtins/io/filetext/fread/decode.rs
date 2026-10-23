@@ -25,6 +25,7 @@ pub(super) fn decode_numeric_scalar(
     })
 }
 
+#[cfg(test)]
 pub(super) async fn numeric_storage_from_scalars(
     input: InputType,
     values: Vec<NumericScalar>,
@@ -62,11 +63,12 @@ pub(super) async fn numeric_storage_from_scalars(
     })
 }
 
-pub(super) fn decode_to_char(
+#[cfg(test)]
+pub(super) fn decode_to_code_unit(
     bytes: &[u8],
     input: InputType,
     endianness: Endianness,
-) -> Result<char, String> {
+) -> Result<runmat_value::Utf16CodeUnit, String> {
     let scalar = decode_numeric_scalar(bytes, input, endianness)?;
     let code = match scalar {
         NumericScalar::F64(value) => floating_char_code(value)?,
@@ -74,19 +76,19 @@ pub(super) fn decode_to_char(
         value => value
             .into_int_value()
             .and_then(|value| value.try_to_u64())
-            .and_then(|value| u32::try_from(value).ok())
-            .ok_or_else(|| "fread: character value is outside the Unicode range".to_string())?,
+            .and_then(|value| u16::try_from(value).ok())
+            .ok_or_else(|| {
+                "fread: character value is outside the UTF-16 code-unit range".to_string()
+            })?,
     };
-    char::from_u32(code).ok_or_else(|| {
-        format!("value 0x{code:X} cannot be represented as a Unicode scalar for char output")
-    })
+    Ok(runmat_value::Utf16CodeUnit::from_raw(code))
 }
 
-pub(super) fn floating_char_code(value: f64) -> Result<u32, String> {
-    if !value.is_finite() || value < 0.0 || value > f64::from(u32::MAX) || value.round() != value {
-        return Err("fread: character value is outside the Unicode range".to_string());
+pub(super) fn floating_char_code(value: f64) -> Result<u16, String> {
+    if !value.is_finite() || value < 0.0 || value > f64::from(u16::MAX) || value.round() != value {
+        return Err("fread: character value is outside the UTF-16 code-unit range".to_string());
     }
-    Ok(value as u32)
+    Ok(value as u16)
 }
 
 pub(super) fn read_u16(bytes: &[u8], endianness: Endianness) -> u16 {

@@ -199,7 +199,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmp_char_array_row_compare() {
-        let chars = CharArray::new(vec!['c', 'a', 't', 'd', 'o', 'g'], 2, 3).unwrap();
+        let chars =
+            CharArray::from_unicode_scalars(vec!['c', 'a', 't', 'd', 'o', 'g'], 2, 3).unwrap();
         let result =
             strcmp_builtin(Value::CharArray(chars), Value::String("cat".into())).expect("cmp");
         let expected = LogicalArray::new(vec![1, 0], vec![2, 1]).unwrap();
@@ -209,8 +210,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmp_char_array_to_char_array() {
-        let left = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap();
-        let right = CharArray::new(vec!['a', 'b', 'x', 'y'], 2, 2).unwrap();
+        let left = CharArray::from_unicode_scalars(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap();
+        let right = CharArray::from_unicode_scalars(vec!['a', 'b', 'x', 'y'], 2, 2).unwrap();
         let result =
             strcmp_builtin(Value::CharArray(left), Value::CharArray(right)).expect("strcmp");
         let expected = LogicalArray::new(vec![1, 0], vec![2, 1]).unwrap();
@@ -264,7 +265,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmp_char_array_trailing_space_is_not_equal() {
-        let chars = CharArray::new(vec!['c', 'a', 't', ' '], 1, 4).unwrap();
+        let chars = CharArray::from_unicode_scalars(vec!['c', 'a', 't', ' '], 1, 4).unwrap();
         let result =
             strcmp_builtin(Value::CharArray(chars), Value::String("cat".into())).expect("strcmp");
         assert_eq!(result, Value::Bool(false));
@@ -273,7 +274,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmp_char_array_empty_rows_returns_empty() {
-        let chars = CharArray::new(Vec::new(), 0, 0).unwrap();
+        let chars = CharArray::from_code_units(Vec::new(), 0, 0).unwrap();
         let result = strcmp_builtin(Value::CharArray(chars), Value::String("anything".into()))
             .expect("strcmp");
         match result {

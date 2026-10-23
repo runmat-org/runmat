@@ -279,17 +279,21 @@ pub(in crate::builtins::io::data) fn attrs_to_struct(
     Value::Struct(out.finish())
 }
 
-pub(in crate::builtins::io::data) fn value_to_json(value: &Value) -> serde_json::Value {
-    match value {
+pub(in crate::builtins::io::data) fn value_to_json(
+    value: &Value,
+) -> BuiltinResult<serde_json::Value> {
+    Ok(match value {
         Value::String(s) => serde_json::Value::String(s.as_str().to_owned()),
-        Value::CharArray(chars) => {
-            serde_json::Value::String(chars.data().iter().collect::<String>())
-        }
+        Value::CharArray(chars) => serde_json::Value::String(
+            crate::builtins::io::utf16::decode_utf16_with_error(chars.data(), || {
+                data_error("attribute value contains malformed UTF-16 text")
+            })?,
+        ),
         Value::Num(n) => serde_json::json!(n),
         Value::Int(i) => int_value_to_json(i),
         Value::Bool(b) => serde_json::json!(b),
         _ => serde_json::Value::String(format!("{value:?}")),
-    }
+    })
 }
 
 pub(in crate::builtins::io::data) fn json_to_value(value: &serde_json::Value) -> Value {

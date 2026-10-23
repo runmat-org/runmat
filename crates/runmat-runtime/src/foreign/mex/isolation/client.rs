@@ -30,6 +30,7 @@ use crate::context::RuntimeContext;
 use crate::execution::RootedValue;
 use crate::foreign::mex::RootedMexInvocation;
 use crate::foreign::RuntimeMexHostServices;
+use crate::RuntimeError;
 
 fn root_published_value(output: Box<dyn MexCallOutput>) -> Result<RootedValue, MexWireError> {
     let mut rooted = None;
@@ -473,7 +474,7 @@ impl IsolatedMexClient {
         timeout: Option<Duration>,
     ) -> IsolatedMexRetirement {
         if let Some(error) = self.terminal_error.clone() {
-            if self.retire_poisoned_host().await {
+            if self.retire_poisoned_host().await.is_ok() {
                 return IsolatedMexRetirement::Retired(Err(error));
             }
             return IsolatedMexRetirement::Retained(error);
@@ -711,24 +712,27 @@ impl IsolatedMexClient {
     async fn flush_pending_reply(&mut self) -> Result<(), MexWireError> {
         let result = std::future::poll_fn(|context| self.poll_pending_reply(context)).await;
         if let Err(error) = &result {
-            self.poison_transport(error.clone()).await;
+            let _ = self.poison_transport(error.clone()).await;
         }
         result
     }
 
-    async fn poison_transport(&mut self, error: MexWireError) {
+    /// Keep the original wire failure as public terminal authority, while
+    /// exposing the exact independent retirement outcome to its owner/tests.
+    /// Failed retirement leaves every pending owner intact for shutdown retry.
+    async fn poison_transport(
+        &mut self,
+        error: MexWireError,
+    ) -> runmat_process_host::ProcessHostResult<()> {
         if self.terminal_error.is_none() {
             self.terminal_error = Some(error);
         }
-        let _ = self.retire_poisoned_host().await;
+        self.retire_poisoned_host().await
     }
 
-    async fn retire_poisoned_host(&mut self) -> bool {
+    async fn retire_poisoned_host(&mut self) -> runmat_process_host::ProcessHostResult<()> {
         if !self.tree_retired {
-            let retired = self.child.terminate_tree().await.is_ok();
-            if !retired {
-                return false;
-            }
+            self.child.terminate_tree().await?;
             self.tree_retired = true;
         }
         self.pending_invocation = None;
@@ -736,7 +740,7 @@ impl IsolatedMexClient {
         self.origins.clear();
         self.callbacks = ClientCallbackTasks::default();
         self.pending_reply = None;
-        true
+        Ok(())
     }
 
     async fn publish_callback_result(
@@ -747,7 +751,7 @@ impl IsolatedMexClient {
         let frame = match callback_reply_frame(response, self.limits) {
             Ok(frame) => frame,
             Err(error) => {
-                self.poison_transport(error.clone()).await;
+                let _ = self.poison_transport(error.clone()).await;
                 return Err(error);
             }
         };
@@ -787,7 +791,7 @@ impl IsolatedMexClient {
         if self.pending_reply.is_some() {
             return match self.poll_background_reply() {
                 Poll::Ready(Err(error)) => {
-                    self.poison_transport(error.clone()).await;
+                    let _ = self.poison_transport(error.clone()).await;
                     Err(error)
                 }
                 Poll::Ready(Ok(())) => Ok(true),
@@ -808,13 +812,13 @@ impl IsolatedMexClient {
                 let frame = match callback_reply_frame(response, self.limits) {
                     Ok(frame) => frame,
                     Err(error) => {
-                        self.poison_transport(error.clone()).await;
+                        let _ = self.poison_transport(error.clone()).await;
                         return Err(error);
                     }
                 };
                 self.pending_reply = Some(frame);
                 if let Poll::Ready(Err(error)) = self.poll_background_reply() {
-                    self.poison_transport(error.clone()).await;
+                    let _ = self.poison_transport(error.clone()).await;
                     return Err(error);
                 }
                 return Ok(true);
@@ -935,29 +939,55 @@ impl Drop for IsolatedMexClient {
 async fn handle_callback(
     callback: MexCallbackRequest,
     runtime: RuntimeContext,
-    snapshots: &SharedSnapshotStore,
+    snapshots: Rc<SharedSnapshotStore>,
 ) -> MexCallbackResult {
-    let run = async {
-        let request_id = callback.request_id;
-        let callback_id = callback.callback_id;
-        let outcome = match callback.validate() {
-            Ok(()) => execute_callback(callback.operation, runtime, snapshots).await,
-            Err(error) => Err(wire_error(
-                "RunMat:MEX:CallbackProtocol",
-                error.to_string(),
-                None,
-            )),
-        };
-        MexCallbackResult {
-            request_id,
-            callback_id,
-            outcome,
+    let request_id = callback.request_id;
+    let callback_id = callback.callback_id;
+    let outcome = match callback.validate() {
+        Err(error) => Err(wire_error(
+            "RunMat:MEX:CallbackProtocol",
+            error.to_string(),
+            None,
+        )),
+        Ok(()) => {
+            let selected = runtime.clone();
+            let admitted = crate::context::run_selected_callback_continuation_with(
+                &runtime,
+                move || async move {
+                    Ok::<_, RuntimeError>(
+                        poll_in_callback_scope(execute_callback(
+                            callback.operation,
+                            selected,
+                            snapshots.as_ref(),
+                        ))
+                        .await,
+                    )
+                },
+            )
+            .await;
+            match admitted {
+                Ok(outcome) => outcome,
+                Err(error) => Err(diagnostic_error(
+                    super::super::services::runtime_diagnostic(error),
+                )),
+            }
         }
     };
-    futures::pin_mut!(run);
+    MexCallbackResult {
+        request_id,
+        callback_id,
+        outcome,
+    }
+}
+
+async fn poll_in_callback_scope<F>(future: F) -> F::Output
+where
+    F: Future,
+{
+    futures::pin_mut!(future);
     std::future::poll_fn(|context| {
         let _callback_scope = CallbackScope::enter();
-        run.as_mut().poll(context)
+        future.as_mut().poll(context)
     })
     .await
 }
@@ -1225,8 +1255,12 @@ mod tests {
             "partial callback frame failed",
             None,
         );
-        client.poison_transport(original.clone()).await;
+        client
+            .poison_transport(original.clone())
+            .await
+            .expect("poisoned host must prove process-tree retirement");
         assert_eq!(client.terminal_error, Some(original.clone()));
+        assert!(client.tree_retired);
         assert!(client.child.try_wait().unwrap().is_some());
         assert!(!client.service_ready_background().await.unwrap());
         let runtime =
@@ -1293,7 +1327,8 @@ mod tests {
                 "leader already exited",
                 None,
             ))
-            .await;
+            .await
+            .expect("exited host leader must still prove process-group retirement");
         assert!(client.tree_retired);
         let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
         while is_process_alive(descendant) {

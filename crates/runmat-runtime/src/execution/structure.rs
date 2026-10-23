@@ -16,17 +16,18 @@ use crate::{
 };
 use runmat_value::{ExactOrderedMap, StructValueBuilder, UnboundedStructValueBuilder, Value};
 
-mod borrowed;
-pub(crate) mod replacement;
-pub(crate) mod cell;
 mod array;
 mod array_values;
+mod borrowed;
+pub(crate) mod cell;
 mod generated;
+pub(crate) mod replacement;
 pub use array::construct_struct_array_from_columns_in_context;
 pub use array_values::construct_struct_array_from_values_in_context;
 pub use borrowed::construct_struct_from_fields_in_context;
 pub(crate) use borrowed::construct_struct_from_fields_in_optional_context;
 pub(crate) use generated::construct_generated_structure;
+pub(crate) use generated::construct_generated_structure_owned;
 
 pub fn construct_struct_in_context<'a, I>(
     runtime: &RuntimeContext,

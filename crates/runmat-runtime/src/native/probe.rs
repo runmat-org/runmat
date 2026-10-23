@@ -84,6 +84,8 @@ pub const fn try_native_abi_probe() -> Option<NativeAbiProbe> {
             portable(layout.site_request),
             portable(layout.site_outcome_kind),
             portable(layout.site_outcome),
+            portable(layout.runtime_builtin_binding),
+            portable(layout.builtin_binding_identity),
         ],
         layout.field_offsets,
     ))
@@ -115,7 +117,7 @@ mod emitted {
     /// No pointers, relocations, padding, or host process state occur in this symbol.
     #[used]
     #[no_mangle]
-    pub static RUNMAT_NATIVE_ABI_PROBE_V1: [u8; NATIVE_ABI_PROBE_BYTES] =
+    pub static RUNMAT_NATIVE_ABI_PROBE_V2: [u8; NATIVE_ABI_PROBE_BYTES] =
         native_abi_probe().canonical_bytes();
 
     #[cfg(test)]
@@ -123,15 +125,25 @@ mod emitted {
         use super::*;
         #[test]
         fn target_compiler_record_matches_runtime_binding_and_rejects_changed_layout() {
-            let probe = NativeAbiProbe::from_canonical_bytes(&RUNMAT_NATIVE_ABI_PROBE_V1).unwrap();
+            let probe = NativeAbiProbe::from_canonical_bytes(&RUNMAT_NATIVE_ABI_PROBE_V2).unwrap();
             assert_eq!(probe, native_abi_probe());
+            let physical =
+                probe.layout(runmat_execution::host::NativeAbiType::RuntimeBuiltinBinding);
+            assert_eq!(
+                physical.size as usize,
+                std::mem::size_of::<crate::builtin::RuntimeBuiltinBinding>()
+            );
+            assert_eq!(
+                physical.alignment as usize,
+                std::mem::align_of::<crate::builtin::RuntimeBuiltinBinding>()
+            );
             let binding = probe.binding().unwrap();
             let encoded = serde_json::to_vec(&probe).unwrap();
             assert_eq!(
                 serde_json::from_slice::<NativeAbiProbe>(&encoded).unwrap(),
                 probe
             );
-            let mut extended = RUNMAT_NATIVE_ABI_PROBE_V1.to_vec();
+            let mut extended = RUNMAT_NATIVE_ABI_PROBE_V2.to_vec();
             extended.push(0);
             assert!(serde_json::from_slice::<NativeAbiProbe>(
                 &serde_json::to_vec(&extended).unwrap()
@@ -145,9 +157,42 @@ mod emitted {
                 binding.layout_fingerprint,
                 crate::native::native_abi_layout_fingerprint()
             );
-            let mut changed = RUNMAT_NATIVE_ABI_PROBE_V1;
+            let mut changed = RUNMAT_NATIVE_ABI_PROBE_V2;
             changed[8] += 1;
             assert!(NativeAbiProbe::from_canonical_bytes(&changed).is_err());
+            let mut changed = probe.clone();
+            changed.offsets.swap(
+                runmat_execution::host::NativeAbiField::BindingImplementation as usize,
+                runmat_execution::host::NativeAbiField::BindingProvenance as usize,
+            );
+            assert_ne!(
+                changed.binding().unwrap(),
+                binding,
+                "same-sized binding field swaps participate in ABI identity"
+            );
+            let mut changed = probe.clone();
+            changed.offsets[runmat_execution::host::NativeAbiField::BindingProvenance as usize] =
+                changed.offset(runmat_execution::host::NativeAbiField::BindingIdentity);
+            assert!(
+                changed.validate().is_err(),
+                "binding fields cannot overlap the identity aggregate"
+            );
+            let mut changed = probe.clone();
+            changed.layouts
+                [runmat_execution::host::NativeAbiType::RuntimeBuiltinBinding as usize]
+                .size += physical.alignment;
+            assert_ne!(
+                changed.binding().unwrap(),
+                binding,
+                "builtin binding layout participates in ABI identity"
+            );
+            let mut old_probe = RUNMAT_NATIVE_ABI_PROBE_V2;
+            old_probe[7] = b'1';
+            old_probe[8] = 1;
+            assert!(
+                NativeAbiProbe::from_canonical_bytes(&old_probe).is_err(),
+                "old probe protocol cannot certify extended binding layout"
+            );
             let mut changed = probe.clone();
             changed.offsets[0] = changed
                 .layout(runmat_execution::host::NativeAbiType::Call)
@@ -160,7 +205,7 @@ mod emitted {
                 binding,
                 "field offsets participate in identity"
             );
-            let mut changed = RUNMAT_NATIVE_ABI_PROBE_V1;
+            let mut changed = RUNMAT_NATIVE_ABI_PROBE_V2;
             changed[26 + runmat_execution::host::NATIVE_ABI_CONTRACT_CAPACITY - 1] = 1;
             assert!(
                 NativeAbiProbe::from_canonical_bytes(&changed).is_err(),

@@ -24,10 +24,10 @@ pub struct JitConfig {
     /// Enable JIT compilation
     #[serde(default = "default_true")]
     pub enabled: bool,
-    /// JIT compilation threshold
+    /// Accepted scalar setting; native tiering uses its own validated policy.
     #[serde(default = "default_jit_threshold")]
     pub threshold: u32,
-    /// JIT optimization level
+    /// Accepted optimization setting; not applied to the native compiler.
     #[serde(default)]
     pub optimization_level: JitOptLevel,
 }

@@ -109,6 +109,8 @@ fn legacy_flavor_uses_selected_operation_not_planner_sum_default() {
             ("mean", Some(runmat_accelerate_api::ReductionFlavor::Mean)),
             ("min", None),
             ("max", None),
+            ("prod", None),
+            ("nnz", None),
         ] {
             let mut plan = sum_plan();
             let FusionOp::Builtin {

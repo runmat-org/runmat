@@ -216,9 +216,17 @@ impl RuntimeSourceEvaluationAuthority for CapturedSourceEvaluationAuthority {
                 request.purpose(),
                 runmat_runtime::context::SessionSourcePurpose::WorkspaceCallback
             ) {
-                let base_service = Rc::new(runmat_runtime::workspace::BaseWorkspaceService::new(
-                    base_workspace,
-                ));
+                let inherited_projection = runtime
+                    .service_ports()
+                    .base_workspace()
+                    .filter(|base| base.owner().same_owner(&base_workspace))
+                    .and_then(|base| base.invocation_projection());
+                let mut base_service =
+                    runmat_runtime::workspace::BaseWorkspaceService::new(base_workspace);
+                if let Some(projection) = inherited_projection {
+                    base_service = base_service.with_invocation_projection(projection)?;
+                }
+                let base_service = Rc::new(base_service);
                 let services = runtime
                     .service_ports()
                     .clone()

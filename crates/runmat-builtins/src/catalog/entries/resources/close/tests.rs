@@ -46,4 +46,34 @@ fn requested_output_and_unknown_input_facts_remain_sound() {
     assert!(!inference::infer(&excess, &CLOSE_CATALOG_ENTRY)
         .diagnostics
         .is_empty());
+
+    let request = |argument| CallRequest {
+        arguments: vec![argument],
+        literals: LiteralContext::new(vec![]),
+        outputs: OutputSelection::new(RequestedOutputCount::One),
+    };
+    let tcp = request(runmat_types::ValueFact::scalar(
+        runmat_types::ValueKindFact::Object(runmat_types::ObjectFact {
+            class: None,
+            runtime_class: Some(crate::TCPCLIENT_CLASS.owned()),
+            properties: Default::default(),
+            properties_complete: false,
+            handle_semantics: Some(true),
+        }),
+    ));
+    let inferred = inference::infer(&tcp, &CLOSE_CATALOG_ENTRY);
+    assert!(inferred.effects.0.contains(&EffectKind::Network));
+    for effect in [
+        EffectKind::UserInterface,
+        EffectKind::HostCallback,
+        EffectKind::Unknown,
+    ] {
+        assert!(!inferred.effects.0.contains(&effect));
+    }
+    let unknown = request(runmat_types::ValueFact::unknown(
+        runmat_types::DynamicReason::RuntimeValue,
+    ));
+    let inferred = inference::infer(&unknown, &CLOSE_CATALOG_ENTRY);
+    assert!(inferred.effects.0.contains(&EffectKind::HostCallback));
+    assert!(inferred.effects.0.contains(&EffectKind::Unknown));
 }

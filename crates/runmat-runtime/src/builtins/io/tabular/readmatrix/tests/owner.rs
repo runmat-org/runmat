@@ -172,7 +172,7 @@ fn paged_text_filename_and_option_reject_before_file_open() {
     let _restore = runmat_filesystem::replace_provider(selected.clone());
     runmat_filesystem::set_current_dir(selected_dir()).expect("selected cwd");
     let paged = Value::CharArray(
-        runmat_value::CharArray::new_with_shape(vec!['x', 'y'], vec![1, 1, 2])
+        runmat_value::CharArray::from_unicode_scalars_with_shape(vec!['x', 'y'], vec![1, 1, 2])
             .expect("paged character array"),
     );
     assert!(block_on(readmatrix_builtin(
@@ -190,7 +190,7 @@ fn paged_text_filename_and_option_reject_before_file_open() {
     assert_eq!(selected.opens.load(Ordering::SeqCst), 0);
 
     let trailing = Value::CharArray(
-        runmat_value::CharArray::new_with_shape(
+        runmat_value::CharArray::from_unicode_scalars_with_shape(
             "input.csv".chars().collect(),
             vec![1, "input.csv".len(), 1],
         )

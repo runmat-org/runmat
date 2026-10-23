@@ -29,6 +29,50 @@ fn reservation_capacity_is_nonblocking_and_uncommitted_drop_releases() {
 }
 
 #[test]
+fn readback_reserves_before_registration_and_commit_races_retire_once() {
+    for stopped_after_reservation in [false, true] {
+        let (progress, receiver) = isolated(1);
+        let reservation = progress.reserve_slot().unwrap();
+        assert!(matches!(
+            progress.reserve_slot(),
+            Err(WgpuObservationProgressError::Capacity)
+        ));
+        let retained = Arc::new(());
+        let weak = Arc::downgrade(&retained);
+        let statuses = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let observed = statuses.clone();
+        if stopped_after_reservation {
+            progress.state.stopped.store(true, Ordering::Release);
+        }
+        let result = reservation.complete_queue_tail(Box::new(move |status| {
+            observed.lock().unwrap().push(status);
+            drop(retained);
+        }));
+        if stopped_after_reservation {
+            assert_eq!(result, Err(WgpuObservationProgressError::Stopped));
+            assert!(weak.upgrade().is_none());
+            assert_eq!(
+                *statuses.lock().unwrap(),
+                vec![Err(WgpuObservationProgressError::Stopped)]
+            );
+        } else {
+            result.unwrap();
+            // Logical cancellation does not remove the queued physical owner.
+            assert!(weak.upgrade().is_some());
+            assert!(statuses.lock().unwrap().is_empty());
+            let state = progress.state.clone();
+            drop(progress);
+            drive(receiver, &state, |submission| assert!(submission.is_none()));
+            assert!(weak.upgrade().is_none());
+            assert_eq!(*statuses.lock().unwrap(), vec![Ok(())]);
+            assert_eq!(state.used.load(Ordering::Acquire), 0);
+            continue;
+        }
+        assert_eq!(progress.state.used.load(Ordering::Acquire), 0);
+    }
+}
+
+#[test]
 fn stopped_progress_never_accepts_new_observed_submissions() {
     let (progress, receiver) = isolated(1);
     progress.state.stopped.store(true, Ordering::Release);
@@ -42,22 +86,64 @@ fn stopped_progress_never_accepts_new_observed_submissions() {
 
 #[test]
 fn failure_cleanup_runs_once_and_does_not_unwind_through_sender() {
+    use std::sync::{atomic::AtomicBool, Weak};
+    #[derive(Debug)]
+    struct Claim(Arc<AtomicBool>);
+    impl Drop for Claim {
+        fn drop(&mut self) {
+            assert!(
+                self.0.load(Ordering::Acquire),
+                "callback payload must retire before funding"
+            );
+        }
+    }
+    struct CallbackPayload {
+        claim: Weak<Claim>,
+        retired: Arc<AtomicBool>,
+    }
+    impl Drop for CallbackPayload {
+        fn drop(&mut self) {
+            assert!(
+                self.claim.upgrade().is_some(),
+                "callback drop must remain funded"
+            );
+            self.retired.store(true, Ordering::Release);
+        }
+    }
     let count = Arc::new(AtomicU32::new(0));
-    let observed = count.clone();
-    drop(Completion(Some(Box::new(move |status| {
-        assert_eq!(status, Err(WgpuObservationProgressError::Stopped));
-        observed.fetch_add(1, Ordering::AcqRel);
-        panic!("injected device-loss cleanup failure");
-    }))));
-    assert_eq!(count.load(Ordering::Acquire), 1);
-    let observed = count.clone();
-    let mut successful = Completion(Some(Box::new(move |status| {
-        assert_eq!(status, Ok(()));
-        observed.fetch_add(1, Ordering::AcqRel);
-    })));
-    successful.finish(Ok(()));
-    drop(successful);
-    assert_eq!(count.load(Ordering::Acquire), 2);
+    for unwind in [true, false] {
+        let retired = Arc::new(AtomicBool::new(false));
+        let claim = Arc::new(Claim(retired.clone()));
+        let weak = Arc::downgrade(&claim);
+        let payload = CallbackPayload {
+            claim: weak.clone(),
+            retired: retired.clone(),
+        };
+        let observed = count.clone();
+        let mut completion = Completion::funded(
+            Box::new(move |status| {
+                let _payload = payload;
+                observed.fetch_add(1, Ordering::AcqRel);
+                if unwind {
+                    assert_eq!(status, Err(WgpuObservationProgressError::Stopped));
+                    panic!("injected device-loss cleanup failure");
+                }
+                assert_eq!(status, Ok(()));
+            }),
+            Some(claim),
+        );
+        assert!(weak.upgrade().is_some());
+        if unwind {
+            drop(completion); // Abandonment callback panics; funding still retires once.
+        } else {
+            completion.finish(Ok(()));
+            completion.finish(Ok(())); // A second finish must not replay.
+            drop(completion);
+        }
+        assert!(retired.load(Ordering::Acquire));
+        assert!(weak.upgrade().is_none());
+        assert_eq!(count.load(Ordering::Acquire), if unwind { 1 } else { 2 });
+    }
 }
 
 #[test]
@@ -76,10 +162,10 @@ fn rejected_commit_invokes_completion_once_and_releases_capacity() {
             &sender,
             Job {
                 submission: 11_u32,
-                completion: Completion(Some(Box::new(move |status| {
+                completion: Completion::ordinary(Box::new(move |status| {
                     assert_eq!(status, Err(WgpuObservationProgressError::Stopped));
                     observed.fetch_add(1, Ordering::AcqRel);
-                }))),
+                })),
                 _slot: Slot(state.clone()),
             },
         );
@@ -104,10 +190,10 @@ fn worker_poll_failure_or_device_loss_fails_and_drains_bounded_queue() {
             sender
                 .send(Job {
                     submission,
-                    completion: Completion(Some(Box::new(move |status| {
+                    completion: Completion::ordinary(Box::new(move |status| {
                         assert!(status.is_err());
                         failed.fetch_add(1, Ordering::AcqRel);
-                    }))),
+                    })),
                     _slot: Slot(state.clone()),
                 })
                 .unwrap_or_else(|_| panic!("test queue available"));
@@ -141,11 +227,11 @@ fn sender_shutdown_drains_without_failing_successful_jobs() {
         sender
             .send(Job {
                 submission,
-                completion: Completion(Some(Box::new(move |status| {
+                completion: Completion::ordinary(Box::new(move |status| {
                     if status.is_err() {
                         failed.fetch_add(1, Ordering::AcqRel);
                     }
-                }))),
+                })),
                 _slot: Slot(state.clone()),
             })
             .unwrap_or_else(|_| panic!("test queue available"));
@@ -157,4 +243,36 @@ fn sender_shutdown_drains_without_failing_successful_jobs() {
     assert_eq!(failures.load(Ordering::Acquire), 0);
     assert_eq!(state.used.load(Ordering::Acquire), 0);
     assert!(state.stopped.load(Ordering::Acquire));
+}
+
+#[test]
+fn readiness_does_not_retire_the_physically_running_callback_tail() {
+    // Controlled channel handshakes, not wall-clock timing or a physical GPU.
+    let (progress, receiver) = isolated(1);
+    let retained = Arc::new(());
+    let weak = Arc::downgrade(&retained);
+    let (ready, ready_rx) = std::sync::mpsc::channel();
+    let (release, release_rx) = std::sync::mpsc::channel();
+    progress
+        .complete_queue_tail(Box::new(move |status| {
+            assert_eq!(status, Ok(()));
+            ready.send(()).unwrap();
+            release_rx.recv().unwrap();
+            drop(retained);
+        }))
+        .unwrap();
+    let state = progress.state.clone();
+    drop(progress);
+    let worker_state = state.clone();
+    let worker = std::thread::spawn(move || drive(receiver, &worker_state, |_| {}));
+    ready_rx.recv().unwrap();
+    assert!(
+        weak.upgrade().is_some(),
+        "readiness cannot release the callback's retained backing"
+    );
+    assert_eq!(state.used.load(Ordering::Acquire), 1);
+    release.send(()).unwrap();
+    worker.join().unwrap();
+    assert!(weak.upgrade().is_none());
+    assert_eq!(state.used.load(Ordering::Acquire), 0);
 }

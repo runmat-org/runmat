@@ -19,7 +19,8 @@ fn nd_cell_grid_positions_follow_semantic_linear_order() {
 
 #[test]
 fn nd_character_contents_are_rejected_without_truncating_shape() {
-    let chars = CharArray::new_with_shape(vec!['a', 'b', 'c', 'd'], vec![1, 2, 2]).unwrap();
+    let chars = CharArray::from_unicode_scalars_with_shape(vec!['a', 'b', 'c', 'd'], vec![1, 2, 2])
+        .unwrap();
     let cell = crate::make_cell(vec![Value::CharArray(chars)], 1, 1).unwrap();
     let error = run(cell).unwrap_err();
     assert!(error.to_string().contains("2-D character array"));
@@ -28,15 +29,17 @@ fn nd_character_contents_are_rejected_without_truncating_shape() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn char_cell() {
-    let a = Value::CharArray(CharArray::new("hi".chars().collect(), 1, 2).unwrap());
-    let b = Value::CharArray(CharArray::new("BY".chars().collect(), 1, 2).unwrap());
+    let a =
+        Value::CharArray(CharArray::from_unicode_scalars("hi".chars().collect(), 1, 2).unwrap());
+    let b =
+        Value::CharArray(CharArray::from_unicode_scalars("BY".chars().collect(), 1, 2).unwrap());
     let cell = crate::make_cell(vec![a, b], 2, 1).expect("cell");
     let result = run(cell).expect("cell2mat");
     match result {
         Value::CharArray(arr) => {
             assert_eq!(arr.rows, 2);
             assert_eq!(arr.cols, 2);
-            assert_eq!(arr.data(), vec!['h', 'i', 'B', 'Y']);
+            assert_eq!(arr.data(), runmat_value::encode_utf16_code_units("hiBY"));
         }
         other => panic!("expected char array, got {other:?}"),
     }

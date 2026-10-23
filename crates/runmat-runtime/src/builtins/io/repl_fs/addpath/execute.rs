@@ -18,7 +18,7 @@ pub(super) async fn run(args: crate::call::BuiltinArguments) -> crate::BuiltinRe
     let request = super::arguments::parse(tokens)?;
     let replacement = super::operation::plan(request).await?;
     let previous = crate::builtins::common::path_state::current_path_string();
-    crate::builtins::common::path_state::set_path_entries(replacement);
+    crate::builtins::common::path_state::set_path_entries(replacement)?;
     Ok(Value::CharArray(runmat_value::CharArray::new_row(
         &previous,
     )))

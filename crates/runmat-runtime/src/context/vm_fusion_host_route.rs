@@ -43,7 +43,7 @@ pub struct VmFusionHostRoute {
 pub(super) struct VmFusionHostOrigin {
     pub registration: VmFusionRegionRegistration,
     pub owner: RuntimeContextLocalId,
-    pub program: Option<ProgramRevision>,
+    pub program: Option<Arc<ProgramRevision>>,
     pub cancellation: CancellationToken,
     pub placement_owner: std::rc::Weak<dyn RuntimePlacementService>,
     pub issuer_live: Weak<()>,
@@ -93,7 +93,7 @@ impl VmFusionHostRoute {
             .zip(runtime.service_ports().placement())
             .is_some_and(|(selected, current)| Rc::ptr_eq(&selected, current));
         runtime.local_identity() == self.origin.owner
-            && runtime.program_revision() == self.origin.program.as_ref()
+            && runtime.program_revision() == self.origin.program.as_deref()
             && runtime
                 .cancellation()
                 .same_generation(&self.origin.cancellation)

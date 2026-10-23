@@ -30,6 +30,9 @@ impl std::fmt::Debug for SessionResourceCleanup {
 #[derive(Debug)]
 pub struct RuntimeContextState {
     pub(crate) local_identity: super::RuntimeContextLocalId,
+    pub(crate) gpu_device_selection: Cell<super::gpu_device::GpuDeviceSelection>,
+    pub(crate) gpu_device_epoch: Cell<u64>,
+    pub(crate) gpu_device_reset: super::gpu_device::GpuDeviceResetState,
     /// Non-serialized liveness authority shared by invocation generations of
     /// this session, but never by a parallel-lab fork or a new context.
     pub(crate) session_lease: Arc<()>,
@@ -91,6 +94,9 @@ impl RuntimeContextState {
     pub fn new(local_identity: super::RuntimeContextLocalId) -> Self {
         Self {
             local_identity,
+            gpu_device_selection: Cell::new(super::gpu_device::GpuDeviceSelection::Inherit),
+            gpu_device_epoch: Cell::new(1),
+            gpu_device_reset: super::gpu_device::GpuDeviceResetState::default(),
             session_lease: Arc::new(()),
             host_effect_generation: Arc::new(AtomicU64::new(0)),
             resource_cleanup: SessionResourceCleanup::default(),

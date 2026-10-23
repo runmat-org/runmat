@@ -1,4 +1,10 @@
+use super::super::super::iterative::callback::{self, CallbackErrorPolicy};
 use super::*;
+
+const CALLBACK_ERRORS: CallbackErrorPolicy = CallbackErrorPolicy {
+    name: "pcg",
+    invalid,
+};
 
 struct PcgCallback<T> {
     selected: RepeatedCallableVector,
@@ -28,26 +34,11 @@ impl<T: PcgValue> CallableOperation<T> for PcgCallback<T> {
         output: &mut [T],
         runtime: &RuntimeContext,
     ) -> Result<(), RuntimeError> {
-        // The callback may retain its language input. Its numeric payload is
-        // therefore an independent Value, not an alias of operation scratch.
-        let argument = T::unbounded_output(input.to_vec())?;
-        let result = self.selected.apply(runtime, argument).await?;
-        let value = result
-            .value()
-            .as_slice()
-            .first()
-            .ok_or_else(|| invalid("operator callback must return exactly one value"))?;
-        let values = validate_vector::<T>(
-            value,
-            output.len(),
-            "operator callback result must be an n-by-1 vector",
-        )?;
-        output.copy_from_slice(values);
-        Ok(())
+        callback::apply(&self.selected, runtime, input, output, CALLBACK_ERRORS).await
     }
 }
 
-fn preconditioner<'a, T: PcgValue>(
+async fn preconditioner<'a, T: PcgValue + 'a>(
     value: &'a mut Option<Value>,
     n: usize,
     context: &RuntimeContext,
@@ -61,18 +52,26 @@ fn preconditioner<'a, T: PcgValue>(
             .map(Preconditioner::callable)
             .map(Some);
     }
-    value
-        .as_ref()
-        .map(|factor| {
-            let factor = T::triangle(factor, context).map_err(|error| {
-                super::super::async_operations::triangular_error(error, context)
-            })?;
-            if factor.order() != n {
-                return Err(invalid("preconditioner dimensions must match A"));
+    match value.as_ref() {
+        Some(factor) => {
+            let factor = crate::builtins::math::linalg::ops::iterative_preconditioner::PreparedMatrixFactor::<T>::prepare(
+                factor,
+                n,
+                Some(context),
+            )
+            .await;
+            match factor {
+                Ok(factor) => Ok(Some(Preconditioner::matrix(factor))),
+                Err(error) if error.numerical_failure() => {
+                    Ok(Some(Preconditioner::NumericalFailure))
+                }
+                Err(error) => Err(super::super::async_operations::preconditioner_error(
+                    error, context,
+                )),
             }
-            Ok(Preconditioner::triangular(factor))
-        })
-        .transpose()
+        }
+        None => Ok(None),
+    }
 }
 
 pub(super) struct AsyncRequest<'a> {
@@ -97,29 +96,32 @@ pub(super) async fn run_async_typed<T: PcgValue>(
 ) -> BuiltinResult<Value> {
     let n = match &source {
         CoefficientInput::Callable(_) => match request.rhs {
+            Value::Num(_) | Value::Complex(_, _) => 1,
             Value::Tensor(tensor) => tensor.rows(),
             Value::ComplexTensor(tensor) => tensor.rows(),
             _ => 0,
         },
         CoefficientInput::Matrix(matrix) => matrix.rows(),
     };
-    let rhs = validate_vector::<T>(
+    let rhs_input = validate_vector::<T>(
         request.rhs,
         n,
         "b must be a column vector with size(A,1) rows",
     )?;
-    let initial = request
+    let initial_input = request
         .initial
         .map(|value| validate_vector::<T>(value, n, "x0 must match b's column shape"))
         .transpose()?;
+    let rhs = rhs_input.as_slice();
+    let initial = initial_input.as_ref().map(|input| input.as_slice());
     let coefficient = match source {
         CoefficientInput::Matrix(matrix) => Coefficient::matrix(matrix),
         CoefficientInput::Callable(callback) => {
             Coefficient::callable(PcgCallback::select(callback, n, context)?)
         }
     };
-    let first = preconditioner::<T>(request.first, n, context)?;
-    let second = preconditioner::<T>(request.second, n, context)?;
+    let first = preconditioner::<T>(request.first, n, context).await?;
+    let second = preconditioner::<T>(request.second, n, context).await?;
     let both = first.is_some() && second.is_some();
     let routes = Operations::new(coefficient, first, second);
     let vector_count = if both { 6usize } else { 5usize };
@@ -174,7 +176,7 @@ pub(super) async fn run_async_typed<T: PcgValue>(
                 Some(receipt),
             )
             .await?;
-        publish_admitted::<T>(receipt, context, x, norms, outcome, requested)
+        publish_admitted::<T>(receipt, context, x, norms, outcome, requested).await
     } else {
         let mut main = vec![T::zero(); vector_count * n];
         let mut norms = vec![0.0; residual_count];
@@ -204,6 +206,7 @@ pub(super) async fn run_async_typed<T: PcgValue>(
                 None,
             )
             .await?;
-        publish_unbounded::<T>(main, n, &norms, outcome, requested)
+        super::super::super::iterative::copy::unbounded_checkpoint(Some(context), "pcg")?;
+        publish_unbounded::<T>(Some(context), main, n, &norms, outcome, requested).await
     }
 }

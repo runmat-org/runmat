@@ -44,6 +44,8 @@ pub(super) fn family(instruction: &Instr) -> InstructionDispatchFamily {
         | Instr::Collective { .. } => Parallel,
 
         Instr::BeginOutputAssignment { .. }
+        | Instr::BeginFixedAssignment { .. }
+        | Instr::CommitFixedAssignment { .. }
         | Instr::PrepareFixedOutputTarget
         | Instr::PrepareDiscardOutputTarget
         | Instr::PrepareMemberSequenceOutputTarget { .. }
@@ -52,8 +54,8 @@ pub(super) fn family(instruction: &Instr) -> InstructionDispatchFamily {
         | Instr::PrepareIndexedMemberDynamicSequenceOutputTarget { .. }
         | Instr::PrepareCellContentsSequenceOutputTarget { .. }
         | Instr::BeginSequenceOutputTarget { .. }
-        | Instr::PrepareMemberPathStep(..)
-        | Instr::PrepareDynamicMemberPathStep
+        | Instr::PrepareMemberPathStep { .. }
+        | Instr::PrepareDynamicMemberPathStep { .. }
         | Instr::BeginPreparedIndexSelectors { .. }
         | Instr::LoadPreparedIndexEnd { .. }
         | Instr::BeginContextualIndexSelectors { .. }
@@ -64,6 +66,7 @@ pub(super) fn family(instruction: &Instr) -> InstructionDispatchFamily {
         | Instr::FinishMemberSequenceOutputTarget(..)
         | Instr::FinishDynamicMemberSequenceOutputTarget
         | Instr::FinishCellContentsSequenceOutputTarget { .. }
+        | Instr::FinishFixedAssignmentTarget { .. }
         | Instr::LoadPreparedOutputCardinality
         | Instr::CommitPreparedOutputTargets { .. } => PreparedOutput,
 
@@ -122,6 +125,7 @@ pub(super) fn family(instruction: &Instr) -> InstructionDispatchFamily {
         | Instr::CaptureMemberDynamicSequence { .. }
         | Instr::CaptureCellContentsSequence { .. }
         | Instr::CaptureReturnedOutputsSequence { .. }
+        | Instr::MoveCapturedSequence { .. }
         | Instr::ReadSubscriptPath { .. }
         | Instr::CaptureSubscriptPath { .. }
         | Instr::BeginSubscriptEndReceiver { .. }
@@ -230,7 +234,9 @@ mod tests {
         );
         assert_eq!(family(&Instr::Await), InstructionDispatchFamily::Parallel);
         assert_eq!(
-            family(&Instr::PrepareDynamicMemberPathStep),
+            family(&Instr::PrepareDynamicMemberPathStep {
+                child_creation: runmat_types::AssignmentChildCreation::ExistingOnly
+            }),
             InstructionDispatchFamily::PreparedOutput
         );
     }

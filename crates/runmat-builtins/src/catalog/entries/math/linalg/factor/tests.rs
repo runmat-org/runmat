@@ -1,4 +1,5 @@
 use super::*;
+mod iterative;
 use crate::{infer_catalog_call, BuiltinDocumentationAuthority};
 use runmat_types::{
     CallRequest, CallableFact, LiteralContext, LiteralValue, NumericClass, NumericDomain,
@@ -16,6 +17,8 @@ fn matrix(rows: usize, columns: usize) -> ValueFact {
         StorageFact::Dense,
     )
 }
+
+mod sparse;
 
 fn factor_request_with_options(
     rows: usize,

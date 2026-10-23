@@ -28,12 +28,21 @@ pub(super) struct NamedOption {
 }
 
 impl HeaderInspection {
-    pub fn inspect(first: &Value, rest: crate::call::FunctionArgumentView<'_>) -> Self {
-        let first_name = rest.first().and_then(scalar_text);
+    pub fn inspect(
+        first: &Value,
+        rest: crate::call::FunctionArgumentView<'_>,
+    ) -> BuiltinResult<Self> {
+        let first_name = match rest.first() {
+            Some(value) => scalar_text(value)?,
+            None => None,
+        };
         let first_identity = first_name
             .as_deref()
             .and_then(FitlmOption::from_public_name);
-        let second_name = rest.get(1).and_then(scalar_text);
+        let second_name = match rest.get(1) {
+            Some(value) => scalar_text(value)?,
+            None => None,
+        };
         let second_identity = second_name
             .as_deref()
             .and_then(FitlmOption::from_public_name);
@@ -44,27 +53,27 @@ impl HeaderInspection {
         };
         let slots = (option_start..rest.len())
             .step_by(2)
-            .map(|index| {
+            .map(|index| -> BuiltinResult<OptionSlot> {
                 let (spelling, identity) = match index {
                     0 => (first_name.clone(), first_identity),
                     1 => (second_name.clone(), second_identity),
                     _ => {
-                        let spelling = scalar_text(&rest[index]);
+                        let spelling = scalar_text(&rest[index])?;
                         let identity = spelling.as_deref().and_then(FitlmOption::from_public_name);
                         (spelling, identity)
                     }
                 };
-                OptionSlot {
+                Ok(OptionSlot {
                     index,
                     spelling: spelling.map(std::borrow::Cow::into_owned),
                     identity,
-                }
+                })
             })
-            .collect();
-        Self {
+            .collect::<BuiltinResult<Vec<_>>>()?;
+        Ok(Self {
             option_start,
             slots,
-        }
+        })
     }
 
     pub fn known_options(&self) -> impl Iterator<Item = (usize, FitlmOption)> + '_ {

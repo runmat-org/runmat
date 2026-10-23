@@ -342,7 +342,7 @@ fn binornd_size_tensor_preserves_rank_zero_rank_one_and_row_only_policy() {
 fn rejects_unsupported_representations_and_excess_outputs() {
     let _guard = reset();
     for value in [
-        Value::CharArray(runmat_value::CharArray::new(vec!['2'], 1, 1).unwrap()),
+        Value::CharArray(runmat_value::CharArray::from_unicode_scalars(vec!['2'], 1, 1).unwrap()),
         Value::Complex(2.0, 0.0),
         Value::SparseTensor(runmat_value::SparseTensor::zeros(1, 1)),
     ] {

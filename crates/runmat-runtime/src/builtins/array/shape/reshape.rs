@@ -707,14 +707,16 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn reshape_char_array_single_dimension_becomes_column() {
-        let chars = CharArray::new("abcd".chars().collect(), 1, 4).expect("char array");
+        let chars =
+            CharArray::from_unicode_scalars("abcd".chars().collect(), 1, 4).expect("char array");
         let result =
             reshape_builtin(Value::CharArray(chars), vec![Value::from(4.0)]).expect("reshape");
         match result {
             Value::CharArray(out) => {
                 assert_eq!(out.rows, 4);
                 assert_eq!(out.cols, 1);
-                let collected: String = out.data().iter().collect();
+                let collected: String = runmat_value::decode_utf16_code_units(out.data())
+                    .expect("valid UTF-16 fixture text");
                 assert_eq!(collected, "abcd");
             }
             other => panic!("expected CharArray, got {other:?}"),

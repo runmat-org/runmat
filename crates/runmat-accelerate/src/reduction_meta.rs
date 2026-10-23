@@ -121,8 +121,21 @@ pub fn value_is_all_keyword(value: &Value) -> bool {
         Value::String(s) => s.eq_ignore_ascii_case("all"),
         Value::CharArray(ca) => {
             if ca.rows == 1 {
-                let candidate: String = ca.data().iter().collect();
-                candidate.trim().eq_ignore_ascii_case("all")
+                let whitespace = |unit: &runmat_value::Utf16CodeUnit| {
+                    char::from_u32(u32::from(unit.raw())).is_some_and(char::is_whitespace)
+                };
+                let mut candidate = ca.data();
+                while candidate.first().is_some_and(whitespace) {
+                    candidate = &candidate[1..];
+                }
+                while candidate.last().is_some_and(whitespace) {
+                    candidate = &candidate[..candidate.len() - 1];
+                }
+                candidate.len() == 3
+                    && candidate.iter().zip(b"all").all(|(unit, ascii)| {
+                        unit.raw() == u16::from(*ascii)
+                            || unit.raw() == u16::from(ascii.to_ascii_uppercase())
+                    })
             } else {
                 false
             }
@@ -185,6 +198,35 @@ fn parse_tensor_dims(tensor: &Tensor) -> Option<Vec<usize>> {
 mod tests {
     use super::*;
     use runmat_value::IntegerStorage;
+
+    #[test]
+    fn all_axis_probe_preserves_text_shape_and_raw_utf16_grammar() {
+        use runmat_value::{CharArray, StringArray, Utf16CodeUnit};
+
+        assert!(value_is_all_keyword(&Value::String("AlL".into())));
+        assert!(!value_is_all_keyword(&Value::String(" all ".into())));
+        for (text, expected) in [("AlL", true), (" all ", false)] {
+            let strings = StringArray::new(vec![text.into()], vec![1, 1]).unwrap();
+            assert_eq!(value_is_all_keyword(&Value::StringArray(strings)), expected);
+        }
+        assert!(value_is_all_keyword(&Value::CharArray(CharArray::new_row(
+            "\u{2003}AlL\u{a0}"
+        ))));
+        for (units, rows, cols) in [
+            (vec![97, 108, 108], 3, 1),
+            (vec![0xD800, 97, 108, 108], 1, 4),
+            (vec![97, 108, 108, 0xDC00], 1, 4),
+            (vec![0, 97, 108, 108], 1, 4),
+        ] {
+            let chars = CharArray::from_code_units(
+                units.into_iter().map(Utf16CodeUnit::from_raw).collect(),
+                rows,
+                cols,
+            )
+            .unwrap();
+            assert!(!value_is_all_keyword(&Value::CharArray(chars)));
+        }
+    }
 
     #[test]
     fn reduction_data_role_is_positional_with_tensor_control_and_unknown_producer() {

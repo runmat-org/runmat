@@ -41,8 +41,8 @@ const CALL_METHOD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatur
 pub const CALL_METHOD_ERROR_NAME_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.CALL_METHOD.NAME_INVALID",
     identifier: Some("RunMat:CallMethodNameInvalid"),
-    when: "The method name is empty or missing.",
-    message: "call_method: method name must not be empty",
+    when: "The method name is not scalar text, is empty, or is missing.",
+    message: "call_method: method name must be nonempty scalar text",
 };
 
 pub const CALL_METHOD_ERROR_RECEIVER_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {

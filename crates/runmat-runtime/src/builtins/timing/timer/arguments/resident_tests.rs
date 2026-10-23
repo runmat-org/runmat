@@ -136,7 +136,7 @@ fn late_property_rejection_never_reads_an_earlier_resident_value() {
     ))
     .expect("automatic resident numeric option remains admitted");
     assert_eq!(prepared.len(), 1);
-    assert!(matches!(&prepared[0].value, Value::Tensor(_)));
+    assert_eq!(prepared[0].value, Value::Num(0.25));
     assert_eq!(owner.downloads.load(Ordering::SeqCst), 1);
 
     owner.mode.store(2, Ordering::SeqCst);

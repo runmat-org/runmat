@@ -1,7 +1,7 @@
 use super::*;
 
 pub fn parse_method(value: &Value, name: &'static str) -> BuiltinResult<Option<InterpMethod>> {
-    let Some(keyword) = keyword_of(value) else {
+    let Some(keyword) = keyword_of(value)? else {
         return Ok(None);
     };
     let method = match keyword.as_str() {
@@ -25,7 +25,7 @@ pub async fn parse_extrapolation(
     value: &Value,
     name: &'static str,
 ) -> BuiltinResult<Option<Extrapolation>> {
-    if let Some(keyword) = keyword_of(value) {
+    if let Some(keyword) = keyword_of(value)? {
         return match keyword.as_str() {
             "extrap" => Ok(Some(Extrapolation::Extrapolate)),
             _ => Ok(None),

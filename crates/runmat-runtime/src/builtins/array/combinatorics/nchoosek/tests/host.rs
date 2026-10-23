@@ -4,7 +4,9 @@ use super::*;
 fn character_pages_use_full_shape_admission() {
     for shape in [vec![1, 2, 2], vec![1, 2, 1]] {
         let count = shape.iter().product();
-        let chars = runmat_value::CharArray::new_with_shape(vec!['x'; count], shape).unwrap();
+        let chars =
+            runmat_value::CharArray::from_unicode_scalars_with_shape(vec!['x'; count], shape)
+                .unwrap();
         assert_eq!(
             call(Value::CharArray(chars), Value::Num(1.0))
                 .unwrap_err()
@@ -104,7 +106,7 @@ fn logical_character_and_complex_vectors_are_supported() {
     };
     assert_eq!(
         output.data(),
-        vec!['a', 'b', 'a', 'c', 'a', 'd', 'b', 'c', 'b', 'd', 'c', 'd']
+        runmat_value::encode_utf16_code_units("abacadbcbdcd")
     );
 
     let complex =

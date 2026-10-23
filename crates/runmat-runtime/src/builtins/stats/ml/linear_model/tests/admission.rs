@@ -88,6 +88,7 @@ fn fitlm_header_keeps_model_spec_separate_from_typed_options() {
         &first,
         crate::call::FunctionArgumentView::from_slice(&values),
     )
+    .unwrap()
     .validate(values.len())
     .unwrap();
     assert_eq!(header.option_start, 2);
@@ -105,6 +106,7 @@ fn fitlm_header_keeps_model_spec_separate_from_typed_options() {
         &first,
         crate::call::FunctionArgumentView::from_slice(&invalid)
     )
+    .unwrap()
     .validate(invalid.len())
     .is_err());
 }
@@ -127,6 +129,7 @@ fn fitlm_preflights_host_option_values_and_response_shape() {
         &first,
         crate::call::FunctionArgumentView::from_slice(&values),
     )
+    .unwrap()
     .validate(values.len())
     .unwrap()
     .preflight_values(crate::call::FunctionArgumentView::from_slice(&values))
@@ -144,6 +147,7 @@ fn fitlm_preflights_host_option_values_and_response_shape() {
         &first,
         crate::call::FunctionArgumentView::from_slice(&invalid)
     )
+    .unwrap()
     .validate(invalid.len())
     .unwrap()
     .preflight_values(crate::call::FunctionArgumentView::from_slice(&invalid))

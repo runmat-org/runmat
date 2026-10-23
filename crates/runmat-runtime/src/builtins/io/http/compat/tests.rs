@@ -160,7 +160,8 @@ fn url_text_typed_failures_and_output_precedence() {
         Some("RunMat:urldecode:WrongArity")
     );
     let pages = Value::CharArray(
-        CharArray::new_with_shape("abcd".chars().collect(), vec![1, 2, 2]).unwrap(),
+        CharArray::from_unicode_scalars_with_shape("abcd".chars().collect(), vec![1, 2, 2])
+            .unwrap(),
     );
     assert_eq!(
         run(urlencode_builtin(vec![pages.clone()]))

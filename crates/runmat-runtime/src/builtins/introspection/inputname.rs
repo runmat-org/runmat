@@ -172,7 +172,7 @@ fn dispatch_inputname_arguments(
         .unwrap_or_default();
     if text.is_empty() {
         Ok(Value::CharArray(
-            CharArray::new(Vec::new(), 0, 0).expect("valid empty character array"),
+            CharArray::from_code_units(Vec::new(), 0, 0).expect("valid empty character array"),
         ))
     } else {
         Ok(Value::CharArray(CharArray::new_row(&text)))
@@ -276,7 +276,7 @@ mod tests {
 
         let expr = dispatch_inputname(vec![Value::Num(2.0)]).expect("inputname succeeds");
         let literal = dispatch_inputname(vec![Value::Num(3.0)]).expect("inputname succeeds");
-        let empty = Value::CharArray(CharArray::new(Vec::new(), 0, 0).unwrap());
+        let empty = Value::CharArray(CharArray::from_code_units(Vec::new(), 0, 0).unwrap());
         assert_eq!(expr, empty);
         assert_eq!(literal, empty);
         let missing = dispatch_inputname(vec![Value::Num(4.0)]).unwrap_err();
@@ -309,7 +309,7 @@ mod tests {
 
     #[test]
     fn inputname_propagates_dot_and_cell_indexing_to_later_arguments_only() {
-        let empty = Value::CharArray(CharArray::new(Vec::new(), 0, 0).unwrap());
+        let empty = Value::CharArray(CharArray::from_code_units(Vec::new(), 0, 0).unwrap());
         for (source_id, source, indexed) in [
             (
                 SourceId(11),

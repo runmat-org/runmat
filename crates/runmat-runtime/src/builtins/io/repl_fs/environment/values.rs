@@ -16,6 +16,7 @@ pub(super) struct EnvironmentValues {
 pub(super) enum ValueError {
     InvalidType,
     InvalidCellElement,
+    Encoding(runmat_value::Utf16DecodeError),
 }
 
 impl EnvironmentValues {
@@ -33,7 +34,7 @@ impl EnvironmentValues {
                 if array.rows == 1
                     && crate::builtins::common::shape::effective_rank(&array.shape) <= 2 =>
             {
-                Ok(Self::scalar(EnvironmentValue::Set(character_row(array))))
+                Ok(Self::scalar(EnvironmentValue::Set(character_row(array)?)))
             }
             Value::StringArray(array) => Ok(Self {
                 values: array.data().iter().map(|text| string_value(text)).collect(),
@@ -42,14 +43,14 @@ impl EnvironmentValues {
             Value::Cell(array) => {
                 let mut values = Vec::with_capacity(array.data().len());
                 for value in array.iter_column_major() {
-                    values.push(Self::decode_scalar(value).ok_or(ValueError::InvalidCellElement)?);
+                    values.push(Self::decode_scalar(value)?.ok_or(ValueError::InvalidCellElement)?);
                 }
                 Ok(Self {
                     values,
                     shape: Some(array.shape.as_slice().to_vec()),
                 })
             }
-            value => Self::decode_scalar(value)
+            value => Self::decode_scalar(value)?
                 .map(Self::scalar)
                 .ok_or(ValueError::InvalidType),
         }
@@ -62,14 +63,14 @@ impl EnvironmentValues {
         }
     }
 
-    fn decode_scalar(value: &Value) -> Option<EnvironmentValue> {
-        match value {
+    fn decode_scalar(value: &Value) -> Result<Option<EnvironmentValue>, ValueError> {
+        Ok(match value {
             Value::String(text) => Some(string_value(text)),
             Value::CharArray(array)
                 if array.rows == 1
                     && crate::builtins::common::shape::effective_rank(&array.shape) <= 2 =>
             {
-                Some(EnvironmentValue::Set(character_row(array)))
+                Some(EnvironmentValue::Set(character_row(array)?))
             }
             Value::Num(value) => Some(EnvironmentValue::Set(format_float(*value))),
             Value::Int(value) => Some(EnvironmentValue::Set(format_integer(value))),
@@ -79,7 +80,7 @@ impl EnvironmentValues {
                 .map(format_numeric)
                 .map(EnvironmentValue::Set),
             _ => None,
-        }
+        })
     }
 
     pub(super) fn align(
@@ -109,12 +110,13 @@ fn string_value(text: &str) -> EnvironmentValue {
     }
 }
 
-fn character_row(array: &runmat_value::CharArray) -> String {
-    let mut text: String = array.data().iter().collect();
+fn character_row(array: &runmat_value::CharArray) -> Result<String, ValueError> {
+    let mut text =
+        runmat_value::decode_utf16_code_units(array.data()).map_err(ValueError::Encoding)?;
     while text.ends_with(' ') {
         text.pop();
     }
-    text
+    Ok(text)
 }
 
 fn format_numeric(value: NumericScalar) -> String {

@@ -1,17 +1,15 @@
 //! MATLAB-compatible `ismethod` builtin backed by RunMat class metadata.
+pub use runmat_builtins::{
+    ISMETHOD_DESCRIPTOR, ISMETHOD_ERROR_NAME_INVALID, ISMETHOD_ERROR_TOO_MANY_OUTPUTS,
+};
 use runmat_types::MemberAccess;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::introspection::type_resolvers::ismethod_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{Listener, MException, Value};
 
@@ -42,72 +40,19 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Not eligible for fusion planning; ismethod executes on the host and produces a logical scalar.",
 };
 
-const ISMETHOD_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tf",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "True when the object has the requested public method.",
-}];
-
-const ISMETHOD_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "obj",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Object instance or gpuArray object to inspect.",
-    },
-    BuiltinParamDescriptor {
-        name: "method_name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Method name as a string scalar or row character vector.",
-    },
-];
-
-const ISMETHOD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "tf = ismethod(obj, method_name)",
-    inputs: &ISMETHOD_INPUTS,
-    outputs: &ISMETHOD_OUTPUT,
-}];
-
 const BUILTIN_NAME: &str = "ismethod";
-
-const ISMETHOD_ERROR_NAME_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISMETHOD.NAME_INVALID",
-    identifier: Some("RunMat:IsMethodNameInvalid"),
-    when: "The method-name argument is not a string scalar or row character vector.",
-    message: "ismethod: method name must be a string scalar or character vector",
-};
-const ISMETHOD_ERRORS: [BuiltinErrorDescriptor; 1] = [ISMETHOD_ERROR_NAME_INVALID];
-
-pub const ISMETHOD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ISMETHOD_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ISMETHOD_ERRORS,
-};
-pub const ISMETHOD_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "ismethod is an object-method predicate rather than an integer computation: host and internally auto-resident integers return false, while explicit integer gpuArrays use the production gpuArray wrapper method registry without payload access.",
-    };
 
 #[runtime_builtin(
     name = "ismethod",
-    category = "introspection",
-    summary = "Test whether an object has a public method.",
-    keywords = "ismethod,method,classdef,object,handle,inheritance",
-    accel = "metadata",
-    type_resolver(ismethod_type),
-    descriptor(crate::builtins::introspection::ismethod::ISMETHOD_DESCRIPTOR),
-    integer_audit(crate::builtins::introspection::ismethod::ISMETHOD_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::introspection::ismethod"
 )]
 fn ismethod_builtin(receiver: Value, method_designator: Value) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_bounded_outputs(
+        &ISMETHOD_DESCRIPTOR,
+        &ISMETHOD_ERROR_TOO_MANY_OUTPUTS,
+        "ismethod",
+    )?;
     let method_name = parse_method_name(&method_designator)?;
     Ok(Value::Bool(value_has_public_method(
         &receiver,
@@ -118,10 +63,12 @@ fn ismethod_builtin(receiver: Value, method_designator: Value) -> crate::Builtin
 fn parse_method_name(value: &Value) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.as_str().to_owned()),
-        Value::StringArray(sa) if sa.rows == 1 && sa.cols == 1 && !sa.data().is_empty() => {
-            Ok(sa.data()[0].as_str().to_owned())
+        Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].as_str().to_owned()),
+        Value::CharArray(ca) if ca.rows <= 1 && ca.shape().iter().skip(2).all(|n| *n == 1) => {
+            super::text::decode_utf16_with_error(ca.data(), || {
+                ismethod_error(&ISMETHOD_ERROR_NAME_INVALID)
+            })
         }
-        Value::CharArray(ca) if ca.rows <= 1 => Ok(ca.data().iter().collect::<String>()),
         _ => Err(ismethod_error(&ISMETHOD_ERROR_NAME_INVALID)),
     }
 }
@@ -173,6 +120,18 @@ mod tests {
         CharArray, HandleRef, IntValue, IntegerStorage, ObjectInstance, StringArray, Tensor,
     };
     use std::collections::HashMap;
+
+    #[test]
+    fn method_designators_reject_extra_pages_and_requested_outputs() {
+        let pages =
+            CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap();
+        assert!(parse_method_name(&Value::CharArray(pages)).is_err());
+        let names = StringArray::new(vec!["a".into(), "b".into()], vec![1, 1, 2]).unwrap();
+        assert!(parse_method_name(&Value::StringArray(names)).is_err());
+        let _outputs = crate::output_count::push_output_count(Some(2)).unwrap();
+        let error = ismethod_builtin(Value::Num(0.0), Value::string("method")).unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:ismethod:TooManyOutputs"));
+    }
 
     fn unique_class_name(label: &str) -> String {
         format!(

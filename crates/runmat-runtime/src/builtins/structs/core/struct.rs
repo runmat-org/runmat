@@ -15,7 +15,9 @@ use runmat_builtins::{
     STRUCT_ERROR_INVALID_SINGLE_INPUT, STRUCT_ERROR_NAME_VALUE_PAIRS, STRUCT_ERROR_SIZE_OVERFLOW,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{CellArray, CharArray, StructArray, StructValue, Value};
+use runmat_value::{
+    decode_utf16_code_units, CellArray, CharArray, StructArray, StructValue, Value,
+};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -249,11 +251,17 @@ fn char_array_to_string(ca: &CharArray) -> BuiltinResult<String> {
     if ca.rows > 1 {
         return Err(struct_error(&STRUCT_ERROR_FIELD_NAME_CHAR_VECTOR));
     }
-    let mut out = String::with_capacity(ca.data().len());
-    for ch in ca.data() {
-        out.push(*ch);
-    }
-    Ok(out)
+    decode_utf16_code_units(ca.data()).map_err(|error| {
+        let mut builder = build_runtime_error(format!(
+            "struct: field name is not valid UTF-16 text: {error}"
+        ))
+        .with_builtin("struct")
+        .with_source(error);
+        if let Some(identifier) = STRUCT_ERROR_FIELD_NAME_TYPE.identifier {
+            builder = builder.with_identifier(identifier);
+        }
+        builder.build()
+    })
 }
 
 fn validate_field_name(name: &str) -> BuiltinResult<()> {
@@ -277,7 +285,9 @@ fn validate_field_name(name: &str) -> BuiltinResult<()> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::identifiers::MATLAB_NAME_LENGTH_MAX;
-    use runmat_value::{CellArray, IntValue, StringArray, StructArray, StructValue, Tensor};
+    use runmat_value::{
+        CellArray, IntValue, StringArray, StructArray, StructValue, Tensor, Utf16CodeUnit,
+    };
 
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::HostTensorView;
@@ -458,6 +468,16 @@ pub(crate) mod tests {
         assert!(err.contains("valid MATLAB identifiers"));
     }
 
+    #[test]
+    fn struct_rejects_malformed_utf16_field_name() {
+        let field = CharArray::from_code_units(vec![Utf16CodeUnit::from_raw(0xD800)], 1, 1)
+            .expect("raw malformed UTF-16 field name");
+        let error = run_struct(vec![Value::CharArray(field), Value::Num(1.0)])
+            .expect_err("field names are semantic text");
+        assert_eq!(error.identifier(), Some("RunMat:struct:FieldNameType"));
+        assert!(error.message().contains("unpaired UTF-16 surrogate"));
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_field_names_follow_shared_identifier_rules() {
@@ -495,7 +515,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_accepts_char_vector_name() {
-        let chars = CharArray::new("field".chars().collect(), 1, 5).unwrap();
+        let chars = CharArray::from_unicode_scalars("field".chars().collect(), 1, 5).unwrap();
         let args = vec![Value::CharArray(chars), Value::Num(1.0)];
         let Value::Struct(s) = run_struct(args).expect("struct") else {
             panic!("expected struct value");

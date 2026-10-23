@@ -78,7 +78,13 @@ impl ProofIndex {
                             index.invalidate(*local);
                         }
                     }
-                    MirStmtKind::CaptureSequence { .. }
+                    MirStmtKind::PreparedAssign { preparation, .. } => {
+                        if let Some(root) = preparation.mutation.place.root_local() {
+                            index.invalidate(root);
+                        }
+                    }
+                    MirStmtKind::PrepareFixedAssignment(_)
+                    | MirStmtKind::CaptureSequence { .. }
                     | MirStmtKind::Expr(_)
                     | MirStmtKind::StatementOutput(_)
                     | MirStmtKind::EnvironmentEffect(_) => {}

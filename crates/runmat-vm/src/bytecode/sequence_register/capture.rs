@@ -25,6 +25,22 @@ pub(super) fn validate_sequence_capture_flow(instructions: &[Instr]) -> Result<(
         }
         entry_states.insert(pc, incoming.clone());
         let mut outgoing = incoming;
+        if let Instr::EnterTry { catch_pc, .. } = &instructions[pc] {
+            pending.push_back((*catch_pc, BTreeSet::new()));
+        }
+        if let Instr::MoveCapturedSequence {
+            source_slot,
+            destination_slot,
+        } = &instructions[pc]
+        {
+            if source_slot == destination_slot
+                || outgoing.contains(destination_slot)
+                || !outgoing.remove(source_slot)
+            {
+                return Err(format!("captured CSL move lacks a unique live source and empty destination at instruction {pc}"));
+            }
+            outgoing.insert(*destination_slot);
+        }
         if let Some(slot) = capture_slot(&instructions[pc]) {
             if !outgoing.insert(slot) {
                 return Err(format!("captured comma-separated sequence local {slot} is overwritten at instruction {pc} before consumption"));
@@ -42,11 +58,14 @@ pub(super) fn validate_sequence_capture_flow(instructions: &[Instr]) -> Result<(
         for slot in captured_aggregate_slots(&instructions[pc]) {
             consume(slot, pc, &mut consumed, &mut outgoing)?;
         }
-        for slot in captured_dotted_argument_slots(&instructions[pc]) {
+        for slot in captured_subscript_argument_slots(&instructions[pc]) {
             consume(slot, pc, &mut consumed, &mut outgoing)?;
         }
         let successors = normal_successors(instructions, pc)?;
-        if successors.is_empty() && !outgoing.is_empty() {
+        if successors.is_empty()
+            && !super::control_flow::is_exceptional_exit(&instructions[pc])
+            && !outgoing.is_empty()
+        {
             return Err(format!("captured comma-separated sequence locals {outgoing:?} remain live at function exit instruction {pc}"));
         }
         pending.extend(successors.into_iter().map(|next| (next, outgoing.clone())));
@@ -114,17 +133,18 @@ fn captured_aggregate_slots(instruction: &Instr) -> impl Iterator<Item = usize> 
     })
 }
 
-fn captured_dotted_argument_slots(instruction: &Instr) -> impl Iterator<Item = usize> + '_ {
+fn captured_subscript_argument_slots(instruction: &Instr) -> impl Iterator<Item = usize> + '_ {
     let steps = match instruction {
         Instr::ReadSubscriptPath { steps, .. } | Instr::CaptureSubscriptPath { steps, .. } => {
             Some(steps.as_slice())
         }
+        Instr::FinishFixedAssignmentTarget { endpoint, .. } => Some(std::slice::from_ref(endpoint)),
         _ => None,
     };
-    steps
-        .into_iter()
-        .flatten()
-        .flat_map(|step| match step {
+    let steps = steps.unwrap_or(&[]);
+    let dotted = steps
+        .iter()
+        .filter_map(|step| match step {
             crate::bytecode::BytecodeSubscriptStep::DottedInvoke { arguments, .. } => {
                 Some(arguments.as_slice())
             }
@@ -137,7 +157,30 @@ fn captured_dotted_argument_slots(instruction: &Instr) -> impl Iterator<Item = u
             ) => Some(*slot),
             crate::bytecode::BytecodeDottedInvokeArgument::Colon
             | crate::bytecode::BytecodeDottedInvokeArgument::Call(_) => None,
+        });
+    let parentheses = steps
+        .iter()
+        .filter_map(|step| match step {
+            crate::bytecode::BytecodeSubscriptStep::Parentheses { selectors } => {
+                Some(selectors.as_slice())
+            }
+            _ => None,
         })
+        .flatten()
+        .chain(
+            match instruction {
+                Instr::PrepareParenthesesPathStep { selectors, .. } => selectors.as_slice(),
+                _ => &[],
+            }
+            .iter(),
+        )
+        .filter_map(|selector| match selector {
+            crate::bytecode::BytecodeSubscriptSelector::Expansion(
+                ArgumentSpec::CapturedSequence { slot },
+            ) => Some(*slot),
+            _ => None,
+        });
+    dotted.chain(parentheses)
 }
 
 #[cfg(test)]

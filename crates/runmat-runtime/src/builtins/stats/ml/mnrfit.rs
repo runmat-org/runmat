@@ -58,6 +58,22 @@ fn internal(message: impl Into<String>) -> RuntimeError {
     error(message, &ERROR_INTERNAL)
 }
 
+fn scalar_text(value: &Value) -> BuiltinResult<Option<std::borrow::Cow<'_, str>>> {
+    Ok(match value {
+        Value::String(text) => Some(std::borrow::Cow::Borrowed(text.as_str())),
+        Value::CharArray(chars) if chars.rows == 1 => Some(std::borrow::Cow::Owned(
+            crate::builtins::stats::decode_utf16_with_error(chars.data(), || {
+                invalid("mnrfit: text value is not valid UTF-16")
+            })?,
+        )),
+        Value::StringArray(array) if array.data().len() == 1 => array
+            .data()
+            .first()
+            .map(|text| std::borrow::Cow::Borrowed(text.as_str())),
+        _ => None,
+    })
+}
+
 #[derive(Clone, Debug)]
 struct FitResult {
     b: Value,
@@ -103,7 +119,7 @@ async fn mnrfit_in_runtime(
 ) -> BuiltinResult<Value> {
     check_cancellation(runtime)?;
     let mut cooperation = FitCooperation::new(runtime);
-    let inspected = options::inspect(rest.view());
+    let inspected = options::inspect(rest.view())?;
     ensure_extensions(&x, &y, rest.view(), &inspected)?;
     let names = options::validate(rest.view(), inspected)?;
     let admitted = admission::prepare(x, y, &mut cooperation).await?;
@@ -271,16 +287,6 @@ async fn fit(
         dev: Value::Num(fit.deviance),
         stats,
     })
-}
-
-fn scalar_text(value: &Value) -> Option<runmat_value::Utf8Text> {
-    match value {
-        Value::String(text) => Some(text.clone()),
-        Value::CharArray(chars) if chars.rows == 1 => {
-            Some(chars.data().iter().collect::<String>().into())
-        }
-        _ => None,
-    }
 }
 
 #[cfg(test)]

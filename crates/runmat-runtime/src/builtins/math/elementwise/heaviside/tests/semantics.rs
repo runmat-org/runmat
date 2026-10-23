@@ -71,7 +71,7 @@ fn runmat_extensions_promote_logical_integer_and_character_values() {
         Value::Num(1.0)
     );
 
-    let array = CharArray::new("RunMat".chars().collect(), 1, 6).unwrap();
+    let array = CharArray::from_unicode_scalars("RunMat".chars().collect(), 1, 6).unwrap();
     let Value::Tensor(output) = execute(Value::CharArray(array)).unwrap() else {
         panic!("expected character output tensor")
     };
@@ -109,7 +109,7 @@ fn compatibility_mode_rejects_each_extension_class() {
             "RunMat:compatibility:HeavisideLogicalInputExtension",
         ),
         (
-            Value::CharArray(CharArray::new(vec!['A'], 1, 1).unwrap()),
+            Value::CharArray(CharArray::from_unicode_scalars(vec!['A'], 1, 1).unwrap()),
             "RunMat:compatibility:HeavisideCharacterInputExtension",
         ),
     ] {

@@ -593,7 +593,14 @@ pub(crate) fn field_name(value: &Value) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.as_str().to_owned()),
         Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].as_str().to_owned()),
-        Value::CharArray(array) if array.rows == 1 => Ok(array.data().iter().collect()),
+        Value::CharArray(array) if array.rows == 1 => {
+            runmat_value::decode_utf16_code_units(array.data()).map_err(|error| {
+                optim_error(
+                    "optimset",
+                    format!("optimset: option name contains {error}"),
+                )
+            })
+        }
         other => Err(optim_error(
             "optimset",
             format!("optimset: option names must be strings, got {other:?}"),
@@ -740,7 +747,11 @@ pub(crate) fn option_string_value(
         Value::String(s) => Ok(s.to_ascii_lowercase()),
         Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].to_ascii_lowercase()),
         Value::CharArray(array) if array.rows == 1 => {
-            Ok(array.data().iter().collect::<String>().to_ascii_lowercase())
+            runmat_value::decode_utf16_code_units(array.data())
+                .map(|text| text.to_ascii_lowercase())
+                .map_err(|error| {
+                    optim_error("optim", format!("optim option {field} contains {error}"))
+                })
         }
         other => Err(optim_error(
             "optim",

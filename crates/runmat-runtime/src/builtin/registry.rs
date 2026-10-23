@@ -171,6 +171,11 @@ pub fn validate_runtime_builtin_registry() -> Vec<RuntimeBuiltinRegistryError> {
                 &binding.identity,
                 "runtime binding has no canonical catalog declaration",
             ));
+        } else if binding.physical_provenance().is_none() {
+            errors.push(registry_error(
+                &binding.identity,
+                "canonical runtime binding has no matching declaration-owned physical provenance",
+            ));
         }
     }
     errors

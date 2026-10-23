@@ -1,12 +1,68 @@
 use super::*;
 use crate::builtins::strings::core::numeric_length::nonnegative_platform_usize;
-use runmat_value::NumericStorage;
+use runmat_value::{NumericStorage, Utf16CodeUnit};
 
 pub(super) struct SscanfResult {
     pub(super) value: Value,
     pub(super) count: usize,
     pub(super) errmsg: String,
     pub(super) next_index: usize,
+}
+
+/// A borrowed UTF-8 input position measured in MATLAB UTF-16 code units.
+/// `trailing` means the high surrogate of the scalar at `byte` was consumed.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct ScanCursor {
+    byte: usize,
+    units: usize,
+    trailing: bool,
+}
+
+impl ScanCursor {
+    const START: Self = Self {
+        byte: 0,
+        units: 0,
+        trailing: false,
+    };
+
+    fn next_scalar(self, text: &str) -> Option<(char, Self)> {
+        if self.trailing {
+            return None;
+        }
+        let character = text[self.byte..].chars().next()?;
+        Some((
+            character,
+            Self {
+                byte: self.byte + character.len_utf8(),
+                units: self.units + character.len_utf16(),
+                trailing: false,
+            },
+        ))
+    }
+
+    fn next_unit(self, text: &str) -> Option<(Utf16CodeUnit, Self)> {
+        let character = text[self.byte..].chars().next()?;
+        let mut encoded = [0u16; 2];
+        let units = character.encode_utf16(&mut encoded);
+        let (unit, byte, trailing) = if self.trailing {
+            if units.len() != 2 {
+                return None;
+            }
+            (units[1], self.byte + character.len_utf8(), false)
+        } else if units.len() == 2 {
+            (units[0], self.byte, true)
+        } else {
+            (units[0], self.byte + character.len_utf8(), false)
+        };
+        Some((
+            Utf16CodeUnit::from_raw(unit),
+            Self {
+                byte,
+                units: self.units + 1,
+                trailing,
+            },
+        ))
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -37,7 +93,7 @@ enum ScanValue {
     F64(f64),
     I64(i64),
     U64(u64),
-    Char(char),
+    Char(Utf16CodeUnit),
 }
 
 #[derive(Clone, Copy)]
@@ -80,7 +136,7 @@ pub(super) fn sscanf_scan(
     });
     let mut values = Vec::new();
     let mut fields = 0usize;
-    let mut pos = 0usize;
+    let mut pos = ScanCursor::START;
     let mut unmatched_input = false;
     loop {
         if scan_limit_reached(limit, size.as_deref(), output_class, fields, values.len()) {
@@ -98,7 +154,7 @@ pub(super) fn sscanf_scan(
                     pos = skip_whitespace(text, pos);
                 }
                 ScanToken::Literal(ch) => {
-                    let Some(next) = text[pos..].chars().next() else {
+                    let Some((next, next_pos)) = pos.next_scalar(text) else {
                         matched_all = false;
                         break;
                     };
@@ -106,7 +162,7 @@ pub(super) fn sscanf_scan(
                         matched_all = false;
                         break;
                     }
-                    pos += next.len_utf8();
+                    pos = next_pos;
                 }
                 ScanToken::Spec {
                     kind,
@@ -153,13 +209,13 @@ pub(super) fn sscanf_scan(
             }
         }
         if !matched_all {
-            unmatched_input = pos < text.len();
+            unmatched_input = pos.byte < text.len();
             break;
         }
-        if pos == start_pos || values.len() == start_len && pos >= text.len() {
+        if pos == start_pos || values.len() == start_len && pos.byte >= text.len() {
             break;
         }
-        if pos >= text.len() {
+        if pos.byte >= text.len() {
             break;
         }
     }
@@ -196,9 +252,8 @@ pub(super) fn sscanf_scan(
         } else {
             String::new()
         },
-        // Whitespace and literal matches are scanned characters even if a
-        // later conversion fails; report a character rather than byte index.
-        next_index: text[..pos].chars().count().saturating_add(1),
+        // A width-limited character field may stop between surrogate units.
+        next_index: pos.units.saturating_add(1),
     })
 }
 
@@ -253,7 +308,7 @@ fn scan_zero(class: ScanOutputClass) -> ScanValue {
         ScanOutputClass::F64 => ScanValue::F64(0.0),
         ScanOutputClass::I64 => ScanValue::I64(0),
         ScanOutputClass::U64 => ScanValue::U64(0),
-        ScanOutputClass::Char => ScanValue::Char('\0'),
+        ScanOutputClass::Char => ScanValue::Char(Utf16CodeUnit::from_raw(0)),
     }
 }
 
@@ -350,13 +405,13 @@ fn parse_scan_format(format: &str) -> BuiltinResult<Vec<ScanToken>> {
 
 fn scan_one(
     text: &str,
-    pos: usize,
+    pos: ScanCursor,
     kind: ScanKind,
     width: Option<usize>,
     remaining: Option<usize>,
     capture_limit: Option<usize>,
-) -> Option<(Vec<ScanValue>, usize)> {
-    if pos > text.len() {
+) -> Option<(Vec<ScanValue>, ScanCursor)> {
+    if pos.byte > text.len() {
         return None;
     }
     let width = if matches!(kind, ScanKind::Char) {
@@ -370,69 +425,108 @@ fn scan_one(
     } else {
         width
     };
-    let end_limit = width
-        .map(|width| pos + prefix_byte_len(&text[pos..], width))
-        .unwrap_or(text.len());
     match kind {
         ScanKind::Float => {
-            let fragment = &text[pos..end_limit];
+            let fragment = numeric_fragment(text, pos, width)?;
             let len = numeric_prefix_len(fragment, false)?;
             let token = &fragment[..len];
-            Some((vec![ScanValue::F64(token.parse::<f64>().ok()?)], pos + len))
+            Some((
+                vec![ScanValue::F64(token.parse::<f64>().ok()?)],
+                numeric_advance(pos, len),
+            ))
         }
         ScanKind::SignedInteger { radix, exact_i64 } => {
-            let fragment = &text[pos..end_limit];
+            let fragment = numeric_fragment(text, pos, width)?;
             let (value, len) = scan_signed_integer(fragment, radix)?;
             let value = if exact_i64 {
                 ScanValue::I64(value)
             } else {
                 ScanValue::F64(value as f64)
             };
-            Some((vec![value], pos + len))
+            Some((vec![value], numeric_advance(pos, len)))
         }
         ScanKind::UnsignedInteger { radix, exact_u64 } => {
-            let fragment = &text[pos..end_limit];
+            let fragment = numeric_fragment(text, pos, width)?;
             let (value, len) = scan_unsigned_integer(fragment, radix)?;
             let value = if exact_u64 {
                 ScanValue::U64(value)
             } else {
                 ScanValue::F64(value as f64)
             };
-            Some((vec![value], pos + len))
+            Some((vec![value], numeric_advance(pos, len)))
         }
         ScanKind::String => {
-            let fragment = &text[pos..end_limit];
-            let len = fragment
-                .char_indices()
-                .find_map(|(idx, ch)| ch.is_whitespace().then_some(idx))
-                .unwrap_or(fragment.len());
-            if len == 0 {
+            let mut next = pos;
+            let mut parsed = Vec::new();
+            while width.is_none_or(|limit| next.units - pos.units < limit) {
+                if next
+                    .next_scalar(text)
+                    .is_some_and(|(character, _)| character.is_whitespace())
+                {
+                    break;
+                }
+                let Some((unit, advanced)) = next.next_unit(text) else {
+                    break;
+                };
+                if parsed.len() < capture_limit.unwrap_or(usize::MAX) {
+                    parsed.push(ScanValue::Char(unit));
+                }
+                next = advanced;
+            }
+            if next == pos {
                 None
             } else {
-                Some((
-                    fragment[..len]
-                        .chars()
-                        .take(capture_limit.unwrap_or(usize::MAX))
-                        .map(ScanValue::Char)
-                        .collect(),
-                    pos + len,
-                ))
+                Some((parsed, next))
             }
         }
         ScanKind::Char => {
-            let fragment = &text[pos..end_limit];
-            if fragment.is_empty() {
-                return None;
+            let mut next = pos;
+            let mut parsed = Vec::new();
+            let limit = width.unwrap_or(1);
+            while next.units - pos.units < limit {
+                let Some((unit, advanced)) = next.next_unit(text) else {
+                    break;
+                };
+                if parsed.len() < capture_limit.unwrap_or(usize::MAX) {
+                    parsed.push(ScanValue::Char(unit));
+                }
+                next = advanced;
             }
-            Some((
-                fragment
-                    .chars()
-                    .take(capture_limit.unwrap_or(usize::MAX))
-                    .map(ScanValue::Char)
-                    .collect(),
-                end_limit,
-            ))
+            (next != pos).then_some((parsed, next))
         }
+    }
+}
+
+fn numeric_fragment(text: &str, pos: ScanCursor, width: Option<usize>) -> Option<&str> {
+    if pos.trailing {
+        return None;
+    }
+    let end = if let Some(width) = width {
+        let mut next = pos;
+        while next.units - pos.units < width {
+            let Some((character, advanced)) = next.next_scalar(text) else {
+                break;
+            };
+            if advanced.units - pos.units > width {
+                break;
+            }
+            next = advanced;
+            if !character.is_ascii() {
+                break;
+            }
+        }
+        next.byte
+    } else {
+        text.len()
+    };
+    Some(&text[pos.byte..end])
+}
+
+fn numeric_advance(pos: ScanCursor, ascii_bytes: usize) -> ScanCursor {
+    ScanCursor {
+        byte: pos.byte + ascii_bytes,
+        units: pos.units + ascii_bytes,
+        trailing: false,
     }
 }
 
@@ -496,7 +590,7 @@ fn scan_values_into_storage(
                     ScanValue::F64(value) => value,
                     ScanValue::I64(value) => value as f64,
                     ScanValue::U64(value) => value as f64,
-                    ScanValue::Char(value) => value as u32 as f64,
+                    ScanValue::Char(value) => f64::from(value.raw()),
                 })
                 .collect(),
         )),
@@ -606,23 +700,14 @@ fn numeric_prefix_len(text: &str, integer: bool) -> Option<usize> {
     (end > 0).then_some(end)
 }
 
-fn skip_whitespace(text: &str, mut pos: usize) -> usize {
-    while pos < text.len() {
-        let Some(ch) = text[pos..].chars().next() else {
-            break;
-        };
-        if !ch.is_whitespace() {
+fn skip_whitespace(text: &str, mut pos: ScanCursor) -> ScanCursor {
+    while let Some((character, next)) = pos.next_scalar(text) {
+        if !character.is_whitespace() {
             break;
         }
-        pos += ch.len_utf8();
+        pos = next;
     }
     pos
-}
-
-fn prefix_byte_len(text: &str, count: usize) -> usize {
-    text.char_indices()
-        .nth(count)
-        .map_or(text.len(), |(index, _)| index)
 }
 
 pub(super) fn scan_size_from_value(value: &Value) -> BuiltinResult<Vec<usize>> {

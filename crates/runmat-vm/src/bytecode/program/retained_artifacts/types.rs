@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use runmat_execution::value::GraphStaticReferenceSite;
 use runmat_hir::FunctionId;
 use runmat_runtime::user_functions::SourceFunctionInfo;
 use runmat_value::FunctionDefinitionLease;
@@ -123,6 +124,11 @@ pub enum RetainedCallableStageError {
     InvalidDefinitionFingerprint(#[from] serde_json::Error),
     #[error("callable artifact contains an incomplete static definition graph")]
     IncompleteDefinitionGraph,
+    #[error("selected fingerprint for {function:?} violates {invariant:?}")]
+    SelectedFingerprintGraph {
+        function: FunctionId,
+        invariant: SelectedFingerprintInvariant,
+    },
     #[error("callable artifact carries a source issued by a different runtime owner")]
     ForeignSourceOwner,
     #[error("session function identity space is exhausted")]
@@ -131,4 +137,27 @@ pub enum RetainedCallableStageError {
     MissingRuntimeSource,
     #[error("callable artifact function has no authenticated portable source")]
     MissingPortableSource,
+}
+
+/// The first failed invariant in an exact selected-body fingerprint. These
+/// stages distinguish malformed import geometry from missing local ownership
+/// without turning a failed graph proof into a name-based fallback.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SelectedFingerprintInvariant {
+    DuplicateSelectedBody,
+    MissingSelectedBody,
+    RepeatedRequestedBody,
+    MissingRootBody,
+    MissingLexicalParent(FunctionId),
+    MismatchedLexicalParent(FunctionId),
+    UnexpectedPortableLexicalParent,
+    DuplicateImportSite(GraphStaticReferenceSite),
+    InvalidReferenceSites(usize),
+    ImportKindMismatch(GraphStaticReferenceSite),
+    UnimportedExternalReference(GraphStaticReferenceSite),
+    UnobservedImportSite(GraphStaticReferenceSite),
+    MissingLocalDefinition(FunctionId),
+    ClosedFunctionRemap,
+    ImportedSiteRemap,
+    FusionStageProjection,
 }

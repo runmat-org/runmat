@@ -1,6 +1,4 @@
-use std::collections::HashMap;
-
-use runmat_hir::{ExprId, HirError, HirExpr, Span};
+use runmat_hir::{HirError, HirExpr, Span};
 
 use crate::{
     BasicBlock, BasicBlockId, MirConstant, MirLocalId, MirOperand, MirPlace, MirRvalue, MirStmt,
@@ -16,15 +14,37 @@ use super::ExpressionTarget;
 pub(super) fn finish_expression(
     ctx: &MirLoweringContext,
     expression: &HirExpr,
-    target: ExpressionTarget,
-    replacements: &HashMap<ExprId, MirOperand>,
+    target: ExpressionTarget<'_>,
+    replacements: &crate::lowering::AwaitReplacements,
     mut statements: Vec<MirStmt>,
 ) -> Result<BasicBlock, HirError> {
+    if let Some(selector) = target.selector {
+        let region = crate::lowering::fixed_target::expression_region(
+            ctx,
+            expression,
+            replacements,
+            target.destination,
+        )?;
+        selector.publish(&mut statements, region, target.destination);
+        return Ok(BasicBlock {
+            id: target.block,
+            statements,
+            terminator: MirTerminator {
+                kind: MirTerminatorKind::Goto(target.continuation),
+                span: target.span,
+            },
+        });
+    }
+    let crate::MirFixedSelectorDestination::Scalar(destination) = target.destination else {
+        return Err(HirError::new(
+            "ordinary expression target cannot publish a selector sequence",
+        ));
+    };
     let value = lower_expr_with_replacements(ctx, expression, &mut statements, replacements)?;
     statements.extend(effect_stmts_for_rvalue(&value, target.span));
     statements.push(MirStmt {
         kind: MirStmtKind::Assign {
-            place: MirPlace::Local(target.destination),
+            place: MirPlace::Local(destination),
             value,
         },
         span: target.span,
@@ -45,7 +65,28 @@ pub(super) fn skipped_guard(
     destination: MirLocalId,
     continuation: BasicBlockId,
     span: Span,
+    selector: Option<crate::lowering::fixed_target::SelectorRegionContext<'_>>,
 ) -> BasicBlock {
+    if let Some(selector) = selector {
+        let mut statements = Vec::new();
+        selector.publish(
+            &mut statements,
+            crate::MirCallArgumentRegion {
+                steps: Vec::new(),
+                argument: crate::MirCallArg::Single(MirOperand::Constant(MirConstant::Bool(value))),
+                span,
+            },
+            crate::MirFixedSelectorDestination::Scalar(destination),
+        );
+        return BasicBlock {
+            id,
+            statements,
+            terminator: MirTerminator {
+                kind: MirTerminatorKind::Goto(continuation),
+                span,
+            },
+        };
+    }
     BasicBlock {
         id,
         statements: vec![MirStmt {

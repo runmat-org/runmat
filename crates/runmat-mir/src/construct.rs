@@ -30,6 +30,8 @@ pub fn effective_native_lowering_class(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
 )]
 pub enum MirConstructKind {
+    PrepareFixedAssignment,
+    PreparedAssign,
     Use,
     Unary,
     Binary,
@@ -149,6 +151,8 @@ pub fn statement_construct_kind(statement: &crate::MirStmtKind) -> MirConstructK
     use MirConstructKind as K;
 
     match statement {
+        S::PrepareFixedAssignment(_) => K::PrepareFixedAssignment,
+        S::PreparedAssign { .. } => K::PreparedAssign,
         S::Assign { .. } => K::Assign,
         S::MultiAssign { .. } => K::MultiAssign,
         S::SequenceAssign { .. } => K::SequenceAssign,
@@ -283,11 +287,13 @@ fn rvalue_construct_inventory_without_regions(value: &crate::MirRvalue) -> Vec<M
 
 fn statement_rvalue(statement: &crate::MirStmtKind) -> Option<&crate::MirRvalue> {
     match statement {
-        crate::MirStmtKind::Assign { value, .. }
+        crate::MirStmtKind::PreparedAssign { value, .. }
+        | crate::MirStmtKind::Assign { value, .. }
         | crate::MirStmtKind::MultiAssign { value, .. }
         | crate::MirStmtKind::SequenceAssign { value, .. }
         | crate::MirStmtKind::Expr(value) => Some(value),
-        crate::MirStmtKind::StatementOutput(_)
+        crate::MirStmtKind::PrepareFixedAssignment(_)
+        | crate::MirStmtKind::StatementOutput(_)
         | crate::MirStmtKind::PlaceMutation(_)
         | crate::MirStmtKind::CaptureSequence { .. }
         | crate::MirStmtKind::WorkspaceEffect { .. }
@@ -361,7 +367,9 @@ pub fn statement_construct_inventory(statement: &crate::MirStmtKind) -> Vec<MirC
 }
 
 impl MirConstructKind {
-    pub const ALL: [Self; 59] = [
+    pub const ALL: [Self; 61] = [
+        Self::PrepareFixedAssignment,
+        Self::PreparedAssign,
         Self::Use,
         Self::Unary,
         Self::Binary,
@@ -458,9 +466,14 @@ impl MirConstructKind {
             | K::EnvironmentEffect
             | K::StatementOutput
             | K::TryCatch => C::RuntimeSlowPath,
-            K::SubscriptChain | K::Future | K::Spawn | K::ParFor | K::Spmd | K::Await => {
-                C::StructuredSuspendResume
-            }
+            K::PrepareFixedAssignment
+            | K::PreparedAssign
+            | K::SubscriptChain
+            | K::Future
+            | K::Spawn
+            | K::ParFor
+            | K::Spmd
+            | K::Await => C::StructuredSuspendResume,
             K::DistributedCreate
             | K::CodistributedCreate
             | K::CodistributedBuild

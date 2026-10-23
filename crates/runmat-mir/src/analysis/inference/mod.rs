@@ -8,7 +8,8 @@ mod value;
 
 pub(crate) use call::{infer_mir_call, FunctionSummary};
 pub(crate) use contract::{
-    apply_rvalue_contract, statement_contract, statement_contract_with_facts,
+    apply_rvalue_contract, conservative_rvalue_contract, rvalue_operation_contract,
+    statement_contract, statement_contract_with_facts, statement_phase_contract,
 };
 pub(crate) use legacy_builtin::infer_legacy_builtin;
 pub(crate) use mutation::assign_place;

@@ -126,7 +126,9 @@ fn colormap_parse_map(
     arg: &Value,
     length: usize,
 ) -> crate::BuiltinResult<(runmat_plot::plots::surface::ColorMap, usize)> {
-    if let Some(name) = as_lower_str(arg) {
+    if let Some(name) = as_lower_str(arg).map_err(|source| {
+        crate::builtins::plotting::plotting_error_with_source("cmds", source.to_string(), source)
+    })? {
         if name.trim() == "default" {
             return Ok((runmat_plot::plots::surface::ColorMap::Parula, 256));
         }

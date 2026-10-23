@@ -15,7 +15,11 @@ pub(super) fn parse(arguments: crate::call::BuiltinArguments) -> BuiltinResult<F
                 &SETFIELD_ERROR_INDEX_INVALID
             }
         };
-        errors::with_message(format!("setfield: {}", error.detail), descriptor)
+        let mut runtime = errors::with_message(format!("setfield: {}", error.detail), descriptor);
+        if let Some(source) = error.source {
+            runtime.source = Some(Box::new(source));
+        }
+        runtime
     })?;
     if path.uses_textual_index {
         crate::compatibility::ensure_builtin_extension_enabled(

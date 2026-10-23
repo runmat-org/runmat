@@ -27,7 +27,11 @@ fn savefig_without_arguments_selects_the_documented_default() {
 #[test]
 fn savefig_accepts_only_figure_handles_while_hgsave_preserves_hierarchy_roots() {
     let _guard = setup();
-    let figure = figure_builtin(vec![]).expect("figure");
+    let figure = figure_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    )
+    .expect("figure");
     let axes = crate::builtins::plotting::subplot::subplot_builtin(
         Value::Num(1.0),
         Value::Num(1.0),
@@ -63,7 +67,11 @@ fn savefig_accepts_only_figure_handles_while_hgsave_preserves_hierarchy_roots() 
 #[test]
 fn hgsave_rejects_ancestor_descendant_arrays_before_file_admission() {
     let _guard = setup();
-    let figure = figure_builtin(vec![]).expect("figure");
+    let figure = figure_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    )
+    .expect("figure");
     let axes = crate::builtins::plotting::subplot::subplot_builtin(
         Value::Num(1.0),
         Value::Num(1.0),

@@ -20,6 +20,18 @@ pub(super) fn independent_output_allocations(
 }
 
 impl ExtremaKind {
+    /// A no-longer-published provider result is still an owned reference.
+    /// Checked release preserves shared input leases and reports a failed last
+    /// retirement instead of allowing Drop to hide it behind successful values.
+    fn retire_reduction_index(self, indices: GpuTensorHandle) -> BuiltinResult<()> {
+        indices.release().map(|_| ()).map_err(|source| {
+            let mut error =
+                self.contract_error("discarded dimensional extrema indices could not retire");
+            error.source = Some(Box::new(source));
+            error
+        })
+    }
+
     pub(super) async fn adopt_reduction_result(
         self,
         provider: &'static dyn AccelProvider,
@@ -117,8 +129,10 @@ impl ExtremaKind {
         }
         if demand == ExtremaDemand::ValuesOnly {
             // The provider still produced both outputs; only adaptation work
-            // is omitted. The unused index reference retires normally here.
-            drop(indices);
+            // is omitted. A failed discarded-result retirement is terminal.
+            if let Err(error) = self.retire_reduction_index(indices) {
+                return Err(gpu_helpers::reject_gpu_output(values, error));
+            }
             return Ok(ExtremaResult::Values(Value::GpuTensor(values)));
         }
         let indices = if index_precision == Some(ProviderPrecision::F32) {
@@ -159,6 +173,9 @@ impl ExtremaKind {
             }
             let host = Tensor::new(data, index_contract.shape)
                 .map_err(|error| self.contract_error(error))?;
+            if let Err(error) = self.retire_reduction_index(indices) {
+                return Err(gpu_helpers::reject_gpu_output(values, error));
+            }
             crate::builtins::common::tensor::tensor_into_value(host)
         } else {
             Value::GpuTensor(indices)

@@ -13,10 +13,6 @@ use std::{cell::RefCell, rc::Rc};
 struct RecordingService(Rc<RefCell<Vec<AdmittedSumReduction>>>);
 
 impl RuntimeAccelerationService for RecordingService {
-    fn supports_operation(&self, _: &str) -> bool {
-        true
-    }
-
     fn prepare_admitted(
         &self,
         _: RuntimeContext,
@@ -174,10 +170,6 @@ struct NativeService {
 }
 
 impl RuntimeAccelerationService for NativeService {
-    fn supports_operation(&self, _: &str) -> bool {
-        true
-    }
-
     fn prepare_admitted(
         &self,
         _: RuntimeContext,

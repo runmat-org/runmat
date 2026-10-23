@@ -166,13 +166,15 @@ fn stage_readback(
     source: &wgpu::Buffer,
     size: u64,
     label: &str,
-) -> wgpu::Buffer {
-    let staging = emission.device().create_buffer(&wgpu::BufferDescriptor {
-        label: Some(label),
-        size,
-        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
+) -> WgpuBufferOwner {
+    let staging = runmat_accelerate_api::WgpuBufferOwner::new(emission.device().create_buffer(
+        &wgpu::BufferDescriptor {
+            label: Some(label),
+            size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        },
+    ));
     encoder.copy_buffer_to_buffer(source, 0, &staging, 0, size);
     staging
 }

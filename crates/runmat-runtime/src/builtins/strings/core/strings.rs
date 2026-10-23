@@ -109,7 +109,7 @@ async fn strings_builtin(rest: crate::call::BuiltinArguments) -> crate::BuiltinR
 
 fn preflight_strings_extensions(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
     for value in args {
-        let Some(keyword) = keyword_of(value) else {
+        let Some(keyword) = keyword_of(value).map_err(remap_strings_flow)? else {
             continue;
         };
         match keyword.as_str() {
@@ -137,7 +137,10 @@ async fn parse_arguments(args: crate::call::BuiltinArguments) -> BuiltinResult<P
         let host = gather_if_needed_async(&args[idx])
             .await
             .map_err(remap_strings_flow)?;
-        if let Some(keyword) = keyword_of(&host) {
+        if let Some(keyword) = keyword_of(&host).map_err(|mut error| {
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            remap_strings_flow(error)
+        })? {
             match keyword.as_str() {
                 "like" => {
                     if like_proto.is_some() {

@@ -12,8 +12,27 @@ use super::{ExecutionServiceError, RuntimeExecutionServices};
 
 #[path = "cooperation/cancellable_await.rs"]
 mod cancellable_await;
+#[path = "cooperation/owned_blocking.rs"]
+mod owned_blocking;
 
+#[cfg(test)]
 type CpuTurn = dyn Fn() -> RuntimeServiceFuture<Result<(), ExecutionServiceError>>;
+
+enum CpuTurnOwner {
+    Service(Rc<dyn RuntimeExecutionServices>),
+    #[cfg(test)]
+    Callback(Rc<CpuTurn>),
+}
+
+impl CpuTurnOwner {
+    fn start(&self) -> RuntimeServiceFuture<Result<(), ExecutionServiceError>> {
+        match self {
+            Self::Service(service) => service.cooperate_cpu(),
+            #[cfg(test)]
+            Self::Callback(turn) => turn(),
+        }
+    }
+}
 
 /// The execution adapter, not an individual builtin, chooses whether CPU work
 /// must periodically give other tasks a turn.
@@ -24,80 +43,22 @@ pub enum CpuCooperationPolicy {
 }
 
 pub struct CpuCooperationBudget {
-    turn: Option<Rc<CpuTurn>>,
+    turn: Option<CpuTurnOwner>,
     cancellation: CancellationToken,
     policy: CpuCooperationPolicy,
     pending_work: u64,
 }
 
 impl CpuCooperationBudget {
-    /// The host-composed native driver retains `retained` until an indivisible
-    /// CPU kernel physically completes. Cancellation stops this await, not
-    /// the library kernel or its managed reservation.
-    pub async fn run_owned_blocking<T, G, F>(
-        &self,
-        service: Option<&dyn super::blocking_cpu::RuntimeBlockingCpuService>,
-        retained: G,
-        work: F,
-    ) -> Result<T, ExecutionServiceError>
-    where
-        T: Send + 'static,
-        G: Send + 'static,
-        F: FnOnce() -> T + Send + 'static,
-    {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let service = service.ok_or_else(|| {
-                ExecutionServiceError::Infrastructure(
-                    "owned blocking CPU service was not installed by this host".into(),
-                )
-            })?;
-            if self.cancellation.is_cancelled() {
-                return Err(ExecutionServiceError::Cancelled);
-            }
-            let (send, receive) = futures::channel::oneshot::channel();
-            let cancellation = self.cancellation.clone();
-            let job = Box::new(move || {
-                let _retained = retained;
-                let result = if cancellation.is_cancelled() {
-                    Err(ExecutionServiceError::Cancelled)
-                } else {
-                    Ok(work())
-                };
-                let _ = send.send(result);
-            });
-            self.await_cancellable(service.submit(job)).await??;
-            return self.await_cancellable(receive).await?.map_err(|_| {
-                ExecutionServiceError::WorkerLost(
-                    "owned blocking CPU job ended before publication".into(),
-                )
-            })?;
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            // Portable same-thread math remains available, but this is not
-            // a claim of mid-kernel yielding until browser worker transport
-            // can retain the same invocation resource owner.
-            let _ = service;
-            if self.cancellation.is_cancelled() {
-                return Err(ExecutionServiceError::Cancelled);
-            }
-            let _retained = retained;
-            let result = work();
-            if self.cancellation.is_cancelled() {
-                return Err(ExecutionServiceError::Cancelled);
-            }
-            Ok(result)
-        }
-    }
-
     /// Await an invocation-owned operation, dropping it when cancellation
     /// wins. This is an execution boundary, not a second scheduling policy.
-    pub async fn await_cancellable<F: std::future::Future>(
-        &self,
+    pub fn await_cancellable<'a, F: std::future::Future + 'a>(
+        &'a self,
         future: F,
-    ) -> Result<F::Output, ExecutionServiceError> {
-        cancellable_await::run(&self.cancellation, future).await
+    ) -> impl std::future::Future<Output = Result<F::Output, ExecutionServiceError>> + 'a {
+        // Forward the original cancellation-first future without embedding
+        // another copy of its concrete work in a forwarding poll frame.
+        cancellable_await::run(&self.cancellation, future)
     }
 
     pub(crate) fn new(
@@ -107,9 +68,9 @@ impl CpuCooperationBudget {
         let policy = service.cpu_cooperation_policy();
         let turn = match policy {
             CpuCooperationPolicy::NeverYield => None,
-            CpuCooperationPolicy::WorkQuantum(_) => {
-                Some(Rc::new(move || service.cooperate_cpu()) as Rc<CpuTurn>)
-            }
+            // Retain the already-owned adapter directly; a budget needs no
+            // separately allocated closure to call this same service.
+            CpuCooperationPolicy::WorkQuantum(_) => Some(CpuTurnOwner::Service(service)),
         };
         Self {
             turn,
@@ -135,7 +96,7 @@ impl CpuCooperationBudget {
         }
         self.pending_work = (total % u128::from(quantum.get())) as u64;
         let turn = self.turn.as_ref().expect("a work quantum owns a turn hook");
-        let result = match select(turn(), self.cancellation.cancelled()).await {
+        let result = match select(turn.start(), self.cancellation.cancelled()).await {
             Either::Left((result, _listener)) => result,
             Either::Right((_reason, _turn)) => return Err(ExecutionServiceError::Cancelled),
         };
@@ -153,7 +114,7 @@ impl CpuCooperationBudget {
         turn: impl Fn() -> RuntimeServiceFuture<Result<(), ExecutionServiceError>> + 'static,
     ) -> Self {
         Self {
-            turn: Some(Rc::new(turn)),
+            turn: Some(CpuTurnOwner::Callback(Rc::new(turn))),
             cancellation,
             policy,
             pending_work: 0,

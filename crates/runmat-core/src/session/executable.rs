@@ -3,10 +3,10 @@ use super::*;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-mod selection;
-mod selected_product;
 #[cfg(not(target_arch = "wasm32"))]
 mod ready_route;
+mod selected_product;
+mod selection;
 
 type InvocationResult =
     std::result::Result<runmat_runtime::execution::RootedValueSequence, RunError>;
@@ -229,14 +229,12 @@ impl RunMatSession {
         profile: Option<&runmat_jit::tiering::RepresentationProfile>,
         interpreter_bytecode_unchanged: bool,
     ) -> std::result::Result<TieredInteractiveInvocation, RuntimeError> {
-        let route_admission = if profile.is_some()
-            && interpreter_bytecode_unchanged
-            && self.generic_native_cache.has_retained_entries()
-        {
-            crate::generic_native::placement::ReadyRouteAdmission::prepare(runtime)?
-        } else {
-            None
-        };
+        let route_admission =
+            if interpreter_bytecode_unchanged && self.generic_native_cache.has_retained_entries() {
+                crate::generic_native::placement::ReadyRouteAdmission::prepare(runtime)?
+            } else {
+                None
+            };
         let ready_at_start = if route_admission.is_some() {
             self.generic_native_cache
                 .ready_publications(unit, None, profile)?
@@ -245,7 +243,17 @@ impl RunMatSession {
         };
         let published = self
             .generic_native_cache
-            .resolve_or_schedule(unit, None, profile)?;
+            .resolve_or_schedule_with_placement(
+                crate::generic_native::placement::ReadyInvocation {
+                    unit,
+                    preferred_function: None,
+                    arguments: runmat_runtime::call::FunctionArgumentView::from_slice(&[]),
+                    requested_outputs: 0,
+                    profile: profile.map(|profile| profile.digest),
+                },
+                profile,
+                runtime,
+            )?;
         let osr = if published
             .as_ref()
             .is_some_and(|entry| matches!(entry.tier, runmat_jit::entry::PublishedTier::Generic))
@@ -255,12 +263,7 @@ impl RunMatSession {
         } else {
             None
         };
-        let eligible = osr.is_none()
-            && profile.is_some()
-            && interpreter_bytecode_unchanged
-            && published
-                .as_ref()
-                .is_some_and(|entry| ready_at_start.contains(entry));
+        let eligible = osr.is_none() && interpreter_bytecode_unchanged;
         let selected = self.select_ready_native_route(
             runtime,
             crate::generic_native::placement::ReadyInvocation {
@@ -272,6 +275,7 @@ impl RunMatSession {
             },
             published,
             eligible,
+            ready_at_start,
             route_admission,
         )?;
         let published = selected.published;
@@ -345,7 +349,7 @@ impl RunMatSession {
     ) -> std::result::Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
         if !self.native_tiering_enabled {
             return self
-                .invoke_entrypoint_interpreted(unit, runtime, runtime_bytecode)
+                .invoke_entrypoint_interpreted(unit, runtime, runtime_bytecode, 0)
                 .await;
         }
         let profile = self.generic_native_cache.representation_profile(&[]);
@@ -361,9 +365,19 @@ impl RunMatSession {
         } else {
             Default::default()
         };
-        let published =
-            self.generic_native_cache
-                .resolve_or_schedule(unit, None, profile.as_ref())?;
+        let published = self
+            .generic_native_cache
+            .resolve_or_schedule_with_placement(
+                crate::generic_native::placement::ReadyInvocation {
+                    unit,
+                    preferred_function: None,
+                    arguments: runmat_runtime::call::FunctionArgumentView::from_slice(&[]),
+                    requested_outputs: 0,
+                    profile: profile.as_ref().map(|profile| profile.digest),
+                },
+                profile.as_ref(),
+                runtime,
+            )?;
         let osr = if published
             .as_ref()
             .is_some_and(|entry| matches!(entry.tier, runmat_jit::entry::PublishedTier::Generic))
@@ -376,10 +390,7 @@ impl RunMatSession {
         // An OSR target is an additional ready product with its own route
         // identity. Until the complete pair is represented, retain the
         // existing tiering route rather than quote a one-product candidate.
-        let eligible = osr.is_none()
-            && published
-                .as_ref()
-                .is_some_and(|entry| ready_at_start.contains(entry));
+        let eligible = osr.is_none();
         let selected = self.select_ready_native_route(
             runtime,
             crate::generic_native::placement::ReadyInvocation {
@@ -391,6 +402,7 @@ impl RunMatSession {
             },
             published,
             eligible,
+            ready_at_start,
             route_admission,
         )?;
         let published = selected.published;
@@ -438,7 +450,7 @@ impl RunMatSession {
             None => {
                 self.stats.interpreter_fallback += 1;
                 (
-                    self.invoke_entrypoint_interpreted(unit, runtime, runtime_bytecode)
+                    self.invoke_entrypoint_interpreted(unit, runtime, runtime_bytecode, 0)
                         .await,
                     BTreeMap::new(),
                     None,
@@ -526,9 +538,19 @@ impl RunMatSession {
         } else {
             Default::default()
         };
-        let published =
-            self.generic_native_cache
-                .resolve_or_schedule(unit, Some(name), profile.as_ref())?;
+        let published = self
+            .generic_native_cache
+            .resolve_or_schedule_with_placement(
+                crate::generic_native::placement::ReadyInvocation {
+                    unit,
+                    preferred_function: Some(name),
+                    arguments: arguments.view(),
+                    requested_outputs,
+                    profile: profile.as_ref().map(|profile| profile.digest),
+                },
+                profile.as_ref(),
+                runtime,
+            )?;
         let osr = if published
             .as_ref()
             .is_some_and(|entry| matches!(entry.tier, runmat_jit::entry::PublishedTier::Generic))
@@ -538,10 +560,7 @@ impl RunMatSession {
         } else {
             None
         };
-        let eligible = osr.is_none()
-            && published
-                .as_ref()
-                .is_some_and(|entry| ready_at_start.contains(entry));
+        let eligible = osr.is_none();
         let selected = self.select_ready_native_route(
             runtime,
             crate::generic_native::placement::ReadyInvocation {
@@ -553,6 +572,7 @@ impl RunMatSession {
             },
             published,
             eligible,
+            ready_at_start,
             route_admission,
         )?;
         let published = selected.published;
@@ -867,6 +887,8 @@ impl RunMatSession {
                 self.project_handoff.clone(),
                 #[cfg(not(target_arch = "wasm32"))]
                 self.local_tasks.child_scope_factory(),
+                #[cfg(not(target_arch = "wasm32"))]
+                Some(self.mex_runtime.native_lane_child_factory()),
             ),
         );
         // Builtin class registration is session-owned. Register the testing
@@ -928,7 +950,13 @@ impl RunMatSession {
         unit: &crate::ExecutableUnit,
         runtime: &runmat_runtime::context::RuntimeContext,
         runtime_bytecode: &runmat_vm::Bytecode,
+        requested_outputs: usize,
     ) -> std::result::Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
+        debug_assert!(requested_outputs <= 1);
+        let result_slot = runtime_bytecode
+            .var_names
+            .iter()
+            .find_map(|(slot, name)| (name == "ans").then_some(*slot));
         let mut variables = vec![Value::Num(0.0); runtime_bytecode.var_count];
         match runmat_vm::interpret_with_workspace_and_dynamic_admission_in_context(
             runtime_bytecode,
@@ -941,11 +969,30 @@ impl RunMatSession {
         .await
         .outcome?
         {
-            runmat_vm::InterpreterOutcome::Completed(_) => {
-                runmat_runtime::execution::RootedValueSequence::new(
-                    runmat_value::ValueSequence::empty(),
-                )
-                .map_err(|error| error.into_runtime_error())
+            runmat_vm::InterpreterOutcome::Completed(completion) => {
+                if requested_outputs == 0 {
+                    return runmat_runtime::execution::RootedValueSequence::new(
+                        runmat_value::ValueSequence::empty(),
+                    )
+                    .map_err(|error| error.into_runtime_error());
+                }
+                // Dense VM storage is not an output contract. An explicit
+                // script result is only the `ans` binding assigned by this
+                // invocation, never the last allocated variable slot.
+                let value = result_slot
+                    .filter(|slot| completion.assigned_slots.contains(slot))
+                    .and_then(|slot| completion.values.get(slot).map(|value| value.clone()))
+                    .ok_or_else(|| {
+                        runmat_runtime::build_runtime_error(
+                            "script did not produce the requested ans value",
+                        )
+                        .with_identifier("RunMat:ExecutableOutput")
+                        .build()
+                    })?;
+                let sequence = runmat_value::ValueSequence::single(value)
+                    .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?;
+                runmat_runtime::execution::RootedValueSequence::new(sequence)
+                    .map_err(|error| error.into_runtime_error())
             }
         }
     }
@@ -1022,43 +1069,35 @@ fn executable_continuation_error(
             "executable invocation continuation admission failed",
         )
     };
-    RunError::Runtime(
-        build_runtime_error(message)
-            .with_identifier(identifier)
-            .with_source(cause)
-            .build(),
-    )
+    let mut builder = build_runtime_error(message).with_identifier(identifier);
+    if cancelled {
+        builder = builder.with_failure_origin(
+            runmat_runtime::runtime_error::RuntimeFailureOrigin::ExecutionControlCancellation,
+        );
+    }
+    RunError::Runtime(builder.with_source(cause).build())
 }
 
-/// Host allocation checkpoints carry a typed cancellation cause but not its
-/// reason. Present the original invocation token's reason without rewriting a
-/// language failure, dropping its diagnostic owner, or weakening the receipt.
+/// Execution and allocation checkpoints carry a typed cancellation cause but
+/// not its invocation-local reason. Present the admitted token's reason without
+/// rewriting a language failure or dropping its retained diagnostic owner.
 fn present_executable_control_failure(
     error: RunError,
     original: &runmat_execution::CancellationToken,
 ) -> RunError {
-    use runmat_runtime::context::host_allocation::HostAllocationError;
-    use runmat_runtime::context::host_effect::HostEffectAllocationError;
-
     let RunError::Runtime(cause) = error else {
         return error;
     };
-    let checkpoint_cancelled = std::error::Error::source(&cause)
-        .and_then(|source| source.downcast_ref::<HostAllocationError>())
-        .is_some_and(|source| {
-            matches!(
-                source,
-                HostAllocationError::Cancelled
-                    | HostAllocationError::Resource(HostEffectAllocationError::Cancelled)
-            )
-        });
-    if checkpoint_cancelled
-        && cause.identifier() == Some("RunMat:ExecutionCancelled")
+    if runmat_runtime::runtime_error::error_has_control_cancellation_origin(&cause)
         && original.stop_reason() == Some(runmat_execution::CancellationReason::Deadline)
     {
         RunError::Runtime(
             build_runtime_error("executable invocation deadline elapsed")
                 .with_identifier("RunMat:ExecutionDeadline")
+                .with_failure_origin(
+                    runmat_runtime::runtime_error::RuntimeFailureOrigin::ExecutionControlCancellation,
+                )
+                .with_gpu_gather_retry(runmat_runtime::runtime_error::GpuGatherRetry::Never)
                 .with_source(cause)
                 .build(),
         )
@@ -1073,4 +1112,25 @@ fn runtime_error(identifier: &'static str, message: impl Into<String>) -> RunErr
             .with_identifier(identifier)
             .build(),
     )
+}
+
+#[cfg(test)]
+mod control_failure_tests {
+    use super::*;
+
+    #[test]
+    fn expired_deadline_does_not_promote_language_failure_with_typed_cancelled_source() {
+        let language = build_runtime_error("language evaluation failed")
+            .with_identifier("RunMat:LanguageFailure")
+            .with_source(runmat_runtime::execution::ExecutionServiceError::Cancelled)
+            .build();
+        let deadline = runmat_execution::CancellationToken::default().with_deadline(Some(0));
+        let RunError::Runtime(presented) =
+            present_executable_control_failure(RunError::Runtime(language), &deadline)
+        else {
+            panic!("runtime failure changed domains");
+        };
+        assert_eq!(presented.identifier(), Some("RunMat:LanguageFailure"));
+        assert_eq!(presented.message(), "language evaluation failed");
+    }
 }

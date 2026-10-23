@@ -25,7 +25,7 @@ pub(super) enum UniformCollector {
         class: NumericDType,
         values: Vec<(NumericScalar, NumericScalar)>,
     },
-    Character(Vec<char>),
+    Character(Vec<runmat_value::Utf16CodeUnit>),
 }
 
 impl UniformCollector {

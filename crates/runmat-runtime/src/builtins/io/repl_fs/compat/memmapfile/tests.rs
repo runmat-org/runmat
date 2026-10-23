@@ -53,8 +53,11 @@ fn character_format_returns_character_class_and_column_major_shape() {
         panic!("Format char must return character data");
     };
     assert_eq!(chars.shape, vec![2, 2]);
-    assert_eq!(chars.data(), vec!['A', 'C', 'B', 'D']);
-    assert_eq!(chars.to_column_major(), vec!['A', 'B', 'C', 'D']);
+    assert_eq!(chars.data(), runmat_value::encode_utf16_code_units("ACBD"));
+    assert_eq!(
+        chars.to_column_major(),
+        runmat_value::encode_utf16_code_units("ABCD")
+    );
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

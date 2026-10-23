@@ -17,6 +17,7 @@ pub mod is_string_scalar;
 pub mod isspace;
 pub mod isstrprop;
 pub mod num2str;
+pub(crate) mod numeric_format_work;
 pub mod newline;
 pub(crate) mod numeric_length;
 pub mod patterns;

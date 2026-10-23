@@ -223,9 +223,11 @@ fn floating_singleton_runtime_carriers_match_inference() {
 #[test]
 fn character_pages_keep_shape_and_column_major_positions() {
     let _mode = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
-    let chars =
-        CharArray::new_with_shape(vec!['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'], vec![2, 2, 2])
-            .unwrap();
+    let chars = CharArray::from_unicode_scalars_with_shape(
+        vec!['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'],
+        vec![2, 2, 2],
+    )
+    .unwrap();
     for name in ["log", "log10", "log1p", "log2", "sqrt"] {
         let result = call(name, Value::CharArray(chars.clone()));
         let Value::Tensor(output) = result.value() else {
@@ -238,7 +240,7 @@ fn character_pages_keep_shape_and_column_major_positions() {
             .iter()
             .zip(chars.to_column_major())
         {
-            let scalar = call(name, Value::Num(character as u32 as f64));
+            let scalar = call(name, Value::Num(f64::from(character.raw())));
             let Value::Num(expected) = scalar.value() else {
                 panic!("scalar result");
             };
@@ -266,6 +268,9 @@ fn character_pages_keep_shape_and_column_major_positions() {
         .zip(exponents.as_f64_slice().unwrap())
         .zip(chars.to_column_major())
     {
-        assert_eq!(fraction * 2.0_f64.powf(*exponent), character as u32 as f64);
+        assert_eq!(
+            fraction * 2.0_f64.powf(*exponent),
+            f64::from(character.raw())
+        );
     }
 }

@@ -194,7 +194,7 @@ fn for_capture_and_next_restore_the_same_loop_before_column_publication() {
         else {
             panic!("captured iterable must have one typed completion");
         };
-        state.start_for_loop(NativeBlockId(0), NativeBlockId(0), *iterator);
+        state.start_for_loop(NativeBlockId(0), NativeBlockId(0), iterator);
         assert!(matches!(
             super::super::call_suspension::begin_for_next(&mut state, NativeBlockId(0)),
             Err(NativeExecutorError::CallSuspended)

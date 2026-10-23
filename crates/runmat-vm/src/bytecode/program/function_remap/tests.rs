@@ -186,7 +186,7 @@ fn every_static_dependency_shape_uses_the_same_remap() {
     let dotted = || BytecodeSubscriptStep::DottedInvoke {
         member: MemberName("method".into()),
         arguments: vec![BytecodeDottedInvokeArgument::Colon],
-        semantic_fallback: Some(identity()),
+        semantic_fallback: Some(std::sync::Arc::new(identity())),
     };
     let mut instructions = vec![
         Instr::CreateExternalBoundFunctionHandle(old, "helper".into(), FunctionSourceRole::Primary),

@@ -6,7 +6,7 @@ use runmat_builtins::{
     STRIP_ERROR_INTERNAL, STRIP_ERROR_INVALID_INPUT, STRIP_ERROR_SIZE_MISMATCH,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{CellArray, CharArray, StringArray, Utf8Text, Value};
+use runmat_value::{CellArray, CharArray, StringArray, Utf16CodeUnit, Utf8Text, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -92,7 +92,7 @@ enum PatternSpec<'a> {
 enum PatternRef<'a> {
     Default,
     CustomText(&'a str),
-    CustomChars(&'a [char]),
+    CustomChars(&'a [Utf16CodeUnit]),
 }
 
 struct PatternExpectation<'a> {
@@ -317,7 +317,7 @@ fn direction_token(text: &str) -> Option<DirectionToken> {
         .find_map(|(candidate, token)| text.eq_ignore_ascii_case(candidate).then_some(token))
 }
 
-fn direction_char_token(chars: &[char]) -> Option<DirectionToken> {
+fn direction_char_token(chars: &[Utf16CodeUnit]) -> Option<DirectionToken> {
     let mut start = 0;
     let mut end = chars.len();
     while start < end && chars[start].is_whitespace() {
@@ -329,12 +329,13 @@ fn direction_char_token(chars: &[char]) -> Option<DirectionToken> {
     direction_candidates()
         .into_iter()
         .find_map(|(candidate, token)| {
-            chars[start..end]
-                .iter()
-                .copied()
-                .map(|c| c.to_ascii_lowercase())
-                .eq(candidate.chars())
-                .then_some(token)
+            let mut actual = chars[start..end].iter().map(|unit| unit.raw());
+            let matches = candidate.bytes().all(|expected| {
+                actual.next().is_some_and(|unit| {
+                    unit <= u8::MAX as u16 && (unit as u8).to_ascii_lowercase() == expected
+                })
+            });
+            (matches && actual.next().is_none()).then_some(token)
         })
 }
 
@@ -454,9 +455,16 @@ fn strip_slice<'a>(text: &'a str, direction: StripDirection, pattern: PatternRef
         PatternRef::CustomText(chars) => {
             strip_slice_with_predicate(text, direction, |c| chars.contains(c))
         }
-        PatternRef::CustomChars(chars) => {
-            strip_slice_with_predicate(text, direction, |c| chars.contains(&c))
-        }
+        PatternRef::CustomChars(chars) => strip_slice_with_predicate(text, direction, |c| {
+            let mut encoded = [0_u16; 2];
+            let encoded = c.encode_utf16(&mut encoded);
+            chars.windows(encoded.len()).any(|window| {
+                window
+                    .iter()
+                    .map(|unit| unit.raw())
+                    .eq(encoded.iter().copied())
+            })
+        }),
     }
 }
 
@@ -583,7 +591,8 @@ pub(crate) mod tests {
             vec![3, 1],
         )
         .unwrap();
-        let chars = CharArray::new(vec!['#', '#', '-', '-', '*', '*'], 3, 2).unwrap();
+        let chars =
+            CharArray::from_unicode_scalars(vec!['#', '#', '-', '-', '*', '*'], 3, 2).unwrap();
         let result = run_strip(
             Value::StringArray(strings),
             vec![Value::String("both".into()), Value::CharArray(chars)],
@@ -656,26 +665,30 @@ pub(crate) mod tests {
     fn strip_char_array_shrinks_width() {
         let source = "  cat  dog  ";
         let chars: Vec<char> = source.chars().collect();
-        let array = CharArray::new(chars, 1, source.chars().count()).unwrap();
+        let array = CharArray::from_unicode_scalars(chars, 1, source.chars().count()).unwrap();
         let result = run_strip(Value::CharArray(array), Vec::new()).expect("strip");
         match result {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 8);
-                let expected: Vec<char> = "cat  dog".chars().collect();
+                let expected = runmat_value::encode_utf16_code_units("cat  dog");
                 assert_eq!(ca.data(), expected);
             }
             other => panic!("expected char array, got {other:?}"),
         }
 
-        let row = CharArray::new_with_shape("  xy  ".chars().collect(), vec![6]).unwrap();
+        let row = CharArray::from_unicode_scalars_with_shape("  xy  ".chars().collect(), vec![6])
+            .unwrap();
         let Value::CharArray(row) = run_strip(Value::CharArray(row), Vec::new()).unwrap() else {
             panic!("expected character row");
         };
         assert_eq!(row.shape.as_slice(), &[2]);
-        assert_eq!(row.data(), &['x', 'y']);
+        assert_eq!(
+            row.data(),
+            runmat_value::encode_utf16_code_units("xy").as_slice()
+        );
 
-        let pages = CharArray::new_with_shape(
+        let pages = CharArray::from_unicode_scalars_with_shape(
             [" a   ", " b   ", " cc  ", " d   "]
                 .concat()
                 .chars()
@@ -688,7 +701,10 @@ pub(crate) mod tests {
             panic!("expected character pages");
         };
         assert_eq!(pages.shape.as_slice(), &[2, 2, 2]);
-        assert_eq!(pages.data(), &['a', ' ', 'b', ' ', 'c', 'c', 'd', ' ']);
+        assert_eq!(
+            pages.data(),
+            runmat_value::encode_utf16_code_units("a b ccd ").as_slice()
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -705,7 +721,7 @@ pub(crate) mod tests {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 3);
-                let expected: Vec<char> = "gpu".chars().collect();
+                let expected = runmat_value::encode_utf16_code_units("gpu");
                 assert_eq!(ca.data(), expected);
             }
             other => panic!("expected char array, got {other:?}"),

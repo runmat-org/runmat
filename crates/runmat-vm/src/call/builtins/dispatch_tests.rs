@@ -55,7 +55,7 @@ fn binding(
 
 fn fixture_body(name: &'static str, value: f64) -> RuntimeBuiltinFuture {
     BODY_CALLS.with_borrow_mut(|calls| calls.push(name));
-    Box::pin(async move {
+    runmat_runtime::builtin::admitted_builtin_future(None, "fixture", async move {
         let sequence = ValueSequence::single(Value::Num(value))
             .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?;
         runmat_runtime::execution::RootedValueSequence::new(sequence)
@@ -77,7 +77,7 @@ fn other_body(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
 
 fn failing_body(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
     BODY_CALLS.with_borrow_mut(|calls| calls.push(EXPLICIT));
-    Box::pin(async {
+    runmat_runtime::builtin::admitted_builtin_future(None, "fixture", async {
         Err(
             runmat_runtime::build_runtime_error("selected import failed")
                 .with_identifier("RunMat:ImportFixtureFailure")
@@ -88,7 +88,7 @@ fn failing_body(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
 
 fn undefined_body(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
     BODY_CALLS.with_borrow_mut(|calls| calls.push(DIRECT));
-    Box::pin(async {
+    runmat_runtime::builtin::admitted_builtin_future(None, "fixture", async {
         Err(
             runmat_runtime::build_runtime_error("body-defined undefined function")
                 .with_identifier("RunMat:UndefinedFunction")

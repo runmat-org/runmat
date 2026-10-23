@@ -10,9 +10,6 @@ use std::{cell::Cell, rc::Rc};
 
 struct RecordingService(Rc<Cell<usize>>);
 impl RuntimeAccelerationService for RecordingService {
-    fn supports_operation(&self, _: &str) -> bool {
-        true
-    }
     fn prepare_admitted(
         &self,
         _: RuntimeContext,

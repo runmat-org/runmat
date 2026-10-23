@@ -17,9 +17,12 @@ fn scalar_real_value(value: &Value) -> Option<f64> {
         Value::Num(n) => Some(*n),
         Value::Bool(b) => Some(if *b { 1.0 } else { 0.0 }),
         Value::LogicalArray(l) if l.data.len() == 1 => Some(if l.data[0] != 0 { 1.0 } else { 0.0 }),
-        Value::CharArray(ca) if ca.data().len() == 1 => {
-            Some(ca.data().first().map(|&ch| ch as u32 as f64).unwrap_or(0.0))
-        }
+        Value::CharArray(ca) if ca.data().len() == 1 => Some(
+            ca.data()
+                .first()
+                .map(|&ch| f64::from(ch.raw()))
+                .unwrap_or(0.0),
+        ),
         _ => None,
     }
 }
@@ -131,7 +134,7 @@ pub(super) fn char_array_to_tensor(chars: &CharArray) -> BuiltinResult<Tensor> {
     let data: Vec<f64> = chars
         .to_column_major()
         .iter()
-        .map(|&ch| ch as u32 as f64)
+        .map(|&ch| f64::from(ch.raw()))
         .collect();
     Tensor::new(data, chars.shape.clone()).map_err(|e| builtin_error(format!("power: {e}")))
 }

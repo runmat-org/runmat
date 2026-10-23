@@ -32,7 +32,7 @@ pub(super) fn evaluate_characters(chars: CharArray) -> BuiltinResult<Value> {
     let values = chars
         .to_column_major()
         .into_iter()
-        .map(|value| super::complex::zero_f64((value as u32 as f64).sqrt()))
+        .map(|value| super::complex::zero_f64((u32::from(value.raw()) as f64).sqrt()))
         .collect();
     let tensor = Tensor::new(values, chars.shape).map_err(errors::internal)?;
     Ok(tensor::tensor_into_value(tensor))

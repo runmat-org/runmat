@@ -14,12 +14,13 @@ pub(crate) fn build_index(
     let rows = columns
         .first()
         .map(|column| column.rows)
-        .ok_or_else(|| "expected at least one grouping variable".to_string())?;
+        .ok_or_else(|| super::VariableError::from("expected at least one grouping variable"))?;
     if let Some(column) = columns.iter().find(|column| column.rows != rows) {
         return Err(format!(
             "grouping variables must have matching row counts ({rows} and {})",
             column.rows
-        ));
+        )
+        .into());
     }
     let rows = (0..rows)
         .map(|row| {
@@ -33,7 +34,7 @@ pub(crate) fn build_index(
             )
         })
         .collect::<VariableResult<Vec<_>>>()?;
-    GroupIndex::build(rows, order)
+    GroupIndex::build(rows, order).map_err(Into::into)
 }
 
 pub(super) fn validate_and_count(value: &Value) -> VariableResult<usize> {
@@ -59,7 +60,7 @@ pub(super) fn validate_and_count(value: &Value) -> VariableResult<usize> {
         Value::Complex(_, _) | Value::ComplexTensor(_) => {
             return Err("complex grouping variables are not supported".into())
         }
-        other => return Err(format!("unsupported grouping variable {other:?}")),
+        other => return Err(format!("unsupported grouping variable {other:?}").into()),
     }
     row_count(value)
 }
@@ -68,7 +69,7 @@ fn ensure_vector(shape: &[usize], context: &str) -> VariableResult<()> {
     if shape.iter().filter(|dimension| **dimension > 1).count() <= 1 {
         Ok(())
     } else {
-        Err(format!("{context} must be a vector"))
+        Err(format!("{context} must be a vector").into())
     }
 }
 
@@ -76,14 +77,15 @@ fn row_count(value: &Value) -> VariableResult<usize> {
     if matches!(value, Value::Object(object) if object.is_class(runmat_types::standard::CALENDAR_DURATION))
     {
         let (months, days) = crate::builtins::datetime::calendar_duration_tensors_from_value(value)
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| super::VariableError::with_source(error.to_string(), error))?;
         if months.shape() != days.shape() {
             return Err("calendarDuration component shapes do not match".into());
         }
         ensure_vector(months.shape(), "calendarDuration grouping variable")?;
         return Ok(tensor_utils::tensor_element_len(&months));
     }
-    value_row_count(value).map_err(|error| error.to_string())
+    value_row_count(value)
+        .map_err(|error| super::VariableError::with_source(error.to_string(), error))
 }
 
 pub(super) fn atoms(value: &Value, rows: usize) -> VariableResult<Vec<KeyAtom>> {
@@ -136,7 +138,12 @@ fn cellstr_atom(value: &Value) -> VariableResult<KeyAtom> {
     let Value::CharArray(value) = value else {
         return Err("cell grouping variables must contain character vectors".into());
     };
-    let text = value.data().iter().collect::<String>();
+    let text = runmat_value::decode_utf16_code_units(value.data()).map_err(|source| {
+        super::VariableError::with_source(
+            "cell grouping variable contains malformed UTF-16 text",
+            source,
+        )
+    })?;
     Ok(if text.is_empty() {
         KeyAtom::Missing
     } else {

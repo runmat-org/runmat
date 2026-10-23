@@ -83,3 +83,28 @@ pub(crate) fn checked_upload_allocation_bytes(
         | ProviderElementType::ComplexF64 => value.checked_byte_len(),
     }
 }
+
+/// Maximum physical native upload allocation over every admitted count,
+/// including zero. An F32 bound on an F64-preferred owner can require more
+/// storage for its empty realization than for one nonempty F32 element.
+#[cfg(feature = "wgpu")]
+pub(crate) fn checked_upload_bound_allocation_bytes(
+    bound: &runmat_accelerate_api::ProviderTransferOutputBound,
+    precision: runmat_accelerate_api::ProviderPrecision,
+) -> Option<u64> {
+    use runmat_accelerate_api::ProviderStorage;
+    let storage = match bound.element_type {
+        ProviderElementType::F32 | ProviderElementType::F64 => ProviderStorage::DenseReal,
+        ProviderElementType::ComplexF32 | ProviderElementType::ComplexF64 => {
+            ProviderStorage::DenseComplexInterleaved
+        }
+        _ => return None,
+    };
+    if bound.storage != storage {
+        return None;
+    }
+    bound
+        .max_elements
+        .checked_mul(bound.element_type.byte_width())
+        .map(|bytes| bytes.max(ProviderElementType::from(precision).byte_width()))
+}

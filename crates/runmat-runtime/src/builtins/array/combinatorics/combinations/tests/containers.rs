@@ -138,7 +138,8 @@ fn unsupported_sequence_representations_are_retained_as_single_cell_values() {
     };
     assert_eq!(column.data(), vec![complex]);
 
-    let characters = Value::CharArray(CharArray::new(vec!['a', 'b'], 2, 1).unwrap());
+    let characters =
+        Value::CharArray(CharArray::from_unicode_scalars(vec!['a', 'b'], 2, 1).unwrap());
     let output = table(call(characters.clone(), Vec::new()).unwrap());
     assert_eq!(table_height(&output).unwrap(), 1);
     let variables = table_variables(&output).unwrap();

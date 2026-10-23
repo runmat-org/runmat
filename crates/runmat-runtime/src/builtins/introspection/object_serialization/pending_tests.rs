@@ -323,7 +323,7 @@ fn typed_mat_load_keeps_decoded_child_rooted_during_pending_selected_loadobj() {
         let selected = selected_load_product(&runtime);
         runtime.set_current_class_product_resolver(Some(Rc::new(move |runtime, class| {
             let selected = Rc::clone(&selected);
-            Box::pin(async move {
+            crate::context::admit_current_class_product_with(&runtime.clone(), move || async move {
                 if class.display_name() == "PendingMatLoad" {
                     return Ok(crate::context::CurrentClassProductResolution::Selected(
                         selected,
@@ -346,7 +346,7 @@ fn typed_mat_load_keeps_decoded_child_rooted_during_pending_selected_loadobj() {
             let gate = Rc::new(std::cell::RefCell::new(Some(gate)));
             let callback_gate = Rc::clone(&gate);
             let _invoker = crate::user_functions::install_local_bound_function_invoker(Rc::new(
-                move |_, binding, arguments, outputs, _| {
+                move |bound_runtime, binding, arguments, outputs, _| {
                     assert_eq!(binding.function, LOAD_METHOD_ID);
                     assert_eq!(outputs, 1);
                     let Value::Struct(payload) = &arguments.supplied()[0] else {
@@ -358,25 +358,28 @@ fn typed_mat_load_keeps_decoded_child_rooted_during_pending_selected_loadobj() {
                     observed_target.set(Some(handle.target));
                     observed.set(observed.get() + 1);
                     let gate = callback_gate.borrow_mut().take().expect("one callback");
-                    Box::pin(async move {
-                        gate.await.map_err(|_| {
-                            crate::runtime_error::semantic_error(
-                                "PendingLoadAbandoned",
-                                "loadobj gate abandoned",
+                    crate::execution::admit_executable_sequence_with(
+                        &bound_runtime.clone(),
+                        move || async move {
+                            gate.await.map_err(|_| {
+                                crate::runtime_error::semantic_error(
+                                    "PendingLoadAbandoned",
+                                    "loadobj gate abandoned",
+                                )
+                            })?;
+                            let Value::Struct(payload) = arguments.supplied()[0].clone() else {
+                                panic!("selected loadobj payload changed");
+                            };
+                            let mut object =
+                                runmat_value::UnboundedObjectBuilder::new("PendingMatLoad");
+                            for (name, value) in payload.clone().into_fields_unbounded() {
+                                object.insert(name, value);
+                            }
+                            crate::user_functions::test_support::rooted_single_value_sequence(
+                                Value::Object(object.finish()),
                             )
-                        })?;
-                        let Value::Struct(payload) = arguments.supplied()[0].clone() else {
-                            panic!("selected loadobj payload changed");
-                        };
-                        let mut object =
-                            runmat_value::UnboundedObjectBuilder::new("PendingMatLoad");
-                        for (name, value) in payload.clone().into_fields_unbounded() {
-                            object.insert(name, value);
-                        }
-                        crate::user_functions::test_support::rooted_single_value_sequence(
-                            Value::Object(object.finish()),
-                        )
-                    })
+                        },
+                    )
                 },
             ))
             .expect("bound call port");

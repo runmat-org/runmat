@@ -126,7 +126,7 @@ pub const BUSDAYS_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     &contracts::BUSDAYS_DESCRIPTOR,
     documentation::BUSDAYS,
     inference::busdays,
-    false,
+    true,
     &BUSINESS_DAY_EXTENSIONS,
 );
 pub const DAYS252BUS_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
@@ -135,7 +135,7 @@ pub const DAYS252BUS_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     &contracts::DAYS252BUS_DESCRIPTOR,
     documentation::DAYS252BUS,
     inference::days252bus,
-    false,
+    true,
     &BUSINESS_DAY_EXTENSIONS,
 );
 pub const DAYSDIF_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
@@ -144,7 +144,7 @@ pub const DAYSDIF_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     &contracts::DAYSDIF_DESCRIPTOR,
     documentation::DAYSDIF,
     inference::daysdif,
-    false,
+    true,
     &BUSINESS_DAY_EXTENSIONS,
 );
 pub const FBUSDATE_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
@@ -153,7 +153,7 @@ pub const FBUSDATE_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     &contracts::FBUSDATE_DESCRIPTOR,
     documentation::FBUSDATE,
     inference::fbusdate,
-    false,
+    true,
     &BUSINESS_DAY_EXTENSIONS,
 );
 pub const HOLIDAYS_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
@@ -171,7 +171,7 @@ pub const ISBUSDAY_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     &contracts::ISBUSDAY_DESCRIPTOR,
     documentation::ISBUSDAY,
     inference::isbusday,
-    false,
+    true,
     &BUSINESS_DAY_EXTENSIONS,
 );
 pub const LBUSDATE_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
@@ -180,6 +180,6 @@ pub const LBUSDATE_CATALOG_ENTRY: BuiltinCatalogEntry = entry(
     &contracts::LBUSDATE_DESCRIPTOR,
     documentation::LBUSDATE,
     inference::lbusdate,
-    false,
+    true,
     &BUSINESS_DAY_EXTENSIONS,
 );

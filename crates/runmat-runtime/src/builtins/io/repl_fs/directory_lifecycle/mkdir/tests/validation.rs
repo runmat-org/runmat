@@ -46,7 +46,9 @@ fn preserves_a_file_at_the_target_and_returns_failure() {
 
 #[test]
 fn rejects_character_pages_and_resident_paths_without_gathering() {
-    let pages = runmat_value::CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap();
+    let pages =
+        runmat_value::CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 1, 2])
+            .unwrap();
     assert_eq!(
         evaluate(vec![Value::CharArray(pages)])
             .unwrap_err()

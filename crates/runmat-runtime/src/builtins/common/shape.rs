@@ -30,17 +30,6 @@ pub fn normalize_scalar_shape(shape: &[usize]) -> Vec<usize> {
     }
 }
 
-/// Normalize a raw shape vector into MATLAB-compatible dimension metadata.
-fn normalize_shape(shape: &[usize]) -> Vec<usize> {
-    if shape.len() == 1 && shape[0] != 1 {
-        return vec![1, shape[0]];
-    }
-    if is_scalar_shape(shape) {
-        return canonical_scalar_shape();
-    }
-    shape.to_vec()
-}
-
 /// Return MATLAB's effective rank after ignoring trailing singleton dimensions.
 /// MATLAB arrays retain a minimum visible rank of two.
 pub fn effective_rank(shape: &[usize]) -> usize {
@@ -62,34 +51,91 @@ pub fn array_shapes_equal(left: &[usize], right: &[usize]) -> bool {
     left_rank == right_rank && left[..left_rank] == right[..right_rank]
 }
 
-/// Return the MATLAB-visible dimension vector for a runtime value.
-#[async_recursion::async_recursion(?Send)]
-pub async fn value_dimensions(value: &Value) -> Result<Vec<usize>, RuntimeError> {
-    let dims = match value {
-        Value::Tensor(t) => normalize_shape(t.shape()),
-        Value::SparseTensor(t) => normalize_shape(&[t.rows, t.cols]),
-        Value::ComplexTensor(t) => normalize_shape(t.shape()),
-        Value::LogicalArray(la) => normalize_shape(&la.shape),
-        Value::StringArray(sa) => normalize_shape(&sa.shape),
-        Value::SymbolicArray(sa) => normalize_shape(&sa.shape),
-        Value::CharArray(ca) => ca.shape().to_vec(),
-        Value::Cell(ca) => normalize_shape(&ca.shape),
-        Value::StructArray(array) => normalize_shape(array.shape()),
-        Value::ObjectArray(array) => normalize_shape(array.shape()),
-        Value::GpuTensor(handle) => normalize_shape(handle.shape()),
+/// Borrowed geometry or the existing two-axis scalar/sparse representation.
+/// No payload, rank vector or recursive future allocation is required.
+#[derive(Clone, Copy, Debug)]
+pub enum ValueDimensions<'a> {
+    Stored(&'a [usize]),
+    Inline([usize; 2]),
+}
+impl ValueDimensions<'_> {
+    pub fn as_slice(&self) -> &[usize] {
+        match self {
+            Self::Stored(shape) => shape,
+            Self::Inline(shape) => shape,
+        }
+    }
+    fn normalized(self) -> Self {
+        let shape = self.as_slice();
+        if shape.len() == 1 && shape[0] != 1 {
+            return Self::Inline([1, shape[0]]);
+        }
+        if is_scalar_shape(shape) {
+            return Self::Inline([1, 1]);
+        }
+        self
+    }
+}
+impl std::ops::Deref for ValueDimensions<'_> {
+    type Target = [usize];
+    fn deref(&self) -> &[usize] {
+        self.as_slice()
+    }
+}
+impl AsRef<[usize]> for ValueDimensions<'_> {
+    fn as_ref(&self) -> &[usize] {
+        self.as_slice()
+    }
+}
+impl PartialEq for ValueDimensions<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_slice() == other.as_slice()
+    }
+}
+impl Eq for ValueDimensions<'_> {}
+
+/// Exact stored geometry used by ordinary indexed receivers. This preserves
+/// rank-zero/rank-one storage policy; visible dimensions normalize separately.
+pub fn stored_dimensions_borrowed(value: &Value) -> ValueDimensions<'_> {
+    match value {
+        Value::Tensor(t) => ValueDimensions::Stored(t.shape()),
+        Value::SparseTensor(t) => ValueDimensions::Inline([t.rows, t.cols]),
+        Value::ComplexTensor(t) => ValueDimensions::Stored(t.shape()),
+        Value::LogicalArray(t) => ValueDimensions::Stored(&t.shape),
+        Value::StringArray(t) => ValueDimensions::Stored(&t.shape),
+        Value::SymbolicArray(t) => ValueDimensions::Stored(&t.shape),
+        Value::CharArray(t) => ValueDimensions::Stored(t.shape()),
+        Value::Cell(t) => ValueDimensions::Stored(&t.shape),
+        Value::StructArray(t) => ValueDimensions::Stored(t.shape()),
+        Value::ObjectArray(t) => ValueDimensions::Stored(t.shape()),
+        Value::GpuTensor(t) => ValueDimensions::Stored(t.shape()),
+        _ => ValueDimensions::Inline([1, 1]),
+    }
+}
+
+/// Canonical MATLAB-visible geometry. Declared object payloads are validated
+/// numeric/logical storage, never recursive Object values.
+pub fn value_dimensions_borrowed(value: &Value) -> Result<ValueDimensions<'_>, RuntimeError> {
+    match value {
         Value::Object(object) => {
             match runmat_builtins::standard_class_array_shape(object.class_name()) {
-                Some(declaration) => object::dimensions(object, declaration).await?,
-                None => canonical_scalar_shape(),
+                Some(declaration) => object::dimensions(object, declaration),
+                None => Ok(ValueDimensions::Inline([1, 1])),
             }
         }
-        _ => vec![1, 1],
-    };
-    Ok(dims)
+        // Character geometry was historically reported exactly as stored.
+        Value::CharArray(_) => Ok(stored_dimensions_borrowed(value)),
+        _ => Ok(stored_dimensions_borrowed(value).normalized()),
+    }
+}
+
+/// Ordinary owned-vector compatibility adapter. Managed consumers retain the
+/// borrowed view directly in their existing admitted owner instead.
+pub async fn value_dimensions(value: &Value) -> Result<Vec<usize>, RuntimeError> {
+    Ok(value_dimensions_borrowed(value)?.as_slice().to_vec())
 }
 
 /// Compute the total number of elements contained in a runtime value.
-#[async_recursion::async_recursion(?Send)]
 pub async fn value_numel(value: &Value) -> Result<usize, RuntimeError> {
     let numel = match value {
         Value::Tensor(t) => tensor_utils::tensor_element_len(t),
@@ -107,9 +153,9 @@ pub async fn value_numel(value: &Value) -> Result<usize, RuntimeError> {
             .iter()
             .copied()
             .fold(1usize, |acc, dim| acc.saturating_mul(dim)),
-        Value::Object(_) => value_dimensions(value)
-            .await?
-            .into_iter()
+        Value::Object(_) => value_dimensions_borrowed(value)?
+            .iter()
+            .copied()
             .try_fold(1usize, |count, dimension| count.checked_mul(dimension))
             .ok_or_else(|| {
                 crate::build_runtime_error("array element count exceeds the structural range")
@@ -122,7 +168,7 @@ pub async fn value_numel(value: &Value) -> Result<usize, RuntimeError> {
 
 /// Compute the dimensionality (NDIMS) of a runtime value, with MATLAB semantics.
 pub async fn value_ndims(value: &Value) -> Result<usize, RuntimeError> {
-    let dims = value_dimensions(value).await?;
+    let dims = value_dimensions_borrowed(value)?;
     Ok(effective_rank(&dims))
 }
 
@@ -146,6 +192,28 @@ pub(crate) mod tests {
         assert_eq!(
             block_on(value_dimensions(&Value::Num(5.0))).unwrap(),
             vec![1, 1]
+        );
+    }
+
+    #[test]
+    fn borrowed_dimensions_preserve_storage_and_visible_rank_policies() {
+        let value = Value::Tensor(Tensor::new(vec![0.0; 6], vec![2, 3]).unwrap());
+        let Value::Tensor(tensor) = &value else {
+            unreachable!()
+        };
+        let stored = stored_dimensions_borrowed(&value);
+        let visible = value_dimensions_borrowed(&value).unwrap();
+        assert_eq!(stored.as_slice().as_ptr(), tensor.shape().as_ptr());
+        assert_eq!(visible.as_slice().as_ptr(), tensor.shape().as_ptr());
+        let value = Value::Tensor(Tensor::new(vec![0.0; 3], vec![3]).unwrap());
+        assert_eq!(stored_dimensions_borrowed(&value).as_slice(), &[3]);
+        assert_eq!(
+            value_dimensions_borrowed(&value).unwrap().as_slice(),
+            &[1, 3]
+        );
+        assert_eq!(
+            ValueDimensions::Stored(&[2, 3]),
+            ValueDimensions::Inline([2, 3])
         );
     }
 

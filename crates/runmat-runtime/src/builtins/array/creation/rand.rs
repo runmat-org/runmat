@@ -10,8 +10,6 @@ use runmat_value::{ComplexTensor, IntValue, NumericDType, Tensor, Value};
 mod host_output;
 
 use crate::build_runtime_error;
-#[cfg(test)]
-use crate::builtins::array::type_resolvers::tensor_type_from_rank;
 use crate::builtins::common::random_args::{
     complex_tensor_into_value, extract_constructor_dimensions, keyword_of,
     normalize_constructor_shape,
@@ -21,10 +19,6 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, random, tensor};
-#[cfg(test)]
-use runmat_builtins::ResolveContext;
-#[cfg(test)]
-use runmat_builtins::Type;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::rand")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -44,17 +38,6 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 
 fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin("rand").build()
-}
-
-#[cfg(test)]
-fn rand_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    if args.is_empty() {
-        return Type::Num;
-    }
-    if args.iter().any(|arg| matches!(arg, Type::String)) {
-        return Type::Unknown;
-    }
-    tensor_type_from_rank(args, ctx)
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::rand")]
@@ -93,7 +76,7 @@ impl LegacyRandCommand {
         let Some(first) = args.first() else {
             return Ok(None);
         };
-        if keyword_of(first).as_deref() != Some("seed") {
+        if keyword_of(first)?.as_deref() != Some("seed") {
             return Ok(None);
         }
         match args.len() {
@@ -201,7 +184,7 @@ impl ParsedRand {
         while idx < args.len() {
             let arg = args[idx].clone();
 
-            if let Some(keyword) = keyword_of(&arg) {
+            if let Some(keyword) = keyword_of(&arg)? {
                 if matches!(template.as_ref(), Some(RandTemplate::GpuArray(_))) {
                     return Err(builtin_error("rand: invalid gpuArray class specification"));
                 }
@@ -584,21 +567,6 @@ pub(crate) mod tests {
             }
             other => panic!("expected scalar double, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn rand_type_defaults_to_num() {
-        assert_eq!(rand_type(&[], &ResolveContext::new(Vec::new())), Type::Num);
-    }
-
-    #[test]
-    fn rand_type_infers_rank_from_scalar_dim() {
-        assert_eq!(
-            rand_type(&[Type::Num], &ResolveContext::new(Vec::new())),
-            Type::Tensor {
-                shape: Some(vec![None, None])
-            }
-        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

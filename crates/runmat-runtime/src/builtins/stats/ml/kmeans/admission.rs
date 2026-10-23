@@ -2,7 +2,7 @@ use super::{
     invalid, Distance, EmptyAction, KmeansDisplay, KmeansOption, KmeansStart, KmeansStatsetField,
     KmeansToggle, StartSpec, MAX_WORK_CELLS,
 };
-use crate::builtins::common::{random_args::keyword_of, tensor};
+use crate::builtins::common::{arg_tokens::scalar_keyword_of, tensor};
 use crate::BuiltinResult;
 use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
 use runmat_value::Value;
@@ -47,6 +47,14 @@ pub(super) enum StatsetInput {
     TolFun(Value),
 }
 
+fn keyword(value: &Value) -> BuiltinResult<Option<String>> {
+    scalar_keyword_of(value, "kmeans").map_err(|source| {
+        let mut error = invalid("kmeans: text control is not valid UTF-16");
+        error.source = Some(Box::new(source));
+        error
+    })
+}
+
 pub(super) fn parse_option_headers(
     args: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Vec<OptionHeader>> {
@@ -57,7 +65,7 @@ pub(super) fn parse_option_headers(
     let mut headers = Vec::new();
     while let Some(name_value) = values.next() {
         let name =
-            keyword_of(&name_value).ok_or_else(|| invalid("kmeans: option name must be text"))?;
+            keyword(&name_value)?.ok_or_else(|| invalid("kmeans: option name must be text"))?;
         let kind = KmeansOption::from_keyword(&name)
             .ok_or_else(|| invalid(format!("kmeans: unsupported option '{name}'")))?;
         let value = values
@@ -129,7 +137,7 @@ pub(super) async fn admit_option_values_cooperative(
                 OptionInput::Replicates(value)
             }
             KmeansOption::Start => {
-                if let Some(text) = keyword_of(&value) {
+                if let Some(text) = keyword(&value)? {
                     OptionInput::Start(StartInput::Named(
                         KmeansStart::from_keyword(&text).ok_or_else(|| {
                             invalid(format!("kmeans: unsupported Start '{text}'"))
@@ -201,7 +209,7 @@ fn validate_host_tolerance(value: &Value, label: &str) -> BuiltinResult<()> {
 }
 
 fn required_text(value: &Value, role: &str) -> BuiltinResult<String> {
-    keyword_of(value).ok_or_else(|| invalid(format!("kmeans: {role} must be text")))
+    keyword(value)?.ok_or_else(|| invalid(format!("kmeans: {role} must be text")))
 }
 
 fn parse_statset(value: Vec<StatsetHeader>) -> BuiltinResult<Vec<StatsetInput>> {

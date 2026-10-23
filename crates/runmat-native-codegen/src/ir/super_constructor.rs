@@ -68,7 +68,15 @@ impl super::NativeFunction {
 
 fn visit_statement(statement: &MirStmtKind, calls: &mut Vec<(ClassIdentity, ClassIdentity)>) {
     match statement {
-        MirStmtKind::Assign { value, .. }
+        MirStmtKind::PrepareFixedAssignment(preparation) => {
+            for step in preparation.steps() {
+                if let MirExpressionStep::Let { value, .. } = step {
+                    visit_rvalue(value, calls);
+                }
+            }
+        }
+        MirStmtKind::PreparedAssign { value, .. }
+        | MirStmtKind::Assign { value, .. }
         | MirStmtKind::MultiAssign { value, .. }
         | MirStmtKind::SequenceAssign { value, .. }
         | MirStmtKind::Expr(value) => visit_rvalue(value, calls),

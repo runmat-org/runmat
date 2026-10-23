@@ -27,7 +27,7 @@ pub(in crate::builtins::math::elementwise::binary_arithmetic) fn host_real_scala
             value
                 .data()
                 .first()
-                .map(|&character| character as u32 as f64)
+                .map(|&character| f64::from(character.raw()))
                 .unwrap_or(0.0),
         ),
         _ => None,

@@ -47,6 +47,19 @@ struct BoundInvocationState {
     dynamic_admission: Option<runmat_vm::DynamicEvalAdmissionPort>,
 }
 
+fn admit_bound_invocation<F>(
+    state: BoundInvocationState,
+    make_future: impl FnOnce(BoundInvocationState) -> F,
+) -> Result<runmat_runtime::user_functions::BoundFunctionFuture, RuntimeError>
+where
+    F: std::future::Future<
+            Output = Result<runmat_runtime::execution::RootedValueSequence, RuntimeError>,
+        > + 'static,
+{
+    let runtime = state.runtime.clone();
+    runmat_runtime::execution::admit_executable_sequence_with(&runtime, move || make_future(state))
+}
+
 pub(super) struct SessionCallableArtifactService {
     evaluator: Weak<SessionSourceEvaluator>,
 }
@@ -457,12 +470,12 @@ pub(in crate::session) fn install_bound_invoker(
             // The caller already requires one boxed UserFunctionFuture. Select
             // its branch before boxing, so an ordinary callback's poll frame
             // does not reserve the constructor branch's future state too.
-            let invocation: runmat_runtime::user_functions::UserFunctionFuture = match prepared {
-                Err(error) => Box::pin(async move { Err(error) }),
+            let invocation = match prepared {
+                Err(error) => Err(error),
                 Ok(PreparedBoundInvocation {
                     kind: BoundInvocationKind::SuperBody,
                     state,
-                }) => Box::pin(async move {
+                }) => admit_bound_invocation(state, move |state| async move {
                     let BoundInvocationState {
                         _generation,
                         selected,
@@ -489,7 +502,7 @@ pub(in crate::session) fn install_bound_invoker(
                     kind: BoundInvocationKind::Constructor(owner),
                     state,
                 }) => {
-                    Box::pin(async move {
+                    admit_bound_invocation(state, move |state| async move {
                         let BoundInvocationState {
                             _generation,
                             selected,
@@ -512,9 +525,9 @@ pub(in crate::session) fn install_bound_invoker(
                         let invocation_owner = owner.clone();
                         let admitted_binding = binding.clone();
                         let constructor_dynamic_admission = dynamic_admission.clone();
-                        let invoke: runmat_runtime::dispatcher::PreparedConstructorInvoke =
-                            Box::new(move |selected_runtime| {
-                                Box::pin(async move {
+                        let invoke = runmat_runtime::dispatcher::PreparedConstructorInvoke::new(
+                            &runtime,
+                            move |selected_runtime: RuntimeContext| async move {
                                     let selected_runtime = selected_runtime
                                         .with_constructor_receiver_for_method(Some(&invocation_owner))?;
                                     runmat_vm::invoke_semantic_function_with_rooted_arguments_and_dynamic_admission_in_context(
@@ -527,8 +540,8 @@ pub(in crate::session) fn install_bound_invoker(
                                         constructor_dynamic_admission,
                                     )
                                     .await
-                                })
-                            });
+                            },
+                        )?;
                         runmat_runtime::dispatcher::call_prepared_constructor_sequence_with_argument_count_in_context(
                             &runtime,
                             owner,
@@ -543,7 +556,7 @@ pub(in crate::session) fn install_bound_invoker(
                 Ok(PreparedBoundInvocation {
                     kind: BoundInvocationKind::Ordinary,
                     state,
-                }) => Box::pin(async move {
+                }) => admit_bound_invocation(state, move |state| async move {
                     let BoundInvocationState {
                         _generation,
                         selected,

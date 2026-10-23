@@ -80,7 +80,7 @@ fn project_chars(kind: ProjectionKind, chars: CharArray) -> BuiltinResult<Value>
         ProjectionKind::Real => chars
             .to_column_major()
             .iter()
-            .map(|&character| character as u32 as f64)
+            .map(|&character| f64::from(character.raw()))
             .collect(),
         ProjectionKind::Imaginary => vec![0.0; chars.data().len()],
     };

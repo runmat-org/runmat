@@ -4,6 +4,31 @@ use runmat_value::{IntValue, Value};
 
 use crate::builtins::common::tensor;
 
+/// Runtime-only scalar keyword admission for array creators. Static literal
+/// inference below remains speculative and cannot issue a runtime failure.
+pub(crate) fn scalar_keyword_of(
+    value: &Value,
+    builtin: &'static str,
+) -> crate::BuiltinResult<Option<String>> {
+    match value {
+        Value::String(text) => Ok(Some(text.to_ascii_lowercase())),
+        Value::StringArray(array) if array.data().len() == 1 => {
+            Ok(Some(array.data()[0].to_ascii_lowercase()))
+        }
+        Value::CharArray(array) if array.rows == 1 => array
+            .try_row_string()
+            .map(|text| text.map(|text| text.to_ascii_lowercase()))
+            .map_err(|source| {
+                crate::runtime_error::semantic_error_with_source(
+                    "InvalidArgument",
+                    format!("{builtin} keyword contains malformed UTF-16"),
+                    source,
+                )
+            }),
+        _ => Ok(None),
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum ArgToken {
     Number(f64),
@@ -74,10 +99,12 @@ fn token_from_value(value: &Value) -> ArgToken {
         Value::StringArray(arr) if arr.data().len() == 1 => {
             ArgToken::String(arr.data()[0].to_ascii_lowercase())
         }
-        Value::CharArray(arr) if arr.rows == 1 => {
-            let text: String = arr.data().iter().collect();
-            ArgToken::String(text.to_ascii_lowercase())
-        }
+        Value::CharArray(arr) if arr.rows == 1 => arr
+            .try_row_string()
+            .ok()
+            .flatten()
+            .map(|text| ArgToken::String(text.to_ascii_lowercase()))
+            .unwrap_or(ArgToken::Unknown),
         Value::Tensor(tensor) => {
             if let Some(storage) = tensor.integer_storage() {
                 return token_from_integer_storage(storage, tensor.shape());

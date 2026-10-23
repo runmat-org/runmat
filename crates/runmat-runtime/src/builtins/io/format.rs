@@ -299,16 +299,20 @@ mod tests {
 
     #[test]
     fn paged_character_mode_rejected_but_trailing_singleton_admitted() {
-        let paged =
-            runmat_value::CharArray::new_with_shape("long".chars().collect(), vec![1, 2, 2])
-                .expect("paged char");
+        let paged = runmat_value::CharArray::from_unicode_scalars_with_shape(
+            "long".chars().collect(),
+            vec![1, 2, 2],
+        )
+        .expect("paged char");
         assert!(block_on(format_builtin(
             crate::builtins::common::test_support::builtin_arguments(vec![Value::CharArray(paged)])
         ))
         .is_err());
-        let trailing =
-            runmat_value::CharArray::new_with_shape("long".chars().collect(), vec![1, 4, 1])
-                .expect("trailing singleton");
+        let trailing = runmat_value::CharArray::from_unicode_scalars_with_shape(
+            "long".chars().collect(),
+            vec![1, 4, 1],
+        )
+        .expect("trailing singleton");
         block_on(format_builtin(
             crate::builtins::common::test_support::builtin_arguments(vec![Value::CharArray(
                 trailing,

@@ -18,12 +18,14 @@ fn double_skip_checked_against_platform_width_before_conversion() {
 #[test]
 fn precision_text_accepts_trailing_singletons_but_not_character_pages() {
     let row = Value::CharArray(
-        CharArray::new_with_shape("uint8".chars().collect(), vec![1, 5, 1, 1]).unwrap(),
+        CharArray::from_unicode_scalars_with_shape("uint8".chars().collect(), vec![1, 5, 1, 1])
+            .unwrap(),
     );
     assert!(is_string_like(&row));
     assert!(parse_precision(Some(&row)).is_ok());
     let pages = Value::CharArray(
-        CharArray::new_with_shape("uint8".chars().collect(), vec![1, 1, 5]).unwrap(),
+        CharArray::from_unicode_scalars_with_shape("uint8".chars().collect(), vec![1, 1, 5])
+            .unwrap(),
     );
     assert!(!is_string_like(&pages));
     assert!(parse_precision(Some(&pages)).is_err());

@@ -21,6 +21,6 @@ pub use objects::{
 };
 pub(crate) use services::run_test_suite_in_context;
 pub use services::{
-    discover_tests, install_test_services, run_tests, RunSuiteFuture, RuntimeTestServices,
-    TestServicesGuard,
+    discover_tests, discover_tests_in_context, install_test_services, run_tests,
+    run_tests_in_context, RunSuiteFuture, RuntimeTestServices, TestServicesGuard,
 };

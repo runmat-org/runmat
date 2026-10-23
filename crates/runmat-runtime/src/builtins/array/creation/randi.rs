@@ -14,8 +14,6 @@ mod gpu_integer_batch_tests;
 
 use crate::build_runtime_error;
 #[cfg(test)]
-use crate::builtins::array::type_resolvers::tensor_type_from_rank;
-#[cfg(test)]
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::integer_conversion::{IntegerClass, IntegerClassExt};
 use crate::builtins::common::spec::{
@@ -23,8 +21,6 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{random, tensor};
-#[cfg(test)]
-use runmat_builtins::{ResolveContext, Type};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::randi")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -44,22 +40,6 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 
 fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin("randi").build()
-}
-
-#[cfg(test)]
-fn randi_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    if args.is_empty() {
-        return Type::Unknown;
-    }
-    if args.len() == 1 {
-        return Type::Num;
-    }
-    let rest = &args[1..];
-    if rest.iter().any(|arg| matches!(arg, Type::String)) {
-        return Type::Unknown;
-    }
-    let rest_ctx = ResolveContext::new(ctx.literal_args.get(1..).unwrap_or(&[]).to_vec());
-    tensor_type_from_rank(rest, &rest_ctx)
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::randi")]
@@ -189,7 +169,9 @@ impl ParsedRandi {
         let mut idx = 0;
         while idx < rest.len() {
             let arg = rest[idx].clone();
-            if let Some(keyword) = keyword_of(&arg) {
+            if let Some(keyword) =
+                crate::builtins::common::arg_tokens::scalar_keyword_of(&arg, "randi")?
+            {
                 if matches!(
                     keyword.as_str(),
                     "double"
@@ -812,18 +794,6 @@ fn is_vector_like(tensor: &Tensor) -> bool {
     tensor.rows() == 1 || tensor.cols() == 1 || tensor.shape().len() == 1
 }
 
-fn keyword_of(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => Some(s.to_ascii_lowercase()),
-        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].to_ascii_lowercase()),
-        Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data().iter().collect();
-            Some(text.to_ascii_lowercase())
-        }
-        _ => None,
-    }
-}
-
 async fn extract_dims(value: &Value) -> crate::BuiltinResult<Option<Vec<usize>>> {
     if matches!(value, Value::LogicalArray(_)) {
         return Ok(None);
@@ -922,25 +892,6 @@ pub(crate) mod tests {
             }
             other => panic!("expected scalar double, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn randi_type_single_bound_is_num() {
-        assert_eq!(
-            randi_type(&[Type::Num], &ResolveContext::new(Vec::new())),
-            Type::Num
-        );
-    }
-
-    #[test]
-    fn randi_type_infers_rank_from_dims() {
-        let ctx = ResolveContext::new(Vec::new());
-        assert_eq!(
-            randi_type(&[Type::Num, Type::Num, Type::Num], &ctx),
-            Type::Tensor {
-                shape: Some(vec![None, None])
-            }
-        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

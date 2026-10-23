@@ -285,7 +285,7 @@ fn active_constructor_receiver_for(class_name: &runmat_types::ClassIdentity) -> 
 }
 
 fn undefined_callable_error(identity: &runmat_types::CallableIdentity) -> RuntimeError {
-    let detail = format!("Undefined function for callable identity {identity:?}");
+    let detail = crate::call::identity::undefined_callable_message(identity);
     build_runtime_error(detail)
         .with_identifier(IDENT_UNDEFINED_FUNCTION)
         .build()
@@ -680,6 +680,37 @@ pub fn call_feval_sequence_async_with_outputs_in_context<'a>(
     )
 }
 
+/// Invoke a callback without replacing the caller's admitted argument storage.
+/// The target registration is retained when this future is constructed.
+pub fn call_feval_retained_sequence_async_with_outputs_in_context<'a>(
+    runtime: &'a crate::context::RuntimeContext,
+    func_value: Value,
+    args: crate::call::BuiltinArguments,
+    requested_outputs: usize,
+) -> impl std::future::Future<Output = Result<crate::execution::RootedValueSequence, RuntimeError>> + 'a
+{
+    let invocation = runmat_value::validate_output_count(requested_outputs)
+        .map_err(crate::sequence::sequence_error_to_runtime)
+        .map(|()| {
+            crate::call::feval::invoke_retained(
+                Some(runtime),
+                func_value,
+                args,
+                requested_outputs,
+                None,
+            )
+        });
+    async move {
+        let invocation = invocation?;
+        runtime
+            .scope(async {
+                let _guard = crate::output_count::push_output_count(Some(requested_outputs))?;
+                invocation.await
+            })
+            .await
+    }
+}
+
 pub fn call_feval_sequence_async_with_outputs_and_callsite_in_context<'a>(
     runtime: &'a crate::context::RuntimeContext,
     func_value: Value,
@@ -855,13 +886,20 @@ pub(crate) fn canonicalize_callback_handle_for_semantic_resolution(
             })
         }
         Value::CharArray(chars) if chars.rows == 1 => {
-            let text: String = chars.data().iter().collect();
-            resolve_text_handle(&text).unwrap_or_else(|| {
-                crate::builtins::introspection::function_handle_text::dispatch_str2func(
-                    Value::CharArray(chars.clone()),
+            let text = chars.try_row_string().map_err(|source| {
+                crate::runtime_error::semantic_error_with_source(
+                    "InvalidCallback",
+                    "callback name contains malformed UTF-16",
+                    source,
                 )
-                .unwrap_or(Value::CharArray(chars))
-            })
+            })?;
+            text.and_then(|text| resolve_text_handle(&text))
+                .unwrap_or_else(|| {
+                    crate::builtins::introspection::function_handle_text::dispatch_str2func(
+                        Value::CharArray(chars.clone()),
+                    )
+                    .unwrap_or(Value::CharArray(chars))
+                })
         }
         Value::FunctionHandle(name) => {
             if let Some(function) = crate::user_functions::resolve_semantic_function_by_name(&name)
@@ -1963,10 +2001,10 @@ mod tests {
         let err = block_on(feval_builtin(handle, vec![Value::Num(3.0)])).expect_err(
             "semantic function handle should not fall back to name-based dispatch when unavailable",
         );
-        assert_eq!(err.identifier(), Some("RunMat:SemanticFunctionUnavailable"));
+        assert_eq!(err.identifier(), Some("RunMat:UndefinedSemanticFunction"));
         assert!(
             err.message()
-                .contains("semantic function handle 'function_target' (9043) is unavailable"),
+                .contains("'function_target' could not invoke semantic function 9043"),
             "unexpected error: {err:?}"
         );
     }
@@ -2215,7 +2253,7 @@ mod tests {
 
     #[test]
     fn feval_rejects_non_row_char_handle_with_identifier() {
-        let chars = runmat_value::CharArray::new(vec!['@', 's'], 2, 1)
+        let chars = runmat_value::CharArray::from_unicode_scalars(vec!['@', 's'], 2, 1)
             .expect("char array construction should succeed");
         let err = block_on(feval_builtin(
             Value::CharArray(chars),
@@ -2368,7 +2406,7 @@ mod tests {
 
     #[test]
     fn str2func_rejects_non_row_char_name_with_identifier() {
-        let chars = runmat_value::CharArray::new(vec!['a', 'b'], 2, 1)
+        let chars = runmat_value::CharArray::from_unicode_scalars(vec!['a', 'b'], 2, 1)
             .expect("char array construction should succeed");
         let err = crate::builtins::introspection::function_handle_text::dispatch_str2func(
             Value::CharArray(chars),
@@ -2699,9 +2737,9 @@ mod tests {
             "unexpected error: {err:?}"
         );
         assert!(
-            !err.message()
+            err.message()
                 .contains("Undefined function 'missing_method'"),
-            "method identity should not use fallback display-name text: {err:?}"
+            "method diagnostic should retain its readable name alongside its typed identity: {err:?}"
         );
     }
 
@@ -3256,57 +3294,80 @@ mod tests {
         let base = Value::Object(runmat_value::ObjectInstance::new(
             "NoSuchMethodClass".to_string(),
         ));
-        let closure = Value::Closure(runmat_value::Closure::from_data(
-            runmat_value::ClosureData {
-                lexical_environment: None,
-                function_name: CALL_METHOD_BUILTIN_NAME.into(),
-                binding: None,
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-                captures: vec![
-                    base.clone(),
-                    Value::String("  deal  ".to_string().into()),
-                    Value::Num(9.0),
-                ]
-                .into(),
-            },
-        ));
-        let result = block_on(feval_builtin(closure, vec![Value::Num(10.0)]))
-            .expect("feval call_method closure should succeed after method-name trimming");
-        match result.value() {
-            Value::OutputList(values) => {
-                assert_eq!(values.len(), 3);
-                assert_eq!(values[0], base);
-                assert_eq!(values[1], Value::Num(9.0));
-                assert_eq!(values[2], Value::Num(10.0));
-            }
-            other => {
-                panic!(
+        for method in [
+            Value::String("  deal  ".into()),
+            Value::StringArray(
+                runmat_value::StringArray::new(vec!["  deal  ".into()], vec![1, 1]).unwrap(),
+            ),
+            Value::CharArray(runmat_value::CharArray::new_row("  deal  ")),
+            Value::CharArray(
+                runmat_value::CharArray::from_unicode_scalars_with_shape(
+                    "  deal  ".chars().collect(),
+                    vec![1, 8, 1],
+                )
+                .unwrap(),
+            ),
+        ] {
+            let closure = Value::Closure(runmat_value::Closure::from_data(
+                runmat_value::ClosureData {
+                    lexical_environment: None,
+                    function_name: CALL_METHOD_BUILTIN_NAME.into(),
+                    binding: None,
+                    source_role: runmat_types::FunctionSourceRole::Unknown,
+                    source_file: None,
+                    captures: vec![base.clone(), method, Value::Num(9.0)].into(),
+                },
+            ));
+            let result = block_on(feval_builtin(closure, vec![Value::Num(10.0)]))
+                .expect("feval call_method closure should succeed after method-name trimming");
+            match result.value() {
+                Value::OutputList(values) => {
+                    assert_eq!(values.len(), 3);
+                    assert_eq!(values[0], base);
+                    assert_eq!(values[1], Value::Num(9.0));
+                    assert_eq!(values[2], Value::Num(10.0));
+                }
+                other => {
+                    panic!(
                     "expected output list from trimmed call_method closure fast path, got {other:?}"
                 )
+                }
             }
         }
     }
 
     #[test]
     fn feval_call_method_closure_rejects_nontext_method_capture_with_identifier() {
-        let closure = Value::Closure(runmat_value::Closure::from_data(
-            runmat_value::ClosureData {
-                lexical_environment: None,
-                function_name: CALL_METHOD_BUILTIN_NAME.into(),
-                binding: None,
-                source_role: runmat_types::FunctionSourceRole::Unknown,
-                source_file: None,
-                captures: vec![
-                    Value::Object(runmat_value::ObjectInstance::new("Point".to_string())),
-                    Value::Num(1.0),
-                ]
-                .into(),
-            },
-        ));
-        let err = block_on(feval_builtin(closure, Vec::new()))
-            .expect_err("feval call_method closure should reject nontext method capture");
-        assert_eq!(err.identifier(), Some("RunMat:CallMethodNameInvalid"));
+        for method in [
+            Value::Num(1.0),
+            Value::Int(runmat_value::IntValue::U8(1)),
+            Value::Bool(true),
+            Value::StringArray(
+                runmat_value::StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap(),
+            ),
+            Value::CharArray(
+                runmat_value::CharArray::from_unicode_scalars("ab".chars().collect(), 2, 1)
+                    .unwrap(),
+            ),
+        ] {
+            let closure = Value::Closure(runmat_value::Closure::from_data(
+                runmat_value::ClosureData {
+                    lexical_environment: None,
+                    function_name: CALL_METHOD_BUILTIN_NAME.into(),
+                    binding: None,
+                    source_role: runmat_types::FunctionSourceRole::Unknown,
+                    source_file: None,
+                    captures: vec![
+                        Value::Object(runmat_value::ObjectInstance::new("Point".to_string())),
+                        method,
+                    ]
+                    .into(),
+                },
+            ));
+            let err = block_on(feval_builtin(closure, Vec::new()))
+                .expect_err("feval call_method closure should reject nontext method capture");
+            assert_eq!(err.identifier(), Some("RunMat:CallMethodNameInvalid"));
+        }
     }
 
     #[test]
@@ -4234,10 +4295,10 @@ mod tests {
 
         let err = block_on(feval_builtin(closure, vec![Value::Num(2.0)]))
             .expect_err("semantic closure should not fall back to name-based dispatch");
-        assert_eq!(err.identifier(), Some("RunMat:SemanticFunctionUnavailable"));
+        assert_eq!(err.identifier(), Some("RunMat:UndefinedSemanticFunction"));
         assert!(
             err.message()
-                .contains("semantic closure 'function_target' (9044) is unavailable"),
+                .contains("'function_target' could not invoke semantic function 9044"),
             "unexpected error: {err:?}"
         );
     }
