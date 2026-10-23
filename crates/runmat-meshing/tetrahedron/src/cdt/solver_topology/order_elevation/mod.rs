@@ -257,7 +257,7 @@ pub(super) fn elevate(
                     moved_node_count,
                     invalid_elements
                         .iter()
-                        .take(3)
+                        .take(1)
                         .map(|element| describe_element(&topology, *element, &exact_midsides))
                         .collect::<Vec<_>>()
                         .join("; "),
@@ -420,9 +420,37 @@ fn describe_element(
             let edge_sagitta = norm(sub(*curved, chord));
             if edge_sagitta > sagitta {
                 sagitta = edge_sagitta;
-                let parameters = |id: u64| node(id).map(|node| format!("{:?}", node.exact_parameters)).unwrap_or_default();
+                let parameters = |id: u64| {
+                    node(id)
+                        .map(|node| {
+                            node.exact_parameters
+                                .iter()
+                                .map(|parameter| match parameter {
+                                    runmat_meshing_core::SolverNodeExactParameter::Curve {
+                                        source_edge_id,
+                                        parameter,
+                                    } => format!(
+                                        "curve {}@{parameter:.6}",
+                                        source_edge_id.source_topology_id.chars().rev().take(6).collect::<String>()
+                                    ),
+                                    runmat_meshing_core::SolverNodeExactParameter::Surface {
+                                        source_face_id,
+                                        evaluator_uv,
+                                        ..
+                                    } => format!(
+                                        "face {}@({:.6},{:.6})",
+                                        source_face_id.source_topology_id.chars().rev().take(6).collect::<String>(),
+                                        evaluator_uv[0],
+                                        evaluator_uv[1]
+                                    ),
+                                })
+                                .collect::<Vec<_>>()
+                                .join(" ")
+                        })
+                        .unwrap_or_default()
+                };
                 worst = format!(
-                    " (edge chord {:e} m; endpoint parameters {} and {}; midside parameters {})",
+                    " (edge chord {:e} m; endpoint parameters [{}] and [{}]; midside parameters [{}])",
                     norm(sub(p[edge[1]], p[edge[0]])),
                     parameters(ids[edge[0]]),
                     parameters(ids[edge[1]]),
