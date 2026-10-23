@@ -103,6 +103,14 @@ enum CoercivityProof {
     },
 }
 
+impl CoercivityCertificate {
+    /// Whether the sparse Cholesky factorization (rather than the anchored local-energy bound)
+    /// certified this operator.
+    pub(crate) fn proved_by_factorization(&self) -> bool {
+        matches!(self.proof, CoercivityProof::SparseCholesky { .. })
+    }
+}
+
 /// Binds algebraic coercivity, the exact prepared right-hand side, and optional physics-owned
 /// null-space attribution. This evidence is never accepted from serialized callers.
 #[derive(Clone, Debug, PartialEq, Serialize)]

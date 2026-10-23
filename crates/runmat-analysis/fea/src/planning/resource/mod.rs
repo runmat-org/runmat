@@ -97,7 +97,8 @@ pub use state_publication::build_fluid_state_publication_resource_plan;
 pub use state_publication::build_state_publication_resource_plan;
 pub use state_publication::build_state_publication_resource_plan_with_ceiling;
 pub use static_profiles::{
-    projected_canonical_output_resource_facts, structural_state_profiles_output_resource_facts,
+    profiled_canonical_output_resource_facts, projected_canonical_output_resource_facts,
+    structural_state_profiles_output_resource_facts,
 };
 mod admission;
 pub use accuracy::preflight_fluid_accuracy_source;

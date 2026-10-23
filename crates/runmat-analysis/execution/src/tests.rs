@@ -33,6 +33,8 @@ mod observation_history_checkpoint_tests;
 
 #[path = "tests/accuracy_source_context.rs"]
 mod accuracy_source_context_tests;
+#[path = "tests/accuracy_plan_binding.rs"]
+mod accuracy_plan_binding_tests;
 #[path = "tests/acoustic_accuracy.rs"]
 mod acoustic_accuracy_tests;
 #[path = "tests/frequency_sample_publication.rs"]

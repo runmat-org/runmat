@@ -6,13 +6,15 @@ mod assembly;
 mod boundary;
 mod recovery;
 mod response;
+pub(crate) use response::closure_target;
 pub(crate) mod sources;
 mod terminals;
 #[cfg(test)]
 pub(crate) mod tests;
 
 pub use response::{
-    CanonicalElectricalResponse, ElectricalConstitutiveResponse, ElectricalTerminalResponse,
+    CanonicalElectricalResponse, ElectricalConstitutiveResponse, ElectricalOperatorProof,
+    ElectricalTerminalResponse,
 };
 use runmat_analysis_core::{
     AnalysisModel, AnalysisProcedure, ElectromagneticDomain, IndependentDomain, PhysicsFamily,
