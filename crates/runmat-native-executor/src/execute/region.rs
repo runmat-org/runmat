@@ -14,6 +14,14 @@ pub(super) fn checkpoint(
         NativeNumericRegionOutcome, NativeNumericRegionRequest, NumericRegionCapability,
     };
     let resumed = super::call_suspension::numeric_region::take(state, request)?;
+    if super::call_suspension::has_completed_operation_at(state, request)? {
+        // A nonnumeric completion proves this source occurrence already
+        // entered its ordinary operation. Its exact typed/embedded consumer,
+        // not a new region selection, must adopt that original owner first.
+        // This also covers a declined region whose ordinary operation yielded
+        // without installing an observation. Do not reconstruct decline state.
+        return Ok(None);
+    }
     let declined = resumed.is_some();
     if let Some(completed) = resumed {
         match completed.outcome {

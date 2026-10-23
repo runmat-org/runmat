@@ -3,10 +3,18 @@ use runmat_runtime::context::{RuntimeAccelerationService, RuntimeServicePorts};
 use runmat_runtime::numeric_region::service::*;
 use std::cell::Cell;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Selection {
+    Completed,
+    Original,
+    Ineligible,
+}
+
 struct Adapter {
     calls: Rc<Cell<usize>>,
     publications: Rc<Cell<usize>>,
     fail: bool,
+    selection: Selection,
 }
 struct Publication(Rc<Cell<usize>>);
 impl NativeNumericRegionPublication for Publication {
@@ -30,6 +38,7 @@ impl RuntimeAccelerationService for Adapter {
         let calls = self.calls.clone();
         let publications = self.publications.clone();
         let fail = self.fail;
+        let selection = self.selection;
         let admission = runtime.clone();
         runmat_runtime::execution::admit_native_continuation_with(&admission, || async move {
             calls.set(calls.get() + 1);
@@ -39,6 +48,16 @@ impl RuntimeAccelerationService for Adapter {
                     "NativeRegionInjected",
                     "injected provider failure",
                 ));
+            }
+            match selection {
+                Selection::Original => {
+                    return Ok(NativeNumericRegionOutcome::Original {
+                        right,
+                        observation: None,
+                    });
+                }
+                Selection::Ineligible => return Ok(NativeNumericRegionOutcome::Ineligible),
+                Selection::Completed => {}
             }
             let outputs = root_values(&runtime, 1, |_| Ok(Value::Num(42.0)))?;
             Ok(NativeNumericRegionOutcome::Completed {
@@ -72,6 +91,18 @@ fn start(
     Rc<Cell<usize>>,
     runmat_execution::cancellation::CancellationSource,
 ) {
+    start_with_selection(fail, Selection::Completed)
+}
+
+fn start_with_selection(
+    fail: bool,
+    selection: Selection,
+) -> (
+    HostState,
+    Rc<Cell<usize>>,
+    Rc<Cell<usize>>,
+    runmat_execution::cancellation::CancellationSource,
+) {
     let calls = Rc::new(Cell::new(0));
     let publications = Rc::new(Cell::new(0));
     let cancellation = runmat_execution::cancellation::CancellationSource::new();
@@ -84,11 +115,16 @@ fn start(
             calls: calls.clone(),
             publications: publications.clone(),
             fail,
+            selection,
         })),
     );
     let mut state = omitted_input_state_with(runtime, None);
     let input = state.arena.insert(Value::Num(7.0));
     state.set_local(0, input).unwrap();
+    // The manual seed publishes into the private canonical workspace. Finish
+    // that setup before region capture, so completion reconciliation does not
+    // replace the seed's owned arena reference with its canonical read lease.
+    state.reconcile_external_workspace().unwrap();
     let mut plan = crate::region::placement_test_support::plan();
     plan.program
         .nodes
@@ -120,38 +156,184 @@ fn start(
 #[test]
 fn native_region_suspends_before_poll_and_publishes_once_after_completion() {
     runmat_gc::gc_test_context(|| {
-        let (mut state, calls, publications, _cancellation) = start(false);
-        let mut exit = runmat_runtime::native::NativeExit::completed(0);
-        assert!(matches!(
-            crate::execute::region::checkpoint(&mut state, site(), &mut exit),
-            Err(NativeExecutorError::CallSuspended)
-        ));
-        assert_eq!(calls.get(), 0);
-        assert_eq!(publications.get(), 0);
-        assert!(state.skipped_optimized_sites.is_empty());
-        let pending = state.pending_call.as_ref().unwrap();
-        let (continuation, generation) = (pending.continuation, pending.generation);
-        futures::executor::block_on(crate::execute::call_suspension::complete(
-            &mut state,
-            continuation,
-            generation,
-        ))
-        .unwrap();
-        assert_eq!(calls.get(), 1);
-        assert_eq!(publications.get(), 0);
-        assert!(
-            crate::execute::region::checkpoint(&mut state, site(), &mut exit)
-                .unwrap()
-                .is_some()
-        );
-        assert_eq!(publications.get(), 1);
-        assert_eq!(state.vectorized_regions(), 1);
-        assert!(!state.skipped_optimized_sites.is_empty());
-        assert!(
-            crate::execute::call_suspension::numeric_region::take(&mut state, site())
-                .unwrap()
-                .is_none()
-        );
+        for selection in [
+            Selection::Completed,
+            Selection::Original,
+            Selection::Ineligible,
+        ] {
+            let (mut state, calls, publications, _cancellation) =
+                start_with_selection(false, selection);
+            // Exercise the real host ABI, not only the checkpoint's internal
+            // suspension sentinel. Ordinary unary execution must yield and then
+            // publish -7, while a selected completion publishes 42 without replay.
+            let terminator = state.function.blocks[0].terminator.clone();
+            let mut source_site = terminator.site.clone();
+            source_site.phase = runmat_native_codegen::NativeSitePhase::Rvalue;
+            source_site.construct = runmat_mir::MirConstructKind::Unary;
+            state.function.expected_sites.push(source_site.clone());
+            state.function.blocks[0]
+                .instructions
+                .push(NativeInstruction {
+                    id: NativeInstructionId(0),
+                    site: source_site,
+                    source: terminator.source,
+                    class: runmat_mir::NativeLoweringClass::NativeOperation,
+                    effects: Default::default(),
+                    capabilities: Default::default(),
+                    inputs: vec![],
+                    outputs: vec![NativeOutput {
+                        value: NativeValueId(0),
+                        value_type: NativeValueType::Generic,
+                        local: None,
+                    }],
+                    effect_epoch_output: None,
+                    embedded_constructs: vec![],
+                    operation: NativeOperation::Rvalue {
+                        value: runmat_mir::MirRvalue::Unary(
+                            runmat_types::OperatorKind::UnaryMinus,
+                            runmat_mir::MirOperand::Local(runmat_mir::MirLocalId(0)),
+                        ),
+                        result: NativeRvalueResult::Assignment,
+                    },
+                    safepoint: None,
+                    frame_state: Some(terminator.frame_state),
+                });
+            use runmat_runtime::native::*;
+            let mut resume = NativeResumeState::default();
+            let mut frame = NativeFrame {
+                resume: &mut resume,
+                ..Default::default()
+            };
+            let mut call = NativeCall {
+                frame: &mut frame,
+                ..Default::default()
+            };
+            let host = crate::execute::callbacks::table(&mut state);
+            let execute = host.execute_site.expect("native site callback");
+            let request = site();
+            let mut exit = runmat_runtime::native::NativeExit::completed(0);
+            let mut outcome = NativeSiteOutcome::continue_execution();
+            // SAFETY: the callback's state, call, frame, resume and outputs all
+            // remain live for this synchronous ABI invocation.
+            assert_eq!(
+                unsafe { execute(host.context, &mut call, &request, &mut outcome, &mut exit) },
+                NativeHostStatus::OK
+            );
+            assert_eq!(outcome.kind, NativeSiteOutcomeKind::EXIT);
+            assert_eq!(
+                exit.kind,
+                NativeExitKind::SUSPENDED,
+                "selection={selection:?}, last_error={:?}",
+                state
+                    .last_error
+                    .as_ref()
+                    .map(|error| (error.identifier(), error.message())),
+            );
+            assert_eq!(calls.get(), 0);
+            assert_eq!(publications.get(), 0);
+            assert!(state.skipped_optimized_sites.is_empty());
+            let pending = state.pending_call.as_ref().unwrap();
+            let (continuation, generation) = (pending.continuation, pending.generation);
+            assert_eq!(exit.suspension.continuation, continuation);
+            assert_eq!(exit.suspension.generation, generation);
+            assert_eq!(pending.request, request);
+            assert_eq!(
+                futures::executor::block_on(crate::execute::call_suspension::complete(
+                    &mut state,
+                    continuation,
+                    generation,
+                ))
+                .unwrap(),
+                request
+            );
+            assert_eq!(calls.get(), 1);
+            assert_eq!(publications.get(), 0);
+            state.prepare_resume(resume).unwrap();
+            // SAFETY: the same checked backing owners are retained for reentry.
+            assert_eq!(
+                unsafe { execute(host.context, &mut call, &request, &mut outcome, &mut exit) },
+                NativeHostStatus::OK
+            );
+            if selection != Selection::Completed {
+                assert_eq!(outcome.kind, NativeSiteOutcomeKind::EXIT);
+                assert_eq!(
+                    exit.kind,
+                    NativeExitKind::SUSPENDED,
+                    "selection={selection:?}, last_error={:?}",
+                    state
+                        .last_error
+                        .as_ref()
+                        .map(|error| (error.identifier(), error.message())),
+                );
+                assert_eq!(calls.get(), 1);
+                assert_eq!(publications.get(), 0);
+                let pending = state.pending_call.as_ref().expect("ordinary unary pending");
+                let identity = (pending.continuation, pending.generation);
+                assert_eq!(pending.request, request);
+                assert_ne!(identity, (continuation, generation));
+                assert_eq!(
+                    futures::executor::block_on(crate::execute::call_suspension::complete(
+                        &mut state, identity.0, identity.1,
+                    ))
+                    .unwrap(),
+                    request
+                );
+                let outputs = crate::execute::call_suspension::completed_value_refs(&state)
+                    .expect("ordinary unary keeps its exact typed value completion")
+                    .as_ptr();
+                let wrong = NativeSiteRequest {
+                    ordinal: 1,
+                    ..request
+                };
+                assert!(matches!(
+                    crate::execute::region::checkpoint(&mut state, wrong, &mut exit),
+                    Err(NativeExecutorError::Host(message))
+                        if message == "completed native call does not match the exact resumed operation"
+                ));
+                assert!(crate::execute::call_suspension::has_completed_operation_at(
+                    &state, request,
+                )
+                .unwrap());
+                assert_eq!(
+                    crate::execute::call_suspension::completed_value_refs(&state)
+                        .expect("mismatched site preserves the typed completion")
+                        .as_ptr(),
+                    outputs,
+                );
+                state.prepare_resume(resume).unwrap();
+                // SAFETY: the original ABI records still own all backing storage.
+                assert_eq!(
+                    unsafe { execute(host.context, &mut call, &request, &mut outcome, &mut exit) },
+                    NativeHostStatus::OK
+                );
+            }
+            assert_eq!(outcome.kind, NativeSiteOutcomeKind::CONTINUE);
+            assert_eq!(
+                calls.get(),
+                1,
+                "the provider is not entered again on resume"
+            );
+            assert_eq!(
+                state.arena.get(state.values[&NativeValueId(0)]).unwrap(),
+                &Value::Num(if selection == Selection::Completed {
+                    42.0
+                } else {
+                    -7.0
+                }),
+                "the selected or ordinary output is published without source replay"
+            );
+            let completed_region = selection == Selection::Completed;
+            assert_eq!(publications.get(), usize::from(completed_region));
+            assert_eq!(state.vectorized_regions(), u64::from(completed_region));
+            assert_eq!(state.skipped_optimized_sites.is_empty(), !completed_region);
+            assert!(state.pending_call.is_none());
+            assert!(state.completed_call.is_none());
+            assert!(
+                crate::execute::call_suspension::numeric_region::take(&mut state, site())
+                    .unwrap()
+                    .is_none()
+            );
+        }
     });
 }
 

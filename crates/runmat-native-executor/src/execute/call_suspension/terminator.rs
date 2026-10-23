@@ -116,10 +116,10 @@ impl TerminatorReady {
         (self.stage, self.equality)
     }
 
-    pub(super) fn arena_roots(&self) -> Vec<NativeValueRef> {
+    pub(super) fn arena_roots(&self) -> &[NativeValueRef] {
         match &self.stage {
-            TerminatorReadyStage::ForNext(Some(reference)) => vec![*reference],
-            _ => Vec::new(),
+            TerminatorReadyStage::ForNext(next) => next.as_slice(),
+            _ => &[],
         }
     }
 }

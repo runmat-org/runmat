@@ -217,6 +217,31 @@ impl CompletedCall {
     }
 }
 
+/// Check source-operation precedence without taking its typed payload or
+/// weakening the exact embedded consumer's later adoption checks.
+pub(super) fn has_completed_operation_at(
+    state: &HostState,
+    request: NativeSiteRequest,
+) -> NativeExecutorResult<bool> {
+    let Some(completed) = &state.completed_call else {
+        return Ok(false);
+    };
+    if completed.request != request {
+        return Err(NativeExecutorError::Host(
+            "completed native call does not match the exact resumed operation".into(),
+        ));
+    }
+    Ok(true)
+}
+
+#[cfg(test)]
+pub(super) fn completed_value_refs(state: &HostState) -> Option<&[NativeValueRef]> {
+    match &state.completed_call.as_ref()?.payload {
+        CompletedPayload::Values(outputs) => Some(outputs),
+        _ => None,
+    }
+}
+
 pub(super) fn take_completed(
     state: &mut HostState,
     embedded: Option<&super::state::EmbeddedOperationIdentity>,
@@ -292,31 +317,21 @@ pub(super) fn completed_roots_from(
     completed
         .into_iter()
         .flat_map(|completed| match &completed.payload {
-            CompletedPayload::OriginalRegionObserved => Vec::new(),
-            CompletedPayload::NumericRegion(_) => Vec::new(),
-            CompletedPayload::Values(outputs) => outputs.clone(),
-            CompletedPayload::ExpandedCallArguments(arguments) => arguments.clone(),
-            CompletedPayload::SequenceRead(_) => Vec::new(),
-            CompletedPayload::PreparedReceiver { receiver, .. } => vec![*receiver],
+            CompletedPayload::OriginalRegionObserved => &[][..],
+            CompletedPayload::NumericRegion(completed) => &completed.completion().inputs[..],
+            CompletedPayload::Values(outputs) => outputs.as_slice(),
+            CompletedPayload::ExpandedCallArguments(arguments) => arguments.as_slice(),
+            CompletedPayload::SequenceRead(_) => &[],
+            CompletedPayload::PreparedReceiver { receiver, .. } => std::slice::from_ref(receiver),
             // Runtime's builder/destination owns its exact canonical root
             // leases. Do not mirror selectors into an arena-reference Vec.
-            CompletedPayload::SequenceStage(_) => Vec::new(),
-            CompletedPayload::ShortCircuitTruth(_) => Vec::new(),
-            CompletedPayload::StatementOutput => Vec::new(),
-            CompletedPayload::SemanticOperation(_) => Vec::new(),
+            CompletedPayload::SequenceStage(_) => &[],
+            CompletedPayload::ShortCircuitTruth(_) => &[],
+            CompletedPayload::StatementOutput => &[],
+            CompletedPayload::SemanticOperation(_) => &[],
             CompletedPayload::Terminator(stage) => stage.arena_roots(),
         })
-        .chain(
-            completed
-                .into_iter()
-                .filter_map(|completed| match &completed.payload {
-                    CompletedPayload::NumericRegion(completed) => {
-                        Some(completed.completion().inputs.iter().copied())
-                    }
-                    _ => None,
-                })
-                .flatten(),
-        )
+        .copied()
 }
 
 pub(super) async fn complete(

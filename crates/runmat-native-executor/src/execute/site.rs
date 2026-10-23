@@ -192,7 +192,14 @@ fn execute_inner(
             }
         }
         if request.phase == NativeSitePhase::RVALUE {
-            if let Some(outcome) = super::region::checkpoint(state, request, exit)? {
+            let region = match super::region::checkpoint(state, request, exit) {
+                Ok(region) => region,
+                Err(NativeExecutorError::CallSuspended) => {
+                    return super::call_suspension::publish(state, call, request, exit);
+                }
+                Err(error) => return Err(error),
+            };
+            if let Some(outcome) = region {
                 // The region completed this site's work without entering the
                 // ordinary instruction path. Release its expression scope and
                 // publish the updated roots before the next native site.
