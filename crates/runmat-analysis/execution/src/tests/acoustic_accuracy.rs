@@ -195,21 +195,12 @@ fn acoustic_accuracy_admission_binds_retained_result_and_original_intent() {
                 substituted[index] = replacement;
                 assert!(check(&substituted).is_err());
             }
-            let weakened = runmat_analysis_fea::execution::AccuracyEvaluationRequest::new(
-                prepared.request.producer,
-                prepared.request.source_kind,
-                prepared.request.source_result,
-                None,
-                prepared.request.plan.clone(),
-            )
-            .unwrap();
-            assert!(validate_accuracy_source_context(
-                &weakened,
+            super::accuracy_source_context_tests::assert_accuracy_plan_identity_bound(
+                &prepared.request,
                 &source,
                 None,
-                &context.iter().collect::<Vec<_>>()
-            )
-            .is_err());
+                &context.iter().collect::<Vec<_>>(),
+            );
             let mut missing = preparation();
             missing.source_context_inputs.pop();
             assert!(prepare_accuracy(missing).is_err());

@@ -204,9 +204,11 @@ fn electrical_static_solver_envelope(
             dimension: Count(envelope.dimension()),
             factor_nonzero_upper_bound: Count(envelope.factor_nonzero_limit()),
             update_count_upper_bound: Count(envelope.update_limit()),
-            // The electrical operator is proved by the local-energy proof, never by
-            // factorization; its admitted resident bound is that proof's reservation.
-            resident_bytes_upper_bound: ByteCount(local_energy_proof_bytes(mesh)?),
+            // The local-energy proof runs first; when its bound is indeterminate the sparse
+            // Cholesky proof decides. The admitted resident bound covers either proof.
+            resident_bytes_upper_bound: ByteCount(
+                local_energy_proof_bytes(mesh)?.max(envelope.factor_resident_limit()),
+            ),
         },
         envelope,
     ))
