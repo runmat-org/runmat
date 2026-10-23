@@ -46,7 +46,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let planning_reservation =
         ThermalOperatorResourceFacts::derivation_resident_bytes_estimate(&mesh)?.0;
     let baseline = peak_allocator::begin_measurement();
-    let planning = ThermalOperatorResourceFacts::derive(&mesh);
+    let planning = ThermalOperatorResourceFacts::derive(&mesh, &[]);
     let planning_growth = peak_allocator::end_measurement().saturating_sub(baseline);
     drop(planning?);
     if planning_growth > planning_reservation {
