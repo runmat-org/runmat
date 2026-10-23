@@ -544,3 +544,76 @@ mod gauss_rule_tests {
 
 #[cfg(test)]
 mod boundary_quality_tests;
+
+/// Diagnostic for a published mesh: which boundary-face check rejects a face, with numbers.
+/// Run with `RUNMAT_FACE_MESH=<solver-mesh.cbor> RUNMAT_FACE_ID=<id>`.
+#[cfg(test)]
+mod face_diagnostic {
+    use super::*;
+    use runmat_meshing_core::CanonicalMeshingContract;
+
+    #[test]
+    #[ignore]
+    fn report_boundary_face_checks() {
+        let path = std::env::var("RUNMAT_FACE_MESH").expect("RUNMAT_FACE_MESH");
+        let face_id: u64 = std::env::var("RUNMAT_FACE_ID").unwrap().parse().unwrap();
+        let mesh = runmat_meshing_core::SolverMeshArtifact::canonical_decode(
+            &std::fs::read(path).unwrap(),
+        )
+        .unwrap();
+        let face = mesh
+            .topology
+            .boundary_faces
+            .iter()
+            .find(|face| face.face_id == face_id)
+            .expect("face");
+        let coordinates = face
+            .node_ids
+            .iter()
+            .map(|id| {
+                mesh.topology
+                    .nodes
+                    .iter()
+                    .find(|node| node.node_id == *id)
+                    .unwrap()
+                    .coordinates_m
+            })
+            .collect::<Vec<_>>();
+        let corner_normal = cross(
+            subtract(coordinates[1], coordinates[0]),
+            subtract(coordinates[2], coordinates[0]),
+        );
+        eprintln!("face {face_id} order {:?} nodes {coordinates:?}", face.order);
+        eprintln!("corner normal norm {:e}", norm(corner_normal));
+        if face.order == BoundaryTriangleOrder::Tri6 {
+            eprintln!(
+                "signed area minimum {:?}",
+                signed_boundary_area_minimum(&coordinates, corner_normal)
+            );
+            let curved = boundary_curved::is_curved(&coordinates);
+            eprintln!("curved {curved}");
+            if curved {
+                eprintln!(
+                    "curved rule converged {}",
+                    boundary_curved::converged_points(&coordinates).is_some()
+                );
+            }
+        }
+        for (barycentric, _) in DUNAVANT_SEVEN {
+            let (_, derivatives) = boundary_shape(face.order, barycentric);
+            let n = coordinates.len();
+            let tangent_xi = weighted_derivative(&coordinates, &derivatives[..n], 0);
+            let tangent_eta = weighted_derivative(&coordinates, &derivatives[..n], 1);
+            let jacobian = cross(tangent_xi, tangent_eta);
+            eprintln!(
+                "point {barycentric:?} jacobian {:e} along corner normal {:e}",
+                norm(jacobian),
+                dot(jacobian, corner_normal)
+            );
+        }
+        eprintln!(
+            "visit_boundary_quadrature: {}",
+            visit_boundary_quadrature(face.order, &coordinates, |_| {}).is_some()
+        );
+    }
+}

@@ -60,6 +60,20 @@ use runmat_execution::{resource::ResourceRequest, Digest};
 pub fn build_resource_plan(
     input: FeaResourcePlanningInput,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
+    let plan = build_resource_plan_unlogged(input)?;
+    tracing::debug!(
+        "fea resource plan {:?}: request memory {} scratch {}; breakdown {:?}",
+        plan.input.phase,
+        plan.request.memory_bytes,
+        plan.request.scratch_bytes,
+        plan.breakdown
+    );
+    Ok(plan)
+}
+
+fn build_resource_plan_unlogged(
+    input: FeaResourcePlanningInput,
+) -> Result<FeaResourcePlan, ResourcePlanningError> {
     validate_common(&input)?;
     match (&input.phase, &input.demand) {
         (
