@@ -156,139 +156,166 @@ pub(super) fn solve(
         .collect();
     let (increment, linear_absolute_residual, relative_residual, iterations, operator_proof) =
         if let Some(operator) = reduced_operator {
-        // Periodic relations: eliminate the secondary nodes and solve the reduced system.
-        // Relations hold absolute potentials; in increments they gain the reference shift.
-        let relations =
-            crate::physics::scalar_constraints::about_reference(&assembly.relations, &reference);
-        let known: Vec<Option<f64>> = assembly
-            .prescribed
-            .iter()
-            .zip(&reference)
-            .map(|(value, reference)| value.map(|value| value - reference))
-            .collect();
-        let reduced = crate::physics::scalar_constraints::solve(
-            &operator,
-            &rhs,
-            &known,
-            &relations,
-            residual_target,
-            planned.map_or(
+            // Periodic relations: eliminate the secondary nodes and solve the reduced system.
+            // Relations hold absolute potentials; in increments they gain the reference shift.
+            let relations = crate::physics::scalar_constraints::about_reference(
+                &assembly.relations,
+                &reference,
+            );
+            let known: Vec<Option<f64>> = assembly
+                .prescribed
+                .iter()
+                .zip(&reference)
+                .map(|(value, reference)| value.map(|value| value - reference))
+                .collect();
+            let strategy = planned.map_or(
                 crate::solve::preconditioner::SpdPreconditionerKind::Auto,
                 |planned| planned.strategy(),
-            ),
-        )
-        .map_err(ElectricalStaticError::Operator)?;
-        let (solution, relative_residual) = (reduced.solution, reduced.relative_residual);
-        if !relative_residual.is_finite() || relative_residual > residual_target {
-            return Err(ElectricalStaticError::Operator(
-                "electrical relative residual target not satisfied".into(),
-            ));
-        }
-        drop(constrained);
-        drop(proof);
-        drop(operators);
-        let rhs_norm = rhs.iter().map(|v| v * v).sum::<f64>().sqrt();
-        (
-            solution,
-            relative_residual * rhs_norm,
-            relative_residual,
-            reduced.iterations,
-            ElectricalOperatorProof::ReducedRelations,
-        )
-    } else {
-    let system = AssembledRealSystem::try_new_with_nullspace_evidence(
-            operators,
-            constrained.clone(),
-            rhs,
-            Some(proof),
-        )
-        .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?;
-        let backend = crate::solve::backend::cpu_reference::CpuReferenceBackend;
-        let lifted_rhs = system.linear_rhs();
-        let rhs_norm = backend.dot(&lifted_rhs, &lifted_rhs).sqrt();
-        drop(lifted_rhs);
-        let mut preparation = crate::algebra::LinearPreparationReuse::with_local_energy(
-            assembly.local_energy.take().ok_or_else(|| {
-                ElectricalStaticError::Operator("missing original local-energy source".into())
-            })?,
-            constrained,
-            scale.recip(),
-        );
-        let solution = crate::solve::linear::solve_operator_system_scoped(
-            &system,
-            planned.map_or(
+            );
+            let reduced_solve = |tolerance| {
+                crate::physics::scalar_constraints::solve(
+                    &operator, &rhs, &known, &relations, tolerance, strategy,
+                )
+                .map_err(ElectricalStaticError::Operator)
+            };
+            let mut reduced = reduced_solve(residual_target)?;
+            let mut iterations = reduced.iterations;
+            let (mut tolerance, mut refinements) = (residual_target, 0);
+            while let Some(next) = conservation_tolerance(
+                &assembly,
+                &reduced.solution,
+                residual_target,
+                tolerance,
+                refinements,
+            )? {
+                tolerance = next;
+                refinements += 1;
+                reduced = reduced_solve(tolerance)?;
+                iterations += reduced.iterations;
+            }
+            let (solution, relative_residual) = (reduced.solution, reduced.relative_residual);
+            if !relative_residual.is_finite() || relative_residual > residual_target {
+                return Err(ElectricalStaticError::Operator(
+                    "electrical relative residual target not satisfied".into(),
+                ));
+            }
+            drop(constrained);
+            drop(proof);
+            drop(operators);
+            let rhs_norm = rhs.iter().map(|v| v * v).sum::<f64>().sqrt();
+            (
+                solution,
+                relative_residual * rhs_norm,
+                relative_residual,
+                iterations,
+                ElectricalOperatorProof::ReducedRelations,
+            )
+        } else {
+            let system = AssembledRealSystem::try_new_with_nullspace_evidence(
+                operators,
+                constrained.clone(),
+                rhs,
+                Some(proof),
+            )
+            .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?;
+            let backend = crate::solve::backend::cpu_reference::CpuReferenceBackend;
+            let lifted_rhs = system.linear_rhs();
+            let rhs_norm = backend.dot(&lifted_rhs, &lifted_rhs).sqrt();
+            drop(lifted_rhs);
+            let mut preparation = crate::algebra::LinearPreparationReuse::with_local_energy(
+                assembly.local_energy.take().ok_or_else(|| {
+                    ElectricalStaticError::Operator("missing original local-energy source".into())
+                })?,
+                constrained,
+                scale.recip(),
+            );
+            let strategy = planned.map_or(
                 crate::solve::preconditioner::SpdPreconditionerKind::Auto,
                 |planned| planned.strategy(),
-            ),
-            crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
-            &backend,
-            None,
-            crate::solve::linear::ScopedLinearSolveSettings {
-                plan: crate::planning::resource::LocalExecutionPlan::serial(),
-                admission: planned.map(|planned| planned.admission),
-                relative_tolerance: residual_target,
-                preparation: Some(&mut preparation),
-            },
-        )
-        .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?;
-        if !solution.converged || solution.solution.iter().any(|value| !value.is_finite()) {
-            return Err(ElectricalStaticError::NotConverged {
-                iterations: solution.iterations,
-                residual: solution.residual_norm,
-                diagnostics: solution.diagnostics,
-            });
-        }
-        let relative_residual = if rhs_norm > 0.0 {
-            solution.residual_norm / rhs_norm
-        } else if solution.residual_norm == 0.0 {
-            0.0
-        } else {
-            return Err(ElectricalStaticError::Operator(
-                "nonzero residual for zero electrical RHS".into(),
-            ));
+            );
+            let mut linear_solve = |guess: Option<&[f64]>, tolerance: f64| {
+                let solution = crate::solve::linear::solve_operator_system_scoped(
+                    &system,
+                    strategy,
+                    crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
+                    &backend,
+                    guess,
+                    crate::solve::linear::ScopedLinearSolveSettings {
+                        plan: crate::planning::resource::LocalExecutionPlan::serial(),
+                        admission: planned.map(|planned| planned.admission),
+                        relative_tolerance: tolerance,
+                        preparation: Some(&mut preparation),
+                    },
+                )
+                .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?;
+                if !solution.converged || solution.solution.iter().any(|value| !value.is_finite()) {
+                    return Err(ElectricalStaticError::NotConverged {
+                        iterations: solution.iterations,
+                        residual: solution.residual_norm,
+                        diagnostics: solution.diagnostics,
+                    });
+                }
+                Ok(solution)
+            };
+            let mut solution = linear_solve(None, residual_target)?;
+            let mut iterations = solution.iterations;
+            let (mut tolerance, mut refinements) = (residual_target, 0);
+            while let Some(next) = conservation_tolerance(
+                &assembly,
+                &solution.solution,
+                residual_target,
+                tolerance,
+                refinements,
+            )? {
+                tolerance = next;
+                refinements += 1;
+                solution = linear_solve(Some(&solution.solution), tolerance)?;
+                iterations += solution.iterations;
+            }
+            let relative_residual = if rhs_norm > 0.0 {
+                solution.residual_norm / rhs_norm
+            } else if solution.residual_norm == 0.0 {
+                0.0
+            } else {
+                return Err(ElectricalStaticError::Operator(
+                    "nonzero residual for zero electrical RHS".into(),
+                ));
+            };
+            if !relative_residual.is_finite() || relative_residual > residual_target {
+                return Err(ElectricalStaticError::Operator(
+                    "electrical relative residual target not satisfied".into(),
+                ));
+            }
+            let operator_proof = if preparation
+                .certificate()
+                .is_some_and(|certificate| certificate.proved_by_factorization())
+            {
+                ElectricalOperatorProof::SparseCholesky
+            } else {
+                ElectricalOperatorProof::LocalEnergy
+            };
+            (
+                solution.solution,
+                solution.residual_norm,
+                relative_residual,
+                iterations,
+                operator_proof,
+            )
         };
-        if !relative_residual.is_finite() || relative_residual > residual_target {
-            return Err(ElectricalStaticError::Operator(
-                "electrical relative residual target not satisfied".into(),
-            ));
-        }
-        let operator_proof = if preparation
-            .certificate()
-            .is_some_and(|certificate| certificate.proved_by_factorization())
-        {
-            ElectricalOperatorProof::SparseCholesky
-        } else {
-            ElectricalOperatorProof::LocalEnergy
-        };
-        (
-            solution.solution,
-            solution.residual_norm,
-            relative_residual,
-            solution.iterations,
-            operator_proof,
-        )
-    };
     let potential = increment
         .iter()
         .zip(&reference)
         .map(|(value, reference)| value + reference)
         .collect();
-    let mut reactions = spmv(&assembly.stiffness, &increment)
-        .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?;
-    // A periodic secondary node passes its reaction and source to its primary nodes: the
-    // flux leaving one face of a periodic pair enters through the other.
-    for relation in &assembly.relations {
-        let reaction = std::mem::take(&mut reactions[relation.secondary]);
-        let source = assembly
-            .charge_sources
-            .as_mut()
-            .map_or(0.0, |source| std::mem::take(&mut source.nodal_source[relation.secondary]));
-        for &(primary, weight) in &relation.primaries {
-            reactions[primary] += weight * reaction;
-            if let Some(sources) = assembly.charge_sources.as_mut() {
-                sources.nodal_source[primary] += weight * source;
-            }
-        }
+    let TerminalBalance {
+        reactions,
+        nodal_source,
+        nodal_outward_flux,
+        terminals,
+        relative_flux_imbalance,
+    } = terminal_balance(&assembly, &increment)?;
+    if let (Some(sources), Some(folded)) = (assembly.charge_sources.as_mut(), nodal_source) {
+        sources.nodal_source = folded;
     }
     let recovery = recovery::recover(&assembly, &increment)?;
     let integrals = recovery
@@ -345,48 +372,6 @@ pub(super) fn solve(
             }
         }
     };
-    let nodal_outward_flux = reactions
-        .iter()
-        .enumerate()
-        .map(|(node, value)| {
-            assembly
-                .charge_sources
-                .as_ref()
-                .map_or(0.0, |source| source.nodal_source[node])
-                - value
-        })
-        .collect::<Vec<_>>();
-    let terminals = assembly
-        .terminal_nodes
-        .iter()
-        .map(|(id, nodes)| ElectricalTerminalResponse {
-            constraint_id: id.clone(),
-            ordered_node_ids: nodes
-                .iter()
-                .map(|&node| assembly.projection.nodes[node].node_id)
-                .collect(),
-            outward_flux: nodes.iter().map(|&node| nodal_outward_flux[node]).sum(),
-        })
-        .collect::<Vec<_>>();
-    let flux_scale = terminals
-        .iter()
-        .map(|terminal| terminal.outward_flux.abs())
-        .sum::<f64>();
-    let integrated_charge = assembly
-        .charge_sources
-        .as_ref()
-        .map_or(0.0, |source| source.integrated_source);
-    let source_scale = assembly
-        .charge_sources
-        .as_ref()
-        .map_or(0.0, |source| source.absolute_source);
-    let relative_flux_imbalance = (terminals
-        .iter()
-        .map(|terminal| terminal.outward_flux)
-        .sum::<f64>()
-        - integrated_charge)
-        .abs()
-        / flux_scale.max(source_scale).max(f64::MIN_POSITIVE);
     if !total.is_finite()
         || !relative_energy_identity_error.is_finite()
         || !relative_flux_imbalance.is_finite()
@@ -397,8 +382,8 @@ pub(super) fn solve(
             "nonfinite conservation accounting".into(),
         ));
     }
-    if relative_energy_identity_error > residual_target.max(1e-10) * 10.0
-        || relative_flux_imbalance > residual_target.max(1e-10) * 10.0
+    if relative_energy_identity_error > closure_target(residual_target)
+        || relative_flux_imbalance > closure_target(residual_target)
     {
         return Err(ElectricalStaticError::Operator(format!(
             "electrical conservation target not satisfied (energy identity {relative_energy_identity_error:e}, flux imbalance {relative_flux_imbalance:e})"
@@ -434,5 +419,116 @@ pub(super) fn solve(
         linear_absolute_residual,
         linear_relative_residual: relative_residual,
         iterations,
+    })
+}
+
+/// Closure tolerance for the energy identity and terminal flux balance (the receipt's
+/// `closure_relative_tolerance`).
+pub(crate) fn closure_target(residual_target: f64) -> f64 {
+    residual_target.max(1e-10) * 10.0
+}
+
+/// Linear refinements allowed to close the terminal flux balance.
+const CONSERVATION_REFINEMENTS: u32 = 4;
+
+/// The terminal imbalance equals the sum of the free-node algebraic residual, which a
+/// relative 2-norm residual bounds only up to the square root of the free-node count. When
+/// the balance misses the closure target, return a tighter linear tolerance in proportion to
+/// the miss so the solver, not the gate, closes the balance. Returns `None` once it closes,
+/// or when the refinements or attainable precision run out (the gate then reports the miss).
+fn conservation_tolerance(
+    assembly: &ElectricalAssembly,
+    increment: &[f64],
+    residual_target: f64,
+    tolerance: f64,
+    refinements: u32,
+) -> Result<Option<f64>, ElectricalStaticError> {
+    let imbalance = terminal_balance(assembly, increment)?.relative_flux_imbalance;
+    let target = closure_target(residual_target);
+    let floor = 64.0 * f64::EPSILON;
+    if !imbalance.is_finite()
+        || imbalance <= target
+        || tolerance <= floor
+        || refinements >= CONSERVATION_REFINEMENTS
+    {
+        return Ok(None);
+    }
+    Ok(Some((tolerance * 0.25 * target / imbalance).max(floor)))
+}
+
+/// Terminal flux accounting of a potential increment, with periodic secondaries folded onto
+/// their primaries: the flux leaving one face of a periodic pair enters through the other.
+struct TerminalBalance {
+    reactions: Vec<f64>,
+    nodal_source: Option<Vec<f64>>,
+    nodal_outward_flux: Vec<f64>,
+    terminals: Vec<ElectricalTerminalResponse>,
+    relative_flux_imbalance: f64,
+}
+
+fn terminal_balance(
+    assembly: &ElectricalAssembly,
+    increment: &[f64],
+) -> Result<TerminalBalance, ElectricalStaticError> {
+    let mut reactions = spmv(&assembly.stiffness, increment)
+        .map_err(|error| ElectricalStaticError::Operator(error.to_string()))?;
+    let mut nodal_source = assembly
+        .charge_sources
+        .as_ref()
+        .map(|source| source.nodal_source.clone());
+    for relation in &assembly.relations {
+        let reaction = std::mem::take(&mut reactions[relation.secondary]);
+        let source = nodal_source.as_mut().map_or(0.0, |source| {
+            std::mem::take(&mut source[relation.secondary])
+        });
+        for &(primary, weight) in &relation.primaries {
+            reactions[primary] += weight * reaction;
+            if let Some(sources) = nodal_source.as_mut() {
+                sources[primary] += weight * source;
+            }
+        }
+    }
+    let nodal_outward_flux = reactions
+        .iter()
+        .enumerate()
+        .map(|(node, value)| nodal_source.as_ref().map_or(0.0, |source| source[node]) - value)
+        .collect::<Vec<_>>();
+    let terminals = assembly
+        .terminal_nodes
+        .iter()
+        .map(|(id, nodes)| ElectricalTerminalResponse {
+            constraint_id: id.clone(),
+            ordered_node_ids: nodes
+                .iter()
+                .map(|&node| assembly.projection.nodes[node].node_id)
+                .collect(),
+            outward_flux: nodes.iter().map(|&node| nodal_outward_flux[node]).sum(),
+        })
+        .collect::<Vec<_>>();
+    let flux_scale = terminals
+        .iter()
+        .map(|terminal| terminal.outward_flux.abs())
+        .sum::<f64>();
+    let integrated_charge = assembly
+        .charge_sources
+        .as_ref()
+        .map_or(0.0, |source| source.integrated_source);
+    let source_scale = assembly
+        .charge_sources
+        .as_ref()
+        .map_or(0.0, |source| source.absolute_source);
+    let relative_flux_imbalance = (terminals
+        .iter()
+        .map(|terminal| terminal.outward_flux)
+        .sum::<f64>()
+        - integrated_charge)
+        .abs()
+        / flux_scale.max(source_scale).max(f64::MIN_POSITIVE);
+    Ok(TerminalBalance {
+        reactions,
+        nodal_source,
+        nodal_outward_flux,
+        terminals,
+        relative_flux_imbalance,
     })
 }

@@ -6,6 +6,7 @@ mod assembly;
 mod boundary;
 mod recovery;
 mod response;
+pub(crate) use response::closure_target;
 pub(crate) mod sources;
 mod terminals;
 #[cfg(test)]

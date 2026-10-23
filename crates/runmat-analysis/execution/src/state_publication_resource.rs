@@ -1,8 +1,7 @@
 //! Shared preparation/worker admission for physical-state publication.
 use crate::{
-    prepared_input_resource_facts_without_resource_plan, projected_output_resource_facts,
-    projected_output_set_resource_facts, AnalysisBridgeError, AnalysisBridgeResult,
-    PreparedAnalysisObjects,
+    prepared_input_resource_facts_without_resource_plan, projected_output_set_resource_facts,
+    AnalysisBridgeError, AnalysisBridgeResult, PreparedAnalysisObjects,
 };
 use runmat_analysis_fea::{
     execution::{
@@ -76,7 +75,10 @@ pub fn build_prepared_state_publication_resource_plan(
         source.manifest.payload_digest,
         PreparedPhaseResourceFacts {
             inputs: prepared_input_resource_facts_without_resource_plan(inputs)?,
-            output: projected_output_resource_facts(profile.encoded_bytes_upper_bound)?,
+            output:
+                runmat_analysis_fea::planning::resource::profiled_canonical_output_resource_facts(
+                    profile,
+                )?,
             output_set: projected_output_set_resource_facts(),
         },
     )?)
