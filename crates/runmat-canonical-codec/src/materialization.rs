@@ -100,6 +100,17 @@ pub fn canonical_chunked_payload_typed_resident_bytes_estimate<'a>(
         })
 }
 
+/// Typed direct-decode estimate of a contiguous canonical payload: the same authority the
+/// scheduler's input facts use for chunked inputs, for producers that profile their own wire.
+pub fn canonical_payload_typed_resident_bytes_estimate(
+    encoded: &[u8],
+) -> Result<u64, CanonicalCodecError> {
+    canonical_chunked_payload_typed_resident_bytes_estimate(
+        std::iter::once(encoded),
+        &crate::NeverCancelled,
+    )
+}
+
 pub(crate) fn typed_resident_bytes_estimate(
     profile: value::MaterializationProfile,
 ) -> Result<u64, CanonicalCodecError> {

@@ -132,7 +132,7 @@ pub fn build_fluid_field_recovery_resource_plan(
             )?,
             admission::add(
                 d,
-                runmat_canonical_codec::canonical_payload_materialization_resident_bytes_estimate(
+                runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(
                     b,
                 )
                 .map_err(invalid)?,

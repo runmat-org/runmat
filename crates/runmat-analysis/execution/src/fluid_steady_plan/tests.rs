@@ -201,7 +201,8 @@ fn native_recovery_has_exact_original_layout_source_request_and_plan_without_sta
         output_policy: task.output_policy,
     })
     .unwrap();
-    assert_eq!(recovered.inputs.len(), 6);
+    // Workload, mesh, source resource plan, source result and the recovery resource plan.
+    assert_eq!(recovered.inputs.len(), 5);
     assert_eq!(
         recovered.host.workload.outputs,
         [AnalysisNumericalObjectKind::Field]
@@ -224,12 +225,12 @@ fn native_recovery_has_exact_original_layout_source_request_and_plan_without_sta
     let mut foreign = recovered.inputs.clone();
     let layout = foreign
         .iter_mut()
-        .find(|i| i.manifest.kind == AnalysisNumericalObjectKind::FieldSourceBinding)
+        .find(|i| i.manifest.kind == AnalysisNumericalObjectKind::SolverResult)
         .unwrap();
     *layout = prepare_analysis_objects(
-        AnalysisNumericalObjectKind::FieldSourceBinding,
+        AnalysisNumericalObjectKind::SolverResult,
         layout.manifest.logical_identity,
-        b"foreign layout",
+        b"foreign result",
         1024,
         ObjectNamespace::InputValue,
         recovered.output_policy.inventory_limits(),
@@ -244,7 +245,8 @@ fn native_recovery_has_exact_original_layout_source_request_and_plan_without_sta
     let native = original
         .recover_native_fields(&w, &m, &recovered.request)
         .unwrap();
-    assert_eq!(native.fields().len(), 3);
+    // Velocity, pressure, face flux, vorticity and wall shear stress.
+    assert_eq!(native.fields().len(), 5);
 }
 
 fn authored() -> (FluidSteadyWorkload, SolverMeshArtifact) {

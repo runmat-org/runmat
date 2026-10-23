@@ -74,11 +74,11 @@ pub(crate) fn projection_from_prepared(
     let request_bytes = request.canonical_bytes().map_err(invalid)?;
     let mesh_bytes = mesh.canonical_encode().map_err(invalid)?;
     let decode = add(
-        runmat_canonical_codec::canonical_payload_materialization_resident_bytes_estimate(
+        runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(
             &request_bytes,
         )
         .map_err(invalid)?,
-        runmat_canonical_codec::canonical_payload_materialization_resident_bytes_estimate(
+        runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(
             &mesh_bytes,
         )
         .map_err(invalid)?,

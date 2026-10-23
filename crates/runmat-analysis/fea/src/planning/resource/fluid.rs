@@ -104,11 +104,11 @@ pub fn derive_fluid_steady_resource_projection(
             .map_err(|_| ResourcePlanningError::Overflow("fluid mesh wire length"))?,
     )?;
     let actual_decode_resident_bytes = admission::add(
-        runmat_canonical_codec::canonical_payload_materialization_resident_bytes_estimate(
+        runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(
             &workload_bytes,
         )
         .map_err(invalid)?,
-        runmat_canonical_codec::canonical_payload_materialization_resident_bytes_estimate(
+        runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(
             &mesh_bytes,
         )
         .map_err(invalid)?,
