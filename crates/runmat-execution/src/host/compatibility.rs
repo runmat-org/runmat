@@ -186,19 +186,45 @@ impl ExecutionHostRequirement {
     pub fn is_satisfied_by(&self, host: &ExecutionHostInventory) -> Result<(), ContractError> {
         self.validate()?;
         host.validate()?;
-        let environment_matches = self.environments().all(|environment| {
-            environment.semantic_schema == host.semantic_schema
+        if let Some(environment) = self.environments().find(|environment| {
+            !(environment.semantic_schema == host.semantic_schema
                 && environment.compiler_schema == host.compiler_schema
                 && environment.runtime_fingerprint == host.runtime_fingerprint
                 && environment.catalog_fingerprint == host.catalog_fingerprint
                 && host
                     .compatibility_modes
-                    .contains(&environment.compatibility_mode)
-        });
-        if !environment_matches {
+                    .contains(&environment.compatibility_mode))
+        }) {
+            let differing = [
+                (environment.semantic_schema != host.semantic_schema).then_some("semantic schema"),
+                (environment.compiler_schema != host.compiler_schema).then_some("compiler schema"),
+                (environment.runtime_fingerprint != host.runtime_fingerprint)
+                    .then_some("runtime fingerprint"),
+                (environment.catalog_fingerprint != host.catalog_fingerprint)
+                    .then_some("catalog fingerprint"),
+                (!host
+                    .compatibility_modes
+                    .contains(&environment.compatibility_mode))
+                .then_some("compatibility mode"),
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(", ");
             return Err(ContractError::invalid(
                 "execution host",
-                "runtime, compiler, catalog, or compatibility-mode identity differs",
+                format!(
+                    "runtime, compiler, catalog, or compatibility-mode identity differs ({differing}): \
+                     required schemas {}/{} runtime {} catalog {}, host schemas {}/{} runtime {} catalog {}",
+                    environment.semantic_schema,
+                    environment.compiler_schema,
+                    environment.runtime_fingerprint,
+                    environment.catalog_fingerprint,
+                    host.semantic_schema,
+                    host.compiler_schema,
+                    host.runtime_fingerprint,
+                    host.catalog_fingerprint,
+                ),
             ));
         }
         match (&self.native_target, &host.target) {

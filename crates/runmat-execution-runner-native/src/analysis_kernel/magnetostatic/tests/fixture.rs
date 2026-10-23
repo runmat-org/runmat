@@ -4,7 +4,7 @@ use runmat_analysis_fea::{
     execution::MagnetostaticWorkload,
     fixtures::{fixture_model, FixtureId},
 };
-use runmat_execution::{ProgramEnvironment, ProgramRevision};
+use runmat_execution::ProgramRevision;
 use runmat_execution_artifact::{object::ObjectInventoryLimits, ArtifactAccess};
 use runmat_meshing_core::{
     fixtures::{quadratic_slab_mesh, slab_mesh},
@@ -134,10 +134,12 @@ pub(super) fn task(
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         authored_study_digest: d,
         frozen_project_digest: None,
+        // The process conformance harness runs this task on native workers, whose host
+        // identity is this binary's program environment; the fixture uses the same one.
         program_revision: ProgramRevision::new(
             d,
             d,
-            ProgramEnvironment::new(1, 1, d, d, "matlab").unwrap(),
+            runmat_core::program_environment(runmat_core::CompatMode::Matlab),
         )
         .unwrap(),
         artifact_access: ArtifactAccess {
