@@ -16,6 +16,10 @@ use super::state::HostState;
 #[path = "site/terminator_tests.rs"]
 mod terminator_tests;
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "site/retirement_tests.rs"]
+mod retirement_tests;
+
 pub(super) fn execute(
     state: &mut HostState,
     call: &mut NativeCall,
@@ -33,6 +37,10 @@ pub(super) fn execute(
             Err(error) => return Err(error),
         }
     }
+    // The observation tail has settled and no current operand borrow exists.
+    // Retire only obsolete generations, before the next operation can borrow
+    // arena payloads or produce an outgoing exception token.
+    state.retire_obsolete_generations(call)?;
     let result = execute_inner(state, call, request, exit);
     let observed = super::region::observation::after_site(state, request, &result);
     runmat_runtime::numeric_region::service::set_native_region_for_current_poll(

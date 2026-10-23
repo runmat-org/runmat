@@ -55,6 +55,12 @@ fn admitted(
                 source_digest: digest("spectra.m"),
             },
             executable_source_digest: digest("executable"),
+            compiled_binding: crate::named_callable::CompiledCallableBinding::fixture(
+                name,
+                name,
+                ProgramFunctionId(11),
+                digest("executable"),
+            ),
             function: ProgramFunctionId(11),
             captures: Vec::new(),
             generator_identity,

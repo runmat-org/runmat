@@ -1,6 +1,7 @@
 //! Admission and value boundaries for portable, pure engineering assessment functions.
 use crate::named_callable::{
     prepare_named_callable_descriptor, AnalysisCallablePurpose, NamedCallableAdmissionRef,
+    NamedCallableSourceRef,
 };
 use crate::{AnalysisBridgeError, AnalysisBridgeResult};
 use runmat_analysis_core::{AssessmentFunctionOutcome, AssessmentRule, AuthoredAssessment};
@@ -21,6 +22,7 @@ pub struct FrozenAssessmentCallable {
     revision: ProgramRevision,
     callable: BundleCallable,
     executable: ExecutableUnitEnvelope,
+    compiled_binding: crate::named_callable::CompiledCallableBinding,
 }
 
 impl FrozenAssessmentCallable {
@@ -30,12 +32,27 @@ impl FrozenAssessmentCallable {
         callable: BundleCallable,
         executable: ExecutableUnitEnvelope,
     ) -> AnalysisBridgeResult<Self> {
-        prepare_assessment_descriptor(&assessment, &revision, &callable, executable.clone())?;
+        executable.validate()?;
+        let compiled_binding =
+            crate::named_callable::CompiledCallableBinding::from_selected_identity(
+                &executable.manifest.identity,
+                &callable.qualified_name,
+            )?;
+        prepare_assessment_descriptor(
+            &assessment,
+            NamedCallableSourceRef {
+                program_revision: &revision,
+                callable: &callable,
+                compiled_binding: &compiled_binding,
+            },
+            executable.clone(),
+        )?;
         Ok(Self {
             assessment,
             revision,
             callable,
             executable,
+            compiled_binding,
         })
     }
 
@@ -46,8 +63,11 @@ impl FrozenAssessmentCallable {
     pub fn validate(&self) -> AnalysisBridgeResult<()> {
         prepare_assessment_descriptor(
             &self.assessment,
-            &self.revision,
-            &self.callable,
+            NamedCallableSourceRef {
+                program_revision: &self.revision,
+                callable: &self.callable,
+                compiled_binding: &self.compiled_binding,
+            },
             self.executable.clone(),
         )?;
         Ok(())
@@ -70,8 +90,11 @@ impl FrozenAssessmentCallable {
             measured_si,
             study_definition,
             evidence_identity,
-            &self.revision,
-            &self.callable,
+            NamedCallableSourceRef {
+                program_revision: &self.revision,
+                callable: &self.callable,
+                compiled_binding: &self.compiled_binding,
+            },
             self.executable.clone(),
         )
     }
@@ -190,14 +213,26 @@ pub fn prepare_assessment_program(
     measured_si: f64,
     study_definition: runmat_execution::Digest,
     evidence_identity: runmat_execution::Digest,
-    revision: &ProgramRevision,
-    callable: &BundleCallable,
+    source: NamedCallableSourceRef<'_>,
     executable: ExecutableUnitEnvelope,
 ) -> AnalysisBridgeResult<PreparedAssessmentProgram> {
+    let NamedCallableSourceRef {
+        program_revision: revision,
+        callable,
+        compiled_binding,
+    } = source;
     use runmat_execution_artifact::{
         ProgramExecutionInputs, ProgramExecutionRequest, PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
     };
-    let descriptor = prepare_assessment_descriptor(assessment, revision, callable, executable)?;
+    let descriptor = prepare_assessment_descriptor(
+        assessment,
+        NamedCallableSourceRef {
+            program_revision: revision,
+            callable,
+            compiled_binding,
+        },
+        executable,
+    )?;
     let inputs = ProgramExecutionInputs {
         schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION,
         context: runmat_execution::ProgramInvocationContext::Direct,
@@ -292,10 +327,14 @@ pub fn build_assessment_task_submission(
 /// workspace closure or unknown output contract can cross this boundary.
 pub fn prepare_assessment_descriptor(
     assessment: &AuthoredAssessment,
-    revision: &ProgramRevision,
-    callable: &BundleCallable,
+    source: NamedCallableSourceRef<'_>,
     executable: ExecutableUnitEnvelope,
 ) -> AnalysisBridgeResult<ProgramExecutionDescriptor> {
+    let NamedCallableSourceRef {
+        program_revision: revision,
+        callable,
+        compiled_binding,
+    } = source;
     let AssessmentRule::Function {
         function,
         parameters,
@@ -316,6 +355,10 @@ pub fn prepare_assessment_descriptor(
             "assessment callable differs from its checked source",
         ));
     }
+    // Authenticate against the original frozen selection before recovering
+    // static facts from a later executable candidate.
+    executable.validate()?;
+    compiled_binding.validate_candidate(&executable.manifest.identity, revision, callable)?;
     let facts =
         crate::callable::executable::verified_named_function(&executable, revision, callable)?;
     validate_assessment_function(
@@ -324,13 +367,14 @@ pub fn prepare_assessment_descriptor(
             AnalysisBridgeError::Invalid("assessment input count overflows".into())
         })?,
     )?;
-    let executable_source_digest = executable.manifest.identity.source_digest;
+    let executable_source_digest = compiled_binding.source_digest();
     prepare_named_callable_descriptor(
         NamedCallableAdmissionRef {
             program_revision: revision,
             callable,
+            compiled_binding,
             executable_source_digest,
-            function: facts.function,
+            function: compiled_binding.function(),
             required_capabilities: &facts.capabilities.0,
         },
         executable,

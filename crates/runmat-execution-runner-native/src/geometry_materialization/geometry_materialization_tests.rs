@@ -452,7 +452,19 @@ fn generated_geometry_requires_and_materializes_its_frozen_product_receipt() {
         },
         revision(),
         callable,
-        Digest::sha256(b"executable"),
+        runmat_analysis_execution::named_callable::CompiledCallableBinding::from_selected_identity(
+            &runmat_execution::ExecutableIdentity {
+                program: revision(),
+                root_package: "examples".into(),
+                entrypoint: "makeBoredBlock".into(),
+                entrypoint_function: Some(function.function),
+                entrypoint_kind: runmat_execution::ExecutableEntrypointKind::Function,
+                declaration_class: None,
+                source_digest: Digest::sha256(b"executable"),
+            },
+            "makeBoredBlock",
+        )
+        .unwrap(),
         &function,
         &BTreeSet::new(),
     )

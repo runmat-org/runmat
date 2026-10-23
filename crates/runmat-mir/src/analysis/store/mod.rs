@@ -1,6 +1,5 @@
 mod dependency;
 mod function;
-mod operation_contract;
 mod program_point;
 mod projection;
 mod region;
@@ -8,12 +7,11 @@ mod version;
 
 pub use dependency::*;
 pub use function::*;
-pub use operation_contract::*;
 pub use program_point::*;
 pub use region::*;
 pub use version::*;
 
-use crate::MirDiagnostic;
+use crate::{MirDiagnostic, MirOperationContract, MirOperationSite};
 use serde::{Deserialize, Serialize};
 
 /// Complete, portable semantic result for one MIR assembly.

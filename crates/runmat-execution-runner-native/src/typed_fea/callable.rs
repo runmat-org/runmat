@@ -4,7 +4,7 @@ use runmat_execution_artifact::BundleCallable;
 pub(super) struct CompiledImportedFunction {
     pub revision: ProgramRevision,
     pub callable: BundleCallable,
-    pub executable_source_digest: Digest,
+    pub compiled_binding: runmat_analysis_execution::named_callable::CompiledCallableBinding,
     pub function: runmat_mir::analysis::FunctionAnalysis,
     pub executable: runmat_execution::ExecutableUnitEnvelope,
 }
@@ -84,12 +84,6 @@ pub(super) async fn compile_imported_function(
         .install_project_handoff(runmat_package::FrozenProjectHandoff::new(frozen.clone()))
         .await
         .map_err(|error| error.to_string())?;
-    let entrypoint = definition
-        .qualified_name
-        .rsplit('.')
-        .next()
-        .filter(|name| !name.is_empty())
-        .ok_or_else(|| "FEA function has an empty function name".to_string())?;
     let executable_source = runmat_core::ExecutableSource::frozen(
         source_id.package_instance.to_string(),
         source_id.relative_path.as_str(),
@@ -115,7 +109,10 @@ pub(super) async fn compile_imported_function(
     }
     .map_err(|error| format!("cannot compile FEA function: {error}"))?;
     let executable = unit
-        .portable_envelope_for(Some(entrypoint))
+        // The frozen resolver already selected this exact primary source.
+        // Core owns source-entry/body/registry-name selection; package labels
+        // must not be reparsed here as executable registry names.
+        .portable_envelope()
         .map_err(|error| error.to_string())?;
     let function = unit
         .function_analysis(
@@ -127,6 +124,12 @@ pub(super) async fn compile_imported_function(
         )
         .cloned()
         .ok_or_else(|| "FEA function has no static function facts".to_string())?;
+    let compiled_binding =
+        runmat_analysis_execution::named_callable::CompiledCallableBinding::from_selected_identity(
+            &executable.manifest.identity,
+            &definition.qualified_name,
+        )
+        .map_err(|error| error.to_string())?;
     Ok(CompiledImportedFunction {
         revision,
         callable: BundleCallable {
@@ -134,7 +137,7 @@ pub(super) async fn compile_imported_function(
             qualified_name: definition.qualified_name,
             source_digest,
         },
-        executable_source_digest: executable.manifest.identity.source_digest,
+        compiled_binding,
         function,
         executable,
     })

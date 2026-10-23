@@ -84,6 +84,12 @@ fn admitted() -> AdmittedSignalGenerator {
             source_digest: digest("loads.m"),
         },
         executable_source_digest: digest("executable-source"),
+        compiled_binding: crate::named_callable::CompiledCallableBinding::fixture(
+            "loads.pulse",
+            "loads.pulse",
+            ProgramFunctionId(7),
+            digest("executable-source"),
+        ),
         function: ProgramFunctionId(7),
         captures: Vec::new(),
         generator_identity: GeneratorIdentity::new(

@@ -227,8 +227,11 @@ async fn execute_functions<'a, P: AnalysisTaskPool>(
             measured.value_si,
             report.study_definition,
             assessment_evidence_identity(report)?,
-            &imported.revision,
-            &imported.callable,
+            runmat_analysis_execution::named_callable::NamedCallableSourceRef {
+                program_revision: &imported.revision,
+                callable: &imported.callable,
+                compiled_binding: &imported.compiled_binding,
+            },
             imported.executable,
         )
         .map_err(|error| error.to_string())?;

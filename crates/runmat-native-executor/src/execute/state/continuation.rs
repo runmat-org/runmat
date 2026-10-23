@@ -1,6 +1,83 @@
 use super::*;
 
 impl HostState {
+    /// Reclaim obsolete physical generations, never logical SSA definitions.
+    /// Call only between settled native sites, with no arena Value borrow live.
+    pub(in crate::execute) fn retire_obsolete_generations(
+        &mut self,
+        call: &mut runmat_runtime::native::NativeCall,
+    ) -> NativeExecutorResult<()> {
+        if !self.arena.has_retirement_debt() {
+            return Ok(());
+        }
+        // Use the original allocation policy, not a guessed next-operation
+        // quote or ledger-pressure fraction. Finite mode pays a full census
+        // after any insertion or final-pin release so obsolete residents cannot
+        // consume the next operation's headroom. Current SSA/pins can still exhaust it.
+        // A policy error grants nothing and is left to its original operation
+        // owner; this maintenance check must not newly deny a pure operation.
+        let managed = matches!(
+            runmat_runtime::context::host_allocation::HostAllocationReceipt::policy(Some(
+                &self.runtime
+            )),
+            Ok(runmat_runtime::context::host_allocation::HostAllocationPolicy::Managed)
+        );
+        if !managed && !self.arena.retirement_due() {
+            return Ok(());
+        }
+        if call.frame.is_null() {
+            return Err(NativeExecutorError::Host("native call has no frame".into()));
+        }
+        // Reuse the canonical typed-owner root census, without mirroring SSA
+        // tokens into another variable-width root buffer. Refresh may relocate
+        // that buffer, so republish its borrowed ABI view before proceeding.
+        let roots = self.refresh_roots();
+        // SAFETY: the checked frame is borrowed from ActiveInvocation for the
+        // complete synchronous machine entry.
+        unsafe { (*call.frame).roots = roots };
+        self.arena.begin_retirement();
+        for root in &self.roots {
+            self.arena.mark_resident(root.value)?;
+        }
+        // Frame materialization and evaluated operands may still require an
+        // old local generation. NativeFrameState is not a last-use analysis.
+        for reference in self.values.values() {
+            self.arena.mark_resident(*reference)?;
+        }
+        // ActiveInvocation owns initialized argument/result windows throughout
+        // each machine entry. Generated code retains no additional opaque
+        // Value tokens outside those windows and HostState's typed owners.
+        if call.argument_count != 0 {
+            if call.arguments.is_null() {
+                return Err(NativeExecutorError::Host(
+                    "native arguments are missing".into(),
+                ));
+            }
+            // SAFETY: ActiveInvocation::enter_once publishes its initialized
+            // argument_refs vector and its exact length for this entry.
+            for reference in
+                unsafe { std::slice::from_raw_parts(call.arguments, call.argument_count) }
+            {
+                self.arena.mark_resident(*reference)?;
+            }
+        }
+        if call.result_capacity != 0 {
+            if call.results.is_null() {
+                return Err(NativeExecutorError::Host(
+                    "native results are missing".into(),
+                ));
+            }
+            // SAFETY: ActiveInvocation allocates results as vec![NULL; count],
+            // clears it before entry, and publishes that vector's exact length.
+            for reference in
+                unsafe { std::slice::from_raw_parts(call.results, call.result_capacity) }
+            {
+                self.arena.mark_resident(*reference)?;
+            }
+        }
+        self.arena.finish_retirement()
+    }
+
     /// A catch edge abandons the throwing native site, including every
     /// partially prepared mutation. None of these cursors may be replayed at
     /// the handler's next site, even when that site has the same MIR shape.

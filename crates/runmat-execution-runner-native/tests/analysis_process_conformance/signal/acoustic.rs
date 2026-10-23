@@ -83,7 +83,11 @@ async fn prepare(drive: Drive) -> SignalFixture {
             qualified_name: "loads.pulse".into(),
             source_digest: Digest::sha256(source),
         },
-        unit.revision().source_digest.parse().unwrap(),
+        runmat_analysis_execution::named_callable::CompiledCallableBinding::from_selected_identity(
+            &executable.manifest.identity,
+            "loads.pulse",
+        )
+        .unwrap(),
         function,
         &BTreeSet::new(),
     )

@@ -255,6 +255,16 @@ fn function_entrypoint(
         name
     } else if unit.functions().resolve_name(&body.display_name) == Some(function) {
         &body.display_name
+    } else if let Some(alias) = unit
+        .functions()
+        .names
+        .keys()
+        .filter(|alias| unit.functions().resolve_name(alias) == Some(function))
+        .min()
+    {
+        // Text never selects another body: this reverse lookup runs only after
+        // MIR selection and admits an exact registered alias of that coordinate.
+        alias
     } else {
         return Err("executable entrypoint has no exact admitted registry name".into());
     };

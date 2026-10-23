@@ -79,6 +79,11 @@ pub(crate) fn materialize_runtime_signal(
     {
         bail!("runtime signal callable differs from its frozen executable product");
     }
+    let compiled_binding =
+        runmat_analysis_execution::named_callable::CompiledCallableBinding::from_selected_identity(
+            identity,
+            &program.display_name,
+        )?;
     let admission = admit_callable_signal_generator(
         &request.signal,
         identity.program.clone(),
@@ -87,7 +92,7 @@ pub(crate) fn materialize_runtime_signal(
             qualified_name: program.display_name,
             source_digest: program.source_digest,
         },
-        program.executable_source_digest,
+        compiled_binding,
         &function,
         request.callable,
         &BTreeSet::new(),

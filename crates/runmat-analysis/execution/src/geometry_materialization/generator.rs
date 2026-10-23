@@ -19,6 +19,8 @@ use crate::{
 };
 
 pub const GENERATED_GEOMETRY_RUNTIME_CLASS: &str = "geometry.Generated";
+use crate::named_callable::CompiledCallableBinding;
+
 const GENERATED_ADMISSION_PREFIX: &[u8] = b"runmat-generated-geometry-admission\0";
 const CONTRACT_LIMITS: CanonicalLimits = CanonicalLimits::new(1024 * 1024, 100_000, 100_000, 64);
 
@@ -34,6 +36,11 @@ pub struct AdmittedGeometryGenerator {
 impl AdmittedGeometryGenerator {
     pub fn validate(&self) -> AnalysisBridgeResult<()> {
         self.invocation.program_revision.validate()?;
+        self.invocation.compiled_binding.validate_admission(
+            &self.invocation.callable,
+            self.invocation.function,
+            self.invocation.executable_source_digest,
+        )?;
         validate_resolved_request(&self.request)?;
         if self.invocation.callable.owner_identity.trim().is_empty()
             || self.invocation.callable.qualified_name != self.request.function
@@ -53,6 +60,7 @@ impl AdmittedGeometryGenerator {
                 &self.invocation.program_revision,
                 &self.invocation.callable,
                 self.invocation.executable_source_digest,
+                &self.invocation.compiled_binding,
                 self.invocation.function,
                 &self.request,
                 &self.arguments,
@@ -80,6 +88,7 @@ impl GeneratorProgramAdmission for AdmittedGeometryGenerator {
             program_revision: &self.invocation.program_revision,
             callable: &self.invocation.callable,
             executable_source_digest: self.invocation.executable_source_digest,
+            compiled_binding: &self.invocation.compiled_binding,
             function: self.invocation.function,
             generator_identity: self.invocation.generator_identity,
             required_capabilities: &self.invocation.required_capabilities,
@@ -119,11 +128,13 @@ pub fn admit_named_geometry_generator(
     request: ResolvedGeneratedGeometryRequest,
     program_revision: ProgramRevision,
     callable: BundleCallable,
-    executable_source_digest: Digest,
+    compiled_binding: CompiledCallableBinding,
     function: &FunctionAnalysis,
     available_capabilities: &BTreeSet<CapabilityRequirement>,
 ) -> AnalysisBridgeResult<AdmittedGeometryGenerator> {
+    let executable_source_digest = compiled_binding.source_digest();
     program_revision.validate()?;
+    compiled_binding.validate_admission(&callable, function.function, executable_source_digest)?;
     if callable.owner_identity.trim().is_empty()
         || callable.qualified_name != request.function
         || callable.source_digest.bytes() != request.source_digest.bytes()
@@ -161,6 +172,7 @@ pub fn admit_named_geometry_generator(
             &program_revision,
             &callable,
             executable_source_digest,
+            &compiled_binding,
             function.function,
             &request,
             &arguments,
@@ -170,6 +182,7 @@ pub fn admit_named_geometry_generator(
             program_revision: program_revision.clone(),
             callable,
             executable_source_digest,
+            compiled_binding,
             function: function.function,
             captures: Vec::new(),
             generator_identity,
@@ -352,6 +365,7 @@ fn geometry_generator_identities(
     program_revision: &ProgramRevision,
     callable: &BundleCallable,
     executable_source_digest: Digest,
+    compiled_binding: &CompiledCallableBinding,
     function: runmat_types::ProgramFunctionId,
     request: &ResolvedGeneratedGeometryRequest,
     arguments: &[ValuePayload],
@@ -362,6 +376,7 @@ fn geometry_generator_identities(
             program_revision,
             callable,
             executable_source_digest,
+            compiled_binding,
             function,
         ),
     )?;

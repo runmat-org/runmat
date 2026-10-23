@@ -24,7 +24,9 @@ use runmat_types::{
 
 use crate::{AnalysisBridgeError, AnalysisBridgeResult};
 
-const ADMISSION_PREFIX: &[u8] = b"runmat-analysis-generator-admission/v1\0";
+use crate::named_callable::CompiledCallableBinding;
+
+const ADMISSION_PREFIX: &[u8] = b"runmat-analysis-generator-admission/v2\0";
 const ADMISSION_LIMITS: CanonicalLimits = CanonicalLimits::new(8 * 1024 * 1024, 65_536, 4096, 32);
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -34,6 +36,7 @@ pub struct AdmittedSignalGenerator {
     pub program_revision: ProgramRevision,
     pub callable: BundleCallable,
     pub executable_source_digest: Digest,
+    pub compiled_binding: CompiledCallableBinding,
     pub function: runmat_types::ProgramFunctionId,
     pub captures: Vec<ValuePayload>,
     pub generator_identity: GeneratorIdentity,
@@ -49,6 +52,7 @@ pub struct AdmittedGeneratorInvocation {
     pub program_revision: ProgramRevision,
     pub callable: BundleCallable,
     pub executable_source_digest: Digest,
+    pub compiled_binding: CompiledCallableBinding,
     pub function: runmat_types::ProgramFunctionId,
     pub captures: Vec<ValuePayload>,
     pub generator_identity: GeneratorIdentity,
@@ -106,6 +110,7 @@ struct CallableAdmission<'a> {
     program_revision: ProgramRevision,
     callable: BundleCallable,
     executable_source_digest: Digest,
+    compiled_binding: CompiledCallableBinding,
     function: &'a FunctionAnalysis,
     available_capabilities: &'a BTreeSet<CapabilityRequirement>,
 }
@@ -125,10 +130,11 @@ pub fn admit_named_signal_generator(
     signal: &PhysicalSignal,
     program_revision: ProgramRevision,
     callable: BundleCallable,
-    executable_source_digest: Digest,
+    compiled_binding: CompiledCallableBinding,
     function: &FunctionAnalysis,
     available_capabilities: &BTreeSet<CapabilityRequirement>,
 ) -> AnalysisBridgeResult<AdmittedSignalGenerator> {
+    let executable_source_digest = compiled_binding.source_digest();
     let generator = signal.generator().ok_or_else(|| {
         AnalysisBridgeError::Invalid("signal is not backed by a callable generator".into())
     })?;
@@ -147,6 +153,7 @@ pub fn admit_named_signal_generator(
             program_revision,
             callable,
             executable_source_digest,
+            compiled_binding,
             function,
             available_capabilities,
         },
@@ -163,11 +170,12 @@ pub fn admit_callable_signal_generator(
     signal: &PhysicalSignal,
     program_revision: ProgramRevision,
     callable: BundleCallable,
-    executable_source_digest: Digest,
+    compiled_binding: CompiledCallableBinding,
     function: &FunctionAnalysis,
     frozen_callable: CallableValue,
     available_capabilities: &BTreeSet<CapabilityRequirement>,
 ) -> AnalysisBridgeResult<AdmittedSignalGenerator> {
+    let executable_source_digest = compiled_binding.source_digest();
     frozen_callable.validate_identity()?;
     let generator = signal.generator().ok_or_else(|| {
         AnalysisBridgeError::Invalid("signal is not backed by a callable generator".into())
@@ -204,6 +212,7 @@ pub fn admit_callable_signal_generator(
             program_revision,
             callable,
             executable_source_digest,
+            compiled_binding,
             function,
             available_capabilities,
         },
@@ -218,10 +227,11 @@ pub fn admit_named_response_spectrum_generator(
     spectrum: &ResponseSpectrum,
     program_revision: ProgramRevision,
     callable: BundleCallable,
-    executable_source_digest: Digest,
+    compiled_binding: CompiledCallableBinding,
     function: &FunctionAnalysis,
     available_capabilities: &BTreeSet<CapabilityRequirement>,
 ) -> AnalysisBridgeResult<AdmittedNumericalGenerator> {
+    let executable_source_digest = compiled_binding.source_digest();
     let invocation = spectrum.ordinates.generator().ok_or_else(|| {
         AnalysisBridgeError::Invalid("response spectrum is not callable-backed".into())
     })?;
@@ -231,6 +241,7 @@ pub fn admit_named_response_spectrum_generator(
             program_revision,
             callable,
             executable_source_digest,
+            compiled_binding,
             function,
             available_capabilities,
         },
@@ -267,10 +278,11 @@ pub fn admit_named_random_spectrum_generator(
     spectrum: &RandomExcitationSpectrum,
     program_revision: ProgramRevision,
     callable: BundleCallable,
-    executable_source_digest: Digest,
+    compiled_binding: CompiledCallableBinding,
     function: &FunctionAnalysis,
     available_capabilities: &BTreeSet<CapabilityRequirement>,
 ) -> AnalysisBridgeResult<AdmittedNumericalGenerator> {
+    let executable_source_digest = compiled_binding.source_digest();
     let invocation = spectrum.spectral_density.generator().ok_or_else(|| {
         AnalysisBridgeError::Invalid("random spectrum is not callable-backed".into())
     })?;
@@ -280,6 +292,7 @@ pub fn admit_named_random_spectrum_generator(
             program_revision,
             callable,
             executable_source_digest,
+            compiled_binding,
             function,
             available_capabilities,
         },
@@ -404,6 +417,7 @@ fn admit_signal_generator(
         program_revision: admitted.program_revision,
         callable: admitted.callable,
         executable_source_digest: admitted.executable_source_digest,
+        compiled_binding: admitted.compiled_binding,
         function: admitted.function,
         captures: admitted.captures,
         generator_identity: admitted.generator_identity,
@@ -424,6 +438,7 @@ fn admit_generator_invocation(
         program_revision,
         callable,
         executable_source_digest,
+        compiled_binding,
         function,
         available_capabilities,
     } = callable;
@@ -432,6 +447,7 @@ fn admit_generator_invocation(
         callable_value_digest,
     } = binding;
     program_revision.validate()?;
+    compiled_binding.validate_admission(&callable, function.function, executable_source_digest)?;
     if callable.owner_identity.trim().is_empty()
         || callable.qualified_name != invocation.callable.display_name()
     {
@@ -464,6 +480,7 @@ fn admit_generator_invocation(
             &callable.qualified_name,
             callable.source_digest,
             executable_source_digest,
+            &compiled_binding,
             function.function,
             callable_value_digest,
         ),
@@ -479,6 +496,7 @@ fn admit_generator_invocation(
         program_revision: program_revision.clone(),
         callable,
         executable_source_digest,
+        compiled_binding,
         function: function.function,
         captures,
         generator_identity,
@@ -827,7 +845,12 @@ mod tests {
             &signal(),
             revision(),
             callable(),
-            digest("executable-source"),
+            CompiledCallableBinding::fixture(
+                "pulse",
+                "loads.pulse",
+                runmat_types::ProgramFunctionId(7),
+                digest("executable-source"),
+            ),
             &analysis(),
             &BTreeSet::new(),
         )
@@ -836,7 +859,12 @@ mod tests {
             &signal(),
             revision(),
             callable(),
-            digest("executable-source"),
+            CompiledCallableBinding::fixture(
+                "pulse",
+                "loads.pulse",
+                runmat_types::ProgramFunctionId(7),
+                digest("executable-source"),
+            ),
             &analysis(),
             &BTreeSet::new(),
         )
@@ -862,7 +890,12 @@ mod tests {
                 &PhysicalSignal::Force(invalid),
                 revision(),
                 callable(),
-                digest("executable-source"),
+                CompiledCallableBinding::fixture(
+                    "pulse",
+                    "loads.pulse",
+                    runmat_types::ProgramFunctionId(7),
+                    digest("executable-source")
+                ),
                 &analysis(),
                 &BTreeSet::new(),
             )
@@ -876,18 +909,47 @@ mod tests {
             &signal(),
             revision(),
             callable(),
-            digest("executable-source"),
+            CompiledCallableBinding::fixture(
+                "pulse",
+                "loads.pulse",
+                runmat_types::ProgramFunctionId(7),
+                digest("executable-source"),
+            ),
             &analysis(),
             &BTreeSet::new(),
         )
         .unwrap();
+        let changed_registry_binding = admit_named_signal_generator(
+            &signal(),
+            revision(),
+            callable(),
+            CompiledCallableBinding::fixture(
+                "registeredPulse",
+                "loads.pulse",
+                runmat_types::ProgramFunctionId(7),
+                digest("executable-source"),
+            ),
+            &analysis(),
+            &BTreeSet::new(),
+        )
+        .unwrap();
+        assert_ne!(
+            baseline.generator_identity,
+            changed_registry_binding.generator_identity
+        );
+        assert_eq!(baseline.callable, changed_registry_binding.callable);
         let mut changed_callable = callable();
         changed_callable.source_digest = digest("changed-loads.m");
         let changed_source = admit_named_signal_generator(
             &signal(),
             revision(),
             changed_callable,
-            digest("executable-source"),
+            CompiledCallableBinding::fixture(
+                "pulse",
+                "loads.pulse",
+                runmat_types::ProgramFunctionId(7),
+                digest("executable-source"),
+            ),
             &analysis(),
             &BTreeSet::new(),
         )
@@ -904,7 +966,12 @@ mod tests {
             &changed_signal,
             revision(),
             callable(),
-            digest("executable-source"),
+            CompiledCallableBinding::fixture(
+                "pulse",
+                "loads.pulse",
+                runmat_types::ProgramFunctionId(7),
+                digest("executable-source"),
+            ),
             &analysis(),
             &BTreeSet::new(),
         )
@@ -925,7 +992,12 @@ mod tests {
             &changed_sampling_signal,
             revision(),
             callable(),
-            digest("executable-source"),
+            CompiledCallableBinding::fixture(
+                "pulse",
+                "loads.pulse",
+                runmat_types::ProgramFunctionId(7),
+                digest("executable-source"),
+            ),
             &analysis(),
             &BTreeSet::new(),
         )
@@ -939,7 +1011,12 @@ mod tests {
             &renamed_signal,
             revision(),
             callable(),
-            digest("executable-source"),
+            CompiledCallableBinding::fixture(
+                "pulse",
+                "loads.pulse",
+                runmat_types::ProgramFunctionId(7),
+                digest("executable-source"),
+            ),
             &analysis(),
             &BTreeSet::new(),
         )
@@ -1023,7 +1100,12 @@ mod tests {
             &bound_signal,
             revision(),
             callable(),
-            digest("executable-source"),
+            CompiledCallableBinding::fixture(
+                "pulse",
+                "loads.pulse",
+                runmat_types::ProgramFunctionId(7),
+                digest("executable-source"),
+            ),
             &facts,
             frozen(2.0),
             &BTreeSet::new(),
@@ -1033,7 +1115,12 @@ mod tests {
             &bound_signal,
             revision(),
             callable(),
-            digest("executable-source"),
+            CompiledCallableBinding::fixture(
+                "pulse",
+                "loads.pulse",
+                runmat_types::ProgramFunctionId(7),
+                digest("executable-source"),
+            ),
             &facts,
             frozen(3.0),
             &BTreeSet::new(),
@@ -1059,7 +1146,12 @@ mod tests {
             &bound_signal,
             revision(),
             callable(),
-            digest("executable-source"),
+            CompiledCallableBinding::fixture(
+                "pulse",
+                "loads.pulse",
+                runmat_types::ProgramFunctionId(7),
+                digest("executable-source")
+            ),
             &facts,
             unresolved,
             &BTreeSet::new(),
@@ -1074,7 +1166,12 @@ mod tests {
             &bound_signal,
             revision(),
             callable(),
-            digest("executable-source"),
+            CompiledCallableBinding::fixture(
+                "pulse",
+                "loads.pulse",
+                runmat_types::ProgramFunctionId(7),
+                digest("executable-source")
+            ),
             &facts,
             wrong_capture_type,
             &BTreeSet::new(),
@@ -1106,7 +1203,12 @@ mod tests {
                 &signal(),
                 revision(),
                 callable(),
-                digest("executable-source"),
+                CompiledCallableBinding::fixture(
+                    "pulse",
+                    "loads.pulse",
+                    runmat_types::ProgramFunctionId(7),
+                    digest("executable-source")
+                ),
                 &facts,
                 &BTreeSet::new(),
             )
@@ -1122,7 +1224,12 @@ mod tests {
             &signal(),
             revision(),
             callable(),
-            digest("executable-source"),
+            CompiledCallableBinding::fixture(
+                "pulse",
+                "loads.pulse",
+                runmat_types::ProgramFunctionId(7),
+                digest("executable-source")
+            ),
             &scalar_axis,
             &BTreeSet::new(),
         )
@@ -1134,7 +1241,12 @@ mod tests {
             &signal(),
             revision(),
             callable(),
-            digest("executable-source"),
+            CompiledCallableBinding::fixture(
+                "pulse",
+                "loads.pulse",
+                runmat_types::ProgramFunctionId(7),
+                digest("executable-source")
+            ),
             &wrong_argument_class,
             &BTreeSet::new(),
         )
@@ -1162,7 +1274,12 @@ mod tests {
             &seeded_signal,
             revision(),
             callable(),
-            digest("executable-source"),
+            CompiledCallableBinding::fixture(
+                "pulse",
+                "loads.pulse",
+                runmat_types::ProgramFunctionId(7),
+                digest("executable-source")
+            ),
             &random,
             &BTreeSet::new(),
         )
@@ -1184,7 +1301,12 @@ mod tests {
             &seeded_signal,
             revision(),
             callable(),
-            digest("executable-source"),
+            CompiledCallableBinding::fixture(
+                "pulse",
+                "loads.pulse",
+                runmat_types::ProgramFunctionId(7),
+                digest("executable-source")
+            ),
             &random,
             &BTreeSet::new(),
         )

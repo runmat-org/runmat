@@ -15,6 +15,7 @@ use crate::{NativeExecutorError, NativeExecutorResult};
 struct Entry {
     generation: u64,
     references: usize,
+    marked: bool,
     value: Option<EntryValue>,
 }
 
@@ -34,6 +35,25 @@ enum EntryValue {
 }
 
 impl EntryValue {
+    /// A cadence signal, not a new allocation quote or ownership charge.
+    /// Unknown heap forests force the next boundary without walking payloads.
+    fn retirement_bytes(&self) -> usize {
+        let value = match self {
+            Self::Owned(value) => value,
+            Self::Retained(lease) => lease.value(),
+            Self::Capture(lease) => lease.value(),
+            Self::CellElement { .. } => return 0,
+        };
+        match value {
+            Value::Int(_) | Value::Num(_) | Value::Complex(_, _) | Value::Bool(_) => 0,
+            Value::Tensor(tensor) => tensor
+                .host_buffer()
+                .checked_byte_len()
+                .unwrap_or(usize::MAX),
+            _ => usize::MAX,
+        }
+    }
+
     fn value(&self) -> &Value {
         match self {
             Self::Owned(value) => value,
@@ -59,6 +79,9 @@ pub struct ValueArena {
     // keeps that pointer stable when the arena itself moves into HostState.
     entries: Box<ArenaEntries>,
     free: Vec<usize>,
+    retirement_debt: usize,
+    payload_byte_debt: usize,
+    retirement_threshold: usize,
     #[cfg(not(target_arch = "wasm32"))]
     root_id: Option<RootId>,
 }
@@ -68,6 +91,9 @@ impl ValueArena {
         let arena = Self {
             entries: Box::default(),
             free: Vec::new(),
+            retirement_debt: 0,
+            payload_byte_debt: 0,
+            retirement_threshold: 64,
             #[cfg(not(target_arch = "wasm32"))]
             root_id: None,
         };
@@ -158,17 +184,23 @@ impl ValueArena {
     }
 
     fn insert_entry(&mut self, value: EntryValue) -> NativeValueRef {
+        self.payload_byte_debt = self
+            .payload_byte_debt
+            .saturating_add(value.retirement_bytes());
         let index = self.free.pop().unwrap_or_else(|| {
             self.entries.values.push(Entry {
                 generation: 1,
                 references: 0,
+                marked: false,
                 value: None,
             });
             self.entries.values.len() - 1
         });
         let entry = &mut self.entries.values[index];
         entry.references = 1;
+        entry.marked = false;
         entry.value = Some(value);
+        self.retirement_debt = self.retirement_debt.saturating_add(1);
         NativeValueRef {
             handle: index as u64 + 1,
             generation: entry.generation,
@@ -206,6 +238,92 @@ impl ValueArena {
         Ok(())
     }
 
+    /// Only the executor's settled ownership boundary may retire baseline
+    /// arena residents. Public insert/retain/release semantics are unchanged.
+    pub(crate) fn has_retirement_debt(&self) -> bool {
+        self.retirement_debt != 0
+    }
+
+    pub(crate) fn retirement_due(&self) -> bool {
+        self.retirement_debt >= self.retirement_threshold || self.payload_byte_debt >= 256 * 1024
+    }
+
+    pub(crate) fn begin_retirement(&mut self) {
+        for entry in &mut self.entries.values {
+            entry.marked = false;
+        }
+    }
+
+    pub(crate) fn mark_resident(&mut self, reference: NativeValueRef) -> NativeExecutorResult<()> {
+        if !reference.is_null() {
+            self.entry_mut(reference)?.marked = true;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn finish_retirement(&mut self) -> NativeExecutorResult<()> {
+        // Retire dead children before considering parents: a parent may have
+        // released its initial residence and be owned solely by that edge.
+        // Surviving children (marked or explicitly retained) protect ancestors.
+        // Nested CellElements are forbidden by insert_cell_element.
+        for index in 0..self.entries.values.len() {
+            let entry = &self.entries.values[index];
+            let Some(EntryValue::CellElement { parent, .. }) = &entry.value else {
+                continue;
+            };
+            if entry.marked || entry.references > 1 {
+                let parent = *parent;
+                self.mark_resident(parent)?;
+            } else {
+                let reference = NativeValueRef {
+                    handle: index as u64 + 1,
+                    generation: entry.generation,
+                };
+                self.release(reference)?;
+            }
+        }
+        for index in 0..self.entries.values.len() {
+            let entry = &self.entries.values[index];
+            // Locals/SSA aliases borrow one arena residence; explicit retains
+            // (including CellElement parent dependencies) must remain intact.
+            if entry.value.is_some() && !entry.marked && entry.references == 1 {
+                let reference = NativeValueRef {
+                    handle: index as u64 + 1,
+                    generation: entry.generation,
+                };
+                self.release(reference)?;
+            }
+        }
+        let survivors = self
+            .entries
+            .values
+            .iter()
+            .filter(|entry| entry.value.is_some())
+            .count();
+        self.retirement_debt = 0;
+        self.payload_byte_debt = 0;
+        // Amortize scans against historical slot highwater as well as current
+        // residents. Half-highwater permits reuse without forcing fresh slots
+        // each cycle, unlike a whole-highwater insertion threshold.
+        self.retirement_threshold = survivors
+            .saturating_add(64)
+            .max(self.entries.values.len() / 2);
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn retirement_stats(&self) -> (usize, usize, usize) {
+        (
+            self.entries
+                .values
+                .iter()
+                .filter(|entry| entry.value.is_some())
+                .count(),
+            self.entries.values.len(),
+            self.entries.values.capacity(),
+        )
+    }
+
     pub fn release(&mut self, reference: NativeValueRef) -> NativeExecutorResult<()> {
         if reference.is_null() {
             return Ok(());
@@ -223,6 +341,12 @@ impl ValueArena {
             return Err(NativeExecutorError::StaleValue);
         }
         entry.references -= 1;
+        // The last explicit pin may disappear without another insertion.
+        // Revisit this potentially obsolete residence at the next lawful
+        // boundary, using the existing debt rather than another owner tracker.
+        if entry.references == 1 {
+            self.retirement_debt = self.retirement_debt.max(1);
+        }
         let retired = if entry.references == 0 {
             let retired = entry.value.take();
             // A wrapped generation could make a prehistoric reference valid
@@ -405,6 +529,122 @@ fn checked_index(reference: NativeValueRef) -> NativeExecutorResult<usize> {
 mod tests {
     use super::*;
     use runmat_runtime::workspace::WorkspaceValueReadLease;
+
+    #[test]
+    fn retirement_preserves_marked_aliases_and_explicit_pins() {
+        let mut arena = ValueArena::new().unwrap();
+        let alias = arena.insert(Value::Num(1.0));
+        let pinned = arena.insert(Value::Num(2.0));
+        let dead = arena.insert(Value::Num(3.0));
+        arena.retain(pinned).unwrap();
+        arena.begin_retirement();
+        arena.mark_resident(alias).unwrap();
+        arena.mark_resident(alias).unwrap();
+        arena.finish_retirement().unwrap();
+        assert_eq!(arena.get(alias).unwrap(), &Value::Num(1.0));
+        assert_eq!(arena.get(pinned).unwrap(), &Value::Num(2.0));
+        assert!(matches!(
+            arena.get(dead),
+            Err(NativeExecutorError::StaleValue)
+        ));
+        let reused = arena.insert(Value::Num(4.0));
+        assert_eq!(dead.handle, reused.handle);
+        assert_ne!(dead.generation, reused.generation);
+        // Marking a stale owner is an error, not a silent alias of a reused slot.
+        assert!(matches!(
+            arena.mark_resident(dead),
+            Err(NativeExecutorError::StaleValue)
+        ));
+        arena.begin_retirement();
+        arena.mark_resident(alias).unwrap();
+        arena.finish_retirement().unwrap();
+        assert!(!arena.has_retirement_debt());
+        arena.release(pinned).unwrap();
+        assert!(arena.has_retirement_debt());
+        arena.begin_retirement();
+        arena.mark_resident(alias).unwrap();
+        arena.finish_retirement().unwrap();
+        assert!(matches!(
+            arena.get(pinned),
+            Err(NativeExecutorError::StaleValue)
+        ));
+    }
+
+    #[test]
+    fn retirement_runs_only_after_amortized_allocation_debt() {
+        let mut arena = ValueArena::new().unwrap();
+        assert!(!arena.has_retirement_debt());
+        for _ in 0..63 {
+            arena.insert(Value::Num(1.0));
+        }
+        assert!(!arena.retirement_due());
+        assert!(arena.has_retirement_debt());
+        arena.insert(Value::Num(2.0));
+        assert!(arena.retirement_due());
+        arena.begin_retirement();
+        arena.finish_retirement().unwrap();
+        assert_eq!(arena.retirement_stats().0, 0);
+        assert!(!arena.has_retirement_debt());
+        assert!(!arena.retirement_due());
+        for _ in 0..64 {
+            arena.insert(Value::Num(3.0));
+        }
+        assert!(arena.retirement_due());
+        assert_eq!(arena.retirement_stats().1, 64);
+    }
+
+    #[test]
+    fn retirement_preserves_child_owned_parent_after_original_release() {
+        let mut arena = ValueArena::new().unwrap();
+        let parent = arena.insert(Value::Cell(
+            runmat_value::CellArray::new(vec![Value::Num(9.0)], 1, 1).unwrap(),
+        ));
+        let child = arena.insert_cell_element(parent, 0).unwrap();
+        arena.release(parent).unwrap();
+        arena.begin_retirement();
+        arena.mark_resident(child).unwrap();
+        arena.finish_retirement().unwrap();
+        assert_eq!(arena.get(child).unwrap(), &Value::Num(9.0));
+        arena.begin_retirement();
+        arena.finish_retirement().unwrap();
+        assert!(matches!(
+            arena.get(child),
+            Err(NativeExecutorError::StaleValue)
+        ));
+        assert!(matches!(
+            arena.get(parent),
+            Err(NativeExecutorError::StaleValue)
+        ));
+    }
+
+    #[test]
+    fn retirement_cadence_bounds_shallow_payload_debt_without_traversal() {
+        let mut arena = ValueArena::new().unwrap();
+        let small =
+            Value::Tensor(runmat_value::Tensor::new(vec![1.0; 1024], vec![1024, 1]).unwrap());
+        for _ in 0..31 {
+            arena.insert(small.clone());
+        }
+        assert!(!arena.retirement_due());
+        arena.insert(small);
+        assert!(arena.retirement_due());
+        arena.begin_retirement();
+        arena.finish_retirement().unwrap();
+        assert!(!arena.retirement_due());
+        let large = arena.insert(Value::Tensor(
+            runmat_value::Tensor::new(vec![1.0; 32768], vec![32768, 1]).unwrap(),
+        ));
+        assert!(
+            arena.retirement_due(),
+            "one large payload forces next boundary"
+        );
+        arena.begin_retirement();
+        arena.mark_resident(large).unwrap();
+        arena.finish_retirement().unwrap();
+        assert!(!arena.retirement_due());
+        arena.insert(Value::String("opaque heap backing".into()));
+        assert!(arena.retirement_due(), "unknown backing is conservative");
+    }
 
     fn workspace_lease(value: Value) -> WorkspaceValueReadLease {
         use runmat_runtime::workspace::{

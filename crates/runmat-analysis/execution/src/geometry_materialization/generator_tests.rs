@@ -115,7 +115,12 @@ fn admitted() -> AdmittedGeometryGenerator {
         request(),
         revision(),
         callable(),
-        digest("executable"),
+        crate::named_callable::CompiledCallableBinding::fixture(
+            "makeBracket",
+            "makeBracket",
+            ProgramFunctionId(7),
+            digest("executable"),
+        ),
         &analysis(),
         &BTreeSet::new(),
     )
@@ -219,7 +224,12 @@ fn admission_rejects_mutable_or_effectful_generator_contracts() {
         request(),
         revision(),
         callable(),
-        digest("executable"),
+        crate::named_callable::CompiledCallableBinding::fixture(
+            "makeBracket",
+            "makeBracket",
+            ProgramFunctionId(7),
+            digest("executable")
+        ),
         &mutable,
         &BTreeSet::new(),
     )
@@ -231,7 +241,12 @@ fn admission_rejects_mutable_or_effectful_generator_contracts() {
         request(),
         revision(),
         callable(),
-        digest("executable"),
+        crate::named_callable::CompiledCallableBinding::fixture(
+            "makeBracket",
+            "makeBracket",
+            ProgramFunctionId(7),
+            digest("executable")
+        ),
         &effectful,
         &BTreeSet::new(),
     )

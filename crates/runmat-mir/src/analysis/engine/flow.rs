@@ -18,7 +18,8 @@ use crate::analysis::inference::{
     infer_rvalue, infer_rvalue_outputs, operand_fact, rvalue_literal, statement_phase_contract,
 };
 use crate::analysis::workspace_effect::statement_exposes_current_workspace;
-use crate::analysis::{AssignmentFact, MirOperationContract, ProgramLocalFact, ProgramPointFacts};
+use crate::analysis::{AssignmentFact, ProgramLocalFact, ProgramPointFacts};
+use crate::MirOperationContract;
 
 #[path = "flow/call_observations.rs"]
 mod call_observations;
@@ -467,7 +468,7 @@ fn edge_states(
     summaries: &BTreeMap<FunctionId, FunctionSummary>,
 ) -> Vec<(BasicBlockId, FlowState)> {
     let mut contracted = state.clone();
-    for value in crate::analysis::terminator_rvalues(kind) {
+    for value in crate::terminator_rvalues(kind) {
         apply_rvalue_contract(&value, &mut contracted, summaries);
     }
     let (effects, capabilities) = operation_contracts::terminator(kind);
