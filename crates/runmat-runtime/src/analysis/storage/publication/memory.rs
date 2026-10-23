@@ -3,9 +3,18 @@ use super::*;
 
 pub(in crate::analysis::storage) fn commit(
     store: &InMemoryAnalysisArtifactStore,
-    prepared: PreparedAnalysisPublication,
+    mut prepared: PreparedAnalysisPublication,
 ) -> Result<AnalysisPublicationReceipt, AnalysisPublicationError> {
     prepared.validate()?;
+    // The memory backend retains every chunk in memory; streamed chunks are read back after
+    // the staging admission has been validated.
+    let spilled = std::mem::take(&mut prepared.spilled);
+    for digest in spilled.digests() {
+        let bytes = spilled
+            .read(&digest)?
+            .ok_or("publication spilled chunk is absent")?;
+        prepared.chunks.insert(digest, Arc::from(bytes));
+    }
     let receipt = prepared.descriptor.receipt(None)?;
     let bytes = resources::json(
         &(&prepared.descriptor, &prepared.manifest),

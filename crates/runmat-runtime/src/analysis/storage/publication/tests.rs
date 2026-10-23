@@ -274,3 +274,78 @@ fn record_digest_matches_the_json_tree_digest_without_building_the_tree() {
         );
     }
 }
+
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: publication staging streams field chunks to a private spill area, so a budget
+//   smaller than the run's total field payload (but covering its largest field in flight)
+//   stages, commits to a filesystem store and reads every field back unchanged. Non-field
+//   staged inventories (records, tiles, histories) remain resident and are not streamed.
+#[test]
+fn staging_streams_field_payload_so_the_budget_bounds_bytes_in_flight() {
+    let _guard = tests::analysis_test_guard();
+    reset_artifact_store_for_tests();
+    let run = run();
+    let mut total_field_bytes = 0u64;
+    let mut largest_field_bytes = 0u64;
+    crate::analysis::operations::visit_analysis_result_fields(&run, |field| {
+        if let AnalysisFieldValues::HostF64(values) = &field.values {
+            let bytes = values.len() as u64 * 16;
+            total_field_bytes += bytes;
+            largest_field_bytes = largest_field_bytes.max(bytes);
+        }
+    });
+    assert!(largest_field_bytes > 0 && total_field_bytes > largest_field_bytes);
+    // Find the smallest budget that stages: it must be below the total field payload.
+    let stages = |budget: u64| {
+        let builder =
+            AnalysisPublicationBuilder::new(Digest::sha256(b"streamed-staging"), budget).unwrap();
+        builder.stage_run(&run).is_ok()
+    };
+    let (mut low, mut high) = (1u64, 1u64 << 34);
+    while low < high {
+        let middle = low + (high - low) / 2;
+        if stages(middle) {
+            high = middle;
+        } else {
+            low = middle + 1;
+        }
+    }
+    // Without streaming every field payload would accumulate in staging.
+    let mut cumulative = 0u64;
+    crate::analysis::storage::preparation::prepare_run_artifact_with_admission(
+        &run,
+        "2026-01-01T00:00:00Z".into(),
+        &mut |bytes| {
+            cumulative += bytes;
+            Ok(())
+        },
+        None,
+    )
+    .unwrap();
+    assert!(
+        low + (total_field_bytes - largest_field_bytes) <= cumulative,
+        "staging retained more than one field payload at a time: {low} vs {cumulative}"
+    );
+    let root = std::env::temp_dir().join(format!(
+        "runmat-streamed-staging-{}",
+        Utc::now().timestamp_nanos_opt().unwrap()
+    ));
+    let store = FilesystemAnalysisArtifactStore::new(root.clone());
+    let definition = Digest::sha256(b"streamed-staging-definition");
+    let builder = AnalysisPublicationBuilder::new(definition, 1 << 30).unwrap();
+    let mut child = run.clone();
+    child.run_id = "streamed_staging".into();
+    builder.stage_run(&child).unwrap();
+    let prepared = builder
+        .finish(serde_json::json!({
+            "study_definition_digest": definition,
+            "public_run": { "steps": [{"run_id": "streamed_staging"}] }
+        }))
+        .unwrap();
+    assert!(prepared.spilled.digests().next().is_some());
+    store.commit_publication(prepared).unwrap();
+    let loaded = store.load_run("streamed_staging").unwrap().unwrap();
+    assert_eq!(loaded.run.fields, run.run.fields);
+    std::fs::remove_dir_all(root).unwrap();
+}

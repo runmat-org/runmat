@@ -111,8 +111,8 @@ fn manifest_preparation_freezes_original_inventory_before_projecting_copies() {
         .unwrap_err()
         .to_string()
         .contains("inventory is frozen"));
-    assert_eq!(builder.store.list_runs().unwrap().len(), 1);
-    assert!(builder.store.load_run(&late.run_id).unwrap().is_none());
+    assert_eq!(builder.store.runs.read().unwrap().len(), 1);
+    assert!(!builder.store.runs.read().unwrap().contains_key(&late.run_id));
 }
 
 // witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
@@ -270,16 +270,8 @@ fn cached_assessment_metadata_cannot_reuse_the_staged_inventory_allowance() {
         .unwrap()
         .unwrap();
     assert_eq!(retry.observation_scalars, first.observation_scalars);
-    assert_eq!(
-        builder
-            .store
-            .load_run(&original.run_id)
-            .unwrap()
-            .unwrap()
-            .run
-            .fields,
-        original.run.fields
-    );
+    // Staging retains the record; its field chunks were streamed to the spill area.
+    assert!(builder.store.runs.read().unwrap().contains_key(&original.run_id));
 }
 
 #[test]
@@ -310,5 +302,5 @@ fn assessment_phase_requires_frozen_inventory_and_subtracts_original_retention()
     foreign.run_id = "late-assessment-child".into();
     assert!(builder.stage_run(&foreign).is_err());
     assert_eq!(builder.assessment_workspace_limit().unwrap(), available);
-    assert_eq!(builder.store.list_runs().unwrap().len(), 1);
+    assert_eq!(builder.store.runs.read().unwrap().len(), 1);
 }

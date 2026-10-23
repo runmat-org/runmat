@@ -26,7 +26,14 @@ impl StudyEvidenceAccess {
         let available = maximum
             .checked_sub(bytes.len() as u64)
             .filter(|available| *available > 0 && *available >= bytes.len() as u64)
-            .ok_or_else(|| limited("immutable object buffers exceed their phase allowance"))?;
+            .ok_or_else(|| {
+                Error::ResourceLimit {
+                    message: format!(
+                        "immutable object buffers exceed their phase allowance: object {} bytes, allowance {maximum} bytes",
+                        bytes.len()
+                    ),
+                }
+            })?;
         let scope = self
             .provider
             .workspace_access(&self.root, true, available)?;

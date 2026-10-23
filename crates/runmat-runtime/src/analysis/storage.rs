@@ -140,6 +140,9 @@ pub struct InMemoryAnalysisArtifactStore {
     observations: RwLock<HashMap<String, observations::ObservationAttachment>>,
     runs: RwLock<HashMap<String, PersistedAnalysisArtifact>>,
     chunks: RwLock<HashMap<Digest, Arc<[u8]>>>,
+    /// Staging only: field chunks streamed to the publication spill area. Records may
+    /// reference them although their bytes are not resident here.
+    streamed: RwLock<std::collections::HashSet<Digest>>,
 }
 
 impl Default for InMemoryAnalysisArtifactStore {
