@@ -123,7 +123,7 @@ fn manifest_preparation_freezes_original_inventory_before_projecting_copies() {
 #[test]
 fn preparation_reservations_accumulate_and_failed_growth_preserves_the_allowance() {
     let input = vec![17u8; 4096];
-    let one = super::super::resident(&input, 128 << 20).unwrap() * 2;
+    let one = super::super::typed_resident(&input, 128 << 20).unwrap() * 2;
     let mut builder =
         AnalysisPublicationBuilder::new(Digest::sha256(b"preparation-growth"), one * 2).unwrap();
     builder.admit_preparation(&input).unwrap();

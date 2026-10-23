@@ -235,7 +235,8 @@ impl AnalysisPublicationBuilder {
         &mut self,
         input: &impl Serialize,
     ) -> Result<PreparationReservation, AnalysisPublicationError> {
-        let bytes = resident(input, self.maximum_bytes)?;
+        // The original and its copy are owned typed values, priced as such (no value tree).
+        let bytes = typed_resident(input, self.maximum_bytes)?;
         let required =
             bytes
                 .checked_mul(2)
@@ -350,7 +351,21 @@ impl AnalysisPublicationBuilder {
             .strip_prefix("sha256:")
             .ok_or("study fingerprint is not a SHA-256 identity")?;
         let maximum = self.source_workspace_limit()?;
-        let resident = resident(state, maximum)?;
+        // The state is encoded directly from its typed value; only the encoder's buffers are new.
+        let profile = runmat_canonical_codec::profile_canonical_encoding(
+            state,
+            CanonicalLimits::new(
+                usize::try_from(maximum).unwrap_or(usize::MAX),
+                usize::MAX,
+                65_536,
+                64,
+            ),
+        )
+        .map_err(AnalysisPublicationError::from)?;
+        let resident = add(
+            profile.encoded_bytes_upper_bound,
+            profile.resident_workspace_bytes_estimate,
+        )?;
         let available = maximum
             .checked_sub(resident)
             .filter(|bytes| *bytes > 0)

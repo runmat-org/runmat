@@ -19,7 +19,7 @@ impl AnalysisPublicationBuilder {
         if !Arc::ptr_eq(&self.preparation_scope, &reservation.scope) {
             return Err("source input reservation belongs to another publication".into());
         }
-        let bytes = resident(input, self.maximum_bytes)?;
+        let bytes = typed_resident(input, self.maximum_bytes)?;
         if bytes > reservation.resident_bytes {
             return Err(AnalysisPublicationError::ResourceLimit {
                 message: "source input exceeds its retained preparation reservation".into(),
@@ -49,7 +49,7 @@ mod tests {
             .unwrap();
         let charged = builder.preparation_resident_bytes;
         let available = builder.source_workspace_limit().unwrap();
-        let candidate_bytes = resident(&input, maximum).unwrap();
+        let candidate_bytes = super::super::typed_resident(&input, maximum).unwrap();
         let inclusive = builder
             .source_workspace_with_preparation(&token, &input)
             .unwrap();
