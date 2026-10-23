@@ -310,23 +310,13 @@ async fn string_payload(data: &Value, work: &mut NetCooperation) -> BuiltinResul
             1
         }
         Value::CharArray(array) => {
-            for group in array.data().chunks(1024) {
-                bytes
-                    .try_reserve(group.len().checked_mul(4).ok_or_else(|| {
-                        write_flow(&WRITE_ERROR_INTERNAL, "write: encoded text size overflow")
-                    })?)
-                    .map_err(|source| {
-                        write_flow(
-                            &WRITE_ERROR_INTERNAL,
-                            format!("write: encoded text allocation failed ({source})"),
-                        )
-                    })?;
-                for ch in group {
-                    let mut encoded = [0u8; 4];
-                    bytes.extend_from_slice(ch.encode_utf8(&mut encoded).as_bytes());
-                }
-                work.completed(group.len()).await?;
-            }
+            let text = crate::builtins::io::utf16::decode_utf16_with_error(array.data(), || {
+                write_flow(
+                    &WRITE_ERROR_INVALID_DATA,
+                    "write: string input contains malformed UTF-16 text",
+                )
+            })?;
+            append_bounded(&mut bytes, text.bytes(), work).await?;
             1
         }
         Value::StringArray(array) if array.data().is_empty() => 0,

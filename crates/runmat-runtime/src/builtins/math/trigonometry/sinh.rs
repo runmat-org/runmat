@@ -212,7 +212,7 @@ fn sinh_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let data = ca
         .data()
         .iter()
-        .map(|&ch| (ch as u32 as f64).sinh())
+        .map(|&ch| (u32::from(ch.raw()) as f64).sinh())
         .collect::<Vec<_>>();
     let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
         .map_err(|e| sinh_error_with_detail(&SINH_ERROR_INTERNAL, e))?;
@@ -289,7 +289,7 @@ pub(crate) mod tests {
             logical.identifier(),
             SINH_LOGICAL_INPUT_EXTENSION.error_identifier
         );
-        let chars = CharArray::new("A".chars().collect(), 1, 1).unwrap();
+        let chars = CharArray::from_unicode_scalars("A".chars().collect(), 1, 1).unwrap();
         let character = block_on(super::sinh_builtin(None, Value::CharArray(chars)))
             .map(|owned| owned.value().clone())
             .expect_err("character input must be gated");
@@ -427,7 +427,7 @@ pub(crate) mod tests {
     #[test]
     fn sinh_char_array_roundtrip() {
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let chars = CharArray::new("abc".chars().collect(), 1, 3).unwrap();
+        let chars = CharArray::from_unicode_scalars("abc".chars().collect(), 1, 3).unwrap();
         let result = sinh_builtin(Value::CharArray(chars)).expect("sinh");
         match result {
             Value::Tensor(t) => {

@@ -19,7 +19,7 @@ impl RemoveOptions {
         let mut dim = RemoveDim::Auto;
         let mut idx = 0;
         while idx < args.len() {
-            if let Some(text) = scalar_text(&args[idx]) {
+            if let Some(text) = scalar_text(&args[idx])? {
                 match text.to_ascii_lowercase().as_str() {
                     "dim" if idx + 1 < args.len() => {
                         dim = dim_from_value(&args[idx + 1])?;

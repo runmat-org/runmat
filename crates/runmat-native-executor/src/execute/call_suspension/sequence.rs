@@ -1,27 +1,22 @@
 use std::future::Future;
-use std::pin::Pin;
 
 use runmat_runtime::sequence::{PreparedSequenceDestination, SequenceDestinationBuilder};
-use runmat_value::Value;
 
 use crate::{NativeExecutorError, NativeExecutorResult};
 
 use super::super::state::{EmbeddedOperationIdentity, HostState};
-use super::{CallCompletion, CompletedPayload, CompletionFuture, PendingCall};
+use super::{CallCompletion, CompletedPayload, PendingCall};
 
-#[derive(Clone)]
+#[path = "sequence/end.rs"]
+mod end;
+pub(in crate::execute) use end::{
+    begin_sequence_end_stage, SequenceEndAdmission, SequenceEndOwner,
+};
+
 pub(in crate::execute) enum SequenceStage {
-    Builder(Box<SequenceDestinationBuilder>),
+    Builder(SequenceDestinationBuilder),
     Destination(PreparedSequenceDestination),
-}
-
-impl SequenceStage {
-    pub(in crate::execute) fn visit_retained_values(&self, visitor: &mut impl FnMut(&Value)) {
-        match self {
-            Self::Builder(builder) => builder.visit_retained_values(visitor),
-            Self::Destination(destination) => destination.visit_retained_values(visitor),
-        }
-    }
+    End(SequenceEndOwner),
 }
 
 pub(in crate::execute) fn take_completed_sequence_stage(
@@ -48,34 +43,41 @@ pub(in crate::execute) fn take_completed_sequence_stage(
             "completed sequence preparation does not match its exact resumed operation".into(),
         ));
     }
-    let CompletedPayload::SequenceStage { stage, .. } = &completed.payload else {
+    if !matches!(&completed.payload, CompletedPayload::SequenceStage(_)) {
         state.completed_call = Some(completed);
         return Err(NativeExecutorError::Host(
             "completed sequence preparation has the wrong typed payload".into(),
         ));
-    };
-    let stage = stage.as_ref().clone();
+    }
     if let Some(embedded) = embedded {
         state.restore_embedded_call_regions(embedded);
     }
-    Ok(Some(stage))
+    match completed.payload {
+        CompletedPayload::SequenceStage(stage) => Ok(Some(stage)),
+        _ => unreachable!("validated owned stage payload"),
+    }
 }
 
-pub(in crate::execute) fn begin_sequence_stage(
+pub(in crate::execute) fn begin_sequence_stage<F>(
     state: &mut HostState,
     embedded: Option<EmbeddedOperationIdentity>,
-    future: Pin<Box<dyn Future<Output = NativeExecutorResult<SequenceStage>> + 'static>>,
-) -> NativeExecutorResult<SequenceStage> {
-    let future: CompletionFuture = Box::pin(async move {
-        future
-            .await
-            .map(Box::new)
-            .map(CallCompletion::SequenceStage)
-    });
-    let future = super::scope_completion(state, future);
+    make_future: impl FnOnce() -> F,
+) -> NativeExecutorResult<SequenceStage>
+where
+    F: Future<Output = NativeExecutorResult<SequenceStage>> + 'static,
+{
     let request = state.current_request.ok_or_else(|| {
         NativeExecutorError::Host("pending sequence preparation has no active site".into())
     })?;
+    let runtime = state.runtime.clone();
+    let catch = state.active_catch_exception();
+    let future =
+        runmat_runtime::execution::admit_native_hostcall_with(&runtime, allocation_cause, || {
+            let future = make_future();
+            runtime.scope_active_catch_unboxed_shared(catch, async move {
+                future.await.map(CallCompletion::SequenceStage)
+            })
+        })?;
     let (continuation, generation) = state.next_suspension_identity()?;
     state.pending_call = Some(PendingCall {
         continuation,
@@ -86,4 +88,16 @@ pub(in crate::execute) fn begin_sequence_stage(
         future,
     });
     Err(NativeExecutorError::CallSuspended)
+}
+
+fn allocation_cause(
+    source: runmat_runtime::context::host_allocation::HostAllocationError,
+) -> NativeExecutorError {
+    runmat_runtime::context::host_allocation::host_allocation_runtime_error(
+        None,
+        "RunMat:Native:SequencePreparation",
+        "sequence preparation continuation admission failed",
+        source,
+    )
+    .into()
 }

@@ -112,7 +112,7 @@ fn encode_field(
                 ));
             }
             for character in chars.to_column_major() {
-                let byte = u8::try_from(character as u32).map_err(|_| {
+                let byte = u8::try_from(character.raw()).map_err(|_| {
                     format_error("memmapfile: mapped character is outside byte range")
                 })?;
                 target.push(byte);

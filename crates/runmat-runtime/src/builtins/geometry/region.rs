@@ -51,7 +51,8 @@ pub async fn geometry_region_binding(args: crate::call::BuiltinArguments) -> Bui
     let selector = match selector {
         Value::String(text) => text.to_string(),
         Value::StringArray(array) if array.data().len() == 1 => array.data()[0].to_string(),
-        Value::CharArray(chars) if chars.rows == 1 => chars.data().iter().collect(),
+        Value::CharArray(chars) if chars.rows == 1 => runmat_value::decode_utf16_code_units(chars.data())
+            .map_err(|_| input_error("selector must be valid text"))?,
         _ => return Err(input_error("selector must be scalar text")),
     };
     geometry_region_builtin(asset.clone(), selector).await

@@ -325,7 +325,7 @@ impl RuntimeBoundExecutableUnit {
         let ids = self.registry.functions.keys().copied().collect::<Vec<_>>();
         self.registry
             .attach_current_selected_executable_product(ids.iter().copied(), product)
-            .map_err(str::to_string)?;
+            .map_err(|error| error.to_string())?;
         for id in ids {
             let selected = self
                 .registry

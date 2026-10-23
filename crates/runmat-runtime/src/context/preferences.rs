@@ -8,6 +8,8 @@ use std::collections::BTreeMap;
 #[path = "preferences/memory.rs"]
 mod memory;
 pub use memory::IsolatedMemoryPreferenceService;
+#[path = "preferences/decomposition.rs"]
+mod decomposition;
 #[path = "preferences/document.rs"]
 mod document;
 #[path = "preferences/input_roots.rs"]
@@ -26,6 +28,38 @@ pub use browser::BrowserPreferenceService;
 pub type PreferenceValues = BTreeMap<String, Value>;
 pub type PreferenceGroups = BTreeMap<String, PreferenceValues>;
 
+async fn encode_selected_preference(
+    value: &Value,
+    budget: &mut crate::execution::CpuCooperationBudget,
+    runtime: &RuntimeContext,
+) -> Result<runmat_execution::value::ValuePayload, PreferenceServiceError> {
+    decomposition::validate(value, runtime, budget).await?;
+    crate::execution::value_codec::encode_durable_value(value)
+        .map_err(PreferenceServiceError::ValueEncoding)
+}
+
+async fn decode_selected_preference(
+    payload: &runmat_execution::value::ValuePayload,
+    budget: &mut crate::execution::CpuCooperationBudget,
+    runtime: &RuntimeContext,
+) -> Result<Value, PreferenceServiceError> {
+    use crate::execution::value_codec::{
+        decode_durable_value_cooperatively_in_context, CooperativeValueCodecError,
+    };
+    let decoded = decode_durable_value_cooperatively_in_context(payload, budget, runtime)
+        .await
+        .map_err(|error| match error {
+            CooperativeValueCodecError::Value(error) => {
+                PreferenceServiceError::ValueEncoding(error)
+            }
+            CooperativeValueCodecError::Execution(error) => {
+                PreferenceServiceError::Execution(error)
+            }
+        })?;
+    decomposition::validate(decoded.value(), runtime, budget).await?;
+    Ok(decoded.into_unrooted_value())
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum PreferenceServiceError {
     #[error("preference '{name}' does not exist in group '{group}'")]
@@ -38,6 +72,8 @@ pub enum PreferenceServiceError {
         #[source]
         crate::execution::value_codec::ValueCodecError,
     ),
+    #[error("decomposition preference binding failed: {0}")]
+    Decomposition(#[source] RuntimeError),
     #[error("preference storage failed: {0}")]
     Storage(#[source] RuntimeError),
     #[error("preference execution failed: {0}")]

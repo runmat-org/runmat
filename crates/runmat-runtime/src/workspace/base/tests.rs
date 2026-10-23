@@ -610,11 +610,22 @@ fn canonical_remove_releases_deleted_capture_immediately() {
         let (initial, handle, value) = rooted_handle("canonical");
         let workspace = BaseWorkspaceOwner::new();
         drop(workspace.apply(assigned("held", value)).unwrap());
+        // An unrelated later write must not keep the deleted binding alive in
+        // an implementation-only overlay predecessor or captured base.
+        drop(
+            workspace
+                .apply(assigned("unrelated", Value::Num(7.0)))
+                .unwrap(),
+        );
         initial.unroot().unwrap();
         runmat_gc::gc_collect_major().unwrap();
         assert!(runmat_gc::gc_clone_value(&handle).is_ok());
 
         drop(workspace.apply(removed("held")).unwrap());
+        assert_eq!(
+            workspace.lookup("unrelated").unwrap(),
+            Some(Value::Num(7.0))
+        );
         runmat_gc::gc_collect_major().unwrap();
         assert!(runmat_gc::gc_clone_value(&handle).is_err());
     });
@@ -744,9 +755,20 @@ fn outstanding_snapshot_retains_only_its_immutable_entry_lifetime() {
         let (initial, handle, value) = rooted_handle("snapshot");
         let workspace = BaseWorkspaceOwner::new();
         drop(workspace.apply(assigned("held", value)).unwrap());
+        drop(
+            workspace
+                .apply(assigned("unrelated", Value::Num(7.0)))
+                .unwrap(),
+        );
         let snapshot = workspace.snapshot().unwrap();
         initial.unroot().unwrap();
         drop(workspace.apply(removed("held")).unwrap());
+        assert!(snapshot.get("held").is_some());
+        assert_eq!(workspace.lookup("held").unwrap(), None);
+        assert_eq!(
+            workspace.lookup("unrelated").unwrap(),
+            Some(Value::Num(7.0))
+        );
 
         runmat_gc::gc_collect_major().unwrap();
         assert!(runmat_gc::gc_clone_value(&handle).is_ok());

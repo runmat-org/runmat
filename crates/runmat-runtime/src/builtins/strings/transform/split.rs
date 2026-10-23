@@ -3,19 +3,18 @@
 #[cfg(test)]
 use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerAuditDescriptor,
-    BuiltinIntegerAuditKind, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    SPLIT_ADVANCED_OPTIONS_EXTENSION, SPLIT_ERROR_CELL_ELEMENT, SPLIT_ERROR_DELIMITER_TYPE,
+    SPLIT_ERROR_DIMENSION, SPLIT_ERROR_EMPTY_DELIMITER, SPLIT_ERROR_INTERNAL,
+    SPLIT_ERROR_INVALID_INPUT, SPLIT_ERROR_NAME_VALUE_PAIR, SPLIT_ERROR_OPTION_VALUE,
+    SPLIT_ERROR_UNKNOWN_NAME, SPLIT_RESIDENT_DIMENSION_EXTENSION, SPLIT_TYPED_DIMENSION_EXTENSION,
+    STRSPLIT_ERROR_DELIMITER_MODE, STRSPLIT_ERROR_DELIMITER_TYPE, STRSPLIT_ERROR_EMPTY_DELIMITER,
+    STRSPLIT_ERROR_INTERNAL, STRSPLIT_ERROR_INVALID_INPUT, STRSPLIT_ERROR_NAME_VALUE_PAIR,
+    STRSPLIT_ERROR_OPTION_VALUE, STRSPLIT_ERROR_REGEX_INVALID, STRSPLIT_ERROR_UNKNOWN_NAME,
 };
 use std::collections::HashSet;
 
 use regex::RegexBuilder;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, StringArray, Utf8Text, Value};
 
@@ -26,7 +25,6 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-use crate::builtins::strings::type_resolvers::{string_array_type, unknown_type};
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::split")]
@@ -59,498 +57,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 const BUILTIN_NAME: &str = "split";
 const STRSPLIT_BUILTIN_NAME: &str = "strsplit";
 const MAX_SPLIT_DIMENSION: usize = 1024;
-
-const SPLIT_OUTPUT: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "newStr",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "String or cell array containing split tokens.",
-    },
-    BuiltinParamDescriptor {
-        name: "match",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "String or cell array containing the delimiters at which splitting occurred.",
-    },
-];
-
-const SPLIT_INPUTS_BASE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "str",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input text scalar/array/cell to split.",
-}];
-
-const SPLIT_INPUTS_DELIMITER: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text scalar/array/cell to split.",
-    },
-    BuiltinParamDescriptor {
-        name: "delimiter",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Delimiter scalar/array/cell.",
-    },
-];
-
-const SPLIT_INPUTS_DELIMITER_DIM: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text scalar/array/cell to split.",
-    },
-    BuiltinParamDescriptor {
-        name: "delimiter",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Delimiter scalar/array/cell.",
-    },
-    BuiltinParamDescriptor {
-        name: "dim",
-        ty: BuiltinParamType::IntegerScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Positive dimension along which output substrings are oriented.",
-    },
-];
-
-const SPLIT_INPUTS_DELIMITER_NAMEVALUE: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text scalar/array/cell to split.",
-    },
-    BuiltinParamDescriptor {
-        name: "delimiter",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Delimiter scalar/array/cell.",
-    },
-    BuiltinParamDescriptor {
-        name: "Name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Option name (`CollapseDelimiters` or `IncludeDelimiters`).",
-    },
-    BuiltinParamDescriptor {
-        name: "Value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Option values and additional Name/Value pairs.",
-    },
-];
-
-const SPLIT_INPUTS_NAMEVALUE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text scalar/array/cell to split.",
-    },
-    BuiltinParamDescriptor {
-        name: "Name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Option name (`CollapseDelimiters` or `IncludeDelimiters`).",
-    },
-    BuiltinParamDescriptor {
-        name: "Value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Option values and additional Name/Value pairs.",
-    },
-];
-
-const SPLIT_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
-    BuiltinSignatureDescriptor {
-        label: "newStr = split(str)",
-        inputs: &SPLIT_INPUTS_BASE,
-        outputs: &SPLIT_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "newStr = split(str, delimiter)",
-        inputs: &SPLIT_INPUTS_DELIMITER,
-        outputs: &SPLIT_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[newStr, match] = split(str, delimiter, dim)",
-        inputs: &SPLIT_INPUTS_DELIMITER_DIM,
-        outputs: &SPLIT_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "newStr = split(str, delimiter, Name, Value, ...)",
-        inputs: &SPLIT_INPUTS_DELIMITER_NAMEVALUE,
-        outputs: &SPLIT_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "newStr = split(str, Name, Value, ...)",
-        inputs: &SPLIT_INPUTS_NAMEVALUE,
-        outputs: &SPLIT_OUTPUT,
-    },
-];
-
-const SPLIT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPLIT.INVALID_INPUT",
-    identifier: Some("RunMat:split:InvalidInput"),
-    when: "First argument is not a string scalar/array, char array, or cell array of text scalars.",
-    message:
-        "split: first argument must be a string scalar, string array, character array, or cell array of character vectors",
-};
-
-const SPLIT_ERROR_DELIMITER_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPLIT.DELIMITER_TYPE",
-    identifier: Some("RunMat:split:DelimiterType"),
-    when: "Delimiter input is not a supported text scalar/array/cell.",
-    message:
-        "split: delimiter input must be a string scalar, string array, character array, or cell array of character vectors",
-};
-
-const SPLIT_ERROR_NAME_VALUE_PAIR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPLIT.NAME_VALUE_PAIR",
-    identifier: Some("RunMat:split:NameValuePair"),
-    when: "Name-value options are not supplied in complete pairs.",
-    message: "split: name-value arguments must be supplied in pairs",
-};
-
-const SPLIT_ERROR_UNKNOWN_NAME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPLIT.UNKNOWN_NAME",
-    identifier: Some("RunMat:split:UnknownName"),
-    when: "An option name is not recognized.",
-    message:
-        "split: unrecognized name-value argument; supported names are 'CollapseDelimiters' and 'IncludeDelimiters'",
-};
-
-const SPLIT_ERROR_EMPTY_DELIMITER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPLIT.EMPTY_DELIMITER",
-    identifier: Some("RunMat:split:EmptyDelimiter"),
-    when: "Delimiter list is empty or contains empty delimiter entries.",
-    message: "split: delimiters must contain at least one character",
-};
-
-const SPLIT_ERROR_CELL_ELEMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPLIT.CELL_ELEMENT",
-    identifier: Some("RunMat:split:CellElement"),
-    when: "Cell arrays contain non-text elements or non-row char arrays.",
-    message: "split: cell array elements must be string scalars or character vectors",
-};
-
-const SPLIT_ERROR_OPTION_VALUE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPLIT.OPTION_VALUE",
-    identifier: Some("RunMat:split:OptionValue"),
-    when: "Option values are not logical true/false values.",
-    message: "split: option values must be logical true or false",
-};
-
-const SPLIT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPLIT.INTERNAL",
-    identifier: Some("RunMat:split:InternalError"),
-    when: "Internal output container construction failed.",
-    message: "split: internal error",
-};
-
-const SPLIT_ERROR_DIMENSION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SPLIT.DIMENSION",
-    identifier: Some("RunMat:split:Dimension"),
-    when: "The dimension argument is not a positive integer scalar in RunMat's supported rank range of 1 through 1024.",
-    message: "split: dimension must be a positive integer scalar no greater than 1024",
-};
-
-const SPLIT_ERRORS: [BuiltinErrorDescriptor; 9] = [
-    SPLIT_ERROR_INVALID_INPUT,
-    SPLIT_ERROR_DELIMITER_TYPE,
-    SPLIT_ERROR_NAME_VALUE_PAIR,
-    SPLIT_ERROR_UNKNOWN_NAME,
-    SPLIT_ERROR_EMPTY_DELIMITER,
-    SPLIT_ERROR_CELL_ELEMENT,
-    SPLIT_ERROR_OPTION_VALUE,
-    SPLIT_ERROR_DIMENSION,
-    SPLIT_ERROR_INTERNAL,
-];
-
-pub const SPLIT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SPLIT_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SPLIT_ERRORS,
-};
-
-const SPLIT_TYPED_DIMENSION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "split-typed-dimension",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "split with a typed-integer dimension",
-    error_identifier: Some("RunMat:compatibility:SplitTypedDimensionExtension"),
-};
-
-const SPLIT_RESIDENT_DIMENSION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "split-resident-dimension",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "split with an explicitly GPU-resident dimension is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:SplitResidentDimensionExtension"),
-};
-
-const SPLIT_ADVANCED_OPTIONS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "split-advanced-options",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "split CollapseDelimiters and IncludeDelimiters options are RunMat extensions",
-    error_identifier: Some("RunMat:compatibility:SplitAdvancedOptionsExtension"),
-};
-
-pub const SPLIT_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    SPLIT_TYPED_DIMENSION_EXTENSION,
-    SPLIT_RESIDENT_DIMENSION_EXTENSION,
-    SPLIT_ADVANCED_OPTIONS_EXTENSION,
-];
-
-const SPLIT_INTEGER_DIMENSION_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "dim",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The compatibility target specifies a positive integer dimension but does not enumerate typed storage classes. RunMat accepts every exact integer class behind a compatibility gate; ordinary host double integer dimensions remain documented behavior.",
-    }];
-
-pub const SPLIT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "[newStr, match] = split(str, delimiter, integer_dim)",
-        inputs: &SPLIT_INTEGER_DIMENSION_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The typed dimension is a gated RunMat extension whose exact one-based value controls only output orientation. Explicit resident dimensions are separately gated before gather; automatic residency may gather transparently.",
-    }];
-
-const STRSPLIT_OUTPUT: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "parts",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Split tokens.",
-    },
-    BuiltinParamDescriptor {
-        name: "matches",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Matched delimiters when requested as second output.",
-    },
-];
-
-const STRSPLIT_INPUTS_BASE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "str",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "String scalar or character vector input.",
-}];
-
-const STRSPLIT_INPUTS_DELIMITER: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "String scalar or character vector input.",
-    },
-    BuiltinParamDescriptor {
-        name: "delimiter",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Delimiter scalar/array/cell.",
-    },
-];
-
-const STRSPLIT_INPUTS_DELIMITER_NAMEVALUE: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "String scalar or character vector input.",
-    },
-    BuiltinParamDescriptor {
-        name: "delimiter",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Delimiter scalar/array/cell.",
-    },
-    BuiltinParamDescriptor {
-        name: "Name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Option name (`CollapseDelimiters` or `DelimiterType`).",
-    },
-    BuiltinParamDescriptor {
-        name: "Value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Option values and additional Name/Value pairs.",
-    },
-];
-
-const STRSPLIT_INPUTS_NAMEVALUE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "String scalar or character vector input.",
-    },
-    BuiltinParamDescriptor {
-        name: "Name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Option name (`CollapseDelimiters` or `DelimiterType`).",
-    },
-    BuiltinParamDescriptor {
-        name: "Value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Option values and additional Name/Value pairs.",
-    },
-];
-
-const STRSPLIT_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "[parts, matches] = strsplit(str)",
-        inputs: &STRSPLIT_INPUTS_BASE,
-        outputs: &STRSPLIT_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[parts, matches] = strsplit(str, delimiter)",
-        inputs: &STRSPLIT_INPUTS_DELIMITER,
-        outputs: &STRSPLIT_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[parts, matches] = strsplit(str, delimiter, Name, Value, ...)",
-        inputs: &STRSPLIT_INPUTS_DELIMITER_NAMEVALUE,
-        outputs: &STRSPLIT_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[parts, matches] = strsplit(str, Name, Value, ...)",
-        inputs: &STRSPLIT_INPUTS_NAMEVALUE,
-        outputs: &STRSPLIT_OUTPUT,
-    },
-];
-
-const STRSPLIT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRSPLIT.INVALID_INPUT",
-    identifier: Some("RunMat:strsplit:InvalidInput"),
-    when: "First argument is not a string scalar or character vector.",
-    message: "strsplit: first argument must be a string scalar or character vector",
-};
-
-const STRSPLIT_ERROR_DELIMITER_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRSPLIT.DELIMITER_TYPE",
-    identifier: Some("RunMat:strsplit:DelimiterType"),
-    when: "Delimiter input is not a supported text scalar/array/cell.",
-    message:
-        "strsplit: delimiter must be a character vector, string scalar, string array, or cell array of character vectors",
-};
-
-const STRSPLIT_ERROR_NAME_VALUE_PAIR: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRSPLIT.NAME_VALUE_PAIR",
-    identifier: Some("RunMat:strsplit:NameValuePair"),
-    when: "Name-value options are not supplied in complete pairs.",
-    message: "strsplit: name-value arguments must be supplied in pairs",
-};
-
-const STRSPLIT_ERROR_UNKNOWN_NAME: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRSPLIT.UNKNOWN_NAME",
-    identifier: Some("RunMat:strsplit:UnknownName"),
-    when: "An option name is not recognized.",
-    message:
-        "strsplit: unrecognized name-value argument; supported names are 'CollapseDelimiters' and 'DelimiterType'",
-};
-
-const STRSPLIT_ERROR_EMPTY_DELIMITER: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRSPLIT.EMPTY_DELIMITER",
-    identifier: Some("RunMat:strsplit:EmptyDelimiter"),
-    when: "Delimiter list is empty or contains empty delimiter entries.",
-    message: "strsplit: delimiters must contain at least one character",
-};
-
-const STRSPLIT_ERROR_DELIMITER_MODE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRSPLIT.DELIMITER_MODE",
-    identifier: Some("RunMat:strsplit:DelimiterMode"),
-    when: "DelimiterType option is not `Simple` or `RegularExpression`.",
-    message: "strsplit: value for 'DelimiterType' must be 'Simple' or 'RegularExpression'",
-};
-
-const STRSPLIT_ERROR_OPTION_VALUE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRSPLIT.OPTION_VALUE",
-    identifier: Some("RunMat:strsplit:OptionValue"),
-    when: "Option values are not logical true/false values.",
-    message: "strsplit: option values must be logical true or false",
-};
-
-const STRSPLIT_ERROR_REGEX_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRSPLIT.REGEX_INVALID",
-    identifier: Some("RunMat:strsplit:RegexInvalid"),
-    when: "Regular expression delimiter pattern fails to compile.",
-    message: "strsplit: invalid delimiter regular expression",
-};
-
-const STRSPLIT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRSPLIT.INTERNAL",
-    identifier: Some("RunMat:strsplit:InternalError"),
-    when: "Internal output container construction failed.",
-    message: "strsplit: internal error",
-};
-
-const STRSPLIT_ERRORS: [BuiltinErrorDescriptor; 9] = [
-    STRSPLIT_ERROR_INVALID_INPUT,
-    STRSPLIT_ERROR_DELIMITER_TYPE,
-    STRSPLIT_ERROR_NAME_VALUE_PAIR,
-    STRSPLIT_ERROR_UNKNOWN_NAME,
-    STRSPLIT_ERROR_EMPTY_DELIMITER,
-    STRSPLIT_ERROR_DELIMITER_MODE,
-    STRSPLIT_ERROR_OPTION_VALUE,
-    STRSPLIT_ERROR_REGEX_INVALID,
-    STRSPLIT_ERROR_INTERNAL,
-];
-
-pub const STRSPLIT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &STRSPLIT_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &STRSPLIT_ERRORS,
-};
-
-pub const STRSPLIT_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "strsplit accepts scalar text, text delimiters, and textual or logical options. Integer and provider-resident numeric values have no documented role and reject before provider access without implicit character conversion.",
-};
 
 fn map_flow(err: RuntimeError) -> RuntimeError {
     map_control_flow_with_builtin(err, BUILTIN_NAME)
@@ -586,43 +92,87 @@ fn strsplit_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     strsplit_error_with_message(error.message, error)
 }
 
+fn utf16_error(
+    builtin: &'static str,
+    descriptor: &'static BuiltinErrorDescriptor,
+    source: runmat_value::Utf16DecodeError,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("{builtin}: malformed UTF-16 character input"))
+        .with_builtin(builtin)
+        .with_source(source);
+    if let Some(identifier) = descriptor.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 #[runtime_builtin(
     name = "split",
-    category = "strings/transform",
-    summary = "Split text inputs into substrings using delimiter rules.",
-    keywords = "split,strsplit,delimiter,CollapseDelimiters,IncludeDelimiters",
-    accel = "sink",
-    type_resolver(string_array_type),
-    descriptor(crate::builtins::strings::transform::split::SPLIT_DESCRIPTOR),
-    extensions(crate::builtins::strings::transform::split::SPLIT_EXTENSIONS),
-    integer_capabilities(crate::builtins::strings::transform::split::SPLIT_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::transform::split"
 )]
-async fn split_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn split_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    text: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_bounded_outputs(
+        &runmat_builtins::SPLIT_DESCRIPTOR,
+        &runmat_builtins::SPLIT_ERROR_TOO_MANY_OUTPUTS,
+        BUILTIN_NAME,
+    )?;
     if crate::dispatcher::value_contains_gpu(&text) {
         return Err(split_error(&SPLIT_ERROR_INVALID_INPUT));
     }
+    let shape = match &text {
+        Value::StringArray(array) => Some(array.shape()),
+        Value::CharArray(array) => Some(array.shape()),
+        Value::Cell(cell) => Some(cell.shape()),
+        _ => None,
+    };
+    if shape.is_some_and(|shape| shape.iter().skip(2).any(|extent| *extent != 1))
+        || crate::builtins::strings::common::has_unsupported_character_pages(&text)
+    {
+        return Err(split_error(&SPLIT_ERROR_INVALID_INPUT));
+    }
     let text = gather_if_needed_async(&text).await.map_err(map_flow)?;
-    let (args, dimension) = prepare_split_arguments(rest).await?;
+    let (args, dimension) = prepare_split_arguments(rest, runtime.as_ref()).await?;
 
-    let options = SplitOptions::parse(&args)?;
+    let options = SplitOptions::parse(args.view())?;
     let matrix = TextMatrix::from_value(text)?;
     matrix.into_split_result(&options, dimension)
 }
 
 async fn prepare_split_arguments(
-    mut rest: Vec<Value>,
-) -> BuiltinResult<(Vec<Value>, Option<usize>)> {
+    rest: crate::call::BuiltinArguments,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> BuiltinResult<(crate::call::BuiltinArguments, Option<usize>)> {
+    if rest
+        .iter()
+        .any(crate::builtins::strings::common::has_unsupported_character_pages)
+    {
+        return Err(split_error(&SPLIT_ERROR_INVALID_INPUT));
+    }
     let dimension_index =
-        if rest.len() >= 2 && !is_name_key(&rest[0]) && is_dimension_candidate(&rest[1]) {
+        if rest.len() >= 2 && !is_name_key(&rest[0])? && is_dimension_candidate(&rest[1]) {
             Some(1usize)
         } else {
             None
         };
-    if rest.last().is_some_and(is_name_key) {
-        return Err(split_error(&SPLIT_ERROR_NAME_VALUE_PAIR));
+    if let Some(value) = rest.last() {
+        if is_name_key(value)? {
+            return Err(split_error(&SPLIT_ERROR_NAME_VALUE_PAIR));
+        }
     }
-    if rest.iter().any(is_name_key) {
+    let mut has_name_key = false;
+    for value in rest.iter() {
+        if is_name_key(value)? {
+            has_name_key = true;
+            break;
+        }
+    }
+    if has_name_key {
         crate::compatibility::ensure_builtin_extension_enabled(
             &SPLIT_ADVANCED_OPTIONS_EXTENSION,
             BUILTIN_NAME,
@@ -644,15 +194,23 @@ async fn prepare_split_arguments(
             )?;
         }
     }
-    let mut host = Vec::with_capacity(rest.len());
-    for value in rest.drain(..) {
-        host.push(gather_if_needed_async(&value).await.map_err(map_flow)?);
-    }
+    let host = rest
+        .try_map_preserving_roots_async(rest.len(), runtime, async |index| {
+            gather_if_needed_async(&rest[index]).await.map_err(map_flow)
+        })
+        .await?;
     let dimension = if let Some(index) = dimension_index {
-        let value = host.remove(index);
-        Some(parse_split_dimension(&value)?)
+        Some(parse_split_dimension(&host[index])?)
     } else {
         None
+    };
+    let host = if let Some(index) = dimension_index {
+        let count = host.len() - 1;
+        host.try_map_preserving_roots(count, runtime, |output, source| {
+            Ok(source[output + usize::from(output >= index)].clone())
+        })?
+    } else {
+        host
     };
     Ok((host, dimension))
 }
@@ -708,16 +266,27 @@ fn positive_usize(value: f64) -> Option<usize> {
 
 #[runtime_builtin(
     name = "strsplit",
-    category = "strings/transform",
-    summary = "Split scalar text into substrings using simple or regex delimiters.",
-    keywords = "strsplit,split,delimiter,CollapseDelimiters,DelimiterType,matches",
-    accel = "sink",
-    type_resolver(unknown_type),
-    descriptor(crate::builtins::strings::transform::split::STRSPLIT_DESCRIPTOR),
-    integer_audit(crate::builtins::strings::transform::split::STRSPLIT_INTEGER_AUDIT),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::transform::split"
 )]
-async fn strsplit_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn strsplit_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    text: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_bounded_outputs(
+        &runmat_builtins::STRSPLIT_DESCRIPTOR,
+        &runmat_builtins::STRSPLIT_ERROR_TOO_MANY_OUTPUTS,
+        STRSPLIT_BUILTIN_NAME,
+    )?;
+    if crate::builtins::strings::common::has_unsupported_character_pages(&text)
+        || rest
+            .iter()
+            .any(crate::builtins::strings::common::has_unsupported_character_pages)
+    {
+        return Err(strsplit_error(&STRSPLIT_ERROR_INVALID_INPUT));
+    }
     if crate::builtins::strings::common::contains_numeric_or_resident_text_input(&text)
         || rest.iter().any(|value| {
             matches!(
@@ -738,17 +307,16 @@ async fn strsplit_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value>
     let text = gather_if_needed_async(&text)
         .await
         .map_err(|err| map_control_flow_with_builtin(err, STRSPLIT_BUILTIN_NAME))?;
-    let mut args = Vec::with_capacity(rest.len());
-    for arg in rest {
-        args.push(
-            gather_if_needed_async(&arg)
+    let args = rest
+        .try_map_preserving_roots_async(rest.len(), runtime.as_ref(), async |index| {
+            gather_if_needed_async(&rest[index])
                 .await
-                .map_err(|err| map_control_flow_with_builtin(err, STRSPLIT_BUILTIN_NAME))?,
-        );
-    }
+                .map_err(|err| map_control_flow_with_builtin(err, STRSPLIT_BUILTIN_NAME))
+        })
+        .await?;
 
     let (input_kind, subject) = extract_strsplit_subject(text)?;
-    let options = StrsplitOptions::parse(&args)?;
+    let options = StrsplitOptions::parse(args.view())?;
     let (parts, matches) = strsplit_text(&subject, &options)?;
     let parts_value = make_strsplit_output(parts, input_kind)?;
 
@@ -780,11 +348,11 @@ struct SplitOptions {
 }
 
 impl SplitOptions {
-    fn parse(args: &[Value]) -> BuiltinResult<Self> {
+    fn parse(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<Self> {
         let mut index = 0usize;
         let mut delimiters = DelimiterSpec::Whitespace;
 
-        if index < args.len() && !is_name_key(&args[index]) {
+        if index < args.len() && !is_name_key(&args[index])? {
             let list = extract_delimiters(&args[index])?;
             if list.is_empty() {
                 return Err(split_error(&SPLIT_ERROR_EMPTY_DELIMITER));
@@ -811,7 +379,7 @@ impl SplitOptions {
         let mut include = false;
 
         while index < args.len() {
-            let name = match name_key(&args[index]) {
+            let name = match name_key(&args[index])? {
                 Some(NameKey::CollapseDelimiters) => NameKey::CollapseDelimiters,
                 Some(NameKey::IncludeDelimiters) => NameKey::IncludeDelimiters,
                 None => return Err(split_error(&SPLIT_ERROR_UNKNOWN_NAME)),
@@ -882,7 +450,13 @@ impl TextMatrix {
         }
         let mut strings = Vec::with_capacity(rows);
         for row in 0..rows {
-            strings.push(char_row_to_string_slice(&data, cols, row).into());
+            strings.push(
+                char_row_to_string_slice(&data, cols, row)
+                    .map_err(|source| {
+                        utf16_error(BUILTIN_NAME, &SPLIT_ERROR_INVALID_INPUT, source)
+                    })?
+                    .into(),
+            );
         }
         Ok(Self {
             data: strings,
@@ -899,7 +473,7 @@ impl TextMatrix {
                 let idx = row * cols + col;
                 let value_ref: &Value = &data[idx];
                 strings.push(
-                    cell_element_to_string(value_ref)
+                    cell_element_to_string(value_ref, BUILTIN_NAME, &SPLIT_ERROR_CELL_ELEMENT)?
                         .ok_or_else(|| split_error(&SPLIT_ERROR_CELL_ELEMENT))?
                         .into(),
                 );
@@ -1263,6 +837,20 @@ fn advance_whitespace(text: &str, mut start: usize) -> usize {
 }
 
 fn extract_delimiters(value: &Value) -> BuiltinResult<Vec<String>> {
+    extract_delimiters_for_builtin(
+        value,
+        BUILTIN_NAME,
+        &SPLIT_ERROR_DELIMITER_TYPE,
+        &SPLIT_ERROR_CELL_ELEMENT,
+    )
+}
+
+fn extract_delimiters_for_builtin(
+    value: &Value,
+    builtin: &'static str,
+    descriptor: &'static BuiltinErrorDescriptor,
+    cell_descriptor: &'static BuiltinErrorDescriptor,
+) -> BuiltinResult<Vec<String>> {
     match value {
         Value::String(text) => Ok(vec![text.as_str().to_owned()]),
         Value::StringArray(array) => Ok(array
@@ -1276,7 +864,10 @@ fn extract_delimiters(value: &Value) -> BuiltinResult<Vec<String>> {
             }
             let mut entries = Vec::with_capacity(array.rows);
             for row in 0..array.rows {
-                entries.push(char_row_to_string_slice(array.data(), array.cols, row));
+                entries.push(
+                    char_row_to_string_slice(array.data(), array.cols, row)
+                        .map_err(|source| utf16_error(builtin, descriptor, source))?,
+                );
             }
             Ok(entries)
         }
@@ -1284,48 +875,73 @@ fn extract_delimiters(value: &Value) -> BuiltinResult<Vec<String>> {
             let mut entries = Vec::with_capacity(cell.data().len());
             for element in cell.data() {
                 entries.push(
-                    cell_element_to_string(element)
-                        .ok_or_else(|| split_error(&SPLIT_ERROR_CELL_ELEMENT))?,
+                    cell_element_to_string(element, builtin, cell_descriptor)?.ok_or_else(
+                        || {
+                            builtin_error_with_descriptor(
+                                builtin,
+                                cell_descriptor.message,
+                                cell_descriptor,
+                            )
+                        },
+                    )?,
                 );
             }
             Ok(entries)
         }
-        _ => Err(split_error(&SPLIT_ERROR_DELIMITER_TYPE)),
+        _ => Err(builtin_error_with_descriptor(
+            builtin,
+            descriptor.message,
+            descriptor,
+        )),
     }
 }
 
-fn cell_element_to_string(value: &Value) -> Option<String> {
+fn cell_element_to_string(
+    value: &Value,
+    builtin: &'static str,
+    descriptor: &'static BuiltinErrorDescriptor,
+) -> BuiltinResult<Option<String>> {
     match value {
-        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::String(text) => Ok(Some(text.as_str().to_owned())),
         Value::StringArray(array) if array.data().len() == 1 => {
-            Some(array.data()[0].as_str().to_owned())
+            Ok(Some(array.data()[0].as_str().to_owned()))
         }
         Value::CharArray(array) if array.rows <= 1 => {
             if array.rows == 0 {
-                Some(String::new())
+                Ok(Some(String::new()))
             } else {
-                Some(char_row_to_string_slice(array.data(), array.cols, 0))
+                char_row_to_string_slice(array.data(), array.cols, 0)
+                    .map(Some)
+                    .map_err(|source| utf16_error(builtin, descriptor, source))
             }
         }
-        _ => None,
+        _ => Ok(None),
     }
 }
 
-fn value_to_scalar_string(value: &Value) -> Option<String> {
+fn value_to_scalar_string(
+    value: &Value,
+    builtin: &'static str,
+    descriptor: &'static BuiltinErrorDescriptor,
+) -> BuiltinResult<Option<String>> {
     match value {
-        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::String(text) => Ok(Some(text.as_str().to_owned())),
         Value::StringArray(array) if array.data().len() == 1 => {
-            Some(array.data()[0].as_str().to_owned())
+            Ok(Some(array.data()[0].as_str().to_owned()))
         }
         Value::CharArray(array) if array.rows <= 1 => {
             if array.rows == 0 {
-                Some(String::new())
+                Ok(Some(String::new()))
             } else {
-                Some(char_row_to_string_slice(array.data(), array.cols, 0))
+                char_row_to_string_slice(array.data(), array.cols, 0)
+                    .map(Some)
+                    .map_err(|source| utf16_error(builtin, descriptor, source))
             }
         }
-        Value::Cell(cell) if cell.data().len() == 1 => cell_element_to_string(&cell.data()[0]),
-        _ => None,
+        Value::Cell(cell) if cell.data().len() == 1 => {
+            cell_element_to_string(&cell.data()[0], builtin, descriptor)
+        }
+        _ => Ok(None),
     }
 }
 
@@ -1378,7 +994,7 @@ fn parse_bool_for_builtin(
             }
         }
         _ => {
-            if let Some(text) = value_to_scalar_string(value) {
+            if let Some(text) = value_to_scalar_string(value, builtin_name, error)? {
                 let lowered = text.trim().to_ascii_lowercase();
                 match lowered.as_str() {
                     "true" | "on" | "yes" => Ok(true),
@@ -1430,7 +1046,15 @@ fn extract_strsplit_subject(value: Value) -> BuiltinResult<(StrsplitInputKind, U
             } else {
                 Ok((
                     StrsplitInputKind::Char,
-                    char_row_to_string_slice(array.data(), array.cols, 0).into(),
+                    char_row_to_string_slice(array.data(), array.cols, 0)
+                        .map_err(|source| {
+                            utf16_error(
+                                STRSPLIT_BUILTIN_NAME,
+                                &STRSPLIT_ERROR_INVALID_INPUT,
+                                source,
+                            )
+                        })?
+                        .into(),
                 ))
             }
         }
@@ -1538,13 +1162,17 @@ struct StrsplitOptions {
 }
 
 impl StrsplitOptions {
-    fn parse(args: &[Value]) -> BuiltinResult<Self> {
+    fn parse(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<Self> {
         let mut index = 0usize;
         let mut delimiters = None;
 
-        if index < args.len() && !is_strsplit_name_key(&args[index]) {
-            let list = extract_delimiters(&args[index])
-                .map_err(|_| strsplit_error(&STRSPLIT_ERROR_DELIMITER_TYPE))?;
+        if index < args.len() && !is_strsplit_name_key(&args[index])? {
+            let list = extract_delimiters_for_builtin(
+                &args[index],
+                STRSPLIT_BUILTIN_NAME,
+                &STRSPLIT_ERROR_DELIMITER_TYPE,
+                &STRSPLIT_ERROR_DELIMITER_TYPE,
+            )?;
             delimiters = Some(list);
             index += 1;
         }
@@ -1553,7 +1181,7 @@ impl StrsplitOptions {
         let mut delimiter_type = StrsplitDelimiterType::Simple;
 
         while index < args.len() {
-            let name = match strsplit_name_key(&args[index]) {
+            let name = match strsplit_name_key(&args[index])? {
                 Some(name) => name,
                 None => return Err(strsplit_error(&STRSPLIT_ERROR_UNKNOWN_NAME)),
             };
@@ -1574,8 +1202,12 @@ impl StrsplitOptions {
                     )?;
                 }
                 StrsplitNameKey::DelimiterType => {
-                    let text = value_to_scalar_string(value)
-                        .ok_or_else(|| strsplit_error(&STRSPLIT_ERROR_DELIMITER_MODE))?;
+                    let text = value_to_scalar_string(
+                        value,
+                        STRSPLIT_BUILTIN_NAME,
+                        &STRSPLIT_ERROR_DELIMITER_MODE,
+                    )?
+                    .ok_or_else(|| strsplit_error(&STRSPLIT_ERROR_DELIMITER_MODE))?;
                     delimiter_type = match text.trim().to_ascii_lowercase().as_str() {
                         "simple" => StrsplitDelimiterType::Simple,
                         "regularexpression" => StrsplitDelimiterType::RegularExpression,
@@ -1610,49 +1242,61 @@ enum StrsplitNameKey {
     DelimiterType,
 }
 
-fn is_name_key(value: &Value) -> bool {
-    name_key(value).is_some()
+fn is_name_key(value: &Value) -> BuiltinResult<bool> {
+    Ok(name_key(value)?.is_some())
 }
 
-fn is_strsplit_name_key(value: &Value) -> bool {
-    strsplit_name_key(value).is_some()
+fn is_strsplit_name_key(value: &Value) -> BuiltinResult<bool> {
+    Ok(strsplit_name_key(value)?.is_some())
 }
 
-fn name_key(value: &Value) -> Option<NameKey> {
-    value_to_scalar_string(value).and_then(|text| {
-        let lowered = text.trim().to_ascii_lowercase();
-        match lowered.as_str() {
-            "collapsedelimiters" => Some(NameKey::CollapseDelimiters),
-            "includedelimiters" => Some(NameKey::IncludeDelimiters),
-            _ => None,
-        }
-    })
+fn name_key(value: &Value) -> BuiltinResult<Option<NameKey>> {
+    Ok(
+        value_to_scalar_string(value, BUILTIN_NAME, &SPLIT_ERROR_UNKNOWN_NAME)?.and_then(|text| {
+            let lowered = text.trim().to_ascii_lowercase();
+            match lowered.as_str() {
+                "collapsedelimiters" => Some(NameKey::CollapseDelimiters),
+                "includedelimiters" => Some(NameKey::IncludeDelimiters),
+                _ => None,
+            }
+        }),
+    )
 }
 
-fn strsplit_name_key(value: &Value) -> Option<StrsplitNameKey> {
-    value_to_scalar_string(value).and_then(|text| {
-        let lowered = text.trim().to_ascii_lowercase();
-        match lowered.as_str() {
-            "collapsedelimiters" => Some(StrsplitNameKey::CollapseDelimiters),
-            "delimitertype" => Some(StrsplitNameKey::DelimiterType),
-            _ => None,
-        }
-    })
+fn strsplit_name_key(value: &Value) -> BuiltinResult<Option<StrsplitNameKey>> {
+    Ok(
+        value_to_scalar_string(value, STRSPLIT_BUILTIN_NAME, &STRSPLIT_ERROR_UNKNOWN_NAME)?
+            .and_then(|text| {
+                let lowered = text.trim().to_ascii_lowercase();
+                match lowered.as_str() {
+                    "collapsedelimiters" => Some(StrsplitNameKey::CollapseDelimiters),
+                    "delimitertype" => Some(StrsplitNameKey::DelimiterType),
+                    _ => None,
+                }
+            }),
+    )
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{CellArray, IntValue, IntegerStorage, LogicalArray, Tensor};
 
     fn split_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(super::split_builtin(text, rest))
+        futures::executor::block_on(super::split_builtin(
+            None,
+            text,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     fn strsplit_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(super::strsplit_builtin(text, rest))
+        futures::executor::block_on(super::strsplit_builtin(
+            None,
+            text,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     #[test]
@@ -1736,6 +1380,40 @@ pub(crate) mod tests {
             }
             other => panic!("expected string array, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn split_rejects_unsupported_nd_input_and_both_splitters_bound_outputs() {
+        let input = Value::StringArray(
+            StringArray::new(vec!["a b".into(), "c d".into()], vec![1, 1, 2]).expect("nd strings"),
+        );
+        let error = split_builtin(input, vec![]).expect_err("do not flatten nd geometry");
+        assert_eq!(error.identifier(), SPLIT_ERROR_INVALID_INPUT.identifier);
+        let nested_pages = crate::make_cell_with_shape(
+            vec![Value::CharArray(
+                CharArray::from_unicode_scalars_with_shape(vec!['x', 'y'], vec![1, 1, 2])
+                    .expect("character pages"),
+            )],
+            vec![1, 1],
+        )
+        .expect("two-dimensional text cell");
+        let error =
+            split_builtin(nested_pages, vec![]).expect_err("do not drop nested character pages");
+        assert_eq!(error.identifier(), SPLIT_ERROR_INVALID_INPUT.identifier);
+        let _outputs =
+            crate::output_count::push_output_count(Some(3)).expect("request three outputs");
+        let error =
+            split_builtin(Value::string("a b"), vec![]).expect_err("split has only two outputs");
+        assert_eq!(
+            error.identifier(),
+            runmat_builtins::SPLIT_ERROR_TOO_MANY_OUTPUTS.identifier
+        );
+        let error = strsplit_builtin(Value::string("a b"), vec![])
+            .expect_err("strsplit has only two outputs");
+        assert_eq!(
+            error.identifier(),
+            runmat_builtins::STRSPLIT_ERROR_TOO_MANY_OUTPUTS.identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1872,7 +1550,7 @@ pub(crate) mod tests {
         row2.resize(width, ' ');
         let mut data = row1;
         data.extend(row2);
-        let char_array = CharArray::new(data, 2, width).unwrap();
+        let char_array = CharArray::from_unicode_scalars(data, 2, width).unwrap();
         let input = Value::CharArray(char_array);
         let result = split_builtin(input, Vec::new()).expect("split");
         match result {
@@ -2098,7 +1776,9 @@ pub(crate) mod tests {
     fn split_cell_array_mixed_inputs() {
         let values = vec![
             Value::String("alpha beta".to_string().into()),
-            Value::CharArray(CharArray::new("gamma".chars().collect(), 1, 5).unwrap()),
+            Value::CharArray(
+                CharArray::from_unicode_scalars("gamma".chars().collect(), 1, 5).unwrap(),
+            ),
         ];
         let cell = Value::Cell(CellArray::new(values, 1, 2).expect("cell array construction"));
         let result = split_builtin(cell, Vec::new()).expect("split");
@@ -2270,7 +1950,9 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strsplit_char_vector_returns_cell() {
-        let input = Value::CharArray(CharArray::new("a,b".chars().collect(), 1, 3).unwrap());
+        let input = Value::CharArray(
+            CharArray::from_unicode_scalars("a,b".chars().collect(), 1, 3).unwrap(),
+        );
         let result = strsplit_builtin(input, vec![Value::String(",".into())]).expect("strsplit");
         match result {
             Value::Cell(cell) => {
@@ -2398,11 +2080,22 @@ pub(crate) mod tests {
         assert!(err.to_string().contains("DelimiterType"));
     }
 
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn split_type_is_string_array() {
-        assert_eq!(
-            string_array_type(&[Type::String], &ResolveContext::new(Vec::new())),
-            Type::cell_of(Type::String)
-        );
+    fn split_and_strsplit_reject_unpaired_utf16_without_replacement() {
+        let malformed = || {
+            Value::CharArray(
+                CharArray::from_code_units(
+                    vec![runmat_value::Utf16CodeUnit::from_raw(0xD800)],
+                    1,
+                    1,
+                )
+                .unwrap(),
+            )
+        };
+        let split_error = split_builtin(malformed(), Vec::new()).unwrap_err();
+        assert!(split_error.to_string().contains("malformed UTF-16"));
+        let strsplit_error = strsplit_builtin(malformed(), Vec::new()).unwrap_err();
+        assert!(strsplit_error.to_string().contains("malformed UTF-16"));
     }
 }

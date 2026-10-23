@@ -200,7 +200,7 @@ enum PageTranspose {
 
 impl PageTranspose {
     fn parse(value: &Value) -> BuiltinResult<Self> {
-        match keyword_of(value).as_deref() {
+        match keyword_of(value)?.as_deref() {
             Some("none") => Ok(Self::None),
             Some("transpose") => Ok(Self::Transpose),
             Some("ctranspose") => Ok(Self::CTranspose),

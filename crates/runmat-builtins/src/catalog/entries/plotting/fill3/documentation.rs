@@ -1,0 +1,176 @@
+use crate::*;
+pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+ authority: BuiltinDocumentationAuthority::Catalog,
+ title: Some("fill3"), slug: Some("fill3"), summary: "Create 3-D filled polygon patches in MATLAB and RunMat.", description: concat!(
+    "`fill3` creates filled polygon patch objects from X, Y, and Z coordinate data ",
+    "in 3-D axes. It reuses the shared patch pipeline, so handle behavior and patch ",
+    "name-value properties follow MATLAB semantics.",
+),
+ keywords: &["fill3", "3-D filled polygon", "patch", "polygon", "matlab fill3", "3d patch"], related: &["patch", "plot3", "scatter3", "surf", "view", "get", "set"],
+ sections: &[BuiltinDocumentationSection { heading: "Behavior", paragraphs: &["`fill3(X, Y, Z, C)` creates one or more 3-D filled polygons from matching coordinate arrays.", "Equal-length row or column vector coordinate inputs create one polygon regardless of orientation.", concat!(
+    "When any coordinate is a matrix, coordinate vectors matching its row count are ",
+    "shared across its columns; square matrices are deterministically grouped by ",
+    "columns.",
+), concat!(
+    "Matrix coordinate inputs create one independently addressable Patch object per ",
+    "column and return one handle per column.",
+), concat!(
+    "Multiple `X,Y,Z,C` groups in one call create multiple patch objects and return ",
+    "a row vector of patch handles.",
+), "A single polygon group returns a scalar patch handle.", concat!(
+    "`fill3` initializes the target axes with the standard 3-D view, so even ",
+    "polygons in the z=0 plane render as 3-D patch content.",
+), "Trailing patch property name-value pairs are applied to every polygon group in the call.", "The returned patch handles work with `get`, `set`, `ishandle`, and `isgraphics`.", "Color strings and RGB triples are supported through the shared patch color parser.", concat!(
+    "Numeric C is retained as authoritative CData for indexed color mapping; color ",
+    "strings and RGB triples use the shared Patch color parser.",
+), concat!(
+    "Integer XData, YData, ZData, and CData preserve their original class, exact ",
+    "values, and shape independently of renderer geometry.",
+)] },
+BuiltinDocumentationSection { heading: "Options", paragraphs: &["`FaceColor` accepts color names, RGB triples, `flat`, or `none` through `patch`.", "`EdgeColor` accepts color names, RGB triples, or `none`.", "`FaceAlpha` and `EdgeAlpha` accept numeric values from 0 to 1.", "`LineWidth`, `DisplayName`, and `Visible` use the shared plotting property model.", "Explicit axes handles are accepted as the leading argument, matching other RunMat plotting builtins."] },
+BuiltinDocumentationSection { heading: "Rendering and residency", paragraphs: &[concat!(
+    "`fill3` is a plotting sink. It gathers GPU-resident coordinate and CData inputs ",
+    "exactly through their owning providers, then lowers each vector or matrix ",
+    "column to an independent Patch object.",
+), concat!(
+    "`fill3` is a plotting sink and fusion barrier. GPU-resident coordinate inputs ",
+    "are gathered before patch construction because MATLAB-compatible parsing ",
+    "requires shape validation and polygon assembly.",
+), concat!(
+    "`fill3` shares patch rendering behavior, so host and gathered-GPU coordinate ",
+    "inputs produce the same patch objects and graphics handles.",
+), "Rendered geometry flows through the shared GPU plotting renderer after the patch objects are built.", concat!(
+    "A future direct GPU path should preserve the same `X,Y,Z,C` grouping and patch ",
+    "property semantics while replacing only the coordinate gathering and geometry ",
+    "packing stage.",
+)] },
+BuiltinDocumentationSection { heading: "Declared source precision and class coverage", paragraphs: &["single", "double"] },
+BuiltinDocumentationSection { heading: "Coordinate broadcasting", paragraphs: &["none"] },
+BuiltinDocumentationSection { heading: "Runtime contract and boundaries", paragraphs: &[concat!(
+    "Graphics results are host double handles; fill/fill3 may return a row of ",
+    "handles for independently created polygon columns/groups. Sphere instead ",
+    "supports zero through three requested outputs: statement form plots, while ",
+    "output forms return host double coordinate grids. Handle aliases, ",
+    "value-selected options and exact graphics receiver roles are resolved by ",
+    "Runtime, not guessed from scalar facts.",
+), concat!(
+    "The existing numerical and geometry owners validate coordinates, integer ",
+    "controls, shapes and properties. Single/double and all eight integer source ",
+    "classes retain their native storage wherever the object has authoritative ",
+    "source properties; client geometry and renderer buffers are deliberate floating ",
+    "boundaries, not a promise of exact wide-integer pixel positions. There is no ",
+    "sparse/complex plotting implementation or numeric broadcasting promise here. ",
+    "Logical, scalar, vector, matrix, rank and empty admission follows each ",
+    "documented owner below rather than a universal coercion.",
+), concat!(
+    "RuntimeOwned preparation retains the original BuiltinArguments through ",
+    "suspension and completion. Eligible direct GPU routes require the live owning ",
+    "provider, admitted precision/storage/shape, compatible exports and installed ",
+    "plotting device. NoAttempt means pre-effect inapplicability, not permission to ",
+    "swallow export, allocation, cancellation or emission errors. Existing provider ",
+    "errors are propagated and ingress errors are terminal Never replay. ",
+    "Source-property queries and figure persistence may require explicit owner-aware ",
+    "readback; surface property snapshots and quiver3/patch construction are not ",
+    "zero-copy routes.",
+), concat!(
+    "Canonical UserInterface capability and host-callback effects reflect scene ",
+    "creation/presentation; function-sampling entries additionally declare Unknown ",
+    "effects for arbitrary user callbacks and require the Process execution stack. ",
+    "NativeAndWasm means the Runtime entry is portable, not that an absent graphics ",
+    "host is emulated. Portable Runtime linkage introduces no separate native ",
+    "numerical library artifact. Rendering is a fusion boundary and distributed ",
+    "execution is unsupported; no numeric provider kernel or fusion primitive is ",
+    "invented.",
+), concat!(
+    "Chart scratch, metadata, retained render state and the sphere coordinate ",
+    "builder do not yet have complete finite host allocation ownership. The shared ",
+    "canonical HostAllocationReceipt policy guard refuses Managed work before ",
+    "extraction/gather/callbacks or scene mutation, preserves ordinary Unbounded ",
+    "routes, and checks captured cancellation generation and policy before ",
+    "publication. This is an explicit L25 gap, not allocation completion. Long ",
+    "synchronous geometry/copy loops, renderer/provider-private allocation ",
+    "accounting, full MATLAB property parity, physical performance and actual ",
+    "example execution remain independently required.",
+)] },
+BuiltinDocumentationSection { heading: "Supported representations and remaining forms", paragraphs: &[concat!(
+    "One or more X,Y,Z,C groups lower to independently addressable shared Patch ",
+    "objects, with leading axes and trailing shared properties retained. Vectors ",
+    "form one polygon; matched matrices split by columns, reusing ",
+    "row-count-compatible vectors. The result is a scalar handle or row of handles; ",
+    "standard 3-D view is applied even for z=0 polygons.",
+), concat!(
+    "Shared Patch parsing owns FaceColor/EdgeColor, FaceAlpha/EdgeAlpha, LineWidth, ",
+    "DisplayName, Visible and color/indexed-CData behavior. Native X/Y/Z/C source ",
+    "class and shape remain authoritative. GPU coordinate/CData gathering precedes ",
+    "host polygon construction; no direct device polygon packer or full renderer ",
+    "color-mapping fidelity is fabricated. Typed-integer axes aliases retain their ",
+    "existing separate compatibility gate.",
+)] }],
+ examples: &[BuiltinExample { id: "retained-1", title: "Create a red square in the z=0 plane", program: "x = [0 1 1 0];\ny = [0 0 1 1];\nz = [0 0 0 0];\nh = fill3(x, y, z, 'r');\nget(h, 'Type')", display_output: Some("ans =\n    'patch'"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::BrowserGraphics, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: concat!(
+    "assert(strcmp(get(h,'Type'),'patch')); observed = get(h, 'ZData'); expected = ",
+    "[0 0 0 0]; assert(isequal(observed(:), expected(:))); ",
+) } },
+BuiltinExample { id: "retained-2", title: "Create two filled polygons in one call", program: concat!(
+    "x1 = [0 1 0];\ny1 = [0 0 1];\nz1 = [0 0 0];\nx2 = [2 3 3 2];\ny2 = [0 0 1 1];\nz2 = ",
+    "[1 1 1 1];\nh = fill3(x1, y1, z1, 'g', x2, y2, z2, [0 0 1]);",
+), display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::BrowserGraphics, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: concat!(
+    "assert(isequal(size(h),[1 2])); observed = get(h(1), 'XData'); expected = x1; ",
+    "assert(isequal(observed(:), expected(:))); observed = get(h(2), 'ZData'); ",
+    "expected = z2; assert(isequal(observed(:), expected(:))); ",
+) } },
+BuiltinExample { id: "retained-3", title: "Apply patch properties to a fill3 polygon", program: concat!(
+    "x = [0 1 0];\ny = [0 0 1];\nz = [0.25 0.5 0.75];\nh = fill3(x, y, z, [0.25 0.5 ",
+    "0.75], 'EdgeColor', 'none', 'FaceAlpha', 0.5);",
+), display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::BrowserGraphics, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: concat!(
+    "observed = get(h, 'ZData'); expected = z; assert(isequal(observed(:), ",
+    "expected(:))); assert(abs(get(h,'FaceAlpha')-0.5)<1e-6); ",
+    "assert(strcmp(get(h,'EdgeColor'),'none'));",
+) } },
+BuiltinExample { id: "retained-4", title: "Create one patch per matrix column", program: concat!(
+    "X = [0 2; 1 3; 1 3; 0 2];\nY = [0 0; 0 0; 1 1; 1 1];\nZ = [0 1; 0 1; 0 1; 0 ",
+    "1];\nfill3(X, Y, Z, 'cyan');\nview(3);",
+), display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::BrowserGraphics, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: concat!(
+    "witness = findobj(gca, 'Type', 'patch'); assert(numel(witness) >= 1); ",
+    "assert(numel(witness)==2); for k=1:2, assert(numel(get(witness(k),'XData'))==4);",
+    " end; assert(isequal(get(gca,'View'),[-37.5 30]));",
+) } }],
+ example_exemption: None,
+ faqs: &[BuiltinDocumentationFaq { question: "What does fill3 return?", answer: concat!(
+    "`fill3` returns patch graphics handles. A single polygon group returns one ",
+    "scalar handle; multiple groups return a row vector of handles.",
+) },
+BuiltinDocumentationFaq { question: "How is fill3 related to patch?", answer: concat!(
+    "`fill3` lowers its positional `X,Y,Z,C` inputs into the same `patch` object ",
+    "machinery. This keeps geometry validation, color parsing, property handling, ",
+    "rendering, and handle behavior consistent with `patch`.",
+) },
+BuiltinDocumentationFaq { question: "Can I pass patch properties to fill3?", answer: concat!(
+    "Yes. Trailing name-value pairs such as `'EdgeColor', 'none'`, `'FaceAlpha', ",
+    "0.5`, and `'LineWidth', 2` are forwarded to the patch objects created by ",
+    "`fill3`.",
+) },
+BuiltinDocumentationFaq { question: "Does fill3 support GPU-resident inputs?", answer: concat!(
+    "GPU-resident coordinate inputs are gathered through the shared patch path for ",
+    "validation and polygon construction, then the resulting geometry is rendered ",
+    "through RunMat's GPU plotting renderer.",
+) },
+BuiltinDocumentationFaq { question: "Does fill3 support indexed CData?", answer: concat!(
+    "Yes. Numeric scalar, vector, and matrix C inputs are retained as Patch CData. ",
+    "Renderer colormap fidelity continues to share the Patch renderer implementation.",
+) }],
+ links: &[BuiltinDocumentationLink { label: "patch", target: BuiltinDocumentationLinkTarget::Builtin("patch") },
+BuiltinDocumentationLink { label: "plot3", target: BuiltinDocumentationLinkTarget::Builtin("plot3") },
+BuiltinDocumentationLink { label: "scatter3", target: BuiltinDocumentationLinkTarget::Builtin("scatter3") },
+BuiltinDocumentationLink { label: "surf", target: BuiltinDocumentationLinkTarget::Builtin("surf") },
+BuiltinDocumentationLink { label: "view", target: BuiltinDocumentationLinkTarget::Builtin("view") },
+BuiltinDocumentationLink { label: "get", target: BuiltinDocumentationLinkTarget::Builtin("get") },
+BuiltinDocumentationLink { label: "set", target: BuiltinDocumentationLinkTarget::Builtin("set") },
+BuiltinDocumentationLink { label: "Graphics Handles", target: BuiltinDocumentationLinkTarget::Documentation("/docs/plotting/graphics-handles") },
+BuiltinDocumentationLink { label: "Plot replay and export", target: BuiltinDocumentationLinkTarget::Documentation("/docs/plotting/plot-replay-and-export") }],
+ media: &[],
+ evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "`crates/runmat-runtime/src/builtins/plotting/ops/fill3.rs`", target: BuiltinDocumentationLinkTarget::Source(concat!(
+    "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtin",
+    "s/plotting/ops/fill3.rs",
+)) }], verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "unit", location: "builtins::plotting::fill3::tests" }], notes: &[] },
+ introduced: None, status: Some(BuiltinDocumentationStatus::Partial),
+};

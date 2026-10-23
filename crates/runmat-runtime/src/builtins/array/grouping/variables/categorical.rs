@@ -12,12 +12,13 @@ pub(super) fn atoms(value: &Value, rows: usize) -> VariableResult<Vec<KeyAtom>> 
         return Err("categorical grouping storage is not an object".into());
     };
     let labels = crate::builtins::table::categorical_observation_labels(object)
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| super::VariableError::with_source(error.to_string(), error))?;
     if labels.len() != rows {
         return Err(format!(
             "categorical grouping storage has {} observations; expected {rows}",
             labels.len()
-        ));
+        )
+        .into());
     }
     Ok(labels
         .into_iter()

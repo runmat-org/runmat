@@ -260,8 +260,12 @@ The isolated extension host contains crashes and can be terminated on cancellati
 | Key                  | Type    | Default   | Notes                                   |
 | -------------------- | ------- | --------- | --------------------------------------- |
 | `enabled`            | boolean | `true`    | Enables JIT compilation.                |
-| `threshold`          | integer | `10`      | Executions before JIT tiering triggers. |
-| `optimization_level` | string  | `"speed"` | `none`, `size`, `speed`, `aggressive`.  |
+| `threshold`          | integer | `10`      | Accepted but does not control native tiering. |
+| `optimization_level` | string  | `"speed"` | Accepts `none`, `size`, `speed`, `aggressive`; does not select native compiler optimization. |
+
+`threshold`, `RUNMAT_JIT_THRESHOLD`, and `--jit-threshold` are accepted inputs, but their value does not control native compilation or specialization. Tiering tracks function and loop activity, profiles of runtime representations, and compilation budgets. Placement separately chooses among eligible implementations. See [JIT Compilation Pipeline](/docs/runtime/jit/pipeline).
+
+`optimization_level` and `--jit-opt-level` are parsed and retained as configuration, but do not select the native compiler's optimization policy.
 
 
 ### `[runtime.gc]`
@@ -467,8 +471,6 @@ options = []
 
 [runtime.jit]
 enabled = true
-threshold = 10
-optimization_level = "speed"
 
 [runtime.gc]
 preset = "low-latency"

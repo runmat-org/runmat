@@ -6,7 +6,7 @@ use super::compare_symbolic;
 #[test]
 fn all_relations_preserve_character_pages_and_column_major_order() {
     let shape = vec![2, 2, 2];
-    let chars = runmat_value::CharArray::new_with_shape(
+    let chars = runmat_value::CharArray::from_unicode_scalars_with_shape(
         vec!['A', '\0', 'B', 'C', '\0', 'D', '\0', 'E'],
         shape.clone(),
     )

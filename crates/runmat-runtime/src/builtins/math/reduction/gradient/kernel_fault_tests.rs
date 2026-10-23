@@ -45,10 +45,15 @@ impl AccelProvider for FailingGradient {
         input: &GpuTensorHandle,
         _: usize,
         _: f64,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        input.allocation_lease().validate_live().unwrap();
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        Err(anyhow::Error::new(kernel_fault()))
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        let result: anyhow::Result<_> = {
+            input.allocation_lease().validate_live().unwrap();
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Err(anyhow::Error::new(kernel_fault()))
+        };
+        result.map(Some).map_err(|source| {
+            runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+        })
     }
 }
 

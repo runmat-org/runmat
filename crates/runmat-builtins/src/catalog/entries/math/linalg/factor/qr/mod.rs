@@ -16,3 +16,5 @@ pub const QR_CATALOG_ENTRY: crate::BuiltinCatalogEntry =
         residency: crate::BuiltinResidencyPolicy::Dynamic,
         maturity: crate::BuiltinContractMaturity::Complete,
     });
+
+pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[&QR_CATALOG_ENTRY];

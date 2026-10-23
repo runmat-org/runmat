@@ -17,6 +17,24 @@ where
     I: Iterator<Item = &'n str> + Clone,
     F: Fn(&str, usize) -> Result<&'v Value, RuntimeError>,
 {
+    construct_generated_structure_owned(runtime, names, shape, |name, index| {
+        value(name, index).cloned()
+    })
+}
+
+/// Initialize the same final structural backing with newly prepared Values.
+/// The caller independently retains all GC children reachable from every
+/// returned Value until publication; construction does not create GC objects.
+pub(crate) fn construct_generated_structure_owned<'n, I, F>(
+    runtime: Option<&RuntimeContext>,
+    names: I,
+    shape: &[usize],
+    value: F,
+) -> Result<RootedValue, RuntimeError>
+where
+    I: Iterator<Item = &'n str> + Clone,
+    F: Fn(&str, usize) -> Result<Value, RuntimeError>,
+{
     let error = |source| {
         host_allocation_runtime_error(
             runtime,
@@ -77,7 +95,7 @@ where
             for name in names {
                 receipt.checkpoint(runtime).map_err(error)?;
                 let key = copy_key(runtime, receipt, &permit, name)?;
-                let child = value(name, 0)?.clone();
+                let child = value(name, 0)?;
                 builder.try_insert_prepared(key, child).map_err(|source| {
                     crate::runtime_error::semantic_error_with_source(
                         "StructConstruction",
@@ -98,7 +116,7 @@ where
                     if index % 4096 == 0 {
                         receipt.checkpoint(runtime).map_err(error)?;
                     }
-                    Ok::<_, RuntimeError>(value(name, index)?.clone())
+                    value(name, index)
                 });
                 receipt.checkpoint(runtime).map_err(error)?;
                 let column = column.map_err(|e| match e {
@@ -126,7 +144,7 @@ where
     } else if length == 1 {
         let mut builder = UnboundedStructValueBuilder::with_capacity(count);
         for name in names {
-            builder.insert(name, value(name, 0)?.clone());
+            builder.insert(name, value(name, 0)?);
             emitted += 1;
         }
         Value::Struct(builder.finish())
@@ -137,7 +155,7 @@ where
             let mut column =
                 runmat_value::exact_capacity_vec(length).map_err(|e| error(e.into()))?;
             for index in 0..length {
-                column.push(value(name, index)?.clone());
+                column.push(value(name, index)?);
             }
             builder
                 .insert(name.to_owned(), OutputListStorage::shared_unbounded(column))

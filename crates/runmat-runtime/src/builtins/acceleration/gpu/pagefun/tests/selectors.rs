@@ -57,7 +57,7 @@ fn pagefun_extensions_follow_compatibility_mode() {
 fn pagefun_mtimes_char_array_handle() {
     let lhs = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
     let rhs = Tensor::new(vec![5.0, 7.0, 6.0, 8.0], vec![2, 2]).unwrap();
-    let func = CharArray::new("@mtimes".chars().collect(), 1, 7).unwrap();
+    let func = CharArray::from_unicode_scalars("@mtimes".chars().collect(), 1, 7).unwrap();
     let result = pagefun_impl(
         Value::CharArray(func),
         Value::Tensor(lhs),
@@ -143,7 +143,7 @@ fn pagefun_mtimes_string_array_handle() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn pagefun_char_array_multirow_error() {
-    let chars = CharArray::new("@mtimes@".chars().collect(), 2, 4).unwrap();
+    let chars = CharArray::from_unicode_scalars("@mtimes@".chars().collect(), 2, 4).unwrap();
     let lhs = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
     let rhs = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
     let err = pagefun_impl(

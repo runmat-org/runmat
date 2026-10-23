@@ -11,7 +11,9 @@
 //!   orderings ([`ordering`]: AMD and multilevel nested dissection), reusable symbolic analysis and
 //!   memory estimates before numeric work;
 //! - Krylov methods ([`krylov`]): PCG, MINRES, GMRES(m)/FGMRES and BiCGStab for real and complex
-//!   systems;
+//!   systems. PCG and GMRES are the caller-owned, resumable recurrences shared with the runtime's
+//!   `pcg`/`gmres` builtins (caller workspace, typed control, original callback errors); the FEA
+//!   reaches them through thin synchronous drivers;
 //! - preconditioners ([`precond`]): Jacobi and block Jacobi, ILU(0), ILUT, smoothed-aggregation
 //!   algebraic multigrid with near-nullspace modes, auxiliary-space (curl-curl) and additive
 //!   Schwarz with pluggable subdomain solvers;

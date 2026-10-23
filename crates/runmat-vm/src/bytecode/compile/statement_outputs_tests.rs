@@ -33,6 +33,12 @@ fn zero_output_call_statement_does_not_discard_a_nonexistent_value() {
                     | Instr::CallFunctionExpandMultiOutput { out_count: 0, .. }
                     | Instr::CallWorkspaceFirstExpandMultiOutput { out_count: 0, .. }
                     | Instr::CallFunctionMulti { out_count: 0, .. }
+                    | Instr::ReadSubscriptPath {
+                        selection: runmat_types::SequenceUse::Discard,
+                        context: runmat_types::ObjectIndexingContext::Statement,
+                        to_sequence_register: false,
+                        ..
+                    }
             )),
             "expected a zero-output call: {source}; {:?}",
             bytecode.instructions

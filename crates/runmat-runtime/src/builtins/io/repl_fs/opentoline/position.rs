@@ -33,7 +33,9 @@ pub(super) async fn resolve_position(value: AdmittedPosition, label: &str) -> Bu
     }
 }
 pub(super) fn host_position(value: &Value, label: &str) -> BuiltinResult<usize> {
-    if let Some(text) = super::super::file_dialog::try_scalar_text(value) {
+    if let Some(text) = super::super::file_dialog::try_scalar_text(value, label, |detail| {
+        opentoline_error(&OPENTOLINE_ERROR_POSITION, detail)
+    })? {
         return parse_positive_integer_text(&text, label);
     }
     if let Value::Int(integer) = value {

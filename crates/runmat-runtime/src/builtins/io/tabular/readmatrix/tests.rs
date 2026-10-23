@@ -929,8 +929,8 @@ fn readmatrix_accepts_character_vector_path() {
     fs::write(&path, "1 2 3\n").expect("write sample file");
     let text = path.to_string_lossy().to_string();
     let chars: Vec<char> = text.chars().collect();
-    let len = chars.len();
-    let char_array = CharArray::new(chars, 1, len).expect("char array");
+    let len = text.encode_utf16().count();
+    let char_array = CharArray::from_unicode_scalars(chars, 1, len).expect("char array");
     let result = block_on(readmatrix_builtin(
         None,
         Value::CharArray(char_array),

@@ -5,22 +5,34 @@ impl HostState {
     /// partially prepared mutation. None of these cursors may be replayed at
     /// the handler's next site, even when that site has the same MIR shape.
     pub fn abandon_site_continuations(&mut self) -> NativeExecutorResult<()> {
+        let mut reference_error = None;
         self.pending_place_mutation = None;
         self.pending_assign = None;
         self.pending_place_prepare = None;
         self.pending_plain_multi = None;
         self.pending_sequence_assign = None;
         self.pending_sequence_rvalue = None;
-        self.pending_multi_preparation = None;
+        if let Some(mut pending) = self.pending_multi_preparation.take() {
+            if let Err(error) = pending.release_fixed_original(&mut self.arena) {
+                reference_error = Some(error);
+            }
+        }
         self.sequence_assignment_register = None;
-        self.prepared_multi_assignment = None;
+        if let Some(mut prepared) = self.prepared_multi_assignment.take() {
+            if let Err(error) = prepared.release_fixed_original(&mut self.arena) {
+                if reference_error.is_none() {
+                    reference_error = Some(error);
+                }
+            }
+        }
         self.pending_call = None;
         self.completed_call = None;
         self.pending_await = None;
-        self.captured_sequences.clear();
+        self.abandon_captured_sequences();
         self.contextual_index_extents.clear();
         self.subscript_end_receivers.clear();
-        self.finish_contextual_site()
+        let finished = self.finish_contextual_site();
+        reference_error.map_or(finished, Err)
     }
 
     pub fn refresh_roots(&mut self) -> NativeRootSet {
@@ -82,8 +94,7 @@ impl HostState {
             }
         }
         if let Some(preparation) = &self.pending_multi_preparation {
-            let values = preparation.root_references().collect::<Vec<_>>();
-            for value in values {
+            for value in preparation.root_references() {
                 let slot = u32::try_from(self.roots.len())
                     .expect("pending multi-target preparation root cardinality is bounded by native value admission");
                 self.roots.push(NativeRoot {
@@ -128,9 +139,11 @@ impl HostState {
                 slot,
             });
         }
-        let completed_call_roots =
-            super::super::call_suspension::completed_roots(self).collect::<Vec<_>>();
-        for value in completed_call_roots {
+        // Borrow only the completed owner so the canonical root buffer can
+        // be updated without copying the numeric continuation's inline slots.
+        for value in
+            super::super::call_suspension::completed_roots_from(self.completed_call.as_ref())
+        {
             let slot = u32::try_from(self.roots.len())
                 .expect("completed call root cardinality is bounded by native value admission");
             self.roots.push(NativeRoot {
@@ -150,20 +163,7 @@ impl HostState {
                 });
             }
         }
-        let mut sequence_root_slot = self.roots.len();
-        for values in self.captured_sequences.values() {
-            for value in values {
-                let slot = u32::try_from(sequence_root_slot).expect(
-                    "captured sequence root cardinality is validated when the sequence is captured",
-                );
-                self.roots.push(NativeRoot {
-                    value: *value,
-                    kind: NativeRootKind::TEMPORARY,
-                    slot,
-                });
-                sequence_root_slot += 1;
-            }
-        }
+        // Captures own canonical Runtime roots: no variable-width arena mirror.
         NativeRootSet {
             roots: self.roots.as_ptr(),
             count: self.roots.len(),
@@ -253,7 +253,7 @@ impl HostState {
             || self.sequence_assignment_register.is_some()
             || self.prepared_multi_assignment.is_some()
             || self.pending_multi_preparation.is_some()
-            || !self.captured_sequences.is_empty()
+            || self.captured_sequences_live()
             || self.has_contextual_progress()
     }
 

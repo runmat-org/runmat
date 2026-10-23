@@ -8,6 +8,12 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, IntValue, IntegerStorage, Tensor, Value};
 
+use crate::context::host_allocation::{
+    host_allocation_runtime_error, HostAllocationError, HostAllocationReceipt,
+};
+use crate::context::RuntimeContext;
+use crate::GpuGatherRetry;
+
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
@@ -18,6 +24,9 @@ use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "int2str";
+
+#[path = "int2str/managed.rs"]
+mod managed;
 
 fn int2str_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     int2str_error_with_message(error.message, error)
@@ -69,9 +78,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "int2str",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::core::int2str"
 )]
 async fn int2str_builtin(
+    runtime: Option<RuntimeContext>,
     value: Value,
     rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
@@ -94,11 +105,60 @@ async fn int2str_builtin(
         )?;
     }
 
+    let original_owner =
+        HostAllocationReceipt::capture_owner(runtime.as_ref()).map_err(|cause| {
+            let runtime = runtime.as_ref().expect("managed capture has runtime");
+            int2str_allocation_error(runtime, cause)
+        })?;
+
     let gathered = gather_if_needed_async(&value)
         .await
         .map_err(remap_int2str_flow)?;
+    let gathered = if original_owner.is_some() {
+        if let Value::GpuTensor(handle) = gathered {
+            Value::Tensor(
+                gpu_helpers::gather_tensor_async(&handle)
+                    .await
+                    .map_err(remap_int2str_flow)
+                    .map_err(|mut error| {
+                        error.gpu_gather_retry = GpuGatherRetry::Never;
+                        error
+                    })?,
+            )
+        } else {
+            gathered
+        }
+    } else {
+        gathered
+    };
+    if let Some(owner) = original_owner {
+        let runtime = runtime.as_ref().expect("managed owner has runtime");
+        owner
+            .check(runtime)
+            .map_err(|cause| int2str_allocation_error(runtime, cause))
+            .map_err(|mut error| {
+                error.gpu_gather_retry = GpuGatherRetry::Never;
+                error
+            })?;
+        return managed::format_managed(gathered, runtime)
+            .await
+            .map(Value::CharArray)
+            .map_err(|mut error| {
+                error.gpu_gather_retry = GpuGatherRetry::Never;
+                error
+            });
+    }
     let data = extract_numeric_data(gathered).await?;
     Ok(Value::CharArray(format_numeric_data(data)?))
+}
+
+fn int2str_allocation_error(runtime: &RuntimeContext, cause: HostAllocationError) -> RuntimeError {
+    host_allocation_runtime_error(
+        Some(runtime),
+        "RunMat:int2str:HostFormatting",
+        "int2str: host formatting allocation failed",
+        cause,
+    )
 }
 
 fn value_is_logical(value: &Value) -> bool {
@@ -288,7 +348,7 @@ where
     for (col, width) in col_widths.iter_mut().enumerate() {
         for (row, row_entries) in entries.iter_mut().enumerate() {
             let text = value_at(row, col);
-            let entry_width = text.chars().count();
+            let entry_width = text.encode_utf16().count();
             row_entries[col] = CellEntry {
                 text,
                 width: entry_width,
@@ -369,7 +429,7 @@ fn rows_to_char_array(rows: Vec<String>) -> BuiltinResult<CharArray> {
     let row_count = rows.len();
     let col_count = rows
         .iter()
-        .map(|row| row.chars().count())
+        .map(|row| row.encode_utf16().count())
         .max()
         .unwrap_or(0);
     let capacity = row_count.checked_mul(col_count).ok_or_else(|| {
@@ -381,16 +441,24 @@ fn rows_to_char_array(rows: Vec<String>) -> BuiltinResult<CharArray> {
 
     let mut data = Vec::with_capacity(capacity);
     for row in rows {
-        let mut chars: Vec<char> = row.chars().collect();
-        if chars.len() < col_count {
-            chars.extend(std::iter::repeat_n(' ', col_count - chars.len()));
-        }
-        data.extend(chars);
+        let width = row.encode_utf16().count();
+        data.extend(
+            row.encode_utf16()
+                .map(runmat_value::Utf16CodeUnit::from_raw),
+        );
+        data.extend(std::iter::repeat_n(
+            runmat_value::Utf16CodeUnit::from_raw(u16::from(b' ')),
+            col_count - width,
+        ));
     }
     char_array(data, row_count, col_count)
 }
 
-fn char_array(data: Vec<char>, rows: usize, cols: usize) -> BuiltinResult<CharArray> {
+fn char_array(
+    data: Vec<runmat_value::Utf16CodeUnit>,
+    rows: usize,
+    cols: usize,
+) -> BuiltinResult<CharArray> {
     let expected = rows.checked_mul(cols).ok_or_else(|| {
         int2str_error_with_message(
             "int2str: output dimensions are too large",
@@ -400,20 +468,122 @@ fn char_array(data: Vec<char>, rows: usize, cols: usize) -> BuiltinResult<CharAr
     if expected != data.len() {
         return Err(int2str_error(&INT2STR_ERROR_INTERNAL));
     }
-    CharArray::new(data, rows, cols).map_err(|_| int2str_error(&INT2STR_ERROR_INTERNAL))
+    CharArray::from_code_units(data, rows, cols).map_err(|_| int2str_error(&INT2STR_ERROR_INTERNAL))
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::builtins::strings::core::numeric_format_work::FormatBuffer;
+    use crate::context::host_effect::ManagedHostEffectLedger;
+    use crate::context::{
+        ParallelCapability, RuntimeParallelResources, RuntimeParallelService, RuntimeServicePorts,
+    };
+    use runmat_value::NumericScalar;
     use runmat_value::{IntValue, LogicalArray};
+    use std::rc::Rc;
+
+    struct ManagedParallel(ManagedHostEffectLedger);
+
+    impl RuntimeParallelService for ManagedParallel {
+        fn supports(&self, _: ParallelCapability) -> bool {
+            false
+        }
+
+        fn placement_resources(&self) -> RuntimeParallelResources {
+            let snapshot = self.0.snapshot();
+            RuntimeParallelResources {
+                memory_available_bytes: Some(snapshot.free_bytes()),
+                epoch: snapshot.epoch,
+                ..RuntimeParallelResources::default()
+            }
+        }
+
+        fn managed_host_effect_ledger(&self) -> Option<ManagedHostEffectLedger> {
+            Some(self.0.clone())
+        }
+    }
+
+    fn managed_runtime(ledger: &ManagedHostEffectLedger) -> RuntimeContext {
+        RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+            .with_service_ports(
+                RuntimeServicePorts::default()
+                    .with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
+            )
+    }
 
     fn int2str_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(super::int2str_builtin(
+            None,
             value,
             crate::builtins::common::test_support::builtin_arguments(rest),
         ))
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn admitted_cell_formatter_matches_original_rounding_and_wide_integer_text() {
+        for value in [
+            NumericScalar::F64(-0.0),
+            NumericScalar::F64(0.5),
+            NumericScalar::F64(-0.5),
+            NumericScalar::F64(1e100),
+            NumericScalar::F64(f64::NAN),
+            NumericScalar::F64(f64::NEG_INFINITY),
+            NumericScalar::I64(i64::MIN),
+            NumericScalar::U64(u64::MAX),
+        ] {
+            let mut backing = [0u8; managed::CELL_TEXT_CAPACITY];
+            let mut text = FormatBuffer::new(&mut backing);
+            managed::write_managed_cell(value, &mut text).unwrap();
+            let expected = match value {
+                NumericScalar::F64(value) => format_rounded_real(value),
+                NumericScalar::I64(value) => value.to_string(),
+                NumericScalar::U64(value) => value.to_string(),
+                _ => unreachable!(),
+            };
+            assert_eq!(text.as_str(), expected, "{value:?}");
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn managed_integer_format_keeps_exact_input_and_retained_output_owner() {
+        let denied = ManagedHostEffectLedger::new(1);
+        let denied_result = futures::executor::block_on(super::int2str_builtin(
+            Some(managed_runtime(&denied)),
+            Value::Int(IntValue::U64(u64::MAX)),
+            test_support::builtin_arguments(Vec::new()),
+        ));
+        assert!(denied_result.is_err());
+        assert_eq!(denied.snapshot().live_reserved_bytes, 0);
+
+        let ledger = ManagedHostEffectLedger::new(1 << 20);
+        let runtime = managed_runtime(&ledger);
+        let input = Value::Tensor(
+            Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX, 1, 42, 0]), vec![2, 2]).unwrap(),
+        );
+        let output = futures::executor::block_on(super::int2str_builtin(
+            Some(runtime),
+            input,
+            test_support::builtin_arguments(Vec::new()),
+        ))
+        .expect("managed int2str");
+        let Value::CharArray(chars) = output else {
+            panic!("expected managed character array")
+        };
+        assert!(chars.data_owner().is_exact());
+        assert_eq!(chars.rows, 2);
+        let first = runmat_value::decode_utf16_code_units(&chars.data()[..chars.cols])
+            .expect("first row UTF-16");
+        assert_eq!(first, "18446744073709551615 42");
+        assert!(ledger.snapshot().live_reserved_bytes > 0);
+        let alias = chars.clone();
+        drop(chars);
+        assert!(ledger.snapshot().live_reserved_bytes > 0);
+        drop(alias);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -439,7 +609,9 @@ pub(crate) mod tests {
             Value::CharArray(ca) => ca
                 .data()
                 .chunks(ca.cols)
-                .map(|chunk| chunk.iter().collect())
+                .map(|chunk| {
+                    runmat_value::decode_utf16_code_units(chunk).expect("valid text fixture")
+                })
                 .collect(),
             other => panic!("expected char array, got {other:?}"),
         }

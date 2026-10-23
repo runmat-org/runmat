@@ -21,12 +21,6 @@ const BUILTIN_NAME: &str = "exist";
 #[cfg(test)]
 pub(crate) mod tests;
 
-fn exist_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message)
-        .with_builtin(BUILTIN_NAME)
-        .build()
-}
-
 fn exist_error_row(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     let mut builder = build_runtime_error(error.message).with_builtin(BUILTIN_NAME);
     if let Some(identifier) = error.identifier {
@@ -69,8 +63,9 @@ async fn exist_builtin(
         .transpose()?
         .unwrap_or(ExistQuery::Any);
 
+    let text = value_to_string(&name)?;
     let result = match query {
-        ExistQuery::Handle if value_to_string(&name).is_none() => {
+        ExistQuery::Handle if text.is_none() => {
             crate::compatibility::ensure_builtin_extension_enabled(
                 &EXIST_NONTEXT_HANDLE_EXTENSION,
                 BUILTIN_NAME,
@@ -79,8 +74,7 @@ async fn exist_builtin(
         }
         ExistQuery::Handle => ExistResultKind::NotFound,
         _ => {
-            let text =
-                value_to_string(&name).ok_or_else(|| exist_error_row(&EXIST_ERROR_NAME_ARG))?;
+            let text = text.ok_or_else(|| exist_error_row(&EXIST_ERROR_NAME_ARG))?;
             exist_for_query(&text, query).await?
         }
     };

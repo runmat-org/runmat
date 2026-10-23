@@ -1,5 +1,5 @@
 use super::*;
-use crate::{OutputListStorage, OwnedExactArrayValues, SharedShape};
+use crate::{HostShapeInput, OutputListStorage, OwnedExactArrayValues, SharedShape};
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -15,6 +15,17 @@ pub struct CellArray {
 }
 
 impl CellArray {
+    /// Authenticate the cached two-dimensional view and every row-major page
+    /// against the canonical Cell shape and payload count.
+    pub fn validate_layout(&self) -> Result<(), String> {
+        let expected = total_len(&self.shape)
+            .ok_or_else(|| "Cell data shape exceeds platform limits".to_string())?;
+        if expected != self.data.len() || shape_rows_cols(&self.shape) != (self.rows, self.cols) {
+            return Err("Cell shape, cache, and payload disagree".into());
+        }
+        Ok(())
+    }
+
     pub fn new(data: Vec<Value>, rows: usize, cols: usize) -> Result<Self, String> {
         Self::new_with_shape(data, vec![rows, cols])
     }
@@ -45,7 +56,12 @@ impl CellArray {
         let expected = total_len(&shape)
             .ok_or_else(|| "Cell data shape exceeds platform limits".to_string())?;
         if expected != data.len() {
-            return Err("Cell payload length does not match shape".into());
+            return Err(format!(
+                "Cell data length {} doesn't match shape {:?} ({} elements)",
+                data.len(),
+                shape,
+                expected
+            ));
         }
         Ok(Self::from_validated_storage(data, shape))
     }
@@ -154,13 +170,27 @@ impl CellArray {
         Ok(())
     }
 
-    pub fn from_column_major(data: Vec<Value>, shape: Vec<usize>) -> Result<Self, String> {
-        let normalized = match shape.as_slice() {
-            [] => vec![0, 0],
-            [length] => vec![1, *length],
-            _ => shape,
+    pub fn from_column_major(
+        data: Vec<Value>,
+        shape: impl Into<HostShapeInput>,
+    ) -> Result<Self, String> {
+        let shape = match shape.into() {
+            HostShapeInput::Owned(shape) => HostShapeInput::Owned(match shape.as_slice() {
+                [] => vec![0, 0],
+                [length] => vec![1, *length],
+                _ => shape,
+            }),
+            HostShapeInput::Shared(shape) => match shape.as_slice() {
+                [] => HostShapeInput::Owned(vec![0, 0]),
+                [length] => HostShapeInput::Owned(vec![1, *length]),
+                _ => HostShapeInput::Shared(shape),
+            },
         };
-        let expected = total_len(&normalized)
+        let normalized = match &shape {
+            HostShapeInput::Owned(shape) => shape.as_slice(),
+            HostShapeInput::Shared(shape) => shape.as_slice(),
+        };
+        let expected = total_len(normalized)
             .ok_or_else(|| "Cell data shape exceeds platform limits".to_string())?;
         if expected != data.len() {
             return Err(format!(
@@ -169,6 +199,14 @@ impl CellArray {
                 normalized,
                 expected
             ));
+        }
+        if expected == 0 {
+            return match shape {
+                HostShapeInput::Owned(shape) => Self::new_with_shape(data, shape),
+                HostShapeInput::Shared(shape) => {
+                    Self::from_shared_storage(OutputListStorage::shared_unbounded(data), shape)
+                }
+            };
         }
         let rows = normalized[0];
         let cols = normalized[1];
@@ -193,7 +231,12 @@ impl CellArray {
                 }
             }
         }
-        Self::new_with_shape(row_major, normalized)
+        match shape {
+            HostShapeInput::Owned(shape) => Self::new_with_shape(row_major, shape),
+            HostShapeInput::Shared(shape) => {
+                Self::from_shared_storage(OutputListStorage::shared_unbounded(row_major), shape)
+            }
+        }
     }
 
     pub fn to_column_major(&self) -> Vec<Value> {
@@ -238,15 +281,32 @@ impl CellArray {
         Ok(ordered)
     }
 
+    /// Borrow one MATLAB-visible linear element in O(1), without cloning or
+    /// materializing a reordered buffer. Cell storage is row-major within each
+    /// 2-D page; higher-dimensional page order is unchanged.
+    pub fn get_column_major(&self, linear: usize) -> Option<&Value> {
+        if linear >= self.data.len() {
+            return None;
+        }
+        let page_len = self.rows.checked_mul(self.cols)?;
+        let page = linear / page_len.max(1);
+        let within_page = linear % page_len.max(1);
+        let row = within_page % self.rows.max(1);
+        let col = within_page / self.rows.max(1);
+        let physical = page
+            .checked_mul(page_len)?
+            .checked_add(row.checked_mul(self.cols)?)?
+            .checked_add(col)?;
+        self.data.as_slice().get(physical)
+    }
+
     /// Iterate in MATLAB-visible linear order without cloning cell payloads.
+    /// For random access, use `get_column_major` rather than repeatedly calling
+    /// `nth`: a mapped iterator must evaluate its skipped elements.
     pub fn iter_column_major(&self) -> impl Iterator<Item = &Value> {
-        let page_len = self.rows * self.cols;
         (0..self.data.len()).map(move |linear| {
-            let page = linear / page_len.max(1);
-            let within_page = linear % page_len.max(1);
-            let row = within_page % self.rows.max(1);
-            let col = within_page / self.rows.max(1);
-            &self.data[page * page_len + row * self.cols + col]
+            self.get_column_major(linear)
+                .expect("cell storage does not match cached dimensions")
         })
     }
 
@@ -337,12 +397,43 @@ mod tests {
         let borrowed = array.iter_column_major().cloned().collect::<Vec<_>>();
         assert_eq!(borrowed, array.to_column_major());
         assert_eq!(borrowed, expected);
+        let rebuilt = CellArray::from_column_major(expected.clone(), array.shape.clone()).unwrap();
+        assert_eq!(rebuilt, array);
+        assert_eq!(rebuilt.shape.as_ptr(), array.shape.as_ptr());
+        let shape = SharedShape::new_unmanaged(vec![usize::MAX, 0]);
+        let empty = CellArray::from_column_major(Vec::new(), shape.clone()).unwrap();
+        assert_eq!(empty.shape.as_ptr(), shape.as_ptr());
+        assert!(empty.data().is_empty());
+        for (index, value) in expected.iter().enumerate() {
+            assert_eq!(array.get_column_major(index), Some(value));
+        }
+        assert_eq!(array.get_column_major(expected.len()), None);
+        assert_eq!(array.get_column_major(usize::MAX), None);
+
+        // Independent physical-storage oracle across pages, not a comparison
+        // between two consumers of the same mapping implementation.
+        let pages = CellArray::new_with_shape(
+            (1..=8).map(|value| Value::Num(f64::from(value))).collect(),
+            vec![2, 2, 2],
+        )
+        .unwrap();
+        let alias = pages.clone();
+        for (logical, physical) in [0, 2, 1, 3, 4, 6, 5, 7].into_iter().enumerate() {
+            let borrowed = pages.get_column_major(logical).unwrap();
+            assert!(std::ptr::eq(borrowed, &pages.data()[physical]));
+            assert!(std::ptr::eq(
+                borrowed,
+                alias.get_column_major(logical).unwrap()
+            ));
+        }
+        assert_eq!(pages.get_column_major(8), None);
     }
 
     #[test]
     fn borrowed_column_major_iteration_handles_empty_shape() {
         let array = CellArray::new(Vec::new(), 0, 0).unwrap();
         assert_eq!(array.iter_column_major().count(), 0);
+        assert_eq!(array.get_column_major(0), None);
     }
 
     #[test]

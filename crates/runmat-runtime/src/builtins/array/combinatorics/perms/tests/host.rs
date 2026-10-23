@@ -4,7 +4,9 @@ use super::*;
 fn character_pages_use_full_shape_admission() {
     for shape in [vec![1, 2, 2], vec![1, 2, 1]] {
         let count = shape.iter().product();
-        let chars = runmat_value::CharArray::new_with_shape(vec!['x'; count], shape).unwrap();
+        let chars =
+            runmat_value::CharArray::from_unicode_scalars_with_shape(vec!['x'; count], shape)
+                .unwrap();
         assert_eq!(
             call(Value::CharArray(chars)).unwrap_err().identifier(),
             Some("RunMat:perms:InvalidInput")
@@ -170,7 +172,11 @@ fn complex_and_container_vectors_preserve_representation() {
     let Value::CharArray(characters) = call(Value::CharArray(characters)).expect("perms") else {
         panic!("expected characters")
     };
-    assert_eq!(characters.data()[0..3].iter().collect::<String>(), "cba");
+    assert_eq!(
+        runmat_value::decode_utf16_code_units(&characters.data()[0..3])
+            .expect("valid UTF-16 fixture text"),
+        "cba"
+    );
     let strings = StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).expect("strings");
     let Value::StringArray(strings) = call(Value::StringArray(strings)).expect("perms") else {
         panic!("expected string array")

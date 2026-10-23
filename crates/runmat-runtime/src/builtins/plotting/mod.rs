@@ -34,7 +34,6 @@ pub(crate) mod style;
 mod test_support;
 #[path = "core/web.rs"]
 pub mod web;
-pub(crate) mod type_resolvers;
 #[path = "ops/addpoints.rs"]
 pub(crate) mod addpoints;
 #[path = "ops/ancestor.rs"]
@@ -265,6 +264,10 @@ pub(crate) mod zoom;
 pub mod ops;
 #[cfg(test)]
 pub(crate) mod tests;
+#[path = "ops/text_chart_admission.rs"]
+mod text_chart_admission;
+#[path = "ops/coordinate_admission.rs"]
+mod coordinate_admission;
 
 #[cfg(feature = "plot-core")]
 pub use self::engine::{

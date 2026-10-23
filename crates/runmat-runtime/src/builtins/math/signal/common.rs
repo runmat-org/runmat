@@ -7,17 +7,17 @@ use runmat_value::{ComplexTensor, NumericDType, Tensor, Value};
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
-pub(super) mod output_precision;
 pub(crate) mod convolution;
 mod cooperation;
 mod iir_boundary;
-mod window_generation;
-mod waveform_map;
+pub(super) mod output_precision;
 mod waveform_boundary;
 mod waveform_control;
-mod waveform_sample;
+mod waveform_map;
 #[cfg(test)]
 pub(crate) mod waveform_restore_fixture;
+mod waveform_sample;
+mod window_generation;
 pub(crate) mod window_provider;
 pub(crate) use cooperation::{SignalCooperation, SIGNAL_WORK_CHUNK};
 pub(crate) use iir_boundary::preflight as preflight_iir_operands;
@@ -54,6 +54,7 @@ pub(crate) enum WindowArgError {
     TooManyOptions,
     InvalidLength,
     InvalidOptionType,
+    Text(runmat_value::Utf16DecodeError),
     UnknownOption(String),
     Allocation(std::collections::TryReserveError),
     Execution(Box<RuntimeError>),
@@ -396,7 +397,7 @@ pub(crate) fn parse_nonnegative_integer(
     Ok(rounded as usize)
 }
 
-pub(crate) fn keyword(value: &Value) -> Option<String> {
+pub(crate) fn keyword(value: &Value) -> Result<Option<String>, runmat_value::Utf16DecodeError> {
     string_keyword(value)
 }
 
@@ -449,7 +450,11 @@ pub(crate) fn parse_window_controls_view(
     }
     let keywords = rest
         .iter()
-        .map(|arg| window_keyword(arg).ok_or(WindowArgError::InvalidOptionType))
+        .map(|arg| {
+            window_keyword(arg)
+                .map_err(WindowArgError::Text)?
+                .ok_or(WindowArgError::InvalidOptionType)
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let mut sampling = WindowSampling::Symmetric;
     let mut output_type = WindowOutputType::Double;
@@ -497,27 +502,27 @@ pub(crate) fn parse_window_options(
     window_options_from_length(len_value, parse_window_controls(rest, allow_type_name)?)
 }
 
-fn string_keyword(value: &Value) -> Option<String> {
-    match value {
+fn string_keyword(value: &Value) -> Result<Option<String>, runmat_value::Utf16DecodeError> {
+    Ok(match value {
         Value::String(s) => Some(s.to_ascii_lowercase()),
         Value::CharArray(chars) => {
-            Some(chars.data().iter().collect::<String>().to_ascii_lowercase())
+            Some(runmat_value::decode_utf16_code_units(chars.data())?.to_ascii_lowercase())
         }
         _ => None,
-    }
+    })
 }
 
-fn window_keyword(value: &Value) -> Option<String> {
-    match value {
+fn window_keyword(value: &Value) -> Result<Option<String>, runmat_value::Utf16DecodeError> {
+    Ok(match value {
         Value::String(text) => Some(text.to_ascii_lowercase()),
         Value::StringArray(values) if values.data().len() == 1 => {
             Some(values.data()[0].to_ascii_lowercase())
         }
         Value::CharArray(chars) if chars.rows == 1 => {
-            Some(chars.data().iter().collect::<String>().to_ascii_lowercase())
+            Some(runmat_value::decode_utf16_code_units(chars.data())?.to_ascii_lowercase())
         }
         _ => None,
-    }
+    })
 }
 
 #[cfg(test)]
@@ -671,8 +676,9 @@ mod tests {
         let misplaced =
             parse_window_controls(&[Value::from("single"), Value::from("periodic")], true);
         assert!(matches!(misplaced, Err(WindowArgError::UnknownOption(_))));
-        let multirow =
-            Value::CharArray(CharArray::new("periodic".chars().collect(), 2, 4).unwrap());
+        let multirow = Value::CharArray(
+            CharArray::from_unicode_scalars("periodic".chars().collect(), 2, 4).unwrap(),
+        );
         assert!(matches!(
             parse_window_controls(&[multirow], true),
             Err(WindowArgError::InvalidOptionType)

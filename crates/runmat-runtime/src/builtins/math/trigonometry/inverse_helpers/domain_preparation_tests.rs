@@ -11,9 +11,6 @@ use std::{cell::RefCell, rc::Rc};
 
 struct Service(Rc<RefCell<Vec<NumericalDomainEvidence>>>);
 impl RuntimeAccelerationService for Service {
-    fn supports_operation(&self, _: &str) -> bool {
-        true
-    }
     fn prepare_admitted(
         &self,
         _: RuntimeContext,

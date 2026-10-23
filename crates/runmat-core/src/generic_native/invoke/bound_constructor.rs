@@ -65,51 +65,54 @@ pub(super) async fn invoke(
     let invocation_owner = owner.clone();
     let function = runmat_hir::FunctionId(binding.function);
     let invoked_function = binding.function;
-    let invoke: runmat_runtime::dispatcher::PreparedConstructorInvoke = Box::new(
-        move |selected_runtime| {
-            Box::pin(async move {
-                let selected_runtime = selected_runtime
-                    .with_constructor_receiver_for_method(Some(&invocation_owner))?;
-                let execution_sources = registry.execution_source_resolver_in(&selected_runtime);
-                let selected_runtime = super::super::super_constructor::bind_selected(
-                    selected_runtime,
-                    &registry,
-                    function,
-                    &execution_sources,
-                )?;
-                if is_native {
-                    let selected = selected_runtime.clone();
-                    return selected
-                        .scope(super::native_semantic::invoke_rooted(
-                            &unit,
-                            executor,
-                            super::native_semantic::RootedInvocation {
-                                function,
-                                arguments,
-                                requested_outputs,
-                                runtime: selected_runtime,
-                                lexical_environment,
-                                dynamic_admission,
-                            },
-                        ))
-                        .await;
-                }
-                runmat_vm::invoke_semantic_function_with_rooted_arguments_and_dynamic_admission_in_context(
-                    invoked_function,
-                    arguments,
-                    requested_outputs,
-                    &registry,
-                    selected_runtime,
-                    lexical_environment,
-                    dynamic_admission,
-                )
-                .await
-            })
-        },
-    );
+    let make_future = move |selected_runtime: RuntimeContext| async move {
+        let selected_runtime =
+            selected_runtime.with_constructor_receiver_for_method(Some(&invocation_owner))?;
+        let execution_sources = registry.execution_source_resolver_in(&selected_runtime);
+        let selected_runtime = super::super::super_constructor::bind_selected(
+            selected_runtime,
+            &registry,
+            function,
+            &execution_sources,
+        )?;
+        if is_native {
+            let selected = selected_runtime.clone();
+            return selected
+                .scope(super::native_semantic::invoke_rooted(
+                    &unit,
+                    executor,
+                    super::native_semantic::RootedInvocation {
+                        function,
+                        arguments,
+                        requested_outputs,
+                        runtime: selected_runtime,
+                        lexical_environment,
+                        dynamic_admission,
+                    },
+                ))
+                .await;
+        }
+        runmat_vm::invoke_semantic_function_with_rooted_arguments_and_dynamic_admission_in_context(
+            invoked_function,
+            arguments,
+            requested_outputs,
+            &registry,
+            selected_runtime,
+            lexical_environment,
+            dynamic_admission,
+        )
+        .await
+    };
     if super_body {
-        return invoke(runtime).await;
+        // This parent body already owns its receiver. Admit its original
+        // concrete future directly, without a second constructor callback.
+        return runmat_runtime::execution::admit_executable_sequence_with(
+            &runtime.clone(),
+            move || make_future(runtime),
+        )?
+        .await;
     }
+    let invoke = runmat_runtime::dispatcher::PreparedConstructorInvoke::new(&runtime, make_future)?;
     runmat_runtime::dispatcher::call_prepared_constructor_sequence_with_argument_count_in_context(
         &runtime,
         owner,

@@ -325,13 +325,21 @@ fn value_is_native_integer(value: &Value) -> bool {
         || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
 }
 
-fn option_name(value: &Value) -> Option<String> {
-    match value {
+fn option_name(value: &Value) -> BuiltinResult<Option<String>> {
+    Ok(match value {
         Value::String(value) => Some(value.to_string()),
-        Value::CharArray(value) if value.rows == 1 => Some(value.data().iter().collect()),
+        Value::CharArray(value) if value.rows == 1 => Some(
+            runmat_value::decode_utf16_code_units(value.data()).map_err(|error| {
+                table_error_with_source(
+                    &TABLE_ERROR_INVALID_ARGUMENT,
+                    format!("table option name is not valid UTF-16 text: {error}"),
+                    error,
+                )
+            })?,
+        ),
         Value::StringArray(value) if value.data().len() == 1 => Some(value.data()[0].to_string()),
         _ => None,
-    }
+    })
 }
 
 fn ensure_groupsummary_extensions(
@@ -350,15 +358,21 @@ fn ensure_groupsummary_extensions(
             "groupsummary",
         )?;
     }
-    if (0..rest.len().saturating_sub(1)).any(|index| {
+    let mut has_integer_extension_control = false;
+    for index in 0..rest.len().saturating_sub(1) {
         let pair = rest
             .range(index..index + 2)
             .expect("bounded adjacent option view");
-        option_name(&pair[0]).is_some_and(|name| {
+        if option_name(&pair[0])?.is_some_and(|name| {
             name.eq_ignore_ascii_case("IncludeMissingGroups")
                 || name.eq_ignore_ascii_case("IncludeEmptyGroups")
         }) && value_is_native_integer(&pair[1])
-    }) {
+        {
+            has_integer_extension_control = true;
+            break;
+        }
+    }
+    if has_integer_extension_control {
         crate::compatibility::ensure_builtin_extension_enabled(
             &GROUPSUMMARY_INTEGER_CONTROL_EXTENSION,
             "groupsummary",
@@ -408,7 +422,7 @@ async fn groupsummary_with_numeric_bins(
     method_or_bins: Value,
     mut rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    if !groupsummary_is_numeric_bins(&method_or_bins) {
+    if !groupsummary_is_numeric_bins(&method_or_bins)? {
         return groupsummary_impl(table, groupvars, method_or_bins, rest.view());
     }
     if rest.is_empty() {
@@ -476,11 +490,18 @@ async fn groupsummary_with_numeric_bins(
     groupsummary_finalize_bins(result, &selected[0], &labels, include_empty)
 }
 
-fn groupsummary_is_numeric_bins(value: &Value) -> bool {
-    matches!(value, Value::Num(_) | Value::Int(_) | Value::Tensor(_))
-        || matches!(value, Value::Cell(cell) if cell.data().len() == 1 && groupsummary_is_numeric_bins(&cell.data()[0]))
-        || matches!(value, Value::String(text) if text.eq_ignore_ascii_case("none"))
-        || matches!(value, Value::CharArray(chars) if chars.data().iter().collect::<String>().eq_ignore_ascii_case("none"))
+fn groupsummary_is_numeric_bins(value: &Value) -> BuiltinResult<bool> {
+    Ok(match value {
+        Value::Num(_) | Value::Int(_) | Value::Tensor(_) => true,
+        Value::Cell(cell) if cell.data().len() == 1 => {
+            groupsummary_is_numeric_bins(&cell.data()[0])?
+        }
+        Value::String(text) => text.eq_ignore_ascii_case("none"),
+        Value::CharArray(chars) if chars.rows == 1 => {
+            option_name(value)?.is_some_and(|text| text.eq_ignore_ascii_case("none"))
+        }
+        _ => false,
+    })
 }
 
 async fn groupsummary_bin_options(
@@ -491,15 +512,15 @@ async fn groupsummary_bin_options(
     let mut include_empty = false;
     let mut forwarded_count = 0usize;
     let mut index = 0;
-    if rest.first().is_some_and(|value| {
-        !option_name(value).is_some_and(|name| {
+    if let Some(value) = rest.first() {
+        if !option_name(value)?.is_some_and(|name| {
             name.eq_ignore_ascii_case("IncludedEdge")
                 || name.eq_ignore_ascii_case("IncludeEmptyGroups")
                 || name.eq_ignore_ascii_case("IncludeMissingGroups")
-        })
-    }) {
-        forwarded_count += 1;
-        index = 1;
+        }) {
+            forwarded_count += 1;
+            index = 1;
+        }
     }
     while index < rest.len() {
         if index + 1 >= rest.len() {
@@ -530,13 +551,14 @@ async fn groupsummary_bin_options(
     }
     // The read-only pass above validates all pairs before destination admission.
     // Only forwarded headers are initialized; all payload/root owners stay shared.
-    let has_selector = rest.first().is_some_and(|value| {
-        !option_name(value).is_some_and(|name| {
+    let has_selector = match rest.first() {
+        Some(value) => !option_name(value)?.is_some_and(|name| {
             name.eq_ignore_ascii_case("IncludedEdge")
                 || name.eq_ignore_ascii_case("IncludeEmptyGroups")
                 || name.eq_ignore_ascii_case("IncludeMissingGroups")
-        })
-    });
+        }),
+        None => false,
+    };
     let mut cursor = 0usize;
     let mut pair_value = false;
     let forwarded = rest
@@ -958,36 +980,36 @@ fn ensure_grpstats_extensions(
             "grpstats",
         )?;
     }
-    if rest.first().is_some_and(value_is_native_integer)
-        || (0..rest.len().saturating_sub(1)).any(|index| {
-            let pair = rest
-                .range(index..index + 2)
-                .expect("bounded adjacent option view");
-            option_name(&pair[0]).is_some_and(|name| name.eq_ignore_ascii_case("Alpha"))
-                && value_is_native_integer(&pair[1])
-        })
-    {
+    if rest.first().is_some_and(value_is_native_integer) || has_integer_option(&rest, "Alpha")? {
         crate::compatibility::ensure_builtin_extension_enabled(
             &GRPSTATS_INTEGER_ALPHA_EXTENSION,
             "grpstats",
         )?;
     }
-    if table_input
-        && (value_is_native_integer(group)
-            || (0..rest.len().saturating_sub(1)).any(|index| {
-                let pair = rest
-                    .range(index..index + 2)
-                    .expect("bounded adjacent option view");
-                option_name(&pair[0]).is_some_and(|name| name.eq_ignore_ascii_case("DataVars"))
-                    && value_is_native_integer(&pair[1])
-            }))
-    {
+    if table_input && (value_is_native_integer(group) || has_integer_option(&rest, "DataVars")?) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &GRPSTATS_INTEGER_SELECTOR_EXTENSION,
             "grpstats",
         )?;
     }
     Ok(())
+}
+
+fn has_integer_option(
+    rest: &crate::call::FunctionArgumentView<'_>,
+    expected: &str,
+) -> BuiltinResult<bool> {
+    for index in 0..rest.len().saturating_sub(1) {
+        let pair = rest
+            .range(index..index + 2)
+            .expect("bounded adjacent option view");
+        if option_name(&pair[0])?.is_some_and(|name| name.eq_ignore_ascii_case(expected))
+            && value_is_native_integer(&pair[1])
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 #[cfg(test)]

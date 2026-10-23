@@ -740,7 +740,10 @@ fn value_into_kron_input(value: Value) -> crate::BuiltinResult<KronInput> {
 }
 
 fn char_array_to_tensor(chars: &CharArray) -> crate::BuiltinResult<Tensor> {
-    let data: Vec<f64> = chars.data().iter().map(|&ch| ch as u32 as f64).collect();
+    let data: Vec<f64> = chars
+        .iter_column_major()
+        .map(|ch| f64::from(ch.raw()))
+        .collect();
     Tensor::new(data, vec![chars.rows, chars.cols])
         .map_err(|e| kron_error_with_message(format!("kron: {e}"), &KRON_ERROR_INTERNAL))
 }
@@ -1390,18 +1393,29 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn kron_char_arrays_convert_to_double() {
-        let chars = CharArray::new("AB".chars().collect(), 1, 2).unwrap();
+        let chars = CharArray::from_code_units(
+            [65, 0xD800, 66, 0xDC00, 67, 0xFFFF]
+                .map(runmat_value::Utf16CodeUnit::from_raw)
+                .to_vec(),
+            3,
+            2,
+        )
+        .unwrap();
         let tensor = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let result =
             kron_builtin(Value::CharArray(chars), Value::Tensor(tensor), Vec::new()).expect("kron");
         match result {
             Value::Tensor(t) => {
-                assert_eq!(t.shape(), &[2, 2]);
-                let expected: Vec<f64> = "AB"
-                    .chars()
-                    .flat_map(|ch| [ch as u32 as f64, 2.0 * ch as u32 as f64])
-                    .collect();
-                assert_eq!(t.materialize_f64(), expected);
+                assert_eq!(t.shape(), &[6, 2]);
+                assert_eq!(
+                    t.as_f64_slice(),
+                    Some(
+                        &[
+                            65.0, 130.0, 66.0, 132.0, 67.0, 134.0, 55296.0, 110592.0, 56320.0,
+                            112640.0, 65535.0, 131070.0
+                        ][..]
+                    )
+                );
             }
             other => panic!("expected tensor result, got {other:?}"),
         }

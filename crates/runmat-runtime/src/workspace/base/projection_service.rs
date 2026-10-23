@@ -55,6 +55,19 @@ struct ProjectionServiceState {
 }
 
 impl BaseWorkspaceProjectionService {
+    pub fn canonical_owner(&self) -> Result<super::BaseWorkspaceOwner, RuntimeError> {
+        self.borrow()?
+            .canonical_owner()
+            .map_err(super::base_workspace_error_to_runtime)
+    }
+
+    pub fn global_target(
+        &self,
+        name: &str,
+    ) -> Result<Option<crate::workspace::GlobalBindingTarget>, RuntimeError> {
+        Ok(self.borrow()?.global_target(name).cloned())
+    }
+
     pub fn new(projection: BaseWorkspaceProjection) -> Self {
         Self {
             state: Rc::new(RefCell::new(ProjectionServiceState {

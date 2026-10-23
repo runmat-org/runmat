@@ -1,6 +1,10 @@
 //! One session's timing state and its separately injectable platform clock.
 
 mod platform;
+mod deterministic;
+mod calendar_instant;
+pub use calendar_instant::RuntimeCalendarInstant;
+pub use deterministic::DeterministicTimingService;
 
 use super::RuntimeServiceFuture;
 use runmat_execution::profiling::CommandThreadCpuSampler;
@@ -34,22 +38,28 @@ pub trait RuntimeTimingService {
 
     /// Wall-clock time since the Unix epoch for externally visible event stamps.
     /// Scheduling must use `monotonic_elapsed`, never this adjustable clock.
+    /// Logical services may advance on reads; physical telemetry/profiling
+    /// must use their independent host observation clocks instead.
     fn wall_time_since_epoch(&self) -> Duration;
 
     /// Resolve a timezone-naive local calendar time against this session's
-    /// host timezone policy. Ambiguous, nonexistent, and pre-epoch times are
+    /// host timezone policy. Ambiguous and nonexistent local times are
     /// unavailable rather than silently mapped through ambient global state.
-    fn local_datetime_to_epoch(&self, local: chrono::NaiveDateTime) -> Option<Duration>;
+    fn local_datetime_to_instant(
+        &self,
+        local: chrono::NaiveDateTime,
+    ) -> Option<RuntimeCalendarInstant>;
 
-    /// Interpret one captured wall instant under the same host-local calendar
-    /// policy used by `local_datetime_to_epoch`.
-    fn local_datetime_at_epoch(&self, epoch: Duration) -> Option<chrono::NaiveDateTime>;
+    /// Interpret a signed absolute instant without consulting an ambient clock.
+    fn local_datetime_at_instant(
+        &self,
+        instant: RuntimeCalendarInstant,
+    ) -> Option<chrono::NaiveDateTime>;
 
-    /// Process CPU seconds; browser hosts must report unavailable, not wall time.
+    /// Process CPU seconds; unsupported hosts report unavailable, not wall time.
     fn process_cpu_seconds(&self) -> Option<f64>;
 
-    /// Optional per-thread CPU counter for attributed command profiling.
-    /// Custom clocks and unsupported hosts remain unknown by default.
+    /// Logical CPU counters never create physical profiling evidence.
     fn command_thread_cpu_sampler(&self) -> Option<Arc<dyn CommandThreadCpuSampler>> {
         None
     }
@@ -135,22 +145,18 @@ mod tests {
             Duration::from_secs(1_700_000_000) + self.0.get()
         }
 
-        fn local_datetime_to_epoch(&self, local: chrono::NaiveDateTime) -> Option<Duration> {
-            let utc = local.and_utc();
-            Some(Duration::new(
-                u64::try_from(utc.timestamp()).ok()?,
-                utc.timestamp_subsec_nanos(),
-            ))
+        fn local_datetime_to_instant(
+            &self,
+            local: chrono::NaiveDateTime,
+        ) -> Option<RuntimeCalendarInstant> {
+            Some(RuntimeCalendarInstant::from_naive_utc(local))
         }
 
-        fn local_datetime_at_epoch(&self, epoch: Duration) -> Option<chrono::NaiveDateTime> {
-            Some(
-                chrono::DateTime::from_timestamp(
-                    i64::try_from(epoch.as_secs()).ok()?,
-                    epoch.subsec_nanos(),
-                )?
-                .naive_utc(),
-            )
+        fn local_datetime_at_instant(
+            &self,
+            instant: crate::context::RuntimeCalendarInstant,
+        ) -> Option<chrono::NaiveDateTime> {
+            instant.at_fixed_offset(0)
         }
 
         fn process_cpu_seconds(&self) -> Option<f64> {
@@ -237,14 +243,21 @@ mod tests {
         let second = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
             .with_service_ports(services);
         assert_eq!(
-            first.service_ports().timing().wall_time_since_epoch(),
+            first
+                .service_ports()
+                .timing()
+                .unwrap()
+                .wall_time_since_epoch(),
             Duration::from_secs(1_700_000_003)
         );
         let token = first
             .state()
             .timing
             .borrow_mut()
-            .start(first.service_ports().timing().monotonic_elapsed(), true)
+            .start(
+                first.service_ports().timing().unwrap().monotonic_elapsed(),
+                true,
+            )
             .expect("token");
         assert_eq!(
             first_clone.state().timing.borrow().start_for(token),
@@ -272,11 +285,15 @@ mod tests {
         assert!(second.state().timing.borrow().pause_enabled());
         time.set(Duration::from_secs(4));
         assert_eq!(
-            first.service_ports().timing().monotonic_elapsed(),
+            first.service_ports().timing().unwrap().monotonic_elapsed(),
             Duration::from_secs(4)
         );
         assert_eq!(
-            first.service_ports().timing().process_cpu_seconds(),
+            first
+                .service_ports()
+                .timing()
+                .unwrap()
+                .process_cpu_seconds(),
             Some(17.0)
         );
     }

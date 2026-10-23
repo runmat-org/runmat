@@ -26,7 +26,7 @@ fn selected_callback(invocation: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltin
         .cloned()
         .map(runmat_runtime::execution::RootedValue::new)
         .transpose();
-    Box::pin(async move {
+    runmat_runtime::builtin::admitted_builtin_future(None, "fixture", async move {
         let first = first.map_err(|error| error.into_runtime_error())?;
         CALLBACKS.with(|calls| calls.borrow_mut().push((runtime.local_identity(), outputs)));
         if let Some(Value::Tensor(shape)) = first.as_ref().map(|owner| owner.value()) {

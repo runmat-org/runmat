@@ -8,7 +8,7 @@ use super::{
     NativeValueRef,
 };
 
-pub const NATIVE_ABI_SCHEMA_VERSION: u16 = 7;
+pub const NATIVE_ABI_SCHEMA_VERSION: u16 = 8;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -23,10 +23,10 @@ impl NativeAbiVersion {
     }
 }
 
-pub const NATIVE_ABI_VERSION: NativeAbiVersion = NativeAbiVersion { major: 1, minor: 6 };
+pub const NATIVE_ABI_VERSION: NativeAbiVersion = NativeAbiVersion { major: 1, minor: 7 };
 
 /// Single canonical preimage, also embedded by the target-built ABI probe.
-pub const NATIVE_ABI_CONTRACT_PREIMAGE: &[u8] = b"runmat-native-abi-v7\0opaque-values\0generation-roots\0explicit-host-table\0typed-host-status\0out-parameter-exits\0no-cross-boundary-unwind\0exact-site-resume\0transactional-exit\0path-free-sources\0typed-native-site-dispatch\0explicit-builtin-invocation-v3\0no-obsolete-slow-call-slot\0target-layout-probe-v1";
+pub const NATIVE_ABI_CONTRACT_PREIMAGE: &[u8] = b"runmat-native-abi-v8\0opaque-values\0generation-roots\0explicit-host-table\0typed-host-status\0out-parameter-exits\0no-cross-boundary-unwind\0exact-site-resume\0transactional-exit\0path-free-sources\0typed-native-site-dispatch\0explicit-builtin-invocation-v3\0no-obsolete-slow-call-slot\0binding-owned-implementation-v1\0target-layout-probe-v2";
 
 /// Target-independent identity used by executable/runtime compatibility keys.
 pub fn native_abi_contract_fingerprint() -> runmat_execution::Digest {
@@ -76,6 +76,8 @@ pub struct NativeAbiLayout {
     pub site_request: NativeTypeLayout,
     pub site_outcome_kind: NativeTypeLayout,
     pub site_outcome: NativeTypeLayout,
+    pub runtime_builtin_binding: NativeTypeLayout,
+    pub builtin_binding_identity: NativeTypeLayout,
     /// Wire order is the shared NativeAbiField enumeration, never Rust layout.
     pub field_offsets: [u32; runmat_execution::host::NativeAbiField::ALL.len()],
 }
@@ -105,6 +107,8 @@ pub const fn native_abi_layout() -> NativeAbiLayout {
         site_request: NativeTypeLayout::of::<NativeSiteRequest>(),
         site_outcome_kind: NativeTypeLayout::of::<NativeSiteOutcomeKind>(),
         site_outcome: NativeTypeLayout::of::<NativeSiteOutcome>(),
+        runtime_builtin_binding: NativeTypeLayout::of::<crate::builtin::RuntimeBuiltinBinding>(),
+        builtin_binding_identity: NativeTypeLayout::of::<runmat_builtins::BuiltinBindingIdentity>(),
         field_offsets: [
             std::mem::offset_of!(NativeCall, host) as u32,
             std::mem::offset_of!(NativeCall, frame) as u32,
@@ -122,6 +126,10 @@ pub const fn native_abi_layout() -> NativeAbiLayout {
             std::mem::offset_of!(NativeSiteOutcome, edge) as u32,
             std::mem::offset_of!(NativeSiteOutcome, flags) as u32,
             std::mem::offset_of!(NativeSiteOutcome, reserved) as u32,
+            std::mem::offset_of!(crate::builtin::RuntimeBuiltinBinding, identity) as u32,
+            std::mem::offset_of!(crate::builtin::RuntimeBuiltinBinding, implementation) as u32,
+            std::mem::offset_of!(crate::builtin::RuntimeBuiltinBinding, continuation_layout) as u32,
+            std::mem::offset_of!(crate::builtin::RuntimeBuiltinBinding, provenance) as u32,
         ],
     }
 }
@@ -146,10 +154,10 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn version_and_contract_identity_are_stable() {
-        assert_eq!(NATIVE_ABI_VERSION.encoded(), 0x0001_0006);
+        assert_eq!(NATIVE_ABI_VERSION.encoded(), 0x0001_0007);
         assert_eq!(
             native_abi_contract_fingerprint().to_string(),
-            "sha256:11a42834618a1739096467355c73eb7ba41e5e4e04ee020a12fade19556ff790"
+            "sha256:e2e95ac182f64729adfcf743e1abc4eff1f4dd65b7485c41e2a7f8c541aa73a3"
         );
     }
 
@@ -158,6 +166,10 @@ mod tests {
     fn layouts_are_c_compatible_and_offsets_are_explicit() {
         let layout = native_abi_layout();
         assert_eq!(layout.pointer_width, usize::BITS as u16);
+        assert_eq!(
+            layout.runtime_builtin_binding,
+            NativeTypeLayout::of::<crate::builtin::RuntimeBuiltinBinding>()
+        );
         assert_eq!(
             layout.host_status,
             NativeTypeLayout {

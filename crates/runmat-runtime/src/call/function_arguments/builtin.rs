@@ -16,7 +16,15 @@ impl BuiltinArguments {
         values: &[Value],
         runtime: Option<&crate::context::RuntimeContext>,
     ) -> Result<Self, crate::RuntimeError> {
-        crate::execution::RootedValues::from_borrowed_arguments(values, runtime).map(Into::into)
+        crate::execution::RootedValues::from_borrowed_arguments(values, runtime)
+            .map(Into::into)
+            .map_err(|mut error| {
+                // This is the actual root-admission failure, before the
+                // builtin body exists. Gathering cannot repair or replay it.
+                // Preserve typed cancellation origin and original cause.
+                error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                error
+            })
     }
     pub fn new(source: RootedFunctionArguments) -> Self {
         Self { source }
@@ -65,11 +73,46 @@ impl BuiltinArguments {
         value: crate::execution::RootedValue,
         runtime: &crate::context::RuntimeContext,
     ) -> Result<Self, crate::RuntimeError> {
-        crate::execution::RootedValues::insert_argument_in_context(
+        self.try_insert(index, value, Some(runtime))
+    }
+    pub(crate) fn try_insert(
+        self,
+        index: usize,
+        value: crate::execution::RootedValue,
+        runtime: Option<&crate::context::RuntimeContext>,
+    ) -> Result<Self, crate::RuntimeError> {
+        if let Some(runtime) = runtime {
+            return crate::execution::RootedValues::insert_argument_in_context(
+                &self.source,
+                index,
+                &value,
+                runtime,
+            )
+            .map(Into::into);
+        }
+        if index > self.len() {
+            return Err(crate::runtime_error::semantic_error(
+                "CallableArguments",
+                "argument insertion index is out of bounds",
+            ));
+        }
+        let count = self.len().checked_add(1).ok_or_else(|| {
+            crate::runtime_error::semantic_error("CallableArguments", "argument count overflows")
+        })?;
+        crate::execution::RootedValues::transform_arguments(
             &self.source,
-            index,
-            &value,
+            count,
+            Some(&value),
             runtime,
+            |slot| {
+                Ok(if slot == index {
+                    value.value().clone()
+                } else {
+                    self.get(if slot < index { slot } else { slot - 1 })
+                        .expect("validated argument slot")
+                        .clone()
+                })
+            },
         )
         .map(Into::into)
     }

@@ -4,6 +4,12 @@ use crate::{AccelProvider, GpuTensorHandle, HostNumericTensorView, ProviderExecu
 mod query;
 pub use query::class_preserving_upload_query;
 
+/// Exact operation-owned words for the provider's native integer encoding.
+/// Lanes include both complex components; this is not a numeric-value mirror.
+pub struct HostNumericUploadScratch<'a> {
+    pub words: &'a mut [u32],
+}
+
 /// A validated upload may own a thread-affine failed-retirement authority.
 /// Keep this typed carrier through local error propagation; converting only its
 /// diagnostic to `anyhow` on WASM would discard the sole custom owner.
@@ -160,16 +166,20 @@ pub fn upload_numeric_protecting_admitted<P: AccelProvider + ?Sized>(
     protected: &[&GpuTensorHandle],
     admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
 ) -> NumericUploadResult<GpuTensorHandle> {
+    upload_numeric_protecting_admitted_with_scratch(provider, host, protected, admission, None)
+}
+
+/// Same validation and rejected-output owner, with caller-funded encoding.
+pub fn upload_numeric_protecting_admitted_with_scratch<P: AccelProvider + ?Sized>(
+    provider: &P,
+    host: &HostNumericTensorView<'_>,
+    protected: &[&GpuTensorHandle],
+    admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    scratch: Option<HostNumericUploadScratch<'_>>,
+) -> NumericUploadResult<GpuTensorHandle> {
     host.validate()?;
-    let _first_borrowed_metadata = protected
-        .first()
-        .map(|handle| crate::ResidencyRestoreGuard::new(handle));
-    let _remaining_borrowed_metadata: Vec<_> = protected
-        .iter()
-        .skip(1)
-        .map(|handle| crate::ResidencyRestoreGuard::new(handle))
-        .collect();
-    let handle = provider.upload_numeric_raw_admitted(host, admission)?;
+    let _borrowed_metadata = crate::residency::ResidencyRestoreSliceGuard::new(protected);
+    let handle = provider.upload_numeric_raw_admitted_with_scratch(host, admission, scratch)?;
     let aliases = protected
         .iter()
         .any(|input| input.shares_allocation_with(&handle));

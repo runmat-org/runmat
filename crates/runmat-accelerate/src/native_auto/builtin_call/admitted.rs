@@ -4,8 +4,8 @@ use super::{
     *,
 };
 use runmat_builtins::{
-    BuiltinOperandPreparation, BuiltinPreparationOperation as Operation,
-    BuiltinPreparationProviderRequirement, BuiltinSinkPreparation,
+    BuiltinPreparationOperation as Operation, BuiltinPreparationProviderRequirement,
+    BuiltinSinkPreparation,
 };
 use runmat_runtime::context::{
     preparation::{
@@ -15,6 +15,7 @@ use runmat_runtime::context::{
 };
 use std::rc::Rc;
 mod host;
+mod native_region;
 pub(super) use host::prepare_async;
 
 /// Install the standard adapter only where the embedding host has not supplied one.
@@ -33,6 +34,30 @@ pub fn install_preparation_service(runtime: RuntimeContext) -> RuntimeContext {
 pub struct AdmittedAcceleration;
 
 impl RuntimeAccelerationService for AdmittedAcceleration {
+    fn numeric_region_capability(
+        &self,
+    ) -> Option<runmat_runtime::numeric_region::service::NumericRegionCapability> {
+        (auto_enabled() && runmat_accelerate_api::provider().is_some()).then_some(
+            runmat_runtime::numeric_region::service::NumericRegionCapability::RealFloating,
+        )
+    }
+
+    fn execute_numeric_region(
+        &self,
+        context: RuntimeContext,
+        request: runmat_runtime::numeric_region::service::NativeNumericRegionRequest,
+    ) -> Result<
+        runmat_runtime::execution::RuntimeContinuationFuture<
+            'static,
+            runmat_runtime::numeric_region::service::NativeNumericRegionOutcome,
+        >,
+        RuntimeError,
+    > {
+        let admission = context.clone();
+        runmat_runtime::execution::admit_native_continuation_with(&admission, || {
+            native_region::execute(context, request)
+        })
+    }
     fn prepare_legacy(
         &self,
         context: RuntimeContext,
@@ -46,15 +71,6 @@ impl RuntimeAccelerationService for AdmittedAcceleration {
                 .map_err(preparation_error)
         })
     }
-    fn supports_operation(&self, operation: &str) -> bool {
-        runmat_builtins::builtin_catalog_primary_entry_by_name(operation).is_some_and(|entry| {
-            matches!(
-                entry.placement.preparation,
-                BuiltinOperandPreparation::Forms(_)
-            )
-        })
-    }
-
     fn prepare_admitted(
         &self,
         context: RuntimeContext,

@@ -146,6 +146,8 @@ fn standalone_derived_constructor_runs_retained_base_on_same_handle() {
             .aot_object_data(
                 &assembly,
                 runmat_core::AotObjectDataOptions {
+                    clock_inputs: None,
+                    local_service_inputs: None,
                     foreign_policy: None,
                     runtime_binding_mode:
                         runmat_native_codegen::aot::AotRuntimeBindingMode::ClosedWorld,

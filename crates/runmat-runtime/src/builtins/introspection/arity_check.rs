@@ -133,7 +133,7 @@ fn scalar_text(value: &Value) -> Option<String> {
         Value::StringArray(value) if value.data().len() == 1 => {
             Some(value.data()[0].as_str().to_owned())
         }
-        Value::CharArray(value) if value.rows == 1 => Some(value.data().iter().collect()),
+        Value::CharArray(value) if value.rows == 1 => value.row_string(),
         _ => None,
     }
 }
@@ -151,7 +151,8 @@ fn legacy_nargout_result(violation: Option<ArityViolation>, structured: bool) ->
         None if structured => return Value::Struct(StructValue::new()),
         None => {
             return Value::CharArray(
-                CharArray::new(Vec::new(), 0, 0).expect("empty legacy nargoutchk result"),
+                CharArray::from_code_units(Vec::new(), 0, 0)
+                    .expect("empty legacy nargoutchk result"),
             )
         }
     };

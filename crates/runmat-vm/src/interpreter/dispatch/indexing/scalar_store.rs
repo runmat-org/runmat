@@ -1,10 +1,9 @@
 use super::{
-    assign_object_scalar_indices, build_assignment_plan, build_index_plan, idx_write_linear,
-    idx_write_slice, index_scalar_from_value, map_slice_shape_error, RuntimeError, SliceSelector,
+    assign_object_scalar_indices, idx_write_linear, idx_write_slice, RuntimeError, SliceSelector,
     Value,
 };
 use crate::interpreter::vars::InterpreterVars;
-use runmat_runtime::indexing::plan::{build_indexed_store_plan, IndexedStorePlanMode};
+use runmat_runtime::indexing::plan::{build_indexed_store_plan_in_context, IndexedStorePlanMode};
 use runmat_runtime::indexing::value as index_value;
 use runmat_value::IntValue;
 
@@ -21,18 +20,27 @@ pub(super) async fn dispatch(
         crate::bytecode::Instr::StoreIndex(num_indices)
         | crate::bytecode::Instr::StoreIndexDelete(num_indices) => {
             let delete = matches!(instr, crate::bytecode::Instr::StoreIndexDelete(_));
-            let rhs = stack.pop().ok_or(crate::interpreter::errors::mex(
-                "StackUnderflow",
-                "stack underflow",
-            ))?;
-            let _rhs_roots = crate::call::root_values([&rhs])?;
-            let mut indices: Vec<usize> = Vec::new();
-            for _ in 0..*num_indices {
-                let value = stack.pop().ok_or(crate::interpreter::errors::mex(
+            if num_indices
+                .checked_add(2)
+                .is_none_or(|width| width > stack.len())
+            {
+                return Err(crate::interpreter::errors::mex(
                     "StackUnderflow",
                     "stack underflow",
-                ))?;
-                let idx_val = index_scalar_from_value(&value).await?.ok_or_else(|| {
+                ));
+            }
+            let mut indices = runmat_runtime::context::host_allocation::initialize_host_array(
+                Some(runtime),
+                *num_indices,
+                |_| Ok(0usize),
+            )?;
+            let (numeric_owner, _operand_roots) =
+                super::extract_selector_operands(stack, runtime, *num_indices, true)?;
+            let rhs = stack
+                .pop()
+                .expect("validated scalar assignment window contains RHS");
+            for (ordinal, value) in numeric_owner.iter().rev().enumerate() {
+                let idx_val = runmat_runtime::indexing::selectors::index_scalar_from_value_in_context(Some(runtime), value).await?.ok_or_else(|| {
                     crate::interpreter::errors::mex(
                         "ScalarIndexRequired",
                         "StoreIndex requires scalar indices; use StoreSlice for vector, range, or logical indices",
@@ -47,14 +55,14 @@ pub(super) async fn dispatch(
                 let index = idx_val.positive_usize().ok_or_else(|| {
                     crate::interpreter::errors::mex("IndexOutOfBounds", "Index out of bounds")
                 })?;
-                indices.push(index);
+                indices
+                    .try_as_mut_slice_unique()
+                    .expect("fresh exact scalar index storage")[*num_indices - ordinal - 1] = index;
             }
-            indices.reverse();
             let base = stack.pop().ok_or(crate::interpreter::errors::mex(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
-            let _base_roots = crate::call::root_values([&base])?;
             match base {
                 Value::Foreign(reference) => {
                     if delete {
@@ -63,23 +71,34 @@ pub(super) async fn dispatch(
                             "Indexed deletion is not supported for foreign objects",
                         ));
                     }
-                    let indices = indices
-                        .into_iter()
-                        .map(|index| Value::Int(IntValue::U64(index as u64)))
-                        .collect();
-                    runmat_runtime::foreign::assign_foreign_resource_index(reference, indices, rhs)
-                        .await?
-                        .with_owned(|value| stack.try_push(value))?;
+                    let arguments =
+                        runmat_runtime::execution::RootedValues::try_initialize_in_context(
+                            indices.len(),
+                            runtime,
+                            |ordinal| {
+                                Ok::<_, RuntimeError>(Value::Int(IntValue::U64(
+                                    indices[ordinal] as u64,
+                                )))
+                            },
+                        )?;
+                    runmat_runtime::foreign::assign_foreign_resource_index_retained_in_context(
+                        runtime,
+                        reference,
+                        arguments.into(),
+                        rhs,
+                    )
+                    .await?
+                    .with_owned(|value| stack.try_push(value))?;
                 }
                 Value::Object(obj) => {
-                    assign_object_scalar_indices(runtime, Value::Object(obj), indices, rhs, delete)
+                    assign_object_scalar_indices(runtime, Value::Object(obj), &indices, rhs, delete)
                         .await?
                         .with_owned(|value| stack.try_push(value))?
                 }
                 Value::HandleObject(handle) => assign_object_scalar_indices(
                     runtime,
                     Value::HandleObject(handle),
-                    indices,
+                    &indices,
                     rhs,
                     delete,
                 )
@@ -88,7 +107,7 @@ pub(super) async fn dispatch(
                 Value::ObjectArray(array) => assign_object_scalar_indices(
                     runtime,
                     Value::ObjectArray(array),
-                    indices,
+                    &indices,
                     rhs,
                     delete,
                 )
@@ -121,17 +140,17 @@ pub(super) async fn dispatch(
                             "Indexed deletion is only supported for linear vector indices",
                         ));
                     }
-                    let shape = index_value::shape(&base).ok_or_else(|| {
+                    let shape = index_value::shape_borrowed(&base).ok_or_else(|| {
                         crate::interpreter::errors::mex(
                             "IndexAssignmentUnsupportedBase",
                             "Numeric indexed assignment requires a numeric base",
                         )
                     })?;
-                    let numeric = indices
-                        .iter()
-                        .copied()
-                        .map(|index| {
-                            u64::try_from(index)
+                    let numeric = runmat_runtime::context::host_allocation::initialize_host_array(
+                        Some(runtime),
+                        indices.len(),
+                        |ordinal| {
+                            u64::try_from(indices[ordinal])
                                 .map(|index| Value::Int(IntValue::U64(index)))
                                 .map_err(|_| {
                                     crate::interpreter::errors::mex(
@@ -139,16 +158,23 @@ pub(super) async fn dispatch(
                                         "Index out of bounds",
                                     )
                                 })
-                        })
-                        .collect::<Result<Vec<_>, _>>()?;
+                        },
+                    )?;
                     let mode = if delete {
                         IndexedStorePlanMode::Bounded
                     } else {
                         IndexedStorePlanMode::Grow
                     };
-                    let plan =
-                        build_indexed_store_plan(indices.len(), 0, 0, &numeric, &shape, mode)
-                            .await?;
+                    let plan = build_indexed_store_plan_in_context(
+                        runtime,
+                        indices.len(),
+                        0,
+                        0,
+                        &numeric,
+                        shape.as_slice(),
+                        mode,
+                    )
+                    .await?;
                     let updated = if delete {
                         match base {
                             Value::Tensor(t) => {
@@ -158,12 +184,20 @@ pub(super) async fn dispatch(
                                 idx_write_slice::delete_complex_with_plan(t, &plan, &rhs)?
                             }
                             value @ (Value::Num(_) | Value::Int(_)) => {
-                                let tensor = index_value::numeric_scalar_tensor(value)?;
+                                let tensor = index_value::numeric_scalar_tensor_in_context(
+                                    Some(runtime),
+                                    value,
+                                )?;
                                 idx_write_slice::delete_tensor_with_plan(tensor, &plan, &rhs)?
                             }
                             Value::GpuTensor(handle) => {
-                                idx_write_slice::delete_gpu_slice_with_plan(&handle, &plan, &rhs)
-                                    .await?
+                                idx_write_slice::delete_gpu_slice_with_plan_in_context(
+                                    Some(runtime),
+                                    &handle,
+                                    &plan,
+                                    &rhs,
+                                )
+                                .await?
                             }
                             _ => {
                                 return Err(crate::interpreter::errors::mex(
@@ -173,35 +207,56 @@ pub(super) async fn dispatch(
                             }
                         }
                     } else {
-                        index_value::assign_with_plan(base, &plan, rhs).await?
+                        index_value::assign_with_plan_in_context(Some(runtime), base, &plan, rhs)
+                            .await?
                     };
                     stack.try_push(updated)?;
                 }
                 Value::Bool(b) => {
-                    let scalar =
-                        runmat_value::Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
-                            .map_err(|e| map_slice_shape_error("scalar index assign", e))?;
+                    let scalar = index_value::numeric_scalar_tensor_in_context(
+                        Some(runtime),
+                        Value::Num(if b { 1. } else { 0. }),
+                    )?;
                     stack.try_push(
-                        idx_write_linear::assign_tensor_scalar(scalar, &indices, &rhs, delete)
-                            .await?,
+                        idx_write_linear::assign_tensor_scalar_in_context(
+                            Some(runtime),
+                            scalar,
+                            &indices,
+                            &rhs,
+                            delete,
+                        )
+                        .await?,
                     )?;
                 }
-                Value::StringArray(mut sa) => {
+                Value::StringArray(sa) => {
                     if delete {
                         return Err(crate::interpreter::errors::mex(
                             "UnsupportedSliceDeletion",
                             "Slice deletion currently supports cell arrays only",
                         ));
                     }
-                    let selectors: Vec<SliceSelector> =
-                        indices.iter().copied().map(SliceSelector::Scalar).collect();
-                    let plan = build_index_plan(&selectors, indices.len(), &sa.shape)?;
+                    let selectors =
+                        runmat_runtime::context::host_allocation::initialize_host_array(
+                            Some(runtime),
+                            indices.len(),
+                            |ordinal| Ok(SliceSelector::Scalar(indices[ordinal])),
+                        )?;
+                    let plan = runmat_runtime::indexing::plan::build_index_plan_in_context(
+                        runtime,
+                        &selectors,
+                        indices.len(),
+                        &sa.shape,
+                    )?;
                     if !plan.indices.is_empty() {
-                        let rhs_view =
-                            idx_write_slice::build_string_rhs_view(&rhs, &plan.selection_lengths)?;
-                        idx_write_slice::scatter_string_with_plan(&mut sa, &plan, &rhs_view)?;
+                        stack.try_push(idx_write_slice::assign_string_with_plan_in_context(
+                            Some(runtime),
+                            sa,
+                            &plan,
+                            &rhs,
+                        )?)?;
+                    } else {
+                        stack.try_push(Value::StringArray(sa))?;
                     }
-                    stack.try_push(Value::StringArray(sa))?;
                 }
                 Value::Cell(ca) => stack.try_push(
                     runmat_runtime::object::cell::assign_cell_paren_with_policy_in_context(
@@ -213,43 +268,80 @@ pub(super) async fn dispatch(
                     )?,
                 )?,
                 Value::Struct(structure) => {
-                    let selectors = indices
-                        .iter()
-                        .copied()
-                        .map(SliceSelector::Scalar)
-                        .collect::<Vec<_>>();
-                    let plan = if delete {
-                        build_index_plan(&selectors, indices.len(), &[1, 1])?
-                    } else {
-                        build_assignment_plan(&selectors, indices.len(), &[1, 1])?
-                    };
-                    stack.try_push(runmat_runtime::indexing::structure::assign_with_plan(
-                        Value::Struct(structure),
-                        &plan,
-                        rhs,
-                        delete,
-                    )?)?;
+                    if delete {
+                        stack.try_push(
+                            runmat_runtime::indexing::structure::delete_scalar_indices_in_context(
+                                Some(runtime),
+                                Value::Struct(structure),
+                                &indices,
+                                &rhs,
+                            )?,
+                        )?;
+                        return Ok(true);
+                    }
+                    let selectors =
+                        runmat_runtime::context::host_allocation::initialize_host_array(
+                            Some(runtime),
+                            indices.len(),
+                            |ordinal| Ok(SliceSelector::Scalar(indices[ordinal])),
+                        )?;
+                    let plan = runmat_runtime::indexing::plan::build_assignment_plan_in_context(
+                        runtime,
+                        &selectors,
+                        indices.len(),
+                        &[1, 1],
+                    )?;
+                    stack.try_push(
+                        runmat_runtime::indexing::structure::assign_with_plan_in_context(
+                            Some(runtime),
+                            Value::Struct(structure),
+                            &plan,
+                            rhs,
+                        )?,
+                    )?;
                 }
                 Value::StructArray(array) => {
-                    let selectors = indices
-                        .iter()
-                        .copied()
-                        .map(SliceSelector::Scalar)
-                        .collect::<Vec<_>>();
-                    let plan = if delete {
-                        build_index_plan(&selectors, indices.len(), array.shape())?
-                    } else {
-                        build_assignment_plan(&selectors, indices.len(), array.shape())?
-                    };
-                    stack.try_push(runmat_runtime::indexing::structure::assign_with_plan(
-                        Value::StructArray(array),
-                        &plan,
-                        rhs,
-                        delete,
-                    )?)?;
+                    if delete {
+                        stack.try_push(
+                            runmat_runtime::indexing::structure::delete_scalar_indices_in_context(
+                                Some(runtime),
+                                Value::StructArray(array),
+                                &indices,
+                                &rhs,
+                            )?,
+                        )?;
+                        return Ok(true);
+                    }
+                    let selectors =
+                        runmat_runtime::context::host_allocation::initialize_host_array(
+                            Some(runtime),
+                            indices.len(),
+                            |ordinal| Ok(SliceSelector::Scalar(indices[ordinal])),
+                        )?;
+                    let plan = runmat_runtime::indexing::plan::build_assignment_plan_in_context(
+                        runtime,
+                        &selectors,
+                        indices.len(),
+                        array.shape(),
+                    )?;
+                    stack.try_push(
+                        runmat_runtime::indexing::structure::assign_with_plan_in_context(
+                            Some(runtime),
+                            Value::StructArray(array),
+                            &plan,
+                            rhs,
+                        )?,
+                    )?;
                 }
                 Value::SparseTensor(sparse) => stack.try_push(
-                    idx_write_linear::assign_sparse_scalar(sparse, &indices, &rhs, delete).await?,
+                    idx_write_linear::assign_sparse_scalar_in_context(
+                        Some(runtime),
+                        sparse,
+                        &indices,
+                        &rhs,
+                        delete,
+                    )
+                    .await?,
                 )?,
                 _ => {
                     if std::env::var("RUNMAT_DEBUG_INDEX").as_deref() == Ok("1") {

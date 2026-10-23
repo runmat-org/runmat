@@ -30,14 +30,14 @@ fn compact_roots_trace_new_children_without_cloning_host_payloads() {
     runmat_gc::gc_test_context(|| {
         let (value, parent) = managed("parent");
         let roots = ExpansionRoots::new().unwrap();
-        roots.retain_values(&[value]);
+        roots.retain_iter(std::iter::once(&value));
         let (child, child_handle) = managed("new child");
         runmat_gc::gc_with_value_mut(&parent, |value| *value = child).unwrap();
         runmat_gc::gc_collect_major().unwrap();
         assert!(runmat_gc::gc_with_value(&child_handle, |_| ()).is_ok());
         let tensor =
             Value::Tensor(runmat_value::Tensor::new(vec![3.0; 65_536], vec![256, 256]).unwrap());
-        roots.retain_values(&[tensor]);
+        roots.retain_iter(std::iter::once(&tensor));
         assert_eq!(
             roots.handles.borrow().values.len(),
             1,
@@ -69,13 +69,17 @@ fn all_materialized_argument_carriers_keep_unconsumed_managed_inputs() {
         };
         let arguments = vec![
             MaterializedArgument::Single(next()),
-            MaterializedArgument::Sequence(ValueSequence::single(next()).unwrap()),
+            MaterializedArgument::Sequence(
+                crate::execution::RootedValueSequence::new(ValueSequence::single(next()).unwrap())
+                    .unwrap(),
+            ),
             MaterializedArgument::Expansion(MaterializedExpansionSource::ReturnedOutputs(
-                ValueSequence::single(next()).unwrap(),
+                crate::execution::RootedValueSequence::new(ValueSequence::single(next()).unwrap())
+                    .unwrap(),
             )),
             MaterializedArgument::Expansion(MaterializedExpansionSource::CellContents {
                 base: next(),
-                indices: vec![next()],
+                indices: vec![next()].into(),
                 expand_all: false,
             }),
             MaterializedArgument::Expansion(MaterializedExpansionSource::Member {
@@ -87,7 +91,9 @@ fn all_materialized_argument_carriers_keep_unconsumed_managed_inputs() {
                 member: next(),
             }),
         ];
-        roots.retain_arguments(&arguments);
+        for argument in &arguments {
+            argument.trace(&mut *roots.handles.borrow_mut());
+        }
         drop(arguments);
         runmat_gc::gc_collect_major().unwrap();
         for handle in &identities {
@@ -125,7 +131,7 @@ fn expansion_lifecycle(completion: Completion) {
                     count.set(call + 1);
                     let fresh = observed.clone();
                     let receiver = receiver.clone();
-                    Box::pin(async move {
+                    crate::user_functions::admit_user_function_with(_runtime.as_ref(), move || async move {
                         if call == 0 {
                             let (value, handle) = managed("fresh method result");
                             *fresh.borrow_mut() = Some(handle);
@@ -243,16 +249,23 @@ fn expansion_result_survives_collecting_source_registration_retirement() {
         let callback_observed = Arc::clone(&observed);
         let output_root_retired = Arc::new(AtomicBool::new(false));
         let callback_root_retired = Arc::clone(&output_root_retired);
+        let output_returned = Arc::new(AtomicBool::new(false));
+        let callback_output_returned = Arc::clone(&output_returned);
         let _observer = runmat_gc::RootRetirementObserver::register(Arc::new(move |event| {
             let Some(handle) = OBSERVED_HANDLE.with(Cell::get) else {
                 return;
             };
-            if event == runmat_gc::RootRetirement::Explicit(handle) {
-                callback_root_retired.store(true, Ordering::SeqCst);
+            if event != runmat_gc::RootRetirement::Explicit(handle) {
+                return;
             }
-            if !matches!(event, runmat_gc::RootRetirement::Registration(_))
-                || callback_observed.swap(true, Ordering::SeqCst)
-            {
+            if callback_output_returned.load(Ordering::SeqCst) {
+                callback_root_retired.store(true, Ordering::SeqCst);
+                return;
+            }
+            // The canonical raw-input lease now retains exact handle roots,
+            // not ExpansionRoots' old scanner registration. Collect at the
+            // actual source-lease retirement before the result is returned.
+            if callback_observed.swap(true, Ordering::SeqCst) {
                 return;
             }
             runmat_gc::gc_collect_major().expect("collect during temporary-root retirement");
@@ -266,7 +279,9 @@ fn expansion_result_survives_collecting_source_registration_retirement() {
             vec![MaterializedArgument::Single(value)],
         ))
         .expect("return rooted argument batch");
+        output_returned.store(true, Ordering::SeqCst);
         assert!(observed.load(Ordering::SeqCst));
+        assert!(!output_root_retired.load(Ordering::SeqCst));
         assert!(runmat_gc::gc_with_value(&handle, |_| ()).is_ok());
         drop(arguments);
         assert!(output_root_retired.load(Ordering::SeqCst));

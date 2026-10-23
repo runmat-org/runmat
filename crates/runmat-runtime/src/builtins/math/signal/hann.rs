@@ -42,6 +42,11 @@ fn hann_error_with_message(
 
 fn hann_map_window_error(error: WindowArgError) -> RuntimeError {
     match error {
+        WindowArgError::Text(source) => {
+            let mut error = hann_error(&HANN_ERROR_INVALID_OPTION);
+            error.source = Some(Box::new(source));
+            error
+        }
         WindowArgError::TooManyOptions => hann_error(&HANN_ERROR_ARG_COUNT),
         WindowArgError::InvalidLength => hann_error(&HANN_ERROR_INVALID_LENGTH),
         WindowArgError::InvalidOptionType => hann_error(&HANN_ERROR_INVALID_OPTION),

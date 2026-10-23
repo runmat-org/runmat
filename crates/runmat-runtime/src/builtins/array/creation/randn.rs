@@ -8,8 +8,6 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, Tensor, Value};
 
 use crate::build_runtime_error;
-#[cfg(test)]
-use crate::builtins::array::type_resolvers::tensor_type_from_rank;
 use crate::builtins::common::random;
 use crate::builtins::common::random::gpu_like::ExactHostRandomMode;
 use crate::builtins::common::random_args::{
@@ -23,10 +21,6 @@ use crate::builtins::common::tensor;
 #[path = "randn/host_output.rs"]
 mod host_output;
 pub(crate) mod source_controls;
-#[cfg(test)]
-use runmat_builtins::ResolveContext;
-#[cfg(test)]
-use runmat_builtins::Type;
 use source_controls::{normalized_shape, RandnKeyword};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::randn")]
@@ -47,17 +41,6 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 
 fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin("randn").build()
-}
-
-#[cfg(test)]
-fn randn_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    if args.is_empty() {
-        return Type::Num;
-    }
-    if args.iter().any(|arg| matches!(arg, Type::String)) {
-        return Type::Unknown;
-    }
-    tensor_type_from_rank(args, ctx)
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::randn")]
@@ -144,7 +127,7 @@ impl ParsedRandn {
         while idx < args.len() {
             let arg = &args[idx];
 
-            if let Some(keyword) = keyword_of(arg) {
+            if let Some(keyword) = keyword_of(arg)? {
                 match RandnKeyword::from_text(&keyword) {
                     RandnKeyword::Like => {
                         let Some(proto) = args.get(idx + 1).cloned() else {
@@ -574,21 +557,6 @@ pub(crate) mod tests {
             Value::Num(v) => assert!((v - expected).abs() < 1e-12),
             other => panic!("expected scalar double, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn randn_type_defaults_to_num() {
-        assert_eq!(randn_type(&[], &ResolveContext::new(Vec::new())), Type::Num);
-    }
-
-    #[test]
-    fn randn_type_infers_rank_from_scalar_dim() {
-        assert_eq!(
-            randn_type(&[Type::Num], &ResolveContext::new(Vec::new())),
-            Type::Tensor {
-                shape: Some(vec![None, None])
-            }
-        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

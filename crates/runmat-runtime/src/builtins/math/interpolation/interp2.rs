@@ -24,10 +24,10 @@ use super::pp::{
     query_points, vector_from_value, Extrapolation, InterpMethod,
 };
 
-#[path = "interp2/spline_grid.rs"]
-mod spline_grid;
 #[path = "interp2/allocation.rs"]
 mod allocation;
+#[path = "interp2/spline_grid.rs"]
+mod spline_grid;
 
 const NAME: &str = "interp2";
 
@@ -164,7 +164,7 @@ async fn preflight_interp2_inputs(
     if args.len() < 3 {
         return Ok(());
     }
-    let explicit = args.len() >= 5 && !is_option_arg(&args[3]);
+    let explicit = args.len() >= 5 && !is_option_arg(&args[3])?;
     let (samples, queries) = if explicit {
         (
             args.range(..3).expect("interp2 samples"),
@@ -260,7 +260,7 @@ impl ParsedInterp2 {
         let mut method = InterpMethod::Linear;
         let mut extrap = Extrapolation::Nan;
         let mut explicit_extrap = false;
-        let explicit_axes = args.len() >= 5 && !is_option_arg(&args[3]);
+        let explicit_axes = args.len() >= 5 && !is_option_arg(&args[3])?;
         let (x_axis, y_axis, z, xq_value, yq_value, options) = if explicit_axes {
             let x = args.pop_front().expect("X");
             let y = args.pop_front().expect("Y");
@@ -342,8 +342,8 @@ impl ParsedInterp2 {
     }
 }
 
-fn is_option_arg(value: &Value) -> bool {
-    crate::builtins::common::random_args::keyword_of(value).is_some()
+fn is_option_arg(value: &Value) -> crate::BuiltinResult<bool> {
+    Ok(crate::builtins::common::random_args::keyword_of(value)?.is_some())
 }
 
 enum GridSamples {

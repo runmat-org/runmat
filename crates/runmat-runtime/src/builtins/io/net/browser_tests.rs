@@ -212,10 +212,12 @@ fn known_invalid_primary_operands_reject_before_native_target_access() {
 fn scalar_text_controls_reject_pages_but_keep_trailing_singletons() {
     let runtime = context_without_tcp();
     let paged_option = Value::CharArray(
-        CharArray::new_with_shape("Timeout".chars().collect(), vec![1, 1, 7]).unwrap(),
+        CharArray::from_unicode_scalars_with_shape("Timeout".chars().collect(), vec![1, 1, 7])
+            .unwrap(),
     );
     let trailing_option = Value::CharArray(
-        CharArray::new_with_shape("Timeout".chars().collect(), vec![1, 7, 1]).unwrap(),
+        CharArray::from_unicode_scalars_with_shape("Timeout".chars().collect(), vec![1, 7, 1])
+            .unwrap(),
     );
     assert_eq!(
         identifier(futures::executor::block_on(tcpclient::tcpclient_builtin(
@@ -238,7 +240,8 @@ fn scalar_text_controls_reject_pages_but_keep_trailing_singletons() {
         Some("RunMat:network:UnsupportedTarget"),
     );
     let paged_datatype = Value::CharArray(
-        CharArray::new_with_shape("uint8".chars().collect(), vec![1, 1, 5]).unwrap(),
+        CharArray::from_unicode_scalars_with_shape("uint8".chars().collect(), vec![1, 1, 5])
+            .unwrap(),
     );
     assert_eq!(
         identifier(futures::executor::block_on(read::read_builtin(
@@ -250,7 +253,8 @@ fn scalar_text_controls_reject_pages_but_keep_trailing_singletons() {
         runmat_builtins::READ_ERROR_INVALID_DATATYPE.identifier,
     );
     let trailing_datatype = Value::CharArray(
-        CharArray::new_with_shape("uint8".chars().collect(), vec![1, 5, 1]).unwrap(),
+        CharArray::from_unicode_scalars_with_shape("uint8".chars().collect(), vec![1, 5, 1])
+            .unwrap(),
     );
     assert_eq!(
         identifier(futures::executor::block_on(write::write_builtin(

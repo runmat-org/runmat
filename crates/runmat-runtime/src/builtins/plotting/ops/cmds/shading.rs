@@ -41,7 +41,10 @@ pub fn shading_builtin(args: crate::call::BuiltinArguments) -> crate::BuiltinRes
             &SHADING_ERROR_INVALID_ARGUMENT,
         ));
     };
-    let Some(mode) = as_lower_str(arg) else {
+    let Some(mode) = as_lower_str(arg).map_err(|source| {
+        crate::builtins::plotting::plotting_error_with_source("cmds", source.to_string(), source)
+    })?
+    else {
         return Err(cmd_error_with_message(
             "shading",
             SHADING_ERROR_INVALID_ARGUMENT.message,

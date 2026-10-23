@@ -116,6 +116,13 @@ impl std::fmt::Display for ObjectEditPreparationError {
 
 impl std::error::Error for ObjectEditPreparationError {}
 impl ExactObjectBuilder {
+    pub fn numeric_factor_native_requested_bytes() -> usize {
+        NativeObjectPayload::numeric_factor_requested_bytes()
+    }
+
+    pub const fn numeric_factor_native_retained_claim_count() -> usize {
+        1
+    }
     pub fn containers_map_native_requested_bytes(
         value: &super::super::ContainersMapStorage,
     ) -> Result<usize, ExactHostNumericAllocationError> {
@@ -526,6 +533,14 @@ impl ExactObjectBuilder {
     }
     pub fn try_set_graphics_receiver(&mut self, value: super::super::GraphicsReceiverRef) -> bool {
         self.try_set_native(NativeObjectPayload::GraphicsReceiver(value))
+    }
+    pub fn try_set_numeric_factor_data(
+        &mut self,
+        value: super::super::NumericFactorData,
+        permit: &dyn ExactHostAllocationPermit,
+    ) -> Result<bool, ExactHostNumericAllocationError> {
+        let value = NativeObjectPayload::numeric_factor_exact(value, permit)?;
+        Ok(self.try_set_native(value))
     }
     pub fn try_set_containers_map_payload(
         &mut self,

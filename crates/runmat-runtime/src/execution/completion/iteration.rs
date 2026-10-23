@@ -1,9 +1,10 @@
 //! A unique owner moves slots; aliases project one canonical Value at a time.
 //! Both routes retain the original physical allocation and its claims. There
 //! is no replacement Vec, iterator Box, or second root registration.
-use runmat_value::{OutputListIntoIter, OutputListStorage, Value};
+use runmat_value::{OutputListIntoIter, OutputListStorage, Value, ValueSequence};
 #[derive(Debug)]
-pub(super) enum RootedValuesIteration {
+pub(crate) enum RootedValuesIteration {
+    Single(Option<Value>),
     Unique(OutputListIntoIter),
     Retained {
         values: OutputListStorage,
@@ -12,6 +13,15 @@ pub(super) enum RootedValuesIteration {
     },
 }
 impl RootedValuesIteration {
+    /// The caller retains the original sequence's root lease. Only physical
+    /// storage moves here; an inline single value needs no collection.
+    pub(crate) fn from_sequence(values: ValueSequence) -> Self {
+        match values.into_legacy_value() {
+            Value::OutputList(values) => Self::new(values),
+            value => Self::Single(Some(value)),
+        }
+    }
+
     pub(super) fn new(values: OutputListStorage) -> Self {
         match values.try_into_owned() {
             Ok(values) => Self::Unique(values.into_iter()),
@@ -30,6 +40,7 @@ impl Iterator for RootedValuesIteration {
     type Item = Value;
     fn next(&mut self) -> Option<Value> {
         match self {
+            Self::Single(value) => value.take(),
             Self::Unique(values) => values.next(),
             Self::Retained {
                 values,
@@ -47,6 +58,7 @@ impl Iterator for RootedValuesIteration {
     }
     fn size_hint(&self) -> (usize, Option<usize>) {
         let n = match self {
+            Self::Single(value) => usize::from(value.is_some()),
             Self::Unique(values) => values.len(),
             Self::Retained { front, back, .. } => back - front,
         };
@@ -56,6 +68,7 @@ impl Iterator for RootedValuesIteration {
 impl DoubleEndedIterator for RootedValuesIteration {
     fn next_back(&mut self) -> Option<Value> {
         match self {
+            Self::Single(value) => value.take(),
             Self::Unique(values) => values.next_back(),
             Self::Retained {
                 values,

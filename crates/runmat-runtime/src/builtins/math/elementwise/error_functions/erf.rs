@@ -329,7 +329,7 @@ pub(crate) mod tests {
         assert!(erf_builtin(Value::Bool(false)).is_err());
         let logical = LogicalArray::new(vec![1, 0, 1, 0], vec![2, 2]).unwrap();
         assert!(erf_builtin(Value::LogicalArray(logical)).is_err());
-        let chars = CharArray::new(vec!['\0', '\u{1}'], 1, 2).unwrap();
+        let chars = CharArray::from_unicode_scalars(vec!['\0', '\u{1}'], 1, 2).unwrap();
         assert!(erf_builtin(Value::CharArray(chars)).is_err());
     }
 

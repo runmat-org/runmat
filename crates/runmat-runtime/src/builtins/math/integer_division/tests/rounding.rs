@@ -38,8 +38,11 @@ fn extreme_scalar_double_overflow_is_structured_in_every_rounding_mode() {
 #[test]
 fn rounding_character_rows_allow_trailing_singletons_not_pages() {
     for (shape, valid) in [(vec![1, 3, 1], true), (vec![1, 1, 3], false)] {
-        let control =
-            runmat_value::CharArray::new_with_shape("fix".chars().collect(), shape).unwrap();
+        let control = runmat_value::CharArray::from_unicode_scalars_with_shape(
+            "fix".chars().collect(),
+            shape,
+        )
+        .unwrap();
         let result = block_on(idivide_builtin(
             crate::builtins::common::test_support::builtin_arguments(vec![
                 Value::Int(IntValue::I16(6)),

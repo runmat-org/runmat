@@ -12,6 +12,7 @@ use super::invocation::{NativeInvocation, NativeInvocationStep};
 use super::state::{HostState, HostStateInput, NativeCaptureInput, NativeFunctionInputs};
 
 mod capture_arguments;
+mod runtime_services;
 
 pub struct NativeExecutor {
     functions: Arc<Vec<runmat_native_codegen::NativeFunction>>,
@@ -27,7 +28,10 @@ pub struct NativeExecutor {
     optimized_regions: Arc<Vec<crate::region::OptimizedRegionPlan>>,
     required_runtime_services:
         std::collections::BTreeSet<runmat_execution::host::NativeDeploymentServiceKind>,
-    selected_source_evaluation: Option<runmat_execution::host::VerifiedNativeServiceIssuer>,
+    selected_services: Vec<runmat_execution::host::VerifiedNativeServiceIssuer>,
+    selected_clock_invocation: Option<runmat_execution::host::NativeClockInvocationIdentity>,
+    selected_local_invocation: Option<runmat_execution::Digest>,
+    selected_deterministic: bool,
 }
 
 struct EntryRepresentationProfile {
@@ -37,6 +41,8 @@ struct EntryRepresentationProfile {
 
 #[derive(Default)]
 pub struct NativeExecutorOptions {
+    pub selected_clock_invocation: Option<runmat_execution::host::NativeClockInvocationIdentity>,
+    pub selected_local_invocation: Option<runmat_execution::Digest>,
     pub program_capture: Option<Vec<u8>>,
     pub interpreter_resume_points: BTreeMap<runmat_types::ProgramPointId, u64>,
     pub coverage_sites: BTreeMap<runmat_native_codegen::NativeMirSite, Vec<u64>>,
@@ -76,6 +82,17 @@ struct NativeRequestParts {
     deoptimization: DeoptimizationPolicy,
     osr_target: Option<OsrTarget>,
     workspace: Option<super::workspace::NativeWorkspaceInput>,
+}
+
+// The admission roots survive preflight until HostState has installed its own
+// lexical roots. Keeping this move-only handoff separate also lets the large
+// frame-construction call run after all preflight temporaries have unwound.
+struct PreparedNativeEntry {
+    input: HostStateInput,
+    function: FunctionId,
+    requested_outputs: u32,
+    osr_target: Option<OsrTarget>,
+    _admission_roots: Option<Vec<runmat_gc::ExplicitRoot>>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -175,7 +192,23 @@ impl NativeExecutor {
         } = request;
         self.require_runtime_services(&runtime)?;
         let retained_captures = self.retained_capture_arguments(function, &arguments)?;
-        self.validate_entry_profile(function, arguments.supplied().iter())?;
+        // Match the profile's original logical ingress before ABI preparation:
+        // interactive entries include their immutable caller workspace after
+        // supplied arguments, just like the legacy request path below.
+        let profile_values = || {
+            arguments.supplied().iter().chain(
+                workspace
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|workspace| workspace.profile_values()),
+            )
+        };
+        self.validate_entry_profile(function, profile_values())?;
+        if let Some(target) = &osr_target {
+            target
+                .executor()
+                .validate_entry_profile(function, profile_values())?;
+        }
         let function_ir = self
             .functions
             .iter()
@@ -213,7 +246,7 @@ impl NativeExecutor {
         executable: NativeExecutable,
         options: NativeExecutorOptions,
     ) -> NativeExecutorResult<Self> {
-        Self::bind_with_selected_service(assembly, executable, options, None)
+        Self::bind_with_selected_service(assembly, executable, options, Vec::new(), false)
     }
 
     /// Selected entry requires the already verified target-pack product, never
@@ -225,8 +258,14 @@ impl NativeExecutor {
         selected: &runmat_native_codegen::aot::SelectedNativeProduct<'_>,
     ) -> NativeExecutorResult<Self> {
         selected.validate_assembly(&assembly)?;
-        let issuer = selected.source_evaluation_issuer()?;
-        Self::bind_with_selected_service(assembly, executable, options, issuer)
+        let issuers = selected.service_issuers()?;
+        let deterministic = selected
+            .product()
+            .selected()
+            .expect("selected product")
+            .profile
+            == runmat_execution::host::NativeDeploymentProfile::DeterministicDeployed;
+        Self::bind_with_selected_service(assembly, executable, options, issuers, deterministic)
     }
 
     /// Bound only by the generated standalone linked-image entry.
@@ -235,32 +274,55 @@ impl NativeExecutor {
         executable: NativeExecutable,
         options: NativeExecutorOptions,
         linked: &runmat_native_codegen::aot::LinkedNativeProduct,
-        source_evaluation: Option<runmat_execution::host::VerifiedNativeServiceIssuer>,
+        services: Vec<runmat_execution::host::VerifiedNativeServiceIssuer>,
     ) -> NativeExecutorResult<Self> {
         linked.validate_assembly(&assembly)?;
-        if source_evaluation.as_ref().map(|issuer| issuer.product())
-            != linked
-                .binding()
-                .required_services
-                .contains(&runmat_execution::host::NativeDeploymentServiceKind::SourceEvaluation)
-                .then(|| linked.binding().fingerprint())
-                .transpose()
-                .map_err(|error| NativeExecutorError::Executable(error.to_string()))?
+        let product = linked
+            .binding()
+            .fingerprint()
+            .map_err(|error| NativeExecutorError::Executable(error.to_string()))?;
+        if services.len() != linked.binding().services.len()
+            || services
+                .iter()
+                .zip(&linked.binding().services)
+                .any(|(issuer, service)| issuer.product() != product || issuer.binding() != service)
         {
             return Err(NativeExecutorError::Executable(
-                "linked source service differs from selected product".into(),
+                "linked runtime services differ from the full selected effect closure".into(),
             ));
         }
-        Self::bind_with_selected_service(assembly, executable, options, source_evaluation)
+        let deterministic = linked.binding().profile
+            == runmat_execution::host::NativeDeploymentProfile::DeterministicDeployed;
+        Self::bind_with_selected_service(assembly, executable, options, services, deterministic)
     }
 
     fn bind_with_selected_service(
         assembly: runmat_native_codegen::NativeAssembly,
         executable: NativeExecutable,
         options: NativeExecutorOptions,
-        selected_source_evaluation: Option<runmat_execution::host::VerifiedNativeServiceIssuer>,
+        selected_services: Vec<runmat_execution::host::VerifiedNativeServiceIssuer>,
+        selected_deterministic: bool,
     ) -> NativeExecutorResult<Self> {
         assembly.verify()?;
+        if selected_services.iter().any(|issuer| {
+            let kind = issuer.binding().kind;
+            !kind.is_local_effect_service()
+                && !matches!(
+                    kind,
+                    runmat_execution::host::NativeDeploymentServiceKind::SourceEvaluation
+                        | runmat_execution::host::NativeDeploymentServiceKind::HostedDynamicDispatch
+                        | runmat_execution::host::NativeDeploymentServiceKind::Effect(
+                            runmat_types::EffectKind::Clock
+                                | runmat_types::EffectKind::Network
+                                | runmat_types::EffectKind::UserInterface
+                                | runmat_types::EffectKind::HostCallback
+                        )
+                )
+        }) {
+            return Err(NativeExecutorError::Executable(
+                "selected native runtime service is unsupported".into(),
+            ));
+        }
         assembly.target.require_host_executable()?;
         let ir_functions = assembly
             .functions
@@ -294,7 +356,10 @@ impl NativeExecutor {
             coverage_sites: options.coverage_sites,
             regions,
             required_runtime_services,
-            selected_source_evaluation,
+            selected_services,
+            selected_deterministic,
+            selected_clock_invocation: options.selected_clock_invocation,
+            selected_local_invocation: options.selected_local_invocation,
             compile_duration_ns: options.compile_duration_ns,
             entry_profile: options
                 .entry_profile
@@ -593,12 +658,21 @@ impl NativeExecutor {
         request: NativeRequestParts,
         lexical_environment: Option<runmat_value::LexicalEnvironment>,
     ) -> NativeExecutorResult<NativeInvocation> {
+        self.construct_prepared_entry(self.prepare_native_entry(request, lexical_environment)?)
+    }
+
+    #[inline(never)]
+    fn prepare_native_entry(
+        &self,
+        request: NativeRequestParts,
+        lexical_environment: Option<runmat_value::LexicalEnvironment>,
+    ) -> NativeExecutorResult<PreparedNativeEntry> {
         // A pre-cancelled invocation must not begin constructing a frame or
         // report an admission failure before the execution cancellation exit.
         if request.runtime.is_cancelled() {
             return Err(NativeExecutorError::Cancelled);
         }
-        let _admission_roots = lexical_environment
+        let admission_roots = lexical_environment
             .as_ref()
             .map(runmat_runtime::call::lexical::root_environment)
             .transpose()?;
@@ -659,7 +733,7 @@ impl NativeExecutor {
         let requested_outputs = u32::try_from(requested_outputs).map_err(|_| {
             NativeExecutorError::Host("requested output count exceeds native ABI".into())
         })?;
-        let (state, argument_refs) = HostState::new(HostStateInput {
+        let input = HostStateInput {
             function: function_ir,
             inputs,
             requested_outputs: requested_outputs as usize,
@@ -674,7 +748,29 @@ impl NativeExecutor {
             osr_point: osr_target.as_ref().map(OsrTarget::point),
             optimized_regions: Arc::clone(&self.optimized_regions),
             workspace,
-        })?;
+        };
+        Ok(PreparedNativeEntry {
+            input,
+            function,
+            requested_outputs,
+            osr_target,
+            _admission_roots: admission_roots,
+        })
+    }
+
+    #[inline(never)]
+    fn construct_prepared_entry(
+        &self,
+        prepared: PreparedNativeEntry,
+    ) -> NativeExecutorResult<NativeInvocation> {
+        let PreparedNativeEntry {
+            input,
+            function,
+            requested_outputs,
+            osr_target,
+            _admission_roots,
+        } = prepared;
+        let (state, argument_refs) = HostState::new(input)?;
         let resume = runmat_runtime::native::NativeResumeState {
             function: state.function.portable_id.0,
             block: state.function.entry.0,
@@ -701,25 +797,6 @@ impl NativeExecutor {
             resume,
             osr_target,
         ))
-    }
-
-    fn require_runtime_services(&self, runtime: &RuntimeContext) -> NativeExecutorResult<()> {
-        if self
-            .required_runtime_services
-            .contains(&runmat_execution::host::NativeDeploymentServiceKind::SourceEvaluation)
-        {
-            if let Some(issuer) = &self.selected_source_evaluation {
-                runtime
-                    .service_ports()
-                    .require_selected_source_evaluation(issuer)?;
-            } else {
-                runtime
-                    .service_ports()
-                    .require_source_evaluation("execute native source evaluation")
-                    .map_err(|error| NativeExecutorError::from(error.into_runtime_error()))?;
-            }
-        }
-        Ok(())
     }
 
     fn validate_entry_profile<'a>(

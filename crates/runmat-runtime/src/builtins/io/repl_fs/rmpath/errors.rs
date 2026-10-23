@@ -19,6 +19,11 @@ pub(super) fn decode(error: super::super::path_mutation::text::DecodeError) -> c
         DecodeError::InvalidInput | DecodeError::Provider(_) => {
             descriptor(&runmat_builtins::RMPATH_ERROR_ARGUMENT_TYPE)
         }
+        DecodeError::Encoding(source) => {
+            let mut error = descriptor(&runmat_builtins::RMPATH_ERROR_ARGUMENT_TYPE);
+            error.source = Some(Box::new(source));
+            error
+        }
         DecodeError::Compatibility(error) => error,
     }
 }

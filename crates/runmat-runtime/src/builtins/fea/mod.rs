@@ -57,13 +57,13 @@ pub(crate) mod domains;
 pub(crate) mod excitations;
 pub(crate) mod execution;
 mod field_access;
-mod object_api;
 pub(crate) mod field_selectors;
 pub(crate) mod generator_policies;
 pub(crate) mod initial_conditions;
 pub(crate) mod interfaces;
 pub(crate) mod material_assignments;
 mod modeling;
+mod object_api;
 pub(crate) mod observations;
 pub(crate) mod response_spectra;
 pub(crate) mod response_spectrum_policies;
@@ -1221,9 +1221,13 @@ fn value_to_json(builtin: &'static str, value: &Value) -> BuiltinResult<serde_js
         Value::Int(i) => Ok(int_value_to_json(i)),
         Value::Bool(b) => Ok(serde_json::Value::Bool(*b)),
         Value::String(s) => Ok(serde_json::Value::String(s.to_string())),
-        Value::CharArray(chars) if chars.rows == 1 => {
-            Ok(serde_json::Value::String(chars.data().iter().collect()))
-        }
+        Value::CharArray(chars) if chars.rows == 1 => Ok(serde_json::Value::String(
+            runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
+                let mut error = builtin_error(builtin, &ERROR_INPUT, source.to_string());
+                error.source = Some(Box::new(source));
+                error
+            })?,
+        )),
         Value::StringArray(array) => Ok(serde_json::Value::Array(
             array
                 .data()
@@ -2301,7 +2305,14 @@ fn scalar_string(
     match value {
         Value::String(value) => Ok(value.to_string()),
         Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].to_string()),
-        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data().iter().collect()),
+        Value::CharArray(chars) if chars.rows == 1 => Ok(runmat_value::decode_utf16_code_units(
+            chars.data(),
+        )
+        .map_err(|source| {
+            let mut error = builtin_error(builtin, error, source.to_string());
+            error.source = Some(Box::new(source));
+            error
+        })?),
         _ => Err(builtin_error(
             builtin,
             error,
@@ -4271,6 +4282,7 @@ mod tests {
         assert!(matches!(field_handle.value(), Value::Num(handle) if *handle >= 1.0));
     }
 
+    #[cfg(feature = "plot-core")]
     #[test]
     fn mesh_request_defaults_to_solver_edges_and_accepts_cad_reference() {
         let _guard = crate::analysis::storage::artifact_store_test_guard();
@@ -4298,6 +4310,7 @@ mod tests {
         assert!(!configured.show_edges);
     }
 
+    #[cfg(feature = "plot-core")]
     #[test]
     fn fea_plot_request_accepts_solver_mesh_edge_option() {
         let _guard = crate::analysis::storage::artifact_store_test_guard();

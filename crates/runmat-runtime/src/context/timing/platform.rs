@@ -1,7 +1,7 @@
 mod calendar;
 mod thread_cpu;
 
-use super::RuntimeTimingService;
+use super::{RuntimeCalendarInstant, RuntimeTimingService};
 use crate::context::RuntimeServiceFuture;
 use calendar::CapturedCalendar;
 use runmat_execution::profiling::CommandThreadCpuSampler;
@@ -34,12 +34,18 @@ impl RuntimeTimingService for PlatformTimingService {
         runmat_time::duration_since_epoch()
     }
 
-    fn local_datetime_to_epoch(&self, local: chrono::NaiveDateTime) -> Option<Duration> {
-        self.calendar.as_ref()?.local_to_epoch(local)
+    fn local_datetime_to_instant(
+        &self,
+        local: chrono::NaiveDateTime,
+    ) -> Option<RuntimeCalendarInstant> {
+        self.calendar.as_ref()?.local_to_instant(local)
     }
 
-    fn local_datetime_at_epoch(&self, epoch: Duration) -> Option<chrono::NaiveDateTime> {
-        self.calendar.as_ref()?.local_at_epoch(epoch)
+    fn local_datetime_at_instant(
+        &self,
+        instant: RuntimeCalendarInstant,
+    ) -> Option<chrono::NaiveDateTime> {
+        self.calendar.as_ref()?.local_at_instant(instant)
     }
 
     fn process_cpu_seconds(&self) -> Option<f64> {
@@ -220,8 +226,13 @@ mod tests {
             .and_hms_opt(0, 0, 0)
             .expect("test time");
 
-        assert_eq!(timing.local_datetime_to_epoch(local), None);
-        assert_eq!(timing.local_datetime_at_epoch(Duration::ZERO), None);
+        assert_eq!(timing.local_datetime_to_instant(local), None);
+        assert_eq!(
+            timing.local_datetime_at_instant(
+                RuntimeCalendarInstant::from_unix_timestamp(0, 0).unwrap()
+            ),
+            None
+        );
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -240,6 +251,7 @@ mod tests {
 
         let timing = PlatformTimingService::new();
         let epoch = Duration::new(1_705_320_000, 123_000_000);
+        let instant = RuntimeCalendarInstant::from_epoch_duration(epoch).unwrap();
         let date = js_sys::Date::new(&JsValue::from_f64(epoch.as_millis() as f64));
         let expected = NaiveDate::from_ymd_opt(
             i32::try_from(date.get_full_year()).expect("browser year"),
@@ -257,16 +269,16 @@ mod tests {
         .unwrap_or_else(|| panic!("browser date in {zone_name} must be representable"));
 
         let first = timing
-            .local_datetime_at_epoch(epoch)
+            .local_datetime_at_instant(instant)
             .unwrap_or_else(|| panic!("captured browser calendar unavailable for {zone_name}"));
         assert_eq!(first, expected, "captured calendar must match browser zone");
         assert_eq!(
-            timing.local_datetime_to_epoch(first),
-            Some(epoch),
+            timing.local_datetime_to_instant(first),
+            Some(instant),
             "paired conversion must use the same captured rules"
         );
         assert_eq!(
-            timing.local_datetime_at_epoch(epoch),
+            timing.local_datetime_at_instant(instant),
             Some(first),
             "the service must retain its captured calendar policy"
         );

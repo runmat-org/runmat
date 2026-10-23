@@ -240,7 +240,11 @@ fn scalar_real(value: &Value) -> Option<RealScalar> {
             dtype: NumericDType::F64,
         }),
         Value::CharArray(ca) if ca.rows.checked_mul(ca.cols) == Some(1) => Some(RealScalar {
-            value: ca.data().first().map(|&ch| ch as u32 as f64).unwrap_or(0.0),
+            value: ca
+                .data()
+                .first()
+                .map(|&ch| f64::from(ch.raw()))
+                .unwrap_or(0.0),
             dtype: NumericDType::F64,
         }),
         _ => None,
@@ -290,7 +294,10 @@ fn logical_to_tensor(logical: &LogicalArray, builtin: &'static str) -> BuiltinRe
 }
 
 fn char_to_tensor(chars: &CharArray, builtin: &'static str) -> BuiltinResult<Tensor> {
-    let data: Vec<f64> = chars.data().iter().map(|&ch| ch as u32 as f64).collect();
+    let data: Vec<f64> = chars
+        .iter_column_major()
+        .map(|ch| f64::from(ch.raw()))
+        .collect();
     Tensor::new(data, vec![chars.rows, chars.cols]).map_err(|err| map_internal_error(builtin, err))
 }
 
@@ -1440,7 +1447,14 @@ mod tests {
 
     #[test]
     fn sparse_plus_char_array_promotes_chars_to_numeric_dense() {
-        let chars = CharArray::new(vec!['A', 'B', 'C', 'D', 'E', 'F'], 3, 2).unwrap();
+        let chars = CharArray::from_code_units(
+            [0x0041, 0xD800, 0x0042, 0xDC00, 0x0043, 0xFFFF]
+                .map(runmat_value::Utf16CodeUnit::from_raw)
+                .to_vec(),
+            3,
+            2,
+        )
+        .unwrap();
         let result = expect_tensor(
             sparse_binary(
                 &Value::SparseTensor(sparse_a()),
@@ -1451,9 +1465,8 @@ mod tests {
             .expect("sparse plus char"),
         );
         let values = double_values(&result);
-        assert_eq!(values[0], 75.0);
-        assert_eq!(values[1], 66.0);
-        assert_eq!(values[2], 97.0);
+        assert_eq!(result.shape(), &[3, 2]);
+        assert_eq!(values, vec![75.0, 66.0, 97.0, 55296.0, 56340.0, 65535.0]);
     }
 
     #[test]

@@ -1097,7 +1097,10 @@ mod tests {
     use runmat_value::{IntegerStorage, LogicalArray};
 
     fn run_tokenized(args: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(tokenized_document_builtin(args))
+        futures::executor::block_on(tokenized_document_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     fn run_token_details(value: Value) -> BuiltinResult<Value> {
@@ -1333,9 +1336,9 @@ mod tests {
     fn add_sentence_details_accepts_categorical_abbreviation_usage() {
         let docs =
             run_tokenized(vec![Value::String("The dept. chair spoke.".into())]).expect("tokenized");
-        let usage = categorical_from_args(vec![Value::StringArray(
-            StringArray::new(vec!["inner".into()], vec![1, 1]).unwrap(),
-        )])
+        let usage = categorical_from_args(crate::call::FunctionArgumentView::from_slice(&[
+            Value::StringArray(StringArray::new(vec!["inner".into()], vec![1, 1]).unwrap()),
+        ]))
         .expect("categorical usage");
         let abbreviations = table_from_columns(
             vec!["Abbreviation".into(), "Usage".into()],

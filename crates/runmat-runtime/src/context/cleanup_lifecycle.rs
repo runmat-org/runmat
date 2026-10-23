@@ -186,7 +186,9 @@ impl RuntimeLifecycleHost {
 
     /// Normal close retires this host's exact workspace bindings first. The
     /// detached root remains alive (but excluded by registration ID from the
-    /// last-owner proof) until every admitted callback has settled.
+    /// last-owner proof) until every admitted callback has settled. A callback
+    /// can publish new session-owned bindings; retire those in subsequent
+    /// batches before declaring the still-open workspace quiescent.
     pub async fn retire_workspace_and_drain(
         &self,
         runtime: &RuntimeContext,
@@ -195,17 +197,41 @@ impl RuntimeLifecycleHost {
         runtime
             .clone()
             .scope(async {
-                let detached = crate::workspace::try_detach_selected(
+                let mut detached = crate::workspace::try_detach_selected(
                     &crate::workspace::WorkspaceDetachSelection::All,
                 )?;
-                crate::builtins::introspection::on_cleanup::lifecycle::dispatch::drain_eligible(
-                    runtime,
-                    &self.registry,
-                    &[detached.root_registration()],
-                )
-                .await?;
-                drop(detached);
-                self.drain_gracefully(runtime).await
+                let mut result = Ok(());
+                loop {
+                    result = crate::runtime_error::complete_with_cleanup(
+                        result,
+                        crate::builtins::introspection::on_cleanup::lifecycle::dispatch::drain_eligible(
+                            runtime,
+                            &self.registry,
+                            &[detached.root_registration()],
+                        )
+                        .await,
+                    );
+                    drop(detached);
+                    result = crate::runtime_error::complete_with_cleanup(
+                        result,
+                        self.drain_gracefully(runtime).await,
+                    );
+                    detached = match crate::workspace::try_detach_selected(
+                        &crate::workspace::WorkspaceDetachSelection::All,
+                    ) {
+                        Ok(detached) => detached,
+                        Err(error) => {
+                            return crate::runtime_error::complete_with_cleanup(result, Err(error));
+                        }
+                    };
+                    // Only newly session-owned bindings repeat this loop.
+                    // Externally owned Active objects never keep close alive.
+                    // No callback is awaited after this empty-batch proof.
+                    if detached.is_empty() {
+                        drop(detached);
+                        return result;
+                    }
+                }
             })
             .await
     }

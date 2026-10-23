@@ -83,7 +83,7 @@ fn integer_complex(real: NumericScalar, imaginary: NumericScalar) -> BuiltinResu
 
 fn character(value: &CharArray, index: usize) -> BuiltinResult<Value> {
     if value.rows == 0 || value.cols == 0 {
-        return CharArray::new(Vec::new(), 0, 0)
+        return CharArray::from_code_units(Vec::new(), 0, 0)
             .map(Value::CharArray)
             .map_err(arrayfun_internal);
     }
@@ -93,7 +93,7 @@ fn character(value: &CharArray, index: usize) -> BuiltinResult<Value> {
         .data()
         .get(row * value.cols + column)
         .ok_or_else(|| arrayfun_flow("arrayfun: index out of bounds"))?;
-    CharArray::new(vec![character], 1, 1)
+    CharArray::from_code_units(vec![character], 1, 1)
         .map(Value::CharArray)
         .map_err(arrayfun_internal)
 }

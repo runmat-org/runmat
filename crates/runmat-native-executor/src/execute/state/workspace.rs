@@ -34,15 +34,25 @@ impl HostState {
             .into());
         }
         let reference = self.local_reference(slot)?;
-        let absent = if creation == runmat_mir::SequenceRootCreation::EmptyCell {
+        let absent = if matches!(
+            creation,
+            runmat_mir::SequenceRootCreation::EmptyCell
+                | runmat_mir::SequenceRootCreation::OrdinaryContainer(_)
+        ) {
             self.sequence_binding_absent(slot, reference)?
         } else {
             false
         };
         if absent {
-            let cell = Self::empty_cell_root();
-            let seed = self.arena.insert(cell.clone());
-            Ok((cell, Some(seed)))
+            let intent = match creation {
+                runmat_mir::SequenceRootCreation::OrdinaryContainer(intent) => intent,
+                _ => runmat_types::AssignmentChildCreation::CellArray,
+            };
+            runmat_runtime::sequence::assignment_container_in_context(Some(&self.runtime), intent)?
+                .with_owned(|value| {
+                    let seed = self.arena.insert(value.clone());
+                    Ok((value, Some(seed)))
+                })
         } else {
             Ok((self.arena.get(reference)?.clone(), None))
         }

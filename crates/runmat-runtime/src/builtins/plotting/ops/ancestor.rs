@@ -1,8 +1,7 @@
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    ANCESTOR_DESCRIPTOR, ANCESTOR_ERROR_INVALID_ARGUMENT, ANCESTOR_ERROR_TOO_MANY_OUTPUTS,
 };
+
 use runmat_macros::runtime_builtin;
 use runmat_value::{NumericDType, Tensor, Value};
 
@@ -12,107 +11,38 @@ use super::state::{
     FigureHandle, PlotObjectKind,
 };
 use crate::builtins::common::tensor as tensor_utils;
-use crate::builtins::plotting::type_resolvers::handle_array_type;
 use crate::{build_runtime_error, RuntimeError};
 
 const BUILTIN_NAME: &str = "ancestor";
-
-const ANCESTOR_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "p",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Matching graphics ancestor handle, or an empty handle array when none exists.",
-}];
-
-const ANCESTOR_INPUTS_TYPE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "h",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Graphics handle or array of graphics handles to inspect.",
-    },
-    BuiltinParamDescriptor {
-        name: "type",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Object type name or cell/string array of type names.",
-    },
-];
-
-const ANCESTOR_INPUTS_TOPLEVEL: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "h",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Graphics handle or array of graphics handles to inspect.",
-    },
-    BuiltinParamDescriptor {
-        name: "type",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Object type name or cell/string array of type names.",
-    },
-    BuiltinParamDescriptor {
-        name: "option",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Use 'toplevel' to return the highest matching ancestor.",
-    },
-];
-
-const ANCESTOR_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "p = ancestor(h, type)",
-        inputs: &ANCESTOR_INPUTS_TYPE,
-        outputs: &ANCESTOR_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "p = ancestor(h, type, 'toplevel')",
-        inputs: &ANCESTOR_INPUTS_TOPLEVEL,
-        outputs: &ANCESTOR_OUTPUT,
-    },
-];
-
-const ANCESTOR_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ANCESTOR.INVALID_ARGUMENT",
-    identifier: Some("RunMat:ancestor:InvalidArgument"),
-    when: "Arguments are missing, the type selector is invalid, or the option is not 'toplevel'.",
-    message: "ancestor: invalid argument",
-};
-
-const ANCESTOR_ERRORS: [BuiltinErrorDescriptor; 1] = [ANCESTOR_ERROR_INVALID_ARGUMENT];
-
-pub const ANCESTOR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ANCESTOR_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ANCESTOR_ERRORS,
-};
-
-pub const ANCESTOR_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "ancestor accepts graphics objects plus text type selectors and returns a graphics object or empty handle array. Integer scalars and arrays are non-graphics inputs and return empty; RunMat's host-double handle encoding is opaque object state, not integer data.",
-};
+#[path = "ancestor/selector.rs"]
+mod selector;
+use selector::{AncestorKind, TypeName};
 
 #[runtime_builtin(
     name = "ancestor",
-    category = "plotting",
-    summary = "Find a graphics object ancestor with a requested type.",
-    keywords = "ancestor,graphics,handle,parent,plotting",
-    suppress_auto_output = true,
-    type_resolver(handle_array_type),
-    descriptor(crate::builtins::plotting::ancestor::ANCESTOR_DESCRIPTOR),
-    integer_audit(crate::builtins::plotting::ancestor::ANCESTOR_INTEGER_AUDIT),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::ancestor"
 )]
-pub fn ancestor_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub fn ancestor_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    arguments: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    let _scope = runtime.as_ref().map(|runtime| runtime.enter());
+    crate::output_count::validate_fixed_outputs(
+        &ANCESTOR_DESCRIPTOR,
+        &ANCESTOR_ERROR_TOO_MANY_OUTPUTS,
+        "ancestor",
+    )
+    .map_err(super::coordinate_admission::terminal)?;
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "ancestor")?;
+    work.finish(ancestor_impl(arguments.view(), &work))
+}
+
+fn ancestor_impl(
+    args: crate::call::FunctionArgumentView<'_>,
+    _work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> crate::BuiltinResult<Value> {
     if !(2..=3).contains(&args.len()) {
         return Err(invalid_argument(
             "expected ancestor(h, type) or ancestor(h, type, 'toplevel')",
@@ -213,63 +143,68 @@ fn legend_object_exists(figure: FigureHandle, axes_index: usize) -> bool {
 
 fn ancestor_chain(raw_handle: f64, handle: PlotHandle) -> Vec<AncestorCandidate> {
     match handle {
-        PlotHandle::Root => vec![AncestorCandidate::new("root", 0.0)],
+        PlotHandle::Root => vec![AncestorCandidate::new(AncestorKind::Root, 0.0)],
         PlotHandle::Figure(figure) => vec![
-            AncestorCandidate::new("figure", figure.as_u32() as f64),
-            AncestorCandidate::new("root", 0.0),
+            AncestorCandidate::new(AncestorKind::Figure, figure.as_u32() as f64),
+            AncestorCandidate::new(AncestorKind::Root, 0.0),
         ],
         PlotHandle::Axes(figure, axes_index) => {
-            chain_from_axes("axes", raw_handle, figure, axes_index)
+            chain_from_axes(AncestorKind::Axes, raw_handle, figure, axes_index)
         }
         PlotHandle::Ruler(figure, axes_index, _) => {
-            chain_from_axes("numericruler", raw_handle, figure, axes_index)
+            chain_from_axes(AncestorKind::Ruler, raw_handle, figure, axes_index)
         }
         PlotHandle::Text(figure, _, PlotObjectKind::SuperTitle) => vec![
-            AncestorCandidate::new("text", raw_handle),
-            AncestorCandidate::new("figure", figure.as_u32() as f64),
-            AncestorCandidate::new("root", 0.0),
+            AncestorCandidate::new(AncestorKind::Text, raw_handle),
+            AncestorCandidate::new(AncestorKind::Figure, figure.as_u32() as f64),
+            AncestorCandidate::new(AncestorKind::Root, 0.0),
         ],
         PlotHandle::Text(figure, axes_index, _) => {
-            chain_from_axes("text", raw_handle, figure, axes_index)
+            chain_from_axes(AncestorKind::Text, raw_handle, figure, axes_index)
         }
         PlotHandle::Legend(figure, axes_index) => {
-            chain_from_axes("legend", raw_handle, figure, axes_index)
+            chain_from_axes(AncestorKind::Legend, raw_handle, figure, axes_index)
         }
         PlotHandle::PlotChild(_, state) => {
             let (figure, axes_index) = state.figure_axes();
-            chain_from_axes(state.type_name(), raw_handle, figure, axes_index)
+            chain_from_axes(
+                AncestorKind::Chart(state.class_identity()),
+                raw_handle,
+                figure,
+                axes_index,
+            )
         }
     }
 }
 
 fn chain_from_axes(
-    kind: &'static str,
+    kind: AncestorKind,
     handle: f64,
     figure: FigureHandle,
     axes_index: usize,
 ) -> Vec<AncestorCandidate> {
     vec![
         AncestorCandidate::new(kind, handle),
-        AncestorCandidate::new("axes", encode_axes_handle(figure, axes_index)),
-        AncestorCandidate::new("figure", figure.as_u32() as f64),
-        AncestorCandidate::new("root", 0.0),
+        AncestorCandidate::new(AncestorKind::Axes, encode_axes_handle(figure, axes_index)),
+        AncestorCandidate::new(AncestorKind::Figure, figure.as_u32() as f64),
+        AncestorCandidate::new(AncestorKind::Root, 0.0),
     ]
 }
 
 #[derive(Clone, Copy)]
 struct AncestorCandidate {
-    kind: &'static str,
+    kind: AncestorKind,
     handle: f64,
 }
 
 impl AncestorCandidate {
-    const fn new(kind: &'static str, handle: f64) -> Self {
+    const fn new(kind: AncestorKind, handle: f64) -> Self {
         Self { kind, handle }
     }
 }
 
 struct TypeSelector {
-    names: Vec<String>,
+    names: Vec<TypeName>,
 }
 
 impl TypeSelector {
@@ -296,14 +231,12 @@ impl TypeSelector {
         Ok(Self { names })
     }
 
-    fn matches(&self, kind: &str) -> bool {
-        self.names
-            .iter()
-            .any(|name| name == kind || (name == "ruler" && kind == "numericruler"))
+    fn matches(&self, kind: AncestorKind) -> bool {
+        self.names.iter().any(|name| name.matches(kind))
     }
 }
 
-fn push_type_name(value: &Value, names: &mut Vec<String>) -> crate::BuiltinResult<()> {
+fn push_type_name(value: &Value, names: &mut Vec<TypeName>) -> crate::BuiltinResult<()> {
     match value {
         Value::StringArray(strings) => {
             for item in strings.data() {
@@ -320,12 +253,12 @@ fn push_type_name(value: &Value, names: &mut Vec<String>) -> crate::BuiltinResul
     }
 }
 
-fn push_normalized_name(raw: &str, names: &mut Vec<String>) -> crate::BuiltinResult<()> {
+fn push_normalized_name(raw: &str, names: &mut Vec<TypeName>) -> crate::BuiltinResult<()> {
     let name = raw.trim().to_ascii_lowercase();
     if name.is_empty() {
         return Err(invalid_argument("type selector entries must not be empty"));
     }
-    names.push(name);
+    names.push(TypeName::parse(&name));
     Ok(())
 }
 
@@ -343,14 +276,7 @@ fn scalar_handle(value: &Value) -> Option<f64> {
 }
 
 fn text_scalar(value: &Value) -> Option<String> {
-    match value {
-        Value::CharArray(chars) => Some(chars.data().iter().collect()),
-        Value::String(text) => Some(text.as_str().to_owned()),
-        Value::StringArray(strings) if strings.data().len() == 1 => {
-            strings.data().first().map(|text| text.as_str().to_owned())
-        }
-        _ => None,
-    }
+    crate::builtins::common::validation::value_text_scalar_string(value)
 }
 
 fn empty_handle_array() -> Value {
@@ -386,6 +312,8 @@ mod tests {
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, reset_plot_state};
     use futures::executor::block_on;
+    use runmat_builtins::BuiltinIntegerAuditKind;
+    use runmat_builtins::{ANCESTOR_DESCRIPTOR, ANCESTOR_INTEGER_AUDIT};
     use runmat_value::{CellArray, IntValue, IntegerStorage, Tensor, Value};
 
     fn setup() -> PlotTestLockGuard {
@@ -429,23 +357,47 @@ mod tests {
         let figure_handle = axes.handle.as_u32() as f64;
 
         assert_eq!(
-            ancestor_builtin(vec![Value::Num(line_handle), Value::String("line".into())]).unwrap(),
+            ancestor_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(line_handle),
+                    Value::String("line".into())
+                ])
+            )
+            .unwrap(),
             Value::Num(line_handle)
         );
         assert_eq!(
-            ancestor_builtin(vec![Value::Num(line_handle), Value::String("axes".into())]).unwrap(),
+            ancestor_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(line_handle),
+                    Value::String("axes".into())
+                ])
+            )
+            .unwrap(),
             Value::Num(axes_handle)
         );
         assert_eq!(
-            ancestor_builtin(vec![
-                Value::Num(line_handle),
-                Value::String("figure".into())
-            ])
+            ancestor_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(line_handle),
+                    Value::String("figure".into())
+                ])
+            )
             .unwrap(),
             Value::Num(figure_handle)
         );
         assert_eq!(
-            ancestor_builtin(vec![Value::Num(line_handle), Value::String("root".into())]).unwrap(),
+            ancestor_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(line_handle),
+                    Value::String("root".into())
+                ])
+            )
+            .unwrap(),
             Value::Num(0.0)
         );
     }
@@ -468,15 +420,25 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            ancestor_builtin(vec![Value::Num(line_handle), Value::Cell(types.clone())]).unwrap(),
+            ancestor_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(line_handle),
+                    Value::Cell(types.clone())
+                ])
+            )
+            .unwrap(),
             Value::Num(axes_handle)
         );
         assert_eq!(
-            ancestor_builtin(vec![
-                Value::Num(line_handle),
-                Value::Cell(types),
-                Value::String("toplevel".into())
-            ])
+            ancestor_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(line_handle),
+                    Value::Cell(types),
+                    Value::String("toplevel".into())
+                ])
+            )
             .unwrap(),
             Value::Num(figure_handle)
         );
@@ -498,18 +460,24 @@ mod tests {
         };
 
         assert_eq!(
-            ancestor_builtin(vec![
-                Value::Num(x_axis_handle),
-                Value::String("numericruler".into())
-            ])
+            ancestor_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(x_axis_handle),
+                    Value::String("numericruler".into())
+                ])
+            )
             .unwrap(),
             Value::Num(x_axis_handle)
         );
         assert_eq!(
-            ancestor_builtin(vec![
-                Value::Num(x_axis_handle),
-                Value::String("axes".into())
-            ])
+            ancestor_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(x_axis_handle),
+                    Value::String("axes".into())
+                ])
+            )
             .unwrap(),
             Value::Num(axes_handle)
         );
@@ -529,10 +497,13 @@ mod tests {
             panic!("Legend should be numeric pseudo-object handle");
         };
 
-        let result = ancestor_builtin(vec![
-            Value::Num(legend_handle),
-            Value::String("legend".into()),
-        ])
+        let result = ancestor_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(legend_handle),
+                Value::String("legend".into()),
+            ]),
+        )
         .unwrap();
         let Value::Tensor(tensor) = result else {
             panic!("expected empty tensor for absent legend");
@@ -562,18 +533,24 @@ mod tests {
         let axes_handle = encode_axes_handle(axes.handle, axes.active_index);
 
         assert_eq!(
-            ancestor_builtin(vec![
-                Value::Num(legend_handle),
-                Value::String("legend".into())
-            ])
+            ancestor_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(legend_handle),
+                    Value::String("legend".into())
+                ])
+            )
             .unwrap(),
             Value::Num(legend_handle)
         );
         assert_eq!(
-            ancestor_builtin(vec![
-                Value::Num(legend_handle),
-                Value::String("axes".into())
-            ])
+            ancestor_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(legend_handle),
+                    Value::String("axes".into())
+                ])
+            )
             .unwrap(),
             Value::Num(axes_handle)
         );
@@ -582,8 +559,14 @@ mod tests {
     #[test]
     fn invalid_scalar_handle_returns_empty() {
         let _guard = setup();
-        let result =
-            ancestor_builtin(vec![Value::Num(f64::NAN), Value::String("axes".into())]).unwrap();
+        let result = ancestor_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                Value::Num(f64::NAN),
+                Value::String("axes".into()),
+            ]),
+        )
+        .unwrap();
         let Value::Tensor(tensor) = result else {
             panic!("expected empty tensor");
         };
@@ -601,10 +584,13 @@ mod tests {
         let axes = current_axes_state();
         let axes_handle = encode_axes_handle(axes.handle, axes.active_index);
 
-        let result = ancestor_builtin(vec![
-            vec_tensor(vec![line_handle, f64::NAN]),
-            Value::String("axes".into()),
-        ])
+        let result = ancestor_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![
+                vec_tensor(vec![line_handle, f64::NAN]),
+                Value::String("axes".into()),
+            ]),
+        )
         .unwrap();
         let Value::Tensor(tensor) = result else {
             panic!("expected tensor result");
@@ -617,7 +603,14 @@ mod tests {
     fn root_matches_itself() {
         let _guard = setup();
         assert_eq!(
-            ancestor_builtin(vec![Value::Num(0.0), Value::String("root".into())]).unwrap(),
+            ancestor_builtin(
+                None,
+                crate::builtins::common::test_support::builtin_arguments(vec![
+                    Value::Num(0.0),
+                    Value::String("root".into())
+                ])
+            )
+            .unwrap(),
             Value::Num(0.0)
         );
     }
@@ -647,14 +640,27 @@ mod tests {
         ];
         for scalar in scalars {
             assert_empty_handle_array(
-                ancestor_builtin(vec![Value::Int(scalar), Value::String("root".into())]).unwrap(),
+                ancestor_builtin(
+                    None,
+                    crate::builtins::common::test_support::builtin_arguments(vec![
+                        Value::Int(scalar),
+                        Value::String("root".into()),
+                    ]),
+                )
+                .unwrap(),
             );
         }
         for storage in arrays {
             let handle = Tensor::new_integer(storage, vec![1, 1]).expect("typed non-handle");
             assert_empty_handle_array(
-                ancestor_builtin(vec![Value::Tensor(handle), Value::String("root".into())])
-                    .unwrap(),
+                ancestor_builtin(
+                    None,
+                    crate::builtins::common::test_support::builtin_arguments(vec![
+                        Value::Tensor(handle),
+                        Value::String("root".into()),
+                    ]),
+                )
+                .unwrap(),
             );
         }
     }

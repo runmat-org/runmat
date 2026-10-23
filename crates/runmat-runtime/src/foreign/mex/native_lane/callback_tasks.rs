@@ -67,6 +67,7 @@ impl Wake for TaskWake {
 }
 
 pub(super) struct CallbackTask {
+    owner: NativeLaneOwner,
     service_id: u64,
     future: RefCell<Option<CallbackFuture>>,
     cancelled: Cell<bool>,
@@ -74,8 +75,14 @@ pub(super) struct CallbackTask {
 }
 
 impl CallbackTask {
-    fn new(service_id: u64, future: CallbackFuture, wake: Arc<TaskWake>) -> Self {
+    fn new(
+        owner: NativeLaneOwner,
+        service_id: u64,
+        future: CallbackFuture,
+        wake: Arc<TaskWake>,
+    ) -> Self {
         Self {
+            owner,
             service_id,
             future: RefCell::new(Some(future)),
             cancelled: Cell::new(false),
@@ -95,6 +102,7 @@ pub(super) struct CallbackTasks {
     next_poll: Cell<u64>,
     tasks: RefCell<HashMap<CallbackTaskId, Rc<CallbackTask>>>,
     ready: Arc<ReadyQueue>,
+    active_owners: RefCell<Vec<NativeLaneOwner>>,
 }
 
 impl CallbackTasks {
@@ -107,11 +115,44 @@ impl CallbackTasks {
                 ids: Mutex::new(VecDeque::new()),
                 host_wakers: Mutex::new(HashMap::new()),
             }),
+            active_owners: RefCell::new(Vec::new()),
+        }
+    }
+
+    pub(super) fn active_for(&self, owner: &NativeLaneOwner) -> bool {
+        self.active_owners
+            .borrow()
+            .iter()
+            .any(|active| active.same(owner))
+    }
+
+    pub(super) fn cancel_for(&self, owner: &NativeLaneOwner) {
+        let selected = self
+            .tasks
+            .borrow()
+            .iter()
+            .filter(|(_, task)| task.owner.same(owner))
+            .map(|(id, task)| (*id, Rc::clone(task)))
+            .collect::<Vec<_>>();
+        for (id, task) in selected {
+            // An absent future is genuinely InPoll: its outer poll owns the
+            // future and will observe cancellation on return. An idle task
+            // can retire now, without leaving a missing-future ready ID that
+            // requeues itself forever.
+            let in_poll = task.future.borrow().is_none();
+            task.cancel();
+            if in_poll {
+                task.wake.wake_by_ref();
+            } else {
+                let retired = self.tasks.borrow_mut().remove(&id);
+                drop(retired);
+            }
         }
     }
 
     pub(super) fn admit(
         &self,
+        owner: &NativeLaneOwner,
         service_id: u64,
         request: BoundaryRequest,
         services: Rc<dyn OriginMexBoundaryServices>,
@@ -140,6 +181,7 @@ impl CallbackTasks {
             queue: Arc::clone(&self.ready),
         });
         let task = Rc::new(CallbackTask::new(
+            owner.clone(),
             service_id,
             Box::pin(async move { reply.send(prepared.await) }),
             Arc::clone(&wake),
@@ -197,15 +239,23 @@ impl CallbackTasks {
                 drop(retired);
                 return Poll::Ready(task.service_id);
             }
-            struct CallbackDepth<'a>(&'a Cell<usize>);
+            struct CallbackDepth<'a> {
+                depth: &'a Cell<usize>,
+                active: &'a RefCell<Vec<NativeLaneOwner>>,
+            }
             impl Drop for CallbackDepth<'_> {
                 fn drop(&mut self) {
-                    self.0.set(self.0.get() - 1);
+                    self.depth.set(self.depth.get() - 1);
+                    let _ = self.active.borrow_mut().pop();
                 }
             }
             callback_depth.set(callback_depth.get() + 1);
+            self.active_owners.borrow_mut().push(task.owner.clone());
             let polled = {
-                let _depth = CallbackDepth(callback_depth);
+                let _depth = CallbackDepth {
+                    depth: callback_depth,
+                    active: &self.active_owners,
+                };
                 let waker = Waker::from(Arc::clone(&task.wake));
                 future.as_mut().poll(&mut Context::from_waker(&waker))
             };
@@ -422,4 +472,37 @@ fn split_request(
         }
     };
     Some((operation, cancellation, reply))
+}
+
+#[cfg(test)]
+mod owner_retirement_tests {
+    use super::*;
+
+    #[test]
+    fn cancelling_one_idle_owner_retires_only_its_tasks() {
+        let tasks = CallbackTasks::new();
+        let child = NativeLaneOwner::default();
+        let parent = NativeLaneOwner::default();
+        for (number, owner) in [(1, &child), (2, &parent)] {
+            let id = CallbackTaskId(number);
+            let wake = Arc::new(TaskWake {
+                id,
+                queued: AtomicBool::new(false),
+                queue: Arc::clone(&tasks.ready),
+            });
+            tasks.tasks.borrow_mut().insert(
+                id,
+                Rc::new(CallbackTask::new(
+                    (*owner).clone(),
+                    number,
+                    Box::pin(futures::future::pending()),
+                    wake,
+                )),
+            );
+        }
+        tasks.cancel_for(&child);
+        assert!(!tasks.tasks.borrow().contains_key(&CallbackTaskId(1)));
+        assert!(tasks.tasks.borrow().contains_key(&CallbackTaskId(2)));
+        assert!(tasks.ready.pop().is_none());
+    }
 }

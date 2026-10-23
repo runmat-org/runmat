@@ -35,6 +35,33 @@ impl RecordTable {
     pub(super) fn values(&self) -> impl Iterator<Item = &Record> {
         self.ordinary.values().chain(self.managed.values())
     }
+    pub(super) fn has_scoped_records(
+        &self,
+        scope: runmat_accelerate_api::DeviceAllocationScope,
+    ) -> bool {
+        self.values()
+            .any(|record| record.scope.is_some_and(|created| scope.covers(created)))
+    }
+    pub(super) fn scoped_count(
+        &self,
+        scope: runmat_accelerate_api::DeviceAllocationScope,
+    ) -> usize {
+        self.values()
+            .filter(|record| record.scope.is_some_and(|created| scope.covers(created)))
+            .count()
+    }
+    pub(super) fn scoped_ids(
+        &self,
+        scope: runmat_accelerate_api::DeviceAllocationScope,
+    ) -> anyhow::Result<Vec<u64>> {
+        let mut ids = runmat_value::exact_capacity_vec(self.scoped_count(scope))?;
+        for (id, record) in self.ordinary.iter().chain(self.managed.iter()) {
+            if record.scope.is_some_and(|created| scope.covers(created)) {
+                ids.push(*id);
+            }
+        }
+        Ok(ids)
+    }
 
     pub(super) fn get(&self, id: &u64) -> Option<&Record> {
         self.managed.get(id).or_else(|| self.ordinary.get(id))

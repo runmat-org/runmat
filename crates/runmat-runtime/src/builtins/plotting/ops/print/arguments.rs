@@ -269,7 +269,14 @@ fn has_extension(path: &Path, expected: &str) -> bool {
 fn string_arg(value: &Value) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.as_str().to_owned()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data().iter().collect()),
+        Value::CharArray(ca) if ca.rows == 1 => Ok(runmat_value::decode_utf16_code_units(
+            ca.data(),
+        )
+        .map_err(|source| {
+            let mut error = print_error_with_detail(&PRINT_ERROR_INVALID_INPUT, source.to_string());
+            error.source = Some(Box::new(source));
+            error
+        })?),
         Value::CharArray(_) => Err(print_error_with_detail(
             &PRINT_ERROR_INVALID_INPUT,
             "character vector arguments must be 1-by-N",

@@ -10,14 +10,17 @@ use runmat_builtins::{
     RegexOutput as OutputSpec, RegexParseMode,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{CharArray, StringArray, Tensor, Value};
+use runmat_value::{CharArray, SharedShape, StringArray, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinGpuSpec, ConstantStrategy, GpuOpKind, ReductionNaN, ResidencyPolicy,
 };
 use crate::builtins::common::tensor;
 use crate::builtins::strings::common::contains_numeric_or_resident_text_input;
-use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
+use crate::{
+    build_runtime_error, gather_if_needed_async, make_cell, make_cell_with_shape, BuiltinResult,
+    RuntimeError,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::regex::regexp")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -39,6 +42,13 @@ const BUILTIN_NAME: &str = "regexp";
 
 fn runtime_error_for(builtin: &'static str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(builtin).build()
+}
+
+fn decode_error_for(builtin: &'static str, source: runmat_value::Utf16DecodeError) -> RuntimeError {
+    build_runtime_error(format!("{builtin}: malformed UTF-16 character input"))
+        .with_builtin(builtin)
+        .with_source(source)
+        .build()
 }
 
 fn with_builtin_context(builtin: &'static str, mut err: RuntimeError) -> RuntimeError {
@@ -144,21 +154,34 @@ fn parse_options(
     rest: crate::call::FunctionArgumentView<'_>,
     case_insensitive_by_default: bool,
 ) -> BuiltinResult<RegexpOptions> {
-    let mut options = project_regex_options(
+    let mut decode_failure = None;
+    let projected = project_regex_options(
         rest.len(),
-        |index| value_to_option_text(&rest[index]),
+        |index| match value_to_option_text(&rest[index], builtin) {
+            Ok(text) => text,
+            Err(error) => {
+                decode_failure = Some(error);
+                None
+            }
+        },
         RegexParseMode::Runtime,
-    )
-    .map_err(|error| match error {
-        RegexOptionError::NonText(index) => runtime_error_for(
-            builtin,
-            format!("{builtin}: expected option string, got {:?}", rest[index]),
-        ),
-        RegexOptionError::Unknown { name, .. } => {
-            runtime_error_for(builtin, format!("{builtin}: unrecognised option '{name}'"))
-        }
-    })?
-    .options;
+    );
+    // The grammar deliberately does not request ignored warning operands.
+    // Preserve their non-observation while carrying a requested decode error.
+    if let Some(error) = decode_failure {
+        return Err(error);
+    }
+    let mut options = projected
+        .map_err(|error| match error {
+            RegexOptionError::NonText(index) => runtime_error_for(
+                builtin,
+                format!("{builtin}: expected option string, got {:?}", rest[index]),
+            ),
+            RegexOptionError::Unknown { name, .. } => {
+                runtime_error_for(builtin, format!("{builtin}: unrecognised option '{name}'"))
+            }
+        })?
+        .options;
     if case_insensitive_by_default {
         options.apply_regexpi_default();
     }
@@ -179,6 +202,9 @@ struct SubjectCollection {
     entries: Vec<runmat_value::Utf8Text>,
     rows: usize,
     cols: usize,
+    /// The original shape owner, including every page. Scalar/char inputs use
+    /// their historical two-dimensional result shape instead.
+    shape: Option<SharedShape>,
     kind: InputKind,
     force_cell_output: bool,
 }
@@ -202,11 +228,12 @@ async fn collect_subjects(
             entries: vec![s],
             rows: 1,
             cols: 1,
+            shape: None,
             kind: InputKind::CharScalar,
             force_cell_output,
         }),
-        Value::CharArray(array) => collect_char_array(array, force_cell_output),
-        Value::StringArray(array) => collect_string_array(array, force_cell_output),
+        Value::CharArray(array) => collect_char_array(builtin, array, force_cell_output),
+        Value::StringArray(array) => collect_string_array(builtin, array, force_cell_output),
         Value::Cell(cell) => collect_cell_array(builtin, cell, force_cell_output).await,
         other => Err(runtime_error_for(
             builtin,
@@ -218,6 +245,7 @@ async fn collect_subjects(
 }
 
 fn collect_char_array(
+    builtin: &'static str,
     array: CharArray,
     force_cell_output: bool,
 ) -> BuiltinResult<SubjectCollection> {
@@ -226,6 +254,7 @@ fn collect_char_array(
             entries: Vec::new(),
             rows: 0,
             cols: 0,
+            shape: None,
             kind: InputKind::CharMatrix {
                 rows: 0,
                 cols: array.cols,
@@ -234,27 +263,29 @@ fn collect_char_array(
         });
     }
     if array.rows == 1 {
-        let text: String = array.data().iter().copied().collect();
+        let text = runmat_value::decode_utf16_code_units(array.data())
+            .map_err(|source| decode_error_for(builtin, source))?;
         return Ok(SubjectCollection {
             entries: vec![runmat_value::Utf8Text::new(text)],
             rows: 1,
             cols: 1,
+            shape: None,
             kind: InputKind::CharScalar,
             force_cell_output,
         });
     }
     let mut entries = Vec::with_capacity(array.rows);
     for r in 0..array.rows {
-        let mut line = String::with_capacity(array.cols);
-        for c in 0..array.cols {
-            line.push(array.data()[r * array.cols + c]);
-        }
+        let start = r * array.cols;
+        let line = runmat_value::decode_utf16_code_units(&array.data()[start..start + array.cols])
+            .map_err(|source| decode_error_for(builtin, source))?;
         entries.push(runmat_value::Utf8Text::new(line));
     }
     Ok(SubjectCollection {
         entries,
         rows: array.rows,
         cols: 1,
+        shape: None,
         kind: InputKind::CharMatrix {
             rows: array.rows,
             cols: array.cols,
@@ -264,18 +295,23 @@ fn collect_char_array(
 }
 
 fn collect_string_array(
+    builtin: &'static str,
     array: StringArray,
     force_cell_output: bool,
 ) -> BuiltinResult<SubjectCollection> {
+    array
+        .validate_layout()
+        .map_err(|cause| runtime_error_for(builtin, format!("{builtin}: {cause}")))?;
     let rows = array.rows();
     let cols = array.cols();
-    let (data, _shape, _rows, _cols) = array.into_parts();
+    let (data, shape, _, _) = array.into_parts();
     let total = data.len();
-    if total == 1 && rows == 1 && cols == 1 {
+    if total == 1 && (shape.is_empty() || (rows == 1 && cols == 1)) {
         return Ok(SubjectCollection {
             entries: vec![data[0].clone()],
             rows: 1,
             cols: 1,
+            shape: None,
             kind: InputKind::StringScalar,
             force_cell_output,
         });
@@ -288,6 +324,7 @@ fn collect_string_array(
         entries,
         rows,
         cols,
+        shape: Some(shape),
         kind: InputKind::StringArray { rows, cols },
         force_cell_output: true,
     })
@@ -298,12 +335,15 @@ async fn collect_cell_array(
     cell: runmat_value::CellArray,
     _force_cell_output: bool,
 ) -> BuiltinResult<SubjectCollection> {
+    cell.validate_layout()
+        .map_err(|cause| runtime_error_for(builtin, format!("{builtin}: {cause}")))?;
+    let shape = cell.shape.clone();
     let mut entries = Vec::with_capacity(cell.data().len());
     for ptr in cell.data() {
         let value = gather_if_needed_async(ptr)
             .await
             .map_err(|err| with_builtin_context(builtin, err))?;
-        let text = extract_string(&value).ok_or_else(|| {
+        let text = extract_string(&value, builtin)?.ok_or_else(|| {
             runtime_error_for(
                 builtin,
                 format!(
@@ -317,6 +357,7 @@ async fn collect_cell_array(
         entries,
         rows: cell.rows,
         cols: cell.cols,
+        shape: Some(shape),
         kind: InputKind::CellArray {
             rows: cell.rows,
             cols: cell.cols,
@@ -325,26 +366,36 @@ async fn collect_cell_array(
     })
 }
 
-fn extract_string(value: &Value) -> Option<runmat_value::Utf8Text> {
-    match value {
+fn extract_string(
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<Option<runmat_value::Utf8Text>> {
+    Ok(match value {
         Value::String(s) => Some(s.clone()),
         Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].clone()),
         Value::CharArray(ca) if ca.rows == 1 => Some(runmat_value::Utf8Text::new(
-            ca.data().iter().copied().collect(),
+            runmat_value::decode_utf16_code_units(ca.data())
+                .map_err(|source| decode_error_for(builtin, source))?,
         )),
         _ => None,
-    }
+    })
 }
 
-fn value_to_option_text(value: &Value) -> Option<Cow<'_, str>> {
-    match value {
+fn value_to_option_text<'a>(
+    value: &'a Value,
+    builtin: &'static str,
+) -> BuiltinResult<Option<Cow<'a, str>>> {
+    Ok(match value {
         Value::String(s) => Some(Cow::Borrowed(s.as_str())),
         Value::StringArray(sa) if sa.data().len() == 1 => {
             Some(Cow::Borrowed(sa.data()[0].as_str()))
         }
-        Value::CharArray(ca) if ca.rows == 1 => Some(Cow::Owned(ca.data().iter().collect())),
+        Value::CharArray(ca) if ca.rows == 1 => Some(Cow::Owned(
+            runmat_value::decode_utf16_code_units(ca.data())
+                .map_err(|source| decode_error_for(builtin, source))?,
+        )),
         _ => None,
-    }
+    })
 }
 
 #[derive(Clone)]
@@ -387,7 +438,7 @@ impl RegexpEvaluation {
         options: RegexpOptions,
     ) -> BuiltinResult<Self> {
         let subjects = collect_subjects(builtin, subject, options.force_cell_output).await?;
-        let pattern_str = extract_string(&pattern).ok_or_else(|| {
+        let pattern_str = extract_string(&pattern, builtin)?.ok_or_else(|| {
             runtime_error_for(
                 builtin,
                 format!("{builtin}: expected char vector or string pattern, got {pattern:?}"),
@@ -438,6 +489,16 @@ impl RegexpEvaluation {
     ) -> BuiltinResult<Value> {
         let builtin = self.builtin;
         make_cell(values, rows, cols)
+            .map_err(|err| runtime_error_for(builtin, format!("{builtin}: {err}")))
+    }
+
+    fn make_cell_value_with_shape(
+        &self,
+        values: Vec<Value>,
+        shape: Vec<usize>,
+    ) -> BuiltinResult<Value> {
+        let builtin = self.builtin;
+        make_cell_with_shape(values, shape)
             .map_err(|err| runtime_error_for(builtin, format!("{builtin}: {err}")))
     }
 
@@ -666,19 +727,51 @@ impl RegexpEvaluation {
     {
         let rows = self.subjects.rows;
         let cols = self.subjects.cols;
+        let matrix_shape = [rows, cols];
+        let shape = self
+            .subjects
+            .shape
+            .as_ref()
+            .map_or(matrix_shape.as_slice(), |shape| shape.as_slice());
+        if self.data.len() != self.subjects.entries.len() {
+            return Err(runtime_error_for(
+                self.builtin,
+                format!(
+                    "{}: subject count does not match match results",
+                    self.builtin
+                ),
+            ));
+        }
         let mut values = Vec::with_capacity(self.data.len());
-        for row in 0..rows {
-            for col in 0..cols {
-                let idx = row * cols + col;
-                let value = if idx < self.data.len() {
-                    build(&self.data[idx])?
-                } else {
-                    Value::string(String::new())
-                };
-                values.push(value);
+        if !self.data.is_empty() {
+            let page_width = rows
+                .checked_mul(cols)
+                .filter(|width| *width > 0)
+                .ok_or_else(|| {
+                    runtime_error_for(
+                        self.builtin,
+                        format!("{}: invalid subject page shape", self.builtin),
+                    )
+                })?;
+            if !self.data.len().is_multiple_of(page_width) {
+                return Err(runtime_error_for(
+                    self.builtin,
+                    format!("{}: incomplete subject page", self.builtin),
+                ));
+            }
+            for page in self.data.chunks_exact(page_width) {
+                for row in 0..rows {
+                    for col in 0..cols {
+                        let idx = match self.subjects.kind {
+                            InputKind::StringArray { .. } => col * rows + row,
+                            _ => row * cols + col,
+                        };
+                        values.push(build(&page[idx])?);
+                    }
+                }
             }
         }
-        self.make_cell_value(values, rows, cols)
+        self.make_cell_value_with_shape(values, shape.to_vec())
     }
 }
 
@@ -903,6 +996,55 @@ pub(crate) mod tests {
             }
             other => panic!("unexpected output {other:?}"),
         }
+
+        // Each page is column-major in the StringArray, but row-major in the
+        // result Cell. The second page must not be truncated or interleaved.
+        let pages = StringArray::new(
+            vec!["hit", "miss", "hit", "miss", "miss", "hit", "miss", "hit"]
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+            vec![2, 2, 2],
+        )
+        .unwrap();
+        let eval = evaluate(
+            Value::StringArray(pages),
+            Value::String("hit".into()),
+            &[Value::String("match".into())],
+        )
+        .unwrap();
+        let outputs = eval.outputs_for_single().unwrap();
+        let Value::Cell(result) = &outputs[0] else {
+            panic!("expected page-preserving Cell result");
+        };
+        assert_eq!(result.shape(), &[2, 2, 2]);
+        let counts: Vec<_> = result
+            .data()
+            .iter()
+            .map(|value| match value {
+                Value::Cell(matches) => matches.data().len(),
+                other => panic!("expected match Cell, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(counts, [1, 1, 0, 0, 0, 0, 1, 1]);
+
+        // A one-element StringArray still follows the scalar regexp grammar,
+        // including a rank-zero shape and trailing singleton dimensions.
+        for shape in [vec![], vec![1, 1, 1]] {
+            let scalar = StringArray::new(vec!["hit".to_owned()], shape).unwrap();
+            let eval = evaluate(
+                Value::StringArray(scalar),
+                Value::String("hit".into()),
+                &[Value::String("match".into())],
+            )
+            .unwrap();
+            let outputs = eval.outputs_for_single().unwrap();
+            let Value::Cell(matches) = &outputs[0] else {
+                panic!("expected scalar match Cell");
+            };
+            assert_eq!(matches.shape(), &[1, 1]);
+            assert_eq!(matches.data(), &[Value::String("hit".into())]);
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -935,6 +1077,35 @@ pub(crate) mod tests {
             }
             other => panic!("unexpected output {other:?}"),
         }
+
+        let pages = runmat_value::CellArray::new_with_shape(
+            ["hit", "hit", "miss", "miss", "miss", "miss", "hit", "hit"]
+                .into_iter()
+                .map(Value::string)
+                .collect(),
+            vec![2, 2, 2],
+        )
+        .unwrap();
+        let eval = evaluate(
+            Value::Cell(pages),
+            Value::String("hit".into()),
+            &[Value::String("match".into())],
+        )
+        .unwrap();
+        let outputs = eval.outputs_for_single().unwrap();
+        let Value::Cell(result) = &outputs[0] else {
+            panic!("expected page-preserving Cell result");
+        };
+        assert_eq!(result.shape(), &[2, 2, 2]);
+        let counts: Vec<_> = result
+            .data()
+            .iter()
+            .map(|value| match value {
+                Value::Cell(matches) => matches.data().len(),
+                other => panic!("expected match Cell, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(counts, [1, 1, 0, 0, 0, 0, 1, 1]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1316,12 +1487,12 @@ pub(crate) mod tests {
                     Value::Cell(inner) => assert_eq!(inner.data().len(), 1),
                     other => panic!("unexpected inner cell {other:?}"),
                 }
-                // Row 0, Col 1
+                // Row 0, Col 1 (row-major cell storage).
                 match &ca.data()[1] {
                     Value::Cell(inner) => assert_eq!(inner.data().len(), 1),
                     other => panic!("unexpected inner cell {other:?}"),
                 }
-                // Row 1, Col 0
+                // Row 1, Col 0.
                 match &ca.data()[2] {
                     Value::Cell(inner) => assert_eq!(inner.data().len(), 0),
                     other => panic!("unexpected inner cell {other:?}"),

@@ -185,7 +185,7 @@ fn conj_complex_integer_tensor_reads_storage_without_mirror() {
 #[test]
 fn conj_char_array_returns_double_codes() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-    let chars = CharArray::new("Hi".chars().collect(), 1, 2).expect("char array");
+    let chars = CharArray::from_unicode_scalars("Hi".chars().collect(), 1, 2).expect("char array");
     let result = conj_builtin(Value::CharArray(chars)).expect("conj");
     match result {
         Value::Tensor(t) => {

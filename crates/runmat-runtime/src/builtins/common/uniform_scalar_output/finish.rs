@@ -59,7 +59,10 @@ fn tensor(values: Vec<f64>, shape: &[usize]) -> Result<Value, UniformScalarError
         .map_err(UniformScalarError::materialization)
 }
 
-fn character(values: Vec<char>, shape: &[usize]) -> Result<Value, UniformScalarError> {
+fn character(
+    values: Vec<runmat_value::Utf16CodeUnit>,
+    shape: &[usize],
+) -> Result<Value, UniformScalarError> {
     let normalized = if shape.is_empty() {
         vec![1, 1]
     } else {
@@ -76,13 +79,13 @@ fn character(values: Vec<char>, shape: &[usize]) -> Result<Value, UniformScalarE
     if expected != values.len() {
         return Err(UniformScalarError::CHARACTER_COUNT);
     }
-    let mut row_major = vec!['\0'; expected];
+    let mut row_major = vec![runmat_value::Utf16CodeUnit::from_raw(0); expected];
     for column in 0..columns {
         for row in 0..rows {
             row_major[row * columns + column] = values[row + column * rows];
         }
     }
-    CharArray::new(row_major, rows, columns)
+    CharArray::from_code_units(row_major, rows, columns)
         .map(Value::CharArray)
         .map_err(UniformScalarError::materialization)
 }

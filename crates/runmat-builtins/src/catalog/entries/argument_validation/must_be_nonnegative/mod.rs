@@ -33,7 +33,7 @@ pub const MUST_BE_NONNEGATIVE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalo
         preparation: BuiltinOperandPreparation::RuntimeOwned,
         portability: BuiltinPortability::NativeAndWasm,
         accelerator: BuiltinAcceleratorPolicy::Forbidden,
-        residency: BuiltinResidencyPolicy::PreserveInputs,
+        residency: BuiltinResidencyPolicy::Host,
         fusion: BuiltinFusionPolicy::Boundary,
         distributed: BuiltinDistributedPolicy::InspectHandles,
     },

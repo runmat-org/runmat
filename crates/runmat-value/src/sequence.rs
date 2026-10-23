@@ -111,6 +111,19 @@ impl ValueSequence {
         self.len() == 0
     }
 
+    /// Keep at most `len` existing values without rebuilding or validating
+    /// children. Shared sequences retain their original physical backing;
+    /// an inline single becomes empty only when zero values are selected.
+    pub fn truncate(&mut self, len: usize) {
+        match &mut self.0 {
+            ValueSequenceStorage::Single(_) if len == 0 => {
+                self.0 = ValueSequenceStorage::CommaSeparated(OutputListStorage::empty());
+            }
+            ValueSequenceStorage::Single(_) => {}
+            ValueSequenceStorage::CommaSeparated(values) => values.truncate(len),
+        }
+    }
+
     pub fn as_slice(&self) -> &[Value] {
         match &self.0 {
             ValueSequenceStorage::Single(value) => std::slice::from_ref(value),

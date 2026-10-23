@@ -8,16 +8,58 @@ use crate::{build_runtime_error, GpuGatherRetry, RuntimeError};
 use runmat_accelerate_api::GpuTensorStorage;
 use runmat_value::NumericDType;
 
+#[path = "managed_download_adoption.rs"]
+mod adoption;
 #[path = "managed_download_quote.rs"]
 mod quote;
 #[path = "managed_download_stage.rs"]
 mod stage;
-#[path = "managed_download_adoption.rs"]
-mod adoption;
 
 pub use adoption::adopt_settled_native_download;
 pub use quote::quote_exact_native_download;
 pub use stage::download_exact_native;
+
+/// Download through the selected operation's authority. The returned native
+/// carrier owns its backing independently of the temporary stage receipt.
+pub(crate) async fn download_value_preserving_residency_in_context(
+    runtime: Option<&RuntimeContext>,
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+    input: &runmat_accelerate_api::GpuTensorHandle,
+    admission_identifier: &'static str,
+    admission_message: &'static str,
+) -> Result<runmat_value::Value, RuntimeError> {
+    use crate::context::host_allocation::{HostAllocationPolicy, HostAllocationReceipt};
+    let allocation = |cause| {
+        host_allocation_runtime_error(runtime, admission_identifier, admission_message, cause)
+    };
+    if HostAllocationReceipt::policy(runtime).map_err(allocation)?
+        == HostAllocationPolicy::Unbounded
+    {
+        return super::download_value_preserving_residency_async(provider, input).await;
+    }
+    let runtime = runtime.ok_or_else(|| allocation(HostAllocationError::MissingManagedOwner))?;
+    let mut budget = runtime.cpu_cooperation();
+    budget
+        .checkpoint(0)
+        .await
+        .map_err(|cause| cause.into_runtime_error_in_context(Some(runtime)))?;
+    let quote = quote_exact_native_download(provider, input)?;
+    let receipt = HostAllocationReceipt::admit(
+        Some(runtime),
+        quote.single_source_plan().map_err(allocation)?,
+    )
+    .map_err(allocation)?
+    .ok_or_else(|| allocation(HostAllocationError::MissingManagedOwner))?;
+    let output = budget
+        .await_cancellable(download_exact_native(
+            runtime, provider, input, &receipt, quote,
+        ))
+        .await
+        .map_err(|cause| cause.into_runtime_error_in_context(Some(runtime)))?
+        .map_err(|failure| failure.error)?;
+    receipt.checkpoint(runtime).map_err(allocation)?;
+    Ok(output)
+}
 
 fn invalid(message: &'static str) -> RuntimeError {
     build_runtime_error(message)

@@ -8,12 +8,12 @@ use runmat_runtime::builtins::common::shape::normalize_scalar_shape;
 mod effects;
 use effects::ElementwiseEffects;
 mod abi;
-#[path = "elementwise/host_readback.rs"]
-pub(super) mod host_readback;
-#[path = "elementwise/host_liveness.rs"]
-mod host_liveness;
 #[path = "elementwise/host_candidate.rs"]
 mod host_candidate;
+#[path = "elementwise/host_liveness.rs"]
+mod host_liveness;
+#[path = "elementwise/host_readback.rs"]
+pub(super) mod host_readback;
 
 pub(super) fn host_liveness_preparation_bytes(
     value_ids_upper: usize,
@@ -249,6 +249,11 @@ async fn execute_elementwise_outputs(
     vm_selection: Option<super::VmFusionSelectionRight<'_>>,
     input_uses: Option<&super::VmHostInputUses>,
     host_continuation: &mut Option<ElementwiseHostContinuation>,
+    native: Option<(
+        Option<&runmat_runtime::numeric_region::service::NativeNumericRegionCpuCandidates>,
+        &runmat_runtime::numeric_region::service::NativeNumericRegionRight,
+        &runmat_runtime::numeric_region::service::NativeNumericRegionProgramOwner,
+    )>,
 ) -> ExecutionResult<FusionExecutionOutcome<(HashMap<ValueId, Value>, FusionPlacementSelection)>> {
     let vm_right = vm_selection.and_then(super::VmFusionSelectionRight::completion);
     crate::ensure_residency_hooks();
@@ -363,7 +368,8 @@ async fn execute_elementwise_outputs(
         .map_err(ProviderExecutionError::from_source)?;
         let host_uses = vm_right
             .zip(input_uses)
-            .map(|(_, uses)| (uses.entry.len(), uses.loads.len()));
+            .map(|(_, uses)| (uses.entry.len(), uses.loads.len()))
+            .or_else(|| native.map(|_| (request.inputs.len(), 0)));
         let bytes = geometry
             .overlapping_preparation_bytes(host_uses)
             .map_err(ProviderExecutionError::from_source)?;
@@ -461,8 +467,18 @@ async fn execute_elementwise_outputs(
                 output_ids,
                 &bindings,
                 provider,
-                vm_right,
-                input_uses,
+                native
+                    .map(|(cpu, right, program)| host_candidate::Source::Native {
+                        cpu,
+                        right,
+                        program,
+                    })
+                    .or_else(|| {
+                        vm_right
+                            .zip(input_uses)
+                            .map(|(right, uses)| host_candidate::Source::Vm { right, uses })
+                    }),
+                preparation_receipt,
                 host_continuation,
             );
         }
@@ -571,16 +587,22 @@ async fn execute_elementwise_outputs(
     )
     .ok()
         == Some(runmat_runtime::context::host_allocation::HostAllocationPolicy::Managed);
-    let admission = vm_right
-        .and(input_uses)
-        .filter(|_| has_host_operations)
-        .and_then(|uses| {
-            if managed_host {
-                host_readback::admit_host(request, &bindings, provider, uses)
-            } else {
-                host_readback::admit(request, &bindings, provider, uses)
-            }
-        });
+    let admission = if let Some((_, right, program)) = native {
+        has_host_operations
+            .then(|| host_readback::admit_native(request, &bindings, provider, program, right))
+            .flatten()
+    } else {
+        vm_right
+            .and(input_uses)
+            .filter(|_| has_host_operations)
+            .and_then(|uses| {
+                if managed_host {
+                    host_readback::admit_host(request, &bindings, provider, uses)
+                } else {
+                    host_readback::admit(request, &bindings, provider, uses)
+                }
+            })
+    };
     let original_host_program = admission
         .is_none()
         .then(|| bindings.host_facts(request, provider.precision()))
@@ -604,7 +626,13 @@ async fn execute_elementwise_outputs(
         scalar_work_units,
     ))
     .map_err(anyhow::Error::from)?;
-    let host = if (has_resident || managed_host) && vm_right.is_some() {
+    let host = if let Some((cpu, right, _)) = native {
+        super::host_readback::CpuHostPlacement::Native {
+            cpu,
+            right,
+            source_host: admission.as_ref().map(|admission| &admission.resources),
+        }
+    } else if (has_resident || managed_host) && vm_right.is_some() {
         admission.as_ref().map_or(
             super::host_readback::CpuHostPlacement::Unavailable,
             |admission| super::host_readback::CpuHostPlacement::Readbacks(&admission.resources),
@@ -658,7 +686,18 @@ async fn execute_elementwise_outputs(
     }
     let selection = match selection {
         FusionExecutionOutcome::Executed(selection) => selection,
-        FusionExecutionOutcome::SharedRuntime(observation) => {
+        FusionExecutionOutcome::SharedRuntime(mut observation) => {
+            if native.is_some() {
+                observation.attach_native_host_admission(
+                    request
+                        .runtime
+                        .as_ref()
+                        .expect("native request has owning Runtime"),
+                    admission,
+                    preparation_receipt,
+                )?;
+                return Ok(FusionExecutionOutcome::SharedRuntime(observation));
+            }
             if vm_right.is_some() {
                 let (readback, outputs) = admission
                     .map(|admission| {
@@ -1000,6 +1039,57 @@ pub async fn execute_elementwise(
     }
 }
 
+/// Native regions retain their original executor plan and input generations;
+/// they do not borrow VM installation, decline, readback, or host-route rights.
+pub(crate) async fn execute_elementwise_native(
+    request: FusionExecutionRequest<'_>,
+    outputs: &[ValueId],
+    right: runmat_runtime::numeric_region::service::NativeNumericRegionRight,
+    native_program: &runmat_runtime::numeric_region::service::NativeNumericRegionProgramOwner,
+) -> ExecutionResult<runmat_runtime::numeric_region::service::NativeNumericRegionOutcome> {
+    use runmat_runtime::numeric_region::service::{root_values, NativeNumericRegionOutcome};
+    let runtime = request
+        .runtime
+        .as_ref()
+        .ok_or_else(|| anyhow!("native fusion requires its owning runtime"))?;
+    if !right.is_current(runtime) {
+        return Err(anyhow!("native numeric region authority is no longer current").into());
+    }
+    let mut host_continuation = None;
+    let (mut values, selection) = match execute_elementwise_outputs(
+        &request,
+        outputs,
+        None,
+        None,
+        &mut host_continuation,
+        Some((native_program.cpu_candidates(), &right, native_program)),
+    )
+    .await?
+    {
+        FusionExecutionOutcome::SharedRuntime(observation) => {
+            return observation
+                .into_native_selection(runtime, right, native_program, &request.inputs)
+                .await
+        }
+        FusionExecutionOutcome::Executed(result) => result,
+    };
+    let rooted = root_values(runtime, outputs.len(), |index| {
+        values.remove(&outputs[index]).ok_or_else(|| {
+            runmat_runtime::runtime_error::semantic_error(
+                "RunMat:Native:NumericRegion",
+                "native fusion output is missing or duplicated",
+            )
+        })
+    })
+    .map_err(|source| ProviderExecutionError::from_source(source).after_effect())?;
+    let publication = selection.into_native_publication(right.identity())?;
+    Ok(NativeNumericRegionOutcome::Completed {
+        outputs: rooted,
+        right,
+        publication,
+    })
+}
+
 pub async fn execute_elementwise_placed(
     request: FusionExecutionRequest<'_>,
 ) -> ExecutionResult<FusionExecutionOutcome<ElementwiseExecutionResult>> {
@@ -1082,6 +1172,7 @@ async fn execute_elementwise_placed_inner(
             .and_then(super::VmFusionExecutionRight::as_selection),
         input_uses,
         &mut host_continuation,
+        None,
     )
     .await?
     {

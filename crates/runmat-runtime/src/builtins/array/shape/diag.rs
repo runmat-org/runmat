@@ -98,7 +98,9 @@ impl ParsedDiagArgs {
         let mut idx = 0;
         while idx < args.len() {
             let arg = &args[idx];
-            if let Some(keyword) = keyword_of(arg) {
+            if let Some(keyword) =
+                crate::builtins::common::arg_tokens::scalar_keyword_of(arg, "diag")?
+            {
                 match keyword.as_str() {
                     "vector" => {
                         if vector_mode {
@@ -221,18 +223,6 @@ impl ParsedDiagArgs {
     }
 }
 
-fn keyword_of(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => Some(s.to_ascii_lowercase()),
-        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].to_ascii_lowercase()),
-        Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data().iter().collect();
-            Some(text.to_ascii_lowercase())
-        }
-        _ => None,
-    }
-}
-
 fn integer_target_from_keyword(keyword: &str) -> Option<IntegerClass> {
     IntegerClass::from_class_name(keyword)
 }
@@ -299,7 +289,14 @@ fn ensure_diag_compatibility(
     value: &Value,
     rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<()> {
-    let keywords: Vec<String> = rest.iter().filter_map(keyword_of).collect();
+    let mut keywords = Vec::new();
+    for argument in rest.iter() {
+        if let Some(keyword) =
+            crate::builtins::common::arg_tokens::scalar_keyword_of(argument, BUILTIN_NAME)?
+        {
+            keywords.push(keyword);
+        }
+    }
     let like_only = rest.len() == 2 && keywords.iter().any(|keyword| keyword == "like");
     if rest.iter().enumerate().any(|(index, arg)| {
         matches!(arg, Value::Bool(_) | Value::LogicalArray(_)) && !(like_only && index == 1)
@@ -774,7 +771,7 @@ fn evaluate_char(array: CharArray, args: &ParsedDiagArgs) -> BuiltinResult<Value
     if args.vector_mode {
         let len = rows.max(cols);
         let data = vector_copy(array.data(), len);
-        let out = CharArray::new(data, len, 1)
+        let out = CharArray::from_code_units(data, len, 1)
             .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))?;
         return Ok(Value::CharArray(out));
     }
@@ -788,9 +785,9 @@ fn evaluate_char(array: CharArray, args: &ParsedDiagArgs) -> BuiltinResult<Value
             args.offset,
             out_rows,
             out_cols,
-            ' ',
+            runmat_value::Utf16CodeUnit::from_raw(0x20),
         )?;
-        let out = CharArray::new(data, out_rows, out_cols)
+        let out = CharArray::from_code_units(data, out_rows, out_cols)
             .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))?;
         return Ok(Value::CharArray(out));
     }
@@ -804,7 +801,7 @@ fn evaluate_char(array: CharArray, args: &ParsedDiagArgs) -> BuiltinResult<Value
 
     let diag = diag_vector_from_matrix_row_major(array.data(), rows, cols, args.offset);
     let len = diag.len();
-    let out = CharArray::new(diag, len, 1)
+    let out = CharArray::from_code_units(diag, len, 1)
         .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))?;
     Ok(Value::CharArray(out))
 }
@@ -1299,9 +1296,8 @@ fn logical_array_from_value(value: Value) -> BuiltinResult<LogicalArray> {
         }
         Value::CharArray(chars) => {
             let data: Vec<u8> = chars
-                .data()
-                .iter()
-                .map(|ch| if (*ch as u32) != 0 { 1 } else { 0 })
+                .iter_column_major()
+                .map(|ch| if ch.raw() != 0 { 1 } else { 0 })
                 .collect();
             LogicalArray::new(data, vec![chars.rows, chars.cols])
                 .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))
@@ -1387,9 +1383,8 @@ fn complex_tensor_from_value(value: Value) -> BuiltinResult<ComplexTensor> {
         }
         Value::CharArray(chars) => {
             let data: Vec<(f64, f64)> = chars
-                .data()
-                .iter()
-                .map(|ch| (*ch as u32 as f64, 0.0))
+                .iter_column_major()
+                .map(|ch| (f64::from(ch.raw()), 0.0))
                 .collect();
             ComplexTensor::new(data, vec![chars.rows, chars.cols])
                 .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))
@@ -1472,7 +1467,10 @@ fn integer_exact_for_float(value: &runmat_value::IntValue, dtype: NumericDType) 
 }
 
 fn char_array_to_tensor(chars: &CharArray) -> BuiltinResult<Tensor> {
-    let data: Vec<f64> = chars.data().iter().map(|ch| *ch as u32 as f64).collect();
+    let data: Vec<f64> = chars
+        .iter_column_major()
+        .map(|ch| f64::from(ch.raw()))
+        .collect();
     Tensor::new(data, vec![chars.rows, chars.cols])
         .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))
 }
@@ -1682,7 +1680,10 @@ mod tests {
         };
         assert_eq!(matrix.rows, 2);
         assert_eq!(matrix.cols, 4);
-        assert_eq!(matrix.data(), vec!['a', ' ', ' ', ' ', ' ', 'b', ' ', ' ']);
+        assert_eq!(
+            matrix.data(),
+            runmat_value::encode_utf16_code_units("a    b  ")
+        );
 
         let extracted = run_diag(Value::CharArray(matrix), Vec::new()).expect("diag extract");
         let Value::CharArray(vector) = extracted else {
@@ -1690,7 +1691,7 @@ mod tests {
         };
         assert_eq!(vector.rows, 2);
         assert_eq!(vector.cols, 1);
-        assert_eq!(vector.data(), vec!['a', 'b']);
+        assert_eq!(vector.data(), runmat_value::encode_utf16_code_units("ab"));
     }
 
     #[test]

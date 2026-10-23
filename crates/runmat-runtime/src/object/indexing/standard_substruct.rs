@@ -36,6 +36,30 @@ pub fn parse_standard_substruct(value: &Value) -> Result<ObjectSubscriptPath, Ru
 }
 
 impl ObjectSubscript {
+    fn selector_value_in_context(
+        &self,
+        runtime: &crate::context::RuntimeContext,
+    ) -> Result<crate::execution::RootedValue, RuntimeError> {
+        use crate::execution::{RootedValue, RootedValues};
+        let slots = match &self.selector {
+            ObjectIndexSelector::ScalarIndices { indices } => {
+                RootedValues::try_initialize_in_context(indices.len(), runtime, |index| {
+                    Ok::<_, RuntimeError>(Value::Num(indices[index] as f64))
+                })?
+            }
+            ObjectIndexSelector::IndexValues { components } => {
+                RootedValues::try_initialize_in_context(components.len(), runtime, |index| {
+                    components[index].protocol_value_in_context(Some(runtime))
+                })?
+            }
+            ObjectIndexSelector::Member(name) => {
+                return RootedValue::in_context(Value::String(name.clone()), runtime);
+            }
+        };
+        let count = slots.len();
+        crate::execution::structure::cell::from_rooted_values(runtime, &[1, count], slots)
+    }
+
     pub fn selector_value(&self) -> Result<Value, RuntimeError> {
         match &self.selector {
             ObjectIndexSelector::ScalarIndices { indices } => protocol_index_cell(
@@ -50,12 +74,53 @@ impl ObjectSubscript {
                     .map(ObjectIndexComponent::protocol_value)
                     .collect(),
             ),
-            ObjectIndexSelector::Member(name) => Ok(Value::string(name.0.clone())),
+            ObjectIndexSelector::Member(name) => Ok(Value::String(name.clone())),
         }
     }
 }
 
 impl ObjectSubscriptPath {
+    /// The managed protocol boundary constructs directly into canonical final
+    /// columns/cells. The path's original GC children stay rooted throughout
+    /// all initializer calls, including previously initialized selector cells.
+    pub(crate) fn to_standard_substruct_value_in_context(
+        &self,
+        runtime: &crate::context::RuntimeContext,
+    ) -> Result<crate::execution::RootedValue, RuntimeError> {
+        let source_values = self.0.iter().flat_map(|step| {
+            let components: &[ObjectIndexComponent] = match &step.selector {
+                ObjectIndexSelector::IndexValues { components } => components,
+                _ => &[],
+            };
+            components.iter().filter_map(|component| match component {
+                ObjectIndexComponent::Value(value) => Some(value),
+                ObjectIndexComponent::Colon => None,
+            })
+        });
+        let _source_roots = crate::execution::RootedValueLease::for_values_iterator_in_context(
+            source_values,
+            runtime,
+        )?;
+        crate::execution::structure::construct_generated_structure_owned(
+            Some(runtime),
+            ["type", "subs"].into_iter(),
+            &[1, self.0.len()],
+            |field, index| {
+                let step = &self.0[index];
+                if field == "type" {
+                    crate::call::argument_text::copy_str(
+                        standard_subscript_type(step.kind),
+                        Some(runtime),
+                    )
+                    .map(Value::String)
+                } else {
+                    step.selector_value_in_context(runtime)
+                        .map(|value| value.with_owned(|value| value))
+                }
+            },
+        )
+    }
+
     pub fn to_standard_substruct_value(&self) -> Result<Value, RuntimeError> {
         let mut types = Vec::with_capacity(self.0.len());
         let mut selectors = Vec::with_capacity(self.0.len());
@@ -106,19 +171,29 @@ fn index_values(value: &Value) -> Result<ObjectIndexSelector, RuntimeError> {
         ));
     };
     Ok(ObjectIndexSelector::IndexValues {
-        components: cell
-            .data()
-            .iter()
-            .cloned()
-            .map(ObjectIndexComponent::from_protocol_value)
-            .collect(),
+        components: runmat_value::ExactArrayStorage::shared_unbounded(
+            cell.data()
+                .iter()
+                .cloned()
+                .map(ObjectIndexComponent::from_protocol_value)
+                .collect::<Vec<_>>(),
+        ),
     })
 }
 
 fn scalar_text(value: &Value) -> Result<String, RuntimeError> {
     match value {
         Value::String(value) => Ok(value.as_str().to_owned()),
-        Value::CharArray(value) if value.rows == 1 => Ok(value.data().iter().collect()),
+        Value::CharArray(value) if value.rows == 1 => value
+            .try_row_string()
+            .map_err(|source| {
+                crate::runtime_error::semantic_error_with_source(
+                    "InvalidObjectSubscriptPath",
+                    "subscript text contains malformed UTF-16",
+                    source,
+                )
+            })?
+            .ok_or_else(|| invalid("subscript type and member selectors must be scalar text")),
         _ => Err(invalid(
             "subscript type and member selectors must be scalar text",
         )),

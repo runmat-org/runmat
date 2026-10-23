@@ -24,7 +24,7 @@ pub(super) fn cast_host_value(value: Value, target: IntegerClass) -> Result<Valu
                 chars
                     .to_column_major()
                     .iter()
-                    .map(|&value| value as u32 as f64)
+                    .map(|&value| f64::from(value.raw()))
                     .collect(),
                 chars.shape,
             )

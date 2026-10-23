@@ -16,7 +16,7 @@ pub(super) async fn parse(args: crate::call::BuiltinArguments) -> crate::Builtin
     let mut prototype = None;
     let mut args = args.into_iter();
     while let Some(value) = args.next() {
-        if is_like(&value) {
+        if is_like(&value)? {
             crate::compatibility::ensure_builtin_extension_enabled(&CELL_LIKE_EXTENSION, "cell")?;
             if prototype.is_some() {
                 return Err(error::invalid_input(
@@ -34,7 +34,7 @@ pub(super) async fn parse(args: crate::call::BuiltinArguments) -> crate::Builtin
             }
             continue;
         }
-        if keyword_of(&value).is_some() {
+        if keyword_of(&value)?.is_some() {
             return Err(error::invalid_input("unrecognized option"));
         }
         if matches!(value, Value::GpuTensor(_)) {
@@ -49,6 +49,6 @@ pub(super) async fn parse(args: crate::call::BuiltinArguments) -> crate::Builtin
     Ok(ParsedCell { shape, prototype })
 }
 
-fn is_like(value: &Value) -> bool {
-    keyword_of(value).is_some_and(|text| text.eq_ignore_ascii_case("like"))
+fn is_like(value: &Value) -> crate::BuiltinResult<bool> {
+    Ok(keyword_of(value)?.is_some_and(|text| text.eq_ignore_ascii_case("like")))
 }

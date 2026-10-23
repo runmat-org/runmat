@@ -113,7 +113,9 @@ fn cell_predicates_preserve_semantic_order_including_nd_and_empty_arrays() {
 #[test]
 fn genuine_character_pages_reject_but_trailing_singletons_remain_rows() {
     for (shape, valid) in [(vec![1, 2, 1], true), (vec![1, 1, 2], false)] {
-        let value = Value::CharArray(CharArray::new_with_shape(vec!['a', 'b'], shape).unwrap());
+        let value = Value::CharArray(
+            CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], shape).unwrap(),
+        );
         for input in [
             value.clone(),
             Value::Cell(CellArray::new(vec![value], 1, 1).unwrap()),

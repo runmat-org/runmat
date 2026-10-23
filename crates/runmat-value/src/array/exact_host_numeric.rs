@@ -18,16 +18,19 @@ use std::sync::Arc;
 
 mod adopted_vec;
 mod complex;
+mod index;
 mod integer;
 mod integer_complex;
 mod logical;
 mod sparse;
 pub use complex::ExactHostComplexTensorAllocation;
+pub use index::ExactHostIndexBufferAllocation;
 use integer::{allocate_integer, integer_layout, ExactIntegerStorage};
 pub use integer_complex::ExactHostIntegerComplexTensorAllocation;
 pub use logical::ExactHostLogicalTensorAllocation;
 pub use sparse::{
-    ExactHostSparseClass, ExactHostSparseTensorAllocation, PreparedExactSparseTensor,
+    ExactHostSparseClass, ExactHostSparsePublicationError, ExactHostSparseTensorAllocation,
+    PreparedExactSparseTensor,
 };
 
 macro_rules! integer_slice_mut {
@@ -405,6 +408,12 @@ enum ExactAllocation {
 }
 
 impl ExactHostNumericAllocation {
+    /// One retained claim owns this numeric buffer and its release metadata.
+    /// Tensor shape storage has its own independent claim.
+    pub const fn retained_claim_count() -> usize {
+        1
+    }
+
     fn unmanaged_requested_bytes(
         dtype: NumericDType,
         len: usize,

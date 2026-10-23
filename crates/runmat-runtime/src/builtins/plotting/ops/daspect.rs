@@ -43,7 +43,13 @@ fn daspect_state(args: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
         0 => query_ratio(target),
         1 => {
             let value = &args[0];
-            if let Some(text) = value_as_string(value) {
+            if let Some(text) = value_as_string(value).map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    "daspect",
+                    source.to_string(),
+                    source,
+                )
+            })? {
                 match text.trim().to_ascii_lowercase().as_str() {
                     "mode" => return query_mode(target),
                     "auto" | "manual" => {
@@ -201,12 +207,14 @@ fn ratio_value(ratio: [f64; 3]) -> Value {
     Value::Tensor(Tensor::new(ratio.to_vec(), vec![1, 3]).expect("aspect-ratio row vector"))
 }
 
-fn value_as_string(value: &Value) -> Option<String> {
-    match value {
+fn value_as_string(value: &Value) -> Result<Option<String>, runmat_value::Utf16DecodeError> {
+    Ok(match value {
         Value::String(s) => Some(s.as_str().to_owned()),
-        Value::CharArray(chars) => chars.row_string(),
+        Value::CharArray(chars) if chars.rows == 1 => {
+            Some(runmat_value::decode_utf16_code_units(chars.data())?)
+        }
         _ => None,
-    }
+    })
 }
 
 fn daspect_err(detail: impl AsRef<str>) -> crate::RuntimeError {

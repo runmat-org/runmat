@@ -27,16 +27,30 @@ pub fn selector_extent(
     Ok(shape.get(position).copied().unwrap_or(1))
 }
 
-pub(crate) fn column_major_strides(shape: &[usize]) -> Result<Vec<usize>, RuntimeError> {
-    let mut strides = Vec::with_capacity(shape.len());
+pub(crate) fn column_major_strides_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    shape: &[usize],
+) -> Result<runmat_value::ExactArrayStorage<usize>, RuntimeError> {
+    let owner = crate::indexing::plan::admission::Owner::new(context)?;
     let mut stride = 1usize;
-    for extent in shape {
-        strides.push(stride);
-        stride = stride.checked_mul(*extent).ok_or_else(|| {
-            semantic_error("IndexOutOfBounds", "index shape exceeds platform limits")
+    let strides =
+        crate::context::host_allocation::initialize_host_array(context, shape.len(), |axis| {
+            if axis % 4096 == 0 {
+                owner.check()?;
+            }
+            let current = stride;
+            advance_stride(&mut stride, shape[axis])?;
+            Ok(current)
         })?;
-    }
+    owner.check()?;
     Ok(strides)
+}
+
+fn advance_stride(stride: &mut usize, extent: usize) -> Result<(), RuntimeError> {
+    *stride = stride
+        .checked_mul(extent)
+        .ok_or_else(|| semantic_error("IndexOutOfBounds", "index shape exceeds platform limits"))?;
+    Ok(())
 }
 
 fn checked_product(extents: &[usize]) -> Result<usize, RuntimeError> {

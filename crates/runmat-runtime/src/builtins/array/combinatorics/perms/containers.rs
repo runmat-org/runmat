@@ -72,7 +72,7 @@ pub(super) fn logical(array: LogicalArray) -> BuiltinResult<Value> {
 pub(super) fn characters(chars: CharArray) -> BuiltinResult<Value> {
     let elements = shape::vector_len(&chars.shape)?;
     let rows = cardinality::output_rows(elements)?;
-    CharArray::new(permuted_rows(chars.data(), rows)?, rows, elements)
+    CharArray::from_code_units(permuted_rows(chars.data(), rows)?, rows, elements)
         .map(Value::CharArray)
         .map_err(internal)
 }

@@ -45,10 +45,7 @@ pub(super) async fn prepare(
                     gather_value(&args[index]),
                 )
                 .await??;
-                let text = map_string_result(
-                    coerce_to_format_string(&host),
-                    &FPRINTF_ERROR_INVALID_INPUT,
-                )?;
+                let text = coerce_to_format_string(&host)?;
                 staged.put(index, host)?;
                 if let Some(Value::String(text)) = text {
                     break (index, text);
@@ -89,7 +86,9 @@ fn validate_unambiguous_host_target(
     if args
         .iter()
         .take(format_index)
-        .any(|value| match_stream_label(value).is_some())
+        .try_fold(false, |found, value| {
+            Ok::<_, RuntimeError>(found || match_stream_label(value)?.is_some())
+        })?
     {
         return Ok(());
     }
@@ -116,7 +115,7 @@ fn next_format(
     start: usize,
 ) -> BuiltinResult<Option<FormatPlan>> {
     for (index, value) in args.iter().enumerate().skip(start) {
-        if match_stream_label(value).is_some() {
+        if match_stream_label(value)?.is_some() {
             crate::compatibility::ensure_builtin_extension_enabled(
                 &FPRINTF_STREAM_LABEL_EXTENSION,
                 BUILTIN_NAME,
@@ -130,9 +129,7 @@ fn next_format(
         if matches!(value, Value::GpuTensor(_)) {
             return Ok(Some(FormatPlan::Resident { index }));
         }
-        if let Some(Value::String(text)) =
-            map_string_result(coerce_to_format_string(value), &FPRINTF_ERROR_INVALID_INPUT)?
-        {
+        if let Some(Value::String(text)) = coerce_to_format_string(value)? {
             return Ok(Some(FormatPlan::Host { index, text }));
         }
     }
@@ -146,7 +143,7 @@ async fn select_target(
     staged: &mut Cache<'_>,
 ) -> BuiltinResult<(Option<usize>, OutputTarget)> {
     for (index, value) in args.iter().enumerate().take(format_index) {
-        if let Some(stream) = match_stream_label(value) {
+        if let Some(stream) = match_stream_label(value)? {
             let target = match stream {
                 SpecialStream::Stdout => OutputTarget::Stdout,
                 SpecialStream::Stderr => OutputTarget::Stderr,

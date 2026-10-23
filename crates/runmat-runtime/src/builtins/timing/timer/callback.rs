@@ -83,7 +83,13 @@ async fn run_callback_with_error(
                 .await?;
         }
         Value::CharArray(chars) if !chars.data().is_empty() => {
-            let text: String = chars.data().iter().collect();
+            let text =
+                crate::builtins::common::text::decode_utf16_with_error(chars.data(), || {
+                    timer_error(
+                        &TIMER_ERROR_INVALID_PROPERTY,
+                        "timer: callback text is not valid UTF-16",
+                    )
+                })?;
             if !text.trim().is_empty() {
                 text_callback_request(runtime, handle, slot, &text)?
                     .evaluate(runtime.clone())
@@ -153,7 +159,7 @@ fn timer_event(
     let time = Value::Num(
         runtime
             .service_ports()
-            .timing()
+            .timing()?
             .wall_time_since_epoch()
             .as_secs_f64(),
     );
@@ -182,7 +188,7 @@ fn timer_event(
 pub(super) fn callback_is_empty(value: &Value) -> bool {
     match value {
         Value::String(text) => text.trim().is_empty(),
-        Value::CharArray(chars) => chars.data().iter().collect::<String>().trim().is_empty(),
+        Value::CharArray(chars) => chars.data().iter().all(|unit| unit.is_whitespace()),
         Value::Cell(cell) => cell.data().is_empty(),
         _ => false,
     }

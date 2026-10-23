@@ -63,12 +63,50 @@ impl<'a> ObjectOutput<'a> {
         runtime: Option<&'a RuntimeContext>,
         path: &str,
     ) -> Result<Self, ValueCodecError> {
+        Self::build(class, names, dynamic, copy, runtime, path, false)
+    }
+
+    pub(super) fn new_numeric_factor<'n>(
+        class: &str,
+        names: impl ExactSizeIterator<Item = &'n str> + Clone,
+        dynamic: &[DurableDynamicProperty],
+        runtime: Option<&'a RuntimeContext>,
+        path: &str,
+    ) -> Result<Self, ValueCodecError> {
+        Self::build(
+            class,
+            names,
+            dynamic,
+            DynamicMetadataCopy::Incremental,
+            runtime,
+            path,
+            true,
+        )
+    }
+
+    fn build<'n>(
+        class: &str,
+        names: impl ExactSizeIterator<Item = &'n str> + Clone,
+        dynamic: &[DurableDynamicProperty],
+        copy: DynamicMetadataCopy,
+        runtime: Option<&'a RuntimeContext>,
+        path: &str,
+        numeric_factor: bool,
+    ) -> Result<Self, ValueCodecError> {
         let allocation = |e| ValueCodecError::allocation(path, e);
         let quote =
             ExactObjectBuilder::quote_with_dynamic_capacity(class, names.len(), dynamic.len())
                 .map_err(|e| allocation(HostAllocationError::Numeric(e)))?;
         let mut bytes = quote.requested_bytes;
         let mut claims = quote.retained_claims;
+        if numeric_factor {
+            bytes = bytes
+                .checked_add(ExactObjectBuilder::numeric_factor_native_requested_bytes())
+                .ok_or_else(|| allocation(HostAllocationError::Overflow))?;
+            claims = claims
+                .checked_add(ExactObjectBuilder::numeric_factor_native_retained_claim_count())
+                .ok_or_else(|| allocation(HostAllocationError::Overflow))?;
+        }
         let mut text = |value: &str| -> Result<(), ValueCodecError> {
             bytes = bytes
                 .checked_add(
@@ -299,6 +337,33 @@ impl<'a> ObjectOutput<'a> {
         };
         self.checkpoint(path)?;
         Ok(previous.is_some())
+    }
+
+    pub(super) fn attach_numeric_factor(
+        &mut self,
+        factor: runmat_value::NumericFactorData,
+        path: &str,
+    ) -> Result<(), ValueCodecError> {
+        self.checkpoint(path)?;
+        match &mut self.builder {
+            Builder::Exact(builder) => {
+                let receipt = self.receipt.as_ref().expect("exact object receipt");
+                let permit = receipt
+                    .output_permit(self.runtime.expect("managed runtime"))
+                    .map_err(|error| ValueCodecError::allocation(path, error))?;
+                if !builder
+                    .try_set_numeric_factor_data(factor, &permit)
+                    .map_err(|error| ValueCodecError::allocation(path, error.into()))?
+                {
+                    return Err(ValueCodecError::invalid(
+                        path,
+                        "numerical factor data was not admitted",
+                    ));
+                }
+            }
+            Builder::Ordinary(builder) => builder.replace_numeric_factor_data(factor),
+        }
+        self.checkpoint(path)
     }
     pub(super) fn finish(self, path: &str) -> Result<ObjectInstance, ValueCodecError> {
         self.checkpoint(path)?;

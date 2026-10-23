@@ -40,7 +40,7 @@ impl ScatterhistOptionPlan {
         let mut steps = Vec::with_capacity(args.len() / 2);
         let mut values = args.into_iter();
         while let Some(name) = values.next() {
-            let text = scalar_text(&name)
+            let text = scalar_text(&name)?
                 .ok_or_else(|| invalid("scatterhist: option names must be text"))?;
             let kind = ScatterhistOptionKind::parse(&text).ok_or_else(|| {
                 invalid(format!(

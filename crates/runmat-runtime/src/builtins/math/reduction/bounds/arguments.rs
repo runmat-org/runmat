@@ -15,24 +15,32 @@ pub(super) async fn normalize(
             "bounds accepts at most a dimension selector and nanflag",
         ));
     }
-    let has_nanflag = rest.iter().any(is_nanflag);
+    let mut has_nanflag = false;
+    for value in rest.iter() {
+        if is_nanflag(value)? {
+            has_nanflag = true;
+            break;
+        }
+    }
     let count = rest.len() + 1 + usize::from(!has_nanflag);
     // These new root-free Values have their own admitted final owners; the
     // argument-slot reservation is not a certificate for child allocations.
     let placeholder = empty_placeholder(runtime)?;
     let normalized = rest
         .try_map_preserving_roots_async(count, runtime, |index| {
-            std::future::ready(if index == 0 {
-                Ok(placeholder.clone())
-            } else if let Some(value) = rest.get(index - 1) {
-                match keyword_of(value).as_deref() {
-                    Some("omitmissing") => text("omitnan", runtime),
-                    Some("includemissing") => text("includenan", runtime),
-                    _ => Ok(value.clone()),
+            std::future::ready((|| {
+                if index == 0 {
+                    Ok(placeholder.clone())
+                } else if let Some(value) = rest.get(index - 1) {
+                    match keyword_of(value)?.as_deref() {
+                        Some("omitmissing") => text("omitnan", runtime),
+                        Some("includemissing") => text("includenan", runtime),
+                        _ => Ok(value.clone()),
+                    }
+                } else {
+                    text("omitnan", runtime)
                 }
-            } else {
-                text("omitnan", runtime)
-            })
+            })())
         })
         .await?;
     drop(rest);

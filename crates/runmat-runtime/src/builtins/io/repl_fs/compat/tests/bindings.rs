@@ -1,6 +1,6 @@
 #[test]
 fn file_attribute_and_rehash_bindings_match_canonical_default_identity() {
-    for name in ["fileattrib", "rehash"] {
+    for name in ["fileattrib", "rehash", "winqueryreg"] {
         let catalog = runmat_builtins::builtin_catalog_entry_by_name(name)
             .unwrap_or_else(|| panic!("missing canonical {name} entry"));
         assert_eq!(catalog.bindings, &runmat_builtins::REQUIRED_DEFAULT_BINDING);

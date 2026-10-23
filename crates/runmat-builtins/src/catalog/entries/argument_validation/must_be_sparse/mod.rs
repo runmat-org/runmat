@@ -31,7 +31,7 @@ pub const MUST_BE_SPARSE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntr
         preparation: BuiltinOperandPreparation::RuntimeOwned,
         portability: BuiltinPortability::NativeAndWasm,
         accelerator: BuiltinAcceleratorPolicy::Forbidden,
-        residency: BuiltinResidencyPolicy::PreserveInputs,
+        residency: BuiltinResidencyPolicy::Host,
         fusion: BuiltinFusionPolicy::Boundary,
         distributed: BuiltinDistributedPolicy::InspectHandles,
     },

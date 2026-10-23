@@ -1,349 +1,717 @@
-//! Restarted GMRES(m) with left, right or flexible (FGMRES) preconditioning.
+//! Restarted GMRES: the one Arnoldi recurrence of the crate. All arrays are
+//! supplied by the caller; this module never allocates or owns an operator.
 //!
-//! Orthogonalization is classical Gram–Schmidt with one unconditional reorthogonalization pass
-//! (CGS2): every coefficient is a deterministic blocked dot product, so the basis is reproducible
-//! under threads while matching modified Gram–Schmidt stability.
+//! [`GmresMode`] selects where the preconditioner acts and when the true
+//! residual is formed. The default (left preconditioning, a true residual
+//! after every Arnoldi step) is the MATLAB-compatible behavior of the
+//! runtime's `gmres`. Right and flexible preconditioning minimize the true
+//! residual `‖b − A x‖`; [`ResidualCheck::OnEstimate`] forms it only when the
+//! Arnoldi estimate passes or a cycle ends, and still certifies convergence on
+//! that true residual before returning flag 0.
 
-use super::{relative, split_work, tolerance, ApplyStatus, KrylovOps, KrylovOptions, KrylovReport, StopFlag};
-use crate::error::SolverResult;
-use crate::par;
-use crate::scalar::Scalar;
+use num_complex::Complex64;
 
-/// Where the preconditioner is applied.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+use super::{ApplyStatus as PreconditionerStatus, KrylovFailure};
+mod scalar;
+use scalar::{axpy, copy, dot, fill, norm, Norm};
+mod geometry;
+pub use geometry::GmresGeometry;
+
+pub trait GmresOperations<T> {
+    type Error;
+
+    fn coefficient(
+        &mut self,
+        input: &[T],
+        output: &mut [T],
+    ) -> impl std::future::Future<Output = Result<(), Self::Error>>;
+    fn precondition(
+        &mut self,
+        input: &[T],
+        output: &mut [T],
+        intermediate: &mut [T],
+    ) -> impl std::future::Future<Output = Result<PreconditionerStatus, Self::Error>>;
+    fn checkpoint(&mut self) -> Result<(), Self::Error>;
+    fn cooperate(
+        &mut self,
+        completed: u64,
+    ) -> impl std::future::Future<Output = Result<(), Self::Error>>;
+}
+
+pub struct GmresWork<'a, T> {
+    pub x: &'a mut [T],
+    pub best: &'a mut [T],
+    pub candidate: &'a mut [T],
+    pub previous: &'a mut [T],
+    pub residual: &'a mut [T],
+    pub product: &'a mut [T],
+    pub preconditioned: &'a mut [T],
+    pub intermediate: &'a mut [T],
+    pub basis: &'a mut [T],
+    pub hessenberg: &'a mut [Complex64],
+    pub cosines: &'a mut [f64],
+    pub sines: &'a mut [Complex64],
+    pub rotated_rhs: &'a mut [Complex64],
+    pub coefficients: &'a mut [Complex64],
+    pub history: &'a mut [f64],
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct GmresOutcome {
+    pub flag: u8,
+    pub relres: f64,
+    pub outer: usize,
+    pub inner: usize,
+    pub residual_count: usize,
+    /// Arnoldi steps performed (each one coefficient application).
+    pub steps: usize,
+}
+
+/// Where the preconditioner `M` acts.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum PreconditionerSide {
     /// Minimizes `‖M⁻¹(b − A x)‖` (MATLAB `gmres`).
+    #[default]
     Left,
-    /// Minimizes the true residual `‖b − A M⁻¹ u‖`.
+    /// Minimizes the true residual `‖b − A M⁻¹ u‖`; the correction is `M⁻¹ V y`.
     Right,
-    /// Right preconditioning that stores `M⁻¹ v_j`, so `M` may change between applications
-    /// (e.g. an inner iterative solve or a nonlinear multigrid cycle).
+    /// Right preconditioning that keeps `Z = M⁻¹ V` in caller workspace, so `M`
+    /// may change between applications (inner iterative solves, variable cycles).
     Flexible,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct GmresOptions {
-    pub restart: usize,
+/// When the residual of the candidate iterate is formed explicitly.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ResidualCheck {
+    /// After every Arnoldi step (one extra coefficient application, and for
+    /// left/right preconditioning one extra preconditioner application, per step).
+    #[default]
+    EveryStep,
+    /// Only when the Arnoldi residual estimate meets the tolerance, the Krylov
+    /// space becomes invariant, or the cycle ends. The candidate then becomes the
+    /// iterate and the restart forms its residual; flag 0 is returned only when
+    /// that formed residual meets the tolerance, otherwise iteration continues.
+    OnEstimate,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct GmresMode {
     pub side: PreconditionerSide,
+    pub residual_check: ResidualCheck,
+    /// [`ResidualCheck::OnEstimate`] only: an exact bound on Arnoldi steps. The cycle that
+    /// reaches it ends there and its iterate is verified like any other.
+    pub step_limit: Option<usize>,
 }
 
-impl Default for GmresOptions {
-    fn default() -> Self {
-        Self {
-            restart: 50,
-            side: PreconditionerSide::Right,
-        }
+#[derive(Clone, Copy)]
+pub struct GmresParameters {
+    pub restart: usize,
+    pub max_outer: usize,
+    pub tolerance: f64,
+}
+
+/// A zero-sized native arithmetic policy avoids imposing a foreign scalar
+/// trait on a caller's canonical storage type. No view cast or copy is needed.
+pub trait Arithmetic<T> {
+    fn zero() -> T;
+    fn to_complex(value: T) -> Complex64;
+    fn from_complex(value: Complex64) -> Option<T>;
+    fn divide_complex(numerator: (f64, f64), denominator: (f64, f64)) -> (f64, f64);
+}
+
+/// Left-preconditioned GMRES with a true residual after every step.
+/// Check every workspace region before the first operation/control effect.
+pub async fn solve<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperations<T>>(
+    rhs: &[T],
+    initial: Option<&[T]>,
+    parameters: GmresParameters,
+    work: &mut GmresWork<'_, T>,
+    operations: &mut O,
+) -> Result<GmresOutcome, KrylovFailure<O::Error>> {
+    solve_with::<T, A, O>(
+        rhs,
+        initial,
+        parameters,
+        GmresMode::default(),
+        work,
+        &mut [],
+        operations,
+    )
+    .await
+}
+
+/// GMRES in the selected [`GmresMode`]. `flexible_basis` holds `Z = M⁻¹ V`
+/// ([`GmresGeometry::flexible_elements`] entries) and may be empty otherwise.
+pub async fn solve_with<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperations<T>>(
+    rhs: &[T],
+    initial: Option<&[T]>,
+    parameters: GmresParameters,
+    mode: GmresMode,
+    work: &mut GmresWork<'_, T>,
+    flexible_basis: &mut [T],
+    operations: &mut O,
+) -> Result<GmresOutcome, KrylovFailure<O::Error>> {
+    let geometry = GmresGeometry::checked(rhs.len(), parameters.restart, parameters.max_outer)
+        .ok_or(KrylovFailure::Invalid(
+            "GMRES workspace geometry overflows or is empty",
+        ))?;
+    if !parameters.tolerance.is_finite()
+        || parameters.tolerance <= 0.0
+        || initial.is_some_and(|x| x.len() != rhs.len())
+        || !geometry.validates(work)
+        || (mode.side == PreconditionerSide::Flexible
+            && flexible_basis.len() < geometry.flexible_elements())
+        || mode
+            .step_limit
+            .is_some_and(|limit| limit == 0 || mode.residual_check != ResidualCheck::OnEstimate)
+    {
+        return Err(KrylovFailure::Invalid(
+            "GMRES parameters or workspace extents are invalid",
+        ));
     }
+    solve_validated::<T, A, O>(
+        rhs,
+        initial,
+        parameters,
+        mode,
+        work,
+        flexible_basis,
+        operations,
+    )
+    .await
+    .map_err(KrylovFailure::Operation)
 }
 
-pub fn gmres_workspace_len(n: usize, options: &KrylovOptions, gmres: &GmresOptions) -> usize {
-    let m = gmres.restart.max(1);
-    let flexible = if gmres.side == PreconditionerSide::Flexible { m } else { 0 };
-    n * ((m + 1) + flexible + 3 + usize::from(options.return_best_iterate))
+fn h_index(row: usize, column: usize, restart: usize) -> usize {
+    column * (restart + 1) + row
 }
 
-fn givens<T: Scalar>(a: T, b: T) -> (f64, T, T) {
-    // Returns (c, s, rho) with [c s; -conj(s) c] [a; b] = [rho; 0].
-    let (abs_a, abs_b) = (a.abs(), b.abs());
-    if abs_b == 0.0 {
-        return (1.0, T::zero(), a);
-    }
-    if abs_a == 0.0 {
-        return (0.0, b.conj().scale(1.0 / abs_b), T::from_f64(abs_b));
-    }
-    let r = abs_a.hypot(abs_b);
-    let phase = a.scale(1.0 / abs_a);
-    let c = abs_a / r;
-    let s = phase * b.conj().scale(1.0 / r);
-    (c, s, phase.scale(r))
-}
+mod algebra;
+pub use algebra::rotation;
+use algebra::{apply_previous_rotations, candidate_from_basis, Candidate};
 
-pub async fn gmres_async<T: Scalar, O: KrylovOps<T>>(
-    ops: &mut O,
-    b: &[T],
-    x: &mut [T],
-    options: &KrylovOptions,
-    gmres: &GmresOptions,
-    work: &mut [T],
-) -> SolverResult<KrylovReport> {
-    let n = b.len();
-    let m = gmres.restart.max(1).min(n.max(1));
-    let side = if ops.has_preconditioner() {
-        gmres.side
+/// The caller has checked every length and owns the exact physical workspaces.
+/// A callback error is terminal; only numerical breakdown is a solver flag.
+async fn solve_validated<T: Copy + PartialEq, A: Arithmetic<T>, O: GmresOperations<T>>(
+    rhs: &[T],
+    initial: Option<&[T]>,
+    parameters: GmresParameters,
+    mode: GmresMode,
+    work: &mut GmresWork<'_, T>,
+    flexible_basis: &mut [T],
+    operations: &mut O,
+) -> Result<GmresOutcome, O::Error> {
+    let GmresParameters {
+        restart,
+        max_outer,
+        tolerance,
+    } = parameters;
+    let n = rhs.len();
+    let side = mode.side;
+    let on_estimate = mode.residual_check == ResidualCheck::OnEstimate;
+    let step_limit = mode.step_limit.unwrap_or(usize::MAX);
+    let mut steps = 0usize;
+    // Restart position of the current iterate x.
+    let mut x_position = (0, 0);
+    operations.checkpoint()?;
+    if let Some(initial) = initial {
+        copy(initial, work.x, operations).await?;
     } else {
-        PreconditionerSide::Right
-    };
-    let flexible = side == PreconditionerSide::Flexible;
-    let total = (m + 1) + if flexible { m } else { 0 } + 3 + usize::from(options.return_best_iterate);
-    let mut parts = split_work(work, n, total);
-    let mut best = if options.return_best_iterate { parts.pop() } else { None };
-    let r = parts.pop().unwrap();
-    let w = parts.pop().unwrap();
-    let t = parts.pop().unwrap();
-    let z_basis: Vec<&mut [T]> = if flexible {
-        parts.split_off(m + 1)
+        fill(work.x, A::zero(), operations).await?;
+    }
+    copy(work.x, work.best, operations).await?;
+    let reference_source: &[T] = if side == PreconditionerSide::Left {
+        if operations
+            .precondition(rhs, work.preconditioned, work.intermediate)
+            .await?
+            == PreconditionerStatus::NumericalFailure
+        {
+            let (outer, inner) = (0, 0);
+            return Ok(GmresOutcome {
+                flag: 2,
+                relres: f64::INFINITY,
+                outer,
+                inner,
+                residual_count: 0,
+                steps,
+            });
+        }
+        &*work.preconditioned
     } else {
-        Vec::new()
+        rhs
     };
-    let mut z_basis = z_basis;
-    let mut basis = parts; // m + 1 vectors
-
-    let mut counters = super::Counters {
-        operator: 0,
-        preconditioner: 0,
+    let Some(reference) = norm::<T, A, O>(reference_source, operations).await? else {
+        return Ok(GmresOutcome {
+            flag: 4,
+            relres: f64::INFINITY,
+            outer: 0,
+            inner: 0,
+            residual_count: 0,
+            steps,
+        });
     };
-    let rhs_norm = par::norm2(b);
-    let tol = tolerance(options, rhs_norm);
-    let mut history = Vec::new();
-    let mut hessenberg = vec![T::zero(); (m + 1) * m];
-    let mut cs = vec![0.0f64; m];
-    let mut sn = vec![T::zero(); m];
-    let mut g = vec![T::zero(); m + 1];
-    let mut coefficients = vec![T::zero(); m + 1];
-    let mut iterations = 0usize;
-    let mut outer = 0usize;
-    let flag;
-    let (mut best_residual, mut best_iteration) = (f64::INFINITY, 0usize);
-    let mut previous_residual = f64::INFINITY;
-    let mut stagnant = 0usize;
-    let mut true_residual;
-    let mut position = (0usize, 0usize);
-
-    loop {
-        // True residual r = b - A x.
-        if x.iter().all(|value| *value == T::zero()) {
-            r.copy_from_slice(b);
-        } else {
-            ops.apply_operator(x, t).await?;
-            counters.operator += 1;
-            par::sub_into(b, t, r);
+    let denominator = if reference.is_zero() {
+        Norm::one()
+    } else {
+        reference
+    };
+    let mut best_residual = Norm::infinity();
+    let mut best_iteration = (0, 0);
+    let mut residual_count = 0;
+    let mut previous_candidate = false;
+    // OnEstimate verifies the last cycle's iterate in one further restart pass.
+    for outer in 0..max_outer + usize::from(on_estimate) {
+        operations.checkpoint()?;
+        for chunk in work.hessenberg[..(restart + 1) * restart].chunks_mut(1024) {
+            operations.cooperate(chunk.len() as u64).await?;
+            chunk.fill(Complex64::new(0.0, 0.0));
         }
-        true_residual = par::norm2(r);
-        if options.record_history && history.is_empty() {
-            history.push(true_residual);
-        }
-        if true_residual < best_residual {
-            best_residual = true_residual;
-            best_iteration = iterations;
-            if let Some(best) = best.as_deref_mut() {
-                best.copy_from_slice(x);
+        operations.coefficient(work.x, work.product).await?;
+        for (index, (destination, (&b, &ax))) in work
+            .residual
+            .iter_mut()
+            .zip(rhs.iter().zip(&*work.product))
+            .enumerate()
+        {
+            if index % 1024 == 0 {
+                operations.cooperate((n - index).min(1024) as u64).await?;
             }
+            let Some(value) = A::from_complex(A::to_complex(b) - A::to_complex(ax)) else {
+                return Ok(GmresOutcome {
+                    flag: 4,
+                    relres: best_residual.relative(denominator),
+                    outer: best_iteration.0,
+                    inner: best_iteration.1,
+                    residual_count,
+                    steps,
+                });
+            };
+            *destination = value;
         }
-        if rhs_norm == 0.0 {
-            x.iter_mut().for_each(|value| *value = T::zero());
-            true_residual = 0.0;
-            flag = StopFlag::Converged;
-            break;
-        }
-        if true_residual <= tol {
-            flag = StopFlag::Converged;
-            break;
-        }
-        if iterations >= options.max_iterations {
-            flag = StopFlag::MaxIterations;
-            break;
-        }
-        if true_residual >= previous_residual * (1.0 - 1.0e-14) {
-            stagnant += 1;
-            if stagnant >= options.max_stagnation_steps {
-                flag = StopFlag::Stagnation;
-                break;
-            }
-        } else {
-            stagnant = 0;
-        }
-        previous_residual = true_residual;
-        outer += 1;
-
-        // Starting vector (left: preconditioned residual).
         if side == PreconditionerSide::Left {
-            counters.preconditioner += 1;
-            if ops.apply_preconditioner(r, basis[0]).await? == ApplyStatus::NumericalFailure {
-                flag = StopFlag::PreconditionerFailure;
-                break;
+            if operations
+                .precondition(work.residual, work.preconditioned, work.intermediate)
+                .await?
+                == PreconditionerStatus::NumericalFailure
+            {
+                let (outer, inner) = best_iteration;
+                return Ok(GmresOutcome {
+                    flag: 2,
+                    relres: best_residual.relative(denominator),
+                    outer,
+                    inner,
+                    residual_count,
+                    steps,
+                });
             }
         } else {
-            basis[0].copy_from_slice(r);
+            copy(work.residual, work.preconditioned, operations).await?;
         }
-        let beta = par::norm2(basis[0]);
-        if !beta.is_finite() {
-            flag = StopFlag::PreconditionerFailure;
-            break;
-        }
-        if beta == 0.0 {
-            flag = StopFlag::Converged;
-            break;
-        }
-        // Scale the inner estimate into true-residual units.
-        let scale = true_residual / beta;
-        par::scale(T::from_f64(1.0 / beta), basis[0]);
-        g.iter_mut().for_each(|value| *value = T::zero());
-        g[0] = T::from_f64(beta);
-        hessenberg.iter_mut().for_each(|value| *value = T::zero());
-        let mut columns = 0usize;
-        let mut inner_failed = None;
-        for j in 0..m {
-            if iterations >= options.max_iterations {
-                break;
+        let Some(beta) = norm::<T, A, O>(work.preconditioned, operations).await? else {
+            return Ok(GmresOutcome {
+                flag: 4,
+                relres: best_residual.relative(denominator),
+                outer: best_iteration.0,
+                inner: best_iteration.1,
+                residual_count,
+                steps,
+            });
+        };
+        if beta.less_than(best_residual) {
+            best_residual = beta;
+            if outer > 0 {
+                best_iteration = x_position;
             }
-            iterations += 1;
-            // w = A M⁻¹ v_j (right/flexible), M⁻¹ A v_j (left), A v_j (none).
-            match side {
-                PreconditionerSide::Right if ops.has_preconditioner() => {
-                    counters.preconditioner += 1;
-                    if ops.apply_preconditioner(basis[j], t).await? == ApplyStatus::NumericalFailure {
-                        inner_failed = Some(StopFlag::PreconditionerFailure);
-                        iterations -= 1;
-                        break;
-                    }
-                    ops.apply_operator(t, w).await?;
-                    counters.operator += 1;
-                }
-                PreconditionerSide::Flexible => {
-                    counters.preconditioner += 1;
-                    if ops.apply_preconditioner(basis[j], z_basis[j]).await?
-                        == ApplyStatus::NumericalFailure
-                    {
-                        inner_failed = Some(StopFlag::PreconditionerFailure);
-                        iterations -= 1;
-                        break;
-                    }
-                    ops.apply_operator(z_basis[j], w).await?;
-                    counters.operator += 1;
-                }
+            copy(work.x, work.best, operations).await?;
+        }
+        if residual_count == 0 {
+            work.history[0] = beta.magnitude();
+            residual_count = 1;
+        }
+        if beta.relative(denominator) <= tolerance {
+            let (outer, inner) = if on_estimate { x_position } else { (outer, 0) };
+            return Ok(GmresOutcome {
+                flag: 0,
+                relres: beta.relative(denominator),
+                outer,
+                inner,
+                residual_count,
+                steps,
+            });
+        }
+        if outer == max_outer || steps >= step_limit {
+            // OnEstimate verification pass after the last permitted cycle or step.
+            break;
+        }
+        for (index, (target, &value)) in work.basis[..n]
+            .iter_mut()
+            .zip(&*work.preconditioned)
+            .enumerate()
+        {
+            if index % 1024 == 0 {
+                operations.cooperate((n - index).min(1024) as u64).await?;
+            }
+            let Some(value) = A::from_complex(beta.normalize(A::to_complex(value))) else {
+                return Ok(GmresOutcome {
+                    flag: 4,
+                    relres: best_residual.relative(denominator),
+                    outer: best_iteration.0,
+                    inner: best_iteration.1,
+                    residual_count,
+                    steps,
+                });
+            };
+            *target = value;
+        }
+        for chunk in work.rotated_rhs[..restart + 1].chunks_mut(1024) {
+            operations.cooperate(chunk.len() as u64).await?;
+            chunk.fill(Complex64::new(0.0, 0.0));
+        }
+        // Preserve the ordinary absolute-RHS solve when beta fits: a tiny
+        // H can have representable beta/H even though 1/H would overflow.
+        // Only an unrepresentable absolute beta uses unit g with the residual
+        // scale carried through the subsequent native candidate correction.
+        let absolute_beta = beta.magnitude();
+        let (projected_rhs, correction_scale) = if absolute_beta.is_finite() {
+            (absolute_beta, Norm::one())
+        } else {
+            (1.0, beta)
+        };
+        work.rotated_rhs[0] = Complex64::new(projected_rhs, 0.0);
+        for inner in 0..restart {
+            operations.checkpoint()?;
+            let basis = &work.basis[inner * n..(inner + 1) * n];
+            let status = match side {
                 PreconditionerSide::Left => {
-                    ops.apply_operator(basis[j], t).await?;
-                    counters.operator += 1;
-                    counters.preconditioner += 1;
-                    if ops.apply_preconditioner(t, w).await? == ApplyStatus::NumericalFailure {
-                        inner_failed = Some(StopFlag::PreconditionerFailure);
-                        iterations -= 1;
-                        break;
-                    }
+                    operations.coefficient(basis, work.product).await?;
+                    operations
+                        .precondition(work.product, work.preconditioned, work.intermediate)
+                        .await?
                 }
                 PreconditionerSide::Right => {
-                    ops.apply_operator(basis[j], w).await?;
-                    counters.operator += 1;
+                    let status = operations
+                        .precondition(basis, work.product, work.intermediate)
+                        .await?;
+                    if status == PreconditionerStatus::Applied {
+                        operations
+                            .coefficient(work.product, work.preconditioned)
+                            .await?;
+                    }
+                    status
                 }
+                PreconditionerSide::Flexible => {
+                    let direction = &mut flexible_basis[inner * n..(inner + 1) * n];
+                    let status = operations
+                        .precondition(basis, direction, work.intermediate)
+                        .await?;
+                    if status == PreconditionerStatus::Applied {
+                        operations
+                            .coefficient(direction, work.preconditioned)
+                            .await?;
+                    }
+                    status
+                }
+            };
+            steps += 1;
+            if status == PreconditionerStatus::NumericalFailure {
+                return Ok(GmresOutcome {
+                    flag: 2,
+                    relres: best_residual.relative(denominator),
+                    outer: best_iteration.0,
+                    inner: best_iteration.1,
+                    residual_count,
+                    steps,
+                });
             }
-            // CGS2 against v_0..v_j.
+            let Some(before) = norm::<T, A, O>(work.preconditioned, operations).await? else {
+                return Ok(GmresOutcome {
+                    flag: 4,
+                    relres: best_residual.relative(denominator),
+                    outer: best_iteration.0,
+                    inner: best_iteration.1,
+                    residual_count,
+                    steps,
+                });
+            };
             for pass in 0..2 {
-                for i in 0..=j {
-                    coefficients[i] = par::dot(basis[i], w);
+                for row in 0..=inner {
+                    let basis = &work.basis[row * n..(row + 1) * n];
+                    let Some(coefficient) =
+                        dot::<T, A, O>(basis, work.preconditioned, operations).await?
+                    else {
+                        return Ok(GmresOutcome {
+                            flag: 4,
+                            relres: best_residual.relative(denominator),
+                            outer: best_iteration.0,
+                            inner: best_iteration.1,
+                            residual_count,
+                            steps,
+                        });
+                    };
+                    work.hessenberg[h_index(row, inner, restart)] += coefficient;
+                    if !axpy::<T, A, O>(work.preconditioned, -coefficient, basis, operations)
+                        .await?
+                    {
+                        return Ok(GmresOutcome {
+                            flag: 4,
+                            relres: best_residual.relative(denominator),
+                            outer: best_iteration.0,
+                            inner: best_iteration.1,
+                            residual_count,
+                            steps,
+                        });
+                    }
                 }
-                for i in 0..=j {
-                    par::axpy(-coefficients[i], basis[i], w);
-                    let entry = &mut hessenberg[j * (m + 1) + i];
-                    *entry = if pass == 0 { coefficients[i] } else { *entry + coefficients[i] };
-                }
-            }
-            let h_next = par::norm2(w);
-            hessenberg[j * (m + 1) + j + 1] = T::from_f64(h_next);
-            if !h_next.is_finite() {
-                inner_failed = Some(StopFlag::Breakdown);
-                break;
-            }
-            // Apply previous rotations to column j.
-            for i in 0..j {
-                let (a, bb) = (hessenberg[j * (m + 1) + i], hessenberg[j * (m + 1) + i + 1]);
-                hessenberg[j * (m + 1) + i] = a.scale(cs[i]) + sn[i] * bb;
-                hessenberg[j * (m + 1) + i + 1] = -(sn[i].conj() * a) + bb.scale(cs[i]);
-            }
-            let (c, s, rho) = givens(hessenberg[j * (m + 1) + j], hessenberg[j * (m + 1) + j + 1]);
-            cs[j] = c;
-            sn[j] = s;
-            hessenberg[j * (m + 1) + j] = rho;
-            hessenberg[j * (m + 1) + j + 1] = T::zero();
-            let gj = g[j];
-            g[j] = gj.scale(c);
-            g[j + 1] = -(s.conj() * gj);
-            columns = j + 1;
-            let estimate = g[j + 1].abs() * scale;
-            if options.record_history {
-                history.push(estimate);
-            }
-            ops.checkpoint(iterations, relative(estimate, rhs_norm)).await?;
-            position = (outer, j + 1);
-            if estimate <= tol || h_next <= f64::EPSILON * beta {
-                break;
-            }
-            if j + 1 < m + 1 {
-                let (head, tail) = basis.split_at_mut(j + 1);
-                let _ = head;
-                tail[0].copy_from_slice(w);
-                par::scale(T::from_f64(1.0 / h_next), tail[0]);
-            }
-        }
-        if columns > 0 {
-            // Solve the upper-triangular least-squares system H y = g.
-            let mut y = vec![T::zero(); columns];
-            for i in (0..columns).rev() {
-                let mut sum = g[i];
-                for k in i + 1..columns {
-                    sum -= hessenberg[k * (m + 1) + i] * y[k];
-                }
-                let diagonal = hessenberg[i * (m + 1) + i];
-                if diagonal.abs() == 0.0 {
-                    inner_failed = Some(StopFlag::Breakdown);
+                if pass == 0
+                    && norm::<T, A, O>(work.preconditioned, operations)
+                        .await?
+                        .is_some_and(|after| after.relative(before) >= 0.717)
+                {
                     break;
                 }
-                y[i] = sum / diagonal;
             }
-            if inner_failed != Some(StopFlag::Breakdown) {
-                match side {
-                    PreconditionerSide::Flexible => {
-                        for (k, coefficient) in y.iter().enumerate() {
-                            par::axpy(*coefficient, z_basis[k], x);
-                        }
+            let Some(next_norm) = norm::<T, A, O>(work.preconditioned, operations).await? else {
+                return Ok(GmresOutcome {
+                    flag: 4,
+                    relres: best_residual.relative(denominator),
+                    outer: best_iteration.0,
+                    inner: best_iteration.1,
+                    residual_count,
+                    steps,
+                });
+            };
+            work.hessenberg[h_index(inner + 1, inner, restart)] =
+                Complex64::new(next_norm.magnitude(), 0.0);
+            if !next_norm.is_zero() {
+                for (index, (target, &value)) in work.basis[(inner + 1) * n..(inner + 2) * n]
+                    .iter_mut()
+                    .zip(&*work.preconditioned)
+                    .enumerate()
+                {
+                    if index % 1024 == 0 {
+                        operations.cooperate((n - index).min(1024) as u64).await?;
                     }
-                    PreconditionerSide::Right if ops.has_preconditioner() => {
-                        w.iter_mut().for_each(|value| *value = T::zero());
-                        for (k, coefficient) in y.iter().enumerate() {
-                            par::axpy(*coefficient, basis[k], w);
-                        }
-                        counters.preconditioner += 1;
-                        if ops.apply_preconditioner(w, t).await? == ApplyStatus::NumericalFailure {
-                            flag = StopFlag::PreconditionerFailure;
-                            break;
-                        }
-                        par::axpy(T::one(), t, x);
-                    }
-                    _ => {
-                        for (k, coefficient) in y.iter().enumerate() {
-                            par::axpy(*coefficient, basis[k], x);
-                        }
-                    }
+                    let Some(value) = A::from_complex(next_norm.normalize(A::to_complex(value)))
+                    else {
+                        return Ok(GmresOutcome {
+                            flag: 4,
+                            relres: best_residual.relative(denominator),
+                            outer: best_iteration.0,
+                            inner: best_iteration.1,
+                            residual_count,
+                            steps,
+                        });
+                    };
+                    *target = value;
                 }
             }
-        }
-        if let Some(failure) = inner_failed {
-            flag = failure;
-            break;
-        }
-    }
-
-    if flag != StopFlag::Converged {
-        ops.apply_operator(x, t).await?;
-        counters.operator += 1;
-        par::sub_into(b, t, r);
-        true_residual = par::norm2(r);
-        if let Some(best_x) = best.as_deref() {
-            if best_residual < true_residual {
-                x.copy_from_slice(best_x);
-                true_residual = best_residual;
-                iterations = best_iteration;
+            apply_previous_rotations(work, inner, restart, operations).await?;
+            let first = h_index(inner, inner, restart);
+            let second = first + 1;
+            let Some((c, s)) = rotation(work.hessenberg[first], work.hessenberg[second]) else {
+                return Ok(GmresOutcome {
+                    flag: 4,
+                    relres: best_residual.relative(denominator),
+                    outer: best_iteration.0,
+                    inner: best_iteration.1,
+                    residual_count,
+                    steps,
+                });
+            };
+            work.cosines[inner] = c;
+            work.sines[inner] = s;
+            let a = work.hessenberg[first];
+            let b = work.hessenberg[second];
+            work.hessenberg[first] = c * a + s * b;
+            work.hessenberg[second] = Complex64::new(0.0, 0.0);
+            let g = work.rotated_rhs[inner];
+            work.rotated_rhs[inner] = c * g;
+            work.rotated_rhs[inner + 1] = -s.conj() * g;
+            if on_estimate {
+                let estimate = correction_scale.times(work.rotated_rhs[inner + 1].norm());
+                work.history[residual_count] = estimate.magnitude();
+                residual_count += 1;
+                if estimate.relative(denominator) > tolerance
+                    && !next_norm.is_zero()
+                    && inner + 1 < restart
+                    && steps < step_limit
+                {
+                    continue;
+                }
+            }
+            match candidate_from_basis::<T, A, O>(
+                work,
+                inner + 1,
+                restart,
+                n,
+                correction_scale,
+                side,
+                flexible_basis,
+                operations,
+            )
+            .await?
+            {
+                Candidate::Ready => {}
+                Candidate::Breakdown => {
+                    return Ok(GmresOutcome {
+                        flag: 4,
+                        relres: best_residual.relative(denominator),
+                        outer: best_iteration.0,
+                        inner: best_iteration.1,
+                        residual_count,
+                        steps,
+                    });
+                }
+                Candidate::PreconditionerFailure => {
+                    return Ok(GmresOutcome {
+                        flag: 2,
+                        relres: best_residual.relative(denominator),
+                        outer: best_iteration.0,
+                        inner: best_iteration.1,
+                        residual_count,
+                        steps,
+                    });
+                }
+            }
+            if on_estimate {
+                // The candidate becomes the iterate; the restart forms and
+                // certifies its residual. An unchanged iterate is stagnation.
+                let mut same = true;
+                for (candidate, current) in work.candidate.chunks(1024).zip(work.x.chunks(1024)) {
+                    operations.cooperate(candidate.len() as u64).await?;
+                    same &= candidate == current;
+                }
+                if same {
+                    copy(work.best, work.x, operations).await?;
+                    return Ok(GmresOutcome {
+                        flag: 3,
+                        relres: best_residual.relative(denominator),
+                        outer: best_iteration.0,
+                        inner: best_iteration.1,
+                        residual_count,
+                        steps,
+                    });
+                }
+                copy(work.candidate, work.x, operations).await?;
+                x_position = (outer + 1, inner + 1);
+                break;
+            }
+            operations.coefficient(work.candidate, work.product).await?;
+            for (index, (destination, (&b, &ax))) in work
+                .residual
+                .iter_mut()
+                .zip(rhs.iter().zip(&*work.product))
+                .enumerate()
+            {
+                if index % 1024 == 0 {
+                    operations.cooperate((n - index).min(1024) as u64).await?;
+                }
+                let Some(value) = A::from_complex(A::to_complex(b) - A::to_complex(ax)) else {
+                    return Ok(GmresOutcome {
+                        flag: 4,
+                        relres: best_residual.relative(denominator),
+                        outer: best_iteration.0,
+                        inner: best_iteration.1,
+                        residual_count,
+                        steps,
+                    });
+                };
+                *destination = value;
+            }
+            let checked: &[T] = if side == PreconditionerSide::Left {
+                if operations
+                    .precondition(work.residual, work.preconditioned, work.intermediate)
+                    .await?
+                    == PreconditionerStatus::NumericalFailure
+                {
+                    return Ok(GmresOutcome {
+                        flag: 2,
+                        relres: best_residual.relative(denominator),
+                        outer: best_iteration.0,
+                        inner: best_iteration.1,
+                        residual_count,
+                        steps,
+                    });
+                }
+                &*work.preconditioned
+            } else {
+                &*work.residual
+            };
+            let Some(actual) = norm::<T, A, O>(checked, operations).await? else {
+                return Ok(GmresOutcome {
+                    flag: 4,
+                    relres: best_residual.relative(denominator),
+                    outer: best_iteration.0,
+                    inner: best_iteration.1,
+                    residual_count,
+                    steps,
+                });
+            };
+            work.history[residual_count] = actual.magnitude();
+            residual_count += 1;
+            let last = (outer + 1, inner + 1);
+            if actual.less_than(best_residual) {
+                best_residual = actual;
+                best_iteration = last;
+                copy(work.candidate, work.best, operations).await?;
+            }
+            if actual.relative(denominator) <= tolerance {
+                copy(work.candidate, work.x, operations).await?;
+                return Ok(GmresOutcome {
+                    flag: 0,
+                    relres: actual.relative(denominator),
+                    outer: outer + 1,
+                    inner: inner + 1,
+                    residual_count,
+                    steps,
+                });
+            }
+            let mut same = previous_candidate;
+            for (candidate, previous) in work.candidate.chunks(1024).zip(work.previous.chunks(1024))
+            {
+                operations.cooperate(candidate.len() as u64).await?;
+                same &= candidate == previous;
+            }
+            if same {
+                return Ok(GmresOutcome {
+                    flag: 3,
+                    relres: best_residual.relative(denominator),
+                    outer: best_iteration.0,
+                    inner: best_iteration.1,
+                    residual_count,
+                    steps,
+                });
+            }
+            copy(work.candidate, work.previous, operations).await?;
+            previous_candidate = true;
+            if next_norm.is_zero() {
+                // The Krylov space is invariant but its best candidate did
+                // not satisfy the true residual test. Restarting the same
+                // space cannot create a new direction; report breakdown,
+                // retaining the best independently checked iterate.
+                copy(work.best, work.x, operations).await?;
+                return Ok(GmresOutcome {
+                    flag: 4,
+                    relres: best_residual.relative(denominator),
+                    outer: best_iteration.0,
+                    inner: best_iteration.1,
+                    residual_count,
+                    steps,
+                });
+            }
+            if inner + 1 == restart {
+                copy(work.candidate, work.x, operations).await?;
+                x_position = (outer + 1, restart);
             }
         }
     }
-    Ok(KrylovReport {
-        flag,
-        iterations,
-        relative_residual: relative(true_residual, rhs_norm),
-        residual_norm: true_residual,
-        rhs_norm,
-        residual_history: history,
-        restart_position: Some(position),
-        operator_applications: counters.operator,
-        preconditioner_applications: counters.preconditioner,
+    copy(work.best, work.x, operations).await?;
+    Ok(GmresOutcome {
+        flag: 1,
+        relres: best_residual.relative(denominator),
+        outer: best_iteration.0,
+        inner: best_iteration.1,
+        residual_count,
+        steps,
     })
 }

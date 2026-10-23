@@ -37,9 +37,6 @@ enum Mode {
 }
 struct Service(Events, Mode);
 impl RuntimeAccelerationService for Service {
-    fn supports_operation(&self, _: &str) -> bool {
-        true
-    }
     fn prepare_admitted(
         &self,
         _: RuntimeContext,

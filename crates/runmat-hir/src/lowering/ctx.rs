@@ -24,8 +24,8 @@ use runmat_types::{
 };
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-mod subscript_chain;
 mod static_member;
+mod subscript_chain;
 
 const IDENT_AWAIT_EXTENSION_DISABLED: &str = "RunMat:AwaitExtensionDisabled";
 const IDENT_AWAIT_CONTEXT_INVALID: &str = "RunMat:AwaitContextInvalid";
@@ -996,6 +996,7 @@ impl LoweringCtx {
         binding: BindingId,
         args: Vec<HirExpr>,
         requested_outputs: RequestedOutputCount,
+        indexing_context: runmat_types::ObjectIndexingContext,
         span: Span,
         force_dynamic_call_dispatch: bool,
     ) -> HirExprKind {
@@ -1004,20 +1005,10 @@ impl LoweringCtx {
             kind: HirExprKind::Binding(binding),
             span,
         };
-        let needs_dynamic_call_dispatch = force_dynamic_call_dispatch
-            || requested_outputs.known_count() != Some(1)
-            || args.iter().any(|arg| {
-                matches!(
-                    &arg.kind,
-                    HirExprKind::Index(_, indexing)
-                        if indexing.kind == IndexKind::Brace
-                            && matches!(
-                                indexing.result_context,
-                                IndexResultContext::FunctionArgumentExpansion
-                            )
-                )
-            });
-        if needs_dynamic_call_dispatch {
+        let needs_dynamic_call_dispatch = args.iter().any(HirExpr::expands_call_argument_sequence);
+        if force_dynamic_call_dispatch {
+            // Explicit name=value syntax selects a call, unlike ordinary
+            // parentheses whose bound receiver may be an array or callable.
             HirExprKind::Call(HirCall {
                 callee: HirCallableRef::DynamicExpr(Box::new(base)),
                 args,
@@ -1026,7 +1017,7 @@ impl LoweringCtx {
                 workspace_first_name: None,
                 bare_identifier: false,
             })
-        } else {
+        } else if !needs_dynamic_call_dispatch && requested_outputs.known_count() == Some(1) {
             HirExprKind::Index(
                 Box::new(base),
                 IndexingSemantics {
@@ -1035,6 +1026,31 @@ impl LoweringCtx {
                     result_context: IndexResultContext::ReadSingle,
                 },
             )
+        } else {
+            // The bound value may be an array or a callable. A requested
+            // sequence count does not establish which one it is: the shared
+            // subscript protocol selects indexing versus invocation from the
+            // actual receiver and carries the destination's output count.
+            HirExprKind::SubscriptChain(crate::HirSubscriptChain {
+                root: Box::new(base),
+                steps: vec![crate::HirSubscriptStep::Index(IndexingSemantics {
+                    kind: IndexKind::Paren,
+                    components: args
+                        .into_iter()
+                        .map(|arg| match &arg.kind {
+                            HirExprKind::Colon => IndexComponent::Colon,
+                            HirExprKind::End => IndexComponent::End {
+                                dim: None,
+                                offset: 0,
+                            },
+                            _ => IndexComponent::Expr(arg),
+                        })
+                        .collect(),
+                    result_context: IndexResultContext::ReadSingle,
+                })],
+                sequence_use: runmat_types::SequenceUse::from_requested_outputs(requested_outputs),
+                context: indexing_context,
+            })
         }
     }
 
@@ -2858,6 +2874,7 @@ impl LoweringCtx {
                         binding,
                         args,
                         requested_outputs,
+                        indexing_context,
                         span,
                         has_name_value_args,
                     )
@@ -3107,10 +3124,20 @@ impl LoweringCtx {
                     })
                     .collect::<Result<_, HirError>>()?,
             },
-            AstExpr::Index(base, indices, _) => HirExprKind::Index(
-                Box::new(self.lower_expr_semantic(base)?),
-                self.lower_indexing(indices, IndexKind::Paren)?,
-            ),
+            AstExpr::Index(base, indices, _) => {
+                let root = Box::new(self.lower_expr_semantic(base)?);
+                let indexing = self.lower_indexing(indices, IndexKind::Paren)?;
+                if indexing.components.iter().any(|component| matches!(component, IndexComponent::Expr(argument) if argument.expands_call_argument_sequence())) {
+                    HirExprKind::SubscriptChain(crate::HirSubscriptChain {
+                        root,
+                        steps: vec![crate::HirSubscriptStep::Index(indexing)],
+                        sequence_use: runmat_types::SequenceUse::from_requested_outputs(requested_outputs),
+                        context: indexing_context,
+                    })
+                } else {
+                    HirExprKind::Index(root, indexing)
+                }
+            }
             AstExpr::IndexCell(base, indices, _) => HirExprKind::Index(
                 Box::new(self.lower_expr_semantic(base)?),
                 self.lower_indexing_with_context(
@@ -3290,7 +3317,23 @@ impl LoweringCtx {
         indices: &[AstExpr],
         kind: IndexKind,
     ) -> Result<IndexingSemantics, HirError> {
-        self.lower_indexing_with_context(indices, kind, IndexResultContext::ReadSingle)
+        if kind == IndexKind::Paren {
+            self.lower_parentheses_arguments(indices)
+        } else {
+            self.lower_indexing_with_context(indices, kind, IndexResultContext::ReadSingle)
+        }
+    }
+
+    fn lower_parentheses_arguments(
+        &mut self,
+        indices: &[AstExpr],
+    ) -> Result<IndexingSemantics, HirError> {
+        self.lower_indexing_with_argument_policy(
+            indices,
+            IndexKind::Paren,
+            IndexResultContext::ReadSingle,
+            true,
+        )
     }
 
     fn lower_call_arguments_for_name(
@@ -3395,6 +3438,21 @@ impl LoweringCtx {
         kind: IndexKind,
         result_context: IndexResultContext,
     ) -> Result<IndexingSemantics, HirError> {
+        self.lower_indexing_with_argument_policy(
+            indices,
+            kind,
+            result_context,
+            kind == IndexKind::Paren,
+        )
+    }
+
+    fn lower_indexing_with_argument_policy(
+        &mut self,
+        indices: &[AstExpr],
+        kind: IndexKind,
+        result_context: IndexResultContext,
+        expand_arguments: bool,
+    ) -> Result<IndexingSemantics, HirError> {
         Ok(IndexingSemantics {
             kind,
             components: indices
@@ -3406,7 +3464,11 @@ impl LoweringCtx {
                             if let Some(offset) = ast_end_relative_offset(expr) {
                                 IndexComponent::End { dim: None, offset }
                             } else {
-                                IndexComponent::Expr(self.lower_expr_semantic(expr)?)
+                                IndexComponent::Expr(if expand_arguments {
+                                    self.lower_call_argument(expr, RequestedOutputCount::One)?
+                                } else {
+                                    self.lower_expr_semantic(expr)?
+                                })
                             }
                         }
                     })

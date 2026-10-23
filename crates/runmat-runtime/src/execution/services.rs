@@ -983,18 +983,10 @@ mod tests {
         let DeferredInvocation::Callable(descriptor) = call.invocation else {
             panic!("expected callable deferred invocation")
         };
-        assert!(matches!(
-            *descriptor,
-            crate::call::descriptor::CallableDescriptor {
-                target: crate::call::descriptor::CallableTarget::Resolved {
-                    identity: runmat_types::CallableIdentity::BoundFunction(
-                        runmat_types::FunctionId(7)
-                    ),
-                    ..
-                },
-                ..
-            }
-        ));
+        assert!(
+            matches!(&descriptor.target, crate::call::descriptor::CallableTarget::Resolved { identity, .. }
+            if matches!(identity.as_identity(), runmat_types::CallableIdentity::BoundFunction(runmat_types::FunctionId(7))))
+        );
         service
             .complete_future(
                 (&future).into(),

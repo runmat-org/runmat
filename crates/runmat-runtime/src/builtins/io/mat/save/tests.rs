@@ -694,7 +694,7 @@ fn save_char_matrix_variable_names() {
     ]);
     let dir = tempdir().unwrap();
     let path = dir.path().join("char_matrix.mat");
-    let chars = CharArray::new("foobar".chars().collect(), 2, 3).unwrap();
+    let chars = CharArray::from_unicode_scalars("foobar".chars().collect(), 2, 3).unwrap();
     let args = vec![
         Value::from(path.to_string_lossy().to_string()),
         Value::CharArray(chars),

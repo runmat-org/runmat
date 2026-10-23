@@ -1,10 +1,10 @@
 //! MATLAB-compatible `strcat` builtin with GPU-aware semantics for RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, STRCAT_ERROR_INTERNAL, STRCAT_ERROR_INVALID_CELL_ELEMENT,
+    STRCAT_ERROR_INVALID_INPUT, STRCAT_ERROR_NOT_ENOUGH_INPUTS, STRCAT_ERROR_SIZE_MISMATCH,
 };
-use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
+
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, StringArray, Value};
 
@@ -17,7 +17,6 @@ use crate::builtins::common::spec::{
 use crate::builtins::strings::common::{
     char_row_to_string_slice, contains_numeric_or_resident_text_input, is_missing_string,
 };
-use crate::builtins::strings::type_resolvers::text_concat_type;
 use crate::{
     build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
 };
@@ -50,94 +49,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "strcat";
-
-const STRCAT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "out",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Concatenated text preserving strcat output container semantics.",
-}];
-
-const STRCAT_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "str1",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First text input (string/char/cell).",
-    },
-    BuiltinParamDescriptor {
-        name: "str2",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Additional text inputs to concatenate element-wise.",
-    },
-];
-
-const STRCAT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "out = strcat(str1, str2, ...)",
-    inputs: &STRCAT_INPUTS,
-    outputs: &STRCAT_OUTPUT,
-}];
-
-const STRCAT_ERROR_NOT_ENOUGH_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRCAT.NOT_ENOUGH_INPUTS",
-    identifier: Some("RunMat:strcat:NotEnoughInputs"),
-    when: "No arguments are supplied.",
-    message: "strcat: not enough input arguments",
-};
-
-const STRCAT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRCAT.INVALID_INPUT",
-    identifier: Some("RunMat:strcat:InvalidInput"),
-    when: "An input is not a string, character array, or cell array of text scalars.",
-    message:
-        "strcat: inputs must be strings, character arrays, or cell arrays of character vectors",
-};
-
-const STRCAT_ERROR_INVALID_CELL_ELEMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRCAT.CELL_ELEMENT",
-    identifier: Some("RunMat:strcat:CellElement"),
-    when: "A cell array contains a non-text element or non-row char array element.",
-    message: "strcat: cell array elements must be character vectors or string scalars",
-};
-
-const STRCAT_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRCAT.SIZE_MISMATCH",
-    identifier: Some("RunMat:strcat:SizeMismatch"),
-    when: "Input shapes are not broadcast-compatible.",
-    message: "strcat: array sizes are not compatible for broadcasting",
-};
-
-const STRCAT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STRCAT.INTERNAL",
-    identifier: Some("RunMat:strcat:InternalError"),
-    when: "Internal output container construction failed.",
-    message: "strcat: internal error",
-};
-
-const STRCAT_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    STRCAT_ERROR_NOT_ENOUGH_INPUTS,
-    STRCAT_ERROR_INVALID_INPUT,
-    STRCAT_ERROR_INVALID_CELL_ELEMENT,
-    STRCAT_ERROR_SIZE_MISMATCH,
-    STRCAT_ERROR_INTERNAL,
-];
-
-pub const STRCAT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &STRCAT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &STRCAT_ERRORS,
-};
-
-pub const STRCAT_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "strcat concatenates character arrays, string arrays, and cell arrays of character vectors. Numeric, integer, and provider-resident values reject before provider access without implicit text conversion.",
-};
 
 fn map_flow(err: RuntimeError) -> RuntimeError {
     map_control_flow_with_builtin(err, BUILTIN_NAME)
@@ -227,7 +138,9 @@ impl TextOperand {
         let cols = array.cols;
         let mut elements = Vec::with_capacity(rows);
         for row in 0..rows {
-            let text = char_row_to_string_slice(array.data(), cols, row);
+            let text = char_row_to_string_slice(array.data(), cols, row).map_err(|e| {
+                strcat_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRCAT_ERROR_INTERNAL)
+            })?;
             let trimmed = trim_trailing_spaces(&text);
             elements.push(TextElement {
                 text: trimmed.into(),
@@ -235,7 +148,7 @@ impl TextOperand {
             });
         }
         let shape = vec![rows, 1];
-        let strides = compute_row_major_strides(&shape);
+        let strides = compute_strides(&shape);
         Ok(Self {
             data: elements,
             shape,
@@ -247,12 +160,12 @@ impl TextOperand {
     fn from_cell_array(array: &CellArray) -> BuiltinResult<Self> {
         let total = array.data().len();
         let mut elements = Vec::with_capacity(total);
-        for handle in array.data() {
+        for handle in array.iter_column_major() {
             let text_element = cell_element_to_text(handle)?;
             elements.push(text_element);
         }
         let shape = array.shape.to_vec();
-        let strides = compute_row_major_strides(&shape);
+        let strides = compute_strides(&shape);
         Ok(Self {
             data: elements,
             shape,
@@ -286,50 +199,6 @@ fn trim_trailing_spaces(text: &str) -> String {
         .to_string()
 }
 
-fn compute_row_major_strides(shape: &[usize]) -> Vec<usize> {
-    if shape.is_empty() {
-        return Vec::new();
-    }
-    let mut strides = vec![0usize; shape.len()];
-    let mut stride = 1usize;
-    for dim in (0..shape.len()).rev() {
-        strides[dim] = stride;
-        let extent = shape[dim].max(1);
-        stride = stride.saturating_mul(extent);
-    }
-    strides
-}
-
-fn column_major_coords(mut index: usize, shape: &[usize]) -> Vec<usize> {
-    if shape.is_empty() {
-        return Vec::new();
-    }
-    let mut coords = Vec::with_capacity(shape.len());
-    for &extent in shape {
-        if extent == 0 {
-            coords.push(0);
-        } else {
-            coords.push(index % extent);
-            index /= extent;
-        }
-    }
-    coords
-}
-
-fn row_major_index(coords: &[usize], shape: &[usize]) -> usize {
-    if coords.is_empty() {
-        return 0;
-    }
-    let mut index = 0usize;
-    let mut stride = 1usize;
-    for dim in (0..coords.len()).rev() {
-        let extent = shape[dim].max(1);
-        index += coords[dim] * stride;
-        stride = stride.saturating_mul(extent);
-    }
-    index
-}
-
 fn cell_element_to_text(value: &Value) -> BuiltinResult<TextElement> {
     match value {
         Value::String(s) => Ok(TextElement {
@@ -347,7 +216,12 @@ fn cell_element_to_text(value: &Value) -> BuiltinResult<TextElement> {
             let text = if ca.rows == 0 {
                 String::new()
             } else {
-                char_row_to_string_slice(ca.data(), ca.cols, 0)
+                char_row_to_string_slice(ca.data(), ca.cols, 0).map_err(|e| {
+                    strcat_error_with_message(
+                        format!("{BUILTIN_NAME}: {e}"),
+                        &STRCAT_ERROR_INTERNAL,
+                    )
+                })?
             };
             Ok(TextElement {
                 text: trim_trailing_spaces(&text).into(),
@@ -361,16 +235,15 @@ fn cell_element_to_text(value: &Value) -> BuiltinResult<TextElement> {
 
 #[runtime_builtin(
     name = "strcat",
-    category = "strings/transform",
-    summary = "Concatenate text inputs element-wise across compatible array sizes.",
-    keywords = "strcat,string concatenation,character arrays,cell arrays",
-    accel = "sink",
-    type_resolver(text_concat_type),
-    descriptor(crate::builtins::strings::transform::strcat::STRCAT_DESCRIPTOR),
-    integer_audit(crate::builtins::strings::transform::strcat::STRCAT_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::transform::strcat"
 )]
-async fn strcat_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn strcat_builtin(rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::STRCAT_DESCRIPTOR,
+        &runmat_builtins::STRCAT_ERROR_TOO_MANY_OUTPUTS,
+        "strcat",
+    )?;
     if rest.is_empty() {
         return Err(strcat_error(&STRCAT_ERROR_NOT_ENOUGH_INPUTS));
     }
@@ -378,11 +251,13 @@ async fn strcat_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
     let mut operands = Vec::with_capacity(rest.len());
     let mut output_kind = OutputKind::Char;
 
-    for value in rest {
-        if contains_numeric_or_resident_text_input(&value) {
+    for value in &rest {
+        if contains_numeric_or_resident_text_input(value)
+            || crate::builtins::strings::common::has_unsupported_character_pages(value)
+        {
             return Err(strcat_error(&STRCAT_ERROR_INVALID_INPUT));
         }
-        let gathered = gather_if_needed_async(&value).await.map_err(map_flow)?;
+        let gathered = gather_if_needed_async(value).await.map_err(map_flow)?;
         let operand = TextOperand::from_value(gathered)?;
         output_kind = output_kind.update(operand.kind);
         operands.push(operand);
@@ -450,50 +325,50 @@ fn build_string_output(data: Vec<String>, shape: &[usize]) -> BuiltinResult<Valu
     Ok(Value::StringArray(array))
 }
 
-fn build_cell_output(mut data: Vec<String>, shape: &[usize]) -> BuiltinResult<Value> {
+fn build_cell_output(data: Vec<String>, shape: &[usize]) -> BuiltinResult<Value> {
     if data.is_empty() {
         return make_cell_with_shape(Vec::new(), shape.to_vec()).map_err(|e| {
             strcat_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRCAT_ERROR_INTERNAL)
         });
-    }
-    if shape.len() > 1 {
-        let mut reordered = vec![String::new(); data.len()];
-        for (cm_index, text) in data.into_iter().enumerate() {
-            let coords = column_major_coords(cm_index, shape);
-            let rm_index = row_major_index(&coords, shape);
-            reordered[rm_index] = text;
-        }
-        data = reordered;
     }
     let mut values = Vec::with_capacity(data.len());
     for text in data {
         let char_array = CharArray::new_row(&text);
         values.push(Value::CharArray(char_array));
     }
-    make_cell_with_shape(values, shape.to_vec()).map_err(|e| {
-        strcat_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRCAT_ERROR_INTERNAL)
-    })
+    CellArray::from_column_major(values, shape.to_vec())
+        .map(Value::Cell)
+        .map_err(|e| {
+            strcat_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRCAT_ERROR_INTERNAL)
+        })
 }
 
 fn build_char_output(data: Vec<String>) -> BuiltinResult<Value> {
     let rows = data.len();
     if rows == 0 {
-        let array = CharArray::new(Vec::new(), 0, 0).map_err(|e| {
+        let array = CharArray::from_code_units(Vec::new(), 0, 0).map_err(|e| {
             strcat_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRCAT_ERROR_INTERNAL)
         })?;
         return Ok(Value::CharArray(array));
     }
 
-    let max_cols = data.iter().map(|s| s.chars().count()).max().unwrap_or(0);
-    let mut chars = Vec::with_capacity(rows * max_cols);
+    let max_cols = data
+        .iter()
+        .map(|s| s.encode_utf16().count())
+        .max()
+        .unwrap_or(0);
+    let mut units = Vec::with_capacity(rows * max_cols);
     for text in data {
-        let mut row_chars: Vec<char> = text.chars().collect();
-        if row_chars.len() < max_cols {
-            row_chars.resize(max_cols, ' ');
+        let mut row_units = text
+            .encode_utf16()
+            .map(runmat_value::Utf16CodeUnit::from_raw)
+            .collect::<Vec<_>>();
+        if row_units.len() < max_cols {
+            row_units.resize(max_cols, runmat_value::Utf16CodeUnit::from_raw(b' ' as u16));
         }
-        chars.extend(row_chars.into_iter());
+        units.extend(row_units);
     }
-    let array = CharArray::new(chars, rows, max_cols).map_err(|e| {
+    let array = CharArray::from_code_units(units, rows, max_cols).map_err(|e| {
         strcat_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRCAT_ERROR_INTERNAL)
     })?;
     Ok(Value::CharArray(array))
@@ -504,13 +379,14 @@ pub(crate) mod tests {
     use super::*;
     #[cfg(feature = "wgpu")]
     use crate::builtins::common::test_support;
-    use runmat_builtins::{ResolveContext, Type};
     #[cfg(feature = "wgpu")]
     use runmat_value::Tensor;
     use runmat_value::{CellArray, CharArray, IntValue, StringArray};
 
     fn run_strcat(rest: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(strcat_builtin(rest))
+        futures::executor::block_on(strcat_builtin(
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -548,16 +424,25 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcat_char_array_multiple_rows_concatenates_per_row() {
-        let first = CharArray::new(vec!['A', ' ', 'B', 'C'], 2, 2).expect("char");
-        let second = CharArray::new(vec!['X', 'Y', 'Z', ' '], 2, 2).expect("char");
+        let first = CharArray::from_unicode_scalars(vec!['A', ' ', 'B', 'C'], 2, 2).expect("char");
+        let second = CharArray::from_unicode_scalars(vec!['X', 'Y', 'Z', ' '], 2, 2).expect("char");
         let result =
             run_strcat(vec![Value::CharArray(first), Value::CharArray(second)]).expect("strcat");
         match result {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 2);
                 assert_eq!(ca.cols, 3);
-                let expected: Vec<char> = vec!['A', 'X', 'Y', 'B', 'C', 'Z'];
-                assert_eq!(ca.data(), expected);
+                assert_eq!(
+                    ca.data().iter().map(|unit| unit.raw()).collect::<Vec<_>>(),
+                    vec![
+                        b'A' as u16,
+                        b'X' as u16,
+                        b'Y' as u16,
+                        b'B' as u16,
+                        b'C' as u16,
+                        b'Z' as u16
+                    ]
+                );
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -574,8 +459,10 @@ pub(crate) mod tests {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 9);
-                let expected: Vec<char> = "GPU Accel".chars().collect();
-                assert_eq!(ca.data(), expected);
+                assert_eq!(
+                    runmat_value::decode_utf16_code_units(ca.data()).unwrap(),
+                    "GPU Accel"
+                );
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -583,8 +470,27 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn strcat_character_width_is_utf16_code_units() {
+        let result = run_strcat(vec![
+            Value::CharArray(CharArray::new_row("😀")),
+            Value::CharArray(CharArray::new_row("X")),
+        ])
+        .expect("strcat");
+        let Value::CharArray(array) = result else {
+            panic!("expected character array");
+        };
+        assert_eq!((array.rows, array.cols), (1, 3));
+        assert_eq!(
+            runmat_value::decode_utf16_code_units(array.data()).unwrap(),
+            "😀X"
+        );
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn strcat_mixed_char_and_string_returns_string_array() {
-        let prefixes = CharArray::new(vec!['A', ' ', 'B', ' '], 2, 2).expect("char");
+        let prefixes =
+            CharArray::from_unicode_scalars(vec!['A', ' ', 'B', ' '], 2, 2).expect("char");
         let suffixes =
             StringArray::new(vec!["core".into(), "runtime".into()], vec![1, 2]).expect("strings");
         let result = run_strcat(vec![
@@ -629,13 +535,58 @@ pub(crate) mod tests {
                 let second: &Value = &ca.data()[1];
                 match (first, second) {
                     (Value::CharArray(a), Value::CharArray(b)) => {
-                        assert_eq!(a.data(), "RunCore".chars().collect::<Vec<char>>());
-                        assert_eq!(b.data(), "MatCore".chars().collect::<Vec<char>>());
+                        assert_eq!(
+                            runmat_value::decode_utf16_code_units(a.data()).unwrap(),
+                            "RunCore"
+                        );
+                        assert_eq!(
+                            runmat_value::decode_utf16_code_units(b.data()).unwrap(),
+                            "MatCore"
+                        );
                     }
                     other => panic!("unexpected cell contents {other:?}"),
                 }
             }
             other => panic!("expected cell array, got {other:?}"),
+        }
+        let cell = make_cell_with_shape(
+            ["a", "b", "c", "d", "e", "f", "g", "h"]
+                .into_iter()
+                .map(|text| Value::CharArray(CharArray::new_row(text)))
+                .collect(),
+            vec![2, 2, 2],
+        )
+        .expect("page-local cell storage");
+        let suffixes = Value::StringArray(
+            StringArray::new((1..=8).map(|n| n.to_string()).collect(), vec![2, 2, 2])
+                .expect("column-major suffixes"),
+        );
+        let Value::StringArray(mixed) =
+            run_strcat(vec![cell.clone(), suffixes]).expect("mixed nd text")
+        else {
+            panic!("string output");
+        };
+        assert_eq!(mixed.shape(), &[2, 2, 2]);
+        assert_eq!(
+            mixed
+                .data()
+                .iter()
+                .map(|text| text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a1", "c2", "b3", "d4", "e5", "g6", "f7", "h8"]
+        );
+        let Value::Cell(cells) = run_strcat(vec![cell, Value::CharArray(CharArray::new_row("!"))])
+            .expect("nd cell output")
+        else {
+            panic!("cell output");
+        };
+        assert_eq!(cells.shape(), &[2, 2, 2]);
+        for (actual, expected) in cells
+            .data()
+            .iter()
+            .zip(["a!", "b!", "c!", "d!", "e!", "f!", "g!", "h!"])
+        {
+            assert_eq!(actual, &Value::CharArray(CharArray::new_row(expected)));
         }
     }
 
@@ -668,10 +619,22 @@ pub(crate) mod tests {
                         Value::CharArray(c),
                         Value::CharArray(d),
                     ) => {
-                        assert_eq!(a.data(), "TopX".chars().collect::<Vec<char>>());
-                        assert_eq!(b.data(), "RightX".chars().collect::<Vec<char>>());
-                        assert_eq!(c.data(), "BottomX".chars().collect::<Vec<char>>());
-                        assert_eq!(d.data(), "LastX".chars().collect::<Vec<char>>());
+                        assert_eq!(
+                            runmat_value::decode_utf16_code_units(a.data()).unwrap(),
+                            "TopX"
+                        );
+                        assert_eq!(
+                            runmat_value::decode_utf16_code_units(b.data()).unwrap(),
+                            "RightX"
+                        );
+                        assert_eq!(
+                            runmat_value::decode_utf16_code_units(c.data()).unwrap(),
+                            "BottomX"
+                        );
+                        assert_eq!(
+                            runmat_value::decode_utf16_code_units(d.data()).unwrap(),
+                            "LastX"
+                        );
                     }
                     other => panic!("unexpected cell contents {other:?}"),
                 }
@@ -734,8 +697,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcat_errors_on_mismatched_sizes() {
-        let left = CharArray::new(vec!['A', 'B'], 2, 1).expect("char");
-        let right = CharArray::new(vec!['C', 'D', 'E'], 3, 1).expect("char");
+        let left = CharArray::from_unicode_scalars(vec!['A', 'B'], 2, 1).expect("char");
+        let right = CharArray::from_unicode_scalars(vec!['C', 'D', 'E'], 3, 1).expect("char");
         let err = run_strcat(vec![Value::CharArray(left), Value::CharArray(right)])
             .expect_err("expected broadcast error");
         assert!(err
@@ -784,13 +747,5 @@ pub(crate) mod tests {
             let err = run_strcat(vec![Value::GpuTensor(handle)]).expect_err("expected error");
             assert_eq!(err.to_string(), STRCAT_ERROR_INVALID_INPUT.message);
         });
-    }
-
-    #[test]
-    fn strcat_type_concatenates_text() {
-        assert_eq!(
-            text_concat_type(&[Type::String], &ResolveContext::new(Vec::new())),
-            Type::String
-        );
     }
 }

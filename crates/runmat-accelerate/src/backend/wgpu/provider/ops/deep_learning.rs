@@ -403,12 +403,14 @@ impl WgpuProvider {
                 }
 
                 let error_size = std::mem::size_of::<u32>() as u64;
-                let staging = emission.device().create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("runmat-crossentropy-error-staging"),
-                    size: error_size,
-                    usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                });
+                let staging = runmat_accelerate_api::WgpuBufferOwner::new(
+                    emission.device().create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("runmat-crossentropy-error-staging"),
+                        size: error_size,
+                        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    }),
+                );
                 let mut encoder = pending.profiled_encoder(
                     emission,
                     &wgpu::CommandEncoderDescriptor {
@@ -732,12 +734,14 @@ impl WgpuProvider {
                     }
 
                     let error_size = std::mem::size_of::<u32>() as u64;
-                    let staging = emission.device().create_buffer(&wgpu::BufferDescriptor {
-                        label: Some("runmat-adamupdate-error-staging"),
-                        size: error_size,
-                        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                        mapped_at_creation: false,
-                    });
+                    let staging = runmat_accelerate_api::WgpuBufferOwner::new(
+                        emission.device().create_buffer(&wgpu::BufferDescriptor {
+                            label: Some("runmat-adamupdate-error-staging"),
+                            size: error_size,
+                            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                            mapped_at_creation: false,
+                        }),
+                    );
                     let mut encoder = pending.profiled_encoder(
                         emission,
                         &wgpu::CommandEncoderDescriptor {

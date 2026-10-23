@@ -1,4 +1,5 @@
 use super::*;
+use crate::execution::value_codec::encode_durable_value;
 use crate::execution::RuntimeExecutionService;
 use futures::channel::oneshot;
 use js_sys::Uint8Array;
@@ -17,6 +18,57 @@ use web_sys::{Event, IdbTransactionMode};
 
 fn runtime() -> RuntimeContext {
     RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
+}
+
+#[wasm_bindgen_test(async)]
+async fn indexeddb_reopens_selected_factor_data_under_current_invocation() {
+    crate::builtins::wasm_registry::register_all();
+    let service = unique_service();
+    let runtime = runtime();
+    let matrix =
+        Value::Tensor(runmat_value::Tensor::new(vec![4.0, 1.0, 1.0, 3.0], vec![2, 2]).unwrap());
+    let original = crate::call_builtin_async_in_context(
+        &runtime,
+        "decomposition",
+        &[matrix, Value::String("chol".into())],
+    )
+    .await
+    .expect("selected public factor constructor")
+    .with_owned(|value| value);
+    let Value::Object(original_object) = &original else {
+        panic!("constructor must publish an object");
+    };
+    assert!(original_object.numeric_factor_data().is_some());
+    service
+        .set_many(
+            runtime.clone(),
+            "factors".into(),
+            vec![("chol".into(), original.clone())],
+        )
+        .await
+        .expect("IndexedDB stores validated DATA");
+    let reopened = BrowserPreferenceService::new(
+        service
+            .namespace
+            .strip_prefix("runmat.application.settings.v1/")
+            .unwrap()
+            .to_string(),
+    )
+    .unwrap();
+    let values = reopened
+        .group_values(runtime, "factors".into())
+        .await
+        .expect("selected contextual import")
+        .expect("factor group");
+    let Value::Object(restored) = &values["chol"] else {
+        panic!("selected preference import must publish an object");
+    };
+    assert_eq!(restored.properties(), original_object.properties());
+    assert_eq!(
+        restored.numeric_factor_data(),
+        original_object.numeric_factor_data()
+    );
+    delete_namespace(&service).await;
 }
 
 fn unique_service() -> BrowserPreferenceService {
@@ -328,8 +380,7 @@ async fn dropped_pending_default_reader_keeps_gc_input_root_until_terminal_obser
         transaction::BrowserMutation::ReadOrCreate {
             group: "app".into(),
             names: vec!["existing".into()],
-            defaults,
-            _roots: roots,
+            defaults: std::rc::Rc::new(transaction::SharedDefaults::new(defaults, roots)),
         },
         gate,
         None,

@@ -36,7 +36,7 @@ pub const GZIP_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         preparation: BuiltinOperandPreparation::RuntimeOwned,
         portability: BuiltinPortability::NativeAndWasm,
         accelerator: BuiltinAcceleratorPolicy::Forbidden,
-        residency: BuiltinResidencyPolicy::PreserveInputs,
+        residency: BuiltinResidencyPolicy::Host,
         fusion: BuiltinFusionPolicy::Boundary,
         distributed: BuiltinDistributedPolicy::Unsupported,
     },

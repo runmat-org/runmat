@@ -49,7 +49,69 @@ pub struct HostNumericBuffer {
     storage: HostBuffer<HostNumericStorage>,
 }
 
+/// Non-growing unique borrow of the canonical numeric allocation. Its original
+/// physical claim remains on the borrowed owner; this never performs COW.
+pub struct UniqueHostNumericMutation<'a> {
+    storage: &'a mut HostNumericStorage,
+}
+impl UniqueHostNumericMutation<'_> {
+    pub fn set_value(&mut self, index: usize, value: NumericScalar) -> Result<(), String> {
+        assign_storage_value(self.storage, index, value)
+    }
+}
+
+fn assign_storage_value(
+    storage: &mut HostNumericStorage,
+    index: usize,
+    value: NumericScalar,
+) -> Result<(), String> {
+    let len = match &*storage {
+        HostNumericStorage::F64(values) => values.len(),
+        HostNumericStorage::F32(values) => values.len(),
+        HostNumericStorage::Integer(storage) => storage.values.len(),
+    };
+    if index >= len {
+        return Err(format!("numeric buffer index {index} out of bounds"));
+    }
+    match storage {
+        HostNumericStorage::F64(values) => {
+            let value = match value {
+                NumericScalar::F64(value) => value,
+                NumericScalar::F32(value) => f64::from(value),
+                value => value
+                    .into_int_value()
+                    .expect("non-floating numeric scalar is integer")
+                    .to_f64(),
+            };
+            values[index] = value;
+        }
+        HostNumericStorage::F32(values) => {
+            values[index] = value.materialize_f32();
+        }
+        HostNumericStorage::Integer(storage) => {
+            let storage = &mut storage.values;
+            let exact = match value {
+                NumericScalar::F64(value) => storage.cast_f64_assignment(value),
+                NumericScalar::F32(value) => storage.cast_f64_assignment(f64::from(value)),
+                value => storage.cast_exact_assignment(
+                    &value
+                        .into_int_value()
+                        .expect("non-floating numeric scalar is integer"),
+                ),
+            };
+            storage.set_value(index, exact)?;
+        }
+    }
+    Ok(())
+}
+
 impl HostNumericBuffer {
+    /// Acquire the existing allocation uniquely or decline without copying.
+    pub fn try_unique_mutation(&mut self) -> Option<UniqueHostNumericMutation<'_>> {
+        self.storage
+            .try_get_mut_unique()
+            .map(|storage| UniqueHostNumericMutation { storage })
+    }
     pub(crate) const fn exact_metadata_bytes() -> usize {
         HostBuffer::<HostNumericStorage>::exact_metadata_bytes()
     }
@@ -337,44 +399,7 @@ impl HostNumericBuffer {
                     .expect("allocated numeric buffer byte length fits usize"),
             );
         }
-        match self.storage.make_mut() {
-            HostNumericStorage::F64(values) => {
-                let value = match value {
-                    NumericScalar::F64(value) => value,
-                    NumericScalar::F32(value) => f64::from(value),
-                    value => value
-                        .into_int_value()
-                        .expect("non-floating numeric scalar is integer")
-                        .to_f64(),
-                };
-                values[index] = value;
-            }
-            HostNumericStorage::F32(values) => {
-                let value = match value {
-                    NumericScalar::F64(value) => value as f32,
-                    NumericScalar::F32(value) => value,
-                    value => value
-                        .into_int_value()
-                        .expect("non-floating numeric scalar is integer")
-                        .to_f64() as f32,
-                };
-                values[index] = value;
-            }
-            HostNumericStorage::Integer(storage) => {
-                let storage = &mut storage.values;
-                let exact = match value {
-                    NumericScalar::F64(value) => storage.cast_f64_assignment(value),
-                    NumericScalar::F32(value) => storage.cast_f64_assignment(f64::from(value)),
-                    value => storage.cast_exact_assignment(
-                        &value
-                            .into_int_value()
-                            .expect("non-floating numeric scalar is integer"),
-                    ),
-                };
-                storage.set_value(index, exact)?;
-            }
-        }
-        Ok(())
+        assign_storage_value(self.storage.make_mut(), index, value)
     }
 
     pub fn copy_from_same_type(&mut self, source: &Self) -> Result<(), String> {

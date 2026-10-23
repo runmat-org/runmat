@@ -2030,7 +2030,7 @@ impl WgpuProvider {
 
         let mut current = handle.clone();
         let mut owns_current = false;
-        for _ in 0..order {
+        for step in 0..order {
             let next = self.diff_once_exec(&current, dim)?;
             if owns_current {
                 drop(current);
@@ -2040,7 +2040,12 @@ impl WgpuProvider {
 
             let entry = self.get_entry(&current)?;
             if entry.len == 0 {
-                break;
+                // Other empty axes can exhaust storage before this axis has
+                // exhausted its geometry. Finish the remaining orders with
+                // the canonical zero-copy view owner, not more dispatches.
+                let mut shape = current.shape().to_vec();
+                shape[dim] = shape[dim].saturating_sub(order - step - 1);
+                return self.reshape_exec(&current, &shape);
             }
         }
         Ok(current)
@@ -2504,7 +2509,10 @@ impl WgpuProvider {
         } else {
             entry.shape.clone()
         };
-        while work_shape.len() <= dim {
+        let stored_rank = work_shape.len();
+        let virtual_axis = dim >= stored_rank;
+        let dim = dim.min(stored_rank);
+        if virtual_axis {
             work_shape.push(1);
         }
         let logical_len = work_shape
@@ -2546,6 +2554,9 @@ impl WgpuProvider {
         let mut output_shape = work_shape.clone();
         if !cumulative {
             output_shape[dim] = 1;
+        }
+        if virtual_axis {
+            output_shape.truncate(stored_rank);
         }
         let output_len = output_shape
             .iter()
@@ -3318,6 +3329,60 @@ mod tests {
         Some(f(provider.provider()))
     }
 
+    #[test]
+    fn diff_provider_preserves_higher_order_empty_geometry_and_native_precision() {
+        use crate::backend::wgpu::provider::WgpuPrecisionPolicy;
+        for precision in [
+            WgpuPrecisionPolicy::RequireF32,
+            WgpuPrecisionPolicy::RequireF64,
+        ] {
+            let Ok(registered) = register_test_wgpu_provider(WgpuProviderOptions {
+                precision,
+                ..Default::default()
+            }) else {
+                continue; // This physical precision is unavailable on this adapter.
+            };
+            let provider = registered.provider();
+            for (shape, order, dim, expected) in [
+                (vec![0, 5], 3, 1, vec![0, 2]),
+                (vec![2, 0, 7], 4, 2, vec![2, 0, 3]),
+                (vec![0, 5], usize::MAX, 1, vec![0, 0]),
+            ] {
+                let data = match precision {
+                    WgpuPrecisionPolicy::RequireF32 => HostNumericDataView::F32(&[]),
+                    WgpuPrecisionPolicy::RequireF64 => HostNumericDataView::F64(&[]),
+                    _ => unreachable!(),
+                };
+                let input = provider
+                    .upload_numeric(&HostNumericTensorView {
+                        data,
+                        shape: &shape,
+                        storage: GpuTensorStorage::Real,
+                    })
+                    .expect("native empty input");
+                let output = provider
+                    .diff_dim(&input, order, dim)
+                    .expect("empty differences")
+                    .expect("admitted native precision");
+                assert_eq!(output.shape(), expected);
+                assert_eq!(
+                    output.physical().element_type(),
+                    input.physical().element_type()
+                );
+                assert_eq!(output.physical().storage(), input.physical().storage());
+                assert_eq!(output.device_id(), input.device_id());
+                assert!(!output.shares_allocation_with(&input));
+                assert!(pollster::block_on(provider.download(&output))
+                    .unwrap()
+                    .data
+                    .is_empty());
+                output.release().unwrap();
+                input.allocation_lease().validate_live().unwrap();
+                input.release().unwrap();
+            }
+        }
+    }
+
     fn run_envelope(method: ProviderEnvelopeMethod, values: &[f64], shape: &[usize]) -> Vec<f64> {
         with_wgpu_provider(|provider| run_envelope_on(provider, method, values, shape))
             .unwrap_or_default()
@@ -3515,7 +3580,8 @@ mod tests {
                 .expect("upload");
             let output = provider
                 .gradient_dim(&input, dim, spacing)
-                .expect("gradient");
+                .expect("gradient")
+                .expect("provider accepted numerical operation");
             let host = pollster::block_on(provider.download(&output)).expect("download");
             assert_eq!(host.storage, GpuTensorStorage::ComplexInterleaved);
             assert_eq!(host.data.len() % 2, 0);
@@ -4320,7 +4386,8 @@ mod tests {
                 .expect("upload spacing");
             let output = provider
                 .trapz_dim(&input, 1, ProviderTrapezoidSpacing::Vector(&spacing))
-                .expect("trapz");
+                .expect("trapz")
+                .expect("provider accepted numerical operation");
             let gathered = pollster::block_on(provider.download(&output)).expect("download");
             input.release().unwrap();
             spacing.release().unwrap();
@@ -4347,7 +4414,8 @@ mod tests {
                 .expect("upload spacing");
             let output = provider
                 .cumtrapz_dim(&input, 1, ProviderTrapezoidSpacing::Tensor(&spacing))
-                .expect("cumtrapz");
+                .expect("cumtrapz")
+                .expect("provider accepted numerical operation");
             let gathered = pollster::block_on(provider.download(&output)).expect("download");
             input.release().unwrap();
             spacing.release().unwrap();
@@ -4378,15 +4446,34 @@ mod tests {
 
             let trapz = provider
                 .trapz_dim(&input, 1, ProviderTrapezoidSpacing::Unit)
-                .expect("trapz");
+                .expect("trapz")
+                .expect("provider accepted numerical operation");
             let cumtrapz = provider
                 .cumtrapz_dim(&input, 1, ProviderTrapezoidSpacing::Unit)
-                .expect("cumtrapz");
+                .expect("cumtrapz")
+                .expect("provider accepted numerical operation");
 
             let trapz_host = pollster::block_on(provider.download(&trapz)).expect("download trapz");
             let cumtrapz_host =
                 pollster::block_on(provider.download(&cumtrapz)).expect("download cumtrapz");
 
+            for dimension in [2, usize::MAX] {
+                for output in [
+                    provider.trapz_dim(&input, dimension, ProviderTrapezoidSpacing::Unit),
+                    provider.cumtrapz_dim(&input, dimension, ProviderTrapezoidSpacing::Unit),
+                ] {
+                    let output = output.unwrap().expect("virtual-axis provider route");
+                    assert_eq!(output.shape(), input.shape());
+                    assert_eq!(
+                        runmat_accelerate_api::handle_precision(&output),
+                        runmat_accelerate_api::handle_precision(&input)
+                    );
+                    let host = pollster::block_on(provider.download(&output)).unwrap();
+                    assert_eq!(host.storage, GpuTensorStorage::ComplexInterleaved);
+                    assert_eq!(host.data, vec![0.; 6]);
+                    output.release().unwrap();
+                }
+            }
             input.release().unwrap();
             trapz.release().unwrap();
             cumtrapz.release().unwrap();

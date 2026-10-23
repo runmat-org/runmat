@@ -54,7 +54,7 @@ pub(super) fn labels_from_value(value: Value, name: &str) -> BuiltinResult<Label
                 return Err(invalid("confusionmat: character labels must be two-dimensional"));
             }
             Ok(LabelVector {
-            labels: char_rows(&array).into_iter().map(Label::Text).collect(),
+            labels: char_rows(&array)?.into_iter().map(Label::Text).collect(),
             kind: LabelKind::Char,
             categories: None,
         })},
@@ -135,7 +135,9 @@ pub(super) fn scalar_text(value: &Value, name: &str) -> BuiltinResult<String> {
         Value::CharArray(chars)
             if chars.rows <= 1 && chars.shape.iter().skip(2).all(|dimension| *dimension == 1) =>
         {
-            Ok(chars.data().iter().collect())
+            crate::builtins::stats::decode_utf16_with_error(chars.data(), || {
+                invalid(format!("confusionmat: {name} must be valid UTF-16 text"))
+            })
         }
         Value::StringArray(array) if array.data().len() == 1 => {
             Ok(array.data()[0].as_str().to_owned())

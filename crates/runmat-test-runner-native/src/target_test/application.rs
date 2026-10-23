@@ -25,14 +25,25 @@ pub async fn run_compiled_native_application(
     max_stdout_bytes: usize,
     max_wall: Duration,
 ) -> NativeRunnerResult<NativePairedApplicationReport> {
+    run_linked_native_application(product.linked(), limits, max_stdout_bytes, max_wall).await
+}
+
+/// Execute an independently reopened physical pair through the same private
+/// image validator and process retirement owner as a newly compiled pair.
+pub async fn run_linked_native_application(
+    product: &runmat_aot::link::LinkedNativePair,
+    limits: NativeTargetTestRunLimits,
+    max_stdout_bytes: usize,
+    max_wall: Duration,
+) -> NativeRunnerResult<NativePairedApplicationReport> {
     if max_stdout_bytes == 0 || max_wall.is_zero() {
         return Err(configuration(
             "application output and time bounds must be nonzero",
         ));
     }
     let mut image = PendingImage::prepare_role(
-        product.linked().application(),
-        product.linked().application_header(),
+        product.application(),
+        product.application_header(),
         NativePairedProductRole::Application,
         limits,
     )?;

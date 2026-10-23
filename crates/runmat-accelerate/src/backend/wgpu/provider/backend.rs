@@ -22,18 +22,18 @@ use runmat_accelerate_api::{
     ProviderBlackScholesPriceRequest, ProviderBlackScholesPriceResult, ProviderCholResult,
     ProviderCondNorm, ProviderConv1dOptions, ProviderConvMode, ProviderConvOrientation,
     ProviderCovarianceToCorrelationResult, ProviderCrossentropyMode, ProviderCrossentropyRequest,
-    ProviderCrossentropyResult, ProviderCummaxResult, ProviderCumminResult, ProviderEigResult,
-    ProviderFindResult, ProviderHermitianKind, ProviderIirFilterOptions, ProviderIirFilterResult,
-    ProviderInvOptions, ProviderLinsolveOptions, ProviderLinsolveResult, ProviderLuResult,
-    ProviderMeshgridResult, ProviderNanMode, ProviderNdgridRequest, ProviderNdgridResult,
-    ProviderNormOrder, ProviderPinvOptions, ProviderPolyderQuotient, ProviderPolyfitResult,
-    ProviderPolyvalOptions, ProviderPrecision, ProviderQrColumnOrder, ProviderQrOptions,
-    ProviderQrOutputs, ProviderQrPowerIterResult, ProviderQrResult, ProviderScanDirection,
-    ProviderSpectralFrameMode, ProviderSpectralRange, ProviderSpectralRequest,
-    ProviderSpectralResult, ProviderStdNormalization, ProviderSymmetryKind, ReduceDimResult,
-    ReductionFlavor, ReductionTwoPassMode, SetdiffOptions, SetdiffResult, SortComparison,
-    SortOrder, SortResult, SortRowsColumnSpec, SpawnHandleConcurrency, UnionOptions, UnionResult,
-    UniqueOptions, UniqueResult, WgpuBufferRef,
+    ProviderCrossentropyResult, ProviderCummaxResult, ProviderCumminResult, ProviderFindResult,
+    ProviderHermitianKind, ProviderIirFilterOptions, ProviderIirFilterResult, ProviderInvOptions,
+    ProviderLinsolveOptions, ProviderLinsolveResult, ProviderLuResult, ProviderMeshgridResult,
+    ProviderNanMode, ProviderNdgridRequest, ProviderNdgridResult, ProviderNormOrder,
+    ProviderPinvOptions, ProviderPolyderQuotient, ProviderPolyfitResult, ProviderPolyvalOptions,
+    ProviderPrecision, ProviderQrColumnOrder, ProviderQrOptions, ProviderQrOutputs,
+    ProviderQrPowerIterResult, ProviderQrResult, ProviderScanDirection, ProviderSpectralFrameMode,
+    ProviderSpectralRange, ProviderSpectralRequest, ProviderSpectralResult,
+    ProviderStdNormalization, ProviderSymmetryKind, ReduceDimResult, ReductionFlavor,
+    ReductionTwoPassMode, SetdiffOptions, SetdiffResult, SortComparison, SortOrder, SortResult,
+    SortRowsColumnSpec, SpawnHandleConcurrency, UnionOptions, UnionResult, UniqueOptions,
+    UniqueResult, WgpuBufferRef,
 };
 use runmat_runtime::builtins::common::shape::normalize_scalar_shape;
 use runmat_runtime::builtins::image::filters::fspecial::{
@@ -191,6 +191,8 @@ pub(crate) mod backend_types;
 mod health;
 #[path = "trait_impl.rs"]
 mod trait_impl;
+#[path = "device_control.rs"]
+mod device_control;
 
 pub(super) use backend_shared::*;
 pub(super) use backend_types::*;

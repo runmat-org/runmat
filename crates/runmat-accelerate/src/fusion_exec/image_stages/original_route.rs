@@ -2,40 +2,48 @@
 //! executes source instructions; VM owns those and their ordered publications.
 use super::*;
 use crate::placement::LocalPlacementFeedback;
-use runmat_accelerate_api::observation::VmRegionRouteAudit;
+use runmat_accelerate_api::observation::SourceRegionRouteAudit;
 use runmat_runtime::context::VmFusionCompletionRight;
 use runmat_time::{duration_ns_saturating, Instant};
-use std::sync::Arc;
 
 pub struct ImageVmOriginalRoute {
     provider: &'static dyn AccelProvider,
     device_id: u32,
     feedback: Option<Box<LocalPlacementFeedback>>,
     right: VmFusionCompletionRight,
-    audit: Arc<VmRegionRouteAudit>,
+    audit: SourceRegionRouteAudit,
     started: Instant,
+    tail_control: Option<super::prepared::RegionTailAdmission>,
 }
 
 impl ImageVmOriginalRoute {
     pub(super) fn new(
+        runtime: &runmat_runtime::context::RuntimeContext,
         provider: &'static dyn AccelProvider,
         feedback: Option<Box<LocalPlacementFeedback>>,
         right: VmFusionCompletionRight,
         started: Instant,
     ) -> Option<Self> {
-        let access = provider.wgpu_device_access()?.clone();
+        let audit = super::prepared::admit_region_audit(runtime, provider).ok()??;
+        let tail_control = match &feedback {
+            Some(feedback) => {
+                super::prepared::admit_region_tail(&feedback.runtime, provider).ok()?
+            }
+            None => None,
+        };
         Some(Self {
             provider,
             device_id: provider.device_id(),
             feedback,
             right,
-            audit: VmRegionRouteAudit::new(provider, access),
+            audit,
             started,
+            tail_control,
         })
     }
 
-    pub fn audit(&self) -> Arc<VmRegionRouteAudit> {
-        Arc::clone(&self.audit)
+    pub fn audit(&self) -> SourceRegionRouteAudit {
+        self.audit.clone()
     }
 
     /// Called only after the VM verified every source store and advanced past
@@ -44,6 +52,9 @@ impl ImageVmOriginalRoute {
     /// sample without changing completed source semantics.
     pub async fn complete(self: Box<Self>) {
         let Some(feedback) = self.feedback else {
+            return;
+        };
+        let Some(tail_control) = self.tail_control else {
             return;
         };
         if !self.audit.exact_single_provider()
@@ -61,7 +72,7 @@ impl ImageVmOriginalRoute {
         }
         if self
             .provider
-            .observe_vm_region_queue_tail(self.device_id)
+            .observe_region_queue_tail(self.device_id, tail_control.claim)
             .await
             .is_err()
         {

@@ -104,10 +104,10 @@ async fn read_column(source: &Value, column: usize) -> Result<RootedValue, Runti
             let path = crate::object::indexing::ObjectSubscriptPath::single(
                 crate::object::indexing::ObjectSubscript::parentheses(
                     crate::object::indexing::ObjectIndexSelector::IndexValues {
-                        components: vec![
+                        components: runmat_value::ExactArrayStorage::shared_unbounded(vec![
                             crate::object::indexing::ObjectIndexComponent::Colon,
                             Value::Num((column + 1) as f64).into(),
-                        ],
+                        ]),
                     },
                 ),
             );
@@ -144,9 +144,13 @@ fn gather_logical(value: &LogicalArray, plan: &IndexPlan) -> Result<Value, Runti
 
 fn gather_char(value: &CharArray, plan: &IndexPlan) -> Result<Value, RuntimeError> {
     let data = gather(&value.to_column_major(), plan, "character")?;
-    CharArray::from_column_major(data, plan.output_shape.clone())
-        .map(Value::CharArray)
-        .map_err(shape_error)
+    let context = crate::context::legacy::active();
+    CharArray::from_column_major(
+        data,
+        plan.row_major_output_shape_in_context(context.as_ref())?,
+    )
+    .map(Value::CharArray)
+    .map_err(shape_error)
 }
 
 fn gather_cell(value: &CellArray, plan: &IndexPlan) -> Result<Value, RuntimeError> {

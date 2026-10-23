@@ -160,11 +160,10 @@ pub struct UserCallContext<'a> {
 /// stack. Semantic and lexical targets can re-enter the VM through their
 /// selected invoker; unknown effects therefore take the sibling continuation.
 fn descriptor_needs_continuation(descriptor: &CallableDescriptor) -> bool {
-    let CallableTarget::Resolved {
-        identity: CallableIdentity::Builtin(id),
-        ..
-    } = &descriptor.target
-    else {
+    let CallableTarget::Resolved { identity, .. } = &descriptor.target else {
+        return true;
+    };
+    let CallableIdentity::Builtin(id) = identity.as_identity() else {
         return true;
     };
     let semantics = runmat_builtins::builtin_catalog_entry_by_name(&id.0)
@@ -698,7 +697,7 @@ async fn handle_method_or_member_index_call_inner(
     let _access_guard = current_class_context
         .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)))
         .transpose()?;
-    let outputs = Box::pin(
+    let outputs = runmat_runtime::execution::admit_executable_sequence_with(runtime, move || {
         runmat_runtime::object::dispatch::call_method_or_member_index_with_outputs_in_context(
             runtime,
             base,
@@ -707,8 +706,8 @@ async fn handle_method_or_member_index_call_inner(
             requested_outputs,
             (!current_function_name.is_empty()).then_some(current_function_name),
             fallback_policy,
-        ),
-    )
+        )
+    })?
     .await?;
     Ok(Some(outputs))
 }
@@ -741,7 +740,7 @@ pub async fn handle_method_or_member_index_expand_multi_call(
     let outputs = args
         .with_unbounded_values_async(|mut args| async move {
             let base = args.remove(0);
-            Box::pin(
+            runmat_runtime::execution::admit_executable_sequence_with(context.runtime, move || {
                 runmat_runtime::object::dispatch::call_method_or_member_index_with_outputs_in_context(
                     context.runtime,
                     base,
@@ -751,8 +750,8 @@ pub async fn handle_method_or_member_index_expand_multi_call(
                     (!context.current_function_name.is_empty())
                         .then_some(context.current_function_name),
                     context.fallback_policy,
-                ),
-            )
+                )
+            })?
             .await
         })
         .await??;

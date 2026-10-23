@@ -1,12 +1,12 @@
 error[E0277]: the trait bound `runmat_value::Value: CanonicalBuiltinOutput` is not satisfied
-   --> tests/ui/fail_output_sequence_type.rs:141:1
+   --> tests/ui/fail_output_sequence_type.rs:155:1
     |
-141 | / #[runtime_builtin(
-142 | |     name = "wrong_sequence_type",
-143 | |     binding_variant = "default",
-144 | |     output_sequence = true,
-145 | |     builtin_path = "tests::wrong_sequence_type"
-146 | | )]
+155 | / #[runtime_builtin(
+156 | |     name = "wrong_sequence_type",
+157 | |     binding_variant = "default",
+158 | |     output_sequence = true,
+159 | |     builtin_path = "tests::wrong_sequence_type"
+160 | | )]
     | |__^ the trait `CanonicalBuiltinOutput` is not implemented for `runmat_value::Value`
     |
     = help: the trait `CanonicalBuiltinOutput` is implemented for `runmat_value::ValueSequence`

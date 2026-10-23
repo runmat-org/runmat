@@ -6,7 +6,7 @@ use crate::context::host_allocation::{
 };
 use runmat_value::{
     exact_capacity_vec, ExactArrayInitializationError, ExactArrayStorage,
-    ExactHostAllocationPermit, OutputListStorage, SharedShape,
+    ExactHostAllocationPermit, OutputListStorage, SharedShape, Utf16CodeUnit,
 };
 
 const CHECKPOINT_CHUNK: usize = 4096;
@@ -183,9 +183,10 @@ fn quote_child(
         let (left, right) =
             character::trimmed_bounds(array.data_owner().as_slice(), direction, pattern);
         let count = right - left;
-        let payload = ExactArrayStorage::<char>::requested_bytes(count).map_err(|cause| {
-            strip_allocation_error(runtime, HostAllocationError::Numeric(cause))
-        })?;
+        let payload =
+            ExactArrayStorage::<Utf16CodeUnit>::requested_bytes(count).map_err(|cause| {
+                strip_allocation_error(runtime, HostAllocationError::Numeric(cause))
+            })?;
         let shape = SharedShape::requested_bytes_for_rank(array.shape.len()).map_err(|cause| {
             strip_allocation_error(runtime, HostAllocationError::Numeric(cause))
         })?;
@@ -243,13 +244,15 @@ fn admitted_child(
             let data = if array.data_owner().is_exact() {
                 array.data_owner().clone()
             } else {
-                ExactArrayStorage::try_initialize(0, permit, |_| Ok::<char, RuntimeError>(' '))
-                    .map_err(|cause| match cause {
-                        ExactArrayInitializationError::Allocation(cause) => {
-                            strip_allocation_error(runtime, HostAllocationError::Numeric(cause))
-                        }
-                        ExactArrayInitializationError::Element(cause) => cause,
-                    })?
+                ExactArrayStorage::try_initialize(0, permit, |_| {
+                    Ok::<Utf16CodeUnit, RuntimeError>(Utf16CodeUnit::from_raw(b' ' as u16))
+                })
+                .map_err(|cause| match cause {
+                    ExactArrayInitializationError::Allocation(cause) => {
+                        strip_allocation_error(runtime, HostAllocationError::Numeric(cause))
+                    }
+                    ExactArrayInitializationError::Element(cause) => cause,
+                })?
             };
             return CharArray::from_admitted(data, shape)
                 .map(Value::CharArray)
@@ -269,7 +272,7 @@ fn admitted_child(
             strip_allocation_error(runtime, HostAllocationError::Numeric(cause))
         })?;
         let data = ExactArrayStorage::try_initialize(width, permit, |index| {
-            Ok::<char, RuntimeError>(array.data()[left + index])
+            Ok::<Utf16CodeUnit, RuntimeError>(array.data()[left + index])
         })
         .map_err(|cause| match cause {
             ExactArrayInitializationError::Allocation(cause) => {
@@ -306,9 +309,12 @@ fn ordinary_child(
         } else {
             vec![1, width]
         };
-        return CharArray::new_with_shape(array.data()[left..right].to_vec(), dimensions)
-            .map(Value::CharArray)
-            .map_err(invalid);
+        return CharArray::from_code_units_with_shape(
+            array.data()[left..right].to_vec(),
+            dimensions,
+        )
+        .map(Value::CharArray)
+        .map_err(invalid);
     }
     Err(strip_error(&STRIP_ERROR_CELL_ELEMENT))
 }

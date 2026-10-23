@@ -131,8 +131,9 @@ async fn invoke_constructor(
     let argument_count = args.supplied_count();
     let invocation_owner = owner.clone();
     let invoked_function = binding.function;
-    let invoke: runmat_runtime::dispatcher::PreparedConstructorInvoke = Box::new(move |selected| {
-        Box::pin(async move {
+    let invoke = runmat_runtime::dispatcher::PreparedConstructorInvoke::new(
+        &runtime,
+        move |selected| async move {
             let selected =
                 selected.with_constructor_receiver_for_method(Some(&invocation_owner))?;
             super::invoke_semantic_function_with_rooted_captures(
@@ -146,8 +147,8 @@ async fn invoke_constructor(
             )
             .await
             .map(|(value, _)| value)
-        })
-    });
+        },
+    )?;
     if portable {
         runmat_runtime::dispatcher::call_portable_prepared_constructor_sequence_with_argument_count_in_context(
             &runtime,

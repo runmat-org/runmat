@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) fn parse_distribution_name(value: &Value) -> BuiltinResult<IcdfDistribution> {
-    let Some(keyword) = crate::builtins::common::random_args::keyword_of(value) else {
+    let Some(keyword) = crate::builtins::common::random_args::keyword_of(value)? else {
         return Err(super::normal_error(
             "icdf",
             "icdf: distribution name must be a string scalar",

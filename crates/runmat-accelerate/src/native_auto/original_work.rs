@@ -139,7 +139,8 @@ mod tests {
             ),
             (
                 Value::CharArray(
-                    runmat_value::CharArray::new_with_shape(vec![], vec![0, 7, 2]).unwrap(),
+                    runmat_value::CharArray::from_unicode_scalars_with_shape(vec![], vec![0, 7, 2])
+                        .unwrap(),
                 ),
                 NumericDomain::Real,
                 14,

@@ -42,6 +42,26 @@ where
     F: FnOnce(Value, Value) -> Fut,
     Fut: Future<Output = BuiltinResult<RootedValue>>,
 {
+    if let Some((runtime, route)) = context.and_then(|runtime| {
+        runtime
+            .native_region_host_route()
+            .map(|route| (runtime, route))
+    }) {
+        if input_count != 2
+            || !crate::builtins::math::host_route::real_floating_host(&left)
+            || !crate::builtins::math::host_route::real_floating_host(&right)
+        {
+            return Err(managed::invalid());
+        }
+        route.require_binary_host(
+            runtime,
+            operator,
+            BuiltinBindingIdentity {
+                builtin: identity,
+                variant: "default",
+            },
+        )?;
+    }
     let _inputs = RootedValueLease::for_values([&left, &right].into_iter())
         .map_err(|cause| cause.into_runtime_error())?;
     if input_count == 2 {

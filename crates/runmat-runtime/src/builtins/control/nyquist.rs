@@ -20,7 +20,7 @@ use crate::builtins::control::tf_model::{control_error, TfModel};
 use crate::BuiltinResult;
 
 const BUILTIN_NAME: &str = "nyquist";
-#[cfg(test)]
+#[cfg(all(test, feature = "plot-core"))]
 const DEFAULT_FREQUENCY_POINTS: usize = 200;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::nyquist")]

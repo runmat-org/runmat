@@ -5,7 +5,7 @@ mod inference;
 pub use contract::*;
 
 pub const PCG_CATALOG_ENTRY: crate::BuiltinCatalogEntry =
-    super::entry::host_factor_entry(super::entry::FactorEntrySpec {
+    super::entry::iterative_entry(super::entry::FactorEntrySpec {
         name: "pcg",
         provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
         documentation: documentation::DOCUMENTATION,
@@ -16,3 +16,5 @@ pub const PCG_CATALOG_ENTRY: crate::BuiltinCatalogEntry =
         residency: crate::BuiltinResidencyPolicy::Host,
         maturity: crate::BuiltinContractMaturity::Incomplete,
     });
+
+pub(super) const ENTRIES: &[&crate::BuiltinCatalogEntry] = &[&PCG_CATALOG_ENTRY];

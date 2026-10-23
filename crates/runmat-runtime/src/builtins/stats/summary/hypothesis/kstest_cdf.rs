@@ -7,7 +7,10 @@ pub(super) fn parse_kstest_cdf(value: &Value) -> BuiltinResult<CdfSpec> {
             Ok(CdfSpec::StandardNormal)
         }
         Value::CharArray(chars) if chars.rows == 1 => {
-            let text = chars.data().iter().collect::<String>();
+            let text = crate::builtins::stats::decode_utf16_with_error(
+                chars.data(),
+                || kstest_invalid_argument("kstest: CDF name is not valid UTF-16 text"),
+            )?;
             if KstestNamedCdf::from_public(&text).is_some() {
                 Ok(CdfSpec::StandardNormal)
             } else {

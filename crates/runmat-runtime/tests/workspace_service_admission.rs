@@ -137,9 +137,9 @@ fn failed_clear_preflight_does_not_clear_dynamic_functions() {
     let (runtime, owner) = runtime_with_workspace();
     let requests = Rc::new(RefCell::new(Vec::new()));
     let observed = requests.clone();
-    runtime.set_dynamic_function_clearer(Some(Rc::new(move |_runtime, request| {
+    runtime.set_dynamic_function_clearer(Some(Rc::new(move |runtime, request| {
         observed.borrow_mut().push(request);
-        Box::pin(async { Ok(()) })
+        runmat_runtime::execution::admit_domain_continuation_with(&runtime, || async { Ok(()) })
     })));
     owner.close().unwrap();
 

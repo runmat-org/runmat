@@ -299,7 +299,8 @@ fn webread_fetches_json_response() {
             let value = struct_value.fields.get("value").expect("value field");
             match message {
                 Value::CharArray(ca) => {
-                    let text: String = ca.data().iter().collect();
+                    let text: String = runmat_value::decode_utf16_code_units(ca.data())
+                        .expect("valid UTF-16 fixture");
                     assert_eq!(text, "hello");
                 }
                 other => panic!("expected char array, got {other:?}"),
@@ -326,7 +327,8 @@ fn webread_fetches_text_response() {
 
     match result {
         Value::CharArray(ca) => {
-            let text: String = ca.data().iter().collect();
+            let text: String =
+                runmat_value::decode_utf16_code_units(ca.data()).expect("valid UTF-16 fixture");
             assert_eq!(text, "RunMat webread test");
         }
         other => panic!("expected char array, got {other:?}"),

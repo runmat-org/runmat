@@ -17,7 +17,9 @@ async fn jsonencode_builtin(
 
 fn as_string(value: Value) -> String {
     match value {
-        Value::CharArray(ca) => ca.data().iter().collect(),
+        Value::CharArray(ca) => {
+            runmat_value::decode_utf16_code_units(ca.data()).expect("valid UTF-16 fixture")
+        }
         Value::String(s) => s.to_string(),
         other => panic!("expected char array, got {:?}", other),
     }

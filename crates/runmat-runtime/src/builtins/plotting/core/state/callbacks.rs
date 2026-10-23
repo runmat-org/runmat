@@ -109,6 +109,16 @@ pub fn retain(value: Value, builtin: &'static str) -> BuiltinResult<PlotCallable
     retain_root(value, None, builtin)
 }
 
+/// Canonical chart ingress supplies the actual session; no ambient owner is
+/// substituted when a direct embedding call deliberately supplies none.
+pub(crate) fn retain_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    value: Value,
+    builtin: &'static str,
+) -> BuiltinResult<PlotCallableToken> {
+    retain_root_in_context(runtime, value, None, builtin)
+}
+
 fn retain_root(
     value: Value,
     authority: Option<crate::context::BackgroundCallbackAuthority>,

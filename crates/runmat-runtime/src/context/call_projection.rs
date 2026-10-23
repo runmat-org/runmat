@@ -770,22 +770,29 @@ mod tests {
                     release: futures::channel::oneshot::Receiver<()>| {
             let selected_runtime = runtime.clone();
             runtime.scope(async move {
-                let invoker: Rc<user_functions::FunctionInvoker> = Rc::new(move |_, _, _, _| {
-                    Box::pin(async move {
-                        crate::execution::RootedValueSequence::new(
-                            ValueSequence::single(Value::Num(ordinal as f64)).unwrap(),
+                let invoker: Rc<user_functions::FunctionInvoker> =
+                    Rc::new(move |selected_runtime, _, _, _| {
+                        crate::user_functions::admit_user_function_with(
+                            selected_runtime.as_ref(),
+                            move || async move {
+                                crate::execution::RootedValueSequence::new(
+                                    ValueSequence::single(Value::Num(ordinal as f64)).unwrap(),
+                                )
+                                .map_err(|error| error.into_runtime_error())
+                            },
                         )
-                        .map_err(|error| error.into_runtime_error())
-                    })
-                });
+                    });
                 let bound: Rc<user_functions::BoundFunctionInvoker> =
-                    Rc::new(move |_, _, _, _, _lexical_environment| {
-                        Box::pin(async move {
-                            crate::execution::RootedValueSequence::new(
-                                ValueSequence::single(Value::Num(ordinal as f64)).unwrap(),
-                            )
-                            .map_err(|error| error.into_runtime_error())
-                        })
+                    Rc::new(move |runtime, _, _, _, _lexical_environment| {
+                        crate::execution::admit_executable_sequence_with(
+                            &runtime,
+                            move || async move {
+                                crate::execution::RootedValueSequence::new(
+                                    ValueSequence::single(Value::Num(ordinal as f64)).unwrap(),
+                                )
+                                .map_err(|error| error.into_runtime_error())
+                            },
+                        )
                     });
                 let _invoker =
                     user_functions::install_local_semantic_function_invoker(Rc::clone(&invoker))
@@ -951,8 +958,8 @@ mod tests {
         let mut cx = Context::from_waker(&waker);
         assert!(matches!(first.as_mut().poll(&mut cx), Poll::Pending));
         assert!(matches!(second.as_mut().poll(&mut cx), Poll::Pending));
-        let loader: Rc<DynamicFunctionLoader> = Rc::new(|_, _, _, _, _, _| {
-            Box::pin(async {
+        let loader: Rc<DynamicFunctionLoader> = Rc::new(|runtime, _, _, _, _, _| {
+            crate::execution::admit_dynamic_function_load_with(&runtime, || async {
                 std::ops::ControlFlow::Break(
                     crate::execution::RootedValueSequence::new(
                         ValueSequence::single(Value::Num(99.0)).unwrap(),

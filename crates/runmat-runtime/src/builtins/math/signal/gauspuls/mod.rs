@@ -5,9 +5,9 @@ mod execution;
 mod math;
 mod parameters;
 #[cfg(test)]
-mod tests;
-#[cfg(test)]
 mod provider_tests;
+#[cfg(test)]
+mod tests;
 use crate::builtins::common::tensor::{scalar_f64_from_value_async, tensor_into_value};
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -35,7 +35,7 @@ const DEFAULT_TPE: f64 = -60.;
     builtin_path = "crate::builtins::math::signal::gauspuls"
 )]
 async fn gauspuls_builtin(t: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
-    if let Some(mode) = parameters::text_scalar(&t) {
+    if let Some(mode) = parameters::text_scalar(&t)? {
         return execution::gauspuls_mode(mode, rest).await;
     }
     if rest.len() > 3 {

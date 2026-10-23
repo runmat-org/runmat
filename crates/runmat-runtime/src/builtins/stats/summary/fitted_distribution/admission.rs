@@ -74,7 +74,7 @@ pub(super) fn fit<'a>(
     let mut frequency = None;
     for pair in options.chunks_exact(2) {
         let name =
-            keyword_of(&pair[0]).ok_or_else(|| invalid("fitdist: option names must be text"))?;
+            keyword_of(&pair[0])?.ok_or_else(|| invalid("fitdist: option names must be text"))?;
         match FittedFitOption::from_keyword(&name) {
             Some(FittedFitOption::Frequency) if frequency.is_none() => {
                 let weight_shape = numeric_shape(FITDIST_NAME, &pair[1])?;

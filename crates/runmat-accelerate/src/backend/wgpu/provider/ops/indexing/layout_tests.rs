@@ -7,6 +7,79 @@ fn values(provider: &WgpuProvider, input: &GpuTensorHandle) -> Vec<f64> {
         .data
 }
 
+fn managed_index_context() -> (
+    runmat_runtime::context::RuntimeContext,
+    runmat_runtime::context::host_effect::ManagedHostEffectLedger,
+) {
+    use runmat_runtime::context::{
+        host_effect::ManagedHostEffectLedger, ParallelCapability, RuntimeContext,
+        RuntimeParallelResources, RuntimeParallelService, RuntimeServicePorts,
+    };
+    use std::rc::Rc;
+    struct Managed(ManagedHostEffectLedger);
+    impl RuntimeParallelService for Managed {
+        fn supports(&self, _: ParallelCapability) -> bool {
+            false
+        }
+        fn placement_resources(&self) -> RuntimeParallelResources {
+            let state = self.0.snapshot();
+            RuntimeParallelResources {
+                memory_available_bytes: Some(state.free_bytes()),
+                epoch: state.epoch,
+                ..Default::default()
+            }
+        }
+        fn managed_host_effect_ledger(&self) -> Option<ManagedHostEffectLedger> {
+            Some(self.0.clone())
+        }
+    }
+    let ledger = ManagedHostEffectLedger::new(16 * 1024 * 1024);
+    let runtime = RuntimeContext::new(Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ))
+    .with_service_ports(
+        RuntimeServicePorts::default().with_parallel(Rc::new(Managed(ledger.clone()))),
+    );
+    (runtime, ledger)
+}
+
+fn index_admission(
+    provider: &WgpuProvider,
+    runtime: &runmat_runtime::context::RuntimeContext,
+    source: &GpuTensorHandle,
+    rhs: Option<&GpuTensorHandle>,
+    rank: usize,
+) -> (
+    Box<dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    runmat_runtime::context::host_allocation::HostAllocationReceipt,
+) {
+    use runmat_runtime::context::host_allocation::{
+        provider_registration_host_quote, HostAllocationPlan, HostAllocationReceipt,
+    };
+    let quote = provider_registration_host_quote(provider, rank, 1, 1)
+        .unwrap()
+        .unwrap();
+    let runmat_execution::ResourceByteBound::Known(scratch) =
+        provider.indexing_host_workspace_bound(source, rhs)
+    else {
+        panic!("exact native indexing bound")
+    };
+    let receipt = HostAllocationReceipt::admit(
+        Some(runtime),
+        HostAllocationPlan::new(
+            quote.preparation_bytes.checked_add(scratch).unwrap(),
+            quote.retained_bytes,
+        )
+        .unwrap(),
+    )
+    .unwrap()
+    .unwrap();
+    let permit = provider
+        .prepare_output_host_metadata(Box::new(receipt.retained_view_permit(runtime).unwrap()), 1)
+        .unwrap();
+    (permit, receipt)
+}
+
 #[test]
 #[ignore = "requires actual WGPU device; run explicitly for F32 and F64"]
 fn transposed_diag_gather_and_in_place_scatter_use_logical_order() {
@@ -25,12 +98,181 @@ fn transposed_diag_gather_and_in_place_scatter_use_logical_order() {
         .gather_linear_exec(&transposed, &[1, 4], &[2, 1])
         .unwrap();
     assert_eq!(values(&provider, &gathered), vec![3., 4.]);
+    // Finite registration uses the same transposed bit-copy kernel without
+    // materializing a reshape/host index mirror. Claims outlive preparation.
+    let (runtime, ledger) = managed_index_context();
+    let (permit, receipt) = index_admission(&provider, &runtime, &transposed, None, 2);
+    let admitted = provider
+        .gather_linear_admitted(&transposed, &[1, 4], &[2, 1], permit.as_ref())
+        .unwrap();
+    assert_eq!(values(&provider, &admitted), vec![3., 4.]);
+    drop(permit);
+    drop(receipt);
+    assert!(ledger.snapshot().live_claimed_bytes > 0);
+    drop(admitted);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    let paired = runmat_accelerate_api::upload_numeric_protecting(
+        &provider,
+        &runmat_accelerate_api::HostNumericTensorView {
+            data: runmat_accelerate_api::HostNumericDataView::U64(&[
+                u64::MAX,
+                9_007_199_254_740_993,
+                2,
+                3,
+                4,
+                5,
+            ]),
+            shape: &[1, 3],
+            storage: GpuTensorStorage::ComplexInterleaved,
+        },
+        &[],
+    )
+    .unwrap();
+    let scalar = runmat_accelerate_api::upload_numeric_protecting(
+        &provider,
+        &runmat_accelerate_api::HostNumericTensorView {
+            data: runmat_accelerate_api::HostNumericDataView::U64(&[7, 9]),
+            shape: &[1, 1],
+            storage: GpuTensorStorage::ComplexInterleaved,
+        },
+        &[],
+    )
+    .unwrap();
+    let (permit, receipt) = index_admission(&provider, &runtime, &paired, Some(&scalar), 2);
+    let broadcast = provider
+        .scatter_linear_functional_admitted(
+            &paired,
+            &[0, 2],
+            &scalar,
+            runmat_accelerate_api::ProviderScatterValueMapping::Scalar,
+            permit.as_ref(),
+        )
+        .unwrap();
+    assert_eq!(
+        futures::executor::block_on(provider.download_numeric(&broadcast))
+            .unwrap()
+            .data,
+        runmat_accelerate_api::HostNumericDataOwned::U64(vec![7, 9, 2, 3, 7, 9])
+    );
+    assert_eq!(
+        futures::executor::block_on(provider.download_numeric(&paired))
+            .unwrap()
+            .data,
+        runmat_accelerate_api::HostNumericDataOwned::U64(vec![
+            u64::MAX,
+            9_007_199_254_740_993,
+            2,
+            3,
+            4,
+            5
+        ])
+    );
+    drop(permit);
+    drop(receipt);
+    drop(broadcast);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    // The same typed upload validator consumes exact caller-funded native
+    // integer encoding, with both borrowed allocations protected.
+    {
+        use runmat_runtime::context::host_allocation::{
+            provider_registration_host_quote, HostAllocationPlan, HostAllocationReceipt,
+            HostTypedWorkspace,
+        };
+        let lanes = [u64::MAX, 9_007_199_254_740_993];
+        let view = runmat_accelerate_api::HostNumericTensorView {
+            data: runmat_accelerate_api::HostNumericDataView::U64(&lanes),
+            shape: &[1, 1],
+            storage: GpuTensorStorage::ComplexInterleaved,
+        };
+        let words = provider
+            .numeric_upload_encoding_words(view.data.element_type(), view.data.len())
+            .unwrap();
+        assert_eq!(words, 4);
+        let quote = provider_registration_host_quote(&provider, 2, 1, 1)
+            .unwrap()
+            .unwrap();
+        let temporary = HostTypedWorkspace::<u32>::quoted_bytes(words).unwrap();
+        let receipt = HostAllocationReceipt::admit(
+            Some(&runtime),
+            HostAllocationPlan::new(
+                quote.preparation_bytes.checked_add(temporary).unwrap(),
+                quote.retained_bytes,
+            )
+            .unwrap(),
+        )
+        .unwrap()
+        .unwrap();
+        let permit = provider
+            .prepare_output_host_metadata(
+                Box::new(receipt.retained_view_permit(&runtime).unwrap()),
+                1,
+            )
+            .unwrap();
+        let mut scratch = receipt.temporary_typed::<u32>(&runtime, words).unwrap();
+        let uploaded = runmat_accelerate_api::upload_numeric_protecting_admitted_with_scratch(
+            &provider,
+            &view,
+            &[&source, &transposed],
+            Some(permit.as_ref()),
+            Some(runmat_accelerate_api::HostNumericUploadScratch {
+                words: scratch.as_mut_slice(),
+            }),
+        )
+        .unwrap();
+        assert_eq!(
+            futures::executor::block_on(provider.download_numeric(&uploaded))
+                .unwrap()
+                .data,
+            runmat_accelerate_api::HostNumericDataOwned::U64(lanes.to_vec())
+        );
+        drop(scratch);
+        drop(permit);
+        drop(receipt);
+        assert!(ledger.snapshot().live_claimed_bytes > 0);
+        drop(uploaded);
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    }
     let replacement = provider
         .upload(&HostTensorView {
             data: &[20., 30.],
             shape: &[2, 1],
         })
         .unwrap();
+    let (permit, receipt) = index_admission(&provider, &runtime, &source, Some(&replacement), 2);
+    let admitted = provider
+        .scatter_linear_functional_admitted(
+            &source,
+            &[1, 4],
+            &replacement,
+            runmat_accelerate_api::ProviderScatterValueMapping::Linear,
+            permit.as_ref(),
+        )
+        .unwrap();
+    assert_eq!(values(&provider, &admitted), vec![1., 20., 3., 4., 30., 6.]);
+    assert_eq!(values(&provider, &source), vec![1., 2., 3., 4., 5., 6.]);
+    drop(permit);
+    drop(receipt);
+    assert!(ledger.snapshot().live_claimed_bytes > 0);
+    drop(admitted);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    let (permit, receipt) =
+        index_admission(&provider, &runtime, &transposed, Some(&replacement), 2);
+    assert!(provider
+        .scatter_linear_functional_admitted(
+            &transposed,
+            &[1, 4],
+            &replacement,
+            runmat_accelerate_api::ProviderScatterValueMapping::Linear,
+            permit.as_ref()
+        )
+        .unwrap_err()
+        .is_unsupported());
+    drop(permit);
+    drop(receipt);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
     let functional = provider
         .scatter_linear_functional_exec(&transposed, &[1, 4], &replacement)
         .unwrap();

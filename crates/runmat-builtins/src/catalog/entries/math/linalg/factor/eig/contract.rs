@@ -144,7 +144,7 @@ pub const EIG_INPUTS_AB: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::NumericArray,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Second square matrix in the generalized problem A*V = B*V*D.",
+        description: "Second square coefficient of A - lambda*B; singular B and infinite or indeterminate generalized eigenvalues are supported.",
     },
 ];
 
@@ -161,7 +161,7 @@ pub const EIG_INPUTS_AB_OPTIONS: [BuiltinParamDescriptor; 3] = [
         ty: BuiltinParamType::NumericArray,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Second square matrix in the generalized problem A*V = B*V*D.",
+        description: "Second square coefficient of A - lambda*B; singular B and infinite or indeterminate generalized eigenvalues are supported.",
     },
     BuiltinParamDescriptor {
         name: "options",

@@ -3,8 +3,8 @@ use runmat_types::{DynamicReason, ValueFact, ValueKindFact};
 
 use super::{index_selectors, simple_operand_fact};
 
-mod dotted_invoke;
 mod callable;
+mod dotted_invoke;
 
 pub(crate) struct SubscriptChainInference {
     pub inference: runmat_types::FactInference,
@@ -27,6 +27,10 @@ pub(crate) fn infer(
     let mut effects = runmat_types::EffectSet::default();
     let mut capabilities = runmat_types::CapabilitySet::default();
     for (position, step) in chain.steps.iter().enumerate() {
+        if matches!(step, MirSubscriptStep::Index(indexing) if indexing.components.iter().any(|component| matches!(component, crate::MirIndexComponent::Expansion(_))))
+        {
+            return dynamic_dispatch(position, diagnostics, effects, capabilities);
+        }
         if matches!(
             current.kind,
             ValueKindFact::Object(_) | ValueKindFact::Unknown
@@ -123,6 +127,13 @@ pub(crate) fn infer_sequence(
     let mut current = simple_operand_fact(&chain.root, facts);
     let mut diagnostics = Vec::new();
     for (position, step) in chain.steps.iter().enumerate() {
+        if matches!(step, MirSubscriptStep::Index(indexing) if indexing.components.iter().any(|component| matches!(component, crate::MirIndexComponent::Expansion(_))))
+        {
+            return runmat_types::SequenceFactInference {
+                sequence: runmat_types::ValueSequenceFact::dynamic(),
+                diagnostics,
+            };
+        }
         if matches!(
             current.kind,
             ValueKindFact::Object(_) | ValueKindFact::Unknown
@@ -297,7 +308,8 @@ fn infer_callable_index(
             crate::MirIndexComponent::Expr(operand) => simple_operand_fact(operand, facts),
             crate::MirIndexComponent::Colon
             | crate::MirIndexComponent::ContextualExpr(_)
-            | crate::MirIndexComponent::PreparedExpr(_) => {
+            | crate::MirIndexComponent::PreparedExpr(_)
+            | crate::MirIndexComponent::Expansion(_) => {
                 ValueFact::unknown(DynamicReason::DynamicDispatch)
             }
         })
@@ -312,7 +324,8 @@ fn infer_callable_index(
             crate::MirIndexComponent::Expr(_)
             | crate::MirIndexComponent::Colon
             | crate::MirIndexComponent::ContextualExpr(_)
-            | crate::MirIndexComponent::PreparedExpr(_) => runmat_types::LiteralValue::Unknown,
+            | crate::MirIndexComponent::PreparedExpr(_)
+            | crate::MirIndexComponent::Expansion(_) => runmat_types::LiteralValue::Unknown,
         })
         .collect();
     callable::infer(current, arguments, literals, sequence_use)

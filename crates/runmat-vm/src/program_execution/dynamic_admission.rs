@@ -38,6 +38,16 @@ pub fn proves_no_graph_demand(canonical: &Bytecode) -> bool {
 
 /// Selected code admission for one VM invocation, never a global registry.
 pub trait DynamicEvalProductAdmission {
+    /// Retain an already-observed semantic definition from this session's
+    /// current publication. The numeric ID only narrows the lookup; the exact
+    /// observed owner must agree before its dependency graph can be issued.
+    fn selected_semantic_source_binding(
+        &self,
+        runtime: &RuntimeContext,
+        function: runmat_hir::FunctionId,
+        expected_owner: &std::sync::Arc<runmat_value::FunctionDefinitionOwner>,
+    ) -> Result<runmat_value::BoundFunctionBinding, RuntimeError>;
+
     /// Read the exact admitted body signature selected by the no-invoke
     /// source loader. Numeric ID and display name alone are never authority.
     fn selected_source_output_arity(

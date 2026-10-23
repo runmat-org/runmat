@@ -91,6 +91,20 @@ impl RunMatSession {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
+    async fn drain_retired_host_cleanup(
+        &self,
+        runtime: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<(), RuntimeError> {
+        // A retired foreign host can release its last explicit callback or
+        // engine-context owner. Observe eligibility and collect its callback
+        // receipt before retiring another host or forcing lifecycle closure.
+        self.local_tasks
+            .participate_foreground(self.lifecycle_host.retire_workspace_and_drain(runtime))
+            .await
+            .and_then(|result| result)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     async fn close_gracefully_native(&self) -> SessionRetirement {
         let runtime = self.runtime_context.clone();
         let mut result = self
@@ -107,10 +121,14 @@ impl RunMatSession {
             SessionRetirement::Retained(error) => return retained_after(result, error),
             SessionRetirement::Retired(selected) => result = append(result, selected),
         }
+        result = append(result, self.drain_retired_host_cleanup(&runtime).await);
 
         let mex = match self
             .local_tasks
-            .participate_foreground(self.mex_runtime.shutdown_gracefully_retirement(runtime))
+            .participate_foreground(
+                self.mex_runtime
+                    .shutdown_gracefully_retirement(runtime.clone()),
+            )
             .await
         {
             Ok(retirement) => retirement,
@@ -124,6 +142,7 @@ impl RunMatSession {
                 result = append(result, mex);
             }
         }
+        result = append(result, self.drain_retired_host_cleanup(&runtime).await);
 
         match self.native_ffi_adapter.shutdown_retirement().await {
             runmat_runtime::foreign::NativeFfiRetirement::Retained(error) => {
@@ -144,6 +163,7 @@ impl RunMatSession {
                 }
             }
         }
+        result = append(result, self.drain_retired_host_cleanup(&runtime).await);
 
         match self.python_adapter.shutdown_selected_retirement().await {
             runmat_runtime::foreign::PythonAdapterRetirement::Retained(error) => {
@@ -164,10 +184,12 @@ impl RunMatSession {
                 }
             }
         }
+        result = append(result, self.drain_retired_host_cleanup(&runtime).await);
 
         if let Err(error) = self.java_adapter.shutdown_selected_retirement() {
             return retained_after(result, error);
         }
+        result = append(result, self.drain_retired_host_cleanup(&runtime).await);
 
         result = append(
             result,

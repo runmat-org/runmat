@@ -1,7 +1,7 @@
 use minicbor::Encoder;
 
 use super::{
-    ExceptionFailureOrigin, ExceptionFrameSource, ExceptionGpuGatherRetry,
+    CharacterEncoding, ExceptionFailureOrigin, ExceptionFrameSource, ExceptionGpuGatherRetry,
     ExceptionRuntimeMetadata, ExceptionValue, InlineValue, RegisteredData, ValueLimits,
     ValuePayload,
 };
@@ -123,15 +123,24 @@ fn encode_inline(
             .map(|_| ())
             .map_err(encoding),
         InlineValue::String(value) => scalar(encoder, 12, |encoder| encoder.str(value).map(|_| ())),
-        InlineValue::Char { shape, code_points } => {
+        InlineValue::Char {
+            encoding: character_encoding,
+            shape,
+            code_units,
+        } => {
             encoder
-                .array(3)
+                .array(4)
                 .and_then(|encoder| encoder.u8(13))
                 .map_err(encoding)?;
+            encoder
+                .u8(match character_encoding {
+                    CharacterEncoding::Utf16CodeUnitsV1 => 1,
+                })
+                .map_err(encoding)?;
             encode_u64_array(encoder, shape)?;
-            encoder.array(code_points.len() as u64).map_err(encoding)?;
-            for value in code_points {
-                encoder.u32(*value).map_err(encoding)?;
+            encoder.array(code_units.len() as u64).map_err(encoding)?;
+            for value in code_units {
+                encoder.u16(*value).map_err(encoding)?;
             }
             Ok(())
         }
@@ -361,6 +370,7 @@ fn encode_exception_runtime(
         .u8(match runtime.failure_origin {
             ExceptionFailureOrigin::Unclassified => 0,
             ExceptionFailureOrigin::LanguageEvaluation => 1,
+            ExceptionFailureOrigin::ExecutionControlCancellation => 2,
         })
         .map(|_| ())
         .map_err(encoding)

@@ -1,14 +1,10 @@
 //! MATLAB-compatible `stackedplot` builtin.
+use runmat_builtins::{
+    STACKEDPLOT_ERROR_INVALID_ARGUMENT as ERROR_INVALID_ARGUMENT,
+    STACKEDPLOT_EXPLICIT_GPU_EXTENSION,
+};
 
 use glam::Vec4;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{LineStyle, PlotElement};
 use runmat_value::NumericStorage;
@@ -27,7 +23,7 @@ use super::style::{
     LineStyleParseOptions, MarkerKind,
 };
 use crate::builtins::common::tensor as tensor_utils;
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
+
 use crate::builtins::table::{
     is_tabular_object, parse_variable_selector_for_object, table_height,
     table_variable_names_from_object, table_variables, timetable_row_times,
@@ -36,163 +32,6 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "stackedplot";
 const MAX_STACKED_VARIABLES: usize = 25;
-
-const OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "s",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Handle to the StackedLineChart object.",
-}];
-
-const INPUTS_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Vector or matrix data. Matrix columns are plotted in separate stacked axes.",
-}];
-
-const INPUTS_X_Y: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Common x-axis vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Vector or matrix y data.",
-    },
-];
-
-const INPUTS_TABLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tbl",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Table or timetable data.",
-}];
-
-const INPUTS_PROPS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "props",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Variable selectors, line style, and StackedLineChart name-value options.",
-}];
-
-const SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
-    BuiltinSignatureDescriptor {
-        label: "s = stackedplot(Y)",
-        inputs: &INPUTS_Y,
-        outputs: &OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "s = stackedplot(X, Y)",
-        inputs: &INPUTS_X_Y,
-        outputs: &OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "s = stackedplot(tbl)",
-        inputs: &INPUTS_TABLE,
-        outputs: &OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "s = stackedplot(tbl, vars)",
-        inputs: &INPUTS_PROPS,
-        outputs: &OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "s = stackedplot(..., LineSpec)",
-        inputs: &INPUTS_PROPS,
-        outputs: &OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "s = stackedplot(..., Name, Value)",
-        inputs: &INPUTS_PROPS,
-        outputs: &OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "s = stackedplot(parent, ...)",
-        inputs: &INPUTS_PROPS,
-        outputs: &OUTPUT,
-    },
-];
-
-const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STACKEDPLOT.INVALID_ARGUMENT",
-    identifier: Some("RunMat:stackedplot:InvalidArgument"),
-    when: "Input data, table selectors, line style, parent, or StackedLineChart properties are invalid.",
-    message: "stackedplot: invalid argument",
-};
-
-const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STACKEDPLOT.INTERNAL",
-    identifier: Some("RunMat:stackedplot:Internal"),
-    when: "Internal plotting state update fails.",
-    message: "stackedplot: internal operation failed",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_INVALID_ARGUMENT, ERROR_INTERNAL];
-
-pub const STACKEDPLOT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
-const STACKEDPLOT_EXPLICIT_GPU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "stackedplot-explicit-gpu-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "stackedplot with an explicitly GPU-resident input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:StackedplotExplicitGpuInputExtension"),
-};
-pub const STACKEDPLOT_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
-    [STACKEDPLOT_EXPLICIT_GPU_EXTENSION];
-const STACKEDPLOT_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X, Y, or numeric table variables",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The documented numeric data surface includes native integer arrays. Exact source class, shape, and values remain authoritative independently of floating render geometry.",
-    }];
-const STACKEDPLOT_INTEGER_SELECTOR_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "vars or XVariable",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The compatibility target explicitly documents integer arrays as table-variable selectors. RunMat decodes them as exact one-based structural indices.",
-    }];
-pub const STACKEDPLOT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "s = stackedplot(integer_Y) or stackedplot(integer_X, integer_Y)",
-        inputs: &STACKEDPLOT_INTEGER_DATA_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Graphics source properties retain native storage and rendering crosses an explicit floating geometry boundary. Automatic residency gathers transparently; explicit gpuArray input is separately gated because the public page does not document it.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "s = stackedplot(tbl, integer_vars) or stackedplot(tbl, XVariable=integer_xvar)",
-        inputs: &STACKEDPLOT_INTEGER_SELECTOR_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Selectors are validated exactly as positive in-range one-based indices; selected integer variables retain their source classes and values.",
-    },
-];
 
 #[derive(Clone, Debug)]
 struct StackedLine {
@@ -249,18 +88,28 @@ struct TabularInput {
 
 #[runtime_builtin(
     name = "stackedplot",
-    category = "plotting",
-    summary = "Create a stacked plot of multiple variables with a common x-axis.",
-    keywords = "stackedplot,stacked,line,table,timetable,plotting",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::stackedplot::STACKEDPLOT_DESCRIPTOR),
-    extensions(crate::builtins::plotting::stackedplot::STACKEDPLOT_EXTENSIONS),
-    integer_capabilities(crate::builtins::plotting::stackedplot::STACKEDPLOT_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::stackedplot"
 )]
-pub fn stackedplot_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
+pub fn stackedplot_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<f64> {
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > 1) {
+        return Err(crate::runtime_error::semantic_error(
+            "RunMat:plotting:TooManyOutputs",
+            "stackedplot: too many output arguments",
+        ));
+    }
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "stackedplot")?;
+    let _arguments = args.fork();
+    work.finish(stackedplot_impl(args, &work))
+}
+fn stackedplot_impl(
+    args: crate::call::BuiltinArguments,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> crate::BuiltinResult<f64> {
     if args
         .iter()
         .any(crate::builtins::common::validation::value_contains_explicit_gpu)
@@ -272,59 +121,56 @@ pub fn stackedplot_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
     }
     let (target, args) = split_parent(args)?;
     let (series, options) = parse_stackedplot_args(args)?;
+    work.check()?;
     render_stackedplot(series, options, target)
 }
 
-fn split_parent(args: Vec<Value>) -> BuiltinResult<(Option<FigureHandle>, Vec<Value>)> {
-    let mut iter = args.into_iter();
-    let Some(first) = iter.next() else {
-        return Ok((None, Vec::new()));
+fn split_parent(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<(Option<FigureHandle>, crate::call::BuiltinArguments)> {
+    let Some(first) = args.first() else {
+        return Ok((None, args));
     };
-    let rest = iter.collect::<Vec<_>>();
-    if let Ok(handle) = resolve_plot_handle(&first, BUILTIN_NAME) {
-        match handle {
-            PlotHandle::Figure(handle) => {
-                if !rest.is_empty()
-                    && !looks_like_stacked_option(&rest[0])
-                    && !looks_like_line_spec(&rest[0])
-                {
-                    return Ok((Some(handle), rest));
-                }
-            }
-            PlotHandle::Axes(_, _) => {
-                if !rest.is_empty()
-                    && !looks_like_stacked_option(&rest[0])
-                    && !looks_like_line_spec(&rest[0])
-                {
-                    return Err(stacked_err(
-                        "parent must be a figure handle; axes handles are not valid stackedplot parents",
-                    ));
-                }
-            }
-            _ => {}
+    if let Ok(handle) = resolve_plot_handle(first, BUILTIN_NAME) {
+        if args
+            .get(1)
+            .map(|value| {
+                Ok::<_, crate::RuntimeError>(
+                    !looks_like_stacked_option(value)? && !looks_like_line_spec(value)?,
+                )
+            })
+            .transpose()?
+            .unwrap_or(false)
+        {
+            match handle {
+    PlotHandle::Figure(handle) => return Ok((Some(handle),args.into_range(1..)?)),
+    PlotHandle::Axes(_,_) => return Err(stacked_err("parent must be a figure handle; axes handles are not valid stackedplot parents")),
+    _ => {}
+   }
         }
     }
-    let mut data_args = Vec::with_capacity(rest.len() + 1);
-    data_args.push(first);
-    data_args.extend(rest);
-    Ok((None, data_args))
+    Ok((None, args))
 }
 
-fn parse_stackedplot_args(args: Vec<Value>) -> BuiltinResult<(Vec<StackedSeries>, StackedOptions)> {
+fn parse_stackedplot_args(
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<(Vec<StackedSeries>, StackedOptions)> {
     if args.is_empty() {
         return Err(stacked_err(
             "expected table, timetable, vector, or matrix data",
         ));
     }
 
-    if let Some((inputs, consumed)) = collect_tabular_inputs(&args)? {
-        return parse_table_call(inputs, &args[consumed..]);
+    if let Some((inputs, consumed)) = collect_tabular_inputs(args.view())? {
+        return parse_table_call(inputs, args.view().range(consumed..)?);
     }
 
-    parse_matrix_call(&args)
+    parse_matrix_call(args.view())
 }
 
-fn collect_tabular_inputs(args: &[Value]) -> BuiltinResult<Option<(Vec<TabularInput>, usize)>> {
+fn collect_tabular_inputs(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Option<(Vec<TabularInput>, usize)>> {
     match args.first() {
         Some(Value::Object(object)) if is_tabular_object(object) => {
             let mut inputs = Vec::new();
@@ -401,7 +247,9 @@ fn source_table_snapshot(inputs: &[TabularInput]) -> BuiltinResult<StackedSource
     })
 }
 
-fn parse_matrix_call(args: &[Value]) -> BuiltinResult<(Vec<StackedSeries>, StackedOptions)> {
+fn parse_matrix_call(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<(Vec<StackedSeries>, StackedOptions)> {
     let mut data_end = if args.len() >= 2 && is_numeric_like(&args[0]) && is_numeric_like(&args[1])
     {
         2
@@ -411,7 +259,7 @@ fn parse_matrix_call(args: &[Value]) -> BuiltinResult<(Vec<StackedSeries>, Stack
     if data_end > args.len() {
         data_end = args.len();
     }
-    let (mut options, style_tokens) = parse_options(&args[data_end..], true)?;
+    let (mut options, style_tokens) = parse_options(args.range(data_end..)?, true)?;
     apply_style_tokens(&mut options, &style_tokens)?;
 
     let (x, x_source, y, explicit_x) = if data_end == 2 {
@@ -468,17 +316,17 @@ fn parse_matrix_call(args: &[Value]) -> BuiltinResult<(Vec<StackedSeries>, Stack
 
 fn parse_table_call(
     inputs: Vec<TabularInput>,
-    rest: &[Value],
+    rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<(Vec<StackedSeries>, StackedOptions)> {
     let mut option_start = 0usize;
     let mut selector: Option<Value> = None;
     if let Some(first) = rest.first() {
-        if !looks_like_stacked_option(first) && !looks_like_line_spec(first) {
+        if !looks_like_stacked_option(first)? && !looks_like_line_spec(first)? {
             selector = Some(first.clone());
             option_start = 1;
         }
     }
-    let (mut options, style_tokens) = parse_options(&rest[option_start..], false)?;
+    let (mut options, style_tokens) = parse_options(rest.range(option_start..)?, false)?;
     apply_style_tokens(&mut options, &style_tokens)?;
     options.source_table = Some(source_table_snapshot(&inputs)?);
     validate_tabular_kinds(&inputs)?;
@@ -664,14 +512,14 @@ fn add_table_line(
 }
 
 fn parse_options(
-    args: &[Value],
+    args: crate::call::FunctionArgumentView<'_>,
     _allow_ylabels: bool,
 ) -> BuiltinResult<(StackedOptions, Vec<Value>)> {
     let mut options = StackedOptions::default();
     let mut style_tokens = Vec::new();
     let mut idx = 0usize;
     while idx < args.len() {
-        if idx == 0 && looks_like_line_spec(&args[idx]) {
+        if idx == 0 && looks_like_line_spec(&args[idx])? {
             style_tokens.push(args[idx].clone());
             idx += 1;
             continue;
@@ -1175,13 +1023,12 @@ fn tensor_plot_column_sources(tensor: &Tensor) -> BuiltinResult<Vec<(Vec<f64>, T
 fn tensor_column_source(tensor: &Tensor, col: usize) -> BuiltinResult<(Vec<f64>, Tensor)> {
     let rows = tensor.rows();
     let indices = (0..rows).map(|row| row + col * rows).collect::<Vec<_>>();
-    let storage = tensor
-        .clone()
-        .into_numeric_storage()
-        .map_err(stacked_err)?
-        .gather(&indices)
-        .map_err(stacked_err)?;
-    let source = Tensor::from_numeric_storage(storage, vec![rows, 1]).map_err(stacked_err)?;
+    let source = super::op_common::line_inputs::select_native(
+        tensor,
+        &indices,
+        vec![rows, 1],
+        BUILTIN_NAME,
+    )?;
     Ok((tensor_utils::tensor_values_f64(&source), source))
 }
 
@@ -1195,18 +1042,34 @@ fn variable_selector(value: &Value) -> BuiltinResult<Vec<String>> {
             .collect()),
         Value::CharArray(array) => {
             if array.rows == 1 {
-                Ok(vec![array.to_string().trim().to_string()])
+                Ok(vec![runmat_value::decode_utf16_code_units(array.data())
+                    .map_err(|source| {
+                        crate::builtins::plotting::plotting_error_with_source(
+                            "stackedplot",
+                            source.to_string(),
+                            source,
+                        )
+                    })?
+                    .trim()
+                    .to_string()])
             } else {
-                Ok((0..array.rows)
+                (0..array.rows)
                     .map(|row| {
                         let start = row * array.cols;
-                        array.data()[start..start + array.cols]
-                            .iter()
-                            .collect::<String>()
-                            .trim()
-                            .to_string()
+                        Ok(runmat_value::decode_utf16_code_units(
+                            &array.data()[start..start + array.cols],
+                        )
+                        .map_err(|source| {
+                            crate::builtins::plotting::plotting_error_with_source(
+                                "stackedplot",
+                                source.to_string(),
+                                source,
+                            )
+                        })?
+                        .trim()
+                        .to_string())
                     })
-                    .collect())
+                    .collect()
             }
         }
         Value::Cell(cell) => cell
@@ -1257,40 +1120,66 @@ fn variable_selector(value: &Value) -> BuiltinResult<Vec<String>> {
     }
 }
 
-fn looks_like_stacked_option(value: &Value) -> bool {
-    let Some(key) = value_as_string(value) else {
-        return false;
-    };
-    matches!(
-        key.to_ascii_lowercase().as_str(),
-        "xvariable"
-            | "combinematchingnames"
-            | "title"
-            | "xlabel"
-            | "displaylabels"
-            | "displayvariables"
-            | "ylabels"
-            | "visible"
-            | "gridvisible"
-            | "xlimits"
-            | "eventsvisible"
-            | "color"
-            | "linestyle"
-            | "linewidth"
-            | "marker"
-            | "markersize"
-    )
+fn looks_like_stacked_option(value: &Value) -> crate::BuiltinResult<bool> {
+    Ok({
+        let Some(key) = value_as_string(value).map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                "stackedplot",
+                source.to_string(),
+                source,
+            )
+        })?
+        else {
+            return Ok(false);
+        };
+        matches!(
+            key.to_ascii_lowercase().as_str(),
+            "xvariable"
+                | "combinematchingnames"
+                | "title"
+                | "xlabel"
+                | "displaylabels"
+                | "displayvariables"
+                | "ylabels"
+                | "visible"
+                | "gridvisible"
+                | "xlimits"
+                | "eventsvisible"
+                | "color"
+                | "linestyle"
+                | "linewidth"
+                | "marker"
+                | "markersize"
+        )
+    })
 }
 
-fn looks_like_line_spec(value: &Value) -> bool {
-    let Some(token) = value_as_string(value) else {
-        return false;
-    };
-    !token.is_empty() && token.chars().all(|c| "-:.ox+*^v<>sdphrgbcmykw".contains(c))
+fn looks_like_line_spec(value: &Value) -> crate::BuiltinResult<bool> {
+    Ok({
+        let Some(token) = value_as_string(value).map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                "stackedplot",
+                source.to_string(),
+                source,
+            )
+        })?
+        else {
+            return Ok(false);
+        };
+        !token.is_empty() && token.chars().all(|c| "-:.ox+*^v<>sdphrgbcmykw".contains(c))
+    })
 }
 
 fn text_scalar(value: &Value, name: &str) -> BuiltinResult<String> {
-    value_as_string(value).ok_or_else(|| stacked_err(format!("{name} must be text")))
+    value_as_string(value)
+        .map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                "stackedplot",
+                source.to_string(),
+                source,
+            )
+        })?
+        .ok_or_else(|| stacked_err(format!("{name} must be text")))
 }
 
 fn bool_scalar(value: &Value, name: &str) -> BuiltinResult<bool> {
@@ -1303,7 +1192,13 @@ fn bool_scalar(value: &Value, name: &str) -> BuiltinResult<bool> {
 }
 
 fn visible_bool(value: &Value) -> BuiltinResult<bool> {
-    if let Some(text) = value_as_string(value) {
+    if let Some(text) = value_as_string(value).map_err(|source| {
+        crate::builtins::plotting::plotting_error_with_source(
+            "stackedplot",
+            source.to_string(),
+            source,
+        )
+    })? {
         return match text.to_ascii_lowercase().as_str() {
             "on" => Ok(true),
             "off" => Ok(false),
@@ -1498,6 +1393,13 @@ fn stacked_runtime_error(builtin: &'static str, detail: impl AsRef<str>) -> Runt
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn stackedplot_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+        super::stackedplot_builtin(
+            crate::context::legacy::active(),
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )
+    }
+
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::set::set_builtin;
     use crate::builtins::plotting::state::{

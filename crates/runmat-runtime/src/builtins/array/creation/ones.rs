@@ -22,14 +22,7 @@ use crate::builtins::common::spec::{
     GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(test)]
-use runmat_builtins::Type;
 use runmat_value::NumericDType;
-
-#[cfg(test)]
-use crate::builtins::array::type_resolvers::tensor_type_from_rank;
-#[cfg(test)]
-use runmat_builtins::ResolveContext;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::ones")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -74,17 +67,6 @@ fn ones_error_with_message(
         builder = builder.with_identifier(identifier);
     }
     builder.build()
-}
-
-#[cfg(test)]
-fn ones_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    if args.is_empty() {
-        return Type::Num;
-    }
-    if args.iter().any(|arg| matches!(arg, Type::String)) {
-        return Type::Unknown;
-    }
-    tensor_type_from_rank(args, ctx)
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::ones")]
@@ -145,7 +127,9 @@ impl ParsedOnes {
         let mut idx = 0;
         while idx < args.len() {
             let arg = args[idx].clone();
-            if let Some(keyword) = keyword_of(&arg) {
+            if let Some(keyword) =
+                crate::builtins::common::arg_tokens::scalar_keyword_of(&arg, "ones")?
+            {
                 if matches!(class_override.as_ref(), Some(OutputTemplate::GpuArray(_)))
                     && keyword != "like"
                 {
@@ -522,18 +506,6 @@ async fn ones_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> crate::Buil
     super::resident_constant::like(handle, shape, super::resident_constant::Constant::One)
 }
 
-fn keyword_of(value: &Value) -> Option<String> {
-    match value {
-        Value::String(s) => Some(s.to_ascii_lowercase()),
-        Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].to_ascii_lowercase()),
-        Value::CharArray(ca) if ca.rows == 1 => {
-            let text: String = ca.data().iter().collect();
-            Some(text.to_ascii_lowercase())
-        }
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -549,34 +521,6 @@ pub(crate) mod tests {
         ))
         .expect("ones");
         assert_eq!(result, Value::Num(1.0));
-    }
-
-    #[test]
-    fn ones_type_defaults_to_num() {
-        assert_eq!(ones_type(&[], &ResolveContext::new(Vec::new())), Type::Num);
-    }
-
-    #[test]
-    fn ones_type_infers_rank_from_scalar_dim() {
-        assert_eq!(
-            ones_type(&[Type::Num], &ResolveContext::new(Vec::new())),
-            Type::Tensor {
-                shape: Some(vec![None, None])
-            }
-        );
-    }
-
-    #[test]
-    fn ones_type_infers_rank_from_size_vector() {
-        let size_vec = Type::Tensor {
-            shape: Some(vec![Some(1), Some(4)]),
-        };
-        assert_eq!(
-            ones_type(&[size_vec], &ResolveContext::new(Vec::new())),
-            Type::Tensor {
-                shape: Some(vec![None, None, None, None])
-            }
-        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

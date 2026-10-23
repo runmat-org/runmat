@@ -2,6 +2,10 @@
 
 use runmat_runtime::execution::{RootedValueLease, RootedValues};
 use runmat_runtime::indexing::plan::{build_index_plan, IndexPlan};
+use runmat_runtime::indexing::read_slice::{
+    read_sparse_slice_with_policy_in_context, try_read_sparse_slice_host_in_context,
+    SparseReadZeroPolicy,
+};
 use runmat_runtime::indexing::selectors::{build_slice_selectors, build_slice_selectors_host};
 use runmat_runtime::object::dispatch::{
     invoke_resolved_object_index_path_method_in_context, resolve_object_index_protocol,
@@ -33,22 +37,23 @@ pub(super) fn read_paren(
                 "Function handle call does not support colon or end selector syntax",
             )));
         }
-        let roots =
-            RootedValueLease::for_values(std::iter::once(&base).chain(selectors.numeric.iter()))
-                .map_err(|error| NativeExecutorError::from(error.into_runtime_error()))?;
+        let roots = RootedValueLease::for_values_iterator_in_context(
+            std::iter::once(&base),
+            &state.runtime,
+        )?;
         let runtime = state.runtime.clone();
         let arguments = selectors.numeric;
         return call_suspension::begin_rooted_arguments(
             state,
             embedded.cloned(),
-            Box::pin(async move {
+            move || async move {
                 let _roots = roots;
                 let sequence = runtime
                     .scope(
-                        runmat_runtime::call_feval_sequence_async_with_outputs_in_context(
+                        runmat_runtime::call_feval_retained_sequence_async_with_outputs_in_context(
                             &runtime,
                             base,
-                            &arguments,
+                            arguments.into(),
                             requested_outputs,
                         ),
                     )
@@ -56,10 +61,9 @@ pub(super) fn read_paren(
                 sequence.with_owned_sequence(|sequence| {
                     let values = normalize_sequence_outputs(sequence, requested_outputs)
                         .map_err(|error| *error)?;
-                    RootedValues::from_output_storage(values)
-                        .map_err(|error| error.into_runtime_error())
+                    RootedValues::from_output_storage_in_context(values, &runtime)
                 })
-            }),
+            },
         )
         .map(|values| {
             IndexedReadOutcome::Ordinary(runmat_value::OutputListStorage::unbounded(values))
@@ -71,19 +75,22 @@ pub(super) fn read_paren(
     ) {
         let resolution = resolve_object_index_protocol(&base, ObjectIndexOp::Subsref, None)?;
         if resolution.is_some() {
-            let path = ObjectSubscriptPath::single(ObjectSubscript::parentheses(object_selector(
-                &selectors,
-            )?));
-            let roots = RootedValueLease::for_values(
-                std::iter::once(&base).chain(selectors.numeric.iter()),
-            )
-            .map_err(|error| NativeExecutorError::from(error.into_runtime_error()))?;
+            let path = ObjectSubscriptPath::single_in_context(
+                Some(&state.runtime),
+                ObjectSubscript::parentheses(object_selector(&state.runtime, &selectors)?),
+            )?;
+            let roots = RootedValueLease::for_values_iterator_in_context(
+                std::iter::once(&base),
+                &state.runtime,
+            )?;
+            let selector_roots = selectors.numeric;
             let runtime = state.runtime.clone();
             return call_suspension::begin_rooted_arguments(
                 state,
                 embedded.cloned(),
-                Box::pin(async move {
+                move || async move {
                     let _roots = roots;
+                    let _selector_roots = selector_roots;
                     let sequence = runtime
                         .scope(invoke_resolved_object_index_path_method_in_context(
                             &runtime,
@@ -96,10 +103,9 @@ pub(super) fn read_paren(
                     sequence.with_owned_sequence(|sequence| {
                         let values = normalize_sequence_outputs(sequence, requested_outputs)
                             .map_err(|error| *error)?;
-                        RootedValues::from_output_storage(values)
-                            .map_err(|error| error.into_runtime_error())
+                        RootedValues::from_output_storage_in_context(values, &runtime)
                     })
-                }),
+                },
             )
             .map(|values| {
                 IndexedReadOutcome::Ordinary(runmat_value::OutputListStorage::unbounded(values))
@@ -108,11 +114,25 @@ pub(super) fn read_paren(
     }
     let direct_host = host_read_eligible(&base) && direct_host_indexing_allowed(state)?;
     let roots =
-        RootedValueLease::for_values(std::iter::once(&base).chain(selectors.numeric.iter()))
-            .map_err(|error| NativeExecutorError::from(error.into_runtime_error()))?;
+        RootedValueLease::for_values_iterator_in_context(std::iter::once(&base), &state.runtime)?;
     if direct_host {
-        if let Some(plan) = plan_for_host(&base, &selectors)? {
-            let value = read_with_plan(base, &plan)?;
+        if let Value::SparseTensor(sparse) = &base {
+            if let Some(value) = try_read_sparse_slice_host_in_context(
+                &state.runtime,
+                sparse,
+                selectors.dims,
+                selectors.colon_mask,
+                selectors.end_mask,
+                selectors.numeric.values(),
+                SparseReadZeroPolicy::PreserveTypedComponents,
+            )? {
+                let outputs = normalize_outputs(value, requested_outputs)?;
+                let rooted = RootedValues::from_output_storage_in_context(outputs, &state.runtime)?;
+                drop(roots);
+                return Ok(IndexedReadOutcome::Host(rooted));
+            }
+        } else if let Some(plan) = plan_for_host(&base, &selectors)? {
+            let value = read_with_plan(Some(&state.runtime), base, &plan)?;
             let outputs = normalize_outputs(value, requested_outputs)?;
             let rooted = RootedValues::from_output_storage_in_context(outputs, &state.runtime)
                 .map_err(NativeExecutorError::from)?;
@@ -125,8 +145,21 @@ pub(super) fn read_paren(
         let _roots = roots;
         let outputs = runtime
             .scope(async {
-                let plan = plan_for(&base, &selectors).await?;
-                let value = read_with_plan(base, &plan)?;
+                let value = if let Value::SparseTensor(sparse) = &base {
+                    read_sparse_slice_with_policy_in_context(
+                        Some(&runtime),
+                        sparse,
+                        selectors.dims,
+                        selectors.colon_mask,
+                        selectors.end_mask,
+                        selectors.numeric.values(),
+                        SparseReadZeroPolicy::PreserveTypedComponents,
+                    )
+                    .await?
+                } else {
+                    let plan = plan_for(&base, &selectors).await?;
+                    read_with_plan(Some(&runtime), base, &plan)?
+                };
                 normalize_outputs(value, requested_outputs)
             })
             .await?;
@@ -138,7 +171,7 @@ pub(super) fn read_paren(
         embedded.cloned(),
         call_suspension::SemanticOperationKind::IndexedRead,
         Vec::new(),
-        future,
+        move || future,
     )?;
     Ok(IndexedReadOutcome::Ordinary(
         values.with_owned_output_storage(|values| values),
@@ -173,7 +206,7 @@ fn plan_for_host(
         selectors.dims,
         selectors.colon_mask,
         selectors.end_mask,
-        &selectors.numeric,
+        selectors.numeric.values(),
         &shape,
     )?
     else {
@@ -193,7 +226,7 @@ async fn plan_for(
         selectors.dims,
         selectors.colon_mask,
         selectors.end_mask,
-        &selectors.numeric,
+        selectors.numeric.values(),
         &shape,
     )
     .await?;

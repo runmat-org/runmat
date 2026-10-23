@@ -68,7 +68,7 @@ pub(super) fn option_headers(
     )?;
     let mut values = values.into_iter();
     while let (Some(name), Some(value)) = (values.next(), values.next()) {
-        let name = keyword_of(&name).ok_or_else(|| invalid("tsne: option name must be text"))?;
+        let name = keyword_of(&name)?.ok_or_else(|| invalid("tsne: option name must be text"))?;
         let option = TsneOption::from_keyword(&name)
             .ok_or_else(|| invalid(format!("tsne: unknown option '{name}'")))?;
         headers.push((option, value));
@@ -111,7 +111,7 @@ pub(super) fn admit_options(headers: Vec<OptionHeader>) -> BuiltinResult<Vec<Adm
                 )
             }
             TsneOption::CacheSize => {
-                if let Some(text) = keyword_of(&value) {
+                if let Some(text) = keyword_of(&value)? {
                     if TsneCacheSizeKeyword::from_keyword(&text)
                         != Some(TsneCacheSizeKeyword::Maximal)
                     {
@@ -234,7 +234,7 @@ fn scalar(
 }
 
 fn text(value: &Value, name: &str) -> BuiltinResult<String> {
-    keyword_of(value).ok_or_else(|| invalid(format!("tsne: {name} must be text")))
+    keyword_of(value)?.ok_or_else(|| invalid(format!("tsne: {name} must be text")))
 }
 
 fn scalar_shape(value: &Value, name: &str) -> BuiltinResult<()> {

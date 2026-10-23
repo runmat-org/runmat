@@ -62,3 +62,11 @@ pub const MAX_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
 };
 
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&MAX_CATALOG_ENTRY];
+
+/// Legacy omit-NaN maximum has the same admitted shape/class/output grammar.
+pub(super) fn infer_omit_nan(
+    request: &runmat_types::CallRequest,
+    entry: &crate::BuiltinCatalogEntry,
+) -> runmat_types::CallInference {
+    inference::infer(request, entry)
+}

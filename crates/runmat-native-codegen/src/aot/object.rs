@@ -338,13 +338,46 @@ fn emit_object(
                 .required_services
                 .contains(&runmat_execution::host::NativeDeploymentServiceKind::SourceEvaluation)
         });
+        let network_service = product_mode.selected().is_some_and(|binding| {
+            binding.services.iter().any(|service| {
+                service.kind
+                    == runmat_execution::host::NativeDeploymentServiceKind::Effect(
+                        runmat_types::EffectKind::Network,
+                    )
+            })
+        });
+        let requires_service = |kind| {
+            product_mode
+                .selected()
+                .is_some_and(|binding| binding.services.iter().any(|service| service.kind == kind))
+        };
         super::launcher::define(
             &mut module,
-            resolver,
-            builtin_resolver,
-            source_service,
-            &linked_data,
-            paired_role,
+            super::launcher::LauncherEntryContract {
+                resolvers: super::launcher::LauncherResolvers {
+                    functions: resolver,
+                    builtins: builtin_resolver,
+                },
+                services: super::launcher::LauncherServiceImports {
+                    source_evaluation: source_service,
+                    network: network_service,
+                    user_interface: requires_service(
+                        runmat_execution::host::NativeDeploymentServiceKind::Effect(
+                            runmat_types::EffectKind::UserInterface,
+                        ),
+                    ),
+                    host_callback: requires_service(
+                        runmat_execution::host::NativeDeploymentServiceKind::Effect(
+                            runmat_types::EffectKind::HostCallback,
+                        ),
+                    ),
+                    hosted_dynamic: requires_service(
+                        runmat_execution::host::NativeDeploymentServiceKind::HostedDynamicDispatch,
+                    ),
+                },
+                data: &linked_data,
+                paired_role,
+            },
         )?;
     }
 

@@ -46,6 +46,10 @@ pub(crate) struct RootedValueMember {
 }
 
 impl RootedValueMember {
+    pub(crate) fn value(&self) -> &Value {
+        &self.value
+    }
+
     /// Transfer an existing registration rather than retracing callback output.
     pub(crate) fn from_rooted(value: super::RootedValue) -> Self {
         let super::RootedResult { value, _roots } = value;

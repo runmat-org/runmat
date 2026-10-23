@@ -127,6 +127,10 @@ mod tests {
 
     #[test]
     fn string_shape_retained_and_char_width_dynamic() {
+        let scalar = ValueFact::scalar(ValueKindFact::String);
+        let result = call(scalar.clone(), scalar);
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(result.outputs[0].kind, ValueKindFact::String);
         let strings = ValueFact::proven(
             ValueKindFact::String,
             ShapeFact::from(vec![Some(2), Some(3)]),

@@ -85,19 +85,26 @@ pub(crate) fn default_filters() -> Vec<OpenFileDialogFilter> {
     }]
 }
 
-pub(crate) fn try_scalar_text(value: &Value) -> Option<String> {
+pub(crate) fn try_scalar_text(
+    value: &Value,
+    context: &str,
+    invalid_argument: impl FnOnce(String) -> RuntimeError,
+) -> BuiltinResult<Option<String>> {
     match value {
-        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::String(text) => Ok(Some(text.as_str().to_owned())),
         Value::CharArray(chars)
             if chars.rows == 1
                 && crate::builtins::common::shape::effective_rank(&chars.shape) <= 2 =>
         {
-            Some(chars.data().iter().collect())
+            crate::builtins::io::utf16::decode_utf16_with_error(chars.data(), || {
+                invalid_argument(format!("{context} contains malformed UTF-16 text"))
+            })
+            .map(Some)
         }
         Value::StringArray(array) if array.data().len() == 1 => {
-            Some(array.data()[0].as_str().to_owned())
+            Ok(Some(array.data()[0].as_str().to_owned()))
         }
-        _ => None,
+        _ => Ok(None),
     }
 }
 
@@ -106,7 +113,7 @@ pub(crate) fn scalar_text(
     context: &str,
     invalid_argument: ErrorMapper,
 ) -> BuiltinResult<String> {
-    try_scalar_text(value).ok_or_else(|| {
+    try_scalar_text(value, context, invalid_argument)?.ok_or_else(|| {
         invalid_argument(format!(
             "{context} must be a character vector or string scalar"
         ))
@@ -194,12 +201,28 @@ mod tests {
 
     #[test]
     fn scalar_text_distinguishes_pages_from_trailing_singletons() {
-        let page =
-            Value::CharArray(CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap());
+        let page = Value::CharArray(
+            CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap(),
+        );
         assert!(scalar_text(&page, "title", error).is_err());
-        let row =
-            Value::CharArray(CharArray::new_with_shape(vec!['a', 'b'], vec![1, 2, 1]).unwrap());
+        let row = Value::CharArray(
+            CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 2, 1]).unwrap(),
+        );
         assert_eq!(scalar_text(&row, "title", error).unwrap(), "ab");
+        let malformed = Value::CharArray(
+            CharArray::from_code_units(vec![runmat_value::Utf16CodeUnit::from_raw(0xd800)], 1, 1)
+                .unwrap(),
+        );
+        let failure = try_scalar_text(&malformed, "title", error).unwrap_err();
+        assert!(failure
+            .source
+            .as_deref()
+            .unwrap()
+            .downcast_ref::<runmat_value::Utf16DecodeError>()
+            .is_some());
+        assert!(try_scalar_text(&Value::Num(1.0), "title", error)
+            .unwrap()
+            .is_none());
     }
 
     #[test]

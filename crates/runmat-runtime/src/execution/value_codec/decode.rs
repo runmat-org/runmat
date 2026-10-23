@@ -160,6 +160,40 @@ pub async fn decode_durable_values_cooperatively(
     decode_validated_values(payloads, None, &mut cooperation, None).await
 }
 
+/// Decode one already-stored preference under the selected invocation. This
+/// uses the same durable validation and decoder as batch import, but avoids
+/// constructing every document value during document admission.
+pub(crate) async fn decode_durable_value_cooperatively_in_context(
+    payload: &ValuePayload,
+    cooperation: &mut CpuCooperationBudget,
+    runtime: &crate::context::RuntimeContext,
+) -> Result<crate::execution::RootedValueMember, CooperativeValueCodecError> {
+    super::durable::require_durable(payload, "$")?;
+    let mut budget = Some(cooperation);
+    validate_values_cooperatively(
+        ValuePayloadValidationCursor::for_durable_storage(
+            std::slice::from_ref(payload),
+            ValueLimits::default(),
+        ),
+        &mut budget,
+    )
+    .await?;
+    let mut machine = DecodeMachine::new_with_runtime(payload, "$", None, Some(runtime))?;
+    loop {
+        let progress = machine.advance(DECODE_WORK_QUANTUM)?;
+        let (completed_work, complete) = match progress {
+            DecodeProgress::Pending { completed_work } => (completed_work, false),
+            DecodeProgress::Complete { completed_work } => (completed_work, true),
+        };
+        if let Some(budget) = budget.as_deref_mut() {
+            budget.checkpoint(completed_work as u64).await?;
+        }
+        if complete {
+            return Ok(machine.take_completed());
+        }
+    }
+}
+
 async fn validate_values_cooperatively(
     mut cursor: ValuePayloadValidationCursor<'_>,
     cooperation: &mut Option<&mut CpuCooperationBudget>,

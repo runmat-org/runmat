@@ -4,12 +4,20 @@
 //! family owns the only boxed future when the operation can actually suspend.
 
 use super::*;
+
+#[path = "future/name.rs"]
+mod name;
+#[path = "future/semantic.rs"]
+mod semantic;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-type DispatchResult = Result<Option<DispatchHandled>, RuntimeError>;
-type SuspendedDispatchFuture<'a> = Pin<Box<dyn Future<Output = DispatchResult> + 'a>>;
+pub(super) type DispatchResult = Result<Option<DispatchHandled>, RuntimeError>;
+#[path = "future/control.rs"]
+pub(super) mod control;
+pub(super) type AdmittedDispatchFuture<'a> =
+    runmat_runtime::execution::RuntimeContinuationFuture<'a, ()>;
 
 pub(super) struct InstructionDispatchFuture<'a> {
     state: InstructionDispatchFutureState<'a>,
@@ -18,8 +26,13 @@ pub(super) struct InstructionDispatchFuture<'a> {
 enum InstructionDispatchFutureState<'a> {
     Immediate(Option<ImmediateInstruction<'a>>),
     Ready(Option<DispatchResult>),
-    Arithmetic(arithmetic::ArithmeticDispatchFuture<'a>),
-    Suspended(SuspendedDispatchFuture<'a>),
+    StackMutation(AdmittedDispatchFuture<'a>),
+    Control(
+        runmat_runtime::execution::RuntimeContinuationFuture<
+            'a,
+            Option<runmat_runtime::execution::RootedResult<DispatchHandled>>,
+        >,
+    ),
 }
 
 struct ImmediateInstruction<'a> {
@@ -49,7 +62,7 @@ impl Future for InstructionDispatchFuture<'_> {
                     .take()
                     .expect("completed instruction future was polled again"),
             ),
-            InstructionDispatchFutureState::Arithmetic(future) => {
+            InstructionDispatchFutureState::StackMutation(future) => {
                 match future.as_mut().poll(context) {
                     Poll::Ready(Ok(())) => Poll::Ready(Ok(Some(DispatchHandled::Generic(
                         DispatchDecision::FallThrough,
@@ -58,7 +71,11 @@ impl Future for InstructionDispatchFuture<'_> {
                     Poll::Pending => Poll::Pending,
                 }
             }
-            InstructionDispatchFutureState::Suspended(future) => future.as_mut().poll(context),
+            InstructionDispatchFutureState::Control(future) => {
+                future.as_mut().poll(context).map(|result| {
+                    result.map(|control| control.map(|control| control.with_owned(|value| value)))
+                })
+            }
         }
     }
 }
@@ -78,9 +95,14 @@ impl<'a> InstructionDispatchFuture<'a> {
         }
     }
 
-    fn suspended(future: SuspendedDispatchFuture<'a>) -> Self {
+    fn control(
+        future: runmat_runtime::execution::RuntimeContinuationFuture<
+            'a,
+            Option<runmat_runtime::execution::RootedResult<DispatchHandled>>,
+        >,
+    ) -> Self {
         Self {
-            state: InstructionDispatchFutureState::Suspended(future),
+            state: InstructionDispatchFutureState::Control(future),
         }
     }
 
@@ -90,9 +112,9 @@ impl<'a> InstructionDispatchFuture<'a> {
         }
     }
 
-    fn arithmetic(future: arithmetic::ArithmeticDispatchFuture<'a>) -> Self {
+    fn stack_mutation(future: AdmittedDispatchFuture<'a>) -> Self {
         Self {
-            state: InstructionDispatchFutureState::Arithmetic(future),
+            state: InstructionDispatchFutureState::StackMutation(future),
         }
     }
 }
@@ -114,362 +136,76 @@ pub(super) fn dispatch_instruction<'a>(
                 port.pending.as_ref().is_some_and(|plan| plan.function(*function).is_some())
             }));
             if pending {
-                InstructionDispatchFuture::suspended(Box::pin(dispatch_semantic_closure(
-                    meta, state,
-                )))
+                admitted_instruction(suspend_semantic_closure(meta, state))
             } else {
                 InstructionDispatchFuture::immediate(meta, state, hooks)
             }
         }
         InstructionDispatchFamily::NameHandle => {
-            InstructionDispatchFuture::suspended(Box::pin(dispatch_name_handle(meta, state)))
+            admitted_instruction(suspend_name_handle(meta, state))
         }
         InstructionDispatchFamily::Parallel => {
-            InstructionDispatchFuture::suspended(suspend_parallel(meta, state))
+            controlled_instruction(suspend_parallel(meta, state))
         }
         InstructionDispatchFamily::PreparedOutput => {
-            InstructionDispatchFuture::suspended(suspend_prepared_output(meta, state, hooks))
+            match suspend_prepared_output(meta, state, hooks) {
+                Ok(future) => InstructionDispatchFuture::stack_mutation(future),
+                Err(error) => InstructionDispatchFuture::ready(Err(error)),
+            }
         }
-        InstructionDispatchFamily::Call => {
-            InstructionDispatchFuture::suspended(dispatch_call(meta, state))
-        }
-        InstructionDispatchFamily::Indexing => {
-            InstructionDispatchFuture::suspended(suspend_indexing(meta, state))
-        }
-        InstructionDispatchFamily::Object => {
-            InstructionDispatchFuture::suspended(suspend_object(meta, state))
-        }
+        InstructionDispatchFamily::Call => controlled_instruction(dispatch_call(meta, state)),
+        InstructionDispatchFamily::Indexing => admitted_instruction(suspend_indexing(meta, state)),
+        InstructionDispatchFamily::Object => admitted_instruction(suspend_object(meta, state)),
         InstructionDispatchFamily::Arithmetic => match suspend_arithmetic(meta, state) {
-            Ok(future) => InstructionDispatchFuture::arithmetic(future),
+            Ok(future) => InstructionDispatchFuture::stack_mutation(future),
             Err(error) => InstructionDispatchFuture::ready(Err(error)),
         },
-        InstructionDispatchFamily::Output => {
-            InstructionDispatchFuture::suspended(suspend_output(meta, state))
-        }
-        InstructionDispatchFamily::Logical => {
-            InstructionDispatchFuture::suspended(suspend_logical(meta, state))
-        }
+        InstructionDispatchFamily::Output => admitted_instruction(suspend_output(meta, state)),
+        InstructionDispatchFamily::Logical => controlled_instruction(suspend_logical(meta, state)),
         InstructionDispatchFamily::Aggregate => {
-            InstructionDispatchFuture::suspended(suspend_aggregate(meta, state))
+            admitted_instruction(suspend_aggregate(meta, state))
         }
     }
 }
 
-async fn dispatch_semantic_closure(
-    meta: DispatchMeta<'_>,
-    state: DispatchState<'_>,
-) -> DispatchResult {
-    let Instr::CreateSemanticClosure(function, display_name, capture_count, source_role) =
-        meta.instr
-    else {
-        unreachable!("semantic-closure route requires its creation opcode");
-    };
-    let inherits_shared_bindings = *source_role == runmat_types::FunctionSourceRole::Anonymous
-        && meta.function_registry.get(*function).is_some_and(|target| {
-            target.lexical_binding_slots.iter().any(|binding| {
-                binding.kind == crate::bytecode::program::LexicalBindingKind::Transit
-            })
-        });
-    let lexical_environment = (*source_role == runmat_types::FunctionSourceRole::Nested
-        || inherits_shared_bindings)
-        .then(|| state.context.lexical_environment.clone())
-        .flatten();
-    let port = state.context.dynamic_eval_admission.clone();
-    let pending = port.as_ref().and_then(|port| {
-        port.pending
-            .as_ref()
-            .filter(|plan| plan.function(*function).is_some())
-            .cloned()
-    });
-    if let Some(plan) = pending {
-        let port = port.expect("pending closure requires its admission port");
-        let pending_function = plan
-            .function(*function)
-            .expect("pending closure lookup was checked above");
-        if pending_function.abi.original_capture_count() != *capture_count {
-            return Err(crate::interpreter::errors::mex(
-                "DynamicWorkspaceCompile",
-                "pending closure opcode differs from its original capture layout",
-            ));
-        }
-        let runtime = state.context.runtime.clone();
-        let compiled = crate::call::builtins::compile_pending_closure(
-            &plan,
-            pending_function,
-            &runtime,
-            meta.function_registry,
-            *function,
-            &port,
-        )
-        .await?;
-        if crate::runtime::workspace::workspace_frame_identity() != Some(compiled.issuing_frame) {
-            return Err(crate::interpreter::errors::mex(
-                "DynamicWorkspaceCompile",
-                "pending closure changed workspace frame after source selection",
-            ));
-        }
-        let direct_captures = compiled.captures.len() == *capture_count
-            && compiled.captures.iter().enumerate().all(|(index, capture)| {
-                matches!(capture, crate::call::builtins::SelectedClosureCapture::Original(original) if *original == index)
-            });
-        let additional_captures = if direct_captures {
-            None
-        } else {
-            if state.stack.len() < *capture_count {
-                return Err(crate::interpreter::errors::mex(
-                    "DynamicWorkspaceCompile",
-                    "pending closure's original captures are absent from the stack",
-                ));
-            }
-            let crate::runtime::workspace::WorkspaceBindingState {
-                frame: live_frame,
-                names: live_names,
-                assigned,
-                ..
-            } = crate::runtime::workspace::workspace_binding_state().ok_or_else(|| {
-                crate::interpreter::errors::mex(
-                    "DynamicWorkspaceUnavailable",
-                    "pending closure lost its issuing workspace frame",
-                )
-            })?;
-            if live_frame != compiled.issuing_frame {
-                return Err(crate::interpreter::errors::mex(
-                    "DynamicWorkspaceCompile",
-                    "pending closure changed workspace frame after source selection",
-                ));
-            }
-            let mut values = Vec::with_capacity(compiled.captures.len());
-            for capture in &compiled.captures {
-                let crate::call::builtins::SelectedClosureCapture::AssignedWorkspace { name, slot } =
-                    capture
-                else {
-                    continue;
-                };
-                if live_names.get(name) != Some(slot) || !assigned.contains(name) {
-                    return Err(crate::interpreter::errors::mex(
-                        "DynamicWorkspaceCompile",
-                        "pending closure workspace capture changed after source selection",
-                    ));
-                }
-                values.push(
-                    crate::runtime::workspace::workspace_lookup(name).ok_or_else(|| {
-                        crate::interpreter::errors::mex(
-                            "DynamicWorkspaceCompile",
-                            "pending closure workspace capture is no longer assigned",
-                        )
-                    })?,
-                );
-            }
-            Some(
-                runmat_runtime::execution::RootedValues::new(values)
-                    .map_err(|error| error.into_runtime_error())?,
-            )
-        };
-        let admitted = port.host().admit_pending_closure(
-            crate::interpreter::dynamic_admission::PendingClosureAdmissionRequest {
-                runtime: &runtime,
-                source: &plan.source,
-                caller_source: plan.caller_source,
-                product: compiled.product,
-                compile_inherited: &plan.inherited,
-                executing: meta.function_registry,
-                local_function: pending_function.local_id,
-                execution_function: *function,
-                expected_issuing_owner: &pending_function.execution_owner,
-                expected_source: pending_function.execution_source,
-                siblings: &pending_function.siblings,
-            },
-        )?;
-        if admitted.binding.function != function.0 {
-            return Err(crate::interpreter::errors::mex(
-                "DynamicWorkspaceCompile",
-                "pending closure selected a different execution identity",
-            ));
-        }
-        if let Some(captures) = additional_captures {
-            let _stack_roots = runmat_runtime::execution::RootedValueLease::for_values(
-                state.stack.as_slice()[state.stack.len() - *capture_count..].iter(),
-            )
-            .map_err(|error| error.into_runtime_error())?;
-            let mut originals = Vec::with_capacity(*capture_count);
-            for _ in 0..*capture_count {
-                originals.push(crate::interpreter::stack::pop_value(state.stack)?);
-            }
-            originals.reverse();
-            let mut originals = originals.into_iter().map(Some).collect::<Vec<_>>();
-            captures.with_unbounded_values(|captures| -> Result<(), RuntimeError> {
-                let mut added = captures.into_iter();
-                let mut ordered = Vec::with_capacity(compiled.captures.len());
-                for source in &compiled.captures {
-                    let next = match source {
-                        crate::call::builtins::SelectedClosureCapture::Original(index) => {
-                            originals.get_mut(*index).and_then(Option::take)
-                        }
-                        crate::call::builtins::SelectedClosureCapture::AssignedWorkspace {
-                            ..
-                        } => added.next(),
-                    }
-                    .ok_or_else(|| {
-                        crate::interpreter::errors::mex(
-                            "DynamicWorkspaceCompile",
-                            "pending closure capture plan lost a selected value",
-                        )
-                    })?;
-                    ordered.push(next);
-                }
-                if originals.iter().any(Option::is_some) || added.next().is_some() {
-                    return Err(crate::interpreter::errors::mex(
-                        "DynamicWorkspaceCompile",
-                        "pending closure capture plan left an issuing value unbound",
-                    ));
-                }
-                crate::call::closures::create_selected_semantic_closure_with_captures(
-                    state.stack,
-                    admitted.binding,
-                    display_name.clone(),
-                    admitted.source_file,
-                    ordered,
-                    *source_role,
-                    lexical_environment,
-                )?;
-                Ok(())
-            })??;
-        } else {
-            crate::call::closures::create_selected_semantic_closure(
-                state.stack,
-                admitted.binding,
-                display_name.clone(),
-                admitted.source_file,
-                *capture_count,
-                *source_role,
-                lexical_environment,
-            )?;
-        }
-        drop(admitted.publication);
-    } else {
-        handle_create_semantic_closure(
-            state.stack,
-            *function,
-            display_name.clone(),
-            *capture_count,
-            *source_role,
-            lexical_environment,
-        )?;
+fn admitted_instruction<'a>(
+    future: Result<AdmittedDispatchFuture<'a>, RuntimeError>,
+) -> InstructionDispatchFuture<'a> {
+    match future {
+        Ok(future) => InstructionDispatchFuture::stack_mutation(future),
+        Err(error) => InstructionDispatchFuture::ready(Err(error)),
     }
-    Ok(Some(DispatchHandled::Generic(
-        DispatchDecision::FallThrough,
-    )))
 }
 
-async fn dispatch_name_handle(meta: DispatchMeta<'_>, state: DispatchState<'_>) -> DispatchResult {
-    use runmat_runtime::user_functions::{
-        DynamicFunctionLoadPhase, RuntimeNameCandidate, RuntimeNameFilter, RuntimeNameQuery,
-        RuntimeNameRoute,
-    };
-
-    let (name, external) = match meta.instr {
-        Instr::CreateFunctionHandle(name) => (name, false),
-        Instr::CreateExternalFunctionHandle(name) => (name, true),
-        _ => unreachable!("name-handle route requires a name-handle opcode"),
-    };
-    let runtime = state.context.runtime.clone();
-    let selected = runtime
-        .clone()
-        .scope(async {
-            let observed = runmat_runtime::user_functions::observe_runtime_name(
-                name,
-                RuntimeNameQuery {
-                    route: RuntimeNameRoute::NamedFeval,
-                    filter: RuntimeNameFilter::Any,
-                    all: false,
-                },
-            )
-            .await
-            .map_err(|error| {
-                runmat_runtime::build_runtime_error(error.to_string())
-                    .with_identifier("RunMat:SelectedHandle:NameResolution")
-                    .build()
-            })?;
-            let phase = match observed.selected() {
-                Some(RuntimeNameCandidate::RegisteredConstructor(class)) => {
-                    Some(DynamicFunctionLoadPhase::Handle {
-                        class: Some(class.clone()),
-                        selected_source: None,
-                    })
-                }
-                Some(RuntimeNameCandidate::Source(file))
-                | Some(RuntimeNameCandidate::ClassFile(file)) => {
-                    Some(DynamicFunctionLoadPhase::Handle {
-                        class: None,
-                        selected_source: Some(file.clone()),
-                    })
-                }
-                _ => None,
-            };
-            let Some(phase) = phase else {
-                return Ok(None);
-            };
-            let selected = runmat_runtime::user_functions::try_load_and_call_dynamic_function(
-                name.clone(),
-                runmat_runtime::call::RootedFunctionArguments::ordinary(
-                    runmat_runtime::execution::RootedValues::in_context(Vec::new(), &runtime)?,
-                ),
-                1,
-                phase,
-                None,
-            )
-            .await;
-            if runtime.search_path().map(|path| path.generation())
-                != observed.captured_path_revision
-                || runmat_runtime::class_registry::class_registry_generation()
-                    != observed.captured_class_revision
-            {
-                return Err(runmat_runtime::build_runtime_error(
-                    "name selection changed while creating a bound handle",
-                )
-                .with_identifier("RunMat:SelectedHandle:SelectionChanged")
-                .build());
-            }
-            Ok(Some(selected))
-        })
-        .await?;
-    if let Some(std::ops::ControlFlow::Break(result)) = selected {
-        let rooted = result?;
-        rooted.with_owned(|sequence| {
-            if sequence.len() != 1
-                || !matches!(
-                    sequence.as_slice().first(),
-                    Some(Value::BoundFunctionHandle(_))
-                )
-            {
-                return Err(runmat_runtime::build_runtime_error(
-                    "selected source did not return one exact bound handle",
-                )
-                .with_identifier("RunMat:SelectedHandle:InvalidOutput")
-                .build());
-            }
-            let selected = sequence
-                .into_output_storage()
-                .try_into_first()
-                .map_err(|_| {
-                    runmat_runtime::sequence::sequence_error_to_runtime(
-                        runmat_value::ValueSequenceError::SharedOutputStorage,
-                    )
-                })?
-                .expect("one checked selected handle");
-            state.stack.try_push(selected)?;
-            Ok(())
-        })?;
-    } else if external {
-        state
-            .stack
-            .try_push(Value::external_function_handle(name.clone()))?;
-    } else {
-        state.stack.try_push(Value::function_handle(name.clone()))?;
+fn controlled_instruction<'a>(
+    future: control::ControlDispatchFuture<'a>,
+) -> InstructionDispatchFuture<'a> {
+    match future {
+        Ok(future) => InstructionDispatchFuture::control(future),
+        Err(error) => InstructionDispatchFuture::ready(Err(error)),
     }
-    Ok(Some(DispatchHandled::Generic(
-        DispatchDecision::FallThrough,
-    )))
+}
+
+#[inline(never)]
+fn suspend_semantic_closure<'a>(
+    meta: DispatchMeta<'a>,
+    state: DispatchState<'a>,
+) -> Result<AdmittedDispatchFuture<'a>, RuntimeError> {
+    let context = &*state.context;
+    runmat_runtime::execution::admit_domain_continuation_with(&context.runtime, move || {
+        semantic::dispatch(meta, state.stack, context)
+    })
+}
+
+#[inline(never)]
+fn suspend_name_handle<'a>(
+    meta: DispatchMeta<'a>,
+    state: DispatchState<'a>,
+) -> Result<AdmittedDispatchFuture<'a>, RuntimeError> {
+    let context = &*state.context;
+    runmat_runtime::execution::admit_domain_continuation_with(&context.runtime, move || {
+        name::dispatch(meta, state.stack, context)
+    })
 }
 
 // Keep construction of each concrete async family outside the exhaustive
@@ -482,7 +218,7 @@ async fn dispatch_name_handle(meta: DispatchMeta<'_>, state: DispatchState<'_>) 
 fn suspend_parallel<'a>(
     meta: DispatchMeta<'a>,
     state: DispatchState<'a>,
-) -> SuspendedDispatchFuture<'a> {
+) -> control::ControlDispatchFuture<'a> {
     parallel::dispatch(
         meta.instr,
         state.stack,
@@ -500,27 +236,83 @@ fn suspend_parallel<'a>(
 
 #[inline(never)]
 fn suspend_prepared_output<'a>(
-    meta: DispatchMeta<'a>,
+    mut meta: DispatchMeta<'a>,
     state: DispatchState<'a>,
     hooks: DispatchHooks<'a>,
-) -> SuspendedDispatchFuture<'a> {
-    Box::pin(dispatch_prepared_output(meta, state, hooks))
+) -> Result<AdmittedDispatchFuture<'a>, RuntimeError> {
+    let call_arg_spans = meta.call_arg_spans.take();
+    prepared_outputs::dispatch(
+        prepared_outputs::Request {
+            instruction: meta.instr,
+            stack: state.stack,
+            vars: state.vars,
+            state: state.sequence_register,
+            context: prepared_outputs::PreparedOutputContext {
+                authority: slot_authority::AssignmentSlotAuthority {
+                    context: state.context,
+                    global_aliases: state.global_aliases,
+                    persistent_aliases: state.persistent_aliases,
+                    missing_input_slots: state.missing_input_slots,
+                    var_names: meta.var_names,
+                    current_function_name: meta.current_function_name,
+                },
+            },
+            before_overwrite: hooks.store_var_before_overwrite,
+            after_store: hooks.store_var_after_store,
+        },
+        move |result| {
+            drop(call_arg_spans);
+            let handled = result?;
+            debug_assert!(handled, "prepared-output route must handle its instruction");
+            Ok(())
+        },
+    )
 }
 
 #[inline(never)]
 fn suspend_indexing<'a>(
     meta: DispatchMeta<'a>,
     state: DispatchState<'a>,
-) -> SuspendedDispatchFuture<'a> {
-    Box::pin(dispatch_indexing_family(meta, state))
+) -> Result<AdmittedDispatchFuture<'a>, RuntimeError> {
+    let context = &*state.context;
+    runmat_runtime::execution::admit_domain_continuation_with(&context.runtime, move || {
+        dispatch_indexing_family(
+            meta,
+            state.stack,
+            state.vars,
+            state.sequence_register,
+            *state.pc,
+            &context.runtime,
+        )
+    })
 }
 
 #[inline(never)]
 fn suspend_object<'a>(
-    meta: DispatchMeta<'a>,
+    mut meta: DispatchMeta<'a>,
     state: DispatchState<'a>,
-) -> SuspendedDispatchFuture<'a> {
-    Box::pin(dispatch_object_family(meta, state))
+) -> Result<AdmittedDispatchFuture<'a>, RuntimeError> {
+    let call_arg_spans = meta.call_arg_spans.take();
+    object::dispatch_object(
+        object::Request {
+            instruction: meta.instr,
+            stack: state.stack,
+            sequence_register: state.sequence_register,
+            context: object::ObjectDispatchContext {
+                vars: state.vars,
+                runtime: &state.context.runtime,
+                current_function_name: meta.current_function_name,
+                bytecode: meta.bytecode,
+                invocation_arity: meta.invocation_arity,
+            },
+        },
+        move |result| {
+            drop(call_arg_spans);
+            let handled = result?;
+            debug_assert!(handled, "object route must handle its instruction");
+            Ok(())
+        },
+    )
 }
 
 #[inline(never)]
@@ -535,60 +327,39 @@ fn suspend_arithmetic<'a>(
 fn suspend_output<'a>(
     meta: DispatchMeta<'a>,
     state: DispatchState<'a>,
-) -> SuspendedDispatchFuture<'a> {
-    Box::pin(dispatch_output(meta, state))
+) -> Result<AdmittedDispatchFuture<'a>, RuntimeError> {
+    let context = &*state.context;
+    runmat_runtime::execution::admit_domain_continuation_with(&context.runtime, move || {
+        dispatch_output(meta, state.stack, state.vars, context)
+    })
 }
 
 #[inline(never)]
 fn suspend_logical<'a>(
     meta: DispatchMeta<'a>,
     state: DispatchState<'a>,
-) -> SuspendedDispatchFuture<'a> {
-    Box::pin(dispatch_logical(meta, state))
+) -> control::ControlDispatchFuture<'a> {
+    let context = &*state.context;
+    control::admit(&context.runtime, move || {
+        dispatch_logical(meta, state.stack, state.pc, &context.runtime)
+    })
 }
 
 #[inline(never)]
 fn suspend_aggregate<'a>(
     meta: DispatchMeta<'a>,
     state: DispatchState<'a>,
-) -> SuspendedDispatchFuture<'a> {
-    Box::pin(dispatch_aggregate(meta, state))
-}
-
-async fn dispatch_prepared_output(
-    meta: DispatchMeta<'_>,
-    state: DispatchState<'_>,
-    hooks: DispatchHooks<'_>,
-) -> DispatchResult {
-    let handled = prepared_outputs::dispatch(
-        meta.instr,
-        state.stack,
-        state.vars,
-        state.sequence_register,
-        prepared_outputs::PreparedOutputContext {
-            authority: slot_authority::AssignmentSlotAuthority {
-                context: state.context,
-                global_aliases: state.global_aliases,
-                persistent_aliases: state.persistent_aliases,
-                missing_input_slots: state.missing_input_slots,
-                var_names: meta.var_names,
-                current_function_name: meta.current_function_name,
-            },
-        },
-        hooks.store_var_before_overwrite,
-        hooks.store_var_after_store,
-    )
-    .await?;
-    debug_assert!(handled, "prepared-output route must handle its instruction");
-    Ok(Some(DispatchHandled::Generic(
-        DispatchDecision::FallThrough,
-    )))
+) -> Result<AdmittedDispatchFuture<'a>, RuntimeError> {
+    let context = &*state.context;
+    runmat_runtime::execution::admit_domain_continuation_with(&context.runtime, move || {
+        dispatch_aggregate(meta, state.stack, state.sequence_register, context)
+    })
 }
 
 fn dispatch_call<'a>(
     meta: DispatchMeta<'a>,
     state: DispatchState<'a>,
-) -> Pin<Box<dyn Future<Output = DispatchResult> + 'a>> {
+) -> control::ControlDispatchFuture<'a> {
     calls::dispatch_call(calls::CallDispatchContext {
         instr: meta.instr,
         stack: state.stack,
@@ -612,68 +383,58 @@ fn dispatch_call<'a>(
 }
 
 async fn dispatch_indexing_family(
-    meta: DispatchMeta<'_>,
-    state: DispatchState<'_>,
-) -> DispatchResult {
+    mut meta: DispatchMeta<'_>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    vars: &mut InterpreterVars,
+    sequence_register: &mut SequenceState,
+    pc: usize,
+    runtime: &runmat_runtime::context::RuntimeContext,
+) -> Result<(), RuntimeError> {
+    let _call_arg_spans = meta.call_arg_spans.take();
     let handled = indexing::dispatch_indexing(
         meta.instr,
-        state.stack,
-        state.vars,
+        stack,
+        vars,
         meta.function_registry,
-        *state.pc,
-        &state.context.runtime,
-        state.sequence_register,
+        pc,
+        runtime,
+        sequence_register,
     )
     .await?;
     debug_assert!(handled, "indexing route must handle its instruction");
-    Ok(Some(DispatchHandled::Generic(
-        DispatchDecision::FallThrough,
-    )))
+    Ok(())
 }
 
-async fn dispatch_object_family(
-    meta: DispatchMeta<'_>,
-    state: DispatchState<'_>,
-) -> DispatchResult {
-    let handled = object::dispatch_object(
-        meta.instr,
-        state.stack,
-        state.sequence_register,
-        object::ObjectDispatchContext {
-            vars: state.vars,
-            runtime: &state.context.runtime,
-            current_function_name: meta.current_function_name,
-            bytecode: meta.bytecode,
-            invocation_arity: meta.invocation_arity,
-        },
-    )
-    .await?;
-    debug_assert!(handled, "object route must handle its instruction");
-    Ok(Some(DispatchHandled::Generic(
-        DispatchDecision::FallThrough,
-    )))
-}
-
-async fn dispatch_output(meta: DispatchMeta<'_>, state: DispatchState<'_>) -> DispatchResult {
+async fn dispatch_output(
+    mut meta: DispatchMeta<'_>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    vars: &mut InterpreterVars,
+    context: &crate::bytecode::program::ExecutionContext,
+) -> Result<(), RuntimeError> {
+    let _call_arg_spans = meta.call_arg_spans.take();
     match meta.instr {
         Instr::EmitStackTop { label } => {
-            emit_stack_top(state.context, state.stack, label, meta.var_names).await?
+            emit_stack_top(context, stack, label, meta.var_names).await?
         }
         Instr::EmitVar { var_index, label } => {
-            emit_var(state.context, state.vars, *var_index, label, meta.var_names).await?
+            emit_var(context, vars, *var_index, label, meta.var_names).await?
         }
         _ => unreachable!("output route received another instruction"),
     }
-    Ok(Some(DispatchHandled::Generic(
-        DispatchDecision::FallThrough,
-    )))
+    Ok(())
 }
 
-async fn dispatch_logical(meta: DispatchMeta<'_>, state: DispatchState<'_>) -> DispatchResult {
+async fn dispatch_logical(
+    mut meta: DispatchMeta<'_>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    pc: &mut usize,
+    runtime: &runmat_runtime::context::RuntimeContext,
+) -> DispatchResult {
+    let _call_arg_spans = meta.call_arg_spans.take();
     let decision = match meta.instr {
         Instr::AndAnd(target) => crate::ops::control_flow::and_and(
             logical_truth_from_value(
-                &crate::interpreter::stack::pop_value(state.stack)?,
+                &crate::interpreter::stack::pop_value(stack)?,
                 "short-circuit && condition",
             )
             .await?,
@@ -681,17 +442,17 @@ async fn dispatch_logical(meta: DispatchMeta<'_>, state: DispatchState<'_>) -> D
         ),
         Instr::OrOr(target) => crate::ops::control_flow::or_or(
             logical_truth_from_value(
-                &crate::interpreter::stack::pop_value(state.stack)?,
+                &crate::interpreter::stack::pop_value(stack)?,
                 "short-circuit || condition",
             )
             .await?,
             *target,
         ),
         Instr::JumpIfFalse(target) => {
-            let condition = crate::interpreter::stack::pop_value(state.stack)?;
+            let condition = crate::interpreter::stack::pop_value(stack)?;
             crate::ops::control_flow::jump_if_false(
                 runmat_runtime::condition::control_flow_truth_from_value(
-                    &state.context.runtime,
+                    runtime,
                     &condition,
                     "if condition",
                 )
@@ -702,11 +463,17 @@ async fn dispatch_logical(meta: DispatchMeta<'_>, state: DispatchState<'_>) -> D
         _ => unreachable!("logical route received another instruction"),
     };
     Ok(Some(DispatchHandled::Generic(apply_control_flow_action(
-        decision, state.pc,
+        decision, pc,
     ))))
 }
 
-async fn dispatch_aggregate(meta: DispatchMeta<'_>, state: DispatchState<'_>) -> DispatchResult {
+async fn dispatch_aggregate(
+    mut meta: DispatchMeta<'_>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    sequence_register: &mut SequenceState,
+    context: &crate::bytecode::program::ExecutionContext,
+) -> Result<(), RuntimeError> {
+    let _call_arg_spans = meta.call_arg_spans.take();
     let source_ref = meta
         .bytecode
         .source_id
@@ -718,22 +485,17 @@ async fn dispatch_aggregate(meta: DispatchMeta<'_>, state: DispatchState<'_>) ->
             elements,
             ..
         } => {
-            let rows = materialize_aggregate_rows(
-                state.stack,
-                state.sequence_register,
-                row_lengths,
-                elements,
-            )?;
+            let rows = materialize_aggregate_rows(stack, sequence_register, row_lengths, elements)?;
             let _rows_roots = crate::call::root_values(rows.iter().flatten())?;
             runmat_runtime::create_matrix_from_values(&rows)
                 .await
                 .map_err(|error| {
                     arrays::qualify_matrix_construction_shape(error, source_ref, invocation_arity)
                 })?
-                .with_owned(|value| state.stack.try_push(value))?;
+                .with_owned(|value| stack.try_push(value))?;
         }
         Instr::CreateMatrixDynamic(num_rows) => {
-            create_matrix_dynamic(state.stack, *num_rows, |rows_data| async move {
+            create_matrix_dynamic(stack, *num_rows, |rows_data| async move {
                 runmat_runtime::create_matrix_from_values(&rows_data)
                     .await
                     .map_err(|error| {
@@ -747,17 +509,15 @@ async fn dispatch_aggregate(meta: DispatchMeta<'_>, state: DispatchState<'_>) ->
             .await?;
         }
         Instr::CreateRange(has_step) => {
-            let runtime = &state.context.runtime;
-            create_range(state.stack, *has_step, |args| async move {
+            let runtime = &context.runtime;
+            create_range(stack, *has_step, |args| async move {
                 crate::call::call_builtin_async(runtime, "colon", &args).await
             })
             .await?;
         }
         _ => unreachable!("aggregate route received another instruction"),
     }
-    Ok(Some(DispatchHandled::Generic(
-        DispatchDecision::FallThrough,
-    )))
+    Ok(())
 }
 
 #[cfg(test)]

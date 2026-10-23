@@ -3,8 +3,43 @@ use crate::execute::workspace::NativeWorkspaceState;
 use crate::memory::ScopedValueRoots;
 use runmat_runtime::call::function_abi::{prepare_function_inputs, FunctionInputSpec};
 
+// This is a move-only handoff between context/input admission and local arena
+// installation. In particular, construction_roots must survive the handoff;
+// prepared legacy inputs cannot lose their roots while locals are seeded.
+struct PreparedConstruction {
+    function: NativeFunction,
+    requested_outputs: usize,
+    runtime: RuntimeContext,
+    program_capture: Option<Vec<u8>>,
+    functions: Arc<Vec<NativeFunction>>,
+    captures: Vec<NativeCaptureInput>,
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
+    lexical_roots: Vec<runmat_gc::ExplicitRoot>,
+    deoptimization: DeoptimizationPolicy,
+    interpreter_resume_points: BTreeMap<runmat_types::ProgramPointId, u64>,
+    coverage_sites: BTreeMap<runmat_native_codegen::NativeMirSite, Vec<u64>>,
+    osr_point: Option<runmat_types::ProgramPointId>,
+    optimized_regions: Arc<Vec<crate::region::OptimizedRegionPlan>>,
+    contextual_regions: expression_regions::ExpressionRegionState,
+    inherited_catch: Option<std::rc::Rc<runmat_value::MException>>,
+    arguments: Option<Vec<runmat_value::Value>>,
+    prepared: runmat_runtime::call::function_abi::PreparedFunctionInputs,
+    construction_roots: Option<ScopedValueRoots>,
+    supplied_inputs: usize,
+    missing_input_locals: Vec<runmat_native_codegen::NativeLocalId>,
+    global_bindings: runmat_runtime::workspace::bindings::FrameGlobalBindings,
+    workspace: NativeWorkspaceState,
+}
+
 impl HostState {
     pub fn new(input: HostStateInput) -> NativeExecutorResult<(Self, Vec<NativeValueRef>)> {
+        Self::install_locals(Self::prepare_context(input)?)
+    }
+
+    // No arena or pending-site state is constructed while source admission,
+    // lexical ownership, and ABI preparation can call into other owners.
+    #[inline(never)]
+    fn prepare_context(input: HostStateInput) -> NativeExecutorResult<PreparedConstruction> {
         let HostStateInput {
             function,
             inputs,
@@ -80,32 +115,8 @@ impl HostState {
         // Compatibility entry owns a second Value forest for the direct ABI.
         // Selected retained entry arrives with one already validated, move-only
         // prepared input set and retains its original roots outside this frame.
-        let (arguments, prepared, _construction_roots) = match inputs.try_into_prepared() {
-            Err(arguments) => {
-                let construction_values = arguments
-                    .iter()
-                    .cloned()
-                    .chain(captures.iter().filter_map(|capture| match capture {
-                        NativeCaptureInput::Owned(capture) => Some(capture.value.clone()),
-                        NativeCaptureInput::Retained { .. } => None,
-                    }))
-                    .collect();
-                let roots = ScopedValueRoots::register(
-                    construction_values,
-                    "native_invocation_construction",
-                )?;
-                let input_specs = function_input_specs(&function)?;
-                let prepared = prepare_function_inputs(
-                    &function.name,
-                    &arguments,
-                    function.abi.fixed_inputs.len(),
-                    function.abi.varargin.is_some(),
-                    &input_specs,
-                )?;
-                (Some(arguments), prepared, Some(roots))
-            }
-            Ok(prepared) => (None, prepared, None),
-        };
+        let (arguments, prepared, construction_roots) =
+            prepare_inputs(&function, inputs, &captures)?;
         let supplied_inputs = prepared.nargin;
         let missing_input_locals = function
             .abi
@@ -144,6 +155,60 @@ impl HostState {
             .clone()
             .with_workspace(workspace.service());
         let runtime = runtime.with_service_ports(ports);
+        Ok(PreparedConstruction {
+            function,
+            requested_outputs,
+            runtime,
+            program_capture,
+            functions,
+            captures,
+            lexical_environment,
+            lexical_roots,
+            deoptimization,
+            interpreter_resume_points,
+            coverage_sites,
+            osr_point,
+            optimized_regions,
+            contextual_regions,
+            inherited_catch,
+            arguments,
+            prepared,
+            construction_roots,
+            supplied_inputs,
+            missing_input_locals,
+            global_bindings,
+            workspace,
+        })
+    }
+
+    #[inline(never)]
+    fn install_locals(
+        preparation: PreparedConstruction,
+    ) -> NativeExecutorResult<(Self, Vec<NativeValueRef>)> {
+        let PreparedConstruction {
+            function,
+            requested_outputs,
+            runtime,
+            program_capture,
+            functions,
+            captures,
+            lexical_environment,
+            lexical_roots,
+            deoptimization,
+            interpreter_resume_points,
+            coverage_sites,
+            osr_point,
+            optimized_regions,
+            contextual_regions,
+            inherited_catch,
+            arguments,
+            prepared,
+            construction_roots: _construction_roots,
+            supplied_inputs,
+            missing_input_locals,
+            global_bindings,
+            workspace,
+        } = preparation;
         let mut arena = ValueArena::new()?;
         let selected_inputs = arguments.is_none();
         let mut argument_refs = arguments
@@ -406,7 +471,6 @@ impl HostState {
             pending_sequence_assign: None,
             prepared_multi_assignment: None,
             pending_multi_preparation: None,
-            captured_sequences: BTreeMap::new(),
             contextual_index_extents: Vec::new(),
             subscript_end_receivers: Vec::new(),
             contextual_regions,
@@ -430,8 +494,16 @@ impl HostState {
             missing_input_locals,
             optimized_regions: optimized_regions
                 .iter()
-                .cloned()
-                .map(|plan| (plan.entry, plan))
+                .enumerate()
+                .map(|(index, plan)| {
+                    (
+                        plan.entry,
+                        crate::region::OptimizedRegionPlanLease::new(
+                            Arc::clone(&optimized_regions),
+                            index,
+                        ),
+                    )
+                })
                 .collect(),
             region_observation: None,
             skipped_optimized_sites: BTreeSet::new(),
@@ -458,6 +530,45 @@ impl HostState {
         }
         state.enter_block(state.function.entry)?;
         Ok((state, argument_refs))
+    }
+}
+
+// Legacy input preparation owns a second, rooted Value forest. Keep those
+// temporaries out of the selected invocation's state-construction frame; the
+// returned root remains live until the complete HostState has been published.
+#[inline(never)]
+fn prepare_inputs(
+    function: &runmat_native_codegen::NativeFunction,
+    inputs: NativeFunctionInputs,
+    captures: &[NativeCaptureInput],
+) -> NativeExecutorResult<(
+    Option<Vec<runmat_value::Value>>,
+    runmat_runtime::call::function_abi::PreparedFunctionInputs,
+    Option<ScopedValueRoots>,
+)> {
+    match inputs.try_into_prepared() {
+        Err(arguments) => {
+            let construction_values = arguments
+                .iter()
+                .cloned()
+                .chain(captures.iter().filter_map(|capture| match capture {
+                    NativeCaptureInput::Owned(capture) => Some(capture.value.clone()),
+                    NativeCaptureInput::Retained { .. } => None,
+                }))
+                .collect();
+            let roots =
+                ScopedValueRoots::register(construction_values, "native_invocation_construction")?;
+            let input_specs = function_input_specs(function)?;
+            let prepared = prepare_function_inputs(
+                &function.name,
+                &arguments,
+                function.abi.fixed_inputs.len(),
+                function.abi.varargin.is_some(),
+                &input_specs,
+            )?;
+            Ok((Some(arguments), prepared, Some(roots)))
+        }
+        Ok(prepared) => Ok((None, prepared, None)),
     }
 }
 

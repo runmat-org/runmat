@@ -104,14 +104,17 @@ fn managed_scalar_output_denial_cancellation_and_character_layout() {
     assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
     let (runtime, ledger, cancellation) = runtime(1 << 20);
     let mut collector = Managed::new(&runtime, 4).unwrap().unwrap();
-    for value in ['a', 'b', 'c', 'd'] {
+    for value in runmat_value::encode_utf16_code_units("abcd") {
         collector.push(ClassifiedValue::Char(value)).unwrap();
     }
     let value = collector.finish(&[2, 2]).unwrap();
     let Value::CharArray(value) = value else {
         panic!("expected character output")
     };
-    assert_eq!(value.data(), &['a', 'c', 'b', 'd']);
+    assert_eq!(
+        value.data(),
+        runmat_value::encode_utf16_code_units("acbd").as_slice()
+    );
     drop(value);
     cancellation.cancel(CancellationReason::User);
     let Err(error) = collector

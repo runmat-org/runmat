@@ -1,9 +1,10 @@
 //! The single framed validator used by synchronous and cooperative frontends.
 
 use super::super::{
-    CallableOwner, DurableObjectArray, DurablePlainObject, DurableStructArray, ElementType,
-    ExceptionFrameSource, ExceptionValue, InlineValue, RegisteredField, SparseValue, StructField,
-    ValueLimits, ValuePayload, ValueRef, ValueRefKind, ValueTransportContext,
+    CallableOwner, CharacterEncoding, DurableDecompositionPayload, DurableNumericFactor,
+    DurableObjectArray, DurablePlainObject, DurableStructArray, ElementType, ExceptionFrameSource,
+    ExceptionValue, InlineValue, RegisteredField, SparseValue, StructField, ValueLimits,
+    ValuePayload, ValueRef, ValueRefKind, ValueTransportContext,
 };
 use crate::{schema::VALUE_PAYLOAD_SCHEMA_VERSION, ContractError};
 use std::{collections::HashSet, num::NonZeroUsize};
@@ -75,7 +76,7 @@ impl<'a> Fields<'a> {
 }
 
 enum AfterShape<'a> {
-    Char(&'a [u32]),
+    Char(&'a [u16]),
     Strings(&'a [String]),
     Dense(ElementType, &'a [u8]),
     Cell(&'a [ValuePayload], u16),
@@ -88,13 +89,18 @@ enum Task<'a> {
     Inline(&'a InlineValue, u16),
     Many(&'a [ValuePayload], usize, u16),
     Texts(&'a [String], usize),
-    Chars(&'a [u32], usize),
+    Chars(&'a [u16], usize),
     Shape(&'a [u64], usize, u64, AfterShape<'a>),
     SparseOffsets(&'a SparseValue, usize),
     SparseRows(&'a SparseValue, usize),
     SortedFields(Fields<'a>, usize, u16, &'static str),
     OrderedFields(&'a [StructField], usize, u16, HashSet<&'a str>),
     Dynamic(&'a DurablePlainObject, usize),
+    FactorIndices(&'a [u64], usize),
+    FactorBlock(&'a DurableNumericFactor, usize, usize, usize, bool),
+    FactorDense(&'a DurableNumericFactor, usize, usize),
+    FactorMap(&'a DurableNumericFactor, usize, usize),
+    FactorScale(&'a DurableNumericFactor, usize),
     StructArray(&'a DurableStructArray, u64, usize, u16, HashSet<&'a str>),
     ObjectArray(&'a DurableObjectArray, usize, u16),
     ExceptionStack(&'a ExceptionValue, usize, u16),
@@ -241,13 +247,7 @@ impl<'a> ValuePayloadValidationCursor<'a> {
                 Ok(())
             }
             Task::Chars(v, i) => {
-                if let Some(x) = v.get(i) {
-                    if char::from_u32(*x).is_none() {
-                        return Err(invalid(
-                            "char payload",
-                            "contains an invalid Unicode scalar",
-                        ));
-                    }
+                if v.get(i).is_some() {
                     self.tasks.push(Task::Chars(v, i + 1));
                 }
                 Ok(())
@@ -258,6 +258,11 @@ impl<'a> ValuePayloadValidationCursor<'a> {
             Task::SortedFields(v, i, d, l) => self.sorted_field(v, i, d, l),
             Task::OrderedFields(v, i, d, n) => self.ordered_field(v, i, d, n),
             Task::Dynamic(v, i) => self.dynamic(v, i),
+            Task::FactorIndices(v, i) => self.factor_index(v, i),
+            Task::FactorBlock(v, b, c, e, d) => self.factor_block(v, b, c, e, d),
+            Task::FactorDense(v, b, i) => self.factor_dense(v, b, i),
+            Task::FactorMap(v, i, o) => self.factor_map(v, i, o),
+            Task::FactorScale(v, i) => self.factor_scale(v, i),
             Task::StructArray(v, n, i, d, s) => self.struct_array_field(v, n, i, d, s),
             Task::ObjectArray(v, i, d) => self.object_array_item(v, i, d),
             Task::ExceptionStack(v, i, d) => self.exception_stack(v, i, d),
@@ -313,9 +318,11 @@ impl<'a> ValuePayloadValidationCursor<'a> {
             }
             InlineValue::ComplexF64Bits { .. } => self.budget.add_bytes(16)?,
             InlineValue::String(x) => self.budget.add_text(x)?,
-            InlineValue::Char { shape, code_points } => {
-                self.shape(shape, AfterShape::Char(code_points))
-            }
+            InlineValue::Char {
+                encoding: CharacterEncoding::Utf16CodeUnitsV1,
+                shape,
+                code_units,
+            } => self.shape(shape, AfterShape::Char(code_units)),
             InlineValue::StringArray { shape, values } => {
                 self.shape(shape, AfterShape::Strings(values))
             }
@@ -418,7 +425,7 @@ impl<'a> ValuePayloadValidationCursor<'a> {
                     ));
                 }
                 self.budget.add_elements(n)?;
-                self.budget.add_bytes((v.len() as u64).saturating_mul(4))?;
+                self.budget.add_bytes((v.len() as u64).saturating_mul(2))?;
                 self.tasks.push(Task::Chars(v, 0));
             }
             AfterShape::Strings(v) => {

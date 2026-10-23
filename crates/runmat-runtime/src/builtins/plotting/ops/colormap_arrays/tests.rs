@@ -119,7 +119,11 @@ fn every_named_palette_preserves_zero_rows_double_class_and_typed_errors() {
 #[test]
 fn default_length_tracks_current_colormap_length() {
     let _guard = setup();
-    let _ = figure_builtin(vec![]).expect("figure");
+    let _ = figure_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(vec![]),
+    )
+    .expect("figure");
     set_colormap_with_length(ColorMap::ColorCube, 17);
     let Value::Tensor(cmap) = parula_builtin(
         crate::builtins::common::test_support::builtin_arguments(vec![]),

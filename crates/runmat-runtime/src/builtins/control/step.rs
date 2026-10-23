@@ -242,7 +242,7 @@ async fn plot_multiple_step_responses(
 async fn plot_multiple_step_responses(
     _runtime: Option<&crate::context::RuntimeContext>,
     _first_sys: Value,
-    _rest: Vec<Value>,
+    _rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<()> {
     Err(crate::plotting_hooks::unavailable_presentation())
 }

@@ -278,8 +278,8 @@ pub(crate) fn aggregate_heatmap_table(
     let mut y_keys = BTreeSet::new();
     let mut groups = BTreeMap::<(GroupAtom, GroupAtom), Vec<usize>>::new();
     for row in 0..height {
-        let x_key = cell_group_atom(x, row);
-        let y_key = cell_group_atom(y, row);
+        let x_key = cell_group_atom(x, row)?;
+        let y_key = cell_group_atom(y, row)?;
         // RunMat's scoped table-heatmap policy excludes rows without a
         // discrete axis category. A literal text category "missing" remains
         // distinct and never collides with an invented display sentinel.

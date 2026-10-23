@@ -12,7 +12,7 @@ pub(super) async fn parse_topk_args(
     let mut comparison = ComparisonMethod::Auto;
     let mut idx = 1usize;
     while idx < rest.len() {
-        if let Some(keyword) = keyword_of(&rest[idx]) {
+        if let Some(keyword) = keyword_of(&rest[idx])? {
             if keyword == "comparisonmethod" {
                 let Some(value) = rest.get(idx + 1) else {
                     return Err(topk_invalid_argument(
@@ -87,7 +87,7 @@ pub(super) fn parse_integer_k(kind: TopKKind, value: &IntValue) -> BuiltinResult
 }
 
 pub(super) fn parse_comparison(kind: TopKKind, value: &Value) -> BuiltinResult<ComparisonMethod> {
-    let Some(keyword) = keyword_of(value) else {
+    let Some(keyword) = keyword_of(value)? else {
         return Err(topk_invalid_argument(
             kind,
             "'ComparisonMethod' expects a string value",

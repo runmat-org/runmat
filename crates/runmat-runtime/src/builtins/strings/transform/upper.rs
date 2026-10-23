@@ -14,11 +14,9 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{
-    cell_has_valid_string_scalar, char_row_to_string_slice, transform_scalar_case,
+    cell_has_valid_string_scalar, transform_character_case, transform_scalar_case,
     transform_string_array_case, TextCase,
 };
-#[cfg(test)]
-use crate::builtins::strings::type_resolvers::text_preserve_type;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::upper")]
@@ -93,7 +91,7 @@ async fn upper_builtin(runtime: Option<RuntimeContext>, value: Value) -> Builtin
                 .map(Value::String)
         }
         Value::StringArray(array) => upper_string_array(runtime.as_ref(), array),
-        Value::CharArray(array) => upper_char_array(array),
+        Value::CharArray(array) => upper_char_array(runtime.as_ref(), array),
         Value::Cell(cell) => upper_cell_array(runtime.as_ref(), cell),
         _ => Err(upper_error(&UPPER_ERROR_INVALID_INPUT)),
     }
@@ -121,35 +119,14 @@ fn upper_admission(runtime: &RuntimeContext, cause: HostAllocationError) -> Runt
         .build()
 }
 
-fn upper_char_array(array: CharArray) -> BuiltinResult<Value> {
-    if array.rows == 0 || array.cols == 0 {
-        return Ok(Value::CharArray(array));
-    }
-    let (data, _, rows, cols) = array.into_parts();
-
-    let mut upper_rows = Vec::with_capacity(rows);
-    let mut target_cols = cols;
-    for row in 0..rows {
-        let text = char_row_to_string_slice(&data, cols, row).to_uppercase();
-        let len = text.chars().count();
-        target_cols = target_cols.max(len);
-        upper_rows.push(text);
-    }
-
-    let mut upper_data = Vec::with_capacity(rows * target_cols);
-    for row_text in upper_rows {
-        let mut chars: Vec<char> = row_text.chars().collect();
-        if chars.len() < target_cols {
-            chars.resize(target_cols, ' ');
-        }
-        upper_data.extend(chars.into_iter());
-    }
-
-    CharArray::new(upper_data, rows, target_cols)
-        .map(Value::CharArray)
-        .map_err(|e| {
-            upper_error_with_message(format!("{BUILTIN_NAME}: {e}"), &UPPER_ERROR_INTERNAL)
-        })
+fn upper_char_array(runtime: Option<&RuntimeContext>, array: CharArray) -> BuiltinResult<Value> {
+    transform_character_case(runtime, array, TextCase::Upper, upper_admission, |detail| {
+        upper_error_with_message(
+            format!("{BUILTIN_NAME}: {detail}"),
+            &UPPER_ERROR_INVALID_INPUT,
+        )
+    })
+    .map(Value::CharArray)
 }
 
 fn upper_cell_array(runtime: Option<&RuntimeContext>, cell: CellArray) -> BuiltinResult<Value> {
@@ -180,7 +157,7 @@ fn upper_cell_element(runtime: Option<&RuntimeContext>, value: &Value) -> Builti
             upper_admission,
         )
         .map(Value::String),
-        Value::CharArray(ca) if ca.rows <= 1 => upper_char_array(ca.clone()),
+        Value::CharArray(ca) if ca.rows <= 1 => upper_char_array(runtime, ca.clone()),
         Value::CharArray(_) => Err(upper_error(&UPPER_ERROR_CELL_ELEMENT)),
         _ => Err(upper_error(&UPPER_ERROR_CELL_ELEMENT)),
     }
@@ -189,7 +166,6 @@ fn upper_cell_element(runtime: Option<&RuntimeContext>, value: &Value) -> Builti
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{ResolveContext, Type};
 
     fn run_upper(value: Value) -> BuiltinResult<Value> {
         futures::executor::block_on(upper_builtin(None, value))
@@ -235,13 +211,13 @@ pub(crate) mod tests {
     #[test]
     fn upper_char_array_multiple_rows() {
         let data: Vec<char> = vec!['c', 'a', 't', 'd', 'o', 'g'];
-        let array = CharArray::new(data, 2, 3).unwrap();
+        let array = CharArray::from_unicode_scalars(data, 2, 3).unwrap();
         let result = run_upper(Value::CharArray(array)).expect("upper");
         match result {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 2);
                 assert_eq!(ca.cols, 3);
-                assert_eq!(ca.data(), vec!['C', 'A', 'T', 'D', 'O', 'G']);
+                assert_eq!(ca.data(), runmat_value::encode_utf16_code_units("CATDOG"));
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -256,7 +232,7 @@ pub(crate) mod tests {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 6);
-                let expected: Vec<char> = "HELLO ".chars().collect();
+                let expected = runmat_value::encode_utf16_code_units("HELLO ");
                 assert_eq!(ca.data(), expected);
             }
             other => panic!("expected char array, got {other:?}"),
@@ -268,17 +244,34 @@ pub(crate) mod tests {
     fn upper_char_array_unicode_expansion_extends_width() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let data: Vec<char> = vec!['ß', 'a'];
-        let array = CharArray::new(data, 1, 2).unwrap();
+        let array = CharArray::from_unicode_scalars(data, 1, 2).unwrap();
         let result = run_upper(Value::CharArray(array)).expect("upper");
         match result {
             Value::CharArray(ca) => {
                 assert_eq!(ca.rows, 1);
                 assert_eq!(ca.cols, 3);
-                let expected: Vec<char> = vec!['S', 'S', 'A'];
+                let expected = runmat_value::encode_utf16_code_units("SSA");
                 assert_eq!(ca.data(), expected);
             }
             other => panic!("expected char array, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn upper_preserves_supplementary_code_unit_geometry_and_refuses_unpaired_units() {
+        let result = run_upper(Value::CharArray(CharArray::new_row("🙂a"))).unwrap();
+        let Value::CharArray(result) = result else {
+            panic!("expected character output");
+        };
+        assert_eq!(result.shape(), &[1, 3]);
+        assert_eq!(result.try_row_string().unwrap().as_deref(), Some("🙂A"));
+
+        let malformed =
+            CharArray::from_code_units(vec![runmat_value::Utf16CodeUnit::from_raw(0xD800)], 1, 1)
+                .unwrap();
+        let error = run_upper(Value::CharArray(malformed)).unwrap_err();
+        assert_eq!(error.identifier(), UPPER_ERROR_INVALID_INPUT.identifier);
+        assert!(error.message().contains("unpaired UTF-16 surrogate"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -375,7 +368,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn upper_cell_allows_empty_char_vector() {
-        let empty_char = CharArray::new(Vec::new(), 1, 0).unwrap();
+        let empty_char = CharArray::from_unicode_scalars(Vec::new(), 1, 0).unwrap();
         let cell = CellArray::new(vec![Value::CharArray(empty_char.clone())], 1, 1).unwrap();
         let result = run_upper(Value::Cell(cell)).expect("upper");
         match result {
@@ -414,14 +407,6 @@ pub(crate) mod tests {
         assert!(
             physical.acquire().is_none(),
             "physical lease must expire after final release"
-        );
-    }
-
-    #[test]
-    fn upper_type_preserves_text() {
-        assert_eq!(
-            text_preserve_type(&[Type::String], &ResolveContext::new(Vec::new())),
-            Type::String
         );
     }
 }

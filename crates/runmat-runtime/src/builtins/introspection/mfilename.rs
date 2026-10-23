@@ -9,14 +9,21 @@ enum MfilenameMode {
     Class,
 }
 
-fn text_value(value: &Value) -> Option<String> {
+fn text_value(value: &Value) -> crate::BuiltinResult<Option<String>> {
     match value {
-        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::String(text) => Ok(Some(text.as_str().to_owned())),
         Value::StringArray(array) if array.data().len() == 1 => {
-            Some(array.data()[0].as_str().to_owned())
+            Ok(Some(array.data()[0].as_str().to_owned()))
         }
-        Value::CharArray(array) if array.rows == 1 => Some(array.data().iter().collect()),
-        _ => None,
+        Value::CharArray(array) if array.rows == 1 => {
+            super::text::decode_utf16_with_error(array.data(), || {
+                crate::build_runtime_error("mfilename: option is not valid UTF-16 text")
+                    .with_builtin("mfilename")
+                    .build()
+            })
+            .map(Some)
+        }
+        _ => Ok(None),
     }
 }
 
@@ -29,7 +36,7 @@ fn mode_from_args(
             &MFILENAME_ERROR_TOO_MANY_INPUTS,
         ));
     }
-    let Some(option) = args.first().and_then(text_value) else {
+    let Some(option) = args.first().map(text_value).transpose()?.flatten() else {
         return Ok(MfilenameMode::Name);
     };
     match option.trim().to_ascii_lowercase().as_str() {

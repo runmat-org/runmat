@@ -34,9 +34,10 @@ pub(super) async fn selected_constructor_dependencies(
             )
             .await
             .map_err(|error| {
-                build_runtime_error(error)
-                    .with_identifier("RunMat:FunctionResolution")
-                    .build()
+                error.into_identified_runtime_error(
+                    "superclass source resolution",
+                    "RunMat:FunctionResolution",
+                )
             })?
             .ok_or_else(|| {
                 build_runtime_error("selected superclass source is unavailable")
@@ -53,6 +54,8 @@ pub(super) async fn selected_constructor_dependencies(
                         path.display()
                     ))
                     .with_identifier("RunMat:FunctionSourceRead")
+                    .with_source(error)
+                    .with_gpu_gather_retry(runmat_runtime::GpuGatherRetry::Never)
                     .build()
                 })?;
         let path_name = path.to_string_lossy();
@@ -76,6 +79,8 @@ pub(super) async fn selected_constructor_dependencies(
                 path.display()
             ))
             .with_identifier("RunMat:ProjectComposition")
+            .with_source(error)
+            .with_gpu_gather_retry(runmat_runtime::GpuGatherRetry::Never)
             .build()
         })?;
         let primary_revision = runmat_execution::Digest::sha256(source_text.as_bytes());

@@ -32,7 +32,13 @@ pub fn axis_ticks_builtin(
     match (args.len(), args.first()) {
         (0, _) => query_ticks(builtin, axis, &target.resolve(builtin)?),
         (1, Some(value)) => {
-            if let Some(text) = value_as_string(value) {
+            if let Some(text) = value_as_string(value).map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    builtin,
+                    source.to_string(),
+                    source,
+                )
+            })? {
                 match text.trim().to_ascii_lowercase().as_str() {
                     "auto" => {
                         super::op_common::axes_output::validate_setter_output(builtin)?;
@@ -258,12 +264,12 @@ fn tick_value(data: Vec<f64>) -> Value {
     Value::Tensor(Tensor::new(data, vec![1, len]).expect("tick row vector"))
 }
 
-fn value_as_string(value: &Value) -> Option<String> {
-    match value {
+fn value_as_string(value: &Value) -> Result<Option<String>, runmat_value::Utf16DecodeError> {
+    Ok(match value {
         Value::String(s) => Some(s.as_str().to_owned()),
-        Value::CharArray(chars) => Some(chars.data().iter().collect()),
+        Value::CharArray(chars) => Some(runmat_value::decode_utf16_code_units(chars.data())?),
         _ => None,
-    }
+    })
 }
 
 #[cfg(test)]

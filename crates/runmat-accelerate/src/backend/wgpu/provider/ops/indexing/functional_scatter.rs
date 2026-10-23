@@ -29,6 +29,32 @@ impl WgpuProvider {
         indices: &[u32],
         values: &GpuTensorHandle,
     ) -> ProviderExecutionResult<GpuTensorHandle> {
+        self.scatter_linear_functional_exec_admitted(
+            target,
+            indices,
+            values,
+            runmat_accelerate_api::ProviderScatterValueMapping::Linear,
+            None,
+        )
+    }
+
+    pub(crate) fn scatter_linear_functional_exec_admitted(
+        &self,
+        target: &GpuTensorHandle,
+        indices: &[u32],
+        values: &GpuTensorHandle,
+        mapping: runmat_accelerate_api::ProviderScatterValueMapping,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> ProviderExecutionResult<GpuTensorHandle> {
+        if admission.is_some()
+            && (runmat_accelerate_api::handle_is_transposed(target)
+                || runmat_accelerate_api::handle_is_transposed(values))
+        {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "admitted functional scatter requires contiguous operands",
+            )
+            .into());
+        }
         let target_entry = self.get_entry_for_bitwise_move(target, "functional scatter")?;
         let values_entry = self.get_entry_for_bitwise_move(values, "functional scatter values")?;
         if !(target_entry.element_type == values_entry.element_type
@@ -41,7 +67,11 @@ impl WgpuProvider {
         }
         let (target_len, words_per_element) = word_geometry(target)?;
         let (values_len, values_words) = word_geometry(values)?;
-        if indices.len() != values_len || words_per_element != values_words {
+        let required_values = match mapping {
+            runmat_accelerate_api::ProviderScatterValueMapping::Linear => indices.len(),
+            runmat_accelerate_api::ProviderScatterValueMapping::Scalar => 1,
+        };
+        if required_values != values_len || words_per_element != values_words {
             return Err(anyhow!("functional scatter RHS word geometry mismatch").into());
         }
         if !indices.iter().all(|&index| (index as usize) < target_len) {
@@ -93,18 +123,32 @@ impl WgpuProvider {
 
         // Transposed views must be materialized in logical order before a raw
         // bitwise copy; reshape_exec performs the existing device-side move.
-        let contiguous = self
-            .reshape_exec(target, target.shape())
-            .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects())?;
-        let values_contiguous = self
-            .reshape_exec(values, values.shape())
-            .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects())?;
-        let entry = self
-            .get_entry_for_bitwise_move(&contiguous, "functional scatter copy")
-            .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects())?;
-        let values_entry = self
-            .get_entry_for_bitwise_move(&values_contiguous, "functional scatter RHS")
-            .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects())?;
+        let contiguous = if runmat_accelerate_api::handle_is_transposed(target) {
+            self.reshape_exec(target, target.shape())
+                .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects())?
+        } else {
+            target.clone()
+        };
+        let values_contiguous = if runmat_accelerate_api::handle_is_transposed(values) {
+            self.reshape_exec(values, values.shape())
+                .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects())?
+        } else {
+            values.clone()
+        };
+        let entry = if runmat_accelerate_api::handle_is_transposed(target) {
+            drop(target_entry);
+            self.get_entry_for_bitwise_move(&contiguous, "functional scatter copy")
+                .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects())?
+        } else {
+            target_entry
+        };
+        let values_entry = if runmat_accelerate_api::handle_is_transposed(values) {
+            drop(values_entry);
+            self.get_entry_for_bitwise_move(&values_contiguous, "functional scatter RHS")
+                .map_err(|error| ProviderExecutionError::from(error).with_unproven_effects())?
+        } else {
+            values_entry
+        };
         let copy_bytes = contiguous.physical().payload_bytes();
         if copy_bytes > entry.buffer.size()
             || copy_bytes % 4 != 0
@@ -161,7 +205,10 @@ impl WgpuProvider {
                 let params = LinearScatterParams {
                     count: indices.len() as u32,
                     lane_factor: words_per_element as u32,
-                    _pad: [0; 2],
+                    rhs_scalar: u32::from(
+                        mapping == runmat_accelerate_api::ProviderScatterValueMapping::Scalar,
+                    ),
+                    _pad: 0,
                 };
                 let params_buffer =
                     self.uniform_buffer(emission, &params, "runmat-functional-scatter-params")?;
@@ -206,12 +253,13 @@ impl WgpuProvider {
             })
             .map_err(|error| ProviderExecutionError::from(error).after_effect())?
             .map_err(|error| ProviderExecutionError::from(error).after_effect())?;
-        self.register_storage_move_buffer(
+        self.register_storage_move_buffer_admitted(
             output_buffer.clone(),
             &entry,
             target.shape().to_vec(),
             entry.len,
             output_buffer.size(),
+            admission,
         )
         .map_err(|error| ProviderExecutionError::from(error).after_effect())
     }

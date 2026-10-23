@@ -5,10 +5,10 @@ use super::{
 };
 use crate::builtins::common::tensor as tensor_utils;
 use crate::BuiltinResult;
-use runmat_value::{CharArray, IntValue, LogicalArray, StringArray, Tensor, Value};
+use runmat_value::{CharArray, IntValue, LogicalArray, StringArray, Tensor, Utf16CodeUnit, Value};
 
 enum Payload {
-    Text(Vec<char>),
+    Text(String),
     Bytes(Vec<u8>),
 }
 
@@ -22,8 +22,8 @@ pub(super) fn prepare_payload(data: &Value, encoding: FileEncoding) -> BuiltinRe
 
 fn extract_payload(data: &Value) -> BuiltinResult<Payload> {
     match data {
-        Value::CharArray(ca) => Ok(Payload::Text(char_array_to_text(ca))),
-        Value::String(s) => Ok(Payload::Text(s.chars().collect())),
+        Value::CharArray(ca) => Ok(Payload::Text(char_array_to_text(ca)?)),
+        Value::String(s) => Ok(Payload::Text(s.as_str().to_owned())),
         Value::StringArray(sa) => Ok(Payload::Text(string_array_to_text(sa))),
         Value::Num(n) => {
             let byte = float_to_byte(*n)?;
@@ -55,9 +55,14 @@ fn extract_payload(data: &Value) -> BuiltinResult<Payload> {
     }
 }
 
-fn char_array_to_text(ca: &CharArray) -> Vec<char> {
+fn char_array_to_text(ca: &CharArray) -> BuiltinResult<String> {
     if ca.rows <= 1 {
-        return ca.data_owner().as_slice().to_vec();
+        return crate::builtins::io::utf16::decode_utf16_with_error(ca.data(), || {
+            filewrite_error_with_detail(
+                &FILEWRITE_ERROR_INVALID_DATA,
+                "character input contains malformed UTF-16 text",
+            )
+        });
     }
     let mut out = Vec::with_capacity(ca.rows * (ca.cols + 1));
     for row in 0..ca.rows {
@@ -65,15 +70,20 @@ fn char_array_to_text(ca: &CharArray) -> Vec<char> {
             out.push(ca.data()[row * ca.cols + col]);
         }
         if row + 1 < ca.rows {
-            out.push('\n');
+            out.push(Utf16CodeUnit::from_raw(b'\n' as u16));
         }
     }
-    out
+    crate::builtins::io::utf16::decode_utf16_with_error(&out, || {
+        filewrite_error_with_detail(
+            &FILEWRITE_ERROR_INVALID_DATA,
+            "character input contains malformed UTF-16 text",
+        )
+    })
 }
 
-fn string_array_to_text(sa: &StringArray) -> Vec<char> {
+fn string_array_to_text(sa: &StringArray) -> String {
     if sa.data().is_empty() {
-        return Vec::new();
+        return String::new();
     }
     let mut combined = String::new();
     for (idx, entry) in sa.data().iter().enumerate() {
@@ -82,7 +92,7 @@ fn string_array_to_text(sa: &StringArray) -> Vec<char> {
             combined.push('\n');
         }
     }
-    combined.chars().collect()
+    combined
 }
 
 pub(super) fn tensor_to_bytes(tensor: &Tensor) -> BuiltinResult<Vec<u8>> {
@@ -185,19 +195,17 @@ fn unsigned_to_byte(value: u64) -> BuiltinResult<u8> {
     Ok(value as u8)
 }
 
-fn encode_text(chars: Vec<char>, encoding: FileEncoding) -> BuiltinResult<Vec<u8>> {
+fn encode_text(text: String, encoding: FileEncoding) -> BuiltinResult<Vec<u8>> {
     match encoding {
-        FileEncoding::Auto | FileEncoding::Utf8 => {
-            Ok(chars.iter().collect::<String>().into_bytes())
-        }
-        FileEncoding::Ascii => encode_ascii_chars(&chars),
-        FileEncoding::Latin1 | FileEncoding::Raw => encode_latin_chars(&chars, encoding),
+        FileEncoding::Auto | FileEncoding::Utf8 => Ok(text.into_bytes()),
+        FileEncoding::Ascii => encode_ascii_chars(&text),
+        FileEncoding::Latin1 | FileEncoding::Raw => encode_latin_chars(&text, encoding),
     }
 }
 
-fn encode_ascii_chars(chars: &[char]) -> BuiltinResult<Vec<u8>> {
-    let mut out = Vec::with_capacity(chars.len());
-    for &ch in chars {
+fn encode_ascii_chars(text: &str) -> BuiltinResult<Vec<u8>> {
+    let mut out = Vec::with_capacity(text.len());
+    for ch in text.chars() {
         if ch as u32 > 0x7F {
             return Err(filewrite_error_with_detail(
                 &FILEWRITE_ERROR_ENCODE,
@@ -212,9 +220,9 @@ fn encode_ascii_chars(chars: &[char]) -> BuiltinResult<Vec<u8>> {
     Ok(out)
 }
 
-fn encode_latin_chars(chars: &[char], encoding: FileEncoding) -> BuiltinResult<Vec<u8>> {
-    let mut out = Vec::with_capacity(chars.len());
-    for &ch in chars {
+fn encode_latin_chars(text: &str, encoding: FileEncoding) -> BuiltinResult<Vec<u8>> {
+    let mut out = Vec::with_capacity(text.len());
+    for ch in text.chars() {
         if ch as u32 > 0xFF {
             return Err(filewrite_error_with_detail(
                 &FILEWRITE_ERROR_ENCODE,

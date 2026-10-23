@@ -3,7 +3,8 @@ use super::*;
 
 #[inline(never)]
 pub(super) fn suspend<'a>(state: ParallelDispatchState<'a>) -> ParallelDispatchFuture<'a> {
-    Box::pin(dispatch(state))
+    let execution = state.context.execution;
+    control::admit(&execution.runtime, move || dispatch(state))
 }
 
 async fn dispatch(state: ParallelDispatchState<'_>) -> ParallelDispatchResult {

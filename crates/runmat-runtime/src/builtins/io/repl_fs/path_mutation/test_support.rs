@@ -17,7 +17,8 @@ impl PathGuard {
 
 impl Drop for PathGuard {
     fn drop(&mut self) {
-        crate::builtins::common::path_state::set_path_string(&self.previous);
+        crate::builtins::common::path_state::set_path_string(&self.previous)
+            .expect("test search path update");
     }
 }
 

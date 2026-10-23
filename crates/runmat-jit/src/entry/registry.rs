@@ -18,6 +18,10 @@ impl EntryRegistry {
     /// Inspect only the requested entry without cloning dependency maps or
     /// scanning unrelated entries. Later resolution authenticates freshness.
     pub fn publications(&self, key: &EntryKey, profile: Option<Digest>) -> EntryPublications {
+        self.publications_borrowed(&key.0, profile)
+    }
+
+    pub fn publications_borrowed(&self, key: &str, profile: Option<Digest>) -> EntryPublications {
         self.cells
             .get(key)
             .map_or_else(EntryPublications::default, |cell| {
@@ -34,6 +38,26 @@ impl EntryRegistry {
 
     pub fn resolve(&self, key: &EntryKey, current: &DependencySnapshot) -> Option<PublishedEntry> {
         self.cells.get(key)?.resolve(current)
+    }
+
+    /// Borrow the tracker's current generations; do not allocate an unrelated
+    /// all-entry snapshot just to authenticate one immutable publication.
+    pub fn resolve_current(
+        &self,
+        key: &EntryKey,
+        current: &crate::invalidation::DependencyTracker,
+        profile: Option<runmat_execution::Digest>,
+    ) -> Option<PublishedEntry> {
+        self.resolve_current_borrowed(&key.0, current, profile)
+    }
+
+    pub fn resolve_current_borrowed(
+        &self,
+        key: &str,
+        current: &crate::invalidation::DependencyTracker,
+        profile: Option<Digest>,
+    ) -> Option<PublishedEntry> {
+        self.cells.get(key)?.resolve_current(current, profile)
     }
 
     pub fn publish(
@@ -55,6 +79,15 @@ impl EntryRegistry {
         current: &DependencySnapshot,
     ) -> Option<PublishedEntry> {
         self.cells.get(key)?.resolve_specialized(profile, current)
+    }
+
+    pub fn preparation_quote(
+        &self,
+        key: &EntryKey,
+        profile: Digest,
+        current: &DependencySnapshot,
+    ) -> Option<super::NativePreparationQuote> {
+        self.cells.get(key)?.preparation_quote(profile, current)
     }
 
     pub fn publish_specialized(

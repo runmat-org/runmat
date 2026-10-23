@@ -469,6 +469,7 @@ fn insufficient(detail: &str) -> crate::RuntimeError {
 }
 
 fn selected_output_error(source: HostEffectAllocationError) -> crate::RuntimeError {
+    let cancelled = matches!(source, HostEffectAllocationError::Cancelled);
     let identifier = match source {
         HostEffectAllocationError::Revoked | HostEffectAllocationError::InvalidInvocation => {
             "RunMat:Placement:StaleResourceAuthority"
@@ -480,10 +481,15 @@ fn selected_output_error(source: HostEffectAllocationError) -> crate::RuntimeErr
         | HostEffectAllocationError::AllocationFailed => "RunMat:Placement:ResourceLimit",
         HostEffectAllocationError::Unavailable => "RunMat:Placement:InsufficientResourceEvidence",
     };
-    build_runtime_error("selected output headroom could not be reserved")
+    let mut error = build_runtime_error("selected output headroom could not be reserved")
         .with_identifier(identifier)
         .with_source(source)
-        .build()
+        .build();
+    if cancelled {
+        error.failure_origin =
+            crate::runtime_error::RuntimeFailureOrigin::ExecutionControlCancellation;
+    }
+    error
 }
 
 /// Owns the exploratory probe until all effects and output publication have

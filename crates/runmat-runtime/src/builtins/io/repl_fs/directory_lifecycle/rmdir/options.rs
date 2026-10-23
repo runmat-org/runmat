@@ -20,8 +20,8 @@ pub(super) async fn parse(args: crate::call::BuiltinArguments) -> BuiltinResult<
     if !(1..=4).contains(&args.len()) {
         return Err(error(&RMDIR_ERROR_ARITY));
     }
-    let folder =
-        super::super::input::text_scalar(&args[0]).map_err(|_| error(&RMDIR_ERROR_FOLDER_TYPE))?;
+    let folder = super::super::input::text_scalar(&args[0])
+        .map_err(|source| source.attach(error(&RMDIR_ERROR_FOLDER_TYPE)))?;
     if folder.is_empty() {
         return Err(error(&RMDIR_ERROR_EMPTY_NAME));
     }
@@ -44,7 +44,8 @@ fn recursive_prefix(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResul
     match super::super::input::text_scalar(value) {
         Ok(text) if text.eq_ignore_ascii_case("s") => Ok((true, 2)),
         Ok(text) if text.eq_ignore_ascii_case("ResolveSymbolicLinks") => Ok((false, 1)),
-        _ => Err(error(&RMDIR_ERROR_OPTION)),
+        Ok(_) => Err(error(&RMDIR_ERROR_OPTION)),
+        Err(source) => Err(source.attach(error(&RMDIR_ERROR_OPTION))),
     }
 }
 
@@ -58,8 +59,8 @@ async fn symbolic_link_option(
     if args.len() != start + 2 {
         return Err(error(&RMDIR_ERROR_OPTION));
     }
-    let name =
-        super::super::input::text_scalar(&args[start]).map_err(|_| error(&RMDIR_ERROR_OPTION))?;
+    let name = super::super::input::text_scalar(&args[start])
+        .map_err(|source| source.attach(error(&RMDIR_ERROR_OPTION)))?;
     if !name.eq_ignore_ascii_case("ResolveSymbolicLinks") {
         return Err(error(&RMDIR_ERROR_OPTION));
     }

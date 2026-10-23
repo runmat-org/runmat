@@ -457,7 +457,8 @@ fn webwrite_applies_basic_auth_and_custom_headers() {
 
     match result {
         Value::CharArray(ca) => {
-            let text: String = ca.data().iter().collect();
+            let text: String =
+                runmat_value::decode_utf16_code_units(ca.data()).expect("valid UTF-16 fixture");
             assert_eq!(text, "OK");
         }
         other => panic!("expected char array, got {other:?}"),

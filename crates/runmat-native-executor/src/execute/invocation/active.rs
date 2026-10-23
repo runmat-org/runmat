@@ -295,10 +295,19 @@ impl ActiveInvocation {
             .state
             .runtime
             .enter_active_catch_shared(self.state.active_catch_exception());
-        let status = unsafe { (self.entrypoint)(&mut call, &mut exit) };
-        // A generated entry has returned: any still-open region was incomplete,
-        // including ABI failures, suspension, cancellation and exceptional exits.
-        self.state.region_observation = None;
+        let audit = super::super::region::observation::active_audit(&self.state);
+        let status =
+            runmat_runtime::numeric_region::service::with_native_region_poll(audit, || unsafe {
+                (self.entrypoint)(&mut call, &mut exit)
+            });
+        // Only the exact published hostcall may retain a still-open source
+        // traversal. All other exits abandon it without successful feedback.
+        if status != NativeHostStatus::OK
+            || exit.kind != NativeExitKind::SUSPENDED
+            || self.state.pending_call.is_none()
+        {
+            self.state.region_observation = None;
+        }
         if status != NativeHostStatus::OK {
             return Err(self.state.host_failure.take().unwrap_or_else(|| {
                 NativeExecutorError::Host(format!("native host returned status {}", status.0))

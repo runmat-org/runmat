@@ -58,7 +58,11 @@ fn text_scalar(value: &Value) -> BuiltinResult<String> {
         Value::StringArray(array) if array.data().len() == 1 => {
             Ok(array.data()[0].as_str().to_owned())
         }
-        Value::CharArray(chars) if chars.rows <= 1 => Ok(chars.data().iter().collect()),
+        Value::CharArray(chars) if chars.rows <= 1 => {
+            super::text::decode_utf16_with_error(chars.data(), || {
+                error("iskeyword", &ERROR_ISKEYWORD_TEXT)
+            })
+        }
         _ => Err(error("iskeyword", &ERROR_ISKEYWORD_TEXT)),
     }
 }

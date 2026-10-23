@@ -55,6 +55,49 @@ impl EnvironmentState {
 }
 
 impl super::RuntimeContext {
+    /// Selected native construction is policy-first: no host environment or
+    /// ambient clock is touched unless the verified caller selected the
+    /// corresponding service. A clock, if selected, is installed separately
+    /// by its linked implementation before invocation.
+    pub fn selected_native_base(
+        execution: std::rc::Rc<dyn crate::execution::RuntimeExecutionServices>,
+        frozen: Option<&runmat_execution::EnvironmentSnapshot>,
+        capture_host_environment: bool,
+        hosted_clock: bool,
+    ) -> io::Result<Self> {
+        let environment = match (frozen, capture_host_environment) {
+            (Some(_), true) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "selected native environment has conflicting policies",
+                ))
+            }
+            (Some(snapshot), false) => {
+                EnvironmentState::from_snapshot(snapshot.entries().to_vec())?
+            }
+            (None, true) => EnvironmentState::from_host(),
+            (None, false) => EnvironmentState::from_snapshot(Vec::new())?,
+        };
+        // Source-path mutation belongs to this invocation, not the process
+        // compatibility path. Seed only from the already admitted snapshot;
+        // an unselected EnvironmentRead service must not expose ambient paths.
+        let search_path =
+            std::sync::Arc::new(crate::builtins::common::path_state::SearchPath::new(
+                environment.var("RUNMAT_PATH").unwrap_or_default(),
+            ));
+        Ok(Self::with_environment_and_services(
+            execution,
+            runmat_execution::CancellationSource::new().token(),
+            environment,
+            if hosted_clock {
+                super::RuntimeServicePorts::selected_with_hosted_clock()
+            } else {
+                super::RuntimeServicePorts::selected_unavailable()
+            },
+        )
+        .with_search_path(search_path))
+    }
+
     /// Construct an isolated context without first collecting ambient host variables.
     pub fn with_frozen_environment(
         execution: std::rc::Rc<dyn crate::execution::RuntimeExecutionServices>,
@@ -69,7 +112,9 @@ impl super::RuntimeContext {
         ))
     }
 
-    /// Replace all visible environment values, without reading or changing the process.
+    /// Trusted embedding/session-management boundary. Replace all visible
+    /// environment values without reading or changing the process. Language
+    /// operations must use the selected EnvironmentWrite owner instead.
     /// Validation completes before replacement, so invalid imports leave state intact.
     pub fn install_environment_snapshot(&self, entries: Vec<(String, String)>) -> io::Result<()> {
         let snapshot = EnvironmentState::from_snapshot(entries)?;
@@ -77,6 +122,9 @@ impl super::RuntimeContext {
         Ok(())
     }
 
+    /// Trusted embedding/session-management boundary used to seed nested
+    /// invocations. Language operations must use the selected EnvironmentRead
+    /// owner instead of calling this projection directly.
     pub fn environment_snapshot(&self) -> Vec<(String, String)> {
         self.environment_state().borrow().vars()
     }

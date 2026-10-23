@@ -1,6 +1,7 @@
 //! Bounded rejection batch and retained pending progress.
 
 use super::*;
+use runmat_accelerate_api::WgpuBufferOwner;
 
 impl WgpuProvider {
     pub(crate) fn propose_integer_child_batch_exec(
@@ -164,7 +165,7 @@ impl WgpuProvider {
             runmat_accelerate_api::observation::ProviderOperationRecorder::submission_checkpoint,
         );
         let staging = self
-            .with_emission(|emission, pending| -> Result<wgpu::Buffer> {
+            .with_emission(|emission, pending| -> Result<WgpuBufferOwner> {
                 let count_storage = emission.device().create_buffer(&wgpu::BufferDescriptor {
                     label: Some("runmat-random-child-batch-count"),
                     size: 4,
@@ -173,12 +174,14 @@ impl WgpuProvider {
                         | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
                 });
-                let staging = emission.device().create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("runmat-random-child-batch-readback"),
-                    size: 4,
-                    usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                });
+                let staging = runmat_accelerate_api::WgpuBufferOwner::new(
+                    emission.device().create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("runmat-random-child-batch-readback"),
+                        size: 4,
+                        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    }),
+                );
                 let mut offset = 0usize;
                 while offset < count {
                     let chunk = (count - offset).min(chunk_capacity);

@@ -221,7 +221,7 @@ fn reject_disabled_integer_sparse_constructor(
 ) -> BuiltinResult<()> {
     let integer_payload = match args.len() {
         1 => value_is_real_integer(&args[0]),
-        3 if keyword_of(&args[2]).is_none() => value_is_real_integer(&args[2]),
+        3 if keyword_of(&args[2])?.is_none() => value_is_real_integer(&args[2]),
         5 | 6 => value_is_real_integer(&args[2]),
         _ => false,
     };
@@ -247,7 +247,7 @@ fn parse_speye_shape(
     let mut args = args;
     let mut class = MatrixClass::Floating(NumericDType::F64);
     if let Some(last) = args.last() {
-        if keyword_of(last).is_some() {
+        if keyword_of(last)?.is_some() {
             class = sparse_storage_class(last, "speye")?;
             args = args.range(..args.len() - 1)?;
         }
@@ -325,7 +325,7 @@ fn parse_speye_shape_tensor(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
 }
 
 fn sparse_float_dtype(value: &Value, label: &str) -> BuiltinResult<NumericDType> {
-    let type_name = keyword_of(value).ok_or_else(|| {
+    let type_name = keyword_of(value)?.ok_or_else(|| {
         sparse_error(
             &SPARSE_ERROR_INVALID_INPUT,
             format!("{label}: typename must be \"double\" or \"single\""),
@@ -342,7 +342,7 @@ fn sparse_float_dtype(value: &Value, label: &str) -> BuiltinResult<NumericDType>
 }
 
 fn sparse_storage_class(value: &Value, label: &str) -> BuiltinResult<MatrixClass> {
-    let type_name = keyword_of(value).ok_or_else(|| {
+    let type_name = keyword_of(value)?.ok_or_else(|| {
         sparse_error(
             &SPARSE_ERROR_INVALID_INPUT,
             format!("{label}: typename must be \"double\", \"single\", or \"logical\""),
@@ -514,10 +514,10 @@ fn nonzeros_value(value: &Value) -> BuiltinResult<Value> {
                 .data()
                 .iter()
                 .copied()
-                .filter(|value| *value != '\0')
+                .filter(|value| value.raw() != 0)
                 .collect::<Vec<_>>();
             let len = data.len();
-            CharArray::new(data, len, 1)
+            CharArray::from_code_units(data, len, 1)
                 .map(Value::CharArray)
                 .map_err(|err| sparse_error(&SPARSE_ERROR_INTERNAL, format!("nonzeros: {err}")))
         }
@@ -662,7 +662,7 @@ fn take_optional_sparse_float_typename(
     args: &mut crate::call::BuiltinArguments,
     label: &str,
 ) -> BuiltinResult<NumericDType> {
-    if args.last().and_then(keyword_of).is_none() {
+    if args.last().map(keyword_of).transpose()?.flatten().is_none() {
         return Ok(NumericDType::F64);
     }
     let value = args.pop().expect("typename argument exists");
@@ -3375,10 +3375,11 @@ pub(crate) mod tests {
 
     #[test]
     fn nonzeros_preserves_character_logical_and_complex_component_classes() {
-        let characters = CharArray::new(vec!['a', '\0', 'z'], 1, 3).expect("character array");
+        let characters =
+            CharArray::from_unicode_scalars(vec!['a', '\0', 'z'], 1, 3).expect("character array");
         let output = nonzeros_builtin(Value::CharArray(characters)).expect("character nonzeros");
         assert!(
-            matches!(output, Value::CharArray(array) if array.shape == vec![2, 1] && array.data() == vec!['a', 'z'])
+            matches!(output, Value::CharArray(array) if array.shape == vec![2, 1] && array.data() == runmat_value::encode_utf16_code_units("az"))
         );
 
         let logical = LogicalArray::new(vec![1, 0, 1], vec![3, 1]).expect("logical array");

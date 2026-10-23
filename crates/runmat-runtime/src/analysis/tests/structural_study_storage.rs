@@ -214,6 +214,7 @@ fn authored_output_fields_are_chunked_and_selectively_readable() {
         root: store_root,
     })
     .unwrap();
+    #[cfg(feature = "plot-core")]
     if run.render_topology.is_some() {
         let (scene, scale, _exact) = crate::analysis::field_scene::build_scene_view(
             &run.run_id,

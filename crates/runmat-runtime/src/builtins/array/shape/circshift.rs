@@ -1264,7 +1264,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn circshift_char_array_rows() {
-        let chars = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap();
+        let chars = CharArray::from_unicode_scalars(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap();
         let result = circshift_builtin(
             Value::CharArray(chars),
             Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap()),
@@ -1275,7 +1275,7 @@ pub(crate) mod tests {
             Value::CharArray(out) => {
                 assert_eq!(out.rows, 2);
                 assert_eq!(out.cols, 2);
-                assert_eq!(out.data(), vec!['c', 'd', 'a', 'b']);
+                assert_eq!(out.data(), runmat_value::encode_utf16_code_units("cdab"));
             }
             other => panic!("expected CharArray, got {other:?}"),
         }

@@ -49,7 +49,7 @@ pub(super) async fn run_batch(
     runtime: &RuntimeContext,
     loop_count: usize,
 ) -> Result<f64, crate::RuntimeError> {
-    let timing = runtime.service_ports().timing();
+    let timing = runtime.service_ports().timing()?;
     let start = timing.monotonic_elapsed();
     let mut cooperation = runtime.cpu_cooperation();
     for _ in 0..loop_count {

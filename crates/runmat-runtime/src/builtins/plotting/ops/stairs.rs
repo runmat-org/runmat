@@ -1,15 +1,9 @@
 //! MATLAB-compatible `stairs` builtin.
 
+use runmat_builtins::BuiltinErrorDescriptor;
+pub use runmat_builtins::{STAIRS_ERROR_INTERNAL, STAIRS_ERROR_INVALID_ARGUMENT};
+
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
 use runmat_macros::runtime_builtin;
 use runmat_plot::gpu::line::{
     self, LineGpuInputs as MarkerGpuInputs, LineGpuParams as MarkerGpuParams,
@@ -18,301 +12,30 @@ use runmat_plot::gpu::stairs::{StairsGpuInputs, StairsGpuParams};
 use runmat_plot::gpu::ScalarType;
 use runmat_plot::plots::NumericPlotData;
 use runmat_plot::plots::{LineMarkerAppearance, LineStyle, StairsPlot};
-use runmat_value::{Tensor, Value};
+#[cfg(test)]
+use runmat_value::Tensor;
+use runmat_value::Value;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::common::tensor as tensor_utils;
 
 use super::common::numeric_plot_data_pair;
 use super::gpu_helpers::gpu_xy_bounds_async;
 use super::op_common::line_inputs::NumericInput as StairsInput;
-use super::op_common::{apply_axes_target, split_leading_axes_handle};
+use super::op_common::{apply_axes_target, split_leading_axes_arguments};
 use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{
     marker_metadata_from_appearance, parse_line_style_args, LineAppearance, LineStyleParseOptions,
     DEFAULT_LINE_MARKER_SIZE,
 };
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use std::convert::TryFrom;
 
 use crate::BuiltinResult;
 use crate::{build_runtime_error, RuntimeError};
 const BUILTIN_NAME: &str = "stairs";
-
-const STAIRS_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Handle to the rendered stairs plot.",
-}];
-
-const STAIRS_INPUTS_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Y samples. X defaults to 1:numel(Y).",
-}];
-
-const STAIRS_INPUTS_X_Y: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X samples.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y samples.",
-    },
-];
-
-const STAIRS_INPUTS_X_Y_STYLE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X samples.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y samples.",
-    },
-    BuiltinParamDescriptor {
-        name: "lineSpec",
-        ty: BuiltinParamType::StyleSpec,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Line style shorthand such as '--r'.",
-    },
-];
-
-const STAIRS_INPUTS_X_Y_PROPS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X samples.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y samples.",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/value style properties.",
-    },
-];
-
-const STAIRS_INPUTS_AX_Y: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y samples. X defaults to 1:numel(Y).",
-    },
-];
-
-const STAIRS_INPUTS_AX_X_Y: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X samples.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y samples.",
-    },
-];
-
-const STAIRS_INPUTS_AX_X_Y_STYLE: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X samples.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y samples.",
-    },
-    BuiltinParamDescriptor {
-        name: "lineSpec",
-        ty: BuiltinParamType::StyleSpec,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Line style shorthand such as '--r'.",
-    },
-];
-
-const STAIRS_INPUTS_AX_X_Y_PROPS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X samples.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y samples.",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/value style properties.",
-    },
-];
-
-const STAIRS_SIGNATURES: [BuiltinSignatureDescriptor; 8] = [
-    BuiltinSignatureDescriptor {
-        label: "h = stairs(Y)",
-        inputs: &STAIRS_INPUTS_Y,
-        outputs: &STAIRS_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = stairs(X, Y)",
-        inputs: &STAIRS_INPUTS_X_Y,
-        outputs: &STAIRS_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = stairs(X, Y, LineSpec)",
-        inputs: &STAIRS_INPUTS_X_Y_STYLE,
-        outputs: &STAIRS_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = stairs(X, Y, Name, Value, ...)",
-        inputs: &STAIRS_INPUTS_X_Y_PROPS,
-        outputs: &STAIRS_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = stairs(ax, Y)",
-        inputs: &STAIRS_INPUTS_AX_Y,
-        outputs: &STAIRS_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = stairs(ax, X, Y)",
-        inputs: &STAIRS_INPUTS_AX_X_Y,
-        outputs: &STAIRS_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = stairs(ax, X, Y, LineSpec)",
-        inputs: &STAIRS_INPUTS_AX_X_Y_STYLE,
-        outputs: &STAIRS_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = stairs(ax, X, Y, Name, Value, ...)",
-        inputs: &STAIRS_INPUTS_AX_X_Y_PROPS,
-        outputs: &STAIRS_OUTPUT_HANDLE,
-    },
-];
-
-pub const STAIRS_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STAIRS.INVALID_ARGUMENT",
-    identifier: Some("RunMat:stairs:InvalidArgument"),
-    when: "Input data, axes targeting, or style arguments are invalid.",
-    message: "stairs: invalid argument",
-};
-
-pub const STAIRS_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.STAIRS.INTERNAL",
-    identifier: Some("RunMat:stairs:Internal"),
-    when: "Internal plot construction or rendering fails unexpectedly.",
-    message: "stairs: internal operation failed",
-};
-
-const STAIRS_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [STAIRS_ERROR_INVALID_ARGUMENT, STAIRS_ERROR_INTERNAL];
-
-pub const STAIRS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &STAIRS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &STAIRS_ERRORS,
-};
-
-const STAIRS_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X and Y",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The compatibility target explicitly lists all eight integer classes for both coordinate roles. Native class, shape, and exact values remain authoritative as graphics-object source data.",
-    }];
-pub const STAIRS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "h = stairs(integer_Y) or stairs(integer_X, integer_Y, ...)",
-        inputs: &STAIRS_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "XData and YData retain native storage while rendering deliberately materializes floating geometry. Floating gpuArray inputs can use the direct WGPU sink; integer resident inputs gather exactly through their owner.",
-    }];
 
 fn stairs_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -370,19 +93,31 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "stairs",
-    category = "plotting",
-    summary = "Create staircase line plots for sampled or piecewise-constant data.",
-    keywords = "stairs,plotting,step",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::stairs::STAIRS_DESCRIPTOR),
-    integer_capabilities(crate::builtins::plotting::stairs::STAIRS_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::stairs"
 )]
-pub async fn stairs_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+pub async fn stairs_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<f64> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::STAIRS_DESCRIPTOR,
+        &runmat_builtins::COORDINATE_ERROR_TOO_MANY_OUTPUTS,
+        "stairs",
+    )?;
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "stairs")?;
+    // Keep the original rooted owner alive even when helpers extract native data.
+    let _arguments = args.fork();
+    work.finish(stairs_impl(args, &work).await)
+}
+
+async fn stairs_impl(
+    args: crate::call::BuiltinArguments,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> crate::BuiltinResult<f64> {
     let (axes_target, mut args) =
-        split_leading_axes_handle(args, BUILTIN_NAME).map_err(map_stairs_invalid_argument)?;
+        split_leading_axes_arguments(args, BUILTIN_NAME).map_err(map_stairs_invalid_argument)?;
 
     let args_len = args.len();
     let (x, y, rest) = match args_len {
@@ -393,7 +128,7 @@ pub async fn stairs_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
             ));
         }
         1 => {
-            let y = args.pop().expect("one arg");
+            let y = args.pop_front().expect("one arg");
             let x = infer_stairs_x_from_y(&y).map_err(map_stairs_invalid_argument)?;
             (x, y, Vec::new())
         }
@@ -450,6 +185,7 @@ pub async fn stairs_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();
     let mut plot = Some(plot);
+    work.check()?;
     let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let plot_index =
             figure.add_stairs_plot_on_axes(plot.take().expect("stairs plot consumed once"), axes);
@@ -501,18 +237,7 @@ fn build_stairs_plot(
 }
 
 fn infer_stairs_x_from_y(y: &Value) -> BuiltinResult<Value> {
-    let len = match y {
-        Value::GpuTensor(handle) => handle.shape().iter().copied().product::<usize>().max(1),
-        other => {
-            let tensor = Tensor::try_from(other)
-                .map_err(|e| plotting_error(BUILTIN_NAME, format!("stairs: {e}")))?;
-            tensor_utils::tensor_element_len(&tensor).max(1)
-        }
-    };
-    let data = (1..=len).map(|i| i as f64).collect::<Vec<_>>();
-    Ok(Value::Tensor(
-        Tensor::new(data, vec![len]).expect("implicit stairs axis"),
-    ))
+    StairsInput::implicit_x(y, BUILTIN_NAME, 1)
 }
 
 async fn build_stairs_gpu_plot(
@@ -639,8 +364,12 @@ fn apply_stairs_marker_metadata(plot: &mut StairsPlot, marker_meta: Option<LineM
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use runmat_builtins::STAIRS_DESCRIPTOR;
     fn stairs_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
-        futures::executor::block_on(super::stairs_builtin(args))
+        futures::executor::block_on(super::stairs_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::state::current_axes_handle_for_figure;
@@ -649,7 +378,6 @@ pub(crate) mod tests {
         clear_figure, clone_figure, configure_subplot, current_figure_handle,
         reset_hold_state_for_run,
     };
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::IntegerStorage;
 
     fn setup_plot_tests() {
@@ -669,6 +397,15 @@ pub(crate) mod tests {
 
     #[test]
     fn infer_stairs_x_reads_typed_integer_length_without_mirror() {
+        for y in [
+            Value::Num(4.0),
+            Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_993)),
+        ] {
+            let Value::Tensor(x) = infer_stairs_x_from_y(&y).expect("scalar implicit axis") else {
+                panic!("tensor axis")
+            };
+            assert_eq!(x.materialize_f64(), vec![1.0]);
+        }
         let x = infer_stairs_x_from_y(&cleared_int_value(
             IntegerStorage::I16(vec![4, 5, 6]),
             vec![1, 3],
@@ -733,14 +470,31 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn stairs_type_is_numeric_handle() {
-        assert_eq!(
-            handle_scalar_type(
-                &[Type::tensor(), Type::tensor()],
-                &ResolveContext::new(Vec::new())
-            ),
-            Type::Num
+    fn stairs_catalog_infers_host_double_handle() {
+        use runmat_types::*;
+        let numeric = ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        });
+        let input = ValueFact::proven(
+            numeric.clone(),
+            ShapeFact::from(vec![Some(3), Some(1)]),
+            StorageFact::Dense,
         );
+        let request = CallRequest {
+            arguments: vec![input; 2],
+            literals: LiteralContext::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        };
+        let result =
+            runmat_builtins::infer_catalog_call(&runmat_builtins::STAIRS_CATALOG_ENTRY, &request);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.outputs.len(), 1);
+        let output = &result.outputs[0];
+        assert_eq!(output.kind, numeric);
+        assert_eq!(output.shape, ShapeFact::Scalar);
+        assert_eq!(output.storage, StorageFact::Dense);
+        assert_eq!(output.residency, ResidencyFact::Host);
     }
 
     #[test]

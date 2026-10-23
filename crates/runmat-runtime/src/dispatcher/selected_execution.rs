@@ -28,17 +28,21 @@ impl SelectedImplementation {
                 )
                 .with_call_observation(observation),
             ),
-            Self::Legacy(implementation) => Box::pin(async move {
-                let ordinary = args.materialize_legacy_contiguous(context.as_ref())?;
-                let sequence = crate::call::arguments::adapt_legacy_builtin_result(
-                    implementation(&ordinary).await?,
-                )?;
-                let result = crate::execution::RootedValueSequence::new(sequence)
-                    .map_err(|error| error.into_runtime_error());
-                drop(ordinary);
-                drop(args);
-                result
-            }),
+            Self::Legacy(implementation) => crate::builtin::admitted_builtin_future_with(
+                context,
+                "legacy inventory",
+                move |context| async move {
+                    let ordinary = args.materialize_legacy_contiguous(context.as_ref())?;
+                    let sequence = crate::call::arguments::adapt_legacy_builtin_result(
+                        implementation(&ordinary).await?,
+                    )?;
+                    let result = crate::execution::RootedValueSequence::new(sequence)
+                        .map_err(|error| error.into_runtime_error());
+                    drop(ordinary);
+                    drop(args);
+                    result
+                },
+            ),
         }
     }
 }
@@ -131,7 +135,7 @@ mod tests {
 
     fn fixture(invocation: RuntimeBuiltinInvocation<'_>) -> crate::builtin::RuntimeBuiltinFuture {
         let requested_outputs = invocation.requested_outputs;
-        Box::pin(async move {
+        crate::builtin::admitted_builtin_future(None, "fixture", async move {
             let sequence = ValueSequence::single(Value::Num(requested_outputs.unwrap_or(0) as f64))
                 .map_err(crate::sequence::sequence_error_to_runtime)?;
             crate::execution::RootedValueSequence::new(sequence)
@@ -153,7 +157,7 @@ mod tests {
                 },
                 variant: "alternate",
             });
-        Box::pin(async move {
+        crate::builtin::admitted_builtin_future(None, "fixture", async move {
             let sequence = ValueSequence::single(Value::Num(if exact { 1.0 } else { 0.0 }))
                 .map_err(crate::sequence::sequence_error_to_runtime)?;
             crate::execution::RootedValueSequence::new(sequence)

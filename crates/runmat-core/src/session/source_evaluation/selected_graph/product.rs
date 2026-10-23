@@ -40,11 +40,13 @@ impl SelectedGraphPrimary {
         let selected = Rc::get_mut(&mut self.selected_registry)
             .ok_or("direct selected registry escaped before product publication")?;
         selected
-            .attach_current_selected_executable_product(ids.iter().copied(), product.clone())?;
+            .attach_current_selected_executable_product(ids.iter().copied(), product.clone())
+            .map_err(|error| error.to_string())?;
         selected.attach_current_selected_static_capture(ids.iter().copied(), &capture)?;
         bytecode
             .function_registry
-            .attach_current_selected_executable_product(ids.iter().copied(), product)?;
+            .attach_current_selected_executable_product(ids.iter().copied(), product)
+            .map_err(|error| error.to_string())?;
         bytecode
             .function_registry
             .attach_current_selected_static_capture(ids.iter().copied(), &capture)?;

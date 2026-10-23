@@ -110,7 +110,8 @@ fn fileread_reads_text_file() {
 
     match result {
         Value::CharArray(ca) => {
-            let text: String = ca.data().iter().collect();
+            let text: String =
+                runmat_value::decode_utf16_code_units(ca.data()).expect("valid UTF-16 fixture");
             assert_eq!(ca.rows, 1);
             assert_eq!(ca.cols, contents.chars().count());
             assert_eq!(text, contents);
@@ -131,14 +132,16 @@ fn fileread_accepts_char_array_input() {
 
     let path_str = path.to_string_lossy();
     let chars: Vec<char> = path_str.chars().collect();
-    let len = chars.len();
-    let char_array = CharArray::new(chars, 1, len).expect("char array from path string");
+    let len = path_str.encode_utf16().count();
+    let char_array =
+        CharArray::from_unicode_scalars(chars, 1, len).expect("char array from path string");
     let value = Value::CharArray(char_array);
 
     let result = run_fileread(value, Vec::new()).expect("fileread");
     match result {
         Value::CharArray(ca) => {
-            let text: String = ca.data().iter().collect();
+            let text: String =
+                runmat_value::decode_utf16_code_units(ca.data()).expect("valid UTF-16 fixture");
             assert_eq!(text, "abc");
         }
         other => panic!("expected char array, got {other:?}"),
@@ -163,7 +166,8 @@ fn fileread_accepts_string_array_scalar() {
     let result = run_fileread(value, Vec::new()).expect("fileread");
     match result {
         Value::CharArray(ca) => {
-            let text: String = ca.data().iter().collect();
+            let text: String =
+                runmat_value::decode_utf16_code_units(ca.data()).expect("valid UTF-16 fixture");
             assert_eq!(text, "xyz");
         }
         other => panic!("expected char array, got {other:?}"),
@@ -223,7 +227,7 @@ fn fileread_preserves_non_utf8_bytes() {
         .expect("fileread");
     match result {
         Value::CharArray(ca) => {
-            let collected: Vec<u32> = ca.data().iter().map(|ch| *ch as u32).collect();
+            let collected: Vec<u32> = ca.data().iter().map(|ch| u32::from(*ch)).collect();
             assert_eq!(collected, vec![0x00FF, 0x0061, 0x0000]);
         }
         other => panic!("expected char array, got {other:?}"),
@@ -248,7 +252,8 @@ fn fileread_supports_encoding_keyword() {
     .expect("fileread");
     match result {
         Value::CharArray(ca) => {
-            let text: String = ca.data().iter().collect();
+            let text: String =
+                runmat_value::decode_utf16_code_units(ca.data()).expect("valid UTF-16 fixture");
             assert_eq!(text, contents);
         }
         other => panic!("expected char array, got {other:?}"),
@@ -273,7 +278,7 @@ fn fileread_supports_single_encoding_argument() {
     .expect("fileread");
     match result {
         Value::CharArray(ca) => {
-            let codes: Vec<u32> = ca.data().iter().map(|ch| *ch as u32).collect();
+            let codes: Vec<u32> = ca.data().iter().map(|ch| u32::from(*ch)).collect();
             assert_eq!(codes, vec![0x00C0, 0x0020, 0x0041]);
         }
         other => panic!("expected char array, got {other:?}"),
@@ -298,7 +303,11 @@ fn fileread_raw_encoding_returns_bytes() {
     .expect("fileread");
     match result {
         Value::CharArray(ca) => {
-            let codes: Vec<u8> = ca.data().iter().map(|ch| *ch as u8).collect();
+            let codes: Vec<u8> = ca
+                .data()
+                .iter()
+                .map(|ch| u8::try_from(ch.raw()).unwrap())
+                .collect();
             assert_eq!(codes, bytes);
         }
         other => panic!("expected char array, got {other:?}"),

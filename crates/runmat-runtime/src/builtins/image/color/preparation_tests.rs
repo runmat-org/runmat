@@ -46,9 +46,6 @@ struct Service {
     map_replacement: Option<Value>,
 }
 impl RuntimeAccelerationService for Service {
-    fn supports_operation(&self, operation: &str) -> bool {
-        NAMES.contains(&operation) || operation == "ind2rgb"
-    }
     fn prepare_admitted(
         &self,
         _: RuntimeContext,

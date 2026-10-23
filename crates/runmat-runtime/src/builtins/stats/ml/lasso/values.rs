@@ -68,7 +68,11 @@ pub(super) fn scalar_text<'a>(
 ) -> BuiltinResult<std::borrow::Cow<'a, str>> {
     match value {
         Value::String(text) => Ok(std::borrow::Cow::Borrowed(text.as_str())),
-        Value::CharArray(chars) => Ok(std::borrow::Cow::Owned(chars.data().iter().collect())),
+        Value::CharArray(chars) => Ok(std::borrow::Cow::Owned(
+            crate::builtins::stats::decode_utf16_with_error(chars.data(), || {
+                invalid_argument(format!("lasso: {label} must be valid UTF-16 text"))
+            })?,
+        )),
         Value::StringArray(array) if array.data().len() == 1 => {
             Ok(std::borrow::Cow::Borrowed(array.data()[0].as_str()))
         }
@@ -135,7 +139,9 @@ pub(super) fn scalar_bool(value: &Value, label: &str) -> BuiltinResult<bool> {
             Ok(text.eq_ignore_ascii_case("true"))
         }
         Value::CharArray(chars) => {
-            let text: String = chars.data().iter().collect();
+            let text = crate::builtins::stats::decode_utf16_with_error(chars.data(), || {
+                invalid_argument("lasso: CV must be valid UTF-16 text")
+            })?;
             if text.eq_ignore_ascii_case("true") || text.eq_ignore_ascii_case("false") {
                 Ok(text.eq_ignore_ascii_case("true"))
             } else {
@@ -255,7 +261,9 @@ pub(super) fn parse_cv(value: &Value) -> BuiltinResult<CvSpec> {
             Ok(CvSpec::Resubstitution)
         }
         Value::CharArray(chars) => {
-            let text: String = chars.data().iter().collect();
+            let text = crate::builtins::stats::decode_utf16_with_error(chars.data(), || {
+                invalid_argument("lasso: CV must be valid UTF-16 text")
+            })?;
             if text.eq_ignore_ascii_case("resubstitution") {
                 Ok(CvSpec::Resubstitution)
             } else {
@@ -277,7 +285,10 @@ pub(super) fn parse_cv(value: &Value) -> BuiltinResult<CvSpec> {
 pub(super) fn string_list(value: &Value, label: &str) -> BuiltinResult<Vec<String>> {
     match value {
         Value::String(text) => Ok(vec![text.as_str().to_owned()]),
-        Value::CharArray(chars) => Ok(vec![chars.data().iter().collect()]),
+        Value::CharArray(chars) => Ok(vec![crate::builtins::stats::decode_utf16_with_error(
+            chars.data(),
+            || invalid_argument(format!("lasso: {label} must contain valid UTF-16 text")),
+        )?]),
         Value::StringArray(array) => Ok(array.data().iter().map(|text| text.as_str().to_owned()).collect()),
         Value::Cell(cell) => cell
             .data()

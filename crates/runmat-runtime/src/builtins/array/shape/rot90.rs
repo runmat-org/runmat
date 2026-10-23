@@ -218,7 +218,12 @@ fn parse_direction(value: &Value) -> crate::BuiltinResult<Option<i64>> {
             Some(std::borrow::Cow::Borrowed(sa.data()[0].as_str()))
         }
         Value::CharArray(ca) if ca.rows == 1 => Some(std::borrow::Cow::Owned(
-            ca.data().iter().collect::<String>(),
+            runmat_value::decode_utf16_code_units(ca.data()).map_err(|error| {
+                rot90_error_with_message(
+                    format!("rot90: rotation direction is not valid UTF-16: {error}"),
+                    &ROT90_ERROR_INVALID_ROTATION,
+                )
+            })?,
         )),
         _ => None,
     };
@@ -346,9 +351,9 @@ fn rot90_char_array(array: CharArray, steps: usize) -> crate::BuiltinResult<Char
     if steps % 2 == 1 {
         std::mem::swap(&mut out_rows, &mut out_cols);
     }
-    let mut out = vec!['\0'; out_rows * out_cols];
+    let mut out = vec![runmat_value::Utf16CodeUnit::from_raw(0); out_rows * out_cols];
     if rows == 0 || cols == 0 {
-        return CharArray::new(out, out_rows, out_cols)
+        return CharArray::from_code_units(out, out_rows, out_cols)
             .map_err(|e| rot90_error_with_message(format!("rot90: {e}"), &ROT90_ERROR_INTERNAL));
     }
     for row in 0..rows {
@@ -364,7 +369,7 @@ fn rot90_char_array(array: CharArray, steps: usize) -> crate::BuiltinResult<Char
             out[dst_idx] = array.data()[src_idx];
         }
     }
-    CharArray::new(out, out_rows, out_cols)
+    CharArray::from_code_units(out, out_rows, out_cols)
         .map_err(|e| rot90_error_with_message(format!("rot90: {e}"), &ROT90_ERROR_INTERNAL))
 }
 
@@ -927,13 +932,14 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn rot90_char_array_roundtrip() {
-        let chars = CharArray::new("runmat".chars().collect(), 2, 3).unwrap();
+        let chars = CharArray::from_unicode_scalars("runmat".chars().collect(), 2, 3).unwrap();
         let result = rot90_builtin(Value::CharArray(chars), Vec::new()).expect("rot90 char");
         match result {
             Value::CharArray(out) => {
                 assert_eq!(out.rows, 3);
                 assert_eq!(out.cols, 2);
-                let collected: String = out.data().iter().collect();
+                let collected = runmat_value::decode_utf16_code_units(out.data())
+                    .expect("valid UTF-16 fixture text");
                 assert_eq!(collected, "ntuarm");
             }
             other => panic!("expected CharArray, got {other:?}"),

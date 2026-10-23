@@ -147,19 +147,33 @@ impl AccelProvider for Provider {
         _: &GpuTensorHandle,
         _: usize,
         _: f64,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        self.fail()
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        let result: anyhow::Result<_> = self.fail();
+        result.map(Some).map_err(|source| {
+            runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+        })
     }
-    fn diff_dim(&self, _: &GpuTensorHandle, _: usize, _: usize) -> anyhow::Result<GpuTensorHandle> {
-        self.fail()
+    fn diff_dim(
+        &self,
+        _: &GpuTensorHandle,
+        _: usize,
+        _: usize,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        let result: anyhow::Result<_> = self.fail();
+        result.map(Some).map_err(|source| {
+            runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+        })
     }
     fn cumtrapz_dim(
         &self,
         _: &GpuTensorHandle,
         _: usize,
         _: ProviderTrapezoidSpacing<'_>,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        self.fail()
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        let result: anyhow::Result<_> = self.fail();
+        result.map(Some).map_err(|source| {
+            runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+        })
     }
 }
 

@@ -32,7 +32,9 @@ fn cputime_builtin(
     }
     let seconds = runtime
         .as_ref()
-        .and_then(|runtime| runtime.service_ports().timing().process_cpu_seconds())
+        .map(|runtime| runtime.service_ports().timing())
+        .transpose()?
+        .and_then(|timing| timing.process_cpu_seconds())
         .ok_or_else(|| cputime_error(&CPUTIME_ERROR_UNAVAILABLE))?;
     Ok(Value::Num(seconds))
 }

@@ -59,6 +59,6 @@ pub(in crate::builtins::io::repl_fs) async fn setpref_builtin(
     preferences
         .set_many(runtime, group, names.into_iter().zip(prepared).collect())
         .await
-        .map_err(|source| service::service_error("setpref", source))?;
+        .map_err(|source| service::service_error_after_preparation("setpref", source))?;
     Ok(Value::Num(0.0))
 }

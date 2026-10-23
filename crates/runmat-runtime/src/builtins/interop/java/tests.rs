@@ -162,7 +162,7 @@ mod native {
     fn classpath_controls_accept_only_actual_text_scalar_shapes() {
         let (runtime, recorder) = context();
         let text = "lib/example.jar";
-        let trailing = runmat_value::CharArray::new_with_shape(
+        let trailing = runmat_value::CharArray::from_unicode_scalars_with_shape(
             text.chars().collect(),
             vec![1, text.chars().count(), 1],
         )
@@ -172,7 +172,7 @@ mod native {
             arguments(vec![Value::CharArray(trailing)]),
         ));
         assert!(added.is_ok());
-        let pages = runmat_value::CharArray::new_with_shape(
+        let pages = runmat_value::CharArray::from_unicode_scalars_with_shape(
             text.chars().collect(),
             vec![1, 1, text.chars().count()],
         )

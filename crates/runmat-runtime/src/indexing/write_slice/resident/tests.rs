@@ -167,7 +167,7 @@ fn slice_assignment_and_deletion_preserve_single_complex_integer_and_logical_cla
         };
         assert!(runmat_accelerate_api::handle_is_logical(&result));
         let Value::LogicalArray(actual) =
-            futures::executor::block_on(ownership::gather(&result)).unwrap()
+            futures::executor::block_on(ownership::gather_in_context(None, &result)).unwrap()
         else {
             panic!("logical download");
         };

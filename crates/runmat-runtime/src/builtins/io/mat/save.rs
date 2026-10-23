@@ -62,7 +62,9 @@ async fn save_builtin(
     };
 
     if used_default {
-        if let Ok(override_path) = std::env::var("RUNMAT_SAVE_DEFAULT_PATH") {
+        if let Some(override_path) =
+            crate::builtins::common::env::optional_var("RUNMAT_SAVE_DEFAULT_PATH")?
+        {
             path_value = Value::from(override_path);
         }
     }

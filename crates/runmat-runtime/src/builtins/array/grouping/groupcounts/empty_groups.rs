@@ -18,7 +18,8 @@ pub(super) fn build(
 ) -> BuiltinResult<GroupIndex> {
     let explicit = explicit_levels(columns, include_missing, include_empty, bins)?;
     let order = explicit.map_or(KeyOrder::Sorted, KeyOrder::Explicit);
-    let mut index = build_index(columns, include_missing, order).map_err(error::invalid)?;
+    let mut index = build_index(columns, include_missing, order)
+        .map_err(|source| source.attach(error::invalid("invalid grouping variable")))?;
     if !include_empty {
         retain_observed(&mut index);
     }

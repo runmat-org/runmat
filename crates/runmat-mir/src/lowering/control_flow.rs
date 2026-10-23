@@ -18,6 +18,9 @@ use super::{
 #[path = "control_flow/await_expression.rs"]
 mod await_expression;
 
+#[path = "control_flow/fixed_target.rs"]
+mod fixed_target;
+
 #[derive(Debug, Default)]
 pub(crate) struct ControlFlowBuilder {
     next_block: usize,
@@ -39,7 +42,8 @@ struct BlockLoweringEnv<'a> {
     body: &'a HirBlock,
     return_terminator: &'a MirTerminator,
     loop_targets: Option<(BasicBlockId, BasicBlockId)>,
-    await_replacements: &'a HashMap<ExprId, MirOperand>,
+    await_replacements: &'a crate::lowering::AwaitReplacements,
+    fixed_preparation: Option<&'a crate::MirPreparedAssignment>,
 }
 
 impl ControlFlowBuilder {
@@ -60,11 +64,12 @@ impl ControlFlowBuilder {
         return_terminator: MirTerminator,
     ) -> Result<LoweredControlFlow, HirError> {
         let base_env = BlockLoweringEnv {
+            fixed_preparation: None,
             ctx,
             body,
             return_terminator: &return_terminator,
             loop_targets: None,
-            await_replacements: &HashMap::new(),
+            await_replacements: &crate::lowering::AwaitReplacements::default(),
         };
         let entry = self.fresh_block();
         let entry = self.lower_block_from(entry, 0, return_terminator.clone(), base_env)?;
@@ -85,6 +90,7 @@ impl ControlFlowBuilder {
     ) -> Result<BasicBlock, HirError> {
         self.catch_scopes.insert(id, self.active_catches.clone());
         let BlockLoweringEnv {
+            fixed_preparation,
             ctx,
             body,
             return_terminator,
@@ -94,6 +100,36 @@ impl ControlFlowBuilder {
         let mut statements = Vec::new();
         for (idx, stmt) in body.statements.iter().enumerate().skip(start) {
             if let Some(await_expr) = first_unlowered_await_in_stmt(stmt, await_replacements) {
+                if matches!(&stmt.kind, HirStmtKind::Assign(target, rhs, _)
+                    if super::stmt::assignment_target_requires_preparation(target)
+                    && first_unlowered_await(rhs, await_replacements).map(|value| value.id) != Some(await_expr.id))
+                {
+                    let entry =
+                        self.lower_suspended_fixed_target(idx, stmt, final_terminator, env)?;
+                    return Ok(BasicBlock {
+                        id,
+                        statements,
+                        terminator: MirTerminator {
+                            kind: MirTerminatorKind::Goto(entry),
+                            span: stmt.span,
+                        },
+                    });
+                }
+                let retained_preparation =
+                    fixed_preparation.filter(|prepared| prepared.source_statement == stmt.id);
+                let target_preparation = if retained_preparation.is_none()
+                    && matches!(&stmt.kind,
+                    HirStmtKind::Assign(_, rhs, _) if first_unlowered_await(rhs, await_replacements).is_some_and(|rhs_await| rhs_await.id == await_expr.id))
+                {
+                    super::stmt::prepare_expanding_assignment(ctx, stmt, await_replacements)?
+                } else {
+                    None
+                };
+                let new_preparation = target_preparation.map(|(prepared, phases)| {
+                    statements.extend(phases);
+                    prepared
+                });
+                let fixed_preparation = new_preparation.as_ref().or(retained_preparation);
                 if matches!(stmt.kind, HirStmtKind::While { .. })
                     && !statements.is_empty()
                     && !self.repeating_while_headers.contains_key(&stmt.id)
@@ -105,6 +141,7 @@ impl ControlFlowBuilder {
                         idx,
                         final_terminator,
                         BlockLoweringEnv {
+                            fixed_preparation,
                             ctx,
                             body,
                             return_terminator,
@@ -138,6 +175,7 @@ impl ControlFlowBuilder {
                         guard.expression.id,
                         &mut statements,
                         &mut prepared,
+                        fixed_preparation.is_some(),
                     )?;
                     let condition = lower_operand_with_replacements(
                         ctx,
@@ -154,6 +192,7 @@ impl ControlFlowBuilder {
                         idx,
                         final_terminator.clone(),
                         BlockLoweringEnv {
+                            fixed_preparation,
                             ctx,
                             body,
                             return_terminator,
@@ -186,7 +225,8 @@ impl ControlFlowBuilder {
                         guard.expression,
                         await_expression::ExpressionTarget {
                             block: evaluated_id,
-                            destination: result,
+                            destination: crate::MirFixedSelectorDestination::Scalar(result),
+                            selector: None,
                             continuation: joined_id,
                             span: stmt.span,
                         },
@@ -217,10 +257,11 @@ impl ControlFlowBuilder {
                     unreachable!();
                 };
                 let mut prepared_replacements = await_replacements.clone();
-                let is_direct_assignment_rhs = matches!(
-                    &stmt.kind,
-                    HirStmtKind::Assign(_, value, _) if value.id == await_expr.id
-                );
+                let is_direct_assignment_rhs = fixed_preparation.is_none()
+                    && matches!(
+                        &stmt.kind,
+                        HirStmtKind::Assign(_, value, _) if value.id == await_expr.id
+                    );
                 if !is_direct_assignment_rhs {
                     super::await_preparation::prepare_statement_prefix(
                         ctx,
@@ -228,6 +269,7 @@ impl ControlFlowBuilder {
                         await_expr.id,
                         &mut statements,
                         &mut prepared_replacements,
+                        fixed_preparation.is_some(),
                     )?;
                 }
                 let future = lower_operand_with_replacements(
@@ -236,7 +278,11 @@ impl ControlFlowBuilder {
                     &mut statements,
                     &prepared_replacements,
                 )?;
-                let await_result = top_level_await_result(ctx, stmt, await_expr, &mut statements)?;
+                let await_result = if fixed_preparation.is_some() {
+                    TopLevelAwaitResult::Nested
+                } else {
+                    top_level_await_result(ctx, stmt, await_expr, &mut statements)?
+                };
                 let (result, resume_start, resume_replacements) = match await_result {
                     TopLevelAwaitResult::ExpressionStatement => (None, idx + 1, None),
                     TopLevelAwaitResult::Assignment(place) => (Some(place), idx + 1, None),
@@ -256,6 +302,7 @@ impl ControlFlowBuilder {
                     resume_start,
                     final_terminator,
                     BlockLoweringEnv {
+                        fixed_preparation,
                         ctx,
                         body,
                         return_terminator,
@@ -293,6 +340,7 @@ impl ControlFlowBuilder {
                     idx + 1,
                     final_terminator,
                     BlockLoweringEnv {
+                        fixed_preparation,
                         ctx,
                         body,
                         return_terminator,
@@ -309,6 +357,7 @@ impl ControlFlowBuilder {
                     0,
                     merge_terminator.clone(),
                     BlockLoweringEnv {
+                        fixed_preparation,
                         ctx,
                         body: then_body,
                         return_terminator,
@@ -325,6 +374,7 @@ impl ControlFlowBuilder {
                     0,
                     merge_terminator,
                     BlockLoweringEnv {
+                        fixed_preparation,
                         ctx,
                         body: else_body.unwrap_or(&empty_else),
                         return_terminator,
@@ -373,6 +423,7 @@ impl ControlFlowBuilder {
                     idx + 1,
                     final_terminator,
                     BlockLoweringEnv {
+                        fixed_preparation,
                         ctx,
                         body,
                         return_terminator,
@@ -388,6 +439,7 @@ impl ControlFlowBuilder {
                         span: stmt.span,
                     },
                     BlockLoweringEnv {
+                        fixed_preparation,
                         ctx,
                         body: loop_body,
                         return_terminator,
@@ -446,6 +498,7 @@ impl ControlFlowBuilder {
                     idx + 1,
                     final_terminator,
                     BlockLoweringEnv {
+                        fixed_preparation,
                         ctx,
                         body,
                         return_terminator,
@@ -461,6 +514,7 @@ impl ControlFlowBuilder {
                         span: stmt.span,
                     },
                     BlockLoweringEnv {
+                        fixed_preparation,
                         ctx,
                         body: loop_body,
                         return_terminator,
@@ -527,6 +581,7 @@ impl ControlFlowBuilder {
                     idx + 1,
                     final_terminator,
                     BlockLoweringEnv {
+                        fixed_preparation,
                         ctx,
                         body,
                         return_terminator,
@@ -542,6 +597,7 @@ impl ControlFlowBuilder {
                         span: stmt.span,
                     },
                     BlockLoweringEnv {
+                        fixed_preparation,
                         ctx,
                         body: loop_body,
                         return_terminator,
@@ -618,6 +674,7 @@ impl ControlFlowBuilder {
                     idx + 1,
                     final_terminator,
                     BlockLoweringEnv {
+                        fixed_preparation,
                         ctx,
                         body,
                         return_terminator,
@@ -634,6 +691,7 @@ impl ControlFlowBuilder {
                             span: stmt.span,
                         },
                         BlockLoweringEnv {
+                            fixed_preparation,
                             ctx,
                             body: spmd_body,
                             return_terminator,
@@ -679,6 +737,7 @@ impl ControlFlowBuilder {
                     idx + 1,
                     final_terminator,
                     BlockLoweringEnv {
+                        fixed_preparation,
                         ctx,
                         body,
                         return_terminator,
@@ -698,6 +757,7 @@ impl ControlFlowBuilder {
                         0,
                         merge_terminator.clone(),
                         BlockLoweringEnv {
+                            fixed_preparation,
                             ctx,
                             body: case_body,
                             return_terminator,
@@ -723,6 +783,7 @@ impl ControlFlowBuilder {
                     0,
                     merge_terminator,
                     BlockLoweringEnv {
+                        fixed_preparation,
                         ctx,
                         body: otherwise.as_ref().unwrap_or(&empty_otherwise),
                         return_terminator,
@@ -763,6 +824,7 @@ impl ControlFlowBuilder {
                     idx + 1,
                     final_terminator,
                     BlockLoweringEnv {
+                        fixed_preparation,
                         ctx,
                         body,
                         return_terminator,
@@ -779,6 +841,7 @@ impl ControlFlowBuilder {
                     0,
                     merge_terminator.clone(),
                     BlockLoweringEnv {
+                        fixed_preparation,
                         ctx,
                         body: try_body,
                         return_terminator,
@@ -792,6 +855,7 @@ impl ControlFlowBuilder {
                     0,
                     merge_terminator,
                     BlockLoweringEnv {
+                        fixed_preparation,
                         ctx,
                         body: catch_body,
                         return_terminator,
@@ -844,73 +908,11 @@ impl ControlFlowBuilder {
                     },
                 });
             }
-            if let HirStmtKind::ExprStmt(expr, _) = &stmt.kind {
-                if let HirExprKind::Await(future) = &expr.kind {
-                    let resume = self.lower_continuation_target(
-                        idx + 1,
-                        final_terminator,
-                        BlockLoweringEnv {
-                            ctx,
-                            body,
-                            return_terminator,
-                            loop_targets,
-                            await_replacements,
-                        },
-                    )?;
-                    let future = lower_operand_with_replacements(
-                        ctx,
-                        future,
-                        &mut statements,
-                        await_replacements,
-                    )?;
-                    return Ok(BasicBlock {
-                        id,
-                        statements,
-                        terminator: MirTerminator {
-                            kind: MirTerminatorKind::Await {
-                                future,
-                                result: None,
-                                resume,
-                            },
-                            span: stmt.span,
-                        },
-                    });
-                }
-            }
-            if let HirStmtKind::Assign(place, expr, _) = &stmt.kind {
-                if let HirExprKind::Await(future) = &expr.kind {
-                    let resume = self.lower_continuation_target(
-                        idx + 1,
-                        final_terminator,
-                        BlockLoweringEnv {
-                            ctx,
-                            body,
-                            return_terminator,
-                            loop_targets,
-                            await_replacements,
-                        },
-                    )?;
-                    let future = lower_operand_with_replacements(
-                        ctx,
-                        future,
-                        &mut statements,
-                        await_replacements,
-                    )?;
-                    let result = lower_place(ctx, place, &mut statements)?;
-                    return Ok(BasicBlock {
-                        id,
-                        statements,
-                        terminator: MirTerminator {
-                            kind: MirTerminatorKind::Await {
-                                future,
-                                result: Some(result),
-                                resume,
-                            },
-                            span: stmt.span,
-                        },
-                    });
-                }
-            }
+            // Unconsumed Await is handled by first_unlowered_await_in_stmt
+            // above. A resumed direct RHS must reach ordinary statement
+            // lowering with its replacement and exact retained preparation;
+            // matching the raw HIR Await again would replay it and omit the
+            // prepared assignment consumer.
             if matches!(stmt.kind, HirStmtKind::Return) {
                 return Ok(BasicBlock {
                     id,
@@ -921,7 +923,12 @@ impl ControlFlowBuilder {
                     },
                 });
             }
-            statements.extend(lower_stmt_with_replacements(ctx, stmt, await_replacements)?);
+            statements.extend(lower_stmt_with_replacements(
+                ctx,
+                stmt,
+                await_replacements,
+                fixed_preparation,
+            )?);
         }
         Ok(BasicBlock {
             id,
@@ -980,7 +987,7 @@ fn top_level_await_result(
 
 fn first_unlowered_await_in_stmt<'a>(
     stmt: &'a HirStmt,
-    await_replacements: &HashMap<ExprId, MirOperand>,
+    await_replacements: &crate::lowering::AwaitReplacements,
 ) -> Option<&'a HirExpr> {
     let direct = super::evaluation_order::statement_expressions(stmt)
         .into_iter()
@@ -998,7 +1005,7 @@ fn first_unlowered_await_in_stmt<'a>(
 
 fn first_unlowered_await<'a>(
     expr: &'a HirExpr,
-    await_replacements: &HashMap<ExprId, MirOperand>,
+    await_replacements: &crate::lowering::AwaitReplacements,
 ) -> Option<&'a HirExpr> {
     if await_replacements.contains_key(&expr.id) {
         return None;

@@ -54,6 +54,8 @@ pub type ExecutionStreamEntry = runmat_runtime::console::ConsoleEntry;
 
 #[derive(Debug, Clone, Default)]
 pub struct ExecutionProfiling {
+    /// Read-only sealed command facts, not a claim of global route coverage.
+    pub command_evidence: Option<CommandExecutionEvidence>,
     /// Outer command wall time, including admitted cleanup. This can exceed
     /// ExecutionOutcome::execution_time_ms, which measures the inner evaluator.
     pub total_ms: u64,
@@ -66,6 +68,18 @@ pub struct ExecutionProfiling {
     /// Exact attributed kernel launches, when observed; not submission counts
     /// or the length of a bounded provider diagnostic log.
     pub kernel_count: Option<u32>,
+}
+
+/// Core's original admission-to-seal projection. Counts concern only admitted
+/// work; even a pending-free command does not establish all-route coverage.
+#[derive(Debug, Clone, Copy)]
+pub struct CommandExecutionEvidence {
+    pub physical_submissions: Option<runmat_execution::profiling::PhysicalSubmissionCounts>,
+    pub deferred_work: Option<runmat_execution::profiling::DeferredWorkCounts>,
+    pub route_coverage: runmat_execution::profiling::CommandRouteCoverage,
+    pub canonical_device_route_admitted: bool,
+    pub unproven_device_route: bool,
+    pub unproven_device_time: bool,
 }
 
 #[derive(Debug)]

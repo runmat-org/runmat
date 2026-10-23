@@ -537,7 +537,7 @@ export function compiledInventoryFixture(id = "foo", options = {}) {
   };
   const snapshot = {
     build: { architecture: "aarch64", operating_system: "macos", family: "unix", pointer_width: 64, endianness: "little", crate_feature_inventory: { crate_name: "runmat-runtime", schema_version: 1, known_features: ["blas-lapack", "blas-only", "gui", "interaction-test-hooks", "occt-native", "occt-wasm-host", "plot-core", "plot-web", "test-classes", "wgpu"], enabled_features: [] } },
-    declared: { namespace_scope: "function_callables_and_constants_are_reported_separately", catalog_schema_version: 8, catalog_fingerprint: "a".repeat(64), catalog_entries: catalogs, catalog_aliases: [], catalog_provenance: ids.map((name) => ({ identity: { builtin: { name }, variant: "default" }, provenance: { source_file: `crates/runmat-builtins/src/catalog/entries/math/${family}/${name}/mod.rs`, module_path: `catalog::${name}` } })), constants: [], legacy_functions: [], legacy_documentation: [] },
+    declared: { namespace_scope: "function_callables_and_constants_are_reported_separately", catalog_schema_version: 10, catalog_fingerprint: "a".repeat(64), catalog_entries: catalogs, catalog_aliases: [], catalog_provenance: ids.map((name) => ({ identity: { builtin: { name }, variant: "default" }, provenance: { source_file: `crates/runmat-builtins/src/catalog/entries/math/${family}/${name}/mod.rs`, module_path: `catalog::${name}` } })), constants: [], legacy_functions: [], legacy_documentation: [] },
     observed: { registration_manifest: registrationManifest, runtime_constants: [], runtime_bindings: ids.map((name) => ({ name, variant: "default", native_symbol: nativeSymbol(name, "default") })), implementation_provenance: ids.map((name) => ({ name, binding_variant: "default", source_file: `crates/runmat-runtime/src/builtins/math/${family}/${name}.rs`, module_path: `builtins::${name}`, function: `${name}_builtin`, builtin_path: `builtins::${name}`, authority: "canonical_binding" })), gpu_specs: options.legacyGroup ? [gpuGroupFixture(ids[0], family)] : [], fusion_specs: [] },
     validation: { status: "valid", errors: [], migration_readiness: options.finding ? { status: "incomplete", findings: [options.finding] } : { status: "ready", findings: [] } },
   };
@@ -550,10 +550,10 @@ function catalogEntryFixture(id, family) {
     audience: "Public", identity: { name: id }, category: `math/${family}`,
     documentation: { authority: "Catalog", title: "Foo", slug: id, summary: "Foo", description: "Foo.", keywords: [], related: [], sections: [], examples: [], example_exemption: "Fixture", faqs: [], links: [], media: [], evidence: { implementation: [], verification: [], notes: [] }, introduced: null, status: "Stable" },
     descriptor: { signatures: [], output_mode: "Fixed", completion_policy: "Public", errors: [] },
-    contract: { maturity: "Complete", inference_rule: { Identity: {} }, compatibility: "Matlab", async_behavior: "NeverSuspends", purity: "Pure", semantic_kind: "General", workspace_effect: null, environment_effect: null, effects: [], capabilities: [] },
+    contract: { maturity: "Complete", inference_rule: { Identity: { structural_dimension_constructor: false } }, compatibility: "Matlab", async_behavior: "NeverSuspends", purity: "Pure", semantic_kind: "General", workspace_effect: null, environment_effect: null, effects: [], capabilities: [] },
     placement: { preparation: "RuntimeOwned", portability: "NativeAndWasm", accelerator: "Forbidden", residency: "Host", fusion: "Never", distributed: "Unsupported" },
     link: { reachability: "Always", policy: "PortableRuntime", execution_stack: "Any", artifact_dependencies: [] },
-    bindings: [{ variant: "default", availability: "Required" }], extensions: [], integer_capabilities: [], integer_audit: null, suppress_auto_output: false,
+    bindings: [{ variant: "default", availability: "Required", owned_worker: "Forbidden" }], extensions: [], integer_capabilities: [], integer_audit: null, suppress_auto_output: false,
   };
 }
 

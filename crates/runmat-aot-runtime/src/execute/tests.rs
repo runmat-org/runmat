@@ -18,6 +18,11 @@ fn revision(mode: LanguageCompatibilityMode) -> ProgramRevision {
     .unwrap()
 }
 
+fn ordinary_runtime(mode: LanguageCompatibilityMode) -> runmat_runtime::context::RuntimeContext {
+    standalone_runtime(&revision(mode), None, None)
+        .expect("ordinary standalone runtime should construct without selected inputs")
+}
+
 #[test]
 fn standalone_policy_comes_from_program_revision() {
     for (mode, expected, extensions) in [
@@ -40,7 +45,8 @@ fn standalone_policy_comes_from_program_revision() {
         // A conflicting ambient policy must not change the compiled program.
         let _ambient = runmat_runtime::compatibility::push_runmat_extensions_enabled(!extensions);
         let program = revision(mode);
-        let runtime = standalone_runtime(&program);
+        let runtime = standalone_runtime(&program, None, None)
+            .expect("ordinary standalone runtime should construct without selected inputs");
         assert!(runtime.service_ports().placement().is_some());
         assert!(runtime.service_ports().acceleration().is_some());
         assert_eq!(runtime.program_revision(), Some(&program));
@@ -69,8 +75,8 @@ fn standalone_policy_comes_from_program_revision() {
 
 #[test]
 fn standalone_program_contexts_keep_independent_policies() {
-    let runmat = standalone_runtime(&revision(LanguageCompatibilityMode::RunMat));
-    let matlab = standalone_runtime(&revision(LanguageCompatibilityMode::Matlab));
+    let runmat = ordinary_runtime(LanguageCompatibilityMode::RunMat);
+    let matlab = ordinary_runtime(LanguageCompatibilityMode::Matlab);
     let _outer = runmat.enter();
     assert!(runmat_runtime::compatibility::runmat_extensions_enabled());
     {
@@ -97,7 +103,7 @@ fn standalone_execution_diagnostic_keeps_original_identifier_and_message() {
     assert_eq!(
         execution_diagnostic(
             original,
-            &standalone_runtime(&revision(LanguageCompatibilityMode::Matlab)),
+            &ordinary_runtime(LanguageCompatibilityMode::Matlab),
         ),
         "standalone native execution failed: RunMat:test:AotSource: aot source failure"
     );
@@ -120,7 +126,7 @@ fn standalone_diagnostic_renders_bound_file_frame_span_and_original_cause() {
     ])
     .unwrap();
     let runtime = runmat_runtime::source_context::bind_portable_source_map_v2(
-        standalone_runtime(&revision(LanguageCompatibilityMode::Matlab)),
+        ordinary_runtime(LanguageCompatibilityMode::Matlab),
         &map,
     )
     .unwrap();

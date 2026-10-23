@@ -1,16 +1,42 @@
-//! Borrowed-CSC sparse LU and tall QR for explicitly unbounded host routes.
+//! Borrowed-CSC sparse factors with allocator-owned LU and complete QR.
 //!
-//! faer 0.24.4 privately allocates symbolic and data-dependent numeric fill.
-//! Its published scratch requirements do not cover those retained factors, so
-//! this owner must never be treated as a Managed allocation receipt. A future
-//! allocator-aware factor backend can implement the same typed entry contract.
+//! LU and sparse QR/COD share actual-policy fill and cooperative workspace.
 
-mod faer_adapter;
-mod lu;
-mod qr;
-
-pub(in crate::builtins::math::linalg) use lu::{SparseLuError, SparseLuFactor};
-pub(in crate::builtins::math::linalg) use qr::{SparseQrError, SparseQrFactor};
+mod coefficient;
+mod managed_cholesky;
+mod managed_ilu;
+mod managed_lu;
+mod managed_qr;
+mod managed_storage;
+use coefficient::coefficient_as;
+mod publication;
+mod retained;
+pub(in crate::builtins::math::linalg) use managed_cholesky::{
+    IncompleteCholeskyKind, IncompleteCholeskyOptions, ManagedCholeskyScalar,
+    ManagedSparseCholesky, ManagedSparseCholeskyError,
+};
+pub(in crate::builtins::math::linalg) use managed_ilu::{
+    IncompleteLuCsc, IncompleteLuKind, IncompleteLuOptions, IncompleteLuPart, ManagedIncompleteLu,
+    ManagedIncompleteLuError, ModifiedIncompleteLu,
+};
+pub(in crate::builtins::math::linalg) use managed_lu::{
+    cholesky_stage_scales, ManagedSparseLu, ManagedSparseLuError, ManagedSparseScalar,
+    PublicSparseLu, SparseLuOptions,
+};
+pub(in crate::builtins::math::linalg) use managed_lu::{
+    FactorRhsGeometry, FactorSolveOptions, SingularSolvePolicy,
+};
+pub(in crate::builtins::math::linalg) use managed_qr::{
+    SparseCompleteQr, SparseCompleteQrError, SparseQrDecomposition, SparseQrScalar,
+};
+pub(in crate::builtins::math::linalg) use publication::{
+    sparse_publication_bytes, SparsePublication, SparsePublicationError,
+};
+pub(in crate::builtins::math::linalg) use retained::{
+    factor_sparse, inspect_native_matrix, solve_factor_indexed, solve_factor_indexed_scaled,
+    NativeMatrixFacts, RetainedFactorError, RetainedFactorScalar, RetainedSolveStatus,
+    SelectedTriangle,
+};
 
 #[cfg(test)]
 mod tests;

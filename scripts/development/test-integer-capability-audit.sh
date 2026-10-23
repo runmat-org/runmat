@@ -7,11 +7,13 @@ audit="${script_dir}/integer-capability-audit.sh"
 temp_dir=$(mktemp -d)
 trap 'rm -rf "${temp_dir}"' EXIT
 fixture="${temp_dir}/catalog.json"
+documentation="${temp_dir}/documentation.json"
 
 jq -n '{builtins: ([range(0; 30) | {name: ("candidate" + tostring), signatures: [{label: ("candidate" + tostring + "(X)"), inputs: [{ty: (if . % 2 == 0 then "Any" else "SizeArg" end)}]}], integer_capabilities: [], integer_audit: null}] + [{name: "settled", signatures: [{label: "settled(X)", inputs: [{ty: "Any"}]}], integer_capabilities: [], integer_audit: {kind: "NotApplicable"}}, {name: "open-form", signatures: [{label: "open-form(X)", inputs: [{ty: "Any"}]}], integer_capabilities: [{form: "open-form(X)", notes: "[integer-audit-open] documented form remains unresolved"}], integer_audit: null}])}' >"${fixture}"
+jq -n '{schema_version: 2, inventory: {documents: 2, catalog_identities: 2, legacy_sidecars: 0, missing_catalog_documentation: []}, builtins: [{key: "Candidate0", authority: "catalog", source: {url: "https://example.com/source/candidate0.rs"}}, {key: "candidate1", authority: "catalog"}]}' >"${documentation}"
 
 run_audit() {
-  RUNMAT_INTEGER_AUDIT_CATALOG="${fixture}" "${audit}" "$@"
+  RUNMAT_INTEGER_AUDIT_CATALOG="${fixture}" RUNMAT_BUILTIN_DOCUMENTATION_EXPORT="${documentation}" RUNMAT_BUILTIN_DOCUMENTATION_MODE=strict "${audit}" "$@"
 }
 
 summary_count=$(run_audit summary | awk -F '\t' '$1 == "signature_screen_untriaged" {print $2}')
@@ -38,9 +40,10 @@ done <<<"${first_queue}"
 type_filtered=$(run_audit queue --limit 2000 --input-type SizeArg --format json)
 jq -e 'length > 0 and all(.[]; .screened_input_types | index("SizeArg") != null)' >/dev/null <<<"${type_filtered}"
 
-run_audit queue --limit 2000 --format json | jq -r '.[] | select(.reference != null) | .reference' | while IFS= read -r reference; do
-  [[ -f "${repo_root}/${reference}" ]]
-done
+run_audit queue --limit 2000 --format json | jq -e '
+  ([.[] | select(.name == "candidate0") | .reference] == ["https://example.com/source/candidate0.rs"])
+  and ([.[] | select(.name != "candidate0") | .reference] | all(. == null))
+' >/dev/null
 
 packet=$(run_audit packet "${cohort_names[@]}")
 jq -e '.selected_count == 8 and (.errors | length) == 0 and (.records | length) == 8' >/dev/null <<<"${packet}"
@@ -59,5 +62,12 @@ expect_packet_rejection not.a.real.builtin "${cohort_names[@]:1:7}" | jq -e '.er
 expect_packet_rejection "${cohort_names[@]:0:7}" | jq -e '.errors | any(contains("8-25 unique names"))' >/dev/null
 expect_packet_rejection "${cohort_names[0]}" "${cohort_names[0]}" "${cohort_names[@]:1:6}" | jq -e '.errors | any(contains("duplicate names"))' >/dev/null
 expect_packet_rejection "${extended_names[@]:0:26}" | jq -e '.errors | any(contains("8-25 unique names"))' >/dev/null
+
+# Malformed or failed canonical input must not silently restore filename scans.
+jq '.preview = {final_acceptance: false}' "${documentation}" >"${temp_dir}/preview.json"
+if RUNMAT_INTEGER_AUDIT_CATALOG="${fixture}" RUNMAT_BUILTIN_DOCUMENTATION_EXPORT="${temp_dir}/preview.json" "${audit}" queue >/dev/null 2>&1; then
+  printf '%s\n' 'expected preview documentation rejection' >&2
+  exit 1
+fi
 
 printf '%s\n' 'integer-capability-audit tests passed'

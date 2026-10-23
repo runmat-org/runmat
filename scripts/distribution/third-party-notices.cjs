@@ -5,6 +5,7 @@ const { join, resolve } = require("node:path");
 const NOTICE_FILE_NAME = "THIRD_PARTY_NOTICES.txt";
 const NOTICE_SOURCES = [
   resolve(__dirname, "../../crates/runmat-runtime/src/builtins/math/linalg/ops/linear_operator/LAPACK-LICENSE.txt"),
+  resolve(__dirname, "../../crates/runmat-runtime/src/builtins/math/linalg/ops/sparse_factor/managed_lu/FAER-LICENSE.txt"),
   resolve(__dirname, "../../crates/runmat-runtime/licenses/UNICODE-LICENSE.txt"),
 ];
 

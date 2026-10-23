@@ -92,7 +92,7 @@ fn jsonencode_cell_array() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn jsonencode_char_array_zero_rows_is_empty_array() {
-    let chars = CharArray::new(Vec::new(), 0, 3).expect("char array");
+    let chars = CharArray::from_code_units(Vec::new(), 0, 3).expect("char array");
     let encoded = block_on(jsonencode_builtin(
         None,
         Value::CharArray(chars),
@@ -105,7 +105,7 @@ fn jsonencode_char_array_zero_rows_is_empty_array() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn jsonencode_char_array_empty_strings_per_row() {
-    let chars = CharArray::new(Vec::new(), 2, 0).expect("char array");
+    let chars = CharArray::from_code_units(Vec::new(), 2, 0).expect("char array");
     let encoded = block_on(jsonencode_builtin(
         None,
         Value::CharArray(chars),

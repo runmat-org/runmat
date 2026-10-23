@@ -94,15 +94,19 @@ fn exact_origin_binding_owns_the_selected_definition_graph() {
     let foreign_entry = foreign.enter();
     let calls = Rc::new(std::cell::Cell::new(0));
     let observed = Rc::clone(&calls);
-    let invoker =
-        install_local_bound_function_invoker(Rc::new(move |_, _, _, _, _lexical_environment| {
+    let invoker = install_local_bound_function_invoker(Rc::new(
+        move |bound_runtime, _, _, _, _lexical_environment| {
             observed.set(observed.get() + 1);
-            Box::pin(async {
-                crate::execution::RootedValueSequence::new(runmat_value::ValueSequence::empty())
-                    .map_err(|error| error.into_runtime_error())
-            })
-        }))
-        .expect("call-port scope");
+            crate::execution::admit_executable_sequence_with(
+                &bound_runtime.clone(),
+                move || async move {
+                    crate::execution::RootedValueSequence::new(runmat_value::ValueSequence::empty())
+                        .map_err(|error| error.into_runtime_error())
+                },
+            )
+        },
+    ))
+    .expect("call-port scope");
     let result = futures::executor::block_on(try_call_bound_function(copied.clone(), &[], 0))
         .expect("bound route is installed");
     assert!(
@@ -236,15 +240,19 @@ fn selected_old_definition_issues_old_owner_under_one_runtime() {
     let _next_entry = next.enter();
     let calls = Rc::new(std::cell::Cell::new(0));
     let observed = Rc::clone(&calls);
-    let _invoker =
-        install_local_bound_function_invoker(Rc::new(move |_, _, _, _, _lexical_environment| {
+    let _invoker = install_local_bound_function_invoker(Rc::new(
+        move |bound_runtime, _, _, _, _lexical_environment| {
             observed.set(observed.get() + 1);
-            Box::pin(async {
-                crate::execution::RootedValueSequence::new(runmat_value::ValueSequence::empty())
-                    .map_err(|error| error.into_runtime_error())
-            })
-        }))
-        .expect("call-port scope");
+            crate::execution::admit_executable_sequence_with(
+                &bound_runtime.clone(),
+                move || async move {
+                    crate::execution::RootedValueSequence::new(runmat_value::ValueSequence::empty())
+                        .map_err(|error| error.into_runtime_error())
+                },
+            )
+        },
+    ))
+    .expect("call-port scope");
     let result = futures::executor::block_on(try_call_bound_function(
         runmat_value::BoundFunctionBinding {
             function: 9,
@@ -265,12 +273,12 @@ fn selected_old_definition_issues_old_owner_under_one_runtime() {
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn legacy_entry_context_inherits_exact_bound_invoker() {
     let exact: Rc<BoundFunctionInvoker> = Rc::new(
-        |_,
+        |runtime,
          _binding: runmat_value::BoundFunctionBinding,
          _args: crate::call::RootedFunctionArguments,
          _outputs: usize,
          _lexical_environment: Option<runmat_value::LexicalEnvironment>| {
-            Box::pin(async {
+            crate::execution::admit_executable_sequence_with(&runtime, move || async move {
                 crate::execution::RootedValueSequence::new(runmat_value::ValueSequence::empty())
                     .map_err(|error| error.into_runtime_error())
             })
@@ -308,14 +316,19 @@ fn selected_bound_future_roots_arguments_until_drop() {
         let observed = Rc::clone(&reached);
         let entry = runtime.enter();
         let _invoker = install_local_bound_function_invoker(Rc::new(
-            move |_, _binding, arguments, _outputs, _lexical_environment| {
+            move |bound_runtime, _binding, arguments, _outputs, _lexical_environment| {
                 observed.set(true);
-                Box::pin(async move {
-                    let _arguments = arguments;
-                    std::future::pending::<()>().await;
-                    crate::execution::RootedValueSequence::new(runmat_value::ValueSequence::empty())
+                crate::execution::admit_executable_sequence_with(
+                    &bound_runtime.clone(),
+                    move || async move {
+                        let _arguments = arguments;
+                        std::future::pending::<()>().await;
+                        crate::execution::RootedValueSequence::new(
+                            runmat_value::ValueSequence::empty(),
+                        )
                         .map_err(|error| error.into_runtime_error())
-                })
+                    },
+                )
             },
         ))
         .expect("call-port scope");

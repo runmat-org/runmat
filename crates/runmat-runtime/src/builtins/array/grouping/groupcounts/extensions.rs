@@ -17,7 +17,7 @@ pub(super) fn validate(
     {
         require(&runmat_builtins::GROUPCOUNTS_RESIDENT_INPUT_EXTENSION)?;
     }
-    let start = options::option_start(rest);
+    let start = options::option_start(rest)?;
     let positional = rest.range(..start).expect("groupcounts positional prefix");
     let bin = if matches!(first, Value::Object(object) if is_tabular_object(object)) {
         positional.get(1)
@@ -25,13 +25,17 @@ pub(super) fn validate(
         positional.first()
     };
     let typed_bin_count = bin.is_some_and(is_fixed_width_integer_scalar);
-    let typed_boolean = rest
+    let mut typed_boolean = false;
+    for pair in rest
         .range(start..)
         .expect("groupcounts option suffix")
         .chunks_exact(2)
-        .any(|pair| {
-            options::is_boolean_option(&pair[0]) && is_fixed_width_integer_scalar(&pair[1])
-        });
+    {
+        if options::is_boolean_option(&pair[0])? && is_fixed_width_integer_scalar(&pair[1]) {
+            typed_boolean = true;
+            break;
+        }
+    }
     if typed_bin_count || typed_boolean {
         require(&runmat_builtins::GROUPCOUNTS_INTEGER_CONTROL_EXTENSION)?;
     }

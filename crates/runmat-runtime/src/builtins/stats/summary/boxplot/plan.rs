@@ -167,7 +167,7 @@ impl BoxplotOptionPlan {
 }
 
 fn decode_option_name(value: &Value) -> BuiltinResult<BoxplotOptionKind> {
-    let name = keyword_of(value).ok_or_else(|| invalid("boxplot: option names must be text"))?;
+    let name = keyword_of(value)?.ok_or_else(|| invalid("boxplot: option names must be text"))?;
     BoxplotOptionKind::parse(&name)
         .ok_or_else(|| invalid(format!("boxplot: unsupported option '{name}'")))
 }

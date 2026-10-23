@@ -8,7 +8,6 @@ use crate::context::{RuntimeContext, RuntimeServiceFuture};
 use crate::context::{
     RuntimeUserPathService, UserPathMutation, UserPathServiceError, UserPathSnapshot,
 };
-use crate::execution::value_codec::{decode_durable_value, encode_durable_value};
 use crate::execution::CpuCooperationBudget;
 use futures::lock::Mutex;
 use runmat_execution::value::ValuePayload;
@@ -68,7 +67,10 @@ impl RuntimePreferenceService for IsolatedMemoryPreferenceService {
             for (group, values) in &document.groups {
                 let mut decoded = PreferenceValues::new();
                 for (name, payload) in values {
-                    decoded.insert(name.clone(), decode_durable_value(payload)?);
+                    decoded.insert(
+                        name.clone(),
+                        super::decode_selected_preference(payload, &mut budget, &runtime).await?,
+                    );
                     checkpoint(&mut budget, 1).await?;
                 }
                 result.insert(group.clone(), decoded);
@@ -96,7 +98,10 @@ impl RuntimePreferenceService for IsolatedMemoryPreferenceService {
             };
             let mut decoded = PreferenceValues::new();
             for (name, payload) in values {
-                decoded.insert(name.clone(), decode_durable_value(payload)?);
+                decoded.insert(
+                    name.clone(),
+                    super::decode_selected_preference(payload, &mut budget, &runtime).await?,
+                );
                 checkpoint(&mut budget, 1).await?;
             }
             Ok(Some(decoded))
@@ -158,7 +163,10 @@ impl RuntimePreferenceService for IsolatedMemoryPreferenceService {
             let mut encoded_defaults = vec![None; names.len()];
             if let Some(defaults) = &defaults {
                 for index in missing_default_indices(&document, &group, &names) {
-                    encoded_defaults[index] = Some(encode_durable_value(&defaults[index])?);
+                    encoded_defaults[index] = Some(
+                        super::encode_selected_preference(&defaults[index], &mut budget, &runtime)
+                            .await?,
+                    );
                     checkpoint(&mut budget, 1).await?;
                 }
             }
@@ -186,7 +194,8 @@ impl RuntimePreferenceService for IsolatedMemoryPreferenceService {
                 let payload = candidate
                     .get(name)
                     .expect("existing or defaulted preference");
-                output.push(decode_durable_value(payload)?);
+                output
+                    .push(super::decode_selected_preference(payload, &mut budget, &runtime).await?);
                 checkpoint(&mut budget, 1).await?;
             }
             checkpoint(&mut budget, 0).await?;
@@ -211,7 +220,10 @@ impl RuntimePreferenceService for IsolatedMemoryPreferenceService {
             checkpoint(&mut budget, 0).await?;
             let mut encoded = Vec::with_capacity(entries.len());
             for (name, value) in &entries {
-                encoded.push((name.clone(), encode_durable_value(value)?));
+                encoded.push((
+                    name.clone(),
+                    super::encode_selected_preference(value, &mut budget, &runtime).await?,
+                ));
                 checkpoint(&mut budget, 1).await?;
             }
             if encoded.is_empty() {

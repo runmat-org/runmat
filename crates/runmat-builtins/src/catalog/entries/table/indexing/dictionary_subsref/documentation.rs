@@ -11,11 +11,13 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
             "Each S element has a type and subs selector. Lookup converts queries to the configured key class, compares integer keys exactly, and reports missing keys as index errors.",
             "A scalar key returns its stored value. Several keys produce an array or cell container according to their value classes; the result depends on runtime contents.",
+            "Single key conversion and homogeneous Single results preserve native binary32 class and payloads. Output shape follows the complete key-query geometry.",
             "Chained paths continue indexing into the retrieved value through the shared object protocol.",
         ] },
         BuiltinDocumentationSection { heading: "Execution and placement", paragraphs: &[
             "Dictionary key lookup is host-side and a numeric fusion boundary. Stored values can have their own residency; a retrieved value is not automatically gathered.",
             "The method may suspend or throw while processing a nested path. Direct distributed dictionary handles are unsupported.",
+            "Typed native dictionary lookup admits its index scratch and retained output under the selected context. The public standard-substruct adapter still rejects finite Managed execution before its shared path/component workspace is allocated; this is a shared-ingress limit, not a class conversion or output fallback.",
         ] },
     ],
     examples: &[BuiltinExample {

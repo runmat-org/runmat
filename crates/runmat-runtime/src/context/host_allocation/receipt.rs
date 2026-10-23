@@ -319,6 +319,10 @@ fn provider_metadata_error(error: HostAllocationError) -> ProviderHostMetadataEr
 }
 
 impl HostAllocationReceipt {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn worker_checkpoint(&self) -> super::checkpoint::HostAllocationWorkerCheckpoint {
+        super::checkpoint::HostAllocationWorkerCheckpoint::from_checkpoint(&self.checkpoint)
+    }
     /// Issue exact per-growth trace scratch against the same current managed
     /// ledger as ordinary output admission. An unbounded operation has no
     /// issuer; finite trace growth never falls back to the global allocator.

@@ -172,33 +172,6 @@ pub(super) fn install_frame_locals(instruction: &mut NativeInstruction, locals: 
     }
 }
 
-pub(super) fn declared_requirements(value: &runmat_mir::MirRvalue) -> OperationRequirements {
-    let (effects, capabilities) = runmat_mir::rvalue_declared_requirements(value);
-    OperationRequirements {
-        effects,
-        capabilities,
-    }
-}
-
-pub(super) fn declared_statement_requirements(
-    statement: &runmat_mir::MirStmtKind,
-) -> OperationRequirements {
-    let (effects, capabilities) = runmat_mir::statement_declared_requirements(statement);
-    OperationRequirements {
-        effects,
-        capabilities,
-    }
-}
-
-pub(super) fn merge_requirements(
-    mut left: OperationRequirements,
-    right: OperationRequirements,
-) -> OperationRequirements {
-    left.effects.0.extend(right.effects.0);
-    left.capabilities.0.extend(right.capabilities.0);
-    left
-}
-
 pub(super) fn root_local(place: &runmat_mir::MirPlace) -> Option<runmat_mir::MirLocalId> {
     match place {
         runmat_mir::MirPlace::Local(local) => Some(*local),
@@ -225,6 +198,16 @@ fn statement_inputs(
 ) -> NativeCodegenResult<Vec<NativeValueId>> {
     let mut inputs = Vec::new();
     match statement {
+        runmat_mir::MirStmtKind::PrepareFixedAssignment(preparation) => {
+            let mut result = Ok(());
+            preparation.visit_external_operands(|operand| {
+                if result.is_ok() {
+                    result = collect_operand(operand, locals, &mut inputs);
+                }
+            });
+            result?;
+        }
+        runmat_mir::MirStmtKind::PreparedAssign { .. } => {}
         runmat_mir::MirStmtKind::Assign { place, .. } => {
             collect_place_inputs(place, locals, &mut inputs)?;
         }

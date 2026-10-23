@@ -27,7 +27,7 @@ fn classifies_scalars_vectors_empty_and_text_shapes() {
         StringArray::new(vec!["RunMat".into()], vec![1, 1]).unwrap()
     )));
     assert!(run(Value::CharArray(
-        CharArray::new(vec!['a'], 1, 1).unwrap()
+        CharArray::from_unicode_scalars(vec!['a'], 1, 1).unwrap()
     )));
     assert!(!run(Value::CharArray(CharArray::new_row("RunMat"))));
 }

@@ -5,11 +5,14 @@ mod contracts;
 mod declarations;
 mod documentation;
 mod inference;
+mod remaining;
 #[cfg(test)]
 mod tests;
 
 pub use self::declarations::*;
+pub use self::remaining::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(declarations::ENTRIES.iter().copied());
+    values.extend(remaining::ENTRIES.iter().copied());
 }

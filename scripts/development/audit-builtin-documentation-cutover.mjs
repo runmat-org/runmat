@@ -55,7 +55,7 @@ const exported = runDocumentationExport((executable, args, settings) => {
         ...options.identities.flatMap(name => ["--identity", name])];
     invocation = { executable, arguments: actualArgs, cwd: repository };
     return spawnSync(executable, actualArgs, { ...settings, cwd: repository });
-});
+}, { repository, transition: false });
 const after = sourceSnapshot(repository, roots);
 if (evidenceDigest(before) !== evidenceDigest(after)) throw new Error("source changed during the compiled documentation export");
 if (exported.status !== 0) throw new Error(`documentation exporter failed (${exported.status}):\n${exported.stderr}`);

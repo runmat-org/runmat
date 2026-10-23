@@ -10,13 +10,13 @@ mod activation;
 mod budget;
 mod resource_activation;
 mod state;
-#[cfg(feature = "wgpu")]
 mod vm_region;
 #[cfg(feature = "wgpu")]
+pub use vm_region::record_source_region_wgpu_submission;
 pub use vm_region::{
-    record_vm_region_provider_selection, record_vm_region_unattributed_device_effect,
-    record_vm_region_wgpu_submission, set_vm_region_for_current_poll, with_vm_region_poll,
-    VmRegionRouteAudit, VmRegionRouteAuditSlot,
+    record_source_region_provider_selection, record_source_region_unattributed_device_effect,
+    set_source_region_for_current_poll, with_source_region_audit, with_source_region_poll,
+    SourceRegionAuditAllocationError, SourceRegionRouteAudit, SourceRegionRouteAuditSlot,
 };
 #[cfg(feature = "wgpu")]
 mod wgpu_progress;

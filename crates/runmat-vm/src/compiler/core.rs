@@ -1049,6 +1049,28 @@ impl Compiler {
     ) -> Result<(), CompileError> {
         let _span_guard = SpanGuard::new(self, stmt.span);
         match &stmt.kind {
+            MirStmtKind::PrepareFixedAssignment(preparation) => {
+                self.pending_place_mutation = None;
+                self.compile_mir_fixed_assignment_target(preparation)
+            }
+            MirStmtKind::PreparedAssign { preparation, value } => {
+                self.pending_place_mutation = None;
+                if preparation.mutation.kind == runmat_types::PlaceMutationKind::Delete
+                    && !self.mir_delete_rhs_is_empty_tensor_literal(value)
+                {
+                    return Err(self
+                        .compile_error("prepared deletion requires an empty tensor literal RHS")
+                        .with_identifier(IDENT_MIR_DELETE_ASSIGNMENT_RHS_INVALID));
+                }
+                self.compile_mir_rvalue(value)?;
+                self.emit(Instr::CaptureScalarSequence);
+                let root_slot = self.mir_place_root_slot(&preparation.mutation.place)?;
+                self.emit(Instr::CommitFixedAssignment {
+                    source_statement: preparation.source_statement,
+                    root_slot,
+                });
+                Ok(())
+            }
             MirStmtKind::Assign { place, value } => {
                 let delete = self.take_assign_delete_flag(place)?;
                 self.compile_mir_assign(place, value, delete)
@@ -1383,6 +1405,11 @@ impl Compiler {
             || parallel_output_count.is_some();
         if !emits_requested_values {
             self.emit(Instr::Unpack(targets.targets.len()));
+            if output_count > 1 {
+                // Scalar Unpack is an unconditional TooManyOutputs error.
+                // It has no normal successor and cannot initialize targets.
+                return Ok(());
+            }
         }
         for target in targets.targets.iter().rev() {
             self.compile_mir_output_target_store(target)?;
@@ -1512,13 +1539,18 @@ impl Compiler {
             MirPlace::Local(_) | MirPlace::Binding(_) => Ok(()),
             MirPlace::Member(base, member) => {
                 self.compile_mir_sequence_target_path(base)?;
-                self.emit(Instr::PrepareMemberPathStep(member.clone()));
+                self.emit(Instr::PrepareMemberPathStep {
+                    member: member.clone(),
+                    child_creation: runmat_types::AssignmentChildCreation::ExistingOnly,
+                });
                 Ok(())
             }
             MirPlace::DynamicMember(base, member) => {
                 self.compile_mir_sequence_target_path(base)?;
                 self.compile_mir_operand(member)?;
-                self.emit(Instr::PrepareDynamicMemberPathStep);
+                self.emit(Instr::PrepareDynamicMemberPathStep {
+                    child_creation: runmat_types::AssignmentChildCreation::ExistingOnly,
+                });
                 Ok(())
             }
             MirPlace::Index(base, indexing) => {
@@ -1527,10 +1559,12 @@ impl Compiler {
                     self.compile_prepared_index_components(indexing)?;
                 match indexing.kind {
                     IndexKind::Paren => self.emit(Instr::PrepareParenthesesPathStep {
+                        child_creation: runmat_types::AssignmentChildCreation::ExistingOnly,
                         component_count,
                         selectors,
                     }),
                     IndexKind::Brace => self.emit(Instr::PrepareBracesPathStep {
+                        child_creation: runmat_types::AssignmentChildCreation::ExistingOnly,
                         component_count,
                         selectors,
                         expand_all: indexing.cell_expand_all,
@@ -1554,6 +1588,9 @@ impl Compiler {
         &mut self,
         indexing: &MirIndexing,
     ) -> Result<(usize, Vec<crate::bytecode::BytecodeSubscriptSelector>), CompileError> {
+        indexing.validate_target_selectors().map_err(|error| {
+            self.compile_error(format!("invalid MIR target selectors: {error}"))
+        })?;
         let component_count = if indexing.cell_expand_all {
             0
         } else {
@@ -1582,6 +1619,15 @@ impl Compiler {
                     self.compile_mir_expression_region(region)?;
                     self.prepared_index_component = previous;
                     selectors.push(crate::bytecode::BytecodeSubscriptSelector::Value);
+                }
+                MirIndexComponent::Expansion(region) => {
+                    self.compile_mir_expression_steps(&region.steps)?;
+                    self.compile_mir_call_arg(&region.argument)?;
+                    let (mut specs, _) =
+                        self.mir_call_arg_specs(std::slice::from_ref(&region.argument))?;
+                    selectors.push(crate::bytecode::BytecodeSubscriptSelector::Expansion(
+                        specs.remove(0),
+                    ));
                 }
             }
         }
@@ -1672,6 +1718,11 @@ impl Compiler {
                     self.contextual_index_component = previous;
                     numeric_count += 1;
                 }
+                MirIndexComponent::Expansion(_) => {
+                    return Err(self.compile_error(
+                        "expanding selectors require ordered subscript-path lowering",
+                    ));
+                }
             }
         }
         self.emit(Instr::FinishContextualIndexSelectors {
@@ -1702,6 +1753,11 @@ impl Compiler {
                     let previous = self.contextual_index_component.replace(component_index);
                     self.compile_mir_expression_region(region)?;
                     self.contextual_index_component = previous;
+                }
+                MirIndexComponent::Expansion(_) => {
+                    return Err(self.compile_error(
+                        "expanding selectors require ordered subscript-path lowering",
+                    ));
                 }
             }
         }
@@ -1859,6 +1915,11 @@ impl Compiler {
                 MirIndexComponent::ContextualExpr(_) => {
                     return Err(self.compile_error(
                         "contextual brace selectors require prepared indexing lowering",
+                    ));
+                }
+                MirIndexComponent::Expansion(_) => {
+                    return Err(self.compile_error(
+                        "expanding selectors require ordered subscript-path lowering",
                     ));
                 }
             }
@@ -2226,6 +2287,11 @@ impl Compiler {
                     .with_identifier(IDENT_MIR_DELETE_ASSIGNMENT_RHS_INVALID));
             }
         }
+        if place.requires_prepared_assignment() {
+            return Err(self.compile_error(
+                "expanded fixed assignment requires its canonical prepared producer/consumer",
+            ));
+        }
         match place {
             MirPlace::Local(_) | MirPlace::Binding(_) => {
                 self.compile_mir_rvalue(value)?;
@@ -2267,6 +2333,182 @@ impl Compiler {
                 self.emit_store_back_mir_member_chain(base, false)
             }
         }
+    }
+
+    fn compile_mir_fixed_assignment_target(
+        &mut self,
+        phase: &runmat_mir::MirFixedPreparation,
+    ) -> Result<(), CompileError> {
+        use crate::bytecode::BytecodeSubscriptStep as Step;
+        use runmat_mir::{
+            MirFixedPreparationPhase as Phase, MirFixedSelectorDestination as Destination,
+        };
+        phase
+            .validate()
+            .map_err(|message| self.compile_error(message))?;
+        let preparation = &phase.assignment;
+        let place = &preparation.mutation.place;
+        match &phase.phase {
+            Phase::CaptureReceiver => {
+                let root_slot = self.mir_place_root_slot(place)?;
+                let root_creation =
+                    place.assignment_root_creation(preparation.mutation.creation_policy);
+                self.emit(Instr::BeginFixedAssignment {
+                    source_statement: preparation.source_statement,
+                    root_slot,
+                });
+                self.emit(Instr::BeginSequenceOutputTarget {
+                    root_slot,
+                    root_creation,
+                });
+            }
+            Phase::BeginIndex { path_step } => {
+                let Some(MirPlace::Index(_, indexing)) = preparation.path_step(*path_step) else {
+                    return Err(self.compile_error("fixed index phase has no indexed path step"));
+                };
+                self.emit(Instr::BeginPreparedIndexSelectors {
+                    component_count: if indexing.cell_expand_all {
+                        0
+                    } else {
+                        indexing.components.len()
+                    },
+                });
+            }
+            Phase::EvaluateSelector {
+                component,
+                region,
+                destination,
+                ..
+            } => {
+                let previous = self.prepared_index_component;
+                self.prepared_index_component = *component;
+                let result = (|| -> Result<(), CompileError> {
+                    self.compile_mir_expression_steps(&region.steps)?;
+                    match (destination, &region.argument) {
+                        (Destination::Scalar(local), MirCallArg::Single(operand)) => {
+                            self.compile_mir_operand(operand)?;
+                            let slot = self.mir_local_slot(*local)?;
+                            self.emit(Instr::StoreVar(slot));
+                        }
+                        (
+                            Destination::Sequence(destination),
+                            MirCallArg::CapturedSequence(source),
+                        ) => {
+                            self.emit(Instr::MoveCapturedSequence {
+                                source_slot: source.0,
+                                destination_slot: destination.0,
+                            });
+                        }
+                        (Destination::Sequence(destination), MirCallArg::Expansion(source)) => {
+                            self.compile_mir_sequence_capture(destination.0, source)?;
+                        }
+                        _ => {
+                            return Err(
+                                self.compile_error("fixed selector changes its scalar/CSL receipt")
+                            )
+                        }
+                    }
+                    Ok(())
+                })();
+                self.prepared_index_component = previous;
+                result?;
+            }
+            Phase::FinishStep { path_step } => {
+                let step = preparation
+                    .path_step(*path_step)
+                    .ok_or_else(|| self.compile_error("fixed path finish is outside its source"))?;
+                let final_step = *path_step + 1 == preparation.path_len();
+                let child_creation = place.assignment_child_creation(
+                    *path_step + 1,
+                    preparation.mutation.creation_policy,
+                );
+                let (endpoint, selector_context) = match step {
+                    MirPlace::Member(_, member) => (Step::Member(member.clone()), None),
+                    MirPlace::DynamicMember(_, member) => {
+                        self.compile_mir_operand(member)?;
+                        (Step::DynamicMember, None)
+                    }
+                    MirPlace::Index(_, indexing) => {
+                        let component_count = if indexing.cell_expand_all {
+                            0
+                        } else {
+                            indexing.components.len()
+                        };
+                        let mut selectors = Vec::with_capacity(indexing.components.len());
+                        for component in &indexing.components {
+                            selectors.push(match component {
+                                MirIndexComponent::Colon => {
+                                    crate::bytecode::BytecodeSubscriptSelector::Colon
+                                }
+                                MirIndexComponent::Expr(operand) => {
+                                    self.compile_mir_operand(operand)?;
+                                    crate::bytecode::BytecodeSubscriptSelector::Value
+                                }
+                                MirIndexComponent::Expansion(region) => {
+                                    let (mut specs, _) = self.mir_call_arg_specs(
+                                        std::slice::from_ref(&region.argument),
+                                    )?;
+                                    crate::bytecode::BytecodeSubscriptSelector::Expansion(
+                                        specs.remove(0),
+                                    )
+                                }
+                                _ => {
+                                    return Err(self.compile_error(
+                                        "fixed descriptor contains uncaptured selector work",
+                                    ))
+                                }
+                            });
+                        }
+                        if indexing.cell_expand_all && final_step {
+                            selectors.push(crate::bytecode::BytecodeSubscriptSelector::Colon);
+                        }
+                        if !final_step {
+                            match indexing.kind {
+                                IndexKind::Paren => self.emit(Instr::PrepareParenthesesPathStep {
+                                    child_creation,
+                                    component_count,
+                                    selectors,
+                                }),
+                                IndexKind::Brace => self.emit(Instr::PrepareBracesPathStep {
+                                    child_creation,
+                                    component_count,
+                                    selectors,
+                                    expand_all: indexing.cell_expand_all,
+                                }),
+                            };
+                            return Ok(());
+                        }
+                        let endpoint = match indexing.kind {
+                            IndexKind::Paren => Step::Parentheses { selectors },
+                            IndexKind::Brace => Step::Braces { selectors },
+                        };
+                        (endpoint, Some(component_count))
+                    }
+                    _ => return Err(self.compile_error("fixed destination has no path endpoint")),
+                };
+                if !final_step {
+                    match endpoint {
+                        Step::Member(member) => self.emit(Instr::PrepareMemberPathStep {
+                            member,
+                            child_creation,
+                        }),
+                        Step::DynamicMember => {
+                            self.emit(Instr::PrepareDynamicMemberPathStep { child_creation })
+                        }
+                        _ => unreachable!("indexed prefix handled above"),
+                    };
+                    return Ok(());
+                }
+                self.emit(Instr::FinishFixedAssignmentTarget {
+                    endpoint,
+                    selector_context,
+                    mutation: preparation.mutation.kind,
+                });
+                self.emit(Instr::LoadPreparedOutputCardinality);
+                self.emit(Instr::Pop);
+            }
+        }
+        Ok(())
     }
 
     fn compile_mir_member_base_for_assignment(
@@ -4169,7 +4411,9 @@ impl Compiler {
                 MirIndexComponent::PreparedExpr(region) => {
                     self.compile_mir_prepared_expression_region(region)?
                 }
-                MirIndexComponent::Colon | MirIndexComponent::ContextualExpr(_) => {
+                MirIndexComponent::Colon
+                | MirIndexComponent::ContextualExpr(_)
+                | MirIndexComponent::Expansion(_) => {
                     return Err(self
                         .compile_error("scalar index lowering expects expression selectors only")
                         .with_identifier(IDENT_MIR_SCALAR_INDEX_PLAN_INVALID));
@@ -4206,6 +4450,11 @@ impl Compiler {
                 MirIndexComponent::ContextualExpr(_) => {
                     return Err(self
                         .compile_error("contextual selectors require contextual slice lowering"));
+                }
+                MirIndexComponent::Expansion(_) => {
+                    return Err(self.compile_error(
+                        "expanding selectors require ordered subscript-path lowering",
+                    ));
                 }
             }
         }

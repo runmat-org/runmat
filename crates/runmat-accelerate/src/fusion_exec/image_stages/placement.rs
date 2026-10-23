@@ -115,7 +115,7 @@ impl PreparedImageStages {
                 provider: self.session.provider,
                 authority: PreparedPhysicalAuthority::ImageStages {
                     plan: self,
-                    tail: self.session.provider.vm_region_queue_tail_resources(),
+                    tail: self.session.provider.region_queue_tail_resources(),
                 },
                 semantic_identity: self.semantic_identity(),
                 source: source.clone(),
@@ -190,7 +190,7 @@ fn select_image_candidate(
     #[cfg(feature = "wgpu")]
     let original_tail = body
         .provider
-        .vm_region_queue_tail_resources()
+        .region_queue_tail_resources()
         .filter(|_| body.provider.wgpu_device_access().is_some());
     #[cfg(not(feature = "wgpu"))]
     let original_tail = None;

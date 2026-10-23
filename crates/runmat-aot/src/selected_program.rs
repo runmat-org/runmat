@@ -22,12 +22,15 @@ use crate::{
 
 pub mod admission;
 mod operator_pair;
-pub use operator_pair::compile_operator_selected_pair;
+pub use operator_pair::{
+    compile_operator_selected_pair, reopen_operator_selected_pair, OperatorPairReopenRequest,
+};
 mod paired;
 pub use paired::{
     compile_selected_target_pack_pair, CompiledSelectedNativePair, NativePairArtifactRecipes,
-    SelectedPairedLinkRequest,
+    PersistedNativePair, SelectedPairedLinkRequest, PERSISTED_NATIVE_PAIR_SCHEMA_VERSION,
 };
+pub(crate) use paired::{reopen_selected_target_pack_pair, ReopenSelectedPairedRequest};
 
 pub struct SelectedTargetPack<'a> {
     pub manifest: &'a TargetPackManifest,

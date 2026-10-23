@@ -65,7 +65,9 @@ fn text_admission_precedes_resident_control_access() {
         error.identifier(),
         Some(runmat_builtins::RMDIR_ERROR_OPTION.identifier.unwrap())
     );
-    let pages = runmat_value::CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap();
+    let pages =
+        runmat_value::CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 1, 2])
+            .unwrap();
     let error = evaluate(vec![Value::CharArray(pages)]).unwrap_err();
     assert_eq!(
         error.identifier(),

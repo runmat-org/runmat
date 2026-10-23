@@ -50,7 +50,7 @@ pub(super) async fn duration_indexing(
             "duration.subsref: receiver must be a duration object",
         ));
     };
-    let format = format_for_object(&object);
+    let format = format_for_object(&object)?;
     let days = duration_tensor_from_duration_value(&Value::Object(object.clone()))?;
 
     let crate::object::indexing::ObjectIndexSelector::IndexValues { components } = step.selector()
@@ -294,7 +294,7 @@ pub(super) async fn duration_read_step(
             let field = scalar_text(&step.selector_value()?, "field selector")?;
             match field.as_str() {
                 FORMAT_FIELD => {
-                    crate::execution::RootedValue::new(Value::string(format_for_object(&object)))
+                    crate::execution::RootedValue::new(Value::string(format_for_object(&object)?))
                         .map_err(|error| error.into_runtime_error())
                 }
                 _ => Err(duration_error(
@@ -492,7 +492,7 @@ pub(super) async fn duration_plus(
         return crate::builtins::datetime::datetime_object_from_serial_tensor(
             runtime.as_ref(),
             tensor,
-            crate::builtins::datetime::datetime_format_from_value(&rhs),
+            crate::builtins::datetime::datetime_format_from_value(&rhs)?,
         );
     }
 
@@ -507,7 +507,7 @@ pub(super) async fn duration_plus(
         runtime.as_ref(),
         days,
         shape,
-        duration_format_from_value(&lhs),
+        duration_format_from_value(&lhs)?,
     )
 }
 
@@ -537,7 +537,7 @@ pub(super) async fn duration_minus(
         runtime.as_ref(),
         days,
         shape,
-        duration_format_from_value(&lhs),
+        duration_format_from_value(&lhs)?,
     )
 }
 #[cfg(test)]

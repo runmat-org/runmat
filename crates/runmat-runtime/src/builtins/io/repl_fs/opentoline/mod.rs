@@ -117,7 +117,10 @@ fn gate_position_extensions(
 }
 
 fn filename_arg(value: &Value) -> BuiltinResult<String> {
-    super::file_dialog::try_scalar_text(value).ok_or_else(|| {
+    super::file_dialog::try_scalar_text(value, "filename", |detail| {
+        opentoline_error(&OPENTOLINE_ERROR_FILENAME, detail)
+    })?
+    .ok_or_else(|| {
         opentoline_error(
             &OPENTOLINE_ERROR_FILENAME,
             OPENTOLINE_ERROR_FILENAME.message,
@@ -125,9 +128,10 @@ fn filename_arg(value: &Value) -> BuiltinResult<String> {
     })
 }
 fn parse_option(value: &Value) -> BuiltinResult<()> {
-    let option = super::file_dialog::try_scalar_text(value).ok_or_else(|| {
-        opentoline_error(&OPENTOLINE_ERROR_OPTION, OPENTOLINE_ERROR_OPTION.message)
-    })?;
+    let option = super::file_dialog::try_scalar_text(value, "option", |detail| {
+        opentoline_error(&OPENTOLINE_ERROR_OPTION, detail)
+    })?
+    .ok_or_else(|| opentoline_error(&OPENTOLINE_ERROR_OPTION, OPENTOLINE_ERROR_OPTION.message))?;
     if option.eq_ignore_ascii_case("select") {
         Ok(())
     } else {
@@ -140,7 +144,7 @@ fn parse_option(value: &Value) -> BuiltinResult<()> {
 async fn resolve_file(name: &str) -> BuiltinResult<PathBuf> {
     let path = find_file_with_extensions(name, GENERAL_FILE_EXTENSIONS, BUILTIN_NAME)
         .await
-        .map_err(|err| opentoline_error(&OPENTOLINE_ERROR_NOT_FOUND, err))?
+        .map_err(|error| error.into_runtime_error(BUILTIN_NAME))?
         .ok_or_else(|| {
             opentoline_error(
                 &OPENTOLINE_ERROR_NOT_FOUND,

@@ -17,19 +17,34 @@ use crate::presentation;
 use crate::telemetry::{capture_provider_snapshot, RuntimeExecutionCounters, TelemetryRunKind};
 use crate::AlreadyReportedCliError;
 
+mod report;
+
 pub async fn execute_benchmark(
     file: PathBuf,
     iterations: u32,
     jit: bool,
+    warmup: u32,
+    report_path: Option<PathBuf>,
     cli: &Cli,
     config: &RunMatRuntimeConfig,
 ) -> Result<()> {
+    let mut report = report_path
+        .as_deref()
+        .map(report::Report::create)
+        .transpose()?;
+    anyhow::ensure!(
+        iterations != 0,
+        "benchmark iterations must be greater than zero"
+    );
     let file = resolve_benchmark_input(file)?;
     info!("Benchmarking script: {file:?} ({iterations} iterations, JIT: {jit})");
 
     let captured_source = SourceInput::capture_path(file.to_string_lossy().into_owned())
         .await
         .with_context(|| format!("Failed to capture benchmark script: {file:?}"))?;
+    if let Some(report) = &mut report {
+        report.header(&captured_source, jit, warmup, iterations, config)?;
+    }
 
     let mut engine = create_session(jit, false, config, "Failed to create execution engine")?;
     let _project_lease = install_project_for_source(&mut engine, &file, cli).await?;
@@ -45,7 +60,13 @@ pub async fn execute_benchmark(
     let mut interpreter_executions: u64 = 0;
 
     println!("{}", presentation::stdout().info("Warming up..."));
-    for _ in 0..3 {
+    // Only report mode adds a cold-first invocation. Default execution retains
+    // the existing three warmups and the existing measured-loop behavior.
+    let cold = report.as_ref().map(|_| report::Phase::ColdFirst);
+    for phase in cold
+        .into_iter()
+        .chain((0..warmup).map(|_| report::Phase::Warmup))
+    {
         let request = ExecutionRequest::for_source(
             captured_source.clone(),
             crate::diagnostics::parser_compat(config.language.compat),
@@ -53,6 +74,9 @@ pub async fn execute_benchmark(
             engine.workspace_handle(),
         );
         let callbacks = engine.graphics_callback_queue().cloned();
+        let sample = report
+            .as_ref()
+            .map(|_| report::SampleStart::capture(&engine, phase));
         let response = local_tasks
             .drive_until(drive_with_graphics_callbacks(
                 callbacks,
@@ -60,6 +84,9 @@ pub async fn execute_benchmark(
             ))
             .await
             .context("Local callback driver stopped during benchmark warm-up")??;
+        if let (Some(report), Some(sample)) = (&mut report, sample) {
+            report.sample(sample, &engine, &response)?;
+        }
         match response.result {
             Ok(outcome) if outcome_error_code(&outcome).is_none() => {}
             Ok(outcome) => {
@@ -129,6 +156,9 @@ pub async fn execute_benchmark(
             engine.workspace_handle(),
         );
         let callbacks = engine.graphics_callback_queue().cloned();
+        let sample = report
+            .as_ref()
+            .map(|_| report::SampleStart::capture(&engine, report::Phase::Warm));
         let response = local_tasks
             .drive_until(drive_with_graphics_callbacks(
                 callbacks,
@@ -136,6 +166,9 @@ pub async fn execute_benchmark(
             ))
             .await
             .context("Local callback driver stopped during benchmark execution")??;
+        if let (Some(report), Some(sample)) = (&mut report, sample) {
+            report.sample(sample, &engine, &response)?;
+        }
         let outcome = match response.result {
             Ok(outcome) => outcome,
             Err(err) => {
@@ -250,6 +283,9 @@ pub async fn execute_benchmark(
         });
     }
 
+    if let Some(report) = &mut report {
+        report.finish()?;
+    }
     Ok(())
 }
 

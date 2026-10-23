@@ -43,13 +43,13 @@ pub(in crate::builtins::math::linalg) async fn evaluate_with_context(
     // This new host route requires the actual execution policy issuer. Legacy
     // context-free callers retain their prior sparse behavior.
     if let (SolveOrientation::Left, Some(context)) = (orientation, context) {
-        if let Some(result) = host::try_sparse_triangular(lhs, rhs, context)? {
+        if let Some(result) = host::try_sparse_triangular(lhs, rhs, context).await? {
             return Ok(result);
         }
-        if let Some(result) = host::try_general_sparse(lhs, rhs, context)? {
+        if let Some(result) = host::try_general_sparse(lhs, rhs, context).await? {
             return Ok(result);
         }
-        if let Some(result) = host::try_rectangular_sparse(lhs, rhs, context)? {
+        if let Some(result) = host::try_rectangular_sparse(lhs, rhs, context).await? {
             return Ok(result);
         }
     }

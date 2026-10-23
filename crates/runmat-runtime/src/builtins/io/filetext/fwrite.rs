@@ -160,16 +160,12 @@ pub async fn evaluate_in_view(
             )?;
         }
     }
-    let precision_spec =
-        map_string_result(parse_precision(raw_precision), &FWRITE_ERROR_INVALID_OPTION)?;
+    let precision_spec = parse_precision(raw_precision)?;
     if let Some(skip) = raw_skip.filter(|value| !matches!(value, Value::GpuTensor(_))) {
         map_string_result(parse_skip(Some(skip)), &FWRITE_ERROR_INVALID_OPTION)?;
     }
     if let Some(machine) = raw_machine {
-        map_string_result(
-            parse_machine_format(Some(machine), "native"),
-            &FWRITE_ERROR_INVALID_OPTION,
-        )?;
+        parse_machine_format(Some(machine), "native")?;
     }
     let fid_host = cooperation.await_io(gather_value(fid_value)).await??;
     let fid = map_string_result(parse_fid(&fid_host), &FWRITE_ERROR_INVALID_INPUT)?;
@@ -212,10 +208,7 @@ pub async fn evaluate_in_view(
     };
     let skip_bytes =
         map_string_result(parse_skip(skip_host.as_ref()), &FWRITE_ERROR_INVALID_OPTION)?;
-    let machine_format = map_string_result(
-        parse_machine_format(raw_machine, &operation.info.machinefmt),
-        &FWRITE_ERROR_INVALID_OPTION,
-    )?;
+    let machine_format = parse_machine_format(raw_machine, &operation.info.machinefmt)?;
     let data_host = cooperation.await_io(gather_value(data_value)).await??;
     let elements = map_string_result(borrow_elements(&data_host), &FWRITE_ERROR_INVALID_INPUT)?;
 

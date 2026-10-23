@@ -1,7 +1,7 @@
 //! Logical producer admission, sharing the ordinary upload ownership boundary.
 use crate::{
     AccelProvider, GpuTensorHandle, GpuTensorStorage, InvalidNumericUploadResult,
-    NumericElementType, ResidencyRestoreGuard,
+    NumericElementType,
 };
 
 /// Borrowed canonical logical bytes. Validation never widens or copies data.
@@ -62,14 +62,7 @@ pub fn upload_logical_protecting_admitted<P: AccelProvider + ?Sized>(
     scratch: Option<HostLogicalUploadScratch<'_>>,
 ) -> crate::NumericUploadResult<GpuTensorHandle> {
     host.validate()?;
-    let _first_residency = protected
-        .first()
-        .map(|handle| ResidencyRestoreGuard::new(handle));
-    let _remaining_residency: Vec<_> = protected
-        .iter()
-        .skip(1)
-        .map(|handle| ResidencyRestoreGuard::new(handle))
-        .collect();
+    let _residency = crate::residency::ResidencyRestoreSliceGuard::new(protected);
     let handle = provider.upload_logical_raw_admitted(host, admission, scratch)?;
     if handle.device_id() == provider.device_id()
         && handle.shape() == host.shape

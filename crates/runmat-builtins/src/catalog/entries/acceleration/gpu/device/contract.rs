@@ -1,13 +1,5 @@
 use crate::*;
 
-pub const GPU_DEVICE_PROVIDER_INFO_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "gpudevice-provider-info",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "gpuDevice returning RunMat acceleration-provider metadata instead of a MATLAB GPUDevice object is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:GpuDeviceProviderInfoExtension"),
-    };
-
 pub const GPU_DEVICE_LOGICAL_SELECTOR_EXTENSION: BuiltinExtensionDescriptor =
     BuiltinExtensionDescriptor {
         id: "gpudevice-logical-selector",
@@ -16,30 +8,19 @@ pub const GPU_DEVICE_LOGICAL_SELECTOR_EXTENSION: BuiltinExtensionDescriptor =
         error_identifier: Some("RunMat:compatibility:GpuDeviceLogicalSelectorExtension"),
     };
 
-pub const GPU_DEVICE_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    GPU_DEVICE_PROVIDER_INFO_EXTENSION,
-    GPU_DEVICE_LOGICAL_SELECTOR_EXTENSION,
-];
+pub const GPU_DEVICE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
+    [GPU_DEVICE_LOGICAL_SELECTOR_EXTENSION];
 
 const DOCUMENTED_INTEGER_INDEX: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
         name: "ind",
         classes: &ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Rejected,
+        availability: BuiltinIntegerInputAvailability::Documented,
         scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The documented selector is a positive scalar integer in the available device-index range, but RunMat does not yet implement the required GPUDevice object and reset lifecycle.",
+        notes: "Exact positive host signed/unsigned integer selector; no conversion through double. Physical device availability and lifecycle capability are checked at runtime.",
     }];
 
-const RUNMAT_INTEGER_INDEX: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "ind",
-        classes: &ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "RunMat's provider-info facade accepts an exact positive integer scalar selecting its currently active provider.",
-    }];
-
-pub const GPU_DEVICE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
+pub const GPU_DEVICE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [
     BuiltinIntegerCapabilityDescriptor {
         form: "D = gpuDevice(integer_ind)",
         inputs: &DOCUMENTED_INTEGER_INDEX,
@@ -48,26 +29,17 @@ pub const GPU_DEVICE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "The documented selection form returns a GPUDevice object and resets the selected device even when already current. RunMat does not implement that object/lifecycle form and rejects it in MATLAB-compatible mode rather than substituting provider metadata.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "info = gpuDevice(integer_ind)",
-        inputs: &RUNMAT_INTEGER_INDEX,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "The compatibility-gated RunMat facade returns provider metadata rather than a MATLAB GPUDevice object.",
+        notes: "The selection form returns an issued GPUDevice handle after physical same-session reset, including when already selected. Unsupported backends/leases fail explicitly before admission; later retirement failure remains fenced, not rolled back.",
     },
 ];
 
 const OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "info",
+    name: "device",
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Struct describing active GPU provider/device metadata.",
+    description:
+        "Session-owned parallel.gpu.GPUDevice handle, or empty host double result for deselection.",
 }];
 const EMPTY_INPUTS: [BuiltinParamDescriptor; 0] = [];
 const INDEX_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -75,16 +47,17 @@ const INDEX_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Device index selector or reset-like argument.",
+    description:
+        "Exact positive host device index or empty host array for physical reset and deselection.",
 }];
 const SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
-        label: "info = gpuDevice()",
+        label: "device = gpuDevice()",
         inputs: &EMPTY_INPUTS,
         outputs: &OUTPUT,
     },
     BuiltinSignatureDescriptor {
-        label: "info = gpuDevice(arg)",
+        label: "device = gpuDevice(arg)",
         inputs: &INDEX_INPUTS,
         outputs: &OUTPUT,
     },
@@ -126,13 +99,14 @@ pub const GPU_DEVICE_ERROR_DEVICE_NOT_AVAILABLE: BuiltinErrorDescriptor = Builti
     when: "Requested device index does not match the currently active provider index.",
     message: "gpuDevice: requested device index is not available",
 };
-const ERRORS: [BuiltinErrorDescriptor; 6] = [
+const ERRORS: [BuiltinErrorDescriptor; 7] = [
     GPU_DEVICE_ERROR_NO_PROVIDER,
     GPU_DEVICE_ERROR_TOO_MANY_INPUTS,
     GPU_DEVICE_ERROR_UNSUPPORTED_ARGUMENT,
     GPU_DEVICE_ERROR_RESET_NOT_SUPPORTED,
     GPU_DEVICE_ERROR_INVALID_INDEX,
     GPU_DEVICE_ERROR_DEVICE_NOT_AVAILABLE,
+    super::methods::LIFECYCLE_ERROR,
 ];
 pub const GPU_DEVICE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,

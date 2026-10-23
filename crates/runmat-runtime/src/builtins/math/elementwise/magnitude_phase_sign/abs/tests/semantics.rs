@@ -177,7 +177,7 @@ fn abs_extensions_and_output_arity_are_enforced_before_execution() {
         ABS_LOGICAL_INPUT_EXTENSION.error_identifier
     );
     let char_error = abs_builtin(Value::CharArray(
-        CharArray::new("A".chars().collect(), 1, 1).unwrap(),
+        CharArray::from_unicode_scalars("A".chars().collect(), 1, 1).unwrap(),
     ))
     .expect_err("character input is an extension");
     assert_eq!(

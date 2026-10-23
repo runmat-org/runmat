@@ -67,7 +67,7 @@ pub(super) fn value_texts(value: &Value) -> Result<Vec<Cow<'_, str>>, RuntimeErr
             .iter()
             .map(|text| Cow::Borrowed(text.as_str()))
             .collect()),
-        Value::CharArray(c) if is_character_row(c) => Ok(vec![Cow::Owned(chars_to_string(c))]),
+        Value::CharArray(c) if is_character_row(c) => Ok(vec![Cow::Owned(chars_to_string(c)?)]),
         Value::Cell(c) => {
             let mut out = Vec::with_capacity(c.data().len());
             for entry in c.data() {
@@ -82,8 +82,17 @@ pub(super) fn value_texts(value: &Value) -> Result<Vec<Cow<'_, str>>, RuntimeErr
     }
 }
 
-pub(super) fn chars_to_string(chars: &CharArray) -> String {
-    chars.data().iter().collect()
+pub(super) fn chars_to_string(chars: &CharArray) -> Result<String, RuntimeError> {
+    chars
+        .try_row_string()
+        .map_err(|source| {
+            crate::runtime_error::semantic_error_with_source(
+                "InvalidArgument",
+                "character text contains malformed UTF-16",
+                source,
+            )
+        })?
+        .ok_or_else(|| invalid_argument_error("argumentValidation", "expected character row"))
 }
 
 pub fn isvarname_value(value: &Value) -> bool {

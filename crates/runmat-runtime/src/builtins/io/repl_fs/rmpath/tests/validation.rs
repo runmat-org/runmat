@@ -35,7 +35,8 @@ fn failed_removal_leaves_the_path_unchanged() {
         "{first}{}{second}",
         crate::builtins::common::path_state::PATH_LIST_SEPARATOR
     );
-    crate::builtins::common::path_state::set_path_string(&original);
+    crate::builtins::common::path_state::set_path_string(&original)
+        .expect("test search path update");
     let error = super::run(vec![
         Value::String(first.into()),
         Value::String("missing/path/for/rmpath".into()),
@@ -55,7 +56,7 @@ fn failed_removal_leaves_the_path_unchanged() {
 fn distinguishes_existing_folders_that_are_not_on_the_path() {
     let _guard = PathGuard::new();
     let directory = tempdir().expect("directory");
-    crate::builtins::common::path_state::set_path_string("");
+    crate::builtins::common::path_state::set_path_string("").expect("test search path update");
     let error = super::run(vec![Value::String(
         directory.path().to_string_lossy().into_owned().into(),
     )])
@@ -70,7 +71,7 @@ fn distinguishes_existing_folders_that_are_not_on_the_path() {
 fn distinguishes_files_from_missing_folders() {
     let _guard = PathGuard::new();
     let file = NamedTempFile::new().expect("file");
-    crate::builtins::common::path_state::set_path_string("");
+    crate::builtins::common::path_state::set_path_string("").expect("test search path update");
     let error = super::run(vec![Value::String(
         file.path().to_string_lossy().into_owned().into(),
     )])

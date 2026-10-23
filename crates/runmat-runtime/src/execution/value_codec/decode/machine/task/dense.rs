@@ -11,6 +11,7 @@ mod admission;
 use admission::DenseAdmission;
 #[path = "dense/managed.rs"]
 mod managed;
+pub(in crate::execution::value_codec::decode::machine) use managed::{numeric_dtype, scalar};
 use managed::{ManagedDense, ManagedDenseOwner};
 
 pub(in crate::execution::value_codec::decode::machine) struct DenseTask<'a> {

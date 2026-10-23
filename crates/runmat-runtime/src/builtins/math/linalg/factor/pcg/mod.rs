@@ -5,9 +5,7 @@ mod async_driver;
 mod async_operations;
 mod execution;
 mod kernel;
-mod recurrence_state;
 mod request;
-mod scale;
 #[cfg(test)]
 mod tests;
 

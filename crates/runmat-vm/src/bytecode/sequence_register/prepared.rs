@@ -12,6 +12,7 @@ pub(super) struct State {
     pub(super) cardinality_loaded: bool,
     pub(super) destination_live: bool,
     pub(super) selector_components: Option<usize>,
+    pub(super) fixed_owner: Option<(runmat_types::StmtId, usize)>,
 }
 
 /// Proves that a runtime-cardinality destination plan is constructed once,
@@ -40,9 +41,18 @@ pub(super) fn validate(instructions: &[Instr]) -> Result<(), String> {
             continue;
         }
         entries.insert(pc, incoming);
+        if let Instr::EnterTry { catch_pc, .. } = &instructions[pc] {
+            // Routing an exception abandons the invocation's prepared
+            // destination. Verify the handler with that same empty state,
+            // including handlers not reached by normal successors.
+            pending.push_back((*catch_pc, None));
+        }
         let outgoing = transition::apply(incoming, &instructions[pc], pc)?;
         let successors = normal_successors(instructions, pc)?;
-        if successors.is_empty() && outgoing.is_some() {
+        if successors.is_empty()
+            && !super::control_flow::is_exceptional_exit(&instructions[pc])
+            && outgoing.is_some()
+        {
             return Err(format!(
                 "prepared output-assignment state remains live at function exit instruction {pc}"
             ));

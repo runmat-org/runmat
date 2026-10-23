@@ -9,7 +9,6 @@ use crate::context::preferences::document::{
 };
 use crate::context::preferences::input_roots::PreferenceInputRoots;
 use crate::context::UserPathSnapshot;
-use crate::execution::value_codec::encode_durable_value;
 use futures::channel::oneshot;
 use futures::lock::OwnedMutexGuard;
 use js_sys::Uint8Array;
@@ -23,9 +22,52 @@ use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{Event, IdbObjectStore, IdbRequest, IdbTransaction, IdbTransactionMode};
 
-pub(super) struct BrowserPrepared {
-    pub values: Vec<ValuePayload>,
-    pub user_path: Option<UserPathSnapshot>,
+pub(super) enum BrowserPrepared {
+    Completed {
+        values: Vec<ValuePayload>,
+        user_path: Option<UserPathSnapshot>,
+    },
+    NeedsPreparation(Vec<usize>),
+}
+
+/// One immutable caller batch and root lease shared by preparation retries.
+/// Only the proof bitset changes, after an actual selected-owner validation.
+pub(super) struct SharedDefaults {
+    values: Vec<Value>,
+    _roots: PreferenceInputRoots,
+    prepared: RefCell<Vec<Option<ValuePayload>>>,
+}
+
+impl SharedDefaults {
+    pub(super) fn new(values: Vec<Value>, roots: PreferenceInputRoots) -> Self {
+        let prepared = RefCell::new(vec![None; values.len()]);
+        Self {
+            values,
+            _roots: roots,
+            prepared,
+        }
+    }
+
+    pub(super) fn value(&self, index: usize) -> &Value {
+        &self.values[index]
+    }
+
+    pub(super) fn mark_prepared(&self, index: usize, payload: ValuePayload) {
+        self.prepared.borrow_mut()[index] = Some(payload);
+    }
+
+    fn prepared(&self, index: usize) -> Option<ValuePayload> {
+        self.prepared.borrow()[index].clone()
+    }
+
+    fn unproved(&self, indices: &[usize]) -> Vec<usize> {
+        let prepared = self.prepared.borrow();
+        indices
+            .iter()
+            .copied()
+            .filter(|index| prepared[*index].is_none())
+            .collect()
+    }
 }
 
 pub(super) enum BrowserMutation {
@@ -33,8 +75,7 @@ pub(super) enum BrowserMutation {
     ReadOrCreate {
         group: String,
         names: Vec<String>,
-        defaults: Vec<Value>,
-        _roots: PreferenceInputRoots,
+        defaults: Rc<SharedDefaults>,
     },
 }
 
@@ -133,11 +174,16 @@ fn on_get_success(weak: &Weak<RefCell<ActiveWrite>>) {
                 group,
                 names,
                 defaults,
-                _roots,
             } => {
+                let missing = missing_default_indices(&document, &group, &names);
+                let unproved = defaults.unproved(&missing);
+                if !unproved.is_empty() {
+                    return Ok(BrowserPrepared::NeedsPreparation(unproved));
+                }
                 let mut encoded = vec![None; names.len()];
-                for index in missing_default_indices(&document, &group, &names) {
-                    encoded[index] = Some(encode_durable_value(&defaults[index])?);
+                for index in missing {
+                    encoded[index] =
+                        Some(defaults.prepared(index).expect("selected default proof"));
                 }
                 DocumentMutation::ReadOrCreate {
                     group,
@@ -158,16 +204,17 @@ fn on_get_success(weak: &Weak<RefCell<ActiveWrite>>) {
                 .put_with_key(&bytes.into(), &JsValue::from_str(DOCUMENT_KEY))
                 .map_err(browser_error)?;
         }
-        Ok(BrowserPrepared {
+        Ok(BrowserPrepared::Completed {
             values: prepared.values,
             user_path: prepared.user_path,
         })
     })();
-    let failed = result.is_err();
+    let abort_without_write =
+        result.is_err() || matches!(&result, Ok(BrowserPrepared::NeedsPreparation(_)));
     state.prepared = Some(result);
     let transaction = state.transaction.clone();
     drop(state);
-    if failed {
+    if abort_without_write {
         let _ = transaction.abort();
     }
 }
@@ -189,11 +236,11 @@ fn abort(weak: &Weak<RefCell<ActiveWrite>>) {
     let Some(active) = weak.upgrade() else { return };
     let mut state = active.borrow_mut();
     state.terminal = true;
-    let outcome = state
-        .prepared
-        .take()
-        .filter(Result::is_err)
-        .unwrap_or_else(|| Err(transaction_error(&state.transaction)));
+    let outcome = match state.prepared.take() {
+        Some(Ok(needs @ BrowserPrepared::NeedsPreparation(_))) => Ok(needs),
+        Some(Err(error)) => Err(error),
+        _ => Err(transaction_error(&state.transaction)),
+    };
     if let Some(sender) = state.completion_sender.take() {
         let _ = sender.send(outcome);
     }

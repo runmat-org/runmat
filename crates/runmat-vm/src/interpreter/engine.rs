@@ -119,7 +119,7 @@ pub fn check_cancelled(
     if runmat_runtime::interrupt::stop_reason()
         == Some(runmat_execution::CancellationReason::Deadline)
     {
-        return Err(crate::interpreter::errors::mex(
+        return Err(control_cancellation_error(
             "ExecutionDeadline",
             "Execution deadline elapsed",
         ));
@@ -131,11 +131,21 @@ pub fn check_cancelled(
 }
 
 pub(super) fn cancellation_error() -> RuntimeError {
-    runmat_runtime::runtime_error::semantic_error_with_source(
-        "ExecutionCancelled",
-        "Execution cancelled by user",
+    control_cancellation_error("ExecutionCancelled", "Execution cancelled by user")
+}
+
+fn control_cancellation_error(identifier: &str, message: &str) -> RuntimeError {
+    let mut error = runmat_runtime::runtime_error::semantic_error_with_source(
+        identifier,
+        message,
         runmat_runtime::execution::ExecutionServiceError::Cancelled,
-    )
+    );
+    // Only the actual execution-control producer establishes this origin.
+    // A language failure retaining the same source must not be reclassified.
+    error.failure_origin =
+        runmat_runtime::runtime_error::RuntimeFailureOrigin::ExecutionControlCancellation;
+    error.gpu_gather_retry = runmat_runtime::runtime_error::GpuGatherRetry::Never;
+    error
 }
 
 pub fn note_pre_dispatch(

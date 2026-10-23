@@ -66,6 +66,38 @@ fn integer_charge(payload_and_shape: usize) -> usize {
 fn exact_sparse_csc_keeps_original_claims_until_final_value_drop() {
     use std::num::NonZeroUsize;
 
+    for len in [0, 3] {
+        let bytes = ExactHostIndexBufferAllocation::requested_bytes(len).unwrap();
+        let quota = permit(bytes);
+        let mut output = ExactHostIndexBufferAllocation::new(len, &quota).unwrap();
+        let pointer = output.as_mut_slice().as_ptr();
+        for (index, value) in output.as_mut_slice().iter_mut().enumerate() {
+            *value = index;
+        }
+        let output = output.into_buffer().unwrap();
+        assert_eq!(output.as_ptr(), pointer);
+        assert_eq!(output.len(), len);
+        assert_eq!(quota.retained.load(Ordering::SeqCst), bytes);
+        assert_eq!(quota.claims.load(Ordering::SeqCst), 1);
+        let shared = output.clone();
+        assert!(shared.shares_allocation_with(&output));
+        drop(output);
+        assert_eq!(quota.retained.load(Ordering::SeqCst), bytes);
+        drop(shared);
+        assert_eq!(quota.retained.load(Ordering::SeqCst), 0);
+        assert_eq!(quota.claims.load(Ordering::SeqCst), 0);
+        let denied = permit(bytes - 1);
+        assert!(matches!(
+            ExactHostIndexBufferAllocation::new(len, &denied),
+            Err(ExactHostNumericAllocationError::ExceedsPermit)
+        ));
+        assert_eq!(denied.retained.load(Ordering::SeqCst), 0);
+    }
+    assert_eq!(
+        ExactHostIndexBufferAllocation::requested_bytes(usize::MAX),
+        Err(ExactHostNumericAllocationError::LayoutOverflow)
+    );
+
     for class in [
         ExactHostSparseClass::Logical,
         ExactHostSparseClass::Numeric(NumericDType::F32),

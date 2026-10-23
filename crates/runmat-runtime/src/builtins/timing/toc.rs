@@ -53,7 +53,7 @@ pub async fn toc_builtin(
             .latest_start()
             .ok_or_else(|| toc_error(&TOC_ERROR_NO_MATCHING_TIC))?
     };
-    let now = runtime.service_ports().timing().monotonic_elapsed();
+    let now = runtime.service_ports().timing()?.monotonic_elapsed();
     let elapsed = now
         .checked_sub(start)
         .ok_or_else(|| toc_error(&TOC_ERROR_INVALID_HANDLE))?;

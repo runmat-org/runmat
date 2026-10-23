@@ -126,6 +126,7 @@ fn run_unzip(args: Vec<Value>, outputs: Option<usize>) -> BuiltinResult<Value> {
     let _provider_lock = runmat_filesystem::provider_override_lock();
     let _guard = outputs
         .map(|count| crate::output_count::push_output_count(Some(count)))
+        .transpose()
         .expect("output-count scope");
     block_on(unzip_builtin(
         None,
@@ -335,7 +336,7 @@ fn paged_character_controls_reject_at_public_dispatch_before_effects() {
     let root = tempdir().expect("output fixture");
     let destination = root.path().join("never-created");
     let paged = Value::CharArray(
-        CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2])
+        CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 1, 2])
             .expect("real paged character value"),
     );
     let source_error = run_unzip(

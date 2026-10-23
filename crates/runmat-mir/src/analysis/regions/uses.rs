@@ -14,6 +14,18 @@ pub(crate) fn statement_uses_defs(statement: &MirStmt) -> (Locals, Locals) {
     let mut uses = Locals::new();
     let mut defs = Locals::new();
     match &statement.kind {
+        MirStmtKind::PrepareFixedAssignment(owner) => {
+            owner.visit_external_operands(|operand| operand_uses(operand, &mut uses));
+            if let Some(crate::MirFixedSelectorDestination::Scalar(local)) = owner.output() {
+                defs.insert(local);
+            }
+        }
+        MirStmtKind::PreparedAssign { preparation, value } => {
+            rvalue_uses(value, &mut uses, &mut defs);
+            if let Some(root) = preparation.mutation.place.root_local() {
+                defs.insert(root);
+            }
+        }
         MirStmtKind::Assign { place, value } => {
             rvalue_uses(value, &mut uses, &mut defs);
             place_uses_defs(place, &mut uses, &mut defs);
@@ -418,6 +430,9 @@ fn indexing_uses(indexing: &MirIndexing, uses: &mut Locals) {
             }
             MirIndexComponent::PreparedExpr(region) => {
                 region.visit_external_operands(|operand| operand_uses(operand, uses));
+            }
+            MirIndexComponent::Expansion(region) => {
+                region.visit_outer_operands(&mut |operand| operand_uses(operand, uses));
             }
             MirIndexComponent::Colon => {}
         }

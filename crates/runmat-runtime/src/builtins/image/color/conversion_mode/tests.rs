@@ -25,7 +25,8 @@ fn indexed_char_array_control_flattens_row_column_and_nd_geometry() {
     let events = Events::default();
     let (runtime, _context) = enter(&events);
     for shape in [vec![1, 7], vec![7, 1], vec![1, 1, 7]] {
-        let option = CharArray::new_with_shape("indexed".chars().collect(), shape).unwrap();
+        let option =
+            CharArray::from_unicode_scalars_with_shape("indexed".chars().collect(), shape).unwrap();
         for name in NAMES {
             block_on(dispatcher::call_builtin_async_in_context(
                 &runtime,
@@ -64,9 +65,6 @@ struct Service {
     pause_after_preparation: bool,
 }
 impl RuntimeAccelerationService for Service {
-    fn supports_operation(&self, operation: &str) -> bool {
-        NAMES.contains(&operation)
-    }
     fn prepare_admitted(
         &self,
         _: RuntimeContext,

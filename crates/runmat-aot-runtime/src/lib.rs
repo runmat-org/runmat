@@ -1,21 +1,25 @@
 //! Process-image runtime host linked into standalone RunMat programs.
 
-mod builtin;
 mod accelerator_profile;
+mod builtin;
+mod clock_service;
 mod execute;
+mod external_service;
 mod foreign_policy;
 mod foreign_retirement;
 mod input;
 mod java_artifacts;
+mod local_service;
 mod mex;
 mod mex_artifacts;
 mod native_interfaces;
+mod network_service;
 mod output;
 mod program;
-mod target_test;
 mod python_artifacts;
 #[cfg(feature = "source-evaluation")]
 mod source_service;
+mod target_test;
 
 /// Owned embedding input remains host-unselected; it cannot mint a selected
 /// linked-image grant from decoded bytes.
@@ -40,6 +44,8 @@ pub const EXIT_RUNTIME_FAILURE: i32 = 70;
 /// every non-null builtin address must identify an immutable
 /// `RuntimeBuiltinBinding`. A non-null `source_service_factory` must identify
 /// the optional factory symbol from the exact verified linked runtime archive.
+/// A non-null `network_service_factory` likewise identifies the exact linked
+/// network factory, never a decoded capability claim.
 /// Each payload pointer must address an immutable
 /// allocation of its corresponding declared length for the duration of this
 /// call. When `argc` is positive, `argv` must be a valid C argument vector.
@@ -50,6 +56,10 @@ pub unsafe extern "C" fn runmat_aot_main(
     function_resolver: *const std::ffi::c_void,
     builtin_resolver: *const std::ffi::c_void,
     source_service_factory: *const std::ffi::c_void,
+    network_service_factory: *const std::ffi::c_void,
+    ui_service_factory: *const std::ffi::c_void,
+    callback_service_factory: *const std::ffi::c_void,
+    dynamic_service_factory: *const std::ffi::c_void,
     native_ir: *const u8,
     native_ir_len: u64,
     program: *const u8,
@@ -100,6 +110,12 @@ pub unsafe extern "C" fn runmat_aot_main(
             function_resolver,
             builtin_resolver,
             source_service_factory,
+            network_service_factory,
+            external_factories: input::LinkedExternalFactories {
+                ui: ui_service_factory,
+                callback: callback_service_factory,
+                dynamic: dynamic_service_factory,
+            },
             native_ir,
             native_ir_len,
             program,
@@ -121,7 +137,16 @@ pub unsafe extern "C" fn runmat_aot_main(
         // SAFETY: this entry is only called by the generated launcher in the
         // qualified linked image described by this function's safety contract.
         let linked = unsafe {
-            input::LinkedAotProcessInput::from_verified_link(input, source_service_factory)
+            input::LinkedAotProcessInput::from_verified_link(
+                input,
+                source_service_factory,
+                network_service_factory,
+                input::LinkedExternalFactories {
+                    ui: ui_service_factory,
+                    callback: callback_service_factory,
+                    dynamic: dynamic_service_factory,
+                },
+            )
         };
         execute::execute_linked(linked)
     }));
@@ -143,7 +168,7 @@ pub unsafe extern "C" fn runmat_aot_main(
 /// and stdout carries exactly one framed receiver result.
 ///
 /// # Safety
-/// The first nineteen arguments have the same contracts as `runmat_aot_main`.
+/// The ordinary linked-image arguments have the same contracts as `runmat_aot_main`.
 /// `paired_header` points to immutable linked bytes of `paired_header_len` for
 /// the duration of this call.
 #[no_mangle]
@@ -153,6 +178,10 @@ pub unsafe extern "C" fn runmat_aot_test_main(
     function_resolver: *const std::ffi::c_void,
     builtin_resolver: *const std::ffi::c_void,
     source_service_factory: *const std::ffi::c_void,
+    network_service_factory: *const std::ffi::c_void,
+    ui_service_factory: *const std::ffi::c_void,
+    callback_service_factory: *const std::ffi::c_void,
+    dynamic_service_factory: *const std::ffi::c_void,
     native_ir: *const u8,
     native_ir_len: u64,
     program: *const u8,
@@ -177,6 +206,12 @@ pub unsafe extern "C" fn runmat_aot_test_main(
             function_resolver,
             builtin_resolver,
             source_service_factory,
+            network_service_factory,
+            external_factories: input::LinkedExternalFactories {
+                ui: ui_service_factory,
+                callback: callback_service_factory,
+                dynamic: dynamic_service_factory,
+            },
             native_ir,
             native_ir_len,
             program,
@@ -208,7 +243,16 @@ pub unsafe extern "C" fn runmat_aot_test_main(
         // SAFETY: this call is available only from the qualified generated
         // test launcher and retains the selected link provenance.
         let linked = unsafe {
-            input::LinkedAotProcessInput::from_verified_link(input, source_service_factory)
+            input::LinkedAotProcessInput::from_verified_link(
+                input,
+                source_service_factory,
+                network_service_factory,
+                input::LinkedExternalFactories {
+                    ui: ui_service_factory,
+                    callback: callback_service_factory,
+                    dynamic: dynamic_service_factory,
+                },
+            )
         };
         target_test::run(linked, header)
     }));

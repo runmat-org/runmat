@@ -208,15 +208,16 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_arrays_concatenate_by_columns() {
-        let lhs = CharArray::new("Run".chars().collect(), 1, 3).unwrap();
-        let rhs = CharArray::new("Mat".chars().collect(), 1, 3).unwrap();
+        let lhs = CharArray::from_unicode_scalars("Run".chars().collect(), 1, 3).unwrap();
+        let rhs = CharArray::from_unicode_scalars("Mat".chars().collect(), 1, 3).unwrap();
         let result =
             horzcat_builtin(vec![Value::CharArray(lhs), Value::CharArray(rhs)]).expect("horzcat");
         match result.value() {
             Value::CharArray(arr) => {
                 assert_eq!(arr.rows, 1);
                 assert_eq!(arr.cols, 6);
-                let text: String = arr.data().iter().copied().collect();
+                let text = runmat_value::decode_utf16_code_units(arr.data())
+                    .expect("valid UTF-16 fixture text");
                 assert_eq!(text, "RunMat");
             }
             other => panic!("expected char array, got {other:?}"),

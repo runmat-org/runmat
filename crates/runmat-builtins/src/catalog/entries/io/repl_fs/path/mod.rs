@@ -79,11 +79,18 @@ pub const PATH_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDesc
     when: "More than one output is requested.",
     message: "path: too many output arguments",
 };
-const ERRORS: [BuiltinErrorDescriptor; 4] = [
+pub const PATH_ERROR_ENVIRONMENT_UPDATE_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PATH.ENVIRONMENT_UPDATE_FAILED",
+    identifier: Some("RunMat:path:EnvironmentUpdateFailed"),
+    when: "Without a session-owned search path, mirroring the replacement into the environment is denied or fails. The previous search path is retained.",
+    message: "path: failed to update environment search path",
+};
+const ERRORS: [BuiltinErrorDescriptor; 5] = [
     PATH_ERROR_TOO_MANY_OUTPUTS,
     PATH_ERROR_INVALID_INPUT,
     PATH_ERROR_TOO_MANY_INPUTS,
     PATH_ERROR_PROVIDER_FAILED,
+    PATH_ERROR_ENVIRONMENT_UPDATE_FAILED,
 ];
 pub const PATH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,

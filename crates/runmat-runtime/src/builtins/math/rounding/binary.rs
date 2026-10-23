@@ -99,28 +99,26 @@ pub(super) fn plan_duration(
     left: Value,
     right: Value,
     builtin: &str,
-) -> Result<BinaryInputPlan<DurationBinaryPlan>, String> {
+) -> BuiltinResult<BinaryInputPlan<DurationBinaryPlan>> {
     let left_duration = crate::builtins::duration::is_duration_object(&left);
     let right_duration = crate::builtins::duration::is_duration_object(&right);
     if !left_duration && !right_duration {
         return Ok(BinaryInputPlan::Values(Box::new((left, right))));
     }
     let format = if left_duration {
-        crate::builtins::duration::duration_format_from_value(&left)
+        crate::builtins::duration::duration_format_from_value(&left)?
     } else {
-        crate::builtins::duration::duration_format_from_value(&right)
+        crate::builtins::duration::duration_format_from_value(&right)?
     };
     let left = if left_duration {
-        crate::builtins::duration::duration_tensor_from_duration_value(&left)
-            .map_err(|error| error.to_string())?
+        crate::builtins::duration::duration_tensor_from_duration_value(&left)?
     } else {
-        tensor::value_into_tensor_for(builtin, left).map_err(|error| error.to_string())?
+        tensor::value_into_tensor_for(builtin, left)?
     };
     let right = if right_duration {
-        crate::builtins::duration::duration_tensor_from_duration_value(&right)
-            .map_err(|error| error.to_string())?
+        crate::builtins::duration::duration_tensor_from_duration_value(&right)?
     } else {
-        tensor::value_into_tensor_for(builtin, right).map_err(|error| error.to_string())?
+        tensor::value_into_tensor_for(builtin, right)?
     };
     Ok(BinaryInputPlan::Structured(DurationBinaryPlan {
         left,

@@ -382,8 +382,9 @@ fn borrowed_codec_preserves_column_major_pages_and_text_classes() {
             .collect::<Vec<_>>()
     );
 
-    let chars = CharArray::new_with_shape(vec!['A', 'é', '𐀀'], vec![1, 1, 3])
+    let chars = CharArray::from_unicode_scalars_with_shape(vec!['A', 'é', '𐀀'], vec![1, 1, 4])
         .expect("paged character input");
+    assert_eq!(chars.shape(), &[1, 1, 4]);
     let payload = prepare_payload(
         &Value::CharArray(chars.clone()),
         DataType::Char,
@@ -416,7 +417,7 @@ fn write_char_payload_encodes_ascii() {
     });
 
     let client = host.connect(port, 1.0, RuntimeTcpByteOrder::Little);
-    let chars = CharArray::new("RunMat".chars().collect(), 1, 6).unwrap();
+    let chars = CharArray::from_unicode_scalars("RunMat".chars().collect(), 1, 6).unwrap();
     let result = run_write(
         &host,
         client.clone(),

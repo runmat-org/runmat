@@ -55,7 +55,12 @@ fn declared_symbols(
         {
             return Err(syms_error(&SYMS_ERRORS[1]));
         }
-        let Some(text) = text_scalar(arg) else {
+        let Some(text) = text_scalar(arg).map_err(|source| {
+            let mut error = syms_error(&SYMS_ERRORS[1]);
+            error.source = Some(Box::new(source));
+            error
+        })?
+        else {
             return Err(syms_error(&SYMS_ERRORS[1]));
         };
         for token in symbolic_declaration_tokens(&text) {

@@ -394,7 +394,16 @@ fn option_name(value: &Value) -> BuiltinResult<IntegralOptionName> {
         Value::String(s) => s.as_str(),
         Value::StringArray(sa) if sa.data().len() == 1 => sa.data()[0].as_str(),
         Value::CharArray(chars) if chars.rows == 1 => {
-            return decode_option_name(&chars.data().iter().collect::<String>());
+            return decode_option_name(
+                &runmat_value::decode_utf16_code_units(chars.data()).map_err(|source| {
+                    let mut error = integral_error_with_detail(
+                        &INTEGRAL_ERROR_INVALID_ARGUMENT,
+                        source.to_string(),
+                    );
+                    error.source = Some(Box::new(source));
+                    error
+                })?,
+            );
         }
         other => Err(integral_error_with_detail(
             &INTEGRAL_ERROR_INVALID_ARGUMENT,

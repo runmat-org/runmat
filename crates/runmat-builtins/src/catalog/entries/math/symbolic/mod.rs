@@ -3,11 +3,29 @@
 
 mod sym;
 mod syms;
+mod digits;
+mod inference;
+mod int;
+mod limit;
+mod piecewise;
+mod scalar_contract;
+mod vpa;
 
-pub use sym::*;
-pub use syms::*;
+pub use self::digits::*;
+pub use self::int::*;
+pub use self::limit::*;
+pub use self::piecewise::*;
+pub use self::scalar_contract::*;
+pub use self::sym::*;
+pub use self::syms::*;
+pub use self::vpa::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(sym::ENTRIES.iter().copied());
     values.extend(syms::ENTRIES.iter().copied());
+    values.extend(digits::ENTRIES.iter().copied());
+    values.extend(int::ENTRIES.iter().copied());
+    values.extend(limit::ENTRIES.iter().copied());
+    values.extend(piecewise::ENTRIES.iter().copied());
+    values.extend(vpa::ENTRIES.iter().copied());
 }

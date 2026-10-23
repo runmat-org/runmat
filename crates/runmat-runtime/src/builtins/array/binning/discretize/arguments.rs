@@ -64,7 +64,13 @@ pub(super) fn scalar_text<'a>(value: &'a Value, context: &str) -> BuiltinResult<
     match value {
         Value::String(value) => Ok(Cow::Borrowed(value.as_str())),
         Value::StringArray(value) => Ok(Cow::Borrowed(value.data()[0].as_str())),
-        Value::CharArray(value) => Ok(Cow::Owned(value.data().iter().collect())),
+        Value::CharArray(value) => runmat_value::decode_utf16_code_units(value.data())
+            .map(Cow::Owned)
+            .map_err(|source| {
+                let mut error = error::invalid(format!("discretize: {context}: {source}"));
+                error.source = Some(Box::new(source));
+                error
+            }),
         other => Err(error::invalid(format!(
             "discretize: {context} must be text, got {other:?}"
         ))),

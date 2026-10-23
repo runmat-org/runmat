@@ -1,11 +1,11 @@
 #![cfg(not(target_arch = "wasm32"))]
 
-#[path = "generic_execution/short_circuit.rs"]
-mod short_circuit;
 #[path = "generic_execution/cancellation_resume.rs"]
 mod cancellation_resume;
 #[path = "generic_execution/search_native_pending.rs"]
 mod search_native_pending;
+#[path = "generic_execution/short_circuit.rs"]
+mod short_circuit;
 
 use std::{
     collections::BTreeMap,
@@ -976,7 +976,8 @@ fn suspending_object_end_and_final_path_do_not_replay_prior_stages() {
     let invoker = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
         Arc::new(move |function, _arguments, requested_outputs| {
             assert_eq!(requested_outputs, 1);
-            let future: runmat_runtime::user_functions::UserFunctionFuture = match function {
+            let future: runmat_runtime::user_functions::UnscopedUserFunctionFuture = match function
+            {
                 11 => {
                     let call = observed_subsref.fetch_add(1, Ordering::SeqCst);
                     Box::pin(async move {
@@ -1589,54 +1590,95 @@ fn generic_global_and_persistent_declarations_use_semantic_session_names() {
 
 #[test]
 fn generic_interactive_workspace_uses_binding_identity_and_commits_a_snapshot() {
-    let executor = compile_executor(workspace_binding_fixture(
-        "interactive",
-        "counter",
-        WorkspaceEffect::None,
-    ))
-    .unwrap();
-    let runtime = runtime_context();
-    let base = runmat_runtime::workspace::BaseWorkspaceOwner::new();
-    let mut initial = runmat_runtime::workspace::WorkspaceDelta::new();
-    initial.assign("counter", Value::Num(41.0)).unwrap();
-    base.apply(initial).unwrap();
-    let generation = runmat_runtime::workspace::LogicalWorkspaceGeneration::capture(
-        &runtime,
-        &base,
-        &runtime.session_variable_authority(),
-    )
-    .unwrap();
-    let workspace = NativeWorkspaceInput::from_generation(
-        generation,
-        BTreeMap::from([(BindingId(0), "counter".into())]),
-        vec![NativeWorkspaceBinding {
-            binding: BindingId(0),
-            name: "counter".into(),
-        }],
-        Vec::new(),
-    );
-    let mut invocation = executor
-        .begin_request(runmat_native_executor::NativeInvocationRequest {
-            function: FunctionId(0),
-            captures: Vec::new(),
-            arguments: Vec::new(),
-            requested_outputs: 1,
-            runtime,
-            deoptimization: DeoptimizationPolicy::default(),
-            osr_target: None,
-            workspace: Some(workspace),
-        })
-        .unwrap();
-    let runmat_native_executor::execute::NativeInvocationStep::Completed(execution) =
-        advance_after_suspended_work(&mut invocation).unwrap()
-    else {
-        panic!("interactive native invocation should complete")
-    };
-    assert_eq!(execution.outputs, vec![Value::Num(42.0)]);
-    assert_eq!(
-        execution.workspace.as_ref().unwrap().get("counter"),
-        Some(&Value::Num(42.0))
-    );
+    // The retained source route and legacy adapter must guard the same
+    // supplied-argument + immutable-workspace representation boundary.
+    for specialized in [false, true] {
+        for rooted in [false, true] {
+            let runtime = runtime_context();
+            let base = runmat_runtime::workspace::BaseWorkspaceOwner::new();
+            let mut initial = runmat_runtime::workspace::WorkspaceDelta::new();
+            initial.assign("counter", Value::Num(41.0)).unwrap();
+            base.apply(initial).unwrap();
+            let generation = runmat_runtime::workspace::LogicalWorkspaceGeneration::capture(
+                &runtime,
+                &base,
+                &runtime.session_variable_authority(),
+            )
+            .unwrap();
+            let workspace = NativeWorkspaceInput::from_generation(
+                generation,
+                BTreeMap::from([(BindingId(0), "counter".into())]),
+                vec![NativeWorkspaceBinding {
+                    binding: BindingId(0),
+                    name: "counter".into(),
+                }],
+                Vec::new(),
+            );
+            let assembly =
+                workspace_binding_fixture("interactive", "counter", WorkspaceEffect::None);
+            let executor = if specialized {
+                let profile = runmat_jit::tiering::RepresentationProfile::from_facts(
+                    workspace
+                        .profile_values()
+                        .map(runmat_runtime::value_fact::value_fact)
+                        .collect(),
+                    usize::MAX,
+                )
+                .unwrap();
+                GenericCompiler::compile_specialized_executor_with_resume_points(
+                    assembly,
+                    None,
+                    BTreeMap::new(),
+                    profile,
+                )
+                .unwrap()
+            } else {
+                compile_executor(assembly).unwrap()
+            };
+            let mut invocation = if rooted {
+                let arguments =
+                    runmat_runtime::call::BuiltinArguments::from_borrowed(&[], Some(&runtime))
+                        .unwrap()
+                        .into_function_arguments();
+                futures::executor::block_on(executor.begin_rooted_request_async(
+                    runmat_native_executor::execute::RootedNativeInvocationRequest {
+                        function: FunctionId(0),
+                        arguments,
+                        requested_outputs: 1,
+                        runtime,
+                        lexical_environment: None,
+                        deoptimization: DeoptimizationPolicy::default(),
+                        osr_target: None,
+                        workspace: Some(workspace),
+                    },
+                ))
+                .unwrap()
+            } else {
+                executor
+                    .begin_request(runmat_native_executor::NativeInvocationRequest {
+                        function: FunctionId(0),
+                        captures: Vec::new(),
+                        arguments: Vec::new(),
+                        requested_outputs: 1,
+                        runtime,
+                        deoptimization: DeoptimizationPolicy::default(),
+                        osr_target: None,
+                        workspace: Some(workspace),
+                    })
+                    .unwrap()
+            };
+            let runmat_native_executor::execute::NativeInvocationStep::Completed(execution) =
+                advance_after_suspended_work(&mut invocation).unwrap()
+            else {
+                panic!("interactive native invocation should complete")
+            };
+            assert_eq!(execution.outputs, vec![Value::Num(42.0)]);
+            assert_eq!(
+                execution.workspace.as_ref().unwrap().get("counter"),
+                Some(&Value::Num(42.0))
+            );
+        }
+    }
 }
 
 #[test]
@@ -2205,7 +2247,7 @@ fn fixture_with_regions(regions: Vec<RegionContract>) -> runmat_native_codegen::
         entrypoints: vec![function],
     };
     let analysis = runmat_mir::analysis::analyze_assembly(&mir);
-    let mut manifest = manifest(analysis.revision.schema_version);
+    let mut manifest = manifest(&analysis);
     manifest.capabilities.0.extend(
         regions
             .iter()
@@ -2356,7 +2398,7 @@ fn branch_fixture() -> runmat_native_codegen::NativeAssembly {
         entrypoints: vec![function],
     };
     let analysis = runmat_mir::analysis::analyze_assembly(&mir);
-    let manifest = manifest(analysis.revision.schema_version);
+    let manifest = manifest(&analysis);
     lower_executable(NativeLoweringInput {
         mir: &mir,
         analysis: &analysis,
@@ -2758,7 +2800,7 @@ fn switch_fixture() -> runmat_native_codegen::NativeAssembly {
         entrypoints: vec![function],
     };
     let analysis = runmat_mir::analysis::analyze_assembly(&mir);
-    let manifest = manifest(analysis.revision.schema_version);
+    let manifest = manifest(&analysis);
     lower_executable(NativeLoweringInput {
         mir: &mir,
         analysis: &analysis,
@@ -2887,7 +2929,7 @@ fn for_fixture() -> runmat_native_codegen::NativeAssembly {
         entrypoints: vec![function],
     };
     let analysis = runmat_mir::analysis::analyze_assembly(&mir);
-    let manifest = manifest(analysis.revision.schema_version);
+    let manifest = manifest(&analysis);
     lower_executable(NativeLoweringInput {
         mir: &mir,
         analysis: &analysis,
@@ -3145,24 +3187,51 @@ fn member_assignment_fixture_with_input(
             span,
         });
     }
-    statements.extend([
-        MirStmt {
-            kind: MirStmtKind::PlaceMutation(MirPlaceMutation {
-                place: place.clone(),
-                kind: runmat_types::PlaceMutationKind::MemberAssign,
-                creation_policy: runmat_types::AssignmentCreationPolicy::CreateStructFieldPath,
-                shape_policy: runmat_types::AssignmentShapePolicy::MatlabCompatible,
-            }),
+    let mutation = MirPlaceMutation {
+        place: place.clone(),
+        kind: runmat_types::PlaceMutationKind::MemberAssign,
+        creation_policy: runmat_types::AssignmentCreationPolicy::CreateStructFieldPath,
+        shape_policy: runmat_types::AssignmentShapePolicy::MatlabCompatible,
+    };
+    let value = MirRvalue::Use(MirOperand::Constant(MirConstant::Number("42".into())));
+    if place.requires_prepared_assignment() {
+        // The synthetic source has an optional root initialization followed by
+        // this assignment. Capture its logical statement ordinal before adding
+        // any MIR annotation/phases; all roles retain that same occurrence.
+        let preparation = runmat_mir::MirPreparedAssignment {
+            source_statement: runmat_hir::StmtId(statements.len()),
+            mutation,
+            steps: Vec::new(),
+        };
+        let phases = std::iter::once(runmat_mir::MirFixedPreparationPhase::CaptureReceiver).chain(
+            (0..preparation.path_len())
+                .map(|path_step| runmat_mir::MirFixedPreparationPhase::FinishStep { path_step }),
+        );
+        for phase in phases {
+            statements.push(MirStmt {
+                kind: MirStmtKind::PrepareFixedAssignment(runmat_mir::MirFixedPreparation {
+                    assignment: preparation.clone(),
+                    phase,
+                }),
+                span,
+            });
+        }
+        statements.push(MirStmt {
+            kind: MirStmtKind::PreparedAssign { preparation, value },
             span,
-        },
-        MirStmt {
-            kind: MirStmtKind::Assign {
-                place,
-                value: MirRvalue::Use(MirOperand::Constant(MirConstant::Number("42".into()))),
+        });
+    } else {
+        statements.extend([
+            MirStmt {
+                kind: MirStmtKind::PlaceMutation(mutation),
+                span,
             },
-            span,
-        },
-    ]);
+            MirStmt {
+                kind: MirStmtKind::Assign { place, value },
+                span,
+            },
+        ]);
+    }
     lower_body_with_inputs(
         "member_assignment",
         1,
@@ -3653,7 +3722,7 @@ fn lower_body_with_inputs_and_capabilities(
         entrypoints: vec![function],
     };
     let analysis = runmat_mir::analysis::analyze_assembly(&mir);
-    let mut manifest = manifest(analysis.revision.schema_version);
+    let mut manifest = manifest(&analysis);
     manifest.capabilities = capabilities;
     lower_executable(NativeLoweringInput {
         mir: &mir,
@@ -3761,7 +3830,7 @@ fn suspending_subscript_prefix_fixture() -> runmat_native_codegen::NativeAssembl
         entrypoints: vec![function],
     };
     let analysis = runmat_mir::analysis::analyze_assembly(&mir);
-    let manifest = manifest(analysis.revision.schema_version);
+    let manifest = manifest(&analysis);
     let binding_names = BTreeMap::from([(BindingId(0), "input".to_string())]);
     lower_executable(NativeLoweringInput {
         mir: &mir,
@@ -3869,7 +3938,7 @@ fn staged_subscript_suspension_fixture() -> runmat_native_codegen::NativeAssembl
         entrypoints: vec![function],
     };
     let analysis = runmat_mir::analysis::analyze_assembly(&mir);
-    let manifest = manifest(analysis.revision.schema_version);
+    let manifest = manifest(&analysis);
     let binding_names = BTreeMap::from([(BindingId(0), "input".to_string())]);
     lower_executable(NativeLoweringInput {
         mir: &mir,
@@ -3971,7 +4040,7 @@ fn workspace_binding_fixture(
         entrypoints: vec![function],
     };
     let analysis = runmat_mir::analysis::analyze_assembly(&mir);
-    let manifest = manifest(analysis.revision.schema_version);
+    let manifest = manifest(&analysis);
     let binding_names = BTreeMap::from([(binding, binding_name.to_string())]);
     lower_executable(NativeLoweringInput {
         mir: &mir,
@@ -4073,7 +4142,7 @@ fn workspace_first_static_fixture() -> runmat_native_codegen::NativeAssembly {
         entrypoints: vec![function],
     };
     let analysis = runmat_mir::analysis::analyze_assembly(&mir);
-    let manifest = manifest(analysis.revision.schema_version);
+    let manifest = manifest(&analysis);
     let binding_names = BTreeMap::from([(binding, "Candidate".to_string())]);
     lower_executable(NativeLoweringInput {
         mir: &mir,
@@ -4657,7 +4726,7 @@ fn caught_contextual_error_fixture() -> runmat_native_codegen::NativeAssembly {
         entrypoints: vec![function],
     };
     let analysis = runmat_mir::analysis::analyze_assembly(&mir);
-    let manifest = manifest(analysis.revision.schema_version);
+    let manifest = manifest(&analysis);
     lower_executable(NativeLoweringInput {
         mir: &mir,
         analysis: &analysis,
@@ -4862,7 +4931,7 @@ fn caught_terminator_call_fixture() -> runmat_native_codegen::NativeAssembly {
         entrypoints: vec![function],
     };
     let analysis = runmat_mir::analysis::analyze_assembly(&mir);
-    let manifest = manifest(analysis.revision.schema_version);
+    let manifest = manifest(&analysis);
     lower_executable(NativeLoweringInput {
         mir: &mir,
         analysis: &analysis,
@@ -4908,7 +4977,7 @@ fn statement(local: usize, value: MirRvalue, span: Span) -> MirStmt {
     }
 }
 
-fn manifest(analysis_schema: u16) -> ExecutableUnitManifest {
+fn manifest(analysis: &runmat_mir::analysis::AnalysisStore) -> ExecutableUnitManifest {
     let program = ProgramRevision::new(
         Digest::sha256(b"r13-graph"),
         Digest::sha256(b"r13-sources"),
@@ -4927,7 +4996,7 @@ fn manifest(analysis_schema: u16) -> ExecutableUnitManifest {
         catalog_fingerprint: *program.catalog_fingerprint(),
         contract_schema: 1,
         contract_fingerprint: Digest::sha256(b"r13-contracts"),
-        analysis_schema,
+        analysis_schema: analysis.revision.schema_version,
         mir_schema: runmat_mir::MIR_SCHEMA_VERSION,
         bytecode_schema: 1,
         vm_layout_schema: 1,
@@ -4940,7 +5009,15 @@ fn manifest(analysis_schema: u16) -> ExecutableUnitManifest {
     let payloads = ExecutableComponentKind::REQUIRED
         .into_iter()
         .map(|kind| {
-            ExecutableComponentPayload::new(kind, format!("{kind:?}-r13").into_bytes()).unwrap()
+            // Bind the independently admitted component to the exact analysis
+            // supplied to lowering, not a schema-only placeholder payload.
+            let bytes = match kind {
+                ExecutableComponentKind::Analysis => analysis
+                    .canonical_bytes()
+                    .expect("encode actual native fixture analysis"),
+                _ => format!("{kind:?}-r13").into_bytes(),
+            };
+            ExecutableComponentPayload::new(kind, bytes).unwrap()
         })
         .collect::<Vec<_>>();
     let components = payloads

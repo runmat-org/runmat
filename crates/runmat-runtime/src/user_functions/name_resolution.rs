@@ -27,7 +27,8 @@ pub enum RuntimeNameResolutionError {
     WasmRegistryNotReady,
     SearchPathChanged,
     ClassRegistryChanged,
-    Search(String),
+    Search(crate::builtins::common::path_search::PathSearchError),
+    Control(Box<crate::RuntimeError>),
 }
 
 impl std::fmt::Display for RuntimeNameResolutionError {
@@ -43,14 +44,21 @@ impl std::fmt::Display for RuntimeNameResolutionError {
             Self::ClassRegistryChanged => {
                 formatter.write_str("name resolution: class registry changed during observation")
             }
-            Self::Search(error) => formatter.write_str(error),
+            Self::Search(error) => std::fmt::Display::fmt(error, formatter),
+            Self::Control(error) => formatter.write_str(error.message()),
         }
     }
 }
 
-impl From<String> for RuntimeNameResolutionError {
-    fn from(error: String) -> Self {
+impl From<crate::builtins::common::path_search::PathSearchError> for RuntimeNameResolutionError {
+    fn from(error: crate::builtins::common::path_search::PathSearchError) -> Self {
         Self::Search(error)
+    }
+}
+
+impl From<crate::RuntimeError> for RuntimeNameResolutionError {
+    fn from(error: crate::RuntimeError) -> Self {
+        Self::Control(Box::new(error))
     }
 }
 
@@ -222,29 +230,30 @@ pub async fn observe_runtime_name(
     ) {
         let native = match context
             .as_ref()
-            .map(|context| context.native_resolution_scope())
+            .map(|context| (context, context.native_resolution_scope()))
         {
-            Some(NativeResolutionScope::Selected(route)) => route.observe(name.to_owned()).await?,
-            #[cfg(not(target_arch = "wasm32"))]
-            Some(NativeResolutionScope::SelectedOrdinary {
-                route,
-                source_owner,
-                ..
-            }) if context
-                .as_ref()
-                .is_some_and(|runtime| source_owner.is_bound_in(runtime)) =>
-            {
-                route.observe(name.to_owned()).await?
+            Some((runtime, NativeResolutionScope::Selected(route))) => {
+                route.observe(runtime.clone(), name.to_owned()).await?
             }
             #[cfg(not(target_arch = "wasm32"))]
-            Some(NativeResolutionScope::SelectedOrdinary { .. }) => None,
-            Some(NativeResolutionScope::SelectedClosed) => None,
-            Some(NativeResolutionScope::Session) | None => {
-                if let Some(observer) = context
-                    .as_ref()
-                    .and_then(|context| context.state().call.borrow().native_name_observer.clone())
-                {
-                    observer(name.to_owned()).await?
+            Some((
+                runtime,
+                NativeResolutionScope::SelectedOrdinary {
+                    route,
+                    source_owner,
+                    ..
+                },
+            )) if source_owner.is_bound_in(runtime) => {
+                route.observe(runtime.clone(), name.to_owned()).await?
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            Some((_, NativeResolutionScope::SelectedOrdinary { .. })) => None,
+            Some((_, NativeResolutionScope::SelectedClosed)) | None => None,
+            Some((runtime, NativeResolutionScope::Session)) => {
+                let observer = runtime.state().call.borrow().native_name_observer.clone();
+                if let Some(observer) = observer {
+                    super::await_native_name_observation(observer(runtime.clone(), name.to_owned()))
+                        .await?
                 } else {
                     None
                 }
@@ -341,7 +350,7 @@ pub async fn observe_runtime_name(
         }
     }
     for folder in class_folder_candidates_with_origin(name, "which")? {
-        if crate::builtins::common::path_search::path_is_directory(folder.path()).await
+        if crate::builtins::common::path_search::path_is_directory(folder.path()).await?
             && seen_paths.insert(folder.path().to_path_buf())
         {
             candidates.push(RuntimeNameCandidate::ClassFolder(folder));
@@ -388,7 +397,7 @@ pub async fn observe_runtime_name(
         }
     }
     for directory in directory_candidates_with_origin(name, "which")? {
-        if crate::builtins::common::path_search::path_is_directory(directory.path()).await
+        if crate::builtins::common::path_search::path_is_directory(directory.path()).await?
             && seen_paths.insert(directory.path().to_path_buf())
         {
             candidates.push(RuntimeNameCandidate::Directory(directory));

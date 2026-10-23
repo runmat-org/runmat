@@ -5,10 +5,18 @@
 //! framed response, request identity and process exit. Neither side treats
 //! decoded identity fields alone as permission to execute a test.
 
-mod image;
 mod application;
-pub use application::{run_compiled_native_application, NativePairedApplicationReport};
+mod image;
+pub use application::{
+    run_compiled_native_application, run_linked_native_application, NativePairedApplicationReport,
+};
 mod process;
+mod qualification;
+
+pub use qualification::{
+    NativePairedQualificationReceipt, QualifiedNativeApplication, QualifiedNativeTest,
+    NATIVE_PAIRED_QUALIFICATION_SCHEMA_VERSION,
+};
 
 pub use process::run_native_target_test;
 
@@ -19,13 +27,15 @@ pub async fn run_compiled_native_target_test(
     request: &runmat_execution_artifact::target_test::NativeTargetTestRequest,
     limits: NativeTargetTestRunLimits,
 ) -> crate::NativeRunnerResult<NativeTargetTestProcessReport> {
-    process::run_native_target_test(
-        product.linked().tests(),
-        product.linked().test_header(),
-        request,
-        limits,
-    )
-    .await
+    run_linked_native_target_test(product.linked(), request, limits).await
+}
+
+pub async fn run_linked_native_target_test(
+    product: &runmat_aot::link::LinkedNativePair,
+    request: &runmat_execution_artifact::target_test::NativeTargetTestRequest,
+    limits: NativeTargetTestRunLimits,
+) -> crate::NativeRunnerResult<NativeTargetTestProcessReport> {
+    process::run_native_target_test(product.tests(), product.test_header(), request, limits).await
 }
 
 /// Host/deployment storage limits, independent of a test's writable artifact

@@ -29,6 +29,37 @@ pub(super) fn validate_subscript_descriptors(instructions: &[Instr]) -> Result<(
                 "dotted invocation at instruction {pc} must be its own execution segment"
             ));
         }
+        for step in steps {
+            match step {
+                super::super::super::BytecodeSubscriptStep::Braces { selectors }
+                    if selectors.iter().any(|selector| {
+                        matches!(
+                            selector,
+                            super::super::super::BytecodeSubscriptSelector::Expansion(_)
+                        )
+                    }) =>
+                {
+                    return Err(format!(
+                        "brace step at instruction {pc} contains an application expansion"
+                    ));
+                }
+                super::super::super::BytecodeSubscriptStep::Parentheses { selectors }
+                    if selectors.iter().any(|selector| {
+                        matches!(
+                            selector,
+                            super::super::super::BytecodeSubscriptSelector::Expansion(_)
+                        )
+                    }) && matches!(
+                        pc.checked_sub(1)
+                            .and_then(|previous| instructions.get(previous)),
+                        Some(Instr::FinishSubscriptEndReceiver { .. })
+                    ) =>
+                {
+                    return Err(format!("expanded parentheses at instruction {pc} cannot use fixed-position end preparation"));
+                }
+                _ => {}
+            }
+        }
         if dotted
             && !matches!(
                 pc.checked_sub(1)

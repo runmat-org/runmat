@@ -9,7 +9,6 @@ use crate::context::{
     RuntimeContext, RuntimeServiceFuture, RuntimeUserPathService, UserPathMutation,
     UserPathServiceError, UserPathSnapshot,
 };
-use crate::execution::value_codec::{decode_durable_value, encode_durable_value};
 use crate::execution::CpuCooperationBudget;
 use runmat_execution::profiling::CommandProfilingReceipt;
 use runmat_value::Value;
@@ -79,6 +78,7 @@ impl NativePreferenceService {
 
     async fn mutate(
         &self,
+        runtime: &RuntimeContext,
         mut budget: CpuCooperationBudget,
         mutation: Mutation,
         profiling: Option<&CommandProfilingReceipt>,
@@ -103,7 +103,14 @@ impl NativePreferenceService {
             profiling.and_then(CommandProfilingReceipt::begin_deferred_work),
         );
         self.driver.spawn_blocking(move || work.run());
-        observe_mutation(&mut budget, prepared_rx, authorized_tx, finished_rx).await
+        observe_mutation(
+            runtime,
+            &mut budget,
+            prepared_rx,
+            authorized_tx,
+            finished_rx,
+        )
+        .await
     }
 
     async fn acquire_write(
@@ -141,6 +148,7 @@ impl NativePreferenceService {
 }
 
 async fn observe_mutation(
+    runtime: &RuntimeContext,
     budget: &mut CpuCooperationBudget,
     prepared_rx: oneshot::Receiver<Result<super::document::DocumentPrepared, TransactionError>>,
     authorized_tx: mpsc::Sender<()>,
@@ -154,7 +162,7 @@ async fn observe_mutation(
         .map_err(transaction_error)?;
     let mut values = Vec::with_capacity(prepared.values.len());
     for payload in &prepared.values {
-        values.push(decode_durable_value(payload)?);
+        values.push(super::decode_selected_preference(payload, budget, runtime).await?);
         checkpoint(budget, 1).await?;
     }
     if prepared.changed {
@@ -196,7 +204,10 @@ impl RuntimePreferenceService for NativePreferenceService {
             for (group, values) in document.groups {
                 let mut decoded = PreferenceValues::new();
                 for (name, payload) in values {
-                    decoded.insert(name, decode_durable_value(&payload)?);
+                    decoded.insert(
+                        name,
+                        super::decode_selected_preference(&payload, &mut budget, &runtime).await?,
+                    );
                     checkpoint(&mut budget, 1).await?;
                 }
                 output.insert(group, decoded);
@@ -222,7 +233,10 @@ impl RuntimePreferenceService for NativePreferenceService {
             };
             let mut output = PreferenceValues::new();
             for (name, payload) in values {
-                output.insert(name.clone(), decode_durable_value(payload)?);
+                output.insert(
+                    name.clone(),
+                    super::decode_selected_preference(payload, &mut budget, &runtime).await?,
+                );
                 checkpoint(&mut budget, 1).await?;
             }
             Ok(Some(output))
@@ -291,13 +305,16 @@ impl RuntimePreferenceService for NativePreferenceService {
                             group: group.clone(),
                             name: name.clone(),
                         })?;
-                    output.push(decode_durable_value(payload)?);
+                    output.push(
+                        super::decode_selected_preference(payload, &mut budget, &runtime).await?,
+                    );
                     checkpoint(&mut budget, 1).await?;
                 }
                 return Ok(output);
             };
             lazy_defaults::read_or_create(
                 service,
+                &runtime,
                 budget,
                 group,
                 names,
@@ -323,7 +340,10 @@ impl RuntimePreferenceService for NativePreferenceService {
             checkpoint(&mut budget, 0).await?;
             let mut encoded = Vec::with_capacity(entries.len());
             for (name, value) in &entries {
-                encoded.push((name.clone(), encode_durable_value(value)?));
+                encoded.push((
+                    name.clone(),
+                    super::encode_selected_preference(value, &mut budget, &runtime).await?,
+                ));
                 checkpoint(&mut budget, 1).await?;
             }
             if encoded.is_empty() {
@@ -331,6 +351,7 @@ impl RuntimePreferenceService for NativePreferenceService {
             }
             service
                 .mutate(
+                    &runtime,
                     budget,
                     Mutation::Set {
                         group,
@@ -375,7 +396,12 @@ impl RuntimeUserPathService for NativePreferenceService {
             let mut budget = runtime.cpu_cooperation();
             checkpoint(&mut budget, 0).await?;
             let (_, snapshot) = service
-                .mutate(budget, Mutation::UserPath(setting), profiling.as_ref())
+                .mutate(
+                    &runtime,
+                    budget,
+                    Mutation::UserPath(setting),
+                    profiling.as_ref(),
+                )
                 .await?;
             Ok(snapshot.expect("user-path mutation prepares a setting snapshot"))
         })

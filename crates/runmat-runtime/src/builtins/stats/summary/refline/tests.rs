@@ -45,11 +45,14 @@ fn y_data(handle: f64) -> Vec<f64> {
 #[test]
 fn refline_without_coefficients_adds_least_squares_line() {
     let _guard = setup();
-    block_on(scatter_builtin(
-        tensor(vec![1.0, 2.0, 3.0], 1, 3),
-        tensor(vec![2.0, 4.0, 6.0], 1, 3),
-        Vec::new(),
-    ))
+    block_on(scatter_builtin(None, {
+        let mut coordinates = vec![
+            tensor(vec![1.0, 2.0, 3.0], 1, 3),
+            tensor(vec![2.0, 4.0, 6.0], 1, 3),
+        ];
+        coordinates.extend(Vec::new());
+        crate::builtins::common::test_support::builtin_arguments(coordinates)
+    }))
     .unwrap();
     let handle = block_on(refline_builtin(
         None,
@@ -377,16 +380,18 @@ fn refline_least_squares_reads_gpu_scatter_source_data() {
     let dummy_vertices = context
         .access
         .with_shared(|emission| {
-            emission.device().create_buffer(&wgpu::BufferDescriptor {
-                label: Some("refline-lsline-gpu-scatter-test-dummy-vertices"),
-                size: 16,
-                usage: wgpu::BufferUsages::VERTEX,
-                mapped_at_creation: false,
-            })
+            runmat_accelerate_api::WgpuBufferOwner::new(emission.device().create_buffer(
+                &wgpu::BufferDescriptor {
+                    label: Some("refline-lsline-gpu-scatter-test-dummy-vertices"),
+                    size: 16,
+                    usage: wgpu::BufferUsages::VERTEX,
+                    mapped_at_creation: false,
+                },
+            ))
         })
         .expect("shared WGPU device access");
     let scatter = ScatterPlot::from_gpu_buffer(
-        GpuVertexBuffer::new(std::sync::Arc::new(dummy_vertices), 0),
+        GpuVertexBuffer::new(dummy_vertices, 0),
         0,
         BoundingBox::new(
             glam::Vec3::new(1.0, 2.0, 0.0),

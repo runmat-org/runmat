@@ -13,6 +13,23 @@ fn binding_slot(bytecode: &runmat_vm::Bytecode, name: &str) -> usize {
 }
 
 #[test]
+fn fixed_target_expansion_uses_prepared_one_output_assignment() {
+    for source in [
+        "A=[1,2;3,4]; I={1,2}; A(I{:})=9; assert(isequal(A,[1,9;3,4]));",
+        "A=[1,2,3,4]; I={2}; A(I{:})=[]; assert(isequal(A,[1,3,4]));",
+        "A=[1,2;3,4]; I={2}; A(:,I{:})=7; assert(isequal(A,[1,7;3,7]));",
+    ] {
+        let bytecode = compile_source(source).expect("compile expanded fixed target");
+        assert!(bytecode.instructions.iter().any(|instruction| matches!(
+            instruction,
+            runmat_vm::Instr::FinishFixedAssignmentTarget { .. }
+        )));
+        execute_source(source).expect("execute expanded fixed target");
+    }
+    assert!(compile_source("A=[1,2]; I={1}; A(end,I{:})=9;").is_err());
+}
+
+#[test]
 fn chained_member_and_index_assignments() {
     // Register test classes and construct an OverIdx object, then chain operations
     let src = "__register_test_classes(); o = new_object('OverIdx'); try; o(1)=42; catch e; end; o.k = 7; z = o.k;";

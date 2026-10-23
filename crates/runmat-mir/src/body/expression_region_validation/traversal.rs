@@ -6,12 +6,18 @@ pub(super) fn visit_outer_statement_sequences(
     statement: &crate::MirStmt,
     visitor: &mut dyn FnMut(crate::MirSequenceLocalId),
 ) {
+    if let MirStmtKind::PrepareFixedAssignment(phase) = &statement.kind {
+        phase.visit_sequence_locals(|sequence| visitor(*sequence));
+        return;
+    }
     let value = match &statement.kind {
-        MirStmtKind::Assign { value, .. }
+        MirStmtKind::PreparedAssign { value, .. }
+        | MirStmtKind::Assign { value, .. }
         | MirStmtKind::MultiAssign { value, .. }
         | MirStmtKind::SequenceAssign { value, .. }
         | MirStmtKind::Expr(value) => Some(value),
-        MirStmtKind::CaptureSequence { .. }
+        MirStmtKind::PrepareFixedAssignment(_)
+        | MirStmtKind::CaptureSequence { .. }
         | MirStmtKind::StatementOutput(_)
         | MirStmtKind::PlaceMutation(_)
         | MirStmtKind::WorkspaceEffect { .. }
@@ -27,6 +33,11 @@ pub(super) fn visit_outer_statement_definitions(
     visitor: &mut dyn FnMut(MirLocalId),
 ) {
     match &statement.kind {
+        MirStmtKind::PrepareFixedAssignment(phase) => {
+            if let Some(crate::MirFixedSelectorDestination::Scalar(local)) = phase.output() {
+                visitor(local);
+            }
+        }
         MirStmtKind::Assign {
             place: MirPlace::Local(local),
             ..
@@ -42,7 +53,8 @@ pub(super) fn visit_outer_statement_definitions(
 
 pub(super) fn statement_outer_rvalue(statement: &crate::MirStmt) -> Option<&crate::MirRvalue> {
     match &statement.kind {
-        MirStmtKind::Assign { value, .. }
+        MirStmtKind::PreparedAssign { value, .. }
+        | MirStmtKind::Assign { value, .. }
         | MirStmtKind::MultiAssign { value, .. }
         | MirStmtKind::SequenceAssign { value, .. }
         | MirStmtKind::Expr(value) => Some(value),

@@ -28,7 +28,9 @@ pub(super) fn derive_semantic_fusion_candidate_groups(
                     | MirStmtKind::MultiAssign { value, .. }
                     | MirStmtKind::SequenceAssign { value, .. }
                     | MirStmtKind::Expr(value) => value,
-                    MirStmtKind::PlaceMutation(_)
+                    MirStmtKind::PrepareFixedAssignment(_)
+                    | MirStmtKind::PreparedAssign { .. }
+                    | MirStmtKind::PlaceMutation(_)
                     | MirStmtKind::CaptureSequence { .. }
                     | MirStmtKind::WorkspaceEffect { .. }
                     | MirStmtKind::StatementOutput(_)

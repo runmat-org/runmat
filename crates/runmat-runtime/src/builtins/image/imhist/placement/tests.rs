@@ -16,7 +16,7 @@ fn finite_host_scratch_tracks_real_buffers_and_one_output_location() {
         assert_eq!(host_scratch_bound(&source, 3, 2), Some(32));
         assert_eq!(
             provider.download_numeric_host_workspace_bound(&source),
-            ResourceByteBound::Known(16)
+            ResourceByteBound::Known(16 + 2 * std::mem::size_of::<usize>() as u64)
         );
         // InProcess does not admit a lazy transpose view; the WGPU provider
         // fixture covers its layout-dependent readback workspace separately.

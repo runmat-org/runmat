@@ -26,5 +26,8 @@ serde_json = { workspace = true }
 
 [dev-dependencies]
 anyhow = { workspace = true }
+runmat-config = { workspace = true }
 runmat-native-codegen = { workspace = true }
+runmat-native-ffi = { workspace = true }
+runmat-types = { workspace = true }
 tempfile = "3.12"

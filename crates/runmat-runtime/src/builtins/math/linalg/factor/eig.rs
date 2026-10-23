@@ -1,13 +1,12 @@
 //! MATLAB-compatible `eig` builtin with host and GPU-aware semantics.
 //!
 //! Implements the dense eigenvalue decomposition for real and complex matrices,
-//! including the vector-only form, generalized `eig(A,B)` for nonsingular `B`,
+//! including the vector-only form and general complex `eig(A,B)` pencils,
+//! including singular `B` with infinite or indeterminate eigenvalues,
 //! the `[V,D]` factorisation, and the three-output `[V,D,W]` variant that
 //! returns left eigenvectors. GPU inputs are currently gathered back to the host
 //! unless their owning provider implements the reserved `eig` hook; host
 //! fallback outputs are restored to that owner when possible.
-
-use std::collections::HashSet;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -17,21 +16,29 @@ use crate::builtins::common::{gpu_helpers, tensor};
 #[cfg(test)]
 use crate::builtins::math::linalg::type_resolvers::eig_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-use nalgebra::linalg::Schur;
-use nalgebra::{DMatrix, DVector};
+#[cfg(test)]
+use nalgebra::DMatrix;
 use num_complex::Complex64;
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{BuiltinErrorDescriptor, FactorOption};
 use runmat_macros::runtime_builtin;
-use runmat_value::{ComplexTensor, IntValue, NumericDType, NumericScalar, Tensor, Value};
+#[cfg(test)]
+use runmat_value::{ComplexTensor, Tensor};
+use runmat_value::{IntValue, NumericDType, NumericScalar, Value};
 
 #[path = "eig_publication.rs"]
 mod publication;
-use publication::upload_eig_eval_to_owner;
+use publication::upload_eig_eval_to_owner_in_context;
+#[path = "eig_resident.rs"]
+mod resident;
+use resident::gather_eig_resident_value_in_context;
+#[path = "eig_host.rs"]
+pub(super) mod host;
+#[path = "eig_work.rs"]
+pub(super) mod work;
+use crate::context::RuntimeContext;
 
 const BUILTIN_NAME: &str = "eig";
-
-const REAL_EPS: f64 = 1e-12;
 
 #[cfg(test)]
 use runmat_builtins::{EIG_DESCRIPTOR, EIG_EXTENSIONS};
@@ -53,7 +60,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "The WGPU `eig` hook gathers real single/double matrices, computes the host eigensystem, and restores real or complex factors in the source class. Generalized inputs and unsupported options use the exact-owner host path.",
+    notes: "Genuine provider eig hooks may execute supported calls. WGPU and unsupported forms use the canonical contextual host EVD and exact-owner restoration of real or complex factors in the source floating class.",
 };
 
 fn eig_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
@@ -109,36 +116,48 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "eig",
     binding_variant = "default",
-    builtin_path = "crate::builtins::math::linalg::factor::eig"
+    builtin_path = "crate::builtins::math::linalg::factor::eig",
+    context = true
 )]
-async fn eig_builtin(
+async fn eig_builtin_context(
+    runtime: Option<RuntimeContext>,
     value: Value,
     rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
-    if let Some(out_count) = crate::output_count::current_output_count() {
-        let require_left = out_count >= 3;
-        let eval = evaluate(value, rest.view(), require_left).await?;
-        if out_count == 0 {
-            return Ok(Value::output_list(Vec::new()));
+    let requested = crate::output_count::current_output_count();
+    let eval = evaluate_in_context(
+        runtime.as_ref(),
+        value,
+        rest.view(),
+        requested.is_some_and(|n| n >= 3),
+    )
+    .await?;
+    match requested {
+        None => Ok(eval.eigenvalues()),
+        Some(0) => work::output_list(runtime.as_ref(), [None; 0], 0).await,
+        Some(1) => work::output_list(runtime.as_ref(), [Some(eval.eigenvalues())], 1).await,
+        Some(2) => {
+            work::output_list(
+                runtime.as_ref(),
+                [Some(eval.right()), Some(eval.diagonal())],
+                2,
+            )
+            .await
         }
-        if out_count == 1 {
-            return Ok(Value::output_list(vec![eval.eigenvalues()]));
+        Some(3) => {
+            work::output_list(
+                runtime.as_ref(),
+                [
+                    Some(eval.right()),
+                    Some(eval.diagonal()),
+                    Some(eval.left()?),
+                ],
+                3,
+            )
+            .await
         }
-        if out_count == 2 {
-            return Ok(Value::output_list(vec![eval.right(), eval.diagonal()]));
-        }
-        if out_count == 3 {
-            let left = eval.left()?;
-            return Ok(Value::output_list(vec![
-                eval.right(),
-                eval.diagonal(),
-                left,
-            ]));
-        }
-        return Err(eig_error(&EIG_ERROR_INVALID_ARGUMENT));
+        Some(_) => Err(eig_error(&EIG_ERROR_INVALID_ARGUMENT)),
     }
-    let eval = evaluate(value, rest.view(), false).await?;
-    Ok(eval.eigenvalues())
 }
 
 #[derive(Clone, Debug)]
@@ -243,38 +262,65 @@ pub async fn evaluate(
     args: crate::call::FunctionArgumentView<'_>,
     require_left: bool,
 ) -> BuiltinResult<EigEval> {
-    let request = parse_request(args)?;
+    evaluate_in_context(None, value, args, require_left).await
+}
+
+/// Explicit execution authority for Runtime-domain callers. The embedding
+/// wrapper above grants no ambient finite-allocation authority.
+pub async fn evaluate_in_context(
+    runtime: Option<&RuntimeContext>,
+    value: Value,
+    args: crate::call::FunctionArgumentView<'_>,
+    require_left: bool,
+) -> BuiltinResult<EigEval> {
+    if let Some(runtime) = runtime {
+        runtime
+            .cpu_cooperation()
+            .checkpoint(0)
+            .await
+            .map_err(|e| e.into_runtime_error_in_context(Some(runtime)))?;
+    }
+    let request = parse_request(runtime, args)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, BUILTIN_NAME)?;
     ensure_eig_coefficient_extension_enabled(&value)?;
     if let Some(b) = request.b {
         crate::builtins::common::validation::reject_typed_complex_integer(&b, BUILTIN_NAME)?;
         ensure_eig_coefficient_extension_enabled(&b)?;
-        return evaluate_generalized(value, b, request.options, require_left).await;
+        return evaluate_generalized(runtime, value, b, request.options, require_left).await;
     }
     let options = request.options;
     match value {
         Value::GpuTensor(handle) => {
             if is_nonfloating_coefficient(&Value::GpuTensor(handle.clone())) {
-                let gathered = gather_eig_resident_value(&handle).await?;
+                let gathered = gather_eig_resident_value_in_context(runtime, &handle).await?;
                 ensure_exact_eig_integer_boundary(&gathered, "A")?;
-                let eval = evaluate_host(gathered, options, require_left).await?;
-                return upload_eig_eval_to_owner(eval, &handle, options.vector_output, &[]);
+                let eval = evaluate_host(runtime, gathered, options, require_left).await?;
+                return upload_eig_eval_to_owner_in_context(
+                    runtime,
+                    eval,
+                    &handle,
+                    options.vector_output,
+                    &[],
+                )
+                .await;
             }
-            if let Some(eval) = evaluate_gpu(&handle, options, require_left).await? {
+            if let Some(eval) = evaluate_gpu(runtime, &handle, options, require_left).await? {
                 return Ok(eval);
             }
-            let gathered = gather_eig_resident_value(&handle).await?;
-            let eval = evaluate_host(gathered, options, require_left).await?;
-            upload_eig_eval_to_owner(eval, &handle, options.vector_output, &[])
+            let gathered = gather_eig_resident_value_in_context(runtime, &handle).await?;
+            let eval = evaluate_host(runtime, gathered, options, require_left).await?;
+            upload_eig_eval_to_owner_in_context(runtime, eval, &handle, options.vector_output, &[])
+                .await
         }
         other => {
             ensure_exact_eig_integer_boundary(&other, "A")?;
-            evaluate_host(other, options, require_left).await
+            evaluate_host(runtime, other, options, require_left).await
         }
     }
 }
 
 async fn evaluate_gpu(
+    runtime: Option<&RuntimeContext>,
     handle: &GpuTensorHandle,
     options: EigOptions,
     require_left: bool,
@@ -283,6 +329,23 @@ async fn evaluate_gpu(
         return Ok(None);
     }
     if !options.balance {
+        return Ok(None);
+    }
+    use crate::context::host_allocation::{HostAllocationPolicy, HostAllocationReceipt};
+    if HostAllocationReceipt::policy(runtime).map_err(|source| {
+        with_eig_context(
+            crate::context::host_allocation::host_allocation_runtime_error(
+                runtime,
+                "RunMat:eig:Workspace",
+                "eig: provider hook allocation policy",
+                source,
+            ),
+        )
+    })? == HostAllocationPolicy::Managed
+    {
+        // The opaque legacy provider continuation has no finite allocation
+        // quote. Decline before creating it; canonical contextual fallback
+        // retains genuine owner/class semantics without inventing a grant.
         return Ok(None);
     }
     let provider = match resolved_actual_eig_owner(handle) {
@@ -325,14 +388,6 @@ fn resolved_actual_eig_owner(
     gpu_helpers::exact_provider_for_handle(handle)
 }
 
-fn eig_result_handles(result: &runmat_accelerate_api::ProviderEigResult) -> Vec<&GpuTensorHandle> {
-    let mut handles = vec![&result.eigenvalues, &result.diagonal, &result.right];
-    if let Some(left) = result.left.as_ref() {
-        handles.push(left);
-    }
-    handles
-}
-
 fn gpu_handles_alias(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
     lhs.shares_allocation_with(rhs)
 }
@@ -354,18 +409,24 @@ fn valid_provider_eig_result(
         runmat_accelerate_api::ProviderPrecision::F32 => runmat_types::standard::SINGLE,
         runmat_accelerate_api::ProviderPrecision::F64 => runmat_types::standard::DOUBLE,
     };
-    let expected_shapes = [vec![order, 1], vec![order, order], vec![order, order]];
-    let mut identities = HashSet::new();
-    for (handle, expected_shape) in eig_result_handles(result).into_iter().zip(
-        expected_shapes
-            .iter()
-            .chain(std::iter::once(&expected_shapes[2])),
-    ) {
+    let handles = [
+        Some(&result.eigenvalues),
+        Some(&result.diagonal),
+        Some(&result.right),
+        result.left.as_ref(),
+    ];
+    let expected_shapes = [[order, 1], [order, order], [order, order], [order, order]];
+    for (index, (handle, expected_shape)) in handles.iter().zip(expected_shapes).enumerate() {
+        let Some(handle) = handle else {
+            continue;
+        };
         let storage = runmat_accelerate_api::handle_storage(handle);
         if gpu_handles_alias(handle, input)
-            || !identities.insert((handle.device_id(), handle.buffer_id()))
+            || handles[..index].iter().flatten().any(|prior| {
+                prior.device_id() == handle.device_id() && prior.buffer_id() == handle.buffer_id()
+            })
             || handle.device_id() != input.device_id()
-            || handle.shape() != *expected_shape
+            || handle.shape() != expected_shape
             || runmat_accelerate_api::handle_is_transposed(handle)
             || resolved_actual_eig_owner(handle)
                 .is_none_or(|owner| !runmat_accelerate_api::same_provider_instance(owner, provider))
@@ -400,58 +461,67 @@ fn reject_provider_eig_result(
 }
 
 async fn evaluate_host(
+    runtime: Option<&RuntimeContext>,
     value: Value,
     options: EigOptions,
     require_left: bool,
 ) -> BuiltinResult<EigEval> {
     let precision = value_precision(&value);
-    let matrix = value_to_complex_matrix(value).await?;
-    cast_eig_eval_precision(compute_eigen(matrix, options, require_left)?, precision)
+    let pairs = host::compute(runtime, &value, None, require_left, false).await?;
+    host::publish(runtime, &pairs, precision, options).await
 }
 
 async fn evaluate_generalized(
-    a_value: Value,
-    b_value: Value,
+    runtime: Option<&RuntimeContext>,
+    a: Value,
+    b: Value,
     options: EigOptions,
     require_left: bool,
 ) -> BuiltinResult<EigEval> {
-    let gpu_sources = [&a_value, &b_value]
-        .into_iter()
-        .filter_map(|value| match value {
-            Value::GpuTensor(handle) => Some(handle.clone()),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    let a_value = gather_eig_coefficient(a_value).await?;
-    let b_value = gather_eig_coefficient(b_value).await?;
-    ensure_exact_eig_integer_boundary(&a_value, "A")?;
-    ensure_exact_eig_integer_boundary(&b_value, "B")?;
-    let precision = combined_value_precision(&a_value, &b_value);
-    let a = value_to_complex_matrix(a_value).await?;
-    let b = value_to_complex_matrix(b_value).await?;
-    let eval = cast_eig_eval_precision(
-        compute_generalized_eigen(a, b, options, require_left)?,
-        precision,
-    )?;
-    match gpu_sources.first() {
-        Some(source) => upload_eig_eval_to_owner(eval, source, options.vector_output, &gpu_sources),
-        None => Ok(eval),
+    let sources = [&a, &b].map(|value| match value {
+        Value::GpuTensor(handle) => Some(handle.clone()),
+        _ => None,
+    });
+    let a = gather_eig_coefficient(runtime, a).await?;
+    let b = gather_eig_coefficient(runtime, b).await?;
+    ensure_exact_eig_integer_boundary(&a, "A")?;
+    ensure_exact_eig_integer_boundary(&b, "B")?;
+    let precision = combined_value_precision(&a, &b);
+    let pairs = host::compute(runtime, &a, Some(&b), require_left, false).await?;
+    let eval = host::publish(runtime, &pairs, precision, options).await?;
+    match sources {
+        [Some(a), Some(b)] => {
+            upload_eig_eval_to_owner_in_context(
+                runtime,
+                eval,
+                &a,
+                options.vector_output,
+                &[a.clone(), b],
+            )
+            .await
+        }
+        [Some(source), None] | [None, Some(source)] => {
+            upload_eig_eval_to_owner_in_context(
+                runtime,
+                eval,
+                &source,
+                options.vector_output,
+                std::slice::from_ref(&source),
+            )
+            .await
+        }
+        [None, None] => Ok(eval),
     }
 }
 
-async fn gather_eig_coefficient(value: Value) -> BuiltinResult<Value> {
+async fn gather_eig_coefficient(
+    runtime: Option<&RuntimeContext>,
+    value: Value,
+) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => gather_eig_resident_value(&handle).await,
+        Value::GpuTensor(handle) => gather_eig_resident_value_in_context(runtime, &handle).await,
         other => Ok(other),
     }
-}
-
-async fn gather_eig_resident_value(handle: &GpuTensorHandle) -> BuiltinResult<Value> {
-    let owner = gpu_helpers::exact_provider_for_handle(handle)
-        .ok_or_else(|| eig_internal_error("eig: no exact owner for resident input"))?;
-    gpu_helpers::download_value_preserving_residency_async(owner, handle)
-        .await
-        .map_err(with_eig_context)
 }
 
 fn ensure_eig_coefficient_extension_enabled(value: &Value) -> BuiltinResult<()> {
@@ -530,8 +600,10 @@ fn numeric_scalar_i128(value: NumericScalar) -> Option<i128> {
 
 fn value_precision(value: &Value) -> NumericDType {
     match value {
-        Value::Tensor(tensor) => tensor.numeric_dtype(),
-        Value::ComplexTensor(tensor) => tensor.numeric_dtype(),
+        Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32 => NumericDType::F32,
+        Value::ComplexTensor(tensor) if tensor.numeric_dtype() == NumericDType::F32 => {
+            NumericDType::F32
+        }
         Value::GpuTensor(handle) => match runmat_accelerate_api::handle_precision(handle) {
             Some(runmat_accelerate_api::ProviderPrecision::F32) => NumericDType::F32,
             _ => NumericDType::F64,
@@ -548,64 +620,14 @@ fn combined_value_precision(a: &Value, b: &Value) -> NumericDType {
     }
 }
 
-fn cast_eig_eval_precision(eval: EigEval, precision: NumericDType) -> BuiltinResult<EigEval> {
-    if precision != NumericDType::F32 {
-        return Ok(eval);
-    }
-    Ok(EigEval {
-        eigenvalues: cast_eig_value_to_single(eval.eigenvalues)?,
-        diagonal_matrix: cast_eig_value_to_single(eval.diagonal_matrix)?,
-        diagonal_output: cast_eig_value_to_single(eval.diagonal_output)?,
-        right: cast_eig_value_to_single(eval.right)?,
-        left: eval.left.map(cast_eig_value_to_single).transpose()?,
-    })
-}
-
-fn cast_eig_value_to_single(value: Value) -> BuiltinResult<Value> {
-    match value {
-        Value::Tensor(tensor) => {
-            let shape = tensor.shape().to_vec();
-            Tensor::from_f32(
-                tensor
-                    .materialize_f64()
-                    .into_iter()
-                    .map(|value| value as f32)
-                    .collect(),
-                shape,
-            )
-            .map(Value::Tensor)
-            .map_err(|err| eig_internal_error(format!("eig: {err}")))
-        }
-        Value::ComplexTensor(tensor) => {
-            let (storage, shape) = tensor.into_complex_storage_and_shape();
-            ComplexTensor::from_f32(
-                storage
-                    .materialize_f64()
-                    .into_iter()
-                    .map(|(real, imag)| (real as f32, imag as f32))
-                    .collect(),
-                shape,
-            )
-            .map(Value::ComplexTensor)
-            .map_err(|err| eig_internal_error(format!("eig: {err}")))
-        }
-        Value::Num(number) => Tensor::from_f32(vec![number as f32], vec![1, 1])
-            .map(Value::Tensor)
-            .map_err(|err| eig_internal_error(format!("eig: {err}"))),
-        Value::Complex(real, imaginary) => {
-            ComplexTensor::from_f32(vec![(real as f32, imaginary as f32)], vec![1, 1])
-                .map(Value::ComplexTensor)
-                .map_err(|err| eig_internal_error(format!("eig: {err}")))
-        }
-        other => Ok(other),
-    }
-}
-
-fn parse_request(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<EigRequest> {
+fn parse_request(
+    runtime: Option<&RuntimeContext>,
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<EigRequest> {
     let mut opts = EigOptions::default();
     let mut b = None;
     for (idx, arg) in args.iter().enumerate() {
-        if let Some(text) = option_text(arg)? {
+        if let Some(text) = option_text(runtime, arg)? {
             match FactorOption::parse(&text) {
                 Some(FactorOption::Balance) => opts.balance = true,
                 Some(FactorOption::NoBalance) => opts.balance = false,
@@ -629,16 +651,34 @@ fn parse_request(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<E
     Ok(EigRequest { b, options: opts })
 }
 
-fn option_text(value: &Value) -> BuiltinResult<Option<String>> {
+fn option_text(
+    runtime: Option<&RuntimeContext>,
+    value: &Value,
+) -> BuiltinResult<Option<runmat_value::Utf8Text>> {
     match value {
-        Value::String(text) => Ok(Some(text.as_str().to_owned())),
-        Value::StringArray(array) if array.data().len() == 1 => {
-            Ok(Some(array.data()[0].as_str().to_owned()))
-        }
+        Value::String(text) => Ok(Some(text.clone())),
+        Value::StringArray(array) if array.data().len() == 1 => Ok(Some(array.data()[0].clone())),
         Value::StringArray(_) => Err(eig_invalid_argument(
             "eig: option arguments must be character vectors or string scalars",
         )),
-        Value::CharArray(chars) if chars.rows <= 1 => Ok(Some(chars.data().iter().collect())),
+        Value::CharArray(chars) if chars.rows <= 1 => {
+            crate::call::argument_text::copy_chars(chars.data(), runtime)
+                .map(Some)
+                .map_err(|mut error| {
+                    if error
+                        .source
+                        .as_ref()
+                        .is_some_and(|source| source.is::<runmat_value::Utf16DecodeError>())
+                    {
+                        let source = error.source.take().expect("checked UTF16 cause");
+                        let mut error = eig_invalid_argument(source.to_string());
+                        error.source = Some(source);
+                        error
+                    } else {
+                        with_eig_context(error)
+                    }
+                })
+        }
         Value::CharArray(_) => Err(eig_invalid_argument(
             "eig: option arguments must be character vectors or string scalars",
         )),
@@ -646,583 +686,28 @@ fn option_text(value: &Value) -> BuiltinResult<Option<String>> {
     }
 }
 
-fn compute_eigen(
-    matrix: DMatrix<Complex64>,
-    options: EigOptions,
-    require_left: bool,
-) -> BuiltinResult<EigEval> {
-    if matrix.nrows() != matrix.ncols() {
-        return Err(eig_error(&EIG_ERROR_INVALID_INPUT));
-    }
-    let n = matrix.nrows();
-    if n == 0 {
-        let empty_vals = Tensor::new(Vec::new(), vec![0, 0])
-            .map_err(|e| eig_internal_error(format!("eig: {e}")))?;
-        let empty_mat = Tensor::new(Vec::new(), vec![0, 0])
-            .map_err(|e| eig_internal_error(format!("eig: {e}")))?;
-        let eigenvalues_value = Value::Tensor(empty_vals.clone());
-        let diagonal_matrix_value = Value::Tensor(empty_mat.clone());
-        let diagonal_output = if options.vector_output {
-            eigenvalues_value.clone()
-        } else {
-            diagonal_matrix_value.clone()
-        };
-        return Ok(EigEval {
-            eigenvalues: eigenvalues_value,
-            diagonal_matrix: diagonal_matrix_value,
-            diagonal_output,
-            right: Value::Tensor(empty_mat.clone()),
-            left: if require_left {
-                Some(Value::Tensor(empty_mat))
-            } else {
-                None
-            },
-        });
-    }
-
-    let balanced = maybe_balance(&matrix, options.balance);
-    let (eigenvalues, right) = schur_eigendecompose(&balanced)?;
-
-    let left_value = if require_left {
-        let left_matrix =
-            compute_left_vectors(&balanced, &right, &eigenvalues).ok_or_else(|| {
-                eig_internal_error(
-                    "eig: unable to compute left eigenvectors for the requested matrix",
-                )
-            })?;
-        Some(left_matrix)
-    } else {
-        None
-    };
-
-    build_eval(eigenvalues, right, left_value, options)
-}
-
-fn compute_generalized_eigen(
-    a: DMatrix<Complex64>,
-    b: DMatrix<Complex64>,
-    options: EigOptions,
-    require_left: bool,
-) -> BuiltinResult<EigEval> {
-    if a.nrows() != a.ncols() {
-        return Err(eig_invalid_input("eig: A matrix must be square"));
-    }
-    if b.nrows() != b.ncols() {
-        return Err(eig_invalid_input("eig: B matrix must be square"));
-    }
-    if a.shape() != b.shape() {
-        return Err(eig_invalid_input(
-            "eig: A and B must be the same size for generalized eigenvalue decomposition",
-        ));
-    }
-    let n = a.nrows();
-    if n == 0 {
-        return compute_eigen(a, options, require_left);
-    }
-
-    #[cfg(all(feature = "blas-lapack", not(target_arch = "wasm32")))]
-    {
-        compute_generalized_eigen_lapack(&a, &b, options, require_left)
-    }
-
-    #[cfg(not(all(feature = "blas-lapack", not(target_arch = "wasm32"))))]
-    {
-        compute_generalized_eigen_via_solve(a, b, options, require_left)
-    }
-}
-
-#[cfg(not(all(feature = "blas-lapack", not(target_arch = "wasm32"))))]
-fn compute_generalized_eigen_via_solve(
-    a: DMatrix<Complex64>,
-    b: DMatrix<Complex64>,
-    options: EigOptions,
-    require_left: bool,
-) -> BuiltinResult<EigEval> {
-    let lu = b.clone().lu();
-    let transformed = lu.solve(&a).ok_or_else(|| {
-        eig_invalid_input(
-            "eig: generalized eig(A,B) with singular B requires full QZ support, which is not yet available",
+#[cfg(test)]
+fn tensor_to_matrix(value: &Tensor) -> BuiltinResult<DMatrix<Complex64>> {
+    host::dimensions(&Value::Tensor(value.clone()), false)?;
+    Ok(DMatrix::from_fn(value.rows(), value.cols(), |r, c| {
+        Complex64::new(
+            value
+                .numeric_value_at(r + c * value.rows())
+                .expect("test coefficient")
+                .materialize_f64(),
+            0.0,
         )
-    })?;
-    let (eigenvalues, right) = schur_eigendecompose(&transformed)?;
-
-    let left_value = if require_left {
-        let standard_left =
-            compute_left_vectors(&transformed, &right, &eigenvalues).ok_or_else(|| {
-                eig_internal_error(
-                    "eig: unable to compute left eigenvectors for the requested generalized problem",
-                )
-            })?;
-        let mut generalized_left = b.adjoint().lu().solve(&standard_left).ok_or_else(|| {
-            eig_invalid_input(
-                "eig: generalized eig(A,B) with singular B requires full QZ support, which is not yet available",
-            )
-        })?;
-        normalize_generalized_left(&mut generalized_left, &b, &right);
-        Some(generalized_left)
-    } else {
-        None
-    };
-
-    build_eval(eigenvalues, right, left_value, options)
+    }))
 }
-
-#[cfg(all(feature = "blas-lapack", not(target_arch = "wasm32")))]
-fn compute_generalized_eigen_lapack(
-    a: &DMatrix<Complex64>,
-    b: &DMatrix<Complex64>,
-    options: EigOptions,
-    require_left: bool,
-) -> BuiltinResult<EigEval> {
-    let n = a.nrows();
-    let n_i32 = i32::try_from(n)
-        .map_err(|_| eig_invalid_input("eig: matrix is too large for LAPACK generalized eig"))?;
-    let mut a_copy = matrix_to_lapack_complex(a);
-    let mut b_copy = matrix_to_lapack_complex(b);
-    let mut alpha = vec![lapack::c64::new(0.0, 0.0); n];
-    let mut beta = vec![lapack::c64::new(0.0, 0.0); n];
-    let mut vl = vec![lapack::c64::new(0.0, 0.0); n * n];
-    let mut vr = vec![lapack::c64::new(0.0, 0.0); n * n];
-    let mut work = vec![lapack::c64::new(0.0, 0.0); 1];
-    let mut rwork = vec![0.0; 8 * n.max(1)];
-    let mut info = 0i32;
-    let jobvl = if require_left { b'V' } else { b'N' };
-    let jobvr = b'V';
-
-    unsafe {
-        lapack::zggev(
-            jobvl,
-            jobvr,
-            n_i32,
-            &mut a_copy,
-            n_i32,
-            &mut b_copy,
-            n_i32,
-            &mut alpha,
-            &mut beta,
-            &mut vl,
-            n_i32,
-            &mut vr,
-            n_i32,
-            &mut work,
-            -1,
-            &mut rwork,
-            &mut info,
-        );
-    }
-    if info != 0 {
-        return Err(eig_internal_error(format!(
-            "eig: LAPACK ZGGEV workspace query failed with info = {info}"
-        )));
-    }
-
-    let lwork = work[0].re.max(1.0) as i32;
-    work.resize(lwork as usize, lapack::c64::new(0.0, 0.0));
-    unsafe {
-        lapack::zggev(
-            jobvl,
-            jobvr,
-            n_i32,
-            &mut a_copy,
-            n_i32,
-            &mut b_copy,
-            n_i32,
-            &mut alpha,
-            &mut beta,
-            &mut vl,
-            n_i32,
-            &mut vr,
-            n_i32,
-            &mut work,
-            lwork,
-            &mut rwork,
-            &mut info,
-        );
-    }
-    if info < 0 {
-        return Err(eig_internal_error(format!(
-            "eig: LAPACK ZGGEV rejected argument {}",
-            -info
-        )));
-    }
-    if info > 0 {
-        return Err(eig_internal_error(format!(
-            "eig: LAPACK ZGGEV failed to converge with info = {info}"
-        )));
-    }
-
-    let eigenvalues = DVector::from_iterator(
-        n,
-        alpha
-            .iter()
-            .zip(beta.iter())
-            .map(|(alpha, beta)| lapack_ratio_to_eigenvalue(alpha, beta)),
-    );
-    let right = lapack_complex_to_matrix(&vr, n, n);
-    let left = if require_left {
-        let mut left = lapack_complex_to_matrix(&vl, n, n);
-        normalize_generalized_left(&mut left, b, &right);
-        Some(left)
-    } else {
-        None
-    };
-
-    build_eval(eigenvalues, right, left, options)
-}
-
-#[cfg(all(feature = "blas-lapack", not(target_arch = "wasm32")))]
-fn matrix_to_lapack_complex(matrix: &DMatrix<Complex64>) -> Vec<lapack::c64> {
-    matrix
-        .iter()
-        .map(|value| lapack::c64::new(value.re, value.im))
-        .collect()
-}
-
-#[cfg(all(feature = "blas-lapack", not(target_arch = "wasm32")))]
-fn lapack_complex_to_matrix(
-    values: &[lapack::c64],
-    rows: usize,
-    cols: usize,
-) -> DMatrix<Complex64> {
-    let data = values
-        .iter()
-        .map(|value| Complex64::new(value.re, value.im))
-        .collect::<Vec<_>>();
-    DMatrix::from_column_slice(rows, cols, &data)
-}
-
-#[cfg(all(feature = "blas-lapack", not(target_arch = "wasm32")))]
-fn lapack_ratio_to_eigenvalue(alpha: &lapack::c64, beta: &lapack::c64) -> Complex64 {
-    let alpha = Complex64::new(alpha.re, alpha.im);
-    let beta = Complex64::new(beta.re, beta.im);
-    if beta.norm() <= REAL_EPS {
-        if alpha.norm() <= REAL_EPS {
-            Complex64::new(f64::NAN, f64::NAN)
-        } else {
-            Complex64::new(infinite_component(alpha.re), infinite_component(alpha.im))
-        }
-    } else {
-        alpha / beta
-    }
-}
-
-#[cfg(all(feature = "blas-lapack", not(target_arch = "wasm32")))]
-fn infinite_component(value: f64) -> f64 {
-    if value == 0.0 {
-        value
-    } else {
-        value.signum() * f64::INFINITY
-    }
-}
-
-fn build_eval(
-    eigenvalues: DVector<Complex64>,
-    right: DMatrix<Complex64>,
-    left: Option<DMatrix<Complex64>>,
-    options: EigOptions,
-) -> BuiltinResult<EigEval> {
-    let eigenvalue_value = vector_to_value(&eigenvalues)?;
-    let diag_value = diag_matrix_value(&eigenvalues)?;
-    let right_value = matrix_to_value(&right)?;
-    let left_value = left
-        .map(|left_matrix| matrix_to_value(&left_matrix))
-        .transpose()?;
-
-    let spectral_output = if options.vector_output {
-        eigenvalue_value.clone()
-    } else {
-        diag_value.clone()
-    };
-
-    Ok(EigEval {
-        eigenvalues: eigenvalue_value,
-        diagonal_matrix: diag_value,
-        diagonal_output: spectral_output,
-        right: right_value,
-        left: left_value,
-    })
-}
-
-fn maybe_balance(matrix: &DMatrix<Complex64>, _balance: bool) -> DMatrix<Complex64> {
-    matrix.clone()
-}
-
-fn schur_eigendecompose(
-    matrix: &DMatrix<Complex64>,
-) -> BuiltinResult<(DVector<Complex64>, DMatrix<Complex64>)> {
-    let n = matrix.nrows();
-    if n == 0 {
-        return Ok((DVector::from(vec![]), DMatrix::zeros(0, 0)));
-    }
-    let schur = Schur::new(matrix.clone());
-    let (q, t) = schur.unpack();
-    let diag = t.diagonal().clone_owned();
-    let mut eigenvectors = DMatrix::<Complex64>::zeros(n, n);
-
-    for idx in 0..n {
-        let lambda = diag[idx];
-        let mut z = DVector::<Complex64>::zeros(n);
-        let mut success = false;
-
-        for attempt in 0..2 {
-            for k in (0..n).rev() {
-                let mut sum = Complex64::new(0.0, 0.0);
-                for j in (k + 1)..n {
-                    sum += t[(k, j)] * z[j];
-                }
-                let coeff = t[(k, k)] - lambda;
-                if coeff.norm() <= REAL_EPS {
-                    if sum.norm() <= REAL_EPS {
-                        if attempt == 0 && k == idx {
-                            z[k] = Complex64::new(1.0, 0.0);
-                        }
-                    } else {
-                        z[k] = -sum / Complex64::new(REAL_EPS, 0.0);
-                    }
-                } else {
-                    z[k] = -sum / coeff;
-                }
-            }
-            let norm = z.norm();
-            if norm > REAL_EPS {
-                let scale = Complex64::new(norm, 0.0);
-                z /= scale;
-                success = true;
-                break;
-            } else {
-                z.fill(Complex64::new(0.0, 0.0));
-                z[idx] = Complex64::new(1.0, 0.0);
-            }
-        }
-        if !success {
-            z.fill(Complex64::new(0.0, 0.0));
-            z[idx] = Complex64::new(1.0, 0.0);
-        }
-        let vec = q.clone() * z;
-        let norm = vec.norm();
-        let final_vec = if norm > REAL_EPS {
-            vec / Complex64::new(norm, 0.0)
-        } else {
-            vec
-        };
-        eigenvectors.set_column(idx, &final_vec);
-    }
-
-    Ok((diag, eigenvectors))
-}
-
-fn compute_left_vectors(
-    matrix: &DMatrix<Complex64>,
-    right: &DMatrix<Complex64>,
-    eigenvalues: &DVector<Complex64>,
-) -> Option<DMatrix<Complex64>> {
-    if let Some(inv) = right.clone().try_inverse() {
-        let mut left = inv.adjoint();
-        normalize_left(&mut left, right);
-        return Some(left);
-    }
-
-    let (left_vals, left_vecs) = schur_eigendecompose(&matrix.adjoint()).ok()?;
-    let n = eigenvalues.len();
-    let mut left = DMatrix::<Complex64>::zeros(n, n);
-    let mut used = vec![false; n];
-
-    for i in 0..n {
-        let target = eigenvalues[i].conj();
-        let mut best_idx = None;
-        let mut best_err = f64::MAX;
-        for j in 0..n {
-            if used[j] {
-                continue;
-            }
-            let err = (left_vals[j] - target).norm();
-            if err < best_err {
-                best_err = err;
-                best_idx = Some(j);
-            }
-        }
-        let idx = best_idx.unwrap_or(i);
-        used[idx] = true;
-        left.set_column(i, &left_vecs.column(idx));
-    }
-
-    normalize_left(&mut left, right);
-    Some(left)
-}
-
-fn normalize_left(left: &mut DMatrix<Complex64>, right: &DMatrix<Complex64>) {
-    for i in 0..right.ncols() {
-        let dot = left.column(i).dot(&right.column(i));
-        let finite = dot.re.is_finite() && dot.im.is_finite();
-        if dot.norm() > REAL_EPS && finite {
-            let scale = dot.conj();
-            for r in 0..left.nrows() {
-                left[(r, i)] /= scale;
-            }
-        }
-    }
-}
-
-fn normalize_generalized_left(
-    left: &mut DMatrix<Complex64>,
-    b: &DMatrix<Complex64>,
-    right: &DMatrix<Complex64>,
-) {
-    let b_right = b * right;
-    for i in 0..right.ncols() {
-        let dot = left.column(i).dot(&b_right.column(i));
-        let finite = dot.re.is_finite() && dot.im.is_finite();
-        if dot.norm() > REAL_EPS && finite {
-            let scale = dot.conj();
-            for r in 0..left.nrows() {
-                left[(r, i)] /= scale;
-            }
-        }
-    }
-}
-
-async fn value_to_complex_matrix(value: Value) -> BuiltinResult<DMatrix<Complex64>> {
-    match value {
-        Value::Tensor(tensor) => tensor_to_matrix(&tensor),
-        Value::ComplexTensor(ct) => complex_tensor_to_matrix(&ct),
-        Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)
-                .map_err(|err| eig_internal_error(format!("eig: {err}")))?;
-            tensor_to_matrix(&tensor)
-        }
-        Value::Num(n) => Ok(DMatrix::from_element(1, 1, Complex64::new(n, 0.0))),
-        Value::Int(i) => Ok(DMatrix::from_element(1, 1, Complex64::new(i.to_f64(), 0.0))),
-        Value::Bool(b) => Ok(DMatrix::from_element(
-            1,
-            1,
-            Complex64::new(if b { 1.0 } else { 0.0 }, 0.0),
-        )),
-        Value::Complex(re, im) => Ok(DMatrix::from_element(1, 1, Complex64::new(re, im))),
-        Value::GpuTensor(handle) => match gather_eig_resident_value(&handle).await? {
-            Value::Tensor(tensor) => tensor_to_matrix(&tensor),
-            Value::ComplexTensor(tensor) => complex_tensor_to_matrix(&tensor),
-            Value::LogicalArray(logical) => {
-                let tensor = tensor::logical_to_tensor(&logical)
-                    .map_err(|error| eig_internal_error(format!("eig: {error}")))?;
-                tensor_to_matrix(&tensor)
-            }
-            other => Err(eig_internal_error(format!(
-                "eig: exact-owner download returned unexpected value {other:?}"
-            ))),
-        },
-        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Err(eig_invalid_input(
-            "eig: input must be numeric or logical; convert character data with double() first",
-        )),
-        other => Err(eig_invalid_input(format!(
-            "eig: unsupported input type {other:?}; expected numeric or logical values"
-        ))),
-    }
-}
-
-fn tensor_to_matrix(tensor: &Tensor) -> BuiltinResult<DMatrix<Complex64>> {
-    if tensor.shape().len() > 2 {
-        return Err(eig_invalid_input("eig: input must be 2-D"));
-    }
-    let rows = tensor.rows();
-    let cols = tensor.cols();
-    let values = tensor::tensor_values_f64_cow(tensor);
-    let mut data = Vec::with_capacity(values.len());
-    for &value in values.iter() {
-        data.push(Complex64::new(value, 0.0));
-    }
-    Ok(DMatrix::from_column_slice(rows, cols, &data))
-}
-
-fn complex_tensor_to_matrix(tensor: &ComplexTensor) -> BuiltinResult<DMatrix<Complex64>> {
-    if tensor.shape().len() > 2 {
-        return Err(eig_invalid_input("eig: input must be 2-D"));
-    }
-    let rows = tensor.rows();
-    let cols = tensor.cols();
-    let mut data = Vec::with_capacity(tensor.materialize_f64().len());
-    for &(re, im) in &tensor.materialize_f64() {
-        data.push(Complex64::new(re, im));
-    }
-    Ok(DMatrix::from_column_slice(rows, cols, &data))
-}
-
-fn vector_to_value(values: &DVector<Complex64>) -> BuiltinResult<Value> {
-    if values.is_empty() {
-        let tensor = Tensor::new(Vec::new(), vec![0, 0])
-            .map_err(|e| eig_internal_error(format!("eig: {e}")))?;
-        return Ok(Value::Tensor(tensor));
-    }
-    if is_all_real(values.iter().copied()) {
-        let mut data = Vec::with_capacity(values.len());
-        for value in values.iter() {
-            data.push(value.re);
-        }
-        let tensor = Tensor::new(data, vec![values.len(), 1])
-            .map_err(|e| eig_internal_error(format!("eig: {e}")))?;
-        Ok(tensor::tensor_into_value(tensor))
-    } else {
-        let mut data = Vec::with_capacity(values.len());
-        for value in values.iter() {
-            data.push((value.re, value.im));
-        }
-        let tensor = ComplexTensor::new(data, vec![values.len(), 1])
-            .map_err(|e| eig_internal_error(format!("eig: {e}")))?;
-        Ok(Value::ComplexTensor(tensor))
-    }
-}
-
-fn diag_matrix_value(values: &DVector<Complex64>) -> BuiltinResult<Value> {
-    if values.is_empty() {
-        let tensor = Tensor::new(Vec::new(), vec![0, 0])
-            .map_err(|e| eig_internal_error(format!("eig: {e}")))?;
-        return Ok(Value::Tensor(tensor));
-    }
-    let size = values.len();
-    if is_all_real(values.iter().copied()) {
-        let mut data = vec![0.0f64; size * size];
-        for i in 0..size {
-            data[i + i * size] = values[i].re;
-        }
-        let tensor = Tensor::new(data, vec![size, size])
-            .map_err(|e| eig_internal_error(format!("eig: {e}")))?;
-        Ok(Value::Tensor(tensor))
-    } else {
-        let mut data = vec![(0.0f64, 0.0f64); size * size];
-        for i in 0..size {
-            data[i + i * size] = (values[i].re, values[i].im);
-        }
-        let tensor = ComplexTensor::new(data, vec![size, size])
-            .map_err(|e| eig_internal_error(format!("eig: {e}")))?;
-        Ok(Value::ComplexTensor(tensor))
-    }
-}
-
-fn matrix_to_value(matrix: &DMatrix<Complex64>) -> BuiltinResult<Value> {
-    if is_all_real(matrix.iter().copied()) {
-        let mut data = Vec::with_capacity(matrix.len());
-        for value in matrix.iter() {
-            data.push(value.re);
-        }
-        let tensor = Tensor::new(data, vec![matrix.nrows(), matrix.ncols()])
-            .map_err(|e| eig_internal_error(format!("eig: {e}")))?;
-        Ok(Value::Tensor(tensor))
-    } else {
-        let mut data = Vec::with_capacity(matrix.len());
-        for value in matrix.iter() {
-            data.push((value.re, value.im));
-        }
-        let tensor = ComplexTensor::new(data, vec![matrix.nrows(), matrix.ncols()])
-            .map_err(|e| eig_internal_error(format!("eig: {e}")))?;
-        Ok(Value::ComplexTensor(tensor))
-    }
-}
-
-fn is_all_real<I>(iter: I) -> bool
-where
-    I: IntoIterator<Item = Complex64>,
-{
-    iter.into_iter()
-        .all(|value| value.im.is_nan() || value.im.abs() <= REAL_EPS)
+#[cfg(test)]
+fn complex_tensor_to_matrix(value: &ComplexTensor) -> BuiltinResult<DMatrix<Complex64>> {
+    host::dimensions(&Value::ComplexTensor(value.clone()), false)?;
+    Ok(DMatrix::from_fn(value.rows(), value.cols(), |r, c| {
+        let (re, im) = value
+            .numeric_value_at(r + c * value.rows())
+            .expect("test coefficient");
+        Complex64::new(re.materialize_f64(), im.materialize_f64())
+    }))
 }
 
 #[cfg(test)]
@@ -1482,6 +967,18 @@ pub(crate) mod tests {
             panic!("expected real single vectors");
         };
         assert_eq!(vectors.numeric_dtype(), NumericDType::F32);
+        let scalar = evaluate(
+            Value::Tensor(Tensor::from_f32(vec![8.], vec![1, 1]).unwrap()),
+            &[],
+            false,
+        )
+        .expect("single singleton eig");
+        let Value::Tensor(singleton) = scalar.eigenvalues() else {
+            panic!("single eigenvalue must not become double scalar")
+        };
+        assert_eq!(singleton.numeric_dtype(), NumericDType::F32);
+        assert_eq!(singleton.shape(), [1, 1]);
+        assert_eq!(singleton.as_f32_slice(), Some(&[8.][..]));
         let builtin =
             builtin_catalog_entry_by_name(BUILTIN_NAME).expect("registered eig catalog entry");
         assert_eq!(builtin.extensions, &EIG_EXTENSIONS);
@@ -1599,6 +1096,41 @@ pub(crate) mod tests {
         let lhs = w.adjoint() * &a;
         let rhs = &d * w.adjoint();
         assert_matrix_close(&lhs, &rhs, 1e-10);
+
+        // Non-real, nonnormal witnesses distinguish Hermitian pairing from
+        // the old unconjugated dot product for both standard and pencil EVD.
+        for generalized in [false, true] {
+            let a = Value::ComplexTensor(
+                ComplexTensor::new(vec![(1., 2.), (0., 0.), (2., -1.), (4., -3.)], vec![2, 2])
+                    .unwrap(),
+            );
+            let b = Value::ComplexTensor(
+                ComplexTensor::new(vec![(2., 1.), (0., 0.), (0., 0.), (3., -0.5)], vec![2, 2])
+                    .unwrap(),
+            );
+            let args = if generalized {
+                vec![b.clone()]
+            } else {
+                Vec::new()
+            };
+            let eval = evaluate(a.clone(), &args, true).expect("complex left eig");
+            let a = matrix_from_value(a);
+            let b = if generalized {
+                matrix_from_value(b)
+            } else {
+                DMatrix::<Complex64>::identity(2, 2)
+            };
+            let v = matrix_from_value(eval.right());
+            let d = matrix_from_value(eval.diagonal_matrix());
+            let w = matrix_from_value(eval.left().expect("complex left factors"));
+            assert_matrix_close(&(&a * &v), &(&b * &v * &d), 1e-10);
+            assert_matrix_close(&(w.adjoint() * &a), &(&d * w.adjoint() * &b), 1e-10);
+            assert_matrix_close(
+                &(w.adjoint() * &b * &v),
+                &DMatrix::<Complex64>::identity(2, 2),
+                1e-10,
+            );
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1767,26 +1299,118 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    #[cfg(not(all(feature = "blas-lapack", not(target_arch = "wasm32"))))]
-    fn eig_generalized_singular_b_errors_with_qz_message() {
-        let a = Tensor::new(vec![1.0, 0.0, 0.0, 2.0], vec![2, 2]).unwrap();
-        let b = Tensor::new(vec![1.0, 0.0, 0.0, 0.0], vec![2, 2]).unwrap();
-        let err = evaluate(Value::Tensor(a), &[Value::Tensor(b)], false).unwrap_err();
-        assert_eq!(err.identifier(), EIG_ERROR_INVALID_INPUT.identifier);
-        let err = error_message(err);
-        assert!(err.contains("singular B"));
-        assert!(err.contains("QZ"));
-    }
-
-    #[cfg(all(feature = "blas-lapack", not(target_arch = "wasm32")))]
-    #[test]
-    fn eig_generalized_singular_b_returns_infinite_eigenvalue_with_lapack() {
+    fn eig_generalized_singular_b_returns_infinite_eigenvalue() {
         let a = Tensor::new(vec![1.0, 0.0, 0.0, 2.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![1.0, 0.0, 0.0, 0.0], vec![2, 2]).unwrap();
         let result = eig_builtin(Value::Tensor(a), vec![Value::Tensor(b)]).expect("eig(A,B)");
         let values = column_vector_from_value(result);
         assert!(values.iter().any(|value| (value.re - 1.0).abs() < 1e-10));
         assert!(values.iter().any(|value| value.re.is_infinite()));
+
+        // A small but nonzero homogeneous denominator remains finite.
+        let eval = evaluate(Value::Num(1.0), &[Value::Num(1e-16)], false).unwrap();
+        let values = column_vector_from_value(eval.eigenvalues());
+        assert!(values[0].re.is_finite());
+        assert!((values[0].re / 1e16 - 1.0).abs() < 1e-10);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn eig_generalized_singular_pencil_preserves_class_and_left_equations() {
+        for single in [false, true] {
+            for complex in [false, true] {
+                let finite = Complex64::new(2.0, if complex { 3.0 } else { 0.0 });
+                let infinite = Complex64::new(4.0, if complex { -2.0 } else { 0.0 });
+                let coefficient = |entries: [Complex64; 3]| {
+                    let data = [
+                        entries[0],
+                        Complex64::new(0.0, 0.0),
+                        Complex64::new(0.0, 0.0),
+                        Complex64::new(0.0, 0.0),
+                        entries[1],
+                        Complex64::new(0.0, 0.0),
+                        Complex64::new(0.0, 0.0),
+                        Complex64::new(0.0, 0.0),
+                        entries[2],
+                    ];
+                    if complex {
+                        Value::ComplexTensor(if single {
+                            ComplexTensor::from_f32(
+                                data.iter().map(|v| (v.re as f32, v.im as f32)).collect(),
+                                vec![3, 3],
+                            )
+                            .unwrap()
+                        } else {
+                            ComplexTensor::new(
+                                data.iter().map(|v| (v.re, v.im)).collect(),
+                                vec![3, 3],
+                            )
+                            .unwrap()
+                        })
+                    } else {
+                        Value::Tensor(if single {
+                            Tensor::from_f32(data.iter().map(|v| v.re as f32).collect(), vec![3, 3])
+                                .unwrap()
+                        } else {
+                            Tensor::new(data.iter().map(|v| v.re).collect(), vec![3, 3]).unwrap()
+                        })
+                    }
+                };
+                let a = coefficient([finite, infinite, Complex64::new(0.0, 0.0)]);
+                let b = coefficient([
+                    Complex64::new(1.0, 0.0),
+                    Complex64::new(0.0, 0.0),
+                    Complex64::new(0.0, 0.0),
+                ]);
+                let eval = evaluate(a.clone(), std::slice::from_ref(&b), true)
+                    .expect("full singular pencil");
+                let values = column_vector_from_value(eval.eigenvalues());
+                let expected_dtype = if single {
+                    NumericDType::F32
+                } else {
+                    NumericDType::F64
+                };
+                for output in [
+                    eval.eigenvalues(),
+                    eval.diagonal_matrix(),
+                    eval.right(),
+                    eval.left().unwrap(),
+                ] {
+                    assert_eq!(value_precision(&output), expected_dtype);
+                }
+                let a = matrix_from_value(a);
+                let b = matrix_from_value(b);
+                let v = matrix_from_value(eval.right());
+                let w = matrix_from_value(eval.left().unwrap());
+                let mut counts = [0; 3];
+                let tolerance = if single { 1e-5 } else { 1e-10 };
+                for (column, value) in values.iter().enumerate() {
+                    let right = v.column(column);
+                    let left = w.column(column).adjoint();
+                    assert!(right.iter().all(|v| v.re.is_finite() && v.im.is_finite()));
+                    assert!(left.iter().all(|v| v.re.is_finite() && v.im.is_finite()));
+                    if value.re.is_nan() || value.im.is_nan() {
+                        // 0/0 is indeterminate: do not invent a finite residual
+                        // or a W'*B*V identity for this undefined eigenvalue.
+                        counts[2] += 1;
+                    } else if value.re.is_infinite() || value.im.is_infinite() {
+                        counts[1] += 1;
+                        assert!((&b * right).norm() < tolerance);
+                        assert!((&left * &b).norm() < tolerance);
+                    } else {
+                        counts[0] += 1;
+                        assert!((*value - finite).norm() < tolerance);
+                        assert!((&a * right - (&b * right) * *value).norm() < tolerance);
+                        assert!((&left * &a - (&left * &b) * *value).norm() < tolerance);
+                        assert!(
+                            ((&left * &b * right)[(0, 0)] - Complex64::new(1.0, 0.0)).norm()
+                                < tolerance
+                        );
+                    }
+                }
+                assert_eq!(counts, [1, 1, 1]);
+            }
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1959,7 +1583,7 @@ pub(crate) mod tests {
     fn eig_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         let rest = crate::execution::RootedValues::new(rest)
             .map_err(|error| error.into_runtime_error())?;
-        block_on(super::eig_builtin(value, rest.into()))
+        block_on(super::eig_builtin_context(None, value, rest.into()))
     }
 
     fn evaluate(value: Value, args: &[Value], require_left: bool) -> BuiltinResult<EigEval> {

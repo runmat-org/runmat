@@ -71,7 +71,9 @@ You can also use `addpath` (including `addpath(genpath(...))`) while a RunMat se
 
 ## Local Dependencies
 
-Local dependencies make another RunMat project available during composition:
+Local dependencies make another RunMat project available during composition.
+
+Files belonging to a loaded local dependency are indexed under that dependency, even when a parent project's source roots cover its directory. An unrelated nested manifest does not create a dependency or change source ownership.
 
 ```text
 sales-report/

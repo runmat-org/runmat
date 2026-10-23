@@ -369,3 +369,57 @@ fn comparison_method_rejects_two_known_numeric_operands() {
         .iter()
         .any(|diagnostic| diagnostic.code == "RM-DURATION-OP-RECEIVER"));
 }
+
+#[test]
+fn arithmetic_handlers_select_typed_operation_independently_of_identity_labels() {
+    let lhs = facts::duration(shape(2, 1));
+    let rhs = facts::datetime(shape(1, 3));
+    // A diagnostic label is not authority to change the registered handler.
+    let mut addition = DURATION_PLUS_CATALOG_ENTRY;
+    addition.identity.name = "duration.minus";
+    let mut subtraction = DURATION_MINUS_CATALOG_ENTRY;
+    subtraction.identity.name = "duration.plus";
+    let request = call(vec![lhs.clone(), rhs], 1);
+    let added = crate::infer_catalog_call(&addition, &request);
+    assert!(added.diagnostics.is_empty());
+    assert_eq!(added.outputs[0].shape, shape(2, 3));
+    assert!(
+        matches!(&added.outputs[0].kind, ValueKindFact::Object(object)
+        if object.runtime_class.as_ref().is_some_and(|class| class.is(runmat_types::standard::DATETIME)))
+    );
+    let rejected = crate::infer_catalog_call(&subtraction, &request);
+    assert!(rejected
+        .diagnostics
+        .iter()
+        .any(|error| error.code == "RM-DURATION-OP-RIGHT"));
+    for rhs in [
+        number(shape(1, 3)),
+        logical(shape(1, 3)),
+        facts::duration(shape(1, 3)),
+    ] {
+        for entry in [&addition, &subtraction] {
+            let result = crate::infer_catalog_call(entry, &call(vec![lhs.clone(), rhs.clone()], 1));
+            assert!(result.diagnostics.is_empty());
+            assert_eq!(result.outputs[0].shape, shape(2, 3));
+            assert_eq!(facts::duration_class(&result.outputs[0]), Some(true));
+        }
+    }
+    for entry in [&addition, &subtraction] {
+        let mut request = call(
+            vec![lhs.clone(), ValueFact::unknown(DynamicReason::RuntimeValue)],
+            1,
+        );
+        request.literals =
+            LiteralContext::new(vec![LiteralValue::Unknown, LiteralValue::Number(2.0)]);
+        let dynamic = crate::infer_catalog_call(entry, &request);
+        assert!(matches!(dynamic.outputs[0].kind, ValueKindFact::Unknown));
+        request.outputs = OutputSelection::new(RequestedOutputCount::Exactly(0));
+        assert!(crate::infer_catalog_call(entry, &request)
+            .outputs
+            .is_empty());
+        request.outputs = OutputSelection::new(RequestedOutputCount::Exactly(2));
+        assert!(!crate::infer_catalog_call(entry, &request)
+            .diagnostics
+            .is_empty());
+    }
+}

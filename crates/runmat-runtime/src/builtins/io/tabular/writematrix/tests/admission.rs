@@ -12,8 +12,9 @@ fn paged_filename_and_option_name_fail_before_file_creation() {
     let _guard = runmat_filesystem::replace_provider(provider.clone());
     runmat_filesystem::set_current_dir("/tabular").expect("cwd");
 
-    let paged_path = CharArray::new_with_shape("a.csvb.csv".chars().collect(), vec![1, 5, 2])
-        .expect("paged path");
+    let paged_path =
+        CharArray::from_unicode_scalars_with_shape("a.csvb.csv".chars().collect(), vec![1, 5, 2])
+            .expect("paged path");
     let path_error = block_on(super::super::writematrix_builtin(
         None,
         Value::Num(1.0),
@@ -25,9 +26,11 @@ fn paged_filename_and_option_name_fail_before_file_creation() {
     assert!(path_error.message().contains("character vector"));
     assert!(provider.read_project_path("/tabular/a.csv").is_err());
 
-    let paged_name =
-        CharArray::new_with_shape("DelimiterDelimiter".chars().collect(), vec![1, 9, 2])
-            .expect("paged option name");
+    let paged_name = CharArray::from_unicode_scalars_with_shape(
+        "DelimiterDelimiter".chars().collect(),
+        vec![1, 9, 2],
+    )
+    .expect("paged option name");
     let option_error = block_on(super::super::writematrix_builtin(
         None,
         Value::Num(1.0),
@@ -51,8 +54,9 @@ fn singleton_page_char_filename_remains_admitted() {
     ));
     let _guard = runmat_filesystem::replace_provider(provider.clone());
     runmat_filesystem::set_current_dir("/tabular").expect("cwd");
-    let path = CharArray::new_with_shape("out.csv".chars().collect(), vec![1, 7, 1])
-        .expect("singleton page");
+    let path =
+        CharArray::from_unicode_scalars_with_shape("out.csv".chars().collect(), vec![1, 7, 1])
+            .expect("singleton page");
     let returned = block_on(super::super::writematrix_builtin(
         None,
         Value::Num(3.0),

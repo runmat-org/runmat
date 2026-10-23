@@ -132,7 +132,23 @@ test("source snapshots use portable Git regular-file modes across host umasks", 
 
 test("Git-backed snapshots reject unindexed source and index observation failure", () => {
   const repository = repositoryFixture();
-  fs.writeFileSync(path.join(repository, ".gitignore"), "ignored-source.txt\n");
+  const sourceDirectory = path.join(repository, "source");
+  fs.mkdirSync(sourceDirectory);
+  fs.writeFileSync(path.join(repository, ".gitignore"), "ignored-source.txt\nsource/.DS_Store\nsource/output.log\n");
+  fs.writeFileSync(path.join(sourceDirectory, "input.rs"), "// indexed source\n");
+  execFileSync("git", ["add", "source/input.rs"], { cwd: repository });
+  const beforeMetadata = sourceSnapshot(repository, ["source"]);
+  fs.writeFileSync(path.join(sourceDirectory, ".DS_Store"), "Finder metadata\n");
+  fs.writeFileSync(path.join(sourceDirectory, "output.log"), "generated runtime output\n");
+  assert.equal(sourceSnapshot(repository, ["source"]).digest, beforeMetadata.digest);
+  assert.throws(
+    () => sourceSnapshot(repository, ["source/.DS_Store"]),
+    /absent from the Git index/,
+  );
+  execFileSync("git", ["add", "--force", "source/.DS_Store"], { cwd: repository });
+  assert.equal(sourceSnapshot(repository, ["source"]).files.length, 2);
+  fs.writeFileSync(path.join(sourceDirectory, "new.rs"), "// not indexed\n");
+  assert.throws(() => sourceSnapshot(repository, ["source"]), /absent from the Git index/);
   execFileSync("git", ["add", ".gitignore"], { cwd: repository });
   execFileSync("git", [
     "-c", "user.name=RunMat Test", "-c", "user.email=test@runmat.invalid",

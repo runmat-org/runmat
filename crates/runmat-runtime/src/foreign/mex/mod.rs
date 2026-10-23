@@ -19,6 +19,7 @@ pub struct RootedMexInvocation {
 pub use isolation::*;
 pub use services::RuntimeMexHostServices;
 pub use session::{
-    MexArtifactExpectation, MexNameSelection, MexRuntimeSession, MexSessionRetirement,
-    PreparedMexArtifactCatalog, ReadyMexArtifactCatalog, ReadyMexIsolationPolicy,
+    MexArtifactExpectation, MexNameSelection, MexNativeLaneChildFactory, MexRuntimeSession,
+    MexSessionRetirement, PreparedMexArtifactCatalog, ReadyMexArtifactCatalog,
+    ReadyMexIsolationPolicy,
 };

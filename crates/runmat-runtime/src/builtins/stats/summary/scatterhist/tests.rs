@@ -34,7 +34,10 @@ fn categorical_group_must_match_full_observation_count() {
     let labels = Value::StringArray(
         StringArray::new(vec!["A".into(), "B".into(), "A".into()], vec![3, 1]).unwrap(),
     );
-    let categorical = crate::builtins::table::categorical_from_args(vec![labels]).unwrap();
+    let categorical = crate::builtins::table::categorical_from_args(
+        crate::call::FunctionArgumentView::from_slice(&[labels]),
+    )
+    .unwrap();
     assert_eq!(
         group_labels(&categorical, 3).unwrap(),
         vec![
@@ -54,8 +57,9 @@ fn categorical_group_must_match_full_observation_count() {
 
 #[test]
 fn character_group_rows_follow_character_payload_layout() {
-    let labels =
-        Value::CharArray(runmat_value::CharArray::new(vec!['A', '1', 'B', '2'], 2, 2).unwrap());
+    let labels = Value::CharArray(
+        runmat_value::CharArray::from_unicode_scalars(vec!['A', '1', 'B', '2'], 2, 2).unwrap(),
+    );
     assert_eq!(
         group_labels(&labels, 2).unwrap(),
         vec![
@@ -105,7 +109,8 @@ fn multirow_character_option_name_is_rejected_before_chart_effects() {
     let figure = current_figure_handle();
     let before = clone_figure(figure).unwrap().plots().count();
     let name = Value::CharArray(
-        runmat_value::CharArray::new(vec!['N', 'B', 'i', 'n', 's', ' '], 2, 3).unwrap(),
+        runmat_value::CharArray::from_unicode_scalars(vec!['N', 'B', 'i', 'n', 's', ' '], 2, 3)
+            .unwrap(),
     );
     let err = futures::executor::block_on(scatterhist_builtin(vec![
         vec_tensor(&[1.0, 2.0]),

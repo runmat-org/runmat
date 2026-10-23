@@ -3,6 +3,8 @@ use crate::builtins::common::gpu_helpers;
 use crate::{runtime_error::semantic_error, RuntimeError};
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, ProviderExecutionError};
 
+mod transfer;
+
 pub(super) fn owner(handle: &GpuTensorHandle) -> Result<&'static dyn AccelProvider, RuntimeError> {
     gpu_helpers::exact_provider_for_handle(handle).ok_or_else(|| {
         semantic_error(
@@ -22,88 +24,193 @@ pub(super) fn failure(context: &str, source: ProviderExecutionError) -> RuntimeE
     )
 }
 
-pub(super) async fn gather(input: &GpuTensorHandle) -> Result<runmat_value::Value, RuntimeError> {
-    gpu_helpers::download_value_preserving_residency_async(owner(input)?, input).await
+pub(super) async fn functional_scatter_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    target: &GpuTensorHandle,
+    indices: &[u32],
+    values: &GpuTensorHandle,
+    mapping: runmat_accelerate_api::ProviderScatterValueMapping,
+) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+    transfer::scatter(context, target, indices, values, mapping).await
 }
 
-pub(super) async fn gather_numeric(
+pub(super) fn read_with_plan_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    input: &GpuTensorHandle,
+    plan: &crate::indexing::plan::IndexPlan,
+) -> Result<runmat_value::Value, RuntimeError> {
+    let authority = crate::indexing::plan::admission::Owner::new(context)?;
+    let _residency = gpu_helpers::ResidencyRestoreGuard::new(input);
+    if plan.indices.is_empty() {
+        return empty_read_in_context(context, input, &plan.output_shape);
+    }
+    let output = transfer::gather(context, input, &plan.indices, &plan.output_shape)?;
+    if let Err(cause) = authority.check() {
+        return Err(gpu_helpers::reject_gpu_output(output, cause));
+    }
+    admit_read(output, input, &plan.output_shape)
+}
+
+pub(super) fn expand_scalar_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    source: &GpuTensorHandle,
+    plan: &crate::indexing::plan::IndexPlan,
+) -> Result<GpuTensorHandle, RuntimeError> {
+    // Only after the typed scalar port declines: legacy providers require a
+    // full values handle. Admit its actual native selector backing.
+    let indices =
+        crate::indexing::plan::admission::Scratch::<u32>::new(context, plan.indices.len())?;
+    let output = transfer::gather(context, source, indices.as_slice(), &plan.output_shape)?;
+    match admit_read(output, source, &plan.output_shape)? {
+        runmat_value::Value::GpuTensor(output) => Ok(output),
+        _ => unreachable!("resident scalar expansion"),
+    }
+}
+
+pub(super) async fn gather_in_context(
+    context: Option<&crate::context::RuntimeContext>,
     input: &GpuTensorHandle,
 ) -> Result<runmat_value::Value, RuntimeError> {
-    match gather(input).await? {
+    let provider = owner(input)?;
+    // Keep physical transfer work out of every host scalar-assignment future.
+    // This boundary is reached only for an actual resident operand. Its one
+    // concrete child allocation is admitted before constructing the download.
+    let result = crate::execution::rooted_continuation::admit_rooted_future_with(
+        context.cloned(),
+        "resident indexing transfer",
+        crate::builtin::builtin_control_error,
+        move |context| async move {
+            let value = gpu_helpers::download_value_preserving_residency_in_context(
+                context.as_ref(),
+                provider,
+                input,
+                "RunMat:Indexing:Ownership",
+                "resident indexing transfer admission failed",
+            )
+            .await?;
+            crate::execution::RootedValue::in_optional_context(value, context.as_ref())
+        },
+    )
+    .await?;
+    Ok(result.with_owned(|value| value))
+}
+
+/// Preserve dispatcher gather semantics for resident selectors and assignment
+/// operands without embedding its recursive future in every host indexing
+/// frame. Callers enter this boundary only when a resident operand is present.
+pub(super) async fn gather_dispatch_value_in_context(
+    value: &runmat_value::Value,
+    context: Option<&crate::context::RuntimeContext>,
+) -> Result<runmat_value::Value, RuntimeError> {
+    let result = crate::execution::rooted_continuation::admit_rooted_future_with(
+        context.cloned(),
+        "resident indexing gather",
+        crate::builtin::builtin_control_error,
+        move |context| async move {
+            let value =
+                crate::dispatcher::gather_if_needed_in_context_async(value, context.as_ref())
+                    .await?;
+            crate::execution::RootedValue::in_optional_context(value, context.as_ref())
+        },
+    )
+    .await?;
+    Ok(result.with_owned(|value| value))
+}
+
+pub(super) async fn gather_numeric_in_context(
+    context: Option<&crate::context::RuntimeContext>,
+    input: &GpuTensorHandle,
+) -> Result<runmat_value::Value, RuntimeError> {
+    match gather_in_context(context, input).await? {
         runmat_value::Value::LogicalArray(array) => {
-            crate::builtins::common::tensor::logical_to_tensor(&array)
-                .map(runmat_value::Value::Tensor)
-                .map_err(|cause| semantic_error("AccelerationOperationFailed", cause))
+            // The legacy scalar numeric grammar needs a numeric working
+            // carrier. Planned mutation above retains Logical directly. Fund
+            // this actual conversion owner rather than an ordinary f64 mirror.
+            let owner = crate::indexing::plan::admission::Owner::new(context)?;
+            let shape =
+                crate::indexing::plan::admission::shape(context, array.shape.len(), |axis| {
+                    Ok(array.shape[axis])
+                })?;
+            crate::indexing::read_slice::payload::output::real(
+                context,
+                runmat_value::NumericDType::F64,
+                shape,
+                |output| {
+                    for (index, &byte) in array.data.iter().enumerate() {
+                        if index % 4096 == 0 {
+                            owner.check()?;
+                        }
+                        output.set(
+                            index,
+                            runmat_value::NumericScalar::F64(if byte != 0 { 1.0 } else { 0.0 }),
+                        )?;
+                    }
+                    Ok(())
+                },
+            )
+            .map(runmat_value::Value::Tensor)
         }
         value => Ok(value),
     }
 }
 
-pub(super) fn restore(
+pub(super) fn restore_in_context(
+    context: Option<&crate::context::RuntimeContext>,
     input: &GpuTensorHandle,
     value: runmat_value::Value,
     other: &[&GpuTensorHandle],
 ) -> Result<runmat_value::Value, RuntimeError> {
     use runmat_value::Value;
+    let authority = crate::indexing::plan::admission::Owner::new(context)?;
     let provider = owner(input)?;
-    let protected: Vec<_> = std::iter::once(input)
-        .chain(other.iter().copied())
-        .collect();
+    let protected_len = other
+        .len()
+        .checked_add(1)
+        .ok_or_else(|| semantic_error("IndexOutOfBounds", "resident protection extent overflow"))?;
+    let protected = crate::indexing::plan::admission::array(context, protected_len, |index| {
+        Ok(if index == 0 { input } else { other[index - 1] })
+    })?;
     let output = match value {
         Value::Tensor(tensor) if runmat_accelerate_api::handle_is_logical(input) => {
-            let data: Vec<u8> = (0..tensor.len())
-                .map(|index| {
-                    u8::from(
-                        tensor
-                            .numeric_value_at(index)
-                            .expect("validated tensor")
-                            .materialize_f64()
-                            != 0.0,
-                    )
-                })
-                .collect();
-            runmat_accelerate_api::upload_logical_protecting(
-                provider,
-                &runmat_accelerate_api::HostLogicalTensorView {
-                    data: &data,
-                    shape: tensor.shape(),
+            let array = crate::indexing::value::primitive_output::logical(
+                context,
+                tensor.shape(),
+                |bytes| {
+                    for (index, byte) in bytes.iter_mut().enumerate() {
+                        if index % 4096 == 0 {
+                            authority.check()?;
+                        }
+                        *byte = u8::from(
+                            tensor
+                                .numeric_value_at(index)
+                                .expect("validated tensor")
+                                .materialize_f64()
+                                != 0.0,
+                        );
+                    }
+                    Ok(())
                 },
-                &protected,
-            )
-            .map_err(|cause| {
-                failure(
-                    "logical indexed result",
-                    ProviderExecutionError::from_source(cause),
-                )
-            })?
+            )?;
+            restore_logical(context, input, &array, &protected)?
         }
-        Value::Tensor(tensor) => gpu_helpers::upload_tensor_protecting_typed(
-            provider, &tensor, &protected,
-        )
-        .map_err(|cause| failure("indexed result", ProviderExecutionError::from_source(cause)))?,
+        Value::Tensor(tensor) => transfer::numeric(
+            context,
+            provider,
+            &runmat_accelerate_api::HostNumericTensorView {
+                data: gpu_helpers::tensor_numeric_view(&tensor),
+                shape: tensor.shape(),
+                storage: runmat_accelerate_api::GpuTensorStorage::Real,
+            },
+            &protected,
+        )?,
         Value::ComplexTensor(_) if runmat_accelerate_api::handle_is_logical(input) => {
             return Err(semantic_error(
                 "AssignmentTypeMismatch",
                 "Logical assignment requires real numeric or logical values",
             ));
         }
-        Value::ComplexTensor(tensor) => {
-            gpu_helpers::upload_complex_tensor_protecting(provider, &tensor, &protected)?
-        }
-        Value::LogicalArray(array) => runmat_accelerate_api::upload_logical_protecting(
-            provider,
-            &runmat_accelerate_api::HostLogicalTensorView {
-                data: &array.data,
-                shape: &array.shape,
-            },
-            &protected,
-        )
-        .map_err(|cause| {
-            failure(
-                "logical indexed result",
-                ProviderExecutionError::from_source(cause),
-            )
-        })?,
+        Value::ComplexTensor(tensor) => restore_complex(context, provider, &tensor, &protected)?,
+        Value::LogicalArray(array) => restore_logical(context, input, &array, &protected)?,
         _ => {
             return Err(semantic_error(
                 "AccelerationOperationFailed",
@@ -111,8 +218,131 @@ pub(super) fn restore(
             ))
         }
     };
+    if let Err(cause) = authority.check() {
+        return Err(gpu_helpers::reject_gpu_output(output, cause));
+    }
     let output = gpu_helpers::propagate_owned_output_provenance(output, [input])?;
     gpu_helpers::resident_gpu_value(output)
+}
+
+fn restore_logical(
+    context: Option<&crate::context::RuntimeContext>,
+    input: &GpuTensorHandle,
+    array: &runmat_value::LogicalArray,
+    protected: &[&GpuTensorHandle],
+) -> Result<GpuTensorHandle, RuntimeError> {
+    use crate::context::host_allocation::{HostAllocationPolicy, HostAllocationReceipt};
+    if HostAllocationReceipt::policy(context).map_err(|source| {
+        crate::context::host_allocation::host_allocation_runtime_error(
+            context,
+            "RunMat:Indexing:Ownership",
+            "logical indexed transfer",
+            source,
+        )
+    })? == HostAllocationPolicy::Unbounded
+    {
+        return runmat_accelerate_api::upload_logical_protecting(
+            owner(input)?,
+            &runmat_accelerate_api::HostLogicalTensorView {
+                data: &array.data,
+                shape: &array.shape,
+            },
+            protected,
+        )
+        .map_err(|cause| failure("logical indexed result", cause.into_execution_error()));
+    }
+    use gpu_helpers::host_upload::GpuHostUpload;
+    let mut upload = GpuHostUpload::prepare_borrowed_logical_output_in_optional_context(
+        context,
+        "indexing",
+        input,
+        &array.shape,
+    )?;
+    upload.publish_logical_protecting(
+        &runmat_accelerate_api::HostLogicalTensorView {
+            data: &array.data,
+            shape: &array.shape,
+        },
+        protected,
+    )
+}
+
+fn restore_complex(
+    context: Option<&crate::context::RuntimeContext>,
+    provider: &dyn AccelProvider,
+    tensor: &runmat_value::ComplexTensor,
+    protected: &[&GpuTensorHandle],
+) -> Result<GpuTensorHandle, RuntimeError> {
+    use crate::indexing::plan::admission::{Owner, Scratch};
+    use runmat_accelerate_api::{GpuTensorStorage, HostNumericDataView, HostNumericTensorView};
+    use runmat_value::{ComplexStorage, IntegerStorage};
+    let owner = Owner::new(context)?;
+    let lanes = tensor
+        .len()
+        .checked_mul(2)
+        .ok_or_else(|| semantic_error("IndexOutOfBounds", "complex upload extent overflow"))?;
+    macro_rules! upload {
+        ($type:ty, $variant:ident, $real:expr, $imag:expr) => {{
+            let mut interleaved = Scratch::<$type>::new(context, lanes)?;
+            for (index, (&real, &imag)) in $real.iter().zip($imag.iter()).enumerate() {
+                if index % 4096 == 0 {
+                    owner.check()?;
+                }
+                interleaved.as_mut_slice()[2 * index] = real;
+                interleaved.as_mut_slice()[2 * index + 1] = imag;
+            }
+            transfer::numeric(
+                context,
+                provider,
+                &HostNumericTensorView {
+                    data: HostNumericDataView::$variant(interleaved.as_slice()),
+                    shape: tensor.shape(),
+                    storage: GpuTensorStorage::ComplexInterleaved,
+                },
+                protected,
+            )
+        }};
+    }
+    macro_rules! pairs {
+        ($type:ty, $variant:ident, $pairs:expr) => {{
+            let mut interleaved = Scratch::<$type>::new(context, lanes)?;
+            for (index, pair) in $pairs.iter().enumerate() {
+                if index % 4096 == 0 {
+                    owner.check()?;
+                }
+                interleaved.as_mut_slice()[2 * index] = pair.0;
+                interleaved.as_mut_slice()[2 * index + 1] = pair.1;
+            }
+            transfer::numeric(
+                context,
+                provider,
+                &HostNumericTensorView {
+                    data: HostNumericDataView::$variant(interleaved.as_slice()),
+                    shape: tensor.shape(),
+                    storage: GpuTensorStorage::ComplexInterleaved,
+                },
+                protected,
+            )
+        }};
+    }
+    match tensor.complex_storage() {
+        ComplexStorage::F32(values) => pairs!(f32, F32, values),
+        ComplexStorage::F64(values) => pairs!(f64, F64, values),
+        ComplexStorage::Integer(storage) => match (storage.real(), storage.imag()) {
+            (IntegerStorage::I8(real), IntegerStorage::I8(imag)) => upload!(i8, I8, real, imag),
+            (IntegerStorage::I16(real), IntegerStorage::I16(imag)) => upload!(i16, I16, real, imag),
+            (IntegerStorage::I32(real), IntegerStorage::I32(imag)) => upload!(i32, I32, real, imag),
+            (IntegerStorage::I64(real), IntegerStorage::I64(imag)) => upload!(i64, I64, real, imag),
+            (IntegerStorage::U8(real), IntegerStorage::U8(imag)) => upload!(u8, U8, real, imag),
+            (IntegerStorage::U16(real), IntegerStorage::U16(imag)) => upload!(u16, U16, real, imag),
+            (IntegerStorage::U32(real), IntegerStorage::U32(imag)) => upload!(u32, U32, real, imag),
+            (IntegerStorage::U64(real), IntegerStorage::U64(imag)) => upload!(u64, U64, real, imag),
+            _ => Err(semantic_error(
+                "AccelerationOperationFailed",
+                "complex integer components must have matching classes",
+            )),
+        },
+    }
 }
 
 pub(super) fn admit_read(
@@ -143,18 +373,17 @@ pub(super) fn admit_read(
     gpu_helpers::resident_gpu_value(output)
 }
 
-pub(super) fn empty_read(
+pub(super) fn empty_read_in_context(
+    context: Option<&crate::context::RuntimeContext>,
     input: &GpuTensorHandle,
     shape: &[usize],
 ) -> Result<runmat_value::Value, RuntimeError> {
     use runmat_accelerate_api::{HostNumericDataView as Data, NumericElementType as Element};
     let provider = owner(input)?;
-    let result = if runmat_accelerate_api::handle_is_logical(input) {
-        runmat_accelerate_api::upload_logical_protecting(
-            provider,
-            &runmat_accelerate_api::HostLogicalTensorView { data: &[], shape },
-            &[input],
-        )
+    if runmat_accelerate_api::handle_is_logical(input) {
+        let array = crate::indexing::value::primitive_output::logical(context, shape, |_| Ok(()))?;
+        restore_logical(context, input, &array, &[input])
+            .and_then(|output| admit_read(output, input, shape))
     } else {
         let data = match input.physical().element_type() {
             Element::F64 => Data::F64(&[]),
@@ -168,7 +397,8 @@ pub(super) fn empty_read(
             Element::U32 => Data::U32(&[]),
             Element::U64 => Data::U64(&[]),
         };
-        runmat_accelerate_api::upload_numeric_protecting(
+        transfer::numeric(
+            context,
             provider,
             &runmat_accelerate_api::HostNumericTensorView {
                 data,
@@ -177,14 +407,8 @@ pub(super) fn empty_read(
             },
             &[input],
         )
+        .and_then(|output| admit_read(output, input, shape))
     }
-    .map_err(|cause| {
-        failure(
-            "empty indexed result",
-            ProviderExecutionError::from_source(cause),
-        )
-    })?;
-    admit_read(result, input, shape)
 }
 
 #[cfg(test)]
@@ -209,7 +433,8 @@ mod tests {
                 .expect("logical input");
                 let host = runmat_value::Tensor::new(vec![1.0; count], shape.clone()).unwrap();
                 let runmat_value::Value::GpuTensor(output) =
-                    restore(&input, runmat_value::Value::Tensor(host), &[]).unwrap()
+                    restore_in_context(None, &input, runmat_value::Value::Tensor(host), &[])
+                        .unwrap()
                 else {
                     panic!("resident logical output expected")
                 };
@@ -220,7 +445,8 @@ mod tests {
                     owner(&output).unwrap(),
                     owner(&input).unwrap(),
                 ));
-                let gathered = futures::executor::block_on(gather(&output)).unwrap();
+                let gathered =
+                    futures::executor::block_on(gather_in_context(None, &output)).unwrap();
                 let runmat_value::Value::LogicalArray(gathered) = gathered else {
                     panic!("logical host output expected")
                 };
@@ -323,7 +549,8 @@ mod tests {
                     &[],
                 )
                 .unwrap();
-                let runmat_value::Value::GpuTensor(output) = empty_read(&input, &[1, 0]).unwrap()
+                let runmat_value::Value::GpuTensor(output) =
+                    empty_read_in_context(None, &input, &[1, 0]).unwrap()
                 else {
                     panic!("resident result");
                 };
@@ -341,7 +568,8 @@ mod tests {
                     shape: &[1, 1],
                 })
                 .unwrap();
-            let runmat_value::Value::GpuTensor(output) = empty_read(&input, &[0, 1]).unwrap()
+            let runmat_value::Value::GpuTensor(output) =
+                empty_read_in_context(None, &input, &[0, 1]).unwrap()
             else {
                 panic!("resident logical");
             };

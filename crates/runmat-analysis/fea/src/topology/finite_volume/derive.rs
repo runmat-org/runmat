@@ -264,31 +264,14 @@ pub(super) fn derive(
         {
             return Err(Error::Invalid("boundary original adjacency mismatch"));
         }
-        if boundary.centroid_m.iter().any(|v| !v.is_finite())
-            || !geometry::close_scalar(boundary.area_m2, face.area_m2, face.area_m2)
-            || geometry::length(subtract(boundary.centroid_m, face.centroid_m))
-                > RELATIVE_TOLERANCE * face.area_m2.sqrt()
+        // Face geometry has one source: the finite-volume face computed from its cell's
+        // nodes, which closes every cell exactly. The mesh boundary record supplies identity,
+        // role and adjacency only; its own geometry may carry curved-surface data, so it is
+        // checked for orientation, never for equality with the flat face.
+        if role_is_exterior
+            && !(dot(boundary.oriented_area_vector_m2, face.owner_area_vector_m2) > 0.0)
         {
-            return Err(Error::Invalid("boundary geometry mismatch"));
-        }
-        // Interfaces may have their own canonical orientation; exterior must be outward.
-        let normal_difference = if role_is_exterior {
-            subtract(boundary.oriented_area_vector_m2, face.owner_area_vector_m2)
-        } else {
-            let sign = if dot(boundary.oriented_area_vector_m2, face.owner_area_vector_m2) >= 0.0 {
-                1.0
-            } else {
-                -1.0
-            };
-            subtract(
-                boundary.oriented_area_vector_m2,
-                face.owner_area_vector_m2.map(|v| sign * v),
-            )
-        };
-        if normal_difference.iter().any(|v| !v.is_finite())
-            || geometry::length(normal_difference) > RELATIVE_TOLERANCE * face.area_m2
-        {
-            return Err(Error::Invalid("boundary area-vector mismatch"));
+            return Err(Error::Invalid("exterior boundary face is not outward"));
         }
         face.boundary_source = Some(FiniteVolumeBoundarySource {
             projection_boundary_index: boundary_index,

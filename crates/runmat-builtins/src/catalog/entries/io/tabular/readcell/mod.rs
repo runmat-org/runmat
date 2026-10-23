@@ -1,14 +1,12 @@
 mod inference;
+mod documentation;
 use crate::*;
 pub const READCELL_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     audience: BuiltinCatalogAudience::Public,
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
     identity: BuiltinCatalogIdentity { name: "readcell" },
     category: "io/tabular",
-    documentation: BuiltinDocumentation {
-        summary: "Read text or spreadsheet data into a cell array.",
-        ..BuiltinDocumentation::EMPTY
-    },
+    documentation: documentation::DOCUMENTATION,
     descriptor: &READCELL_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Incomplete,

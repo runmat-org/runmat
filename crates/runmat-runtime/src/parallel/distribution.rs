@@ -461,47 +461,65 @@ fn block_cyclic_indices(
 
 fn selectors_from_layout(
     layout: &DistributedPartitionLayout,
-) -> Result<Vec<SliceSelector>, RuntimeError> {
-    layout
-        .selections
-        .iter()
-        .map(|selection| match selection {
-            PartitionSelection::Range(range) => Ok(SliceSelector::Indices(
-                (range.start..range.end)
-                    .map(|index| {
-                        usize::try_from(index + 1)
-                            .map_err(|_| error("partition index exceeds this host"))
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-            )),
-            PartitionSelection::Strided {
-                start, step, count, ..
-            } => Ok(SliceSelector::Indices(
-                (0..*count)
-                    .map(|offset| {
-                        start
-                            .checked_add(step.checked_mul(offset).ok_or_else(|| {
-                                error("partition selection multiplication overflowed")
-                            })?)
-                            .and_then(|index| index.checked_add(1))
-                            .and_then(|index| usize::try_from(index).ok())
-                            .ok_or_else(|| error("partition selection exceeds this host"))
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-            )),
-            PartitionSelection::Indices { indices, .. } => Ok(SliceSelector::Indices(
-                indices
-                    .iter()
-                    .map(|index| {
-                        index
-                            .checked_add(1)
-                            .and_then(|index| usize::try_from(index).ok())
-                            .ok_or_else(|| error("partition index exceeds this host"))
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-            )),
-        })
-        .collect()
+) -> Result<runmat_value::ExactArrayStorage<SliceSelector>, RuntimeError> {
+    let context = crate::context::legacy::active();
+    let context = context.as_ref();
+    crate::context::host_allocation::initialize_host_array(
+        context,
+        layout.selections.len(),
+        |dimension| {
+            let values = match &layout.selections[dimension] {
+                PartitionSelection::Range(range) => {
+                    let count = usize::try_from(range.end.saturating_sub(range.start))
+                        .map_err(|_| error("partition index exceeds this host"))?;
+                    crate::context::host_allocation::initialize_host_array(
+                        context,
+                        count,
+                        |offset| {
+                            range
+                                .start
+                                .checked_add(offset as u64)
+                                .and_then(|index| index.checked_add(1))
+                                .and_then(|index| usize::try_from(index).ok())
+                                .ok_or_else(|| error("partition index exceeds this host"))
+                        },
+                    )?
+                }
+                PartitionSelection::Strided {
+                    start, step, count, ..
+                } => {
+                    let length = usize::try_from(*count)
+                        .map_err(|_| error("partition selection exceeds this host"))?;
+                    crate::context::host_allocation::initialize_host_array(
+                        context,
+                        length,
+                        |offset| {
+                            start
+                                .checked_add(step.checked_mul(offset as u64).ok_or_else(|| {
+                                    error("partition selection multiplication overflowed")
+                                })?)
+                                .and_then(|index| index.checked_add(1))
+                                .and_then(|index| usize::try_from(index).ok())
+                                .ok_or_else(|| error("partition selection exceeds this host"))
+                        },
+                    )?
+                }
+                PartitionSelection::Indices { indices, .. } => {
+                    crate::context::host_allocation::initialize_host_array(
+                        context,
+                        indices.len(),
+                        |offset| {
+                            indices[offset]
+                                .checked_add(1)
+                                .and_then(|index| usize::try_from(index).ok())
+                                .ok_or_else(|| error("partition index exceeds this host"))
+                        },
+                    )?
+                }
+            };
+            Ok(SliceSelector::Indices(values))
+        },
+    )
 }
 
 fn zero_like(prototype: &Value, shape: &[usize]) -> Result<Value, RuntimeError> {

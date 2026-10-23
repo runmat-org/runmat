@@ -35,6 +35,7 @@ pub(super) enum EnvironmentNames {
 pub(super) enum NameError {
     InvalidType,
     InvalidCellElement,
+    Encoding(runmat_value::Utf16DecodeError),
 }
 
 impl EnvironmentNames {
@@ -46,12 +47,12 @@ impl EnvironmentNames {
                 Err(NameError::InvalidType)
             }
             Value::CharArray(array) if array.rows == 1 => {
-                Ok(Self::CharacterRow(character_row(array, 0)))
+                Ok(Self::CharacterRow(character_row(array, 0)?))
             }
             Value::CharArray(array) if array.rows > 1 => Ok(Self::CharacterMatrix {
                 names: (0..array.rows)
                     .map(|row| character_row(array, row))
-                    .collect(),
+                    .collect::<Result<Vec<_>, _>>()?,
                 rows: array.rows,
             }),
             Value::CharArray(_) => Ok(Self::CharacterRow(String::new())),
@@ -78,7 +79,7 @@ impl EnvironmentNames {
                     if chars.rows == 1
                         && crate::builtins::common::shape::effective_rank(&chars.shape) <= 2 =>
                 {
-                    names.push(character_row(chars, 0));
+                    names.push(character_row(chars, 0)?);
                     kinds.push(CellNameKind::Character);
                 }
                 Value::String(text) => {
@@ -130,11 +131,12 @@ impl EnvironmentNames {
     }
 }
 
-fn character_row(array: &CharArray, row: usize) -> String {
+fn character_row(array: &CharArray, row: usize) -> Result<String, NameError> {
     let start = row * array.cols;
-    let mut text: String = array.data()[start..start + array.cols].iter().collect();
+    let mut text = runmat_value::decode_utf16_code_units(&array.data()[start..start + array.cols])
+        .map_err(NameError::Encoding)?;
     while text.ends_with(' ') {
         text.pop();
     }
-    text
+    Ok(text)
 }

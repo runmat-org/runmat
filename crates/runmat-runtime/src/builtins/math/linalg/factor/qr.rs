@@ -138,9 +138,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "qr",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::linalg::factor::qr"
 )]
-async fn qr_builtin(
+async fn qr_builtin_context(
+    runtime: Option<crate::context::RuntimeContext>,
     value: Value,
     rest: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<Value> {
@@ -151,6 +153,10 @@ async fn qr_builtin(
         Some(3) => QrOutputRequest::Qrp,
         Some(_) => return Err(qr_error(&QR_ERROR_INVALID_ARGUMENT)),
     };
+    if let Value::SparseTensor(source) = &value {
+        admit_qr_extensions(&value, rest.view())?;
+        return sparse::evaluate(runtime.as_ref(), source, rest.view(), count).await;
+    }
     let eval = evaluate_requested(value, rest.view(), request).await?;
     match count {
         None => Ok(eval.r()),
@@ -164,6 +170,16 @@ async fn qr_builtin(
         ])),
         Some(_) => unreachable!("output count was validated before QR execution"),
     }
+}
+
+mod sparse;
+
+#[cfg(test)]
+async fn qr_builtin(
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    qr_builtin_context(None, value, rest).await
 }
 
 /// Output envelope containing only the values selected by its typed request.

@@ -43,18 +43,25 @@ pub(super) fn ensure_corr_integer_extensions(
     value: &Value,
     rest: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<()> {
-    let second_is_data = rest
-        .first()
-        .is_some_and(|candidate| keyword_of(candidate).is_none());
+    let second_is_data = match rest.first() {
+        Some(candidate) => keyword_of(candidate)?.is_none(),
+        None => false,
+    };
     if is_typed_integer_value(value)
         || second_is_data && rest.first().is_some_and(is_typed_integer_value)
     {
         crate::compatibility::ensure_builtin_extension_enabled(&CORR_INTEGER_DATA_EXTENSION, NAME)?;
     }
-    if rest.iter().zip(rest.iter().skip(1)).any(|(name, value)| {
-        keyword_of(name).is_some_and(|name| name.eq_ignore_ascii_case("weights"))
+    let mut integer_weights = false;
+    for (name, value) in rest.iter().zip(rest.iter().skip(1)) {
+        if keyword_of(name)?.is_some_and(|name| name.eq_ignore_ascii_case("weights"))
             && is_typed_integer_value(value)
-    }) {
+        {
+            integer_weights = true;
+            break;
+        }
+    }
+    if integer_weights {
         crate::compatibility::ensure_builtin_extension_enabled(
             &CORR_INTEGER_WEIGHTS_EXTENSION,
             NAME,
@@ -75,7 +82,7 @@ pub(super) async fn parse_args(
     let mut weights = None;
     let mut idx = 0usize;
     if let Some(first) = rest.first() {
-        if keyword_of(first).is_none() {
+        if keyword_of(first)?.is_none() {
             right = Some(value_to_tensor(first.clone()).await?);
             idx = 1;
         }
@@ -86,11 +93,11 @@ pub(super) async fn parse_args(
                 "corr: name-value options must be provided in pairs",
             ));
         }
-        let name = keyword_of(&rest[idx])
+        let name = keyword_of(&rest[idx])?
             .ok_or_else(|| corr_error("corr: option names must be string scalars"))?;
         match name.to_ascii_lowercase().as_str() {
             "type" => {
-                let option = keyword_of(&rest[idx + 1])
+                let option = keyword_of(&rest[idx + 1])?
                     .ok_or_else(|| corr_error("corr: Type must be a string scalar"))?;
                 match option.to_ascii_lowercase().as_str() {
                     "pearson" => corr_type = CorrType::Pearson,
@@ -100,7 +107,7 @@ pub(super) async fn parse_args(
                 }
             }
             "rows" => {
-                let option = keyword_of(&rest[idx + 1])
+                let option = keyword_of(&rest[idx + 1])?
                     .ok_or_else(|| corr_error("corr: Rows must be a string scalar"))?;
                 match option.to_ascii_lowercase().as_str() {
                     "all" => rows = RowsMode::All,
@@ -110,7 +117,7 @@ pub(super) async fn parse_args(
                 }
             }
             "tail" => {
-                let option = keyword_of(&rest[idx + 1])
+                let option = keyword_of(&rest[idx + 1])?
                     .ok_or_else(|| corr_error("corr: Tail must be a string scalar"))?;
                 match option.to_ascii_lowercase().as_str() {
                     "both" => tail = Tail::Both,

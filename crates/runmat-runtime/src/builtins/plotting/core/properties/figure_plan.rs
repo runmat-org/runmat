@@ -112,16 +112,32 @@ impl FigurePropertyEdit {
         let key = property_name(key, builtin)?;
         let opts = LineStyleParseOptions::generic(builtin);
         Ok(match key.as_str() {
-            "name" => {
-                Self::Name(value_as_text_string(value).ok_or_else(|| {
-                    plotting_error(builtin, format!("{builtin}: Name must be text"))
-                })?)
-            }
-            "tag" => {
-                Self::Tag(value_as_text_string(value).ok_or_else(|| {
-                    plotting_error(builtin, format!("{builtin}: Tag must be text"))
-                })?)
-            }
+            "name" => Self::Name(
+                value_as_text_string(value)
+                    .map_err(|source| {
+                        crate::builtins::plotting::plotting_error_with_source(
+                            builtin,
+                            source.to_string(),
+                            source,
+                        )
+                    })?
+                    .ok_or_else(|| {
+                        plotting_error(builtin, format!("{builtin}: Name must be text"))
+                    })?,
+            ),
+            "tag" => Self::Tag(
+                value_as_text_string(value)
+                    .map_err(|source| {
+                        crate::builtins::plotting::plotting_error_with_source(
+                            builtin,
+                            source.to_string(),
+                            source,
+                        )
+                    })?
+                    .ok_or_else(|| {
+                        plotting_error(builtin, format!("{builtin}: Tag must be text"))
+                    })?,
+            ),
             "numbertitle" => Self::NumberTitle(value_as_bool(value).ok_or_else(|| {
                 plotting_error(builtin, format!("{builtin}: NumberTitle must be logical"))
             })?),
@@ -172,7 +188,13 @@ impl FigurePropertyEdit {
                 Self::CurrentAxes { index, receiver }
             }
             "sgtitle" => {
-                if let Some(text) = value_as_text_string(value) {
+                if let Some(text) = value_as_text_string(value).map_err(|source| {
+                    crate::builtins::plotting::plotting_error_with_source(
+                        builtin,
+                        source.to_string(),
+                        source,
+                    )
+                })? {
                     Self::SuperTitle {
                         text: Some(text),
                         style: None,

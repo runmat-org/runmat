@@ -10,7 +10,8 @@ pub const NATIVE_LINK_PLAN_SCHEMA_VERSION: u16 = 3;
 
 /// Exact authored object and runtime bytes, independent of the shared pack
 /// selection/tool qualification. Different programs cannot share this record.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NativeProgramLinkIdentity {
     pub object: runmat_execution::Digest,
     pub runtime_archive: runmat_execution::Digest,

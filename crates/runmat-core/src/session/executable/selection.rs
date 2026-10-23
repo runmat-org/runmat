@@ -60,6 +60,7 @@ impl RunMatSession {
                 }
                 self.select_entrypoint(
                     context,
+                    invocation.requested_outputs,
                     #[cfg(not(target_arch = "wasm32"))]
                     backend,
                 )
@@ -196,10 +197,24 @@ impl RunMatSession {
     fn select_entrypoint<'a>(
         &'a mut self,
         context: SelectionContext<'a>,
+        requested_outputs: usize,
         #[cfg(not(target_arch = "wasm32"))] backend: crate::ExecutableBackendPolicy,
     ) -> SelectedInvocation<'a> {
         #[cfg(not(target_arch = "wasm32"))]
         {
+            // Native entrypoints do not expose workspace assignments as
+            // ordinal returns. Keep an explicit script `ans` request on the
+            // interpreter path unless the caller required native execution.
+            if requested_outputs == 1 {
+                if backend == crate::ExecutableBackendPolicy::ForcedGenericNative {
+                    return Err(runmat_runtime::build_runtime_error(
+                        "native script entrypoints do not expose the ans binding",
+                    )
+                    .with_identifier("RunMat:ExecutableBackend")
+                    .build());
+                }
+                return self.construct_interpreted_entrypoint(context, requested_outputs);
+            }
             if backend == crate::ExecutableBackendPolicy::ForcedGenericNative {
                 return self.construct_generic_entrypoint(context);
             }
@@ -207,7 +222,7 @@ impl RunMatSession {
                 return self.construct_tiered_entrypoint(context);
             }
         }
-        self.construct_interpreted_entrypoint(context)
+        self.construct_interpreted_entrypoint(context, requested_outputs)
     }
 
     fn select_procedure<'a>(
@@ -244,10 +259,16 @@ impl RunMatSession {
     fn construct_interpreted_entrypoint<'a>(
         &'a mut self,
         context: SelectionContext<'a>,
+        requested_outputs: usize,
     ) -> SelectedInvocation<'a> {
         admit_executable_sequence(
             context.runtime,
-            self.invoke_entrypoint_interpreted(context.unit, context.runtime, context.bytecode),
+            self.invoke_entrypoint_interpreted(
+                context.unit,
+                context.runtime,
+                context.bytecode,
+                requested_outputs,
+            ),
         )
     }
 

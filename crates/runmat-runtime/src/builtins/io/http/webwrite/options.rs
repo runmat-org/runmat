@@ -122,7 +122,11 @@ pub(super) fn numeric_scalar(value: &Value, context: &str) -> BuiltinResult<f64>
 pub(super) fn scalar_to_string(value: &Value) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.as_str().to_owned()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data().iter().collect()),
+        Value::CharArray(ca) if ca.rows == 1 => {
+            crate::builtins::io::utf16::decode_utf16_with_error(ca.data(), || {
+                webwrite_error("webwrite: value contains malformed UTF-16 text")
+            })
+        }
         Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].as_str().to_owned()),
         Value::Num(n) => Ok(format!("{}", n)),
         Value::Int(i) => Ok(i.decimal_string()),
@@ -164,7 +168,11 @@ pub(super) fn scalar_to_string(value: &Value) -> BuiltinResult<String> {
 pub(super) fn expect_string_scalar(value: &Value, context: &str) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.as_str().to_owned()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data().iter().collect()),
+        Value::CharArray(ca) if ca.rows == 1 => {
+            crate::builtins::io::utf16::decode_utf16_with_error(ca.data(), || {
+                webwrite_error(context)
+            })
+        }
         Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].as_str().to_owned()),
         _ => Err(webwrite_error(context)),
     }
@@ -173,7 +181,13 @@ pub(super) fn expect_string_scalar(value: &Value, context: &str) -> BuiltinResul
 pub(super) fn value_to_query_string(value: &Value, name: &str) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.as_str().to_owned()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data().iter().collect()),
+        Value::CharArray(ca) if ca.rows == 1 => {
+            crate::builtins::io::utf16::decode_utf16_with_error(ca.data(), || {
+                webwrite_error(format!(
+                    "webwrite: query parameter {name} contains malformed UTF-16"
+                ))
+            })
+        }
         Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].as_str().to_owned()),
         Value::Num(n) => Ok(format!("{}", n)),
         Value::Int(i) => Ok(i.decimal_string()),

@@ -36,7 +36,7 @@ fn effects() -> Vec<&'static str> {
 }
 
 fn fallback(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
-    Box::pin(async {
+    runmat_runtime::builtin::admitted_builtin_future(None, "fixture", async {
         record("fallback");
         let sequence = ValueSequence::single(Value::Num(17.0))
             .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?;
@@ -46,7 +46,7 @@ fn fallback(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
 }
 
 fn fails_after_effect(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
-    Box::pin(async {
+    runmat_runtime::builtin::admitted_builtin_future(None, "fixture", async {
         record("selected");
         Err(
             build_runtime_error("selected invocation failed after its effect")
@@ -59,7 +59,7 @@ fn fails_after_effect(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
 }
 
 fn untyped_failure(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
-    Box::pin(async {
+    runmat_runtime::builtin::admitted_builtin_future(None, "fixture", async {
         record("untyped");
         // Even conversion-like text is not an applicability capability.
         Err(RuntimeError::new("expected 1 args, got 0"))
@@ -67,7 +67,7 @@ fn untyped_failure(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
 }
 
 fn successful_override(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
-    Box::pin(async {
+    runmat_runtime::builtin::admitted_builtin_future(None, "fixture", async {
         record("override");
         let sequence = ValueSequence::single(Value::Num(29.0))
             .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?;
@@ -78,7 +78,7 @@ fn successful_override(_: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture 
 
 fn sequence_override(invocation: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
     let requested_outputs = invocation.requested_outputs;
-    Box::pin(async move {
+    runmat_runtime::builtin::admitted_builtin_future(None, "fixture", async move {
         let sequence = match requested_outputs {
             None => ValueSequence::single(Value::Num(7.0))
                 .map_err(runmat_runtime::sequence::sequence_error_to_runtime),
@@ -105,7 +105,7 @@ fn observe_invocation(invocation: RuntimeBuiltinInvocation<'_>) -> RuntimeBuilti
         .context
         .expect("session call carries its runtime");
     let outputs = invocation.requested_outputs;
-    Box::pin(async move {
+    runmat_runtime::builtin::admitted_builtin_future(None, "fixture", async move {
         INVOCATIONS.with(|records| {
             records
                 .borrow_mut()
@@ -241,7 +241,7 @@ fn requested_gather_adapts_only_the_selected_implementation() {
     let _provider = ThreadProviderGuard::set(Some(provider));
     fn host_only(invocation: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
         let is_resident = matches!(invocation.args[0], Value::GpuTensor(_));
-        Box::pin(async move {
+        runmat_runtime::builtin::admitted_builtin_future(None, "fixture", async move {
             if is_resident {
                 record("request-gather");
                 Err(

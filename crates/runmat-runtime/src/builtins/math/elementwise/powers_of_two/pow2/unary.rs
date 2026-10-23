@@ -83,7 +83,7 @@ fn transform_complex(tensor: ComplexTensor) -> BuiltinResult<Value> {
 fn transform_characters(chars: CharArray) -> BuiltinResult<Value> {
     let values = chars
         .iter_column_major()
-        .map(|character| (character as u32 as f64).exp2())
+        .map(|character| (f64::from(character.raw())).exp2())
         .collect();
     Tensor::new(values, chars.shape)
         .map(Value::Tensor)

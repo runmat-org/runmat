@@ -90,12 +90,12 @@ fn selected_ports_change_only_the_exact_units_foreign_owner() {
     assert_eq!(old_context.language_mode(), RuntimeLanguageMode::Matlab);
     assert_eq!(new_context.language_mode(), RuntimeLanguageMode::Strict);
     assert!(Rc::ptr_eq(
-        old_context.service_ports().timing(),
-        base.service_ports().timing()
+        old_context.service_ports().timing().unwrap(),
+        base.service_ports().timing().unwrap()
     ));
     assert!(Rc::ptr_eq(
-        new_context.service_ports().timing(),
-        base.service_ports().timing()
+        new_context.service_ports().timing().unwrap(),
+        base.service_ports().timing().unwrap()
     ));
 }
 

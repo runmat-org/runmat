@@ -28,6 +28,7 @@ pub struct ImageVmStages {
     _stage_preparation: Option<HostAllocationReceipt>,
     _provider_metadata_preparation: Option<HostAllocationReceipt>,
     _cold_cache_preparation: Option<HostAllocationReceipt>,
+    tail_control: Option<super::prepared::RegionTailAdmission>,
 }
 
 /// Source-bound inputs and invocation rights for one selected VM region.
@@ -353,6 +354,11 @@ impl ImageVmStages {
                 // provider-only headroom is reserved for a CPU choice. Once
                 // selected, reserve it before a HostSingle upload or any
                 // provider stage can emit its first effect.
+                let tail_control = if completion.is_some() {
+                    super::prepared::admit_region_tail(runtime, provider)?
+                } else {
+                    None
+                };
                 let mut provider_metadata_admission =
                     selected_metadata::admit_selected(provider, runtime, provider_metadata_quote)?;
                 let (mut prepared, upload_submissions) = match prepared {
@@ -480,6 +486,7 @@ impl ImageVmStages {
                     _stage_preparation: stage_preparation,
                     _provider_metadata_preparation: provider_metadata_admission.into_receipt(),
                     _cold_cache_preparation: cold_cache_preparation,
+                    tail_control,
                 })))
             }
             #[cfg(feature = "wgpu")]
@@ -498,7 +505,7 @@ impl ImageVmStages {
                     return Ok(ImageVmSelectedRoute::Declined);
                 };
                 let Some(route) =
-                    super::ImageVmOriginalRoute::new(provider, feedback, right, started)
+                    super::ImageVmOriginalRoute::new(runtime, provider, feedback, right, started)
                 else {
                     return Ok(ImageVmSelectedRoute::Declined);
                 };
@@ -598,10 +605,11 @@ impl ImageVmStages {
             );
         }
         let completion = self.selection.into_vm_completion(self.completion?)?;
+        let tail_control = self.tail_control?;
         let provider = self.prepared.session.provider;
         if self.runtime.is_cancelled()
             || provider
-                .observe_vm_region_queue_tail(provider.device_id())
+                .observe_region_queue_tail(provider.device_id(), tail_control.claim)
                 .await
                 .is_err()
             || self.runtime.is_cancelled()

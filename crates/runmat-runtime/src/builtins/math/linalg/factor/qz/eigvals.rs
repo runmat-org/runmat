@@ -17,29 +17,14 @@ pub(super) fn ratio(alpha: c64, beta: c64) -> (f64, f64) {
             (f64::INFINITY, 0.0)
         };
     }
-    let scale = alpha
-        .re
-        .abs()
-        .max(alpha.im.abs())
-        .max(beta.re.abs())
-        .max(beta.im.abs());
-    let alpha = c64::new(alpha.re / scale, alpha.im / scale);
-    let beta = c64::new(beta.re / scale, beta.im / scale);
-    if beta.re.abs() >= beta.im.abs() {
-        let r = beta.im / beta.re;
-        let denominator = beta.re + beta.im * r;
-        (
-            (alpha.re + alpha.im * r) / denominator,
-            (alpha.im - alpha.re * r) / denominator,
-        )
-    } else {
-        let r = beta.re / beta.im;
-        let denominator = beta.im + beta.re * r;
-        (
-            (alpha.re * r + alpha.im) / denominator,
-            (alpha.im * r - alpha.re) / denominator,
-        )
-    }
+    crate::builtins::math::linalg::ops::complex_division::divide_finite_components(
+        alpha.re, alpha.im, beta.re, beta.im,
+    )
+    .unwrap_or_else(|| {
+        let value = num_complex::Complex64::new(alpha.re, alpha.im)
+            / num_complex::Complex64::new(beta.re, beta.im);
+        (value.re, value.im)
+    })
 }
 
 pub(super) fn complex_schur_values(

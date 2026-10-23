@@ -15,7 +15,9 @@ fn accepts_empty_cells_and_character_arrays_of_any_size() {
     let cell = CellArray::new(
         vec![
             Value::CharArray(CharArray::new_row("red")),
-            Value::CharArray(CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap()),
+            Value::CharArray(
+                CharArray::from_unicode_scalars(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap(),
+            ),
         ],
         1,
         2,

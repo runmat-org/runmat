@@ -50,6 +50,7 @@ fn fitctree_header_retains_typed_options_and_rejects_malformed_pairs() {
         &first,
         crate::call::FunctionArgumentView::from_slice(&valid),
     )
+    .unwrap()
     .validate(valid.len())
     .unwrap();
     assert_eq!(header.option_start, 1);
@@ -60,6 +61,7 @@ fn fitctree_header_retains_typed_options_and_rejects_malformed_pairs() {
     let odd = vec![Value::Num(0.0), Value::from("MinLeafSize")];
     assert!(
         HeaderInspection::inspect(&first, crate::call::FunctionArgumentView::from_slice(&odd))
+            .unwrap()
             .validate(odd.len())
             .is_err()
     );
@@ -68,6 +70,7 @@ fn fitctree_header_retains_typed_options_and_rejects_malformed_pairs() {
         &first,
         crate::call::FunctionArgumentView::from_slice(&unknown)
     )
+    .unwrap()
     .validate(unknown.len())
     .is_err());
     let unsupported = vec![Value::Num(0.0), Value::from("Prune"), Value::Bool(true)];
@@ -75,6 +78,7 @@ fn fitctree_header_retains_typed_options_and_rejects_malformed_pairs() {
         &first,
         crate::call::FunctionArgumentView::from_slice(&unsupported)
     )
+    .unwrap()
     .validate(unsupported.len())
     .is_err());
 }

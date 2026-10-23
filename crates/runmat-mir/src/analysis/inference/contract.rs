@@ -17,18 +17,30 @@ pub(crate) fn apply_rvalue_contract(
     state: &mut FlowState,
     summaries: &BTreeMap<FunctionId, FunctionSummary>,
 ) {
+    let (effects, capabilities) = rvalue_operation_contract(value, state, summaries);
+    state.effects.0.extend(effects.0);
+    state.capabilities.0.extend(capabilities.0);
+}
+
+pub(crate) fn rvalue_operation_contract(
+    value: &MirRvalue,
+    state: &FlowState,
+    summaries: &BTreeMap<FunctionId, FunctionSummary>,
+) -> (EffectSet, CapabilitySet) {
     let facts = state.value_facts();
     // Expansion/captured sequences can change argument positions. Keep their
-    // call-site capabilities conservative until the exact expanded literals
-    // are represented in the sequence contract.
+    // call-site literals conservative until the exact expansion is proven.
     let literals = match value {
         MirRvalue::Call(call) => proven_call_literals(call, state),
         _ => Vec::new(),
     };
-    let (effects, capabilities) =
-        rvalue_contract_with_facts_and_literals(value, summaries, &facts, Some(&literals));
-    state.effects.0.extend(effects.0);
-    state.capabilities.0.extend(capabilities.0);
+    rvalue_contract_with_facts_and_literals(
+        value,
+        summaries,
+        &facts,
+        state.sequence_facts(),
+        Some(&literals),
+    )
 }
 
 fn proven_call_literals(call: &crate::MirCall, state: &FlowState) -> Vec<LiteralValue> {
@@ -51,12 +63,38 @@ pub(crate) fn statement_contract(
     summaries: &BTreeMap<FunctionId, FunctionSummary>,
 ) -> (EffectSet, CapabilitySet) {
     match &statement.kind {
-        MirStmtKind::Assign { value, .. }
+        MirStmtKind::PreparedAssign { value, .. }
+        | MirStmtKind::Assign { value, .. }
         | MirStmtKind::MultiAssign { value, .. }
         | MirStmtKind::SequenceAssign { value, .. }
         | MirStmtKind::Expr(value) => rvalue_contract(value, summaries),
         MirStmtKind::CaptureSequence { source, .. } => {
             expansion_source_contract(source, summaries, &[])
+        }
+        MirStmtKind::PrepareFixedAssignment(phase) => {
+            let mutation = &phase.assignment.mutation;
+            let (mut effects, mut capabilities) =
+                crate::statement_declared_requirements(&statement.kind);
+            if let Some(crate::MirCallArgumentRegion {
+                argument: crate::MirCallArg::Expansion(source),
+                ..
+            }) = phase.selector_region()
+            {
+                let (nested_effects, nested_capabilities) =
+                    expansion_source_contract(source, summaries, &[]);
+                effects.0.extend(nested_effects.0);
+                capabilities.0.extend(nested_capabilities.0);
+            }
+            if matches!(
+                phase.phase,
+                crate::MirFixedPreparationPhase::FinishStep { .. }
+            ) && (mutation.creation_policy == runmat_hir::AssignmentCreationPolicy::Overloaded
+                || mutation.shape_policy == runmat_hir::AssignmentShapePolicy::Overloaded
+                || mutation.kind == runmat_hir::PlaceMutationKind::MemberAssign)
+            {
+                effects.0.insert(EffectKind::Unknown);
+            }
+            (effects, capabilities)
         }
         MirStmtKind::PlaceMutation(mutation)
             if mutation.creation_policy == runmat_hir::AssignmentCreationPolicy::Overloaded
@@ -70,15 +108,9 @@ pub(crate) fn statement_contract(
         }
         MirStmtKind::PlaceMutation(_) => (EffectSet::default(), CapabilitySet::default()),
         MirStmtKind::StatementOutput(_) => crate::statement_declared_requirements(&statement.kind),
-        MirStmtKind::WorkspaceEffect { effect, .. } => (
-            EffectSet([EffectKind::WorkspaceWrite].into_iter().collect()),
-            CapabilitySet(
-                (*effect == runmat_hir::WorkspaceEffect::DynamicEval)
-                    .then_some(CapabilityRequirement::HostRuntime)
-                    .into_iter()
-                    .collect(),
-            ),
-        ),
+        MirStmtKind::WorkspaceEffect { .. } => {
+            crate::statement_declared_requirements(&statement.kind)
+        }
         MirStmtKind::EnvironmentEffect(_) => (
             EffectSet([EffectKind::EnvironmentWrite].into_iter().collect()),
             CapabilitySet::default(),
@@ -93,18 +125,29 @@ pub(crate) fn rvalue_contract(
     rvalue_contract_with_facts(value, summaries, &[])
 }
 
+/// Complete conservative contract used for structurally present operations
+/// whose flow entry is unreachable. It runs the same embedded-expression
+/// walker as reachable inference, with no invented facts or literals.
+pub(crate) fn conservative_rvalue_contract(
+    value: &MirRvalue,
+    summaries: &BTreeMap<FunctionId, FunctionSummary>,
+) -> (EffectSet, CapabilitySet) {
+    rvalue_contract_with_facts_and_literals(value, summaries, &[], &BTreeMap::new(), None)
+}
+
 pub(crate) fn rvalue_contract_with_facts(
     value: &MirRvalue,
     summaries: &BTreeMap<FunctionId, FunctionSummary>,
     facts: &[Option<ValueFact>],
 ) -> (EffectSet, CapabilitySet) {
-    rvalue_contract_with_facts_and_literals(value, summaries, facts, None)
+    rvalue_contract_with_facts_and_literals(value, summaries, facts, &BTreeMap::new(), None)
 }
 
 fn rvalue_contract_with_facts_and_literals(
     value: &MirRvalue,
     summaries: &BTreeMap<FunctionId, FunctionSummary>,
     facts: &[Option<ValueFact>],
+    sequences: &BTreeMap<crate::MirSequenceLocalId, runmat_types::ValueSequenceFact>,
     proven_literals: Option<&[LiteralValue]>,
 ) -> (EffectSet, CapabilitySet) {
     let mut effects = EffectSet::default();
@@ -116,14 +159,29 @@ fn rvalue_contract_with_facts_and_literals(
             let inference = infer_mir_call(
                 call,
                 facts,
-                &BTreeMap::new(),
+                sequences,
                 literals,
                 summaries,
                 OutputSelection::new(call.requested_outputs),
             );
+            // `infer_mir_call` is the canonical operation-local inference
+            // owner. A typed non-legacy catalog identity may soundly refine
+            // its coarse declaration from facts and literals (for example,
+            // TCP-only `close`). Other inference paths do not certify that
+            // their effect result is complete.
             effects = inference.effects;
-            extend_declared_call_effects(&mut effects, &call.effects);
             capabilities = inference.capabilities;
+            if !typed_catalog_contract_is_complete(call) {
+                // Legacy, dynamic, method, and unresolved inference may
+                // recover useful output facts without owning a complete
+                // effect contract. Preserve the lowering declaration for
+                // those paths. Only a typed non-legacy catalog identity is
+                // allowed to refine that declaration away.
+                let (declared_effects, declared_capabilities) =
+                    crate::rvalue_declared_requirements(value);
+                effects.0.extend(declared_effects.0);
+                capabilities.0.extend(declared_capabilities.0);
+            }
             if matches!(
                 call.workspace_effect,
                 Some(
@@ -186,6 +244,19 @@ fn rvalue_contract_with_facts_and_literals(
     (effects, capabilities)
 }
 
+fn typed_catalog_contract_is_complete(call: &crate::MirCall) -> bool {
+    let crate::MirCallee::Static(runmat_hir::CallableIdentity::Builtin(identity)) = &call.callee
+    else {
+        return false;
+    };
+    runmat_builtins::builtin_catalog_entry_by_name(&identity.0).is_some_and(|entry| {
+        !matches!(
+            entry.contract.maturity,
+            runmat_builtins::BuiltinContractMaturity::LegacyResolver
+        )
+    })
+}
+
 fn expansion_source_contract(
     source: &crate::MirExpansionSource,
     summaries: &BTreeMap<FunctionId, FunctionSummary>,
@@ -233,41 +304,62 @@ fn expression_steps_contract(
     (effects, capabilities)
 }
 
-fn extend_declared_call_effects(
-    effects: &mut EffectSet,
-    declared: &runmat_builtins::BuiltinEffects,
-) {
-    for (present, effect) in [
-        (declared.workspace, EffectKind::WorkspaceWrite),
-        (declared.environment, EffectKind::EnvironmentWrite),
-        (declared.filesystem, EffectKind::FilesystemRead),
-        (declared.network, EffectKind::Network),
-        (declared.ui, EffectKind::UserInterface),
-        (declared.random, EffectKind::Randomness),
-        (declared.time, EffectKind::Clock),
-        (declared.host_callback, EffectKind::HostCallback),
-        (declared.unknown, EffectKind::Unknown),
-    ] {
-        if present {
-            effects.0.insert(effect);
-        }
-    }
-}
-
 pub(crate) fn statement_contract_with_facts(
     statement: &MirStmt,
     summaries: &BTreeMap<FunctionId, FunctionSummary>,
     facts: &[Option<ValueFact>],
 ) -> (EffectSet, CapabilitySet) {
-    match &statement.kind {
-        MirStmtKind::Assign { value, .. }
-        | MirStmtKind::MultiAssign { value, .. }
-        | MirStmtKind::Expr(value) => rvalue_contract_with_facts(value, summaries, facts),
-        MirStmtKind::CaptureSequence { source, .. } => {
-            expansion_source_contract(source, summaries, facts)
-        }
-        _ => statement_contract(statement, summaries),
+    let (mut effects, mut capabilities) = statement_phase_contract(statement, summaries, facts);
+    if let Some(value) = crate::analysis::statement_rvalue(&statement.kind) {
+        let (nested_effects, nested_capabilities) =
+            rvalue_contract_with_facts(value, summaries, facts);
+        effects.0.extend(nested_effects.0);
+        capabilities.0.extend(nested_capabilities.0);
     }
+    (effects, capabilities)
+}
+
+/// Requirements executed by the store/statement phase, independently of its
+/// preceding RHS operation. Contextual LHS selectors belong here, while the
+/// cloned PlaceMutation annotation must not count as a second evaluation.
+pub(crate) fn statement_phase_contract(
+    statement: &MirStmt,
+    summaries: &BTreeMap<FunctionId, FunctionSummary>,
+    facts: &[Option<ValueFact>],
+) -> (EffectSet, CapabilitySet) {
+    if let MirStmtKind::CaptureSequence { source, .. } = &statement.kind {
+        return expansion_source_contract(source, summaries, facts);
+    }
+    let (mut effects, mut capabilities) =
+        if let MirStmtKind::PreparedAssign { preparation, .. } = &statement.kind {
+            // The retained target's protocol write executes here; preparation
+            // owns selector expressions but cannot license the later callback.
+            let mutation = &preparation.mutation;
+            if mutation.creation_policy == runmat_hir::AssignmentCreationPolicy::Overloaded
+                || mutation.shape_policy == runmat_hir::AssignmentShapePolicy::Overloaded
+                || mutation.kind == runmat_hir::PlaceMutationKind::MemberAssign
+            {
+                (
+                    EffectSet([EffectKind::Unknown].into_iter().collect()),
+                    CapabilitySet::default(),
+                )
+            } else {
+                Default::default()
+            }
+        } else if crate::analysis::statement_rvalue(&statement.kind).is_some() {
+            Default::default()
+        } else {
+            statement_contract(statement, summaries)
+        };
+    statement
+        .kind
+        .visit_statement_expression_steps_dyn(&mut |steps| {
+            let (nested_effects, nested_capabilities) =
+                expression_steps_contract(steps, summaries, facts);
+            effects.0.extend(nested_effects.0);
+            capabilities.0.extend(nested_capabilities.0);
+        });
+    (effects, capabilities)
 }
 
 #[cfg(test)]

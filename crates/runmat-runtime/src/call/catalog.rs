@@ -73,7 +73,13 @@ fn callable_name(callable: &Value) -> Option<std::borrow::Cow<'_, str>> {
             Cow::Borrowed(array.data().first()?.as_str())
         }
         Value::CharArray(array) if array.rows == 1 => {
-            Cow::Owned(array.data().iter().collect::<String>())
+            // Only a speculative catalog hint; actual call admission reports
+            // malformed text rather than treating it as a valid name.
+            let text = match array.try_row_string() {
+                Ok(Some(text)) => text,
+                Ok(None) | Err(_) => return None,
+            };
+            Cow::Owned(text)
         }
         Value::MethodFunctionHandle(_) | Value::BoundFunctionHandle(_) | Value::Closure(_) => {
             return None

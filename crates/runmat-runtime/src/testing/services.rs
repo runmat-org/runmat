@@ -12,8 +12,10 @@ use crate::BuiltinResult;
 pub type RunSuiteFuture = Pin<Box<dyn Future<Output = BuiltinResult<Value>>>>;
 pub type RunSuiteService =
     dyn Fn(Option<RuntimeContext>, Value, OutputListStorage) -> RunSuiteFuture;
-pub type RunTestsService = dyn Fn(Option<RuntimeContext>, Vec<Value>) -> RunSuiteFuture;
-pub type DiscoverTestsService = dyn Fn(Option<RuntimeContext>, Vec<Value>) -> RunSuiteFuture;
+pub type RunTestsService =
+    dyn Fn(Option<RuntimeContext>, crate::call::BuiltinArguments) -> RunSuiteFuture;
+pub type DiscoverTestsService =
+    dyn Fn(Option<RuntimeContext>, crate::call::BuiltinArguments) -> RunSuiteFuture;
 
 /// Runtime-facing ports supplied by the active Core execution composition.
 ///
@@ -37,8 +39,10 @@ impl std::fmt::Debug for RuntimeTestServices {
 impl RuntimeTestServices {
     pub fn new(
         run_suite: impl Fn(Option<RuntimeContext>, Value, OutputListStorage) -> RunSuiteFuture + 'static,
-        run_tests: impl Fn(Option<RuntimeContext>, Vec<Value>) -> RunSuiteFuture + 'static,
-        discover_tests: impl Fn(Option<RuntimeContext>, Vec<Value>) -> RunSuiteFuture + 'static,
+        run_tests: impl Fn(Option<RuntimeContext>, crate::call::BuiltinArguments) -> RunSuiteFuture
+            + 'static,
+        discover_tests: impl Fn(Option<RuntimeContext>, crate::call::BuiltinArguments) -> RunSuiteFuture
+            + 'static,
     ) -> Self {
         Self {
             run_suite: Rc::new(run_suite),
@@ -79,20 +83,6 @@ pub fn install_test_services(services: RuntimeTestServices) -> TestServicesGuard
         TEST_SERVICES_STACK.with(|stack| stack.borrow_mut().push(services));
     }
     TestServicesGuard { context }
-}
-
-fn current_test_services() -> Option<(RuntimeTestServices, Option<RuntimeContext>)> {
-    if let Some(context) = crate::context::legacy::active() {
-        let service = { context.state().test_services.borrow().last().cloned() };
-        return service.map(|service| (service, Some(context)));
-    }
-    TEST_SERVICES_STACK.with(|stack| {
-        stack
-            .borrow()
-            .last()
-            .cloned()
-            .map(|service| (service, None))
-    })
 }
 
 /// The service future owns suite and plugin backing. Field order retires it
@@ -169,8 +159,20 @@ pub(crate) fn run_test_suite_in_context(
 }
 
 pub async fn run_tests(args: Vec<Value>) -> BuiltinResult<Value> {
-    let service = current_test_services();
-    let Some((service, caller)) = service else {
+    let caller = crate::context::legacy::active();
+    let args = crate::call::BuiltinArguments::from_borrowed(&args, caller.as_ref())?;
+    run_tests_in_context(caller, args).await
+}
+
+pub async fn run_tests_in_context(
+    caller: Option<RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let service = match caller.as_ref() {
+        Some(runtime) => runtime.state().test_services.borrow().last().cloned(),
+        None => TEST_SERVICES_STACK.with(|stack| stack.borrow().last().cloned()),
+    };
+    let Some(service) = service else {
         return Err(
             crate::build_runtime_error("runtests requires an active Core test executor")
                 .with_identifier("RunMat:Testing:RequiresExecutor")
@@ -178,12 +180,28 @@ pub async fn run_tests(args: Vec<Value>) -> BuiltinResult<Value> {
                 .build(),
         );
     };
-    (service.run_tests)(caller, args).await
+    let future = (service.run_tests)(caller.clone(), args);
+    match caller {
+        Some(caller) => caller.scope(future).await,
+        None => future.await,
+    }
 }
 
 pub async fn discover_tests(args: Vec<Value>) -> BuiltinResult<Value> {
-    let service = current_test_services();
-    let Some((service, caller)) = service else {
+    let caller = crate::context::legacy::active();
+    let args = crate::call::BuiltinArguments::from_borrowed(&args, caller.as_ref())?;
+    discover_tests_in_context(caller, args).await
+}
+
+pub async fn discover_tests_in_context(
+    caller: Option<RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    let service = match caller.as_ref() {
+        Some(runtime) => runtime.state().test_services.borrow().last().cloned(),
+        None => TEST_SERVICES_STACK.with(|stack| stack.borrow().last().cloned()),
+    };
+    let Some(service) = service else {
         return Err(
             crate::build_runtime_error("testsuite requires an active Core test executor")
                 .with_identifier("RunMat:Testing:RequiresExecutor")
@@ -191,7 +209,11 @@ pub async fn discover_tests(args: Vec<Value>) -> BuiltinResult<Value> {
                 .build(),
         );
     };
-    (service.discover_tests)(caller, args).await
+    let future = (service.discover_tests)(caller.clone(), args);
+    match caller {
+        Some(caller) => caller.scope(future).await,
+        None => future.await,
+    }
 }
 
 #[cfg(test)]
@@ -206,7 +228,7 @@ mod tests {
                 Box::pin(async move {
                     let count = args.len();
                     Ok(Value::Cell(
-                        runmat_value::CellArray::new(args, 1, count).unwrap(),
+                        runmat_value::CellArray::new(args.into_iter().collect(), 1, count).unwrap(),
                     ))
                 })
             },

@@ -37,7 +37,7 @@ enum OptionName {
 
 impl GroupCountOptions {
     pub(super) fn split_and_parse(values: Vec<Value>) -> BuiltinResult<(Vec<Value>, Self)> {
-        let start = option_start(crate::call::FunctionArgumentView::from_slice(&values));
+        let start = option_start(crate::call::FunctionArgumentView::from_slice(&values))?;
         let (positional, pairs) = values.split_at(start);
         if !pairs.len().is_multiple_of(2) {
             return Err(error::invalid(
@@ -46,7 +46,7 @@ impl GroupCountOptions {
         }
         let mut options = Self::default();
         for pair in pairs.chunks_exact(2) {
-            let name = OptionName::parse(&pair[0])
+            let name = OptionName::parse(&pair[0])?
                 .ok_or_else(|| error::invalid("groupcounts: unsupported name-value option"))?;
             match name {
                 OptionName::IncludedEdge => {
@@ -65,9 +65,11 @@ impl GroupCountOptions {
 }
 
 impl OptionName {
-    pub(super) fn parse(value: &Value) -> Option<Self> {
-        let text = scalar_text(value)?;
-        if text.eq_ignore_ascii_case("IncludedEdge") {
+    pub(super) fn parse(value: &Value) -> BuiltinResult<Option<Self>> {
+        let Some(text) = scalar_text(value)? else {
+            return Ok(None);
+        };
+        Ok(if text.eq_ignore_ascii_case("IncludedEdge") {
             Some(Self::IncludedEdge)
         } else if text.eq_ignore_ascii_case("IncludeMissingGroups") {
             Some(Self::IncludeMissingGroups)
@@ -75,27 +77,29 @@ impl OptionName {
             Some(Self::IncludeEmptyGroups)
         } else {
             None
-        }
+        })
     }
 }
 
-pub(super) fn option_start(values: crate::call::FunctionArgumentView<'_>) -> usize {
-    values
-        .iter()
-        .position(|value| OptionName::parse(value).is_some())
-        .unwrap_or(values.len())
+pub(super) fn option_start(values: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<usize> {
+    for (index, value) in values.iter().enumerate() {
+        if OptionName::parse(value)?.is_some() {
+            return Ok(index);
+        }
+    }
+    Ok(values.len())
 }
 
-pub(super) fn is_boolean_option(value: &Value) -> bool {
-    matches!(
-        OptionName::parse(value),
+pub(super) fn is_boolean_option(value: &Value) -> BuiltinResult<bool> {
+    Ok(matches!(
+        OptionName::parse(value)?,
         Some(OptionName::IncludeMissingGroups | OptionName::IncludeEmptyGroups)
-    )
+    ))
 }
 
 impl IncludedEdge {
     fn parse(value: &Value) -> BuiltinResult<Self> {
-        let value = scalar_text(value)
+        let value = scalar_text(value)?
             .ok_or_else(|| error::invalid("groupcounts: IncludedEdge must be 'left' or 'right'"))?;
         if value.eq_ignore_ascii_case("left") {
             Ok(Self::Left)
@@ -109,14 +113,19 @@ impl IncludedEdge {
     }
 }
 
-pub(super) fn scalar_text(value: &Value) -> Option<std::borrow::Cow<'_, str>> {
-    match value {
+pub(super) fn scalar_text(value: &Value) -> BuiltinResult<Option<std::borrow::Cow<'_, str>>> {
+    Ok(match value {
         Value::String(value) => Some(std::borrow::Cow::Borrowed(value.as_str())),
-        Value::CharArray(value) if value.rows <= 1 => {
-            Some(std::borrow::Cow::Owned(value.data().iter().collect()))
-        }
+        Value::CharArray(value) if value.rows <= 1 => Some(std::borrow::Cow::Owned(
+            runmat_value::decode_utf16_code_units(value.data()).map_err(|source| {
+                let mut error =
+                    error::invalid(format!("groupcounts: invalid option text: {source}"));
+                error.source = Some(Box::new(source));
+                error
+            })?,
+        )),
         _ => None,
-    }
+    })
 }
 
 fn binary_boolean(value: &Value, name: &str) -> BuiltinResult<bool> {

@@ -1,6 +1,7 @@
 mod complex;
 mod conversion;
 mod general_sparse;
+mod managed_output;
 mod real;
 mod solver;
 mod sparse_triangular;

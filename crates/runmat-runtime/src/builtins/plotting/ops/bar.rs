@@ -1,16 +1,14 @@
 //! MATLAB-compatible `bar` and `barh` builtins.
 
+use runmat_builtins::BuiltinErrorDescriptor;
+pub use runmat_builtins::{
+    BARH_ERROR_INTERNAL, BARH_ERROR_INVALID_ARGUMENT, BAR_ERROR_INTERNAL,
+    BAR_ERROR_INVALID_ARGUMENT,
+};
+
 use futures::executor::block_on;
 use glam::{Vec3, Vec4};
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
-};
 use runmat_macros::runtime_builtin;
 use runmat_plot::core::BoundingBox;
 use runmat_plot::gpu::bar::{BarGpuInputs, BarGpuParams, BarLayoutMode, BarOrientation};
@@ -36,538 +34,9 @@ use super::state::{
     PlotRenderOptions,
 };
 use super::style::{parse_bar_style_args, BarLayout, BarStyle, BarStyleDefaults};
-use crate::builtins::plotting::type_resolvers::handle_array_type;
 
 const BUILTIN_NAME: &str = "bar";
 const BARH_BUILTIN_NAME: &str = "barh";
-
-const BAR_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Bar graphics handle or handle row vector, with one handle per plotted series.",
-}];
-
-const BAR_INPUTS_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Bar heights as a vector or matrix.",
-}];
-
-const BAR_INPUTS_Y_STYLE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Bar heights as a vector or matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "style",
-        ty: BuiltinParamType::StyleSpec,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Layout/style token such as 'stacked' or color shorthand.",
-    },
-];
-
-const BAR_INPUTS_Y_WIDTH: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Bar heights as a vector or matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "width",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("0.8"),
-        description: "Fraction of available category space occupied by each bar.",
-    },
-];
-
-const BAR_INPUTS_Y_WIDTH_COLOR: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Bar heights as a vector or matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "width",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("0.8"),
-        description: "Fraction of available category space occupied by each bar.",
-    },
-    BuiltinParamDescriptor {
-        name: "color",
-        ty: BuiltinParamType::StyleSpec,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Color shorthand or color name for all bars.",
-    },
-];
-
-const BAR_INPUTS_Y_PROPS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Bar heights as a vector or matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/value style arguments.",
-    },
-];
-
-const BAR_INPUTS_X_Y: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Category positions for bars.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Bar heights as a vector or matrix.",
-    },
-];
-
-const BAR_INPUTS_X_Y_STYLE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Category positions for bars.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Bar heights as a vector or matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "style",
-        ty: BuiltinParamType::StyleSpec,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Layout/style token such as 'stacked' or color shorthand.",
-    },
-];
-
-const BAR_INPUTS_X_Y_WIDTH: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Category positions for bars.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Bar heights as a vector or matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "width",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("0.8"),
-        description: "Fraction of available category space occupied by each bar.",
-    },
-];
-
-const BAR_INPUTS_X_Y_WIDTH_COLOR: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Category positions for bars.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Bar heights as a vector or matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "width",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("0.8"),
-        description: "Fraction of available category space occupied by each bar.",
-    },
-    BuiltinParamDescriptor {
-        name: "color",
-        ty: BuiltinParamType::StyleSpec,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Color shorthand or color name for all bars.",
-    },
-];
-
-const BAR_INPUTS_X_Y_PROPS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Category positions for bars.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Bar heights as a vector or matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/value style arguments.",
-    },
-];
-
-const BAR_SIGNATURES: [BuiltinSignatureDescriptor; 10] = [
-    BuiltinSignatureDescriptor {
-        label: "h = bar(Y)",
-        inputs: &BAR_INPUTS_Y,
-        outputs: &BAR_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = bar(Y, width)",
-        inputs: &BAR_INPUTS_Y_WIDTH,
-        outputs: &BAR_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = bar(Y, width, color)",
-        inputs: &BAR_INPUTS_Y_WIDTH_COLOR,
-        outputs: &BAR_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = bar(Y, style)",
-        inputs: &BAR_INPUTS_Y_STYLE,
-        outputs: &BAR_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = bar(Y, Name, Value, ...)",
-        inputs: &BAR_INPUTS_Y_PROPS,
-        outputs: &BAR_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = bar(X, Y)",
-        inputs: &BAR_INPUTS_X_Y,
-        outputs: &BAR_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = bar(X, Y, width)",
-        inputs: &BAR_INPUTS_X_Y_WIDTH,
-        outputs: &BAR_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = bar(X, Y, width, color)",
-        inputs: &BAR_INPUTS_X_Y_WIDTH_COLOR,
-        outputs: &BAR_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = bar(X, Y, style)",
-        inputs: &BAR_INPUTS_X_Y_STYLE,
-        outputs: &BAR_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = bar(X, Y, Name, Value, ...)",
-        inputs: &BAR_INPUTS_X_Y_PROPS,
-        outputs: &BAR_OUTPUT_HANDLE,
-    },
-];
-
-const BARH_SIGNATURES: [BuiltinSignatureDescriptor; 10] = [
-    BuiltinSignatureDescriptor {
-        label: "h = barh(Y)",
-        inputs: &BAR_INPUTS_Y,
-        outputs: &BAR_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = barh(Y, width)",
-        inputs: &BAR_INPUTS_Y_WIDTH,
-        outputs: &BAR_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = barh(Y, width, color)",
-        inputs: &BAR_INPUTS_Y_WIDTH_COLOR,
-        outputs: &BAR_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = barh(Y, style)",
-        inputs: &BAR_INPUTS_Y_STYLE,
-        outputs: &BAR_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = barh(Y, Name, Value, ...)",
-        inputs: &BAR_INPUTS_Y_PROPS,
-        outputs: &BAR_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = barh(X, Y)",
-        inputs: &BAR_INPUTS_X_Y,
-        outputs: &BAR_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = barh(X, Y, width)",
-        inputs: &BAR_INPUTS_X_Y_WIDTH,
-        outputs: &BAR_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = barh(X, Y, width, color)",
-        inputs: &BAR_INPUTS_X_Y_WIDTH_COLOR,
-        outputs: &BAR_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = barh(X, Y, style)",
-        inputs: &BAR_INPUTS_X_Y_STYLE,
-        outputs: &BAR_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = barh(X, Y, Name, Value, ...)",
-        inputs: &BAR_INPUTS_X_Y_PROPS,
-        outputs: &BAR_OUTPUT_HANDLE,
-    },
-];
-
-const BAR_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.BAR.INVALID_ARGUMENT",
-    identifier: Some("RunMat:bar:InvalidArgument"),
-    when: "Bar input arrays, style tokens, or name/value arguments are invalid.",
-    message: "bar: invalid argument",
-};
-
-const BAR_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.BAR.INTERNAL",
-    identifier: Some("RunMat:bar:Internal"),
-    when: "Renderer/GPU conversion fails while building bar geometry.",
-    message: "bar: internal operation failed",
-};
-
-const BAR_ERRORS: [BuiltinErrorDescriptor; 2] = [BAR_ERROR_INVALID_ARGUMENT, BAR_ERROR_INTERNAL];
-
-const BARH_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.BARH.INVALID_ARGUMENT",
-    identifier: Some("RunMat:barh:InvalidArgument"),
-    when: "Horizontal bar input arrays, style tokens, or name/value arguments are invalid.",
-    message: "barh: invalid argument",
-};
-
-const BARH_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.BARH.INTERNAL",
-    identifier: Some("RunMat:barh:Internal"),
-    when: "Renderer/GPU conversion fails while building horizontal bar geometry.",
-    message: "barh: internal operation failed",
-};
-
-const BARH_ERRORS: [BuiltinErrorDescriptor; 2] = [BARH_ERROR_INVALID_ARGUMENT, BARH_ERROR_INTERNAL];
-
-const BAR_Y_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "Y",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::Documented,
-    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-    notes: "Y explicitly accepts every built-in integer class as scalar, vector, or matrix bar-height data.",
-}];
-
-const BAR_X_Y_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "X explicitly accepts every built-in integer class as category-position data.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "Y",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Y independently accepts every built-in integer class as scalar, vector, or matrix bar-height data.",
-    },
-];
-
-const BAR_WIDTH_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "width",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The positional width explicitly accepts every built-in integer class as a real numeric scalar.",
-    }];
-
-const BAR_LINE_WIDTH_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "LineWidth",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes:
-            "LineWidth explicitly accepts every built-in integer class as a real numeric scalar.",
-    }];
-
-const BARH_Y_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Y",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Y explicitly accepts every built-in integer class as scalar, vector, or matrix horizontal-bar-length data.",
-    }];
-
-const BARH_X_Y_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "X explicitly accepts every built-in integer class as vertical-axis category-position data.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "Y",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Y independently accepts every built-in integer class as scalar, vector, or matrix horizontal-bar-length data.",
-    },
-];
-
-const BARH_WIDTH_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "width",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The positional thickness explicitly accepts every built-in integer class as a real numeric scalar.",
-    }];
-
-pub const BAR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "b = bar(integer_Y)",
-        inputs: &BAR_Y_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Authoritative integer Y storage crosses one explicit client graphics boundary. Resident integer data gathers exactly before conversion because the floating shared-WGPU vertex path cannot reinterpret native integer buffers; the output is one or more opaque Bar handles.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "b = bar(integer_X, integer_Y)",
-        inputs: &BAR_X_Y_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "X remains exact through category-count and uniqueness validation, including wide int64 and uint64 labels, before the deliberate client graphics conversion. Resident X and integer Y inputs gather through the owning provider.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "b = bar(..., integer_width)",
-        inputs: &BAR_WIDTH_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The positional width reads exactly one host numeric scalar and then crosses the explicit f32 graphics-property boundary; it does not produce integer data.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "b = bar(..., \"LineWidth\", integer_width)",
-        inputs: &BAR_LINE_WIDTH_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "LineWidth reads exactly one host numeric scalar and then crosses the explicit f32 graphics-property boundary; it does not produce integer data.",
-    },
-];
-
-pub const BARH_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "b = barh(integer_Y)",
-        inputs: &BARH_Y_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Authoritative integer Y storage crosses one explicit client graphics boundary. Resident integer data gathers exactly before conversion because the floating shared-WGPU vertex path cannot reinterpret native integer buffers; the output is one or more opaque Bar handles.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "b = barh(integer_X, integer_Y)",
-        inputs: &BARH_X_Y_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "X remains exact through vertical-category count and uniqueness validation, including wide int64 and uint64 labels, before the deliberate client graphics conversion. Resident X and integer Y inputs gather through the owning provider.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "b = barh(..., integer_width)",
-        inputs: &BARH_WIDTH_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The positional thickness reads exactly one host numeric scalar and then crosses the explicit f32 graphics-property boundary; it does not produce integer data.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "b = barh(..., \"LineWidth\", integer_width)",
-        inputs: &BAR_LINE_WIDTH_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "LineWidth reads exactly one host numeric scalar and then crosses the explicit f32 graphics-property boundary; it does not produce integer data.",
-    },
-];
-
-pub const BAR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &BAR_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &BAR_ERRORS,
-};
-
-pub const BARH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &BARH_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &BARH_ERRORS,
-};
 
 fn bar_descriptor_error(
     builtin: &'static str,
@@ -677,37 +146,51 @@ pub const BARH_FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "bar",
-    category = "plotting",
-    summary = "Create bar charts.",
-    keywords = "bar,barchart,plotting",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(handle_array_type),
-    descriptor(crate::builtins::plotting::bar::BAR_DESCRIPTOR),
-    integer_capabilities(crate::builtins::plotting::bar::BAR_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::bar"
 )]
-pub async fn bar_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    bar_impl(args, BAR_CONFIG).await
+pub async fn bar_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::BAR_DESCRIPTOR,
+        &runmat_builtins::COORDINATE_ERROR_TOO_MANY_OUTPUTS,
+        "bar",
+    )?;
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "bar")?;
+    // Keep the original rooted owner alive even when helpers extract native data.
+    let _arguments = args.fork();
+    work.finish(bar_impl(args, BAR_CONFIG, &work).await)
 }
 
 #[runtime_builtin(
     name = "barh",
-    category = "plotting",
-    summary = "Create horizontal bar charts.",
-    keywords = "barh,horizontal bar,barchart,plotting",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(handle_array_type),
-    descriptor(crate::builtins::plotting::bar::BARH_DESCRIPTOR),
-    integer_capabilities(crate::builtins::plotting::bar::BARH_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::bar"
 )]
-pub async fn barh_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    bar_impl(args, BARH_CONFIG).await
+pub async fn barh_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::BARH_DESCRIPTOR,
+        &runmat_builtins::COORDINATE_ERROR_TOO_MANY_OUTPUTS,
+        "barh",
+    )?;
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "barh")?;
+    // Keep the original rooted owner alive even when helpers extract native data.
+    let _arguments = args.fork();
+    work.finish(bar_impl(args, BARH_CONFIG, &work).await)
 }
 
-async fn bar_impl(args: Vec<Value>, config: BarRenderConfig) -> crate::BuiltinResult<Value> {
+async fn bar_impl(
+    args: crate::call::BuiltinArguments,
+    config: BarRenderConfig,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> crate::BuiltinResult<Value> {
     let (x_values, values, rest) = parse_bar_call_args(args, config)?;
     let defaults = BarStyleDefaults::new(default_bar_color(), DEFAULT_BAR_WIDTH);
     let style = parse_bar_style_args(config.builtin_name, &rest, defaults)?;
@@ -720,6 +203,7 @@ async fn bar_impl(args: Vec<Value>, config: BarRenderConfig) -> crate::BuiltinRe
     let target_axes = current_axes_state().active_index;
     let hold_enabled = current_hold_enabled();
     let figure_handle = crate::builtins::plotting::current_figure_handle();
+    work.check()?;
     let render_result = render_active_plot(config.builtin_name, opts, move |figure, axes| {
         let style = style.clone();
         let arg = input.take().expect("bar input consumed once");
@@ -792,7 +276,7 @@ fn default_bar_color() -> Vec4 {
 }
 
 fn parse_bar_call_args(
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
     config: BarRenderConfig,
 ) -> BuiltinResult<(Option<Value>, Value, Vec<Value>)> {
     if args.is_empty() {
@@ -1284,7 +768,7 @@ impl BarInput {
                     Some(Value::GpuTensor(handle)) => {
                         Some(gather_tensor_from_gpu_async(handle, config).await?)
                     }
-                    Some(value) => Some(Tensor::try_from(&value).map_err(|e| config.invalid(&e))?),
+                    Some(value) => Some(bar_host_coordinate(value, config)?),
                     None => None,
                 };
                 if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
@@ -1295,9 +779,9 @@ impl BarInput {
                 }
             }
             (x, other) => {
-                let y = Tensor::try_from(&other).map_err(|e| config.invalid(&e))?;
+                let y = bar_host_coordinate(other, config)?;
                 let x = match x {
-                    Some(value) => Some(Tensor::try_from(&value).map_err(|e| config.invalid(&e))?),
+                    Some(value) => Some(bar_host_coordinate(value, config)?),
                     None => None,
                 };
                 Ok(Self::Host { x, y })
@@ -1323,6 +807,34 @@ impl BarInput {
             Self::Host { x, y } => Ok((x, y)),
             Self::Gpu { x, y } => Ok((x, gather_tensor_from_gpu(y, config)?)),
         }
+    }
+}
+
+fn bar_host_coordinate(value: Value, config: BarRenderConfig) -> BuiltinResult<Tensor> {
+    // Preserve the prior logical-array/scalar and host-Y/device-X restrictions.
+    // Num/Int normalization is the same native owner as explicit chart pairs.
+    if matches!(value, Value::Bool(_) | Value::GpuTensor(_)) {
+        return Err(config.invalid("expected host real numeric coordinate data"));
+    }
+    match super::op_common::line_inputs::NumericInput::from_value(value, config.builtin_name) {
+        Ok(super::op_common::line_inputs::NumericInput::Host(tensor)) => Ok(tensor),
+        Ok(super::op_common::line_inputs::NumericInput::Gpu(_)) => {
+            unreachable!("device input rejected")
+        }
+        Err(source) => Err(build_runtime_error(format!(
+            "{}: {}",
+            config.invalid_error.message,
+            source.message()
+        ))
+        .with_builtin(config.builtin_name)
+        .with_identifier(
+            config
+                .invalid_error
+                .identifier
+                .unwrap_or("RunMat:bar:InvalidArgument"),
+        )
+        .with_source(source)
+        .build()),
     }
 }
 
@@ -1579,10 +1091,23 @@ fn compute_stack_offsets(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use runmat_builtins::{BuiltinIntegerInputAvailability, BuiltinParamType};
+    use runmat_builtins::{
+        BARH_DESCRIPTOR, BARH_INTEGER_CAPABILITIES, BAR_DESCRIPTOR, BAR_INPUTS_Y_WIDTH,
+        BAR_INTEGER_CAPABILITIES, BAR_OUTPUT_HANDLE,
+    };
+    fn parse_bar_call_args(
+        args: Vec<Value>,
+        config: BarRenderConfig,
+    ) -> BuiltinResult<(Option<Value>, Value, Vec<Value>)> {
+        super::parse_bar_call_args(
+            crate::builtins::common::test_support::builtin_arguments(args),
+            config,
+        )
+    }
     use crate::builtins::common::{gpu_helpers, test_support};
     use crate::builtins::plotting::tests::ensure_plot_test_env;
     use futures::executor::block_on;
-    use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{IntegerStorage, Value};
 
     fn setup_plot_tests() {
@@ -1590,11 +1115,17 @@ pub(crate) mod tests {
     }
 
     fn bar_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::bar_builtin(args))
+        block_on(super::bar_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     fn barh_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::barh_builtin(args))
+        block_on(super::barh_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
 
     fn tensor_from(data: &[f64]) -> Tensor {
@@ -1724,13 +1255,21 @@ pub(crate) mod tests {
 
     #[test]
     fn bar_invalid_argument_uses_stable_identifier() {
-        let err = block_on(super::bar_builtin(vec![])).expect_err("missing args should fail");
+        let err = block_on(super::bar_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .expect_err("missing args should fail");
         assert_eq!(err.identifier(), BAR_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[test]
     fn barh_invalid_argument_uses_stable_identifier() {
-        let err = block_on(super::barh_builtin(vec![])).expect_err("missing args should fail");
+        let err = block_on(super::barh_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(vec![]),
+        ))
+        .expect_err("missing args should fail");
         assert_eq!(err.identifier(), BARH_ERROR_INVALID_ARGUMENT.identifier);
     }
 
@@ -1851,11 +1390,45 @@ pub(crate) mod tests {
         let defaults = BarStyleDefaults::new(default_bar_color(), DEFAULT_BAR_WIDTH);
         let style = parse_bar_style_args("bar", &[], defaults).unwrap();
         for storage in all_integer_bar_storages() {
+            let source = Tensor::new_integer(storage.clone(), vec![2, 2]).unwrap();
+            let scalar = source
+                .numeric_value_at(0)
+                .unwrap()
+                .into_int_value()
+                .unwrap();
+            for config in [BAR_CONFIG, BARH_CONFIG] {
+                let input = block_on(BarInput::from_value(
+                    None,
+                    Value::Int(scalar.clone()),
+                    config,
+                ))
+                .expect("native scalar Y");
+                let BarInput::Host { y, .. } = input else {
+                    panic!("host scalar")
+                };
+                assert_eq!(
+                    y.integer_storage(),
+                    Some(&IntegerStorage::from_scalar(scalar.clone()))
+                );
+                let charts =
+                    build_bar_series_from_tensor(None, y, &style, config).expect("scalar chart");
+                assert_eq!(charts.len(), 1);
+                assert_eq!(charts[0].bar_count(), 1);
+                assert_eq!(charts[0].orientation, config.orientation);
+            }
             let tensor = Tensor::new_integer(storage, vec![2, 2]).expect("integer Y");
             let charts =
                 build_bar_series_from_tensor(None, tensor, &style, BAR_CONFIG).expect("bar charts");
             assert_eq!(charts.len(), 2);
             assert_eq!(charts[0].bar_count(), 2);
+        }
+        for config in [BAR_CONFIG, BARH_CONFIG] {
+            let input = block_on(BarInput::from_value(None, Value::Num(4.0), config))
+                .expect("double scalar Y");
+            let BarInput::Host { y, .. } = input else {
+                panic!("host scalar")
+            };
+            assert_eq!(y.materialize_f64(), vec![4.0]);
         }
     }
 
@@ -2194,10 +1767,30 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn bar_type_is_numeric_handle_array() {
-        assert_eq!(
-            handle_array_type(&[Type::tensor()], &ResolveContext::new(Vec::new())),
-            Type::tensor()
+    fn bar_catalog_infers_host_double_handle_array() {
+        use runmat_types::*;
+        let numeric = ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        });
+        let input = ValueFact::proven(
+            numeric.clone(),
+            ShapeFact::from(vec![Some(3), Some(2)]),
+            StorageFact::Dense,
         );
+        let request = CallRequest {
+            arguments: vec![input; 1],
+            literals: LiteralContext::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        };
+        let result =
+            runmat_builtins::infer_catalog_call(&runmat_builtins::BAR_CATALOG_ENTRY, &request);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.outputs.len(), 1);
+        let output = &result.outputs[0];
+        assert_eq!(output.kind, numeric);
+        assert_eq!(output.shape, ShapeFact::Unknown);
+        assert_eq!(output.storage, StorageFact::Dense);
+        assert_eq!(output.residency, ResidencyFact::Host);
     }
 }

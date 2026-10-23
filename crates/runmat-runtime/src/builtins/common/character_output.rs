@@ -5,7 +5,9 @@ use crate::context::host_allocation::{
 };
 use crate::context::RuntimeContext;
 use crate::{BuiltinResult, RuntimeError};
-use runmat_value::{CharArray, ExactArrayInitializationError, ExactArrayStorage, SharedShape};
+use runmat_value::{
+    CharArray, ExactArrayInitializationError, ExactArrayStorage, SharedShape, Utf16CodeUnit,
+};
 
 pub(crate) const CHECKPOINT_CHUNK: usize = 4096;
 
@@ -20,12 +22,12 @@ pub(crate) fn build(
     count: usize,
     extra_scratch_bytes: u64,
     mut shape_at: impl FnMut(usize) -> BuiltinResult<usize>,
-    fill: impl FnOnce(&mut [char], &[usize], &HostAllocationReceipt) -> BuiltinResult<()>,
+    fill: impl FnOnce(&mut [Utf16CodeUnit], &[usize], &HostAllocationReceipt) -> BuiltinResult<()>,
     errors: CharacterBuildErrors,
 ) -> BuiltinResult<CharArray> {
     let error = errors.admission;
     let invalid = errors.invalid;
-    let payload_bytes = ExactArrayStorage::<char>::requested_bytes(count)
+    let payload_bytes = ExactArrayStorage::<Utf16CodeUnit>::requested_bytes(count)
         .map_err(|cause| error(context, HostAllocationError::Numeric(cause)))?;
     let shape_bytes = SharedShape::requested_bytes_for_rank(rank)
         .map_err(|cause| error(context, HostAllocationError::Numeric(cause)))?;
@@ -69,7 +71,7 @@ pub(crate) fn build(
                 if index.is_multiple_of(CHECKPOINT_CHUNK) {
                     receipt.checkpoint(context)?;
                 }
-                Ok::<char, HostAllocationError>(' ')
+                Ok::<Utf16CodeUnit, HostAllocationError>(Utf16CodeUnit::from_raw(b' ' as u16))
             })
         })
         .map_err(|cause| error(context, cause))?

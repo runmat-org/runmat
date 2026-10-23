@@ -8,25 +8,36 @@ use super::*;
 
 #[runmat_macros::runtime_builtin(
     name = "year",
-    descriptor(crate::builtins::datetime::DATETIME_YEAR_DESCRIPTOR),
-    extensions(crate::builtins::datetime::YEAR_EXTENSIONS),
-    integer_capabilities(crate::builtins::datetime::YEAR_INTEGER_CAPABILITIES),
-    builtin_path = "crate::builtins::datetime",
-    category = "datetime",
-    summary = "Extract calendar year components from datetime values.",
-    keywords = "year,datetime,date component"
+    context = true,
+    binding_variant = "default",
+    builtin_path = "crate::builtins::datetime"
 )]
-pub(super) async fn year_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let (value, option) =
-        prepare_legacy_component_input("year", value, &rest, &YEAR_TYPED_LEGACY_NUMERIC_EXTENSION)
-            .await?;
+pub(super) async fn year_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    if let Some(output) =
+        map_legacy_component(runtime.as_ref(), ComponentKind::Year, &value, rest.view()).await?
+    {
+        return Ok(output);
+    }
+    let work = super::allocation::UnboundedCalendarWork::admit(runtime.as_ref(), "year")?;
+    let (value, option) = prepare_legacy_component_input(
+        &work,
+        "year",
+        value,
+        rest.view(),
+        &YEAR_TYPED_LEGACY_NUMERIC_EXTENSION,
+    )
+    .await?;
     if is_datetime_object(&value) {
         let mode = option
             .as_deref()
             .unwrap_or("iso")
             .trim()
             .to_ascii_lowercase();
-        return match mode.as_str() {
+        return work.finish(match mode.as_str() {
             "iso" => component_tensor_from_datetime(&value, "year", |naive| naive.year() as f64),
             "gregorian" => component_tensor_from_datetime(&value, "year", |naive| {
                 let year = naive.year();
@@ -39,28 +50,39 @@ pub(super) async fn year_builtin(value: Value, rest: Vec<Value>) -> crate::Built
             _ => Err(datetime_error(format!(
                 "year: unsupported year type '{mode}'"
             ))),
-        };
+        });
     }
-    numeric_component_from_modern_or_legacy("year", value, option.as_deref(), |naive| {
-        naive.year() as f64
-    })
+    work.finish(numeric_component_from_modern_or_legacy(
+        runtime.as_ref(),
+        "year",
+        value,
+        option.as_deref(),
+        |naive| naive.year() as f64,
+    ))
 }
 
 #[runmat_macros::runtime_builtin(
     name = "month",
-    descriptor(crate::builtins::datetime::DATETIME_MONTH_DESCRIPTOR),
-    extensions(crate::builtins::datetime::MONTH_EXTENSIONS),
-    integer_capabilities(crate::builtins::datetime::MONTH_INTEGER_CAPABILITIES),
-    builtin_path = "crate::builtins::datetime",
-    category = "datetime",
-    summary = "Extract month numbers from datetime arrays.",
-    keywords = "month,datetime,date component"
+    context = true,
+    binding_variant = "default",
+    builtin_path = "crate::builtins::datetime"
 )]
-pub(super) async fn month_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(super) async fn month_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    if let Some(output) =
+        map_legacy_component(runtime.as_ref(), ComponentKind::Month, &value, rest.view()).await?
+    {
+        return Ok(output);
+    }
+    let work = super::allocation::UnboundedCalendarWork::admit(runtime.as_ref(), "month")?;
     let (value, option) = prepare_legacy_component_input(
+        &work,
         "month",
         value,
-        &rest,
+        rest.view(),
         &MONTH_TYPED_LEGACY_NUMERIC_EXTENSION,
     )
     .await?;
@@ -70,7 +92,7 @@ pub(super) async fn month_builtin(value: Value, rest: Vec<Value>) -> crate::Buil
             .unwrap_or("monthofyear")
             .trim()
             .to_ascii_lowercase();
-        return match mode.as_str() {
+        return work.finish(match mode.as_str() {
             "monthofyear" => {
                 component_tensor_from_datetime(&value, "month", |naive| naive.month() as f64)
             }
@@ -79,24 +101,34 @@ pub(super) async fn month_builtin(value: Value, rest: Vec<Value>) -> crate::Buil
             _ => Err(datetime_error(format!(
                 "month: unsupported month type '{mode}'"
             ))),
-        };
+        });
     }
-    numeric_component_from_modern_or_legacy("month", value, option.as_deref(), |naive| {
-        naive.month() as f64
-    })
+    work.finish(numeric_component_from_modern_or_legacy(
+        runtime.as_ref(),
+        "month",
+        value,
+        option.as_deref(),
+        |naive| naive.month() as f64,
+    ))
 }
 
 #[runmat_macros::runtime_builtin(
     name = "day",
-    descriptor(crate::builtins::datetime::DATETIME_DAY_DESCRIPTOR),
-    extensions(crate::builtins::datetime::DAY_EXTENSIONS),
-    integer_capabilities(crate::builtins::datetime::DAY_INTEGER_CAPABILITIES),
-    builtin_path = "crate::builtins::datetime",
-    category = "datetime",
-    summary = "Extract day numbers or names from datetime and legacy date inputs.",
-    keywords = "day,datetime,date component,dayofweek,dayofyear"
+    context = true,
+    binding_variant = "default",
+    builtin_path = "crate::builtins::datetime"
 )]
-pub(super) async fn day_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(super) async fn day_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    if let Some(output) =
+        map_legacy_component(runtime.as_ref(), ComponentKind::Day, &value, rest.view()).await?
+    {
+        return Ok(output);
+    }
+    let work = super::allocation::UnboundedCalendarWork::admit(runtime.as_ref(), "day")?;
     if std::iter::once(&value)
         .chain(rest.iter())
         .any(|value| matches!(value, Value::GpuTensor(_)))
@@ -117,8 +149,25 @@ pub(super) async fn day_builtin(value: Value, rest: Vec<Value>) -> crate::Builti
     }
     let value = gather_if_needed_async(&value)
         .await
-        .map_err(|err| datetime_error(format!("day: {}", err.message())))?;
-    let rest = gather_args(&rest).await?;
+        .map_err(|err| crate::builtins::common::map_control_flow_with_builtin(err, "day"))?;
+    work.check()?;
+    let mut budget = runtime
+        .as_ref()
+        .map(crate::context::RuntimeContext::cpu_cooperation);
+    let rest = rest
+        .try_map_preserving_roots_async(rest.len(), runtime.as_ref(), async |index| {
+            work.check()?;
+            let value = crate::dispatcher::gather_if_needed_owned_async(
+                rest[index].clone(),
+                budget.as_mut(),
+            )
+            .await
+            .map_err(|err| datetime_gather_error(runtime.as_ref(), err))?;
+            work.check()?;
+            Ok(value)
+        })
+        .await?;
+    work.check()?;
     if rest.len() > 1 {
         return Err(datetime_error("day: expected at most one day type"));
     }
@@ -143,7 +192,8 @@ pub(super) async fn day_builtin(value: Value, rest: Vec<Value>) -> crate::Builti
     let serials = match &value {
         Value::Object(obj) if obj.is_class(DATETIME_CLASS) => serial_tensor_for_object(obj)?,
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
-            let (serials, shape) = parse_legacy_day_text(value, legacy_input_format.as_deref())?;
+            let (serials, shape) =
+                parse_legacy_day_text(runtime.as_ref(), value, legacy_input_format.as_deref())?;
             Tensor::new(serials, shape).map_err(|err| datetime_error(format!("day: {err}")))?
         }
         _ => serial_tensor_from_value(value, "day legacy serial input")?,
@@ -161,14 +211,18 @@ pub(super) async fn day_builtin(value: Value, rest: Vec<Value>) -> crate::Builti
                 String::new()
             };
             out.push(Value::CharArray(
-                CharArray::new(text.chars().collect(), 1, text.chars().count())
-                    .map_err(|err| datetime_error(format!("day: {err}")))?,
+                CharArray::from_unicode_scalars(
+                    text.chars().collect(),
+                    1,
+                    text.encode_utf16().count(),
+                )
+                .map_err(|err| datetime_error(format!("day: {err}")))?,
             ));
         }
-        return Ok(Value::Cell(
+        return work.finish(Ok(Value::Cell(
             runmat_value::CellArray::new_with_shape(out, shape)
                 .map_err(|err| datetime_error(format!("day: {err}")))?,
-        ));
+        )));
     }
     let extractor: fn(&NaiveDateTime) -> f64 = match mode.as_str() {
         "dayofmonth" => |value| value.day() as f64,
@@ -189,7 +243,7 @@ pub(super) async fn day_builtin(value: Value, rest: Vec<Value>) -> crate::Builti
             f64::NAN
         });
     }
-    tensor_or_scalar(out, shape)
+    work.finish(tensor_or_scalar(out, shape))
 }
 
 pub(super) fn weekday_name(weekday: Weekday, short: bool) -> &'static str {
@@ -213,106 +267,150 @@ pub(super) fn weekday_name(weekday: Weekday, short: bool) -> &'static str {
 
 #[runmat_macros::runtime_builtin(
     name = "hour",
-    descriptor(crate::builtins::datetime::DATETIME_HOUR_DESCRIPTOR),
-    extensions(crate::builtins::datetime::HOUR_EXTENSIONS),
-    integer_capabilities(crate::builtins::datetime::HOUR_INTEGER_CAPABILITIES),
-    builtin_path = "crate::builtins::datetime",
-    category = "datetime",
-    summary = "Extract hour components from datetime values.",
-    keywords = "hour,datetime,time component"
+    context = true,
+    binding_variant = "default",
+    builtin_path = "crate::builtins::datetime"
 )]
-pub(super) async fn hour_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let (value, format) =
-        prepare_legacy_component_input("hour", value, &rest, &HOUR_TYPED_LEGACY_NUMERIC_EXTENSION)
-            .await?;
-    numeric_component_from_modern_or_legacy("hour", value, format.as_deref(), |naive| {
-        naive.hour() as f64
-    })
+pub(super) async fn hour_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    if let Some(output) =
+        map_legacy_component(runtime.as_ref(), ComponentKind::Hour, &value, rest.view()).await?
+    {
+        return Ok(output);
+    }
+    let work = super::allocation::UnboundedCalendarWork::admit(runtime.as_ref(), "hour")?;
+    let (value, format) = prepare_legacy_component_input(
+        &work,
+        "hour",
+        value,
+        rest.view(),
+        &HOUR_TYPED_LEGACY_NUMERIC_EXTENSION,
+    )
+    .await?;
+    work.finish(numeric_component_from_modern_or_legacy(
+        runtime.as_ref(),
+        "hour",
+        value,
+        format.as_deref(),
+        |naive| naive.hour() as f64,
+    ))
 }
 
 #[runmat_macros::runtime_builtin(
     name = "minute",
-    descriptor(crate::builtins::datetime::DATETIME_MINUTE_DESCRIPTOR),
-    extensions(crate::builtins::datetime::MINUTE_EXTENSIONS),
-    integer_capabilities(crate::builtins::datetime::MINUTE_INTEGER_CAPABILITIES),
-    builtin_path = "crate::builtins::datetime",
-    category = "datetime",
-    summary = "Extract minute numbers from datetime arrays.",
-    keywords = "minute,datetime,time component"
+    context = true,
+    binding_variant = "default",
+    builtin_path = "crate::builtins::datetime"
 )]
-pub(super) async fn minute_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(super) async fn minute_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    value: Value,
+    rest: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    if let Some(output) =
+        map_legacy_component(runtime.as_ref(), ComponentKind::Minute, &value, rest.view()).await?
+    {
+        return Ok(output);
+    }
+    let work = super::allocation::UnboundedCalendarWork::admit(runtime.as_ref(), "minute")?;
     let (value, format) = prepare_legacy_component_input(
+        &work,
         "minute",
         value,
-        &rest,
+        rest.view(),
         &MINUTE_TYPED_LEGACY_NUMERIC_EXTENSION,
     )
     .await?;
-    numeric_component_from_modern_or_legacy("minute", value, format.as_deref(), |naive| {
-        naive.minute() as f64
-    })
-}
-
-#[runmat_macros::runtime_builtin(
-    name = "second",
-    descriptor(crate::builtins::datetime::DATETIME_SECOND_DESCRIPTOR),
-    integer_audit(crate::builtins::datetime::SECOND_INTEGER_AUDIT),
-    builtin_path = "crate::builtins::datetime",
-    category = "datetime",
-    summary = "Extract second components from datetime values.",
-    keywords = "second,datetime,time component"
-)]
-pub(super) async fn second_builtin(value: Value) -> crate::BuiltinResult<Value> {
-    component_tensor_from_datetime(&value, "second", |naive| {
-        naive.second() as f64 + f64::from(naive.nanosecond()) / 1_000_000_000.0
-    })
+    work.finish(numeric_component_from_modern_or_legacy(
+        runtime.as_ref(),
+        "minute",
+        value,
+        format.as_deref(),
+        |naive| naive.minute() as f64,
+    ))
 }
 
 #[runmat_macros::runtime_builtin(
     name = "isdatetime",
-    builtin_path = "crate::builtins::datetime",
-    category = "datetime",
-    summary = "Return true for datetime values.",
-    keywords = "isdatetime,datetime,predicate"
+    binding_variant = "default",
+    context = true,
+    builtin_path = "crate::builtins::datetime"
 )]
-pub(super) fn isdatetime_builtin(value: Value) -> crate::BuiltinResult<Value> {
-    Ok(Value::Bool(is_datetime_object(&value)))
+pub(super) fn isdatetime_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    super::operators::remaining::predicate(runtime.as_ref(), args.view())
 }
 
 #[runmat_macros::runtime_builtin(
     name = "now",
-    builtin_path = "crate::builtins::datetime",
-    category = "datetime",
-    summary = "Return the current local date and time as a MATLAB serial date number.",
-    keywords = "now,datenum,current time"
+    context = true,
+    binding_variant = "default",
+    builtin_path = "crate::builtins::datetime"
 )]
-pub(super) fn now_builtin() -> crate::BuiltinResult<Value> {
-    Ok(Value::Num(datenum_from_naive(current_naive_local())))
+pub(super) fn now_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+) -> crate::BuiltinResult<Value> {
+    Ok(Value::Num(datenum_from_naive(current_naive_local(
+        runtime.as_ref(),
+    )?)))
 }
 
 #[runmat_macros::runtime_builtin(
     name = "today",
-    builtin_path = "crate::builtins::datetime",
-    category = "datetime",
-    summary = "Return the current local date as a datetime scalar.",
-    keywords = "today,datetime,current date"
+    context = true,
+    binding_variant = "default",
+    builtin_path = "crate::builtins::datetime"
 )]
-pub(super) fn today_builtin() -> crate::BuiltinResult<Value> {
-    let today = Local::now().date_naive().and_hms_opt(0, 0, 0).unwrap();
-    datetime_from_date_only(today, DEFAULT_DATE_FORMAT)
+pub(super) fn today_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    let output_type = match args.len() {
+        0 => runmat_builtins::TodayOutputType::Datenum,
+        1 => {
+            let option = scalar_text(&args[0], "today outputType")?;
+            runmat_builtins::TodayOutputType::parse(&option).ok_or_else(|| {
+                datetime_argument_error("today: outputType must be 'datenum' or 'datetime'")
+            })?
+        }
+        _ => {
+            return Err(datetime_argument_error(
+                "today: expected at most one outputType",
+            ))
+        }
+    };
+    // One current-time read per successful invocation, after option validation.
+    let today = current_naive_local(runtime.as_ref())?
+        .date()
+        .and_hms_opt(0, 0, 0)
+        .unwrap();
+    let serial = datenum_from_naive(today);
+    match output_type {
+        runmat_builtins::TodayOutputType::Datenum => Ok(Value::Num(serial)),
+        runmat_builtins::TodayOutputType::Datetime => datetime_object_from_serials(
+            runtime.as_ref(),
+            vec![serial],
+            vec![1, 1],
+            DEFAULT_DATE_FORMAT,
+        ),
+    }
 }
 
 #[runmat_macros::runtime_builtin(
     name = "clock",
-    builtin_path = "crate::builtins::datetime",
-    category = "datetime",
-    summary = "Return the current local date and time as a date vector.",
-    keywords = "clock,datevec,current time"
+    context = true,
+    binding_variant = "default",
+    builtin_path = "crate::builtins::datetime"
 )]
-pub(super) fn clock_builtin() -> crate::BuiltinResult<Value> {
-    let components = datevec_components_from_serial(datenum_from_naive(current_naive_local()))?;
-    Ok(Value::Tensor(
-        Tensor::new(components.to_vec(), vec![1, 6])
-            .map_err(|err| datetime_error(format!("clock: {err}")))?,
-    ))
+pub(super) fn clock_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+) -> crate::BuiltinResult<Value> {
+    let components =
+        datevec_components_from_serial(datenum_from_naive(current_naive_local(runtime.as_ref())?))?;
+    super::allocation::clock_components_output(runtime.as_ref(), components)
 }

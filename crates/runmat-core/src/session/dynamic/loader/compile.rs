@@ -67,6 +67,8 @@ pub(super) async fn compile_dynamic_product(
                     path.display()
                 ))
                 .with_identifier("RunMat:FunctionCompositionError")
+                .with_source(error)
+                .with_gpu_gather_retry(runmat_runtime::GpuGatherRetry::Never)
                 .build()
             })?
     } else {

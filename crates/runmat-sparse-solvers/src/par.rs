@@ -52,7 +52,10 @@ fn blocked_reduce<R: Copy + Send + std::ops::Add<Output = R>>(
     let blocks = len.div_ceil(REDUCTION_BLOCK);
     let range = |b: usize| b * REDUCTION_BLOCK..((b + 1) * REDUCTION_BLOCK).min(len);
     if parallel(len) {
-        let partials: Vec<R> = (0..blocks).into_par_iter().map(|b| block(range(b))).collect();
+        let partials: Vec<R> = (0..blocks)
+            .into_par_iter()
+            .map(|b| block(range(b)))
+            .collect();
         partials.into_iter().fold(zero, |acc, value| acc + value)
     } else {
         (0..blocks).fold(zero, |acc, b| acc + block(range(b)))
@@ -83,16 +86,111 @@ pub fn dotu<T: Scalar>(x: &[T], y: &[T]) -> T {
     })
 }
 
-/// Euclidean norm.
+/// Scaled sum of squares `scale² · sum_squares` (LAPACK `xLASSQ` form), combinable in a fixed order.
+#[derive(Clone, Copy)]
+struct ScaledSquares {
+    scale: f64,
+    sum_squares: f64,
+}
+
+impl ScaledSquares {
+    const ZERO: Self = Self {
+        scale: 0.0,
+        sum_squares: 1.0,
+    };
+
+    fn add_component(&mut self, component: f64) {
+        let magnitude = component.abs();
+        if magnitude == 0.0 {
+            return;
+        }
+        if !magnitude.is_finite() {
+            // NaN propagates; an infinite component makes the norm infinite.
+            self.scale = if magnitude.is_nan() || self.scale.is_nan() {
+                f64::NAN
+            } else {
+                f64::INFINITY
+            };
+            self.sum_squares = 1.0;
+            return;
+        }
+        if !self.scale.is_finite() {
+            return;
+        }
+        if self.scale < magnitude {
+            let ratio = self.scale / magnitude;
+            self.sum_squares = 1.0 + self.sum_squares * ratio * ratio;
+            self.scale = magnitude;
+        } else {
+            let ratio = magnitude / self.scale;
+            self.sum_squares += ratio * ratio;
+        }
+    }
+
+    fn norm(self) -> f64 {
+        if self.scale == 0.0 || !self.scale.is_finite() {
+            return self.scale;
+        }
+        self.scale * self.sum_squares.sqrt()
+    }
+}
+
+impl std::ops::Add for ScaledSquares {
+    type Output = Self;
+    fn add(self, other: Self) -> Self {
+        if self.scale.is_nan() || other.scale.is_nan() {
+            return Self {
+                scale: f64::NAN,
+                sum_squares: 1.0,
+            };
+        }
+        if self.scale.is_infinite() || other.scale.is_infinite() {
+            return Self {
+                scale: f64::INFINITY,
+                sum_squares: 1.0,
+            };
+        }
+        if other.scale == 0.0 {
+            return self;
+        }
+        if self.scale == 0.0 {
+            return other;
+        }
+        let scale = self.scale.max(other.scale);
+        let (a, b) = (self.scale / scale, other.scale / scale);
+        Self {
+            scale,
+            sum_squares: self.sum_squares * a * a + other.sum_squares * b * b,
+        }
+    }
+}
+
+/// Euclidean norm. Accumulated as a scaled sum of squares, so finite vectors whose entries would
+/// overflow or underflow when squared still produce their representable norm; the blocked
+/// reduction order keeps the result identical for every thread count.
 pub fn norm2<T: Scalar>(x: &[T]) -> f64 {
-    blocked_reduce(x.len(), 0.0f64, |range| {
-        let mut sum = 0.0;
+    // Below this a block's plain sum of squares may have lost digits to gradual underflow.
+    const SAFE_MINIMUM: f64 = f64::MIN_POSITIVE * (1u64 << 52) as f64;
+    blocked_reduce(x.len(), ScaledSquares::ZERO, |range| {
+        // Fast path: the plain sum of squares is exact enough whenever it is finite and normal
+        // with margin; otherwise rescan the block with explicit scaling.
+        let plain: f64 = x[range.clone()].iter().map(|value| value.abs2()).sum();
+        if plain.is_finite() && plain >= SAFE_MINIMUM {
+            return ScaledSquares {
+                scale: plain.sqrt(),
+                sum_squares: 1.0,
+            };
+        }
+        let mut sum = ScaledSquares::ZERO;
         for i in range {
-            sum += x[i].abs2();
+            sum.add_component(x[i].re());
+            if T::IS_COMPLEX {
+                sum.add_component(x[i].im());
+            }
         }
         sum
     })
-    .sqrt()
+    .norm()
 }
 
 /// Maximum modulus.
@@ -101,7 +199,11 @@ pub fn norm_inf<T: Scalar>(x: &[T]) -> f64 {
 }
 
 /// Ordered map over `0..len`; parallel inside an admitted pool, serial otherwise.
-pub fn map_range<R: Send>(len: usize, min_len: usize, work: impl Fn(usize) -> R + Sync + Send) -> Vec<R> {
+pub fn map_range<R: Send>(
+    len: usize,
+    min_len: usize,
+    work: impl Fn(usize) -> R + Sync + Send,
+) -> Vec<R> {
     if threads() > 1 && len >= 2 * min_len.max(1) {
         (0..len)
             .into_par_iter()

@@ -3,6 +3,25 @@ use sha2::{Digest, Sha256};
 use super::{migration_inventory, migration_inventory_json, MIGRATION_INVENTORY_SCHEMA_VERSION};
 
 #[test]
+fn compiled_placement_contracts_match_actual_binding_owned_execution_routes() {
+    let inventory = migration_inventory();
+    let mismatches = inventory
+        .snapshot
+        .validation
+        .migration_readiness
+        .findings
+        .iter()
+        .filter(|finding| {
+            matches!(
+                finding.code,
+                super::schema::MigrationFindingCode::PlacementContractMismatch
+            )
+        })
+        .collect::<Vec<_>>();
+    assert!(mismatches.is_empty(), "{mismatches:#?}");
+}
+
+#[test]
 fn compiled_inventory_is_deterministic_and_self_digesting() {
     let first = migration_inventory_json().expect("first inventory");
     let second = migration_inventory_json().expect("second inventory");

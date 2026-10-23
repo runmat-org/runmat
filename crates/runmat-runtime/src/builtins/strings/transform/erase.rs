@@ -17,8 +17,6 @@ use crate::builtins::strings::common::{
     cell_contains_string, char_row_to_string_slice, is_missing_string, is_multirow_char_array,
 };
 use crate::builtins::strings::core::compat::pattern_regex;
-#[cfg(test)]
-use crate::builtins::strings::type_resolvers::text_preserve_type;
 use crate::{
     build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
 };
@@ -162,7 +160,14 @@ impl<'a> PatternList<'a> {
                     let mut list = Vec::with_capacity(array.rows);
                     for row in 0..array.rows {
                         list.push(PatternEntry::Literal(std::borrow::Cow::Owned(
-                            char_row_to_string_slice(array.data(), array.cols, row),
+                            char_row_to_string_slice(array.data(), array.cols, row).map_err(
+                                |e| {
+                                    erase_error_with_message(
+                                        format!("{BUILTIN_NAME}: {e}"),
+                                        &ERASE_ERROR_INTERNAL,
+                                    )
+                                },
+                            )?,
                         )));
                     }
                     list
@@ -185,7 +190,12 @@ impl<'a> PatternList<'a> {
                         }
                         Value::CharArray(ca) if ca.rows == 1 => {
                             list.push(PatternEntry::Literal(std::borrow::Cow::Owned(
-                                char_row_to_string_slice(ca.data(), ca.cols, 0),
+                                char_row_to_string_slice(ca.data(), ca.cols, 0).map_err(|e| {
+                                    erase_error_with_message(
+                                        format!("{BUILTIN_NAME}: {e}"),
+                                        &ERASE_ERROR_INTERNAL,
+                                    )
+                                })?,
                             )));
                         }
                         Value::CharArray(_) => return Err(erase_error(&ERASE_ERROR_CELL_ELEMENT)),
@@ -263,25 +273,31 @@ fn erase_char_array(array: CharArray, patterns: &PatternList<'_>) -> BuiltinResu
     let mut processed: Vec<String> = Vec::with_capacity(rows);
     let mut target_cols = 0usize;
     for row in 0..rows {
-        let slice = char_row_to_string_slice(&data, cols, row);
+        let slice = char_row_to_string_slice(&data, cols, row).map_err(|e| {
+            erase_error_with_message(format!("{BUILTIN_NAME}: {e}"), &ERASE_ERROR_INTERNAL)
+        })?;
         let erased = patterns.apply(&slice);
-        let len = erased.chars().count();
+        let len = erased.encode_utf16().count();
         if len > target_cols {
             target_cols = len;
         }
         processed.push(erased);
     }
 
-    let mut flattened: Vec<char> = Vec::with_capacity(rows * target_cols);
+    let mut flattened = Vec::with_capacity(rows * target_cols);
     for row_text in processed {
-        let mut chars: Vec<char> = row_text.chars().collect();
-        if chars.len() < target_cols {
-            chars.resize(target_cols, ' ');
-        }
-        flattened.extend(chars);
+        let mut units = row_text
+            .encode_utf16()
+            .map(runmat_value::Utf16CodeUnit::from_raw)
+            .collect::<Vec<_>>();
+        units.extend(std::iter::repeat_n(
+            runmat_value::Utf16CodeUnit::from_raw(b' ' as u16),
+            target_cols - row_text.encode_utf16().count(),
+        ));
+        flattened.extend(units);
     }
 
-    CharArray::new(flattened, rows, target_cols)
+    CharArray::from_code_units(flattened, rows, target_cols)
         .map(Value::CharArray)
         .map_err(|e| {
             erase_error_with_message(format!("{BUILTIN_NAME}: {e}"), &ERASE_ERROR_INTERNAL)
@@ -308,7 +324,9 @@ fn erase_cell_element(value: &Value, patterns: &PatternList<'_>) -> BuiltinResul
         ))),
         Value::CharArray(ca) if ca.rows == 0 => Ok(Value::CharArray(ca.clone())),
         Value::CharArray(ca) if ca.rows == 1 => {
-            let slice = char_row_to_string_slice(ca.data(), ca.cols, 0);
+            let slice = char_row_to_string_slice(ca.data(), ca.cols, 0).map_err(|e| {
+                erase_error_with_message(format!("{BUILTIN_NAME}: {e}"), &ERASE_ERROR_INTERNAL)
+            })?;
             let erased = patterns.apply(&slice);
             Ok(Value::CharArray(CharArray::new_row(&erased)))
         }
@@ -320,7 +338,6 @@ fn erase_cell_element(value: &Value, patterns: &PatternList<'_>) -> BuiltinResul
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{ResolveContext, Type};
 
     fn erase_builtin(text: Value, pattern: Value) -> BuiltinResult<Value> {
         futures::executor::block_on(super::erase_builtin(text, pattern))
@@ -329,7 +346,8 @@ pub(crate) mod tests {
     #[test]
     fn erase_char_matrix_requires_runmat_mode() {
         let matrix = Value::CharArray(
-            CharArray::new("abcdwxyz".chars().collect(), 2, 4).expect("character matrix"),
+            CharArray::from_unicode_scalars("abcdwxyz".chars().collect(), 2, 4)
+                .expect("character matrix"),
         );
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         for (text, pattern) in [
@@ -425,15 +443,17 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn erase_char_array_adjusts_width() {
-        let chars = CharArray::new("matrix".chars().collect(), 1, 6).unwrap();
+        let chars = CharArray::from_unicode_scalars("matrix".chars().collect(), 1, 6).unwrap();
         let result =
             erase_builtin(Value::CharArray(chars), Value::String("tr".into())).expect("erase");
         match result {
             Value::CharArray(out) => {
                 assert_eq!(out.rows, 1);
                 assert_eq!(out.cols, 4);
-                let expected: Vec<char> = "maix".chars().collect();
-                assert_eq!(out.data(), expected);
+                assert_eq!(
+                    runmat_value::decode_utf16_code_units(out.data()).unwrap(),
+                    "maix"
+                );
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -459,7 +479,7 @@ pub(crate) mod tests {
     #[test]
     fn erase_char_array_multiple_rows_sequential_patterns() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let chars = CharArray::new(
+        let chars = CharArray::from_unicode_scalars(
             vec![
                 'G', 'P', 'U', ' ', 'p', 'i', 'p', 'e', 'l', 'i', 'n', 'e', 'C', 'P', 'U', ' ',
                 'p', 'i', 'p', 'e', 'l', 'i', 'n', 'e',
@@ -475,8 +495,8 @@ pub(crate) mod tests {
             Value::CharArray(out) => {
                 assert_eq!(out.rows, 2);
                 assert_eq!(out.cols, 12);
-                let first = char_row_to_string_slice(out.data(), out.cols, 0);
-                let second = char_row_to_string_slice(out.data(), out.cols, 1);
+                let first = char_row_to_string_slice(out.data(), out.cols, 0).unwrap();
+                let second = char_row_to_string_slice(out.data(), out.cols, 1).unwrap();
                 assert_eq!(first.trim_end(), "pipeline");
                 assert_eq!(second.trim_end(), "CPU pipeline");
             }
@@ -642,13 +662,5 @@ pub(crate) mod tests {
         let pattern = crate::builtins::strings::core::compat::pattern_object(r"\d+");
         let result = erase_builtin(Value::String("run42mat".into()), pattern).expect("erase");
         assert_eq!(result, Value::String("runmat".into()));
-    }
-
-    #[test]
-    fn erase_type_preserves_text() {
-        assert_eq!(
-            text_preserve_type(&[Type::String], &ResolveContext::new(Vec::new())),
-            Type::String
-        );
     }
 }

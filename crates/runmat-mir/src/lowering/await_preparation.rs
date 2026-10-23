@@ -1,8 +1,6 @@
-use std::collections::HashMap;
-
 use runmat_hir::{ExprId, HirError, HirStmt, HirStmtKind, OutputTarget};
 
-use crate::{MirOperand, MirStmt};
+use crate::MirStmt;
 
 use super::MirLoweringContext;
 
@@ -18,11 +16,14 @@ pub(super) fn prepare_statement_prefix(
     statement: &HirStmt,
     awaited: ExprId,
     output: &mut Vec<MirStmt>,
-    replacements: &mut HashMap<ExprId, MirOperand>,
+    replacements: &mut crate::lowering::AwaitReplacements,
+    destination_prepared: bool,
 ) -> Result<(), HirError> {
     match &statement.kind {
         HirStmtKind::Assign(place, value, _) => {
-            if prepare_place_prefix(ctx, place, awaited, output, replacements)? {
+            if !destination_prepared
+                && prepare_place_prefix(ctx, place, awaited, output, replacements)?
+            {
                 return Ok(());
             }
             prepare_expr_prefix(ctx, value, awaited, output, replacements)?;

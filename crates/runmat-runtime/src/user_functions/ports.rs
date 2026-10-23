@@ -218,16 +218,21 @@ pub fn install_semantic_function_invoker(
 ) -> Result<FunctionInvokerGuard, crate::RuntimeError> {
     replace_semantic_function_invoker(invoker.map(|invoker| {
         Rc::new(
-            move |_runtime,
+            move |runtime: Option<crate::context::RuntimeContext>,
                   function,
                   arguments: crate::call::RootedFunctionArguments,
                   requested_outputs|
-                  -> UserFunctionFuture {
+                  -> Result<UserFunctionFuture, crate::RuntimeError> {
                 let invoker = invoker.clone();
-                Box::pin(async move {
-                    let arguments = arguments.materialize_legacy_contiguous(None)?;
-                    invoker(function, &arguments, requested_outputs).await
-                })
+                crate::execution::rooted_continuation::adopt_unbounded_legacy_rooted_future(
+                    runtime.as_ref(),
+                    move || {
+                        Box::pin(async move {
+                            let arguments = arguments.materialize_legacy_contiguous(None)?;
+                            invoker(function, &arguments, requested_outputs).await
+                        })
+                    },
+                )
             },
         ) as Rc<FunctionInvoker>
     }))
@@ -301,11 +306,16 @@ fn replace_semantic_function_invoker(
 pub fn install_external_function_invoker(
     invoker: Option<Arc<UnscopedExternalFunctionInvoker>>,
 ) -> ExternalFunctionInvokerGuard {
-    replace_external_function_invoker(
-        invoker.map(|invoker| {
-            Rc::new(move |_runtime, call| invoker(call)) as Rc<ExternalFunctionInvoker>
-        }),
-    )
+    replace_external_function_invoker(invoker.map(|invoker| {
+        Rc::new(
+            move |runtime: Option<crate::context::RuntimeContext>, call| {
+                crate::execution::rooted_continuation::adopt_unbounded_legacy_rooted_future(
+                    runtime.as_ref(),
+                    || invoker(call),
+                )
+            },
+        ) as Rc<ExternalFunctionInvoker>
+    }))
 }
 
 pub fn install_local_external_function_invoker(
@@ -335,11 +345,16 @@ fn replace_external_function_invoker(
 pub fn install_lexical_function_invoker(
     invoker: Option<Arc<UnscopedLexicalFunctionInvoker>>,
 ) -> LexicalFunctionInvokerGuard {
-    replace_lexical_function_invoker(
-        invoker.map(|invoker| {
-            Rc::new(move |_runtime, call| invoker(call)) as Rc<LexicalFunctionInvoker>
-        }),
-    )
+    replace_lexical_function_invoker(invoker.map(|invoker| {
+        Rc::new(
+            move |runtime: Option<crate::context::RuntimeContext>, call| {
+                crate::execution::rooted_continuation::adopt_unbounded_legacy_rooted_future(
+                    runtime.as_ref(),
+                    || invoker(call),
+                )
+            },
+        ) as Rc<LexicalFunctionInvoker>
+    }))
 }
 
 pub fn install_local_lexical_function_invoker(

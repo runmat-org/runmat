@@ -19,14 +19,14 @@ pub(super) fn execute(
             kind,
             builtin,
         ),
-        (1, Some(class), _) if super::syntax::text(class).is_some() => {
-            let text = super::syntax::text(class).expect("guarded text value");
+        (1, Some(class), _) if super::syntax::text(class, builtin)?.is_some() => {
+            let text = super::syntax::text(class, builtin)?.expect("guarded text value");
             let class = parse_class(&text, builtin)?;
             host::value(class, false, false, kind, builtin)
         }
         (1, _, _) if kind == FloatingLimitKind::SpacingAtOne => Err(super::eps::invalid_value()),
         (2, Some(keyword), Some(prototype))
-            if super::syntax::text(keyword)
+            if super::syntax::text(keyword, builtin)?
                 .is_some_and(|text| text.eq_ignore_ascii_case("like")) =>
         {
             like(prototype, kind, builtin)

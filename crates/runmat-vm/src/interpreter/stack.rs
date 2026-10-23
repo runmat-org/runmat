@@ -328,6 +328,105 @@ impl InterpreterStack {
         drop(drained);
         Ok(result)
     }
+
+    /// Move a non-tail captured window into the canonical exact output owner.
+    /// The source backing and its claim remain live while the separately
+    /// admitted destination initializes; allocation denial precedes draining.
+    pub(crate) fn try_extract_output_range(
+        &mut self,
+        start: usize,
+        end: usize,
+    ) -> Result<runmat_value::OutputListStorage, RuntimeError> {
+        let context = self.context.clone();
+        self.extract_output_range(start, end, context.as_ref())
+    }
+
+    /// Explicit-context ingress also funds extraction from an ordinary source
+    /// stack. A managed source retains and validates its original authority.
+    pub(crate) fn try_extract_output_range_in_context(
+        &mut self,
+        start: usize,
+        end: usize,
+        context: &RuntimeContext,
+    ) -> Result<runmat_value::OutputListStorage, RuntimeError> {
+        self.extract_output_range(start, end, Some(context))
+    }
+
+    fn extract_output_range(
+        &mut self,
+        start: usize,
+        end: usize,
+        context: Option<&RuntimeContext>,
+    ) -> Result<runmat_value::OutputListStorage, RuntimeError> {
+        if start > end || end > self.values.len() {
+            return Err(mex(
+                "StackWindow",
+                "captured output range is outside the operand stack",
+            ));
+        }
+        if let (Some(receipt), Some(context)) = (&self.receipt, context) {
+            receipt.checkpoint(context).map_err(|source| {
+                crate::runtime::workspace::frame_allocation_error_in_context(Some(context), source)
+            })?;
+        }
+        let Some(context) = context else {
+            return Ok(runmat_value::OutputListStorage::unbounded(
+                self.values.drain(start..end).collect(),
+            ));
+        };
+        let count = end - start;
+        let allocation = |source| {
+            crate::runtime::workspace::frame_allocation_error_in_context(Some(context), source)
+        };
+        let bytes = u64::try_from(
+            runmat_value::OutputListStorage::requested_bytes(count)
+                .map_err(HostAllocationError::Numeric)
+                .map_err(allocation)?,
+        )
+        .map_err(|_| allocation(HostAllocationError::Overflow))?;
+        let retained =
+            HostAllocationPlan::retained_exact_output_bytes(bytes, usize::from(count != 0))
+                .map_err(allocation)?;
+        let receipt = HostAllocationReceipt::admit(
+            Some(context),
+            HostAllocationPlan::new(0, retained).map_err(allocation)?,
+        )
+        .map_err(allocation)?;
+        let Some(receipt) = receipt else {
+            return Ok(runmat_value::OutputListStorage::unbounded(
+                self.values.drain(start..end).collect(),
+            ));
+        };
+        let mut drained = None;
+        let mut source = Some(&mut self.values);
+        let result = receipt
+            .with_output_construction(context, |permit| {
+                runmat_value::OutputListStorage::try_initialize(count, permit, |_| {
+                    if drained.is_none() {
+                        drained = Some(
+                            source
+                                .take()
+                                .expect("one range initializer")
+                                .drain(start..end),
+                        );
+                    }
+                    drained
+                        .as_mut()
+                        .and_then(Iterator::next)
+                        .ok_or(runmat_value::ExactHostNumericAllocationError::AllocationFailed)
+                })
+            })
+            .map_err(allocation)?
+            .map_err(|error| match error {
+                runmat_value::OutputListInitializationError::Allocation(source)
+                | runmat_value::OutputListInitializationError::Element(source) => {
+                    allocation(HostAllocationError::Numeric(source))
+                }
+            })?;
+        drop(drained);
+        receipt.checkpoint(context).map_err(allocation)?;
+        Ok(result)
+    }
 }
 
 fn stack_extent_error(message: &'static str) -> RuntimeError {
@@ -486,6 +585,15 @@ mod tests {
         assert!(stack.try_push(Value::Num(3.0)).is_err());
         assert_eq!(stack.as_slice(), &[Value::Num(1.0), Value::Num(2.0)]);
 
+        // A separate ingress destination must be funded before stack drain.
+        // The verified frame already reserves the entire finite envelope.
+        assert!(stack
+            .try_extract_output_range_in_context(0, 2, &context)
+            .is_err());
+        assert_eq!(stack.as_slice(), &[Value::Num(1.0), Value::Num(2.0)]);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, total_retained);
+        assert_eq!(ledger.snapshot().live_claimed_bytes, stack_retained);
+
         let output = stack.try_extract_output(0).expect("extract output");
         assert!(stack.is_empty());
         assert_eq!(output.as_slice(), &[Value::Num(1.0), Value::Num(2.0)]);
@@ -496,5 +604,65 @@ mod tests {
         drop(output);
         assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
         assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+
+        // The same frame admission owner funds CSL metadata; a slot move
+        // retains its exact stack window, including on denied cancellation.
+        let ledger = ManagedHostEffectLedger::new(65_536);
+        let cancellation = runmat_execution::cancellation::CancellationSource::new();
+        let context = RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ))
+        .with_service_ports(
+            RuntimeServicePorts::default().with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
+        )
+        .with_cancellation_token(cancellation.token());
+        let mut source = InterpreterStack::unbounded();
+        source.try_push(Value::Num(3.0)).unwrap();
+        source.try_push(Value::Num(4.0)).unwrap();
+        let ingress = source
+            .try_extract_output_range_in_context(0, 2, &context)
+            .unwrap();
+        assert!(source.is_empty());
+        assert_eq!(ingress.as_slice(), &[Value::Num(3.0), Value::Num(4.0)]);
+        assert!(ledger.snapshot().live_claimed_bytes > 0);
+        drop(source);
+        assert!(ledger.snapshot().live_claimed_bytes > 0);
+        drop(ingress);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+        let mut sequences =
+            crate::interpreter::dispatch::SequenceState::new_in_context(&context).unwrap();
+        let mut operands = InterpreterStack::unbounded();
+        let values = runmat_runtime::execution::RootedValues::from_output_storage_in_context(
+            vec![Value::Num(7.0), Value::Num(8.0)].into(),
+            &context,
+        )
+        .unwrap();
+        sequences
+            .capture_rooted_values(1, &mut operands, values)
+            .unwrap();
+        let pointer = operands.as_slice().as_ptr();
+        sequences.move_capture(1, 2).unwrap();
+        assert_eq!(operands.as_slice().as_ptr(), pointer);
+        assert_eq!(operands.as_slice(), &[Value::Num(7.0), Value::Num(8.0)]);
+        assert!(ledger.snapshot().live_claimed_bytes > 0);
+        let claimed = ledger.snapshot().live_claimed_bytes;
+        cancellation.cancel(runmat_execution::CancellationReason::User);
+        assert!(sequences.move_capture(2, 3).is_err());
+        assert_eq!(ledger.snapshot().live_claimed_bytes, claimed);
+        assert_eq!(operands.as_slice().as_ptr(), pointer);
+        drop(sequences);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+
+        let ledger = ManagedHostEffectLedger::new(0);
+        let context = RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ))
+        .with_service_ports(
+            RuntimeServicePorts::default().with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
+        );
+        assert!(crate::interpreter::dispatch::SequenceState::new_in_context(&context).is_err());
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
     }
 }

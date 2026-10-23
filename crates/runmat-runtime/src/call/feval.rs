@@ -200,10 +200,12 @@ pub(crate) async fn invoke_object_retained(
     let path = crate::object::indexing::ObjectSubscriptPath::single(
         crate::object::indexing::ObjectSubscript::parentheses(
             crate::object::indexing::ObjectIndexSelector::IndexValues {
-                components: arguments
-                    .into_iter()
-                    .map(crate::object::indexing::ObjectIndexComponent::from_protocol_value)
-                    .collect(),
+                components: runmat_value::ExactArrayStorage::shared_unbounded(
+                    arguments
+                        .into_iter()
+                        .map(crate::object::indexing::ObjectIndexComponent::from_protocol_value)
+                        .collect::<Vec<_>>(),
+                ),
             },
         ),
     );

@@ -1,10 +1,6 @@
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+use runmat_builtins::BuiltinErrorDescriptor;
+pub use runmat_builtins::{
+    AREA_ERROR_INTERNAL, AREA_ERROR_INVALID_ARGUMENT, AREA_LINESPEC_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::AreaPlot;
@@ -19,7 +15,6 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::common::gather_tensor_from_gpu_async;
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
 use super::op_common::line_inputs::NumericInput;
 use super::state::{render_active_plot, PlotRenderOptions};
@@ -37,505 +32,6 @@ const MATLAB_COLOR_ORDER: [glam::Vec4; 7] = [
     glam::Vec4::new(0.301, 0.745, 0.933, 0.4),
     glam::Vec4::new(0.635, 0.078, 0.184, 0.4),
 ];
-
-const AREA_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Area graphics handle or handle row vector, with one handle per plotted series.",
-}];
-
-const AREA_INPUTS_Y: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Y data vector or matrix. Columns are rendered as stacked series.",
-}];
-
-const AREA_INPUTS_X_Y: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinates matching the row count of Y.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y data vector or matrix. Columns are rendered as stacked series.",
-    },
-];
-
-const AREA_INPUTS_Y_STYLE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y data vector or matrix. Columns are rendered as stacked series.",
-    },
-    BuiltinParamDescriptor {
-        name: "lineSpec",
-        ty: BuiltinParamType::StyleSpec,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Line/color shorthand such as '--r'.",
-    },
-];
-
-const AREA_INPUTS_X_Y_STYLE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinates matching the row count of Y.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y data vector or matrix. Columns are rendered as stacked series.",
-    },
-    BuiltinParamDescriptor {
-        name: "lineSpec",
-        ty: BuiltinParamType::StyleSpec,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Line/color shorthand such as '--r'.",
-    },
-];
-
-const AREA_INPUTS_Y_BASE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y data vector or matrix. Columns are rendered as stacked series.",
-    },
-    BuiltinParamDescriptor {
-        name: "basevalue",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Horizontal baseline value.",
-    },
-];
-
-const AREA_INPUTS_X_Y_BASE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinates matching the row count of Y.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y data vector or matrix. Columns are rendered as stacked series.",
-    },
-    BuiltinParamDescriptor {
-        name: "basevalue",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Horizontal baseline value.",
-    },
-];
-
-const AREA_INPUTS_Y_PROPS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y data vector or matrix. Columns are rendered as stacked series.",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/value style properties such as Color, LineWidth, and BaseValue.",
-    },
-];
-
-const AREA_INPUTS_X_Y_PROPS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinates matching the row count of Y.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y data vector or matrix. Columns are rendered as stacked series.",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/value style properties such as Color, LineWidth, and BaseValue.",
-    },
-];
-
-const AREA_INPUTS_AX_Y: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y data vector or matrix. Columns are rendered as stacked series.",
-    },
-];
-
-const AREA_INPUTS_AX_X_Y: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinates matching the row count of Y.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y data vector or matrix. Columns are rendered as stacked series.",
-    },
-];
-
-const AREA_INPUTS_AX_Y_PROPS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y data vector or matrix. Columns are rendered as stacked series.",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/value style properties such as Color, LineWidth, and BaseValue.",
-    },
-];
-
-const AREA_INPUTS_AX_X_Y_PROPS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinates matching the row count of Y.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y data vector or matrix. Columns are rendered as stacked series.",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name/value style properties such as Color, LineWidth, and BaseValue.",
-    },
-];
-
-const AREA_INPUTS_AX_Y_BASE: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y data vector or matrix. Columns are rendered as stacked series.",
-    },
-    BuiltinParamDescriptor {
-        name: "basevalue",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Horizontal baseline value.",
-    },
-];
-
-const AREA_INPUTS_AX_X_Y_BASE: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "X coordinates matching the row count of Y.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Y data vector or matrix. Columns are rendered as stacked series.",
-    },
-    BuiltinParamDescriptor {
-        name: "basevalue",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Horizontal baseline value.",
-    },
-];
-
-const AREA_SIGNATURES: [BuiltinSignatureDescriptor; 14] = [
-    BuiltinSignatureDescriptor {
-        label: "h = area(Y)",
-        inputs: &AREA_INPUTS_Y,
-        outputs: &AREA_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = area(Y, LineSpec)",
-        inputs: &AREA_INPUTS_Y_STYLE,
-        outputs: &AREA_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = area(Y, basevalue)",
-        inputs: &AREA_INPUTS_Y_BASE,
-        outputs: &AREA_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = area(Y, Name, Value, ...)",
-        inputs: &AREA_INPUTS_Y_PROPS,
-        outputs: &AREA_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = area(X, Y)",
-        inputs: &AREA_INPUTS_X_Y,
-        outputs: &AREA_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = area(X, Y, LineSpec)",
-        inputs: &AREA_INPUTS_X_Y_STYLE,
-        outputs: &AREA_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = area(X, Y, basevalue)",
-        inputs: &AREA_INPUTS_X_Y_BASE,
-        outputs: &AREA_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = area(X, Y, Name, Value, ...)",
-        inputs: &AREA_INPUTS_X_Y_PROPS,
-        outputs: &AREA_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = area(ax, Y)",
-        inputs: &AREA_INPUTS_AX_Y,
-        outputs: &AREA_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = area(ax, Y, Name, Value, ...)",
-        inputs: &AREA_INPUTS_AX_Y_PROPS,
-        outputs: &AREA_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = area(ax, Y, basevalue)",
-        inputs: &AREA_INPUTS_AX_Y_BASE,
-        outputs: &AREA_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = area(ax, X, Y)",
-        inputs: &AREA_INPUTS_AX_X_Y,
-        outputs: &AREA_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = area(ax, X, Y, Name, Value, ...)",
-        inputs: &AREA_INPUTS_AX_X_Y_PROPS,
-        outputs: &AREA_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = area(ax, X, Y, basevalue)",
-        inputs: &AREA_INPUTS_AX_X_Y_BASE,
-        outputs: &AREA_OUTPUT_HANDLE,
-    },
-];
-
-const AREA_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.AREA.INVALID_ARGUMENT",
-    identifier: Some("RunMat:area:InvalidArgument"),
-    when: "Input data, style tokens, or name/value options are invalid.",
-    message: "area: invalid argument",
-};
-
-const AREA_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.AREA.INTERNAL",
-    identifier: Some("RunMat:area:Internal"),
-    when: "Renderer/GPU conversion fails during chart construction.",
-    message: "area: internal operation failed",
-};
-
-const AREA_ERRORS: [BuiltinErrorDescriptor; 2] = [AREA_ERROR_INVALID_ARGUMENT, AREA_ERROR_INTERNAL];
-
-const AREA_LINESPEC_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "area-linespec",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "area with a compact positional LineSpec is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:AreaLineSpecExtension"),
-};
-
-pub const AREA_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [AREA_LINESPEC_EXTENSION];
-
-const AREA_Y_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "Y",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::Documented,
-    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-    notes: "Y independently accepts every built-in integer class as vector or matrix data.",
-}];
-
-const AREA_X_Y_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes:
-            "X independently accepts every built-in integer class as vector or matrix coordinates.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "Y",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Y independently accepts every built-in integer class as vector or matrix data.",
-    },
-];
-
-const AREA_BASE_VALUE_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "basevalue",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The positional or BaseValue name-value control accepts a real numeric scalar.",
-    }];
-
-const AREA_LINE_WIDTH_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "LineWidth",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "LineWidth explicitly accepts every built-in integer class as a scalar point width.",
-    }];
-
-pub const AREA_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "a = area(integer_Y)",
-        inputs: &AREA_Y_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "An implicit double X axis is generated from one through the vector length or matrix row count. Authoritative integer Y storage crosses one explicit client graphics boundary; resident integer data gathers because area accepts GPU arrays but executes on the client.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "a = area(integer_X, integer_Y)",
-        inputs: &AREA_X_Y_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "X and Y retain authoritative typed storage through shape validation and exact integer X ordering before the deliberate client graphics conversion. The output is one or more opaque Area graphics handles rather than integer data.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "a = area(..., integer_basevalue)",
-        inputs: &AREA_BASE_VALUE_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The positional and BaseValue name-value forms read exactly one real numeric scalar and then cross the explicit f64 graphics-property boundary; a resident scalar gathers on the client.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "a = area(..., \"LineWidth\", integer_width)",
-        inputs: &AREA_LINE_WIDTH_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "LineWidth is validated and converted once by the shared host graphics-style parser; it does not create an integer output. Applying and exposing the parsed outline width is a general Area graphics-property gap, not an integer-storage distinction.",
-    },
-];
-
-pub const AREA_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &AREA_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &AREA_ERRORS,
-};
 
 fn area_error_with_detail(
     error: &'static BuiltinErrorDescriptor,
@@ -579,20 +75,31 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "area",
-    category = "plotting",
-    summary = "Create filled area plots.",
-    keywords = "area,plotting,stacked,fill",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::area::AREA_DESCRIPTOR),
-    extensions(crate::builtins::plotting::area::AREA_EXTENSIONS),
-    integer_capabilities(crate::builtins::plotting::area::AREA_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::area"
 )]
-pub async fn area_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub async fn area_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::AREA_DESCRIPTOR,
+        &runmat_builtins::COORDINATE_ERROR_TOO_MANY_OUTPUTS,
+        "area",
+    )?;
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "area")?;
+    // Keep the original rooted owner alive even when helpers extract native data.
+    let _arguments = args.fork();
+    work.finish(area_impl(args, &work).await)
+}
+
+async fn area_impl(
+    args: crate::call::BuiltinArguments,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> crate::BuiltinResult<Value> {
     let (target_axes, x_value, y_value, rest) = parse_area_args(args)?;
-    if begins_with_linespec(&rest) {
+    if begins_with_linespec(&rest)? {
         crate::compatibility::ensure_builtin_extension_enabled(
             &AREA_LINESPEC_EXTENSION,
             BUILTIN_NAME,
@@ -606,6 +113,7 @@ pub async fn area_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let plot_handles = Rc::new(RefCell::new(Vec::new()));
     let plot_handles_slot = Rc::clone(&plot_handles);
     let figure_handle = crate::builtins::plotting::current_figure_handle();
+    work.check()?;
     let render_result = render_active_plot(
         BUILTIN_NAME,
         PlotRenderOptions::default(),
@@ -862,7 +370,13 @@ async fn parse_area_style_args(args: &[Value]) -> crate::BuiltinResult<ParsedAre
         idx = 1;
     }
     while idx < args.len() {
-        if let Some(key) = super::style::value_as_string(&args[idx]) {
+        if let Some(key) = super::style::value_as_string(&args[idx]).map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                "area",
+                source.to_string(),
+                source,
+            )
+        })? {
             if key.trim().eq_ignore_ascii_case("BaseValue") && idx + 1 < args.len() {
                 validate_area_scalar(&args[idx + 1])?;
                 base_values.push(&args[idx + 1]);
@@ -874,7 +388,7 @@ async fn parse_area_style_args(args: &[Value]) -> crate::BuiltinResult<ParsedAre
         idx += 1;
     }
     let parsed = parse_line_style_args(&filtered, &LineStyleParseOptions::generic(BUILTIN_NAME))?;
-    let explicit_color = area_color_was_explicit(&filtered);
+    let explicit_color = area_color_was_explicit(&filtered)?;
     let mut base_value = 0.0;
     for value in base_values {
         base_value = area_scalar_f64(value).await?;
@@ -887,70 +401,104 @@ async fn parse_area_style_args(args: &[Value]) -> crate::BuiltinResult<ParsedAre
     })
 }
 
-fn begins_with_linespec(args: &[Value]) -> bool {
-    let Some(token) = args.first().and_then(super::style::value_as_string) else {
-        return false;
-    };
-    let token = token.trim();
-    !token.is_empty()
-        && token.chars().all(|ch| {
-            matches!(
-                ch,
-                '-' | ':'
-                    | '.'
-                    | 'r'
-                    | 'g'
-                    | 'b'
-                    | 'c'
-                    | 'm'
-                    | 'y'
-                    | 'k'
-                    | 'w'
-                    | 'o'
-                    | '+'
-                    | '*'
-                    | 'x'
-                    | 's'
-                    | 'd'
-                    | '^'
-                    | 'v'
-                    | '>'
-                    | '<'
-                    | 'p'
-                    | 'h'
-            )
-        })
+fn begins_with_linespec(args: &[Value]) -> crate::BuiltinResult<bool> {
+    Ok({
+        let Some(token) = args
+            .first()
+            .map(super::style::value_as_string)
+            .transpose()
+            .map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    "area",
+                    source.to_string(),
+                    source,
+                )
+            })?
+            .flatten()
+        else {
+            return Ok(false);
+        };
+        let token = token.trim();
+        !token.is_empty()
+            && token.chars().all(|ch| {
+                matches!(
+                    ch,
+                    '-' | ':'
+                        | '.'
+                        | 'r'
+                        | 'g'
+                        | 'b'
+                        | 'c'
+                        | 'm'
+                        | 'y'
+                        | 'k'
+                        | 'w'
+                        | 'o'
+                        | '+'
+                        | '*'
+                        | 'x'
+                        | 's'
+                        | 'd'
+                        | '^'
+                        | 'v'
+                        | '>'
+                        | '<'
+                        | 'p'
+                        | 'h'
+                )
+            })
+    })
 }
 
-fn area_color_was_explicit(args: &[Value]) -> bool {
-    if let Some(token) = args.first().and_then(super::style::value_as_string) {
-        let mut chars = token.chars().peekable();
-        while let Some(ch) = chars.next() {
-            match ch {
-                'y' | 'm' | 'c' | 'r' | 'g' | 'b' | 'w' | 'k' => return true,
-                '-' | '.' => {
-                    if matches!(chars.peek(), Some('-' | '.')) {
-                        chars.next();
+fn area_color_was_explicit(args: &[Value]) -> crate::BuiltinResult<bool> {
+    Ok({
+        if let Some(token) = args
+            .first()
+            .map(super::style::value_as_string)
+            .transpose()
+            .map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    "area",
+                    source.to_string(),
+                    source,
+                )
+            })?
+            .flatten()
+        {
+            let mut chars = token.chars().peekable();
+            while let Some(ch) = chars.next() {
+                match ch {
+                    'y' | 'm' | 'c' | 'r' | 'g' | 'b' | 'w' | 'k' => return Ok(true),
+                    '-' | '.' => {
+                        if matches!(chars.peek(), Some('-' | '.')) {
+                            chars.next();
+                        }
                     }
+                    _ => {}
                 }
-                _ => {}
             }
         }
-    }
-    let mut idx = 0usize;
-    while idx + 1 < args.len() {
-        if let Some(key) = super::style::value_as_string(&args[idx]) {
-            if key.trim().eq_ignore_ascii_case("Color") {
-                return true;
+        let mut idx = 0usize;
+        while idx + 1 < args.len() {
+            if let Some(key) = super::style::value_as_string(&args[idx]).map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    "area",
+                    source.to_string(),
+                    source,
+                )
+            })? {
+                if key.trim().eq_ignore_ascii_case("Color") {
+                    return Ok(true);
+                }
             }
+            idx += 2;
         }
-        idx += 2;
-    }
-    false
+        false
+    })
 }
 
 fn parse_area_args(
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<(Option<usize>, Value, Value, Vec<Value>)> {
     if args.is_empty() {
         return Err(area_error_with_detail(
@@ -1257,8 +805,12 @@ fn compare_floating<T: PartialOrd>(left: T, right: T) -> Ordering {
 
 #[cfg(test)]
 mod tests {
+    use runmat_builtins::{AREA_DESCRIPTOR, AREA_EXTENSIONS, AREA_INTEGER_CAPABILITIES};
     fn area_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-        futures::executor::block_on(super::area_builtin(args))
+        futures::executor::block_on(super::area_builtin(
+            None,
+            crate::builtins::common::test_support::builtin_arguments(args),
+        ))
     }
     fn parse_area_style_args(args: &[Value]) -> crate::BuiltinResult<super::ParsedAreaStyle> {
         futures::executor::block_on(super::parse_area_style_args(args))

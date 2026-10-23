@@ -86,6 +86,50 @@ impl<'a> SelectedNativeProduct<'a> {
             .map_err(error)
     }
 
+    pub fn service_issuers(
+        &self,
+    ) -> NativeCodegenResult<Vec<runmat_execution::host::VerifiedNativeServiceIssuer>> {
+        let binding = self.product.selected().expect("selected constructor");
+        binding
+            .services
+            .iter()
+            .map(|service| {
+                match service.kind {
+                    runmat_execution::host::NativeDeploymentServiceKind::SourceEvaluation
+                    | runmat_execution::host::NativeDeploymentServiceKind::HostedDynamicDispatch
+                    | runmat_execution::host::NativeDeploymentServiceKind::Effect(
+                        runmat_types::EffectKind::Clock
+                        | runmat_types::EffectKind::Network
+                        | runmat_types::EffectKind::UserInterface
+                        | runmat_types::EffectKind::HostCallback,
+                    ) => {}
+                    runmat_execution::host::NativeDeploymentServiceKind::Effect(
+                        runmat_types::EffectKind::WorkspaceRead
+                        | runmat_types::EffectKind::WorkspaceWrite
+                        | runmat_types::EffectKind::EnvironmentRead
+                        | runmat_types::EffectKind::EnvironmentWrite
+                        | runmat_types::EffectKind::FilesystemRead
+                        | runmat_types::EffectKind::FilesystemWrite
+                        | runmat_types::EffectKind::Randomness,
+                    ) => {}
+                    runmat_execution::host::NativeDeploymentServiceKind::Effect(
+                        runmat_types::EffectKind::MaySuspend
+                        | runmat_types::EffectKind::MayThrow
+                        | runmat_types::EffectKind::Unknown,
+                    ) => {
+                        return Err(error(format!(
+                        "selected native executor has no implementation for reached service {:?}",
+                        service.kind
+                    )))
+                    }
+                }
+                self.contents
+                    .verified_service_issuer(service.kind)
+                    .map_err(error)
+            })
+            .collect()
+    }
+
     pub fn validate_assembly(&self, assembly: &NativeAssembly) -> NativeCodegenResult<()> {
         validate_selected_assembly(
             self.product.selected().expect("selected constructor"),

@@ -5,9 +5,7 @@ use crate::context::host_allocation::{
 };
 use crate::context::RuntimeContext;
 use crate::RuntimeError;
-use runmat_value::{exact_capacity_vec, Utf8Text, Value};
-
-const CHECKPOINT_CHUNK: usize = 4096;
+use runmat_value::{Utf16TextCopyError, Utf8Text, Value};
 
 pub(crate) fn text_input_admission(
     name: &'static str,
@@ -55,24 +53,18 @@ pub(crate) fn scalar_text_input<'a>(
                 crate::build_runtime_error("text input: character shape exceeds its payload")
                     .build()
             })?;
-            let ordinary = || {
-                let text: String = chars.iter().collect();
-                TextInput::Owned(Utf8Text::new(text))
-            };
             let Some(runtime) = runtime else {
-                return Ok(Some(ordinary()));
+                let text = runmat_value::decode_utf16_code_units(chars).map_err(invalid_utf16)?;
+                return Ok(Some(TextInput::Owned(Utf8Text::new(text))));
             };
-            let mut bytes = 0usize;
-            for (index, character) in chars.iter().enumerate() {
-                if index % CHECKPOINT_CHUNK == 0 && runtime.is_cancelled() {
-                    return Err(admission_error(runtime, HostAllocationError::Cancelled));
+            let (bytes, physical) = Utf8Text::requested_bytes_for_utf16_with(chars, |_| {
+                if runtime.is_cancelled() {
+                    Err(HostAllocationError::Cancelled)
+                } else {
+                    Ok(())
                 }
-                bytes = bytes
-                    .checked_add(character.len_utf8())
-                    .ok_or_else(|| admission_error(runtime, HostAllocationError::Overflow))?;
-            }
-            let physical = Utf8Text::requested_bytes_for_capacity(bytes)
-                .map_err(|cause| admission_error(runtime, HostAllocationError::Numeric(cause)))?;
+            })
+            .map_err(|source| utf16_copy_error(runtime, &admission_error, source))?;
             let retained = HostAllocationPlan::retained_exact_output_bytes(
                 u64::try_from(physical)
                     .map_err(|_| admission_error(runtime, HostAllocationError::Overflow))?,
@@ -84,34 +76,45 @@ pub(crate) fn scalar_text_input<'a>(
             let Some(receipt) = HostAllocationReceipt::admit(Some(runtime), plan)
                 .map_err(|cause| admission_error(runtime, cause))?
             else {
-                return Ok(Some(ordinary()));
+                let text = runmat_value::decode_utf16_code_units(chars).map_err(invalid_utf16)?;
+                return Ok(Some(TextInput::Owned(Utf8Text::new(text))));
             };
-            let encoded = receipt
-                .with_output_construction(runtime, |permit| {
-                    let mut output =
-                        exact_capacity_vec::<u8>(bytes).map_err(HostAllocationError::Numeric)?;
-                    for (index, character) in chars.iter().enumerate() {
-                        if index % CHECKPOINT_CHUNK == 0 {
-                            receipt.checkpoint(runtime)?;
-                        }
-                        let mut scratch = [0u8; 4];
-                        output.extend_from_slice(character.encode_utf8(&mut scratch).as_bytes());
-                    }
-                    if output.len() != bytes {
-                        return Err(HostAllocationError::Overflow);
-                    }
-                    // SAFETY: only char::encode_utf8 wrote this byte backing.
-                    Utf8Text::new(unsafe { String::from_utf8_unchecked(output) })
-                        .try_admit_exact(permit)
-                        .map_err(|failure| HostAllocationError::Numeric(failure.source()))
-                })
-                .map_err(|cause| admission_error(runtime, cause))?
+            let permit = receipt
+                .output_permit(runtime)
                 .map_err(|cause| admission_error(runtime, cause))?;
+            let encoded = Utf8Text::try_copy_utf16_exact_with(chars, &permit, |_| {
+                receipt.checkpoint(runtime)
+            })
+            .map_err(|source| utf16_copy_error(runtime, &admission_error, source))?;
             receipt
                 .checkpoint(runtime)
                 .map_err(|cause| admission_error(runtime, cause))?;
             Ok(Some(TextInput::Owned(encoded)))
         }
         _ => Ok(None),
+    }
+}
+
+fn invalid_utf16(source: runmat_value::Utf16DecodeError) -> RuntimeError {
+    crate::build_runtime_error("text input contains malformed UTF-16")
+        .with_source(source)
+        .build()
+}
+
+fn utf16_copy_error(
+    runtime: &RuntimeContext,
+    admission_error: &impl Fn(&RuntimeContext, HostAllocationError) -> RuntimeError,
+    source: runmat_value::ExactArrayInitializationError<Utf16TextCopyError<HostAllocationError>>,
+) -> RuntimeError {
+    match source {
+        runmat_value::ExactArrayInitializationError::Allocation(source) => {
+            admission_error(runtime, HostAllocationError::Numeric(source))
+        }
+        runmat_value::ExactArrayInitializationError::Element(Utf16TextCopyError::Checkpoint(
+            source,
+        )) => admission_error(runtime, source),
+        runmat_value::ExactArrayInitializationError::Element(Utf16TextCopyError::Decode(
+            source,
+        )) => invalid_utf16(source),
     }
 }

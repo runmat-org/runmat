@@ -72,7 +72,9 @@ fn character_matrix_uses_trimmed_rows() {
         ("ant", 2.0.into()),
         ("bat", 3.0.into()),
     ]);
-    let names = CharArray::new(vec!['b', 'a', 't', 'c', 'a', 't', 'a', 'n', 't'], 3, 3).unwrap();
+    let names =
+        CharArray::from_unicode_scalars(vec!['b', 'a', 't', 'c', 'a', 't', 'a', 'n', 't'], 3, 3)
+            .unwrap();
     let Value::Struct(output) = call(Value::Struct(source), vec![Value::CharArray(names)]).unwrap()
     else {
         panic!("expected structure")

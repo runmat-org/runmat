@@ -108,7 +108,32 @@ fn local_handle(operand: &MirOperand, targets: &mut BTreeSet<FunctionId>) {
 
 fn collect_statement_calls(statement: &MirStmt, targets: &mut BTreeSet<FunctionId>) {
     match &statement.kind {
-        MirStmtKind::Assign { value, .. }
+        MirStmtKind::PrepareFixedAssignment(owner) => {
+            for step in owner.steps() {
+                match step {
+                    crate::MirExpressionStep::Let { value, .. } => {
+                        collect_local_calls(value, targets)
+                    }
+                    crate::MirExpressionStep::CaptureSequence { source, .. } => {
+                        collect_expansion_calls(source, targets)
+                    }
+                }
+            }
+            owner.visit_expression_regions(|region| {
+                for step in region.steps() {
+                    match step {
+                        crate::MirExpressionStep::Let { value, .. } => {
+                            collect_local_calls(value, targets)
+                        }
+                        crate::MirExpressionStep::CaptureSequence { source, .. } => {
+                            collect_expansion_calls(source, targets)
+                        }
+                    }
+                }
+            });
+        }
+        MirStmtKind::PreparedAssign { value, .. }
+        | MirStmtKind::Assign { value, .. }
         | MirStmtKind::MultiAssign { value, .. }
         | MirStmtKind::SequenceAssign { value, .. }
         | MirStmtKind::Expr(value) => collect_local_calls(value, targets),

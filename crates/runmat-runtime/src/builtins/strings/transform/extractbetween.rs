@@ -71,6 +71,16 @@ fn extract_between_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError
     extract_between_error_with_message(error.message, error)
 }
 
+fn extract_between_utf16_error(source: runmat_value::Utf16DecodeError) -> RuntimeError {
+    let mut builder = build_runtime_error("extractBetween: malformed UTF-16 character input")
+        .with_builtin(BUILTIN_NAME)
+        .with_source(source);
+    if let Some(identifier) = EXTRACT_BETWEEN_ERROR_INVALID_INPUT.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 fn extract_between_error_with_message(
     message: impl Into<String>,
     error: &'static BuiltinErrorDescriptor,
@@ -340,7 +350,7 @@ async fn parse_boundaries_option(
     let mut idx = 0;
     while idx < args.len() {
         let name_value = gather_if_needed_async(&args[idx]).await.map_err(map_flow)?;
-        let name = value_to_string(&name_value)
+        let name = value_to_string(&name_value)?
             .ok_or_else(|| extract_between_error(&EXTRACT_BETWEEN_ERROR_OPTION_NAME))?;
         if !name.eq_ignore_ascii_case("boundaries") {
             return Err(extract_between_error(&EXTRACT_BETWEEN_ERROR_OPTION_NAME));
@@ -348,7 +358,7 @@ async fn parse_boundaries_option(
         let value = gather_if_needed_async(&args[idx + 1])
             .await
             .map_err(map_flow)?;
-        let value_str = value_to_string(&value)
+        let value_str = value_to_string(&value)?
             .ok_or_else(|| extract_between_error(&EXTRACT_BETWEEN_ERROR_OPTION_VALUE))?;
         let parsed_mode = if value_str.eq_ignore_ascii_case("inclusive") {
             BoundariesMode::Inclusive
@@ -363,24 +373,31 @@ async fn parse_boundaries_option(
     Ok(mode)
 }
 
-fn value_to_string(value: &Value) -> Option<String> {
-    match value {
+fn value_to_string(value: &Value) -> BuiltinResult<Option<String>> {
+    Ok(match value {
         Value::String(s) => Some(s.as_str().to_owned()),
         Value::StringArray(sa) if sa.data().len() == 1 => Some(sa.data()[0].as_str().to_owned()),
         Value::CharArray(ca) if ca.rows <= 1 => {
             if ca.rows == 0 {
                 Some(String::new())
             } else {
-                Some(char_row_to_string_slice(ca.data(), ca.cols, 0))
+                Some(
+                    char_row_to_string_slice(ca.data(), ca.cols, 0).map_err(|e| {
+                        extract_between_error_with_message(
+                            format!("{BUILTIN_NAME}: {e}"),
+                            &EXTRACT_BETWEEN_ERROR_INTERNAL,
+                        )
+                    })?,
+                )
             }
         }
         Value::CharArray(_) => None,
         Value::Cell(cell) if cell.data().len() == 1 => {
             let element = &cell.data()[0];
-            value_to_string(element)
+            value_to_string(element)?
         }
         _ => None,
-    }
+    })
 }
 
 #[derive(Clone)]
@@ -545,7 +562,14 @@ impl NormalizedText {
                     data.push(String::new());
                 } else {
                     for row in 0..ca.rows {
-                        data.push(char_row_to_string_slice(ca.data(), ca.cols, row));
+                        data.push(char_row_to_string_slice(ca.data(), ca.cols, row).map_err(
+                            |e| {
+                                extract_between_error_with_message(
+                                    format!("{BUILTIN_NAME}: {e}"),
+                                    &EXTRACT_BETWEEN_ERROR_INTERNAL,
+                                )
+                            },
+                        )?);
                     }
                 }
                 Ok(Self {
@@ -566,7 +590,7 @@ impl NormalizedText {
                     let scalar = TextCellScalar::from_value(element).ok_or_else(|| {
                         extract_between_error(&EXTRACT_BETWEEN_ERROR_CELL_ELEMENT)
                     })?;
-                    data.push(scalar.text());
+                    data.push(scalar.text().map_err(extract_between_utf16_error)?);
                     kinds.push(scalar.kind());
                 }
                 Ok(Self {
@@ -657,19 +681,25 @@ impl NormalizedText {
                 let mut max_width = 0usize;
                 let mut row_strings = Vec::with_capacity(rows);
                 for result in &results {
-                    let width = result.text.chars().count();
+                    let width = result.text.encode_utf16().count();
                     max_width = max_width.max(width);
                     row_strings.push(result.text.clone());
                 }
                 let mut flattened = Vec::with_capacity(rows * max_width);
                 for row in row_strings {
-                    let mut chars: Vec<char> = row.chars().collect();
-                    if chars.len() < max_width {
-                        chars.resize(max_width, ' ');
+                    let mut units = row
+                        .encode_utf16()
+                        .map(runmat_value::Utf16CodeUnit::from_raw)
+                        .collect::<Vec<_>>();
+                    if units.len() < max_width {
+                        units.resize(
+                            max_width,
+                            runmat_value::Utf16CodeUnit::from_raw(b' ' as u16),
+                        );
                     }
-                    flattened.extend(chars);
+                    flattened.extend(units);
                 }
-                CharArray::new(flattened, rows, max_width)
+                CharArray::from_code_units(flattened, rows, max_width)
                     .map(Value::CharArray)
                     .map_err(|e| {
                         extract_between_error_with_message(
@@ -787,7 +817,14 @@ impl BoundaryText {
             Value::CharArray(ca) => {
                 let mut data = Vec::with_capacity(ca.rows);
                 for row in 0..ca.rows {
-                    data.push(char_row_to_string_slice(ca.data(), ca.cols, row));
+                    data.push(
+                        char_row_to_string_slice(ca.data(), ca.cols, row).map_err(|e| {
+                            extract_between_error_with_message(
+                                format!("{BUILTIN_NAME}: {e}"),
+                                &EXTRACT_BETWEEN_ERROR_INTERNAL,
+                            )
+                        })?,
+                    );
                 }
                 Ok(Self {
                     data,
@@ -801,7 +838,7 @@ impl BoundaryText {
                     let scalar = TextCellScalar::from_value(element).ok_or_else(|| {
                         extract_between_error(&EXTRACT_BETWEEN_ERROR_CELL_ELEMENT)
                     })?;
-                    data.push(scalar.text());
+                    data.push(scalar.text().map_err(extract_between_utf16_error)?);
                 }
                 Ok(Self { data, shape })
             }

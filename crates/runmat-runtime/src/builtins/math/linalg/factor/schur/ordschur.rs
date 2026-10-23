@@ -40,7 +40,7 @@ fn selection(
     name: SchurContext,
 ) -> BuiltinResult<Selection> {
     let n = eigenvalues.len();
-    if let Some(keyword) = option_text(value) {
+    if let Some(keyword) = option_text(value, name)? {
         let region = match keyword.trim() {
             "lhp" => Region::LeftHalfPlane,
             "rhp" => Region::RightHalfPlane,

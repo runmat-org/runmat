@@ -134,6 +134,13 @@ impl MirCallArgumentRegion {
     }
 
     pub fn validate(&self) -> Result<(), &'static str> {
+        self.validate_with_external_sequences(&std::collections::BTreeSet::new())
+    }
+
+    pub(crate) fn validate_with_external_sequences(
+        &self,
+        external: &std::collections::BTreeSet<MirSequenceLocalId>,
+    ) -> Result<(), &'static str> {
         use std::collections::BTreeSet;
         let all_locals = self
             .steps
@@ -221,7 +228,9 @@ impl MirCallArgumentRegion {
         }
         let mut invalid_result_sequence = false;
         self.argument.visit_sequence_locals(&mut |sequence| {
-            if !all_sequences.contains(sequence) || !defined_sequences.contains(sequence) {
+            if !external.contains(sequence)
+                && (!all_sequences.contains(sequence) || !defined_sequences.contains(sequence))
+            {
                 invalid_result_sequence = true;
             }
             *sequence_uses.entry(*sequence).or_insert(0usize) += 1;
@@ -252,6 +261,16 @@ impl MirCallArgumentRegion {
         }) || self.argument.contains_contextual_end()
     }
 
+    /// End that needs the enclosing selector's receiver, as opposed to an
+    /// End owned by a nested indexing/expansion receiver. Final Single is an
+    /// operand, not an rvalue; expansion captures have their own receiver.
+    pub fn contains_unscoped_end(&self) -> bool {
+        self.steps.iter().any(|step| match step {
+            MirExpressionStep::Let { value, .. } => value.contains_unscoped_end(),
+            MirExpressionStep::CaptureSequence { .. } => false,
+        })
+    }
+
     pub fn visit_operands(&self, visitor: &mut dyn FnMut(&MirOperand)) {
         for step in &self.steps {
             match step {
@@ -267,7 +286,7 @@ impl MirCallArgumentRegion {
     pub fn visit_outer_operands(&self, visitor: &mut dyn FnMut(&MirOperand)) {
         // A region's own locals are internal preparation details, not inputs to
         // the enclosing subscript path.
-        let local_defs = self
+        let mut local_defs = self
             .steps
             .iter()
             .filter_map(|step| match step {
@@ -275,6 +294,7 @@ impl MirCallArgumentRegion {
                 MirExpressionStep::CaptureSequence { .. } => None,
             })
             .collect::<std::collections::BTreeSet<_>>();
+        self.visit_expression_regions(&mut |region| local_defs.extend(region.defined_locals()));
         self.visit_operands(&mut |operand| {
             if !matches!(operand, MirOperand::Local(local) if local_defs.contains(local)) {
                 visitor(operand);

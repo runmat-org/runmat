@@ -37,7 +37,7 @@ impl TimerRunConfig {
         let mut requires_source_evaluation = false;
         for slot in TimerCallback::ALL {
             let callback = property(handle, slot.property().name())?;
-            if let Some(text) = nonempty_text_callback(&callback) {
+            if let Some(text) = nonempty_text_callback(&callback)? {
                 // Capture through the executor's source catalog, then release
                 // the preflight lease. Each actual firing captures its own
                 // source identity so callback property edits remain visible.
@@ -99,14 +99,21 @@ pub(super) fn duration_property(seconds: f64, name: &str) -> BuiltinResult<Durat
     })
 }
 
-fn nonempty_text_callback(value: &Value) -> Option<std::borrow::Cow<'_, str>> {
-    match value {
+fn nonempty_text_callback(value: &Value) -> BuiltinResult<Option<std::borrow::Cow<'_, str>>> {
+    Ok(match value {
         Value::String(text) if !text.trim().is_empty() => Some(std::borrow::Cow::Borrowed(text)),
         Value::CharArray(chars) if chars.data().iter().any(|ch| !ch.is_whitespace()) => {
-            Some(std::borrow::Cow::Owned(chars.data().iter().collect()))
+            Some(std::borrow::Cow::Owned(
+                crate::builtins::common::text::decode_utf16_with_error(chars.data(), || {
+                    timer_error(
+                        &TIMER_ERROR_INVALID_PROPERTY,
+                        "timer: callback text is not valid UTF-16",
+                    )
+                })?,
+            ))
         }
         _ => None,
-    }
+    })
 }
 
 fn admission_error(error: TimerAdmissionError) -> RuntimeError {

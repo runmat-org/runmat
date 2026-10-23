@@ -1,6 +1,4 @@
-use std::collections::VecDeque;
-use std::future::Future;
-use std::pin::Pin;
+use runmat_value::ExactArrayIntoIter;
 
 use runmat_value::Value;
 
@@ -9,12 +7,12 @@ use crate::context::RuntimeContext;
 use crate::execution::{RootedValue, RootedValueSequence};
 use crate::object::indexing::{ObjectSubscript, ObjectSubscriptPath};
 use crate::runtime_error::semantic_error;
-use crate::sequence::{ResolveValueSequence, SequenceResolutionContext, ValueSequence};
+use crate::sequence::ValueSequence;
 use crate::RuntimeError;
 
+mod callable;
 mod default_indexing;
 mod dotted_invoke;
-mod callable;
 mod owned;
 mod request;
 mod selected_paren;
@@ -29,9 +27,9 @@ pub fn read_subscript_path<'a>(
     base: Value,
     path: ObjectSubscriptPath,
     caller_function_name: Option<&'a str>,
-) -> Pin<Box<dyn Future<Output = Result<RootedValue, RuntimeError>> + 'a>> {
+) -> crate::execution::RuntimeContinuationFuture<'a, RootedValue> {
     let access = super::ObjectAccessContext::from_legacy_function_name(caller_function_name);
-    Box::pin(async move {
+    super::context::admit_future_with(None, move || async move {
         let request = SubscriptReadRequest::require_single(access);
         let sequence =
             read_subscript_path_sequence(None, base, path, request, caller_function_name).await?;
@@ -44,9 +42,9 @@ pub fn read_subscript_path_in_context<'a>(
     base: Value,
     path: ObjectSubscriptPath,
     caller_function_name: Option<&'a str>,
-) -> Pin<Box<dyn Future<Output = Result<RootedValue, RuntimeError>> + 'a>> {
+) -> crate::execution::RuntimeContinuationFuture<'a, RootedValue> {
     let access = super::ObjectAccessContext::from_legacy_function_name(caller_function_name);
-    Box::pin(async move {
+    super::context::admit_future_with(Some(runtime), move || async move {
         let request = SubscriptReadRequest::require_single(access);
         let sequence =
             read_subscript_path_sequence(Some(runtime), base, path, request, caller_function_name)
@@ -59,8 +57,8 @@ pub fn read_subscript_path_with_access(
     base: Value,
     path: ObjectSubscriptPath,
     access: super::ObjectAccessContext,
-) -> Pin<Box<dyn Future<Output = Result<RootedValue, RuntimeError>>>> {
-    Box::pin(async move {
+) -> crate::execution::RuntimeContinuationFuture<'static, RootedValue> {
+    super::context::admit_future_with(None, move || async move {
         let sequence = read_subscript_path_sequence(
             None,
             base,
@@ -78,8 +76,8 @@ pub fn read_subscript_path_with_access_in_context<'a>(
     base: Value,
     path: ObjectSubscriptPath,
     access: super::ObjectAccessContext,
-) -> Pin<Box<dyn Future<Output = Result<RootedValue, RuntimeError>> + 'a>> {
-    Box::pin(async move {
+) -> crate::execution::RuntimeContinuationFuture<'a, RootedValue> {
+    super::context::admit_future_with(Some(runtime), move || async move {
         let sequence = read_subscript_path_sequence(
             Some(runtime),
             base,
@@ -96,7 +94,7 @@ pub fn read_subscript_path_sequence_with_access(
     base: Value,
     path: ObjectSubscriptPath,
     request: SubscriptReadRequest,
-) -> Pin<Box<dyn Future<Output = Result<RootedValueSequence, RuntimeError>>>> {
+) -> crate::execution::RuntimeContinuationFuture<'static, RootedValueSequence> {
     read_subscript_path_sequence(None, base, path, request, None)
 }
 
@@ -105,7 +103,7 @@ pub fn read_subscript_path_sequence_with_access_in_context<'a>(
     base: Value,
     path: ObjectSubscriptPath,
     request: SubscriptReadRequest,
-) -> Pin<Box<dyn Future<Output = Result<RootedValueSequence, RuntimeError>> + 'a>> {
+) -> crate::execution::RuntimeContinuationFuture<'a, RootedValueSequence> {
     read_subscript_path_sequence(Some(runtime), base, path, request, None)
 }
 
@@ -115,8 +113,8 @@ fn read_subscript_path_sequence<'a>(
     path: ObjectSubscriptPath,
     request: SubscriptReadRequest,
     caller_function_name: Option<&'a str>,
-) -> Pin<Box<dyn Future<Output = Result<RootedValueSequence, RuntimeError>> + 'a>> {
-    Box::pin(async move {
+) -> crate::execution::RuntimeContinuationFuture<'a, RootedValueSequence> {
+    super::context::admit_future_with(runtime, move || async move {
         let _base_root = crate::execution::RootedValueLease::for_values(std::iter::once(&base))
             .map_err(|error| error.into_runtime_error())?;
         match resolve_object_protocol(&base, ObjectProtocol::Subsref, &request.access)? {
@@ -125,7 +123,7 @@ fn read_subscript_path_sequence<'a>(
                 read_default_steps(
                     runtime,
                     base,
-                    path.into_steps().into(),
+                    path.into_steps_in_context(runtime)?.into_iter(),
                     request,
                     caller_function_name,
                 )
@@ -140,7 +138,7 @@ pub fn assign_subscript_path<'a>(
     path: ObjectSubscriptPath,
     values: Vec<Value>,
     caller_function_name: Option<&'a str>,
-) -> Pin<Box<dyn Future<Output = Result<RootedValue, RuntimeError>> + 'a>> {
+) -> crate::execution::RuntimeContinuationFuture<'a, RootedValue> {
     assign_subscript_path_with_context(None, base, path, values, caller_function_name)
 }
 
@@ -150,7 +148,7 @@ pub fn assign_subscript_path_in_context<'a>(
     path: ObjectSubscriptPath,
     values: Vec<Value>,
     caller_function_name: Option<&'a str>,
-) -> Pin<Box<dyn Future<Output = Result<RootedValue, RuntimeError>> + 'a>> {
+) -> crate::execution::RuntimeContinuationFuture<'a, RootedValue> {
     assign_subscript_path_with_context(Some(runtime), base, path, values, caller_function_name)
 }
 
@@ -160,8 +158,8 @@ fn assign_subscript_path_with_context<'a>(
     path: ObjectSubscriptPath,
     values: Vec<Value>,
     caller_function_name: Option<&'a str>,
-) -> Pin<Box<dyn Future<Output = Result<RootedValue, RuntimeError>> + 'a>> {
-    Box::pin(async move {
+) -> crate::execution::RuntimeContinuationFuture<'a, RootedValue> {
+    super::context::admit_future_with(runtime, move || async move {
         let _inputs_root = crate::execution::RootedValueLease::for_values(
             std::iter::once(&base).chain(values.iter()),
         )
@@ -181,7 +179,7 @@ fn assign_subscript_path_with_context<'a>(
                 assign_default_steps(
                     runtime,
                     base,
-                    path.into_steps().into(),
+                    path.into_steps_in_context(runtime)?.into_iter(),
                     values,
                     caller_function_name,
                 )
@@ -194,17 +192,17 @@ fn assign_subscript_path_with_context<'a>(
 fn read_default_steps<'a>(
     runtime: Option<&'a RuntimeContext>,
     base: Value,
-    mut steps: VecDeque<ObjectSubscript>,
+    mut steps: ExactArrayIntoIter<ObjectSubscript>,
     request: SubscriptReadRequest,
     caller_function_name: Option<&'a str>,
-) -> Pin<Box<dyn Future<Output = Result<RootedValueSequence, RuntimeError>> + 'a>> {
-    Box::pin(async move {
+) -> crate::execution::RuntimeContinuationFuture<'a, RootedValueSequence> {
+    super::context::admit_future_with(runtime, move || async move {
         let mut base = RootedValue::new(base).map_err(|error| error.into_runtime_error())?;
-        while !steps.is_empty() {
+        while steps.len() != 0 {
             if let Some(method) =
                 resolve_object_protocol(base.value(), ObjectProtocol::Subsref, &request.access)?
             {
-                let remaining = ObjectSubscriptPath::new(steps.into_iter().collect())?;
+                let remaining = ObjectSubscriptPath::from_remaining_in_context(runtime, steps)?;
                 return invoke_prepared_subsref(
                     runtime,
                     base.value().clone(),
@@ -223,7 +221,7 @@ fn read_default_steps<'a>(
             )
             .await?
             {
-                if steps.is_empty() {
+                if steps.len() == 0 {
                     return Ok(sequence);
                 }
                 base = resolve_single(sequence)?;
@@ -234,17 +232,17 @@ fn read_default_steps<'a>(
             // indexing of the handle. The selected receiver is never read or
             // invoked again after this boundary.
             if callable::is_callable_value(base.value())
-                && steps.front().is_some_and(|step| {
+                && steps.as_slice().first().is_some_and(|step| {
                     step.kind() == crate::object::indexing::ObjectIndexKind::Paren
                 })
             {
-                let step = steps.pop_front().ok_or_else(|| {
+                let step = steps.next().ok_or_else(|| {
                     semantic_error(
                         "InvalidObjectSubscriptPath",
                         "object subscript path is empty",
                     )
                 })?;
-                let requested_outputs = if steps.is_empty() {
+                let requested_outputs = if steps.len() == 0 {
                     request.known_requested_outputs()?.ok_or_else(|| {
                         semantic_error(
                             "SequenceOutputContextUnavailable",
@@ -254,29 +252,29 @@ fn read_default_steps<'a>(
                 } else {
                     1
                 };
-                let arguments = callable::paren_arguments(step)?;
+                let arguments = callable::paren_arguments(runtime, step)?;
                 let sequence = base
                     .with_owned_async(|target| {
-                        callable::invoke(runtime, target, arguments, requested_outputs)
+                        callable::invoke(runtime, target, arguments.into(), requested_outputs)
                     })
                     .await?;
-                if steps.is_empty() {
+                if steps.len() == 0 {
                     return Ok(sequence);
                 }
                 base = resolve_single(sequence)?;
                 continue;
             }
-            if selected_paren::supports(base.value(), steps.front()) {
-                let step = steps.pop_front().ok_or_else(|| {
+            if selected_paren::supports(base.value(), steps.as_slice().first()) {
+                let step = steps.next().ok_or_else(|| {
                     semantic_error(
                         "InvalidObjectSubscriptPath",
                         "object subscript path is empty",
                     )
                 })?;
                 let value = base
-                    .with_owned_async(|target| selected_paren::execute(target, step))
+                    .with_owned_async(|target| selected_paren::execute(runtime, target, step))
                     .await?;
-                if steps.is_empty() {
+                if steps.len() == 0 {
                     return value.try_map_owned(
                         |value| {
                             ValueSequence::single(value)
@@ -288,13 +286,13 @@ fn read_default_steps<'a>(
                 base = value;
                 continue;
             }
-            let step = steps.pop_front().ok_or_else(|| {
+            let step = steps.next().ok_or_else(|| {
                 semantic_error(
                     "InvalidObjectSubscriptPath",
                     "object subscript path is empty",
                 )
             })?;
-            if steps.is_empty() {
+            if steps.len() == 0 {
                 return read_default_step_sequence(
                     runtime,
                     base.value().clone(),
@@ -365,19 +363,5 @@ async fn invoke_prepared_subsref(
 }
 
 fn resolve_single(sequence: RootedValueSequence) -> Result<RootedValue, RuntimeError> {
-    sequence.try_map_owned(
-        |sequence| {
-            let values = sequence.resolve(
-                runmat_types::SequenceUse::RequireSingle,
-                SequenceResolutionContext::default(),
-            )?;
-            crate::sequence::into_first_output(values)?.ok_or_else(|| {
-                semantic_error(
-                    "CommaSeparatedListRequiresSingleValue",
-                    "subscript read requires one value",
-                )
-            })
-        },
-        |error| error.into_runtime_error(),
-    )
+    sequence.try_into_single()
 }

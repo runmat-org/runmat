@@ -338,7 +338,7 @@ fn round_complex_tensor(ct: ComplexTensor, strategy: RoundStrategy) -> BuiltinRe
 fn round_char_array(ca: CharArray, strategy: RoundStrategy) -> BuiltinResult<Value> {
     let mut data = Vec::with_capacity(ca.data().len());
     for ch in ca.to_column_major() {
-        data.push(round_scalar(ch as u32 as f64, strategy));
+        data.push(round_scalar(u32::from(ch.raw()) as f64, strategy));
     }
     let tensor = Tensor::new(data, ca.shape)
         .map_err(|e| builtin_error_with_detail(&ROUND_ERROR_INTERNAL, e))?;

@@ -2,6 +2,7 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use runmat_execution::cancellation::CancellationToken;
 use runmat_execution::ProgramRevision;
@@ -19,7 +20,7 @@ pub(in crate::context) struct HostEffectStageAuthority {
     state: Rc<RuntimeContextState>,
     live_cancellation: Rc<RefCell<CancellationToken>>,
     execution: Rc<dyn RuntimeExecutionServices>,
-    program_revision: Option<ProgramRevision>,
+    program_revision: Option<Arc<ProgramRevision>>,
     placement: Option<Rc<dyn RuntimePlacementService>>,
     host_effect_resources: Option<Rc<dyn RuntimeHostEffectResourceService>>,
     parallel: Option<Rc<dyn RuntimeParallelService>>,
@@ -30,7 +31,7 @@ impl HostEffectStageAuthority {
         state: Rc<RuntimeContextState>,
         live_cancellation: Rc<RefCell<CancellationToken>>,
         execution: Rc<dyn RuntimeExecutionServices>,
-        program_revision: Option<ProgramRevision>,
+        program_revision: Option<Arc<ProgramRevision>>,
         placement: Option<Rc<dyn RuntimePlacementService>>,
         host_effect_resources: Option<Rc<dyn RuntimeHostEffectResourceService>>,
         parallel: Option<Rc<dyn RuntimeParallelService>>,
@@ -67,7 +68,7 @@ impl HostEffectStageAuthority {
             )
             && same(self.parallel.as_ref(), runtime.service_ports().parallel())
             && Rc::ptr_eq(&self.execution, runtime.execution())
-            && self.program_revision.as_ref() == runtime.program_revision()
+            && self.program_revision.as_deref() == runtime.program_revision()
             && original_cancellation.same_generation(&runtime.cancellation())
     }
 }

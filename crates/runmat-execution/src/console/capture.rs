@@ -40,6 +40,29 @@ impl ConsoleCapture {
     }
 
     pub fn push(&mut self, stream: ConsoleStream, text: String) -> Result<(), ContractError> {
+        self.precheck(stream, &text)?;
+        self.push_prechecked(stream, text);
+        Ok(())
+    }
+
+    /// Reject a borrowed write before allocating its retained text. A host
+    /// must not clone an oversized or already-rejected record first.
+    pub fn push_borrowed(
+        &mut self,
+        stream: ConsoleStream,
+        text: &str,
+    ) -> Result<(), ContractError> {
+        self.precheck(stream, text)?;
+        let mut retained = String::new();
+        retained
+            .try_reserve_exact(text.len())
+            .map_err(|_| ContractError::invalid("console capture", "text allocation failed"))?;
+        retained.push_str(text);
+        self.push_prechecked(stream, retained);
+        Ok(())
+    }
+
+    fn precheck(&mut self, stream: ConsoleStream, text: &str) -> Result<(), ContractError> {
         if let Some(limit) = self.rejected {
             return Err(limit_error(limit, self.limits));
         }
@@ -65,13 +88,16 @@ impl ConsoleCapture {
             self.rejected = Some(limit);
             return Err(limit_error(limit, self.limits));
         }
+        Ok(())
+    }
+
+    fn push_prechecked(&mut self, stream: ConsoleStream, text: String) {
         self.text_bytes += text.len() as u64;
         self.records.push(ConsoleRecord {
             sequence: self.records.len() as u64 + 1,
             stream,
             text: text.into_boxed_str(),
         });
-        Ok(())
     }
 
     /// Move the original inventory, retaining a rejected prefix even if the
@@ -101,4 +127,27 @@ fn limit_error(limit: ConsoleRejection, limits: ConsoleLimits) -> ContractError 
         ConsoleRejection::TextByteLimit => ("console UTF-8 bytes", limits.max_text_bytes),
     };
     ContractError::Limit { field, limit }
+}
+
+#[cfg(test)]
+mod borrowed_tests {
+    use super::*;
+
+    #[test]
+    fn oversized_borrowed_text_rejects_before_retention_and_remains_sticky() {
+        let mut capture = ConsoleCapture::new(ConsoleLimits {
+            max_records: 1,
+            max_text_bytes: 2,
+        })
+        .unwrap();
+        let source = "borrowed text that cannot fit";
+        assert!(capture
+            .push_borrowed(ConsoleStream::Stdout, source)
+            .is_err());
+        assert_eq!(capture.rejected(), Some(ConsoleRejection::TextByteLimit));
+        assert!(capture.records().is_empty());
+        assert_eq!(capture.text_bytes(), 0);
+        assert!(capture.push_borrowed(ConsoleStream::Stdout, "ok").is_err());
+        assert!(capture.records().is_empty());
+    }
 }

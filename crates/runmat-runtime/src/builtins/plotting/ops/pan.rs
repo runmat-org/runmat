@@ -82,7 +82,13 @@ pub fn pan_builtin(
             }
         }
         (1, Some(single), _) => {
-            if let Some(option) = super::style::value_as_string(single) {
+            if let Some(option) = super::style::value_as_string(single).map_err(|source| {
+                crate::builtins::plotting::plotting_error_with_source(
+                    "pan",
+                    source.to_string(),
+                    source,
+                )
+            })? {
                 apply_option_to_figure(ensure_current_pan_figure(), &option)?;
                 return Ok(status());
             }
@@ -96,6 +102,13 @@ pub fn pan_builtin(
             gate_integer_target(target)?;
             let target = resolve_pan_target(target)?;
             let option = super::style::value_as_string(command)
+                .map_err(|source| {
+                    crate::builtins::plotting::plotting_error_with_source(
+                        "pan",
+                        source.to_string(),
+                        source,
+                    )
+                })?
                 .ok_or_else(|| invalid("expected a pan option string"))?;
             apply_option_to_target(target, &option)?;
             Ok(status())
@@ -516,6 +529,9 @@ fn parse_on_off(value: &Value, property: &str) -> BuiltinResult<bool> {
 
 fn parse_motion(value: &Value) -> BuiltinResult<ZoomMotion> {
     let text = super::style::value_as_string(value)
+        .map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source("pan", source.to_string(), source)
+        })?
         .ok_or_else(|| invalid("Motion must be 'both', 'horizontal', or 'vertical'"))?;
     match text.trim().to_ascii_lowercase().as_str() {
         "both" => Ok(ZoomMotion::Both),

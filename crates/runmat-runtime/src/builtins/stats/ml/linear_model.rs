@@ -216,7 +216,7 @@ async fn fitlm_builtin(
     first: Value,
     rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    let inspection = HeaderInspection::inspect(&first, rest.view());
+    let inspection = HeaderInspection::inspect(&first, rest.view())?;
     ensure_fitlm_integer_extensions(&first, rest.view(), &inspection)?;
     ensure_fitlm_resident_fallback_extension(&first, rest.view())?;
     preflight_matrix_rank(&first)?;
@@ -264,7 +264,7 @@ fn ensure_fitlm_integer_extensions(
                         FITLM_NAME,
                     )?;
                 }
-                weights_name = scalar_text(value).map(|text| text.into_owned());
+                weights_name = scalar_text(value)?.map(|text| text.into_owned());
             }
             FitlmOption::Exclude if is_typed_integer_value(value) => {
                 crate::compatibility::ensure_builtin_extension_enabled(
@@ -273,10 +273,10 @@ fn ensure_fitlm_integer_extensions(
                 )?;
             }
             FitlmOption::ResponseVar => {
-                response_name = scalar_text(value).map(|text| text.into_owned())
+                response_name = scalar_text(value)?.map(|text| text.into_owned())
             }
             FitlmOption::PredictorVars => {
-                predictor_names = text_list(value, "PredictorVars").ok();
+                predictor_names = Some(text_list(value, "PredictorVars")?);
             }
             FitlmOption::Intercept if is_typed_integer_value(value) => {
                 crate::compatibility::ensure_builtin_extension_enabled(
@@ -294,10 +294,10 @@ fn ensure_fitlm_integer_extensions(
         };
         let names = table_variable_names_from_object(object)
             .map_err(|error| fitlm_invalid(format!("fitlm: {error}")))?;
-        let positional = rest
-            .first()
-            .filter(|_| inspection.option_start == 1)
-            .and_then(scalar_text);
+        let positional = match rest.first().filter(|_| inspection.option_start == 1) {
+            Some(value) => scalar_text(value)?,
+            None => None,
+        };
         if response_name.is_none() {
             response_name = positional.as_ref().and_then(|text| {
                 if let Some((lhs, _)) = text.split_once('~') {

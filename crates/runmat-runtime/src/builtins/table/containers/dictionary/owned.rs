@@ -1,282 +1,206 @@
-//! Move dictionary cells out of the original object. Exact backing remains
-//! claimed through edits and is republished without cloning child Values.
-
+//! Preflight a replayable native edit plan before allocating outputs or changing
+//! either property. Only usize origins live in scratch, never unrooted Values.
+use super::allocation::{add, allocation, exact_bytes, exact_error, Indices, Work};
+use super::stream::{element_at, element_count, element_shape, Element, Query};
 use super::*;
-use crate::context::host_allocation::{
-    host_allocation_runtime_error, HostAllocationError, HostAllocationPlan, HostAllocationPolicy,
-    HostAllocationReceipt,
-};
+use crate::context::host_allocation::HostAllocationError;
 use crate::context::RuntimeContext;
-use runmat_value::{
-    ExactArrayInitializationError, OutputListStorage, OwnedExactArrayValues, SharedShape,
-};
+use runmat_value::{OutputListStorage, SharedShape};
 
-fn admission(runtime: &RuntimeContext, cause: HostAllocationError) -> crate::RuntimeError {
-    host_allocation_runtime_error(
-        Some(runtime),
-        "RunMat:dictionary:HostAllocation",
-        "dictionary: replacement admission failed",
-        cause,
-    )
-}
-
-fn take_cell(
-    runtime: Option<&RuntimeContext>,
-    object: &mut ObjectInstance,
-    name: &'static str,
-) -> BuiltinResult<(String, CellArray)> {
-    let value = crate::execution::object::replacement::remove_property(
-        runtime,
-        object,
-        name,
-        |message, cause| match runtime {
-            Some(runtime) => admission(runtime, cause),
-            None => invalid_variable(format!("dictionary: {message}: {cause}")),
-        },
-        |message| invalid_variable(format!("dictionary: {message}")),
-    )?;
-    match value {
-        Value::Cell(cell) => Ok((name.to_owned(), cell)),
-        other => Err(invalid_variable(format!(
-            "dictionary: {name} storage must be a cell array, got {other:?}"
-        ))),
-    }
-}
-
-fn move_values(mut cell: CellArray, managed: bool) -> BuiltinResult<OwnedExactArrayValues<Value>> {
-    if !managed {
-        cell.make_data_unique_unbounded()
-            .map_err(|error| invalid_variable(error.to_string()))?;
-    }
-    cell.into_owned_data().map_err(|_| {
-        invalid_variable("dictionary: shared admitted cell backing requires a new output owner")
-    })
-}
-
-fn collect_exact(
-    old: OwnedExactArrayValues<Value>,
-    appended: Vec<Value>,
-    count: usize,
-    permit: &dyn runmat_value::ExactHostAllocationPermit,
-) -> BuiltinResult<OutputListStorage> {
-    let mut original = old.into_iter();
-    let mut appended = appended.into_iter();
-    OutputListStorage::try_initialize(count, permit, |_| {
-        original
-            .next()
-            .or_else(|| appended.next())
-            .ok_or_else(|| invalid_variable("dictionary: replacement collection is incomplete"))
-    })
-    .map_err(|cause| match cause {
-        ExactArrayInitializationError::Allocation(cause) => {
-            invalid_variable(format!("dictionary: output allocation failed: {cause}"))
-        }
-        ExactArrayInitializationError::Element(cause) => cause,
-    })
-}
+const UNCHANGED: usize = usize::MAX;
+const REMOVED: usize = usize::MAX - 1;
 
 pub(super) fn assign(
     runtime: Option<&RuntimeContext>,
     mut object: ObjectInstance,
-    payload: &Value,
+    query: Query<'_>,
     rhs: Value,
-) -> BuiltinResult<Value> {
-    let (query_keys, query_shape) = dictionary_selector_values(payload)?;
-    dictionary_cells(&object, "Keys")?;
-    dictionary_cells(&object, "Values")?;
-    let (keys_name, keys) = take_cell(runtime, &mut object, "Keys")?;
-    let (values_name, values) = take_cell(runtime, &mut object, "Values")?;
-    let query_keys = convert_queries_to_key_class(&keys, query_keys)?;
-    let policy = HostAllocationReceipt::policy(runtime).map_err(|cause| match runtime {
-        Some(runtime) => admission(runtime, cause),
-        None => invalid_variable(format!("dictionary: allocation policy failed: {cause}")),
-    })?;
-    let managed = policy == HostAllocationPolicy::Managed;
-    let keys_capacity = if keys.data_owner().is_unique() {
-        keys.data_owner().capacity()
-    } else {
-        keys.data().len()
-    };
-    let values_capacity = if values.data_owner().is_unique() {
-        values.data_owner().capacity()
-    } else {
-        values.data().len()
-    };
-    let keys_exact = keys.data_owner().is_exact();
-    let values_exact = values.data_owner().is_exact();
-    let mut keys = move_values(keys, managed)?;
-    let mut values = move_values(values, managed)?;
-    let mut append_keys = Vec::new();
-    let mut append_values = Vec::new();
-    if option_value_is_empty(&rhs) {
-        for query in query_keys {
-            if let Some(index) = keys
-                .as_slice()
-                .iter()
-                .position(|key| dictionary_keys_equal(key, &query))
-            {
-                keys.try_remove(index);
-                values.try_remove(index);
-            }
-        }
-    } else {
-        let mut rhs_values = value_elements(&rhs)?;
-        if rhs_values.len() == 1 && query_keys.len() != 1 {
-            rhs_values.resize(query_keys.len(), rhs_values[0].clone());
-        } else if rhs_values.len() != query_keys.len() {
+) -> BuiltinResult<crate::execution::RootedValue> {
+    let _source_root = lookup::rooted(runtime, Value::Object(object.clone()))?;
+    let _rhs_root = lookup::rooted(runtime, rhs.clone())?;
+    let _query_roots = query.roots(runtime)?;
+    let keys = dictionary_cells(&object, "Keys")?;
+    let values = dictionary_cells(&object, "Values")?;
+    let old = keys.data().len();
+    if old != values.data().len() {
+        return Err(invalid_variable("dictionary: key/value storage diverged"));
+    }
+    let queries = query.count()?;
+    let query_shape = query.shape(queries)?;
+    let remove = option_value_is_empty(&rhs);
+    let rhs_count = element_count(&rhs);
+    if !remove {
+        if rhs_count != 1 && rhs_count != queries {
             return Err(invalid_index("dictionary: assignment keys and values must have the same size unless values is scalar"));
-        } else if rhs_values.len() > 1 && dictionary_element_shape(&rhs) != query_shape {
+        }
+        if rhs_count > 1 && element_shape(&rhs).as_slice() != query_shape.as_slice() {
             return Err(invalid_index(
                 "dictionary: non-scalar assignment values must have the same size as the keys",
             ));
         }
-        normalize_to_existing_class(values.as_slice(), &mut rhs_values)?;
-        for (query, mut value) in query_keys.into_iter().zip(rhs_values) {
-            if let Some(index) = keys
-                .as_slice()
-                .iter()
-                .position(|key| dictionary_keys_equal(key, &query))
-            {
-                std::mem::swap(&mut values.as_mut_slice()[index], &mut value);
+    }
+    let capacity = old
+        .checked_add(queries)
+        .filter(|count| *count < REMOVED)
+        .ok_or_else(|| allocation(runtime, HostAllocationError::Overflow))?;
+    let scratch_len = capacity
+        .checked_mul(2)
+        .ok_or_else(|| allocation(runtime, HostAllocationError::Overflow))?;
+    // Two exact native arrays: first key origin and last RHS origin for every
+    // final slot. This same plan resolves duplicates in pending appended keys.
+    let mut plan = Indices::new(runtime, scratch_len)?;
+    for index in 0..old {
+        plan.as_mut_slice()[index] = index;
+        plan.as_mut_slice()[capacity + index] = UNCHANGED;
+    }
+    let key_class = keys.data().first().map(Element::Borrowed);
+    let value_class = values.data().first().map(Element::Borrowed);
+    let query_key = |index| query.at(index)?.normalize(key_class);
+    let rhs_value =
+        |index| element_at(&rhs, if rhs_count == 1 { 0 } else { index })?.normalize(value_class);
+    let mut slots = old;
+    for index in 0..queries {
+        plan.check()?;
+        let key = query_key(index)?;
+        // Validate even shadowed RHS elements before any mutation/publication.
+        if !remove {
+            rhs_value(index)?;
+        }
+        let mut target = None;
+        for slot in 0..slots {
+            plan.check()?;
+            if remove && plan.as_slice()[capacity + slot] == REMOVED {
+                continue;
+            }
+            let origin = plan.as_slice()[slot];
+            let existing = if origin < old {
+                Element::Borrowed(&keys.data()[origin])
             } else {
-                append_keys.push(query);
-                append_values.push(value);
+                query_key(origin - old)?
+            };
+            if key.equal(existing)? {
+                target = Some(slot);
+                break;
+            }
+        }
+        match (target, remove) {
+            (Some(slot), true) => plan.as_mut_slice()[capacity + slot] = REMOVED,
+            (None, true) => {}
+            (Some(slot), false) => plan.as_mut_slice()[capacity + slot] = index,
+            (None, false) => {
+                plan.as_mut_slice()[slots] = old + index;
+                plan.as_mut_slice()[capacity + slots] = index;
+                slots += 1;
             }
         }
     }
-    let count = keys
-        .len()
-        .checked_add(append_keys.len())
-        .ok_or_else(|| invalid_variable("dictionary: key count exceeds platform limits"))?;
-    if Some(count) != values.len().checked_add(append_values.len()) {
-        return Err(invalid_variable("dictionary: key/value storage diverged"));
-    }
-    let in_place = count <= keys_capacity && count <= values_capacity;
-    if in_place {
-        for (key, value) in append_keys.drain(..).zip(append_values.drain(..)) {
-            keys.try_push(key)
-                .map_err(|_| invalid_variable("dictionary: key capacity changed"))?;
-            values
-                .try_push(value)
-                .map_err(|_| invalid_variable("dictionary: value capacity changed"))?;
+    // Compact surviving origins in the same admitted scratch. Output replay
+    // is linear even when a large dictionary receives one small update.
+    let mut count = 0;
+    for slot in 0..slots {
+        plan.check()?;
+        if plan.as_slice()[capacity + slot] != REMOVED {
+            let key_origin = plan.as_slice()[slot];
+            let rhs_origin = plan.as_slice()[capacity + slot];
+            plan.as_mut_slice()[count] = key_origin;
+            plan.as_mut_slice()[capacity + count] = rhs_origin;
+            count += 1;
         }
     }
-    let mut publication_receipt = None;
-    let (keys_data, values_data, shape) = if managed {
-        let runtime =
-            runtime.ok_or_else(|| invalid_variable("dictionary: Managed runtime is absent"))?;
-        let replace = !in_place || !keys_exact || !values_exact;
-        let raw_list = if replace {
-            OutputListStorage::requested_bytes(count)
-                .map_err(|cause| admission(runtime, HostAllocationError::Numeric(cause)))?
-                .checked_mul(2)
-                .ok_or_else(|| admission(runtime, HostAllocationError::Overflow))?
+    let key_at = |slot| {
+        let origin = plan.as_slice()[slot];
+        if origin < old {
+            Ok(Element::Borrowed(&keys.data()[origin]))
         } else {
-            0
-        };
-        let raw_shape = SharedShape::requested_bytes_for_rank(2)
-            .map_err(|cause| admission(runtime, HostAllocationError::Numeric(cause)))?;
-        let raw = u64::try_from(
-            raw_list
-                .checked_add(raw_shape)
-                .ok_or_else(|| admission(runtime, HostAllocationError::Overflow))?,
-        )
-        .map_err(|_| admission(runtime, HostAllocationError::Overflow))?;
-        let claims = 1 + if replace && count != 0 { 2 } else { 0 };
-        let retained = HostAllocationPlan::retained_exact_output_bytes(raw, claims)
-            .map_err(|cause| admission(runtime, cause))?;
-        let receipt = HostAllocationReceipt::admit(
-            Some(runtime),
-            HostAllocationPlan::new(0, retained).map_err(|cause| admission(runtime, cause))?,
-        )
-        .map_err(|cause| admission(runtime, cause))?
-        .ok_or_else(|| admission(runtime, HostAllocationError::MissingManagedOwner))?;
-        let result = receipt.with_output_construction(runtime, |permit| {
-            let shape =
-                SharedShape::new_admitted_from_slice(&[usize::from(count != 0), count], permit)
-                    .map_err(|cause| admission(runtime, HostAllocationError::Numeric(cause)))?;
-            let (keys_data, values_data) = if replace {
-                (
-                    collect_exact(keys, append_keys, count, permit)?,
-                    collect_exact(values, append_values, count, permit)?,
-                )
-            } else {
-                (
-                    keys.try_into_storage().map_err(|_| {
-                        invalid_variable("dictionary: key header allocation failed")
-                    })?,
-                    values.try_into_storage().map_err(|_| {
-                        invalid_variable("dictionary: value header allocation failed")
-                    })?,
-                )
-            };
-            Ok::<_, crate::RuntimeError>((keys_data, values_data, shape))
-        });
-        receipt
-            .checkpoint(runtime)
-            .map_err(|cause| admission(runtime, cause))?;
-        let (keys_data, values_data, shape) =
-            result.map_err(|cause| admission(runtime, cause))??;
-        publication_receipt = Some(receipt);
-        (keys_data, values_data, shape)
-    } else {
-        let keys_data = if in_place {
-            keys.try_into_storage()
-                .map_err(|_| invalid_variable("dictionary: key header allocation failed"))?
-        } else {
-            OutputListStorage::shared_unbounded(keys.into_iter().chain(append_keys).collect())
-        };
-        let values_data = if in_place {
-            values
-                .try_into_storage()
-                .map_err(|_| invalid_variable("dictionary: value header allocation failed"))?
-        } else {
-            OutputListStorage::shared_unbounded(values.into_iter().chain(append_values).collect())
-        };
-        (
-            keys_data,
-            values_data,
-            SharedShape::new_unmanaged(vec![usize::from(count != 0), count]),
-        )
+            query_key(origin - old)
+        }
     };
-    let keys_cell = if managed {
-        CellArray::from_admitted(keys_data, shape.clone())
-    } else {
-        CellArray::from_shared_storage(keys_data, shape.clone())
+    let value_at = |slot| {
+        let origin = plan.as_slice()[capacity + slot];
+        if origin == UNCHANGED {
+            Ok(Element::Borrowed(&values.data()[plan.as_slice()[slot]]))
+        } else {
+            rhs_value(origin)
+        }
+    };
+    let raw_list = OutputListStorage::requested_bytes(count)
+        .map_err(|cause| allocation(runtime, cause.into()))?;
+    let raw_shape = SharedShape::requested_bytes_for_rank(2)
+        .map_err(|cause| allocation(runtime, cause.into()))?;
+    let mut retained = add(
+        exact_bytes(raw_list, usize::from(count != 0), runtime)?,
+        exact_bytes(raw_list, usize::from(count != 0), runtime)?,
+        runtime,
+    )?;
+    retained = add(retained, exact_bytes(raw_shape, 1, runtime)?, runtime)?;
+    for index in 0..count {
+        plan.check()?;
+        retained = add(retained, key_at(index)?.retained_bytes(runtime)?, runtime)?;
+        retained = add(retained, value_at(index)?.retained_bytes(runtime)?, runtime)?;
     }
-    .map_err(invalid_variable)?;
-    let values_cell = if managed {
-        CellArray::from_admitted(values_data, shape)
-    } else {
-        CellArray::from_shared_storage(values_data, shape)
-    }
-    .map_err(invalid_variable)?;
-    crate::execution::object::replacement::replace_property(
+    // This receipt quotes all newly retained scalar payloads/shape claims as
+    // well as both slot lists and their shared shape before construction.
+    let work = Work::new(runtime, 0, retained)?;
+    let (new_keys, new_values) = work.construct(|permit| {
+        let materialize_key = |index| {
+            plan.check()?;
+            work.check()?;
+            key_at(index)?.materialize(runtime, permit)
+        };
+        let materialize_value = |index| {
+            plan.check()?;
+            work.check()?;
+            value_at(index)?.materialize(runtime, permit)
+        };
+        let dimensions = [usize::from(count != 0), count];
+        let (keys, values) = match permit {
+            Some(permit) => {
+                let shape = SharedShape::new_admitted_from_slice(&dimensions, permit)
+                    .map_err(|cause| allocation(runtime, cause.into()))?;
+                let keys = OutputListStorage::try_initialize(count, permit, materialize_key)
+                    .map_err(|cause| exact_error(runtime, cause))?;
+                let values = OutputListStorage::try_initialize(count, permit, materialize_value)
+                    .map_err(|cause| exact_error(runtime, cause))?;
+                (
+                    CellArray::from_admitted(keys, shape.clone()).map_err(invalid_variable)?,
+                    CellArray::from_admitted(values, shape).map_err(invalid_variable)?,
+                )
+            }
+            None => {
+                let keys = (0..count)
+                    .map(materialize_key)
+                    .collect::<BuiltinResult<Vec<_>>>()?;
+                let values = (0..count)
+                    .map(materialize_value)
+                    .collect::<BuiltinResult<Vec<_>>>()?;
+                (
+                    CellArray::new_with_shape(keys, dimensions.to_vec())
+                        .map_err(invalid_variable)?,
+                    CellArray::new_with_shape(values, dimensions.to_vec())
+                        .map_err(invalid_variable)?,
+                )
+            }
+        };
+        Ok((Value::Cell(keys), Value::Cell(values)))
+    })?;
+    // Root both complete outputs before snapshot preparation. Any root,
+    // quota, cancellation, or object-copy failure leaves object untouched.
+    let new_keys = lookup::rooted(runtime, new_keys)?;
+    let new_values = lookup::rooted(runtime, new_values)?;
+    plan.check()?;
+    work.check()?;
+    let updates = [("Keys", new_keys.value()), ("Values", new_values.value())];
+    crate::execution::object::replacement::replace_properties(
         runtime,
         &mut object,
-        &keys_name,
-        Value::Cell(keys_cell),
-        |message, cause| match runtime {
-            Some(runtime) => admission(runtime, cause),
-            None => invalid_variable(format!("dictionary: {message}: {cause}")),
-        },
+        updates.into_iter(),
+        |_, cause| allocation(runtime, cause),
         |message| invalid_variable(format!("dictionary: {message}")),
     )?;
-    crate::execution::object::replacement::replace_property(
-        runtime,
-        &mut object,
-        &values_name,
-        Value::Cell(values_cell),
-        |message, cause| match runtime {
-            Some(runtime) => admission(runtime, cause),
-            None => invalid_variable(format!("dictionary: {message}: {cause}")),
-        },
-        |message| invalid_variable(format!("dictionary: {message}")),
-    )?;
-    if let (Some(runtime), Some(receipt)) = (runtime, publication_receipt.as_ref()) {
-        receipt
-            .checkpoint(runtime)
-            .map_err(|cause| admission(runtime, cause))?;
-    }
-    Ok(Value::Object(object))
+    // The snapshot is still local, not a workspace publication. Root it under
+    // the selected context before retiring either original admission fence.
+    let output = lookup::rooted(runtime, Value::Object(object))?;
+    plan.check()?;
+    work.check()?;
+    Ok(output)
 }

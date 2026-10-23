@@ -87,7 +87,7 @@ pub fn atoms(value: &Value) -> Result<Vec<ValidationAtom>, RuntimeError> {
         Value::Bool(v) => Ok(vec![ValidationAtom::Bool(*v)]),
         Value::Complex(re, im) => Ok(vec![ValidationAtom::ComplexNumber(*re, *im)]),
         Value::String(s) => Ok(vec![ValidationAtom::Text(s.as_str().to_owned())]),
-        Value::CharArray(c) if c.rows == 1 => Ok(vec![ValidationAtom::Text(chars_to_string(c))]),
+        Value::CharArray(c) if c.rows == 1 => Ok(vec![ValidationAtom::Text(chars_to_string(c)?)]),
         Value::Tensor(t) => {
             if let Some(storage) = t.integer_storage() {
                 return Ok(storage

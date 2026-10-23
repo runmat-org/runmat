@@ -1259,7 +1259,13 @@ impl RangeSpec {
         match value {
             Value::String(text) => Self::parse_text(text),
             Value::CharArray(ca) if ca.rows == 1 => {
-                let text: String = ca.data().iter().collect();
+                let text = runmat_value::decode_utf16_code_units(ca.data()).map_err(|error| {
+                    table_error_with_source(
+                        &TABLE_ERROR_INVALID_ARGUMENT,
+                        format!("readtable: Range is not valid UTF-16 text: {error}"),
+                        error,
+                    )
+                })?;
                 Self::parse_text(&text)
             }
             Value::StringArray(sa) if sa.data().len() == 1 => Self::parse_text(&sa.data()[0]),

@@ -84,10 +84,12 @@ fn heterogeneous_cell_group_keys_do_not_collapse_into_display_text() {
 
 #[test]
 fn character_group_rows_follow_the_canonical_row_major_payload() {
-    let row_major = CharArray::new(vec!['A', '1', 'B', '2'], 2, 2).unwrap();
-    let column_major = CharArray::from_column_major(vec!['A', 'B', '1', '2'], vec![2, 2]).unwrap();
-    assert_eq!(groups::char_rows(&row_major), vec!["A1", "B2"]);
-    assert_eq!(groups::char_rows(&column_major), vec!["A1", "B2"]);
+    let row_major = CharArray::from_unicode_scalars(vec!['A', '1', 'B', '2'], 2, 2).unwrap();
+    let column_major =
+        CharArray::from_column_major(runmat_value::encode_utf16_code_units("AB12"), vec![2, 2])
+            .unwrap();
+    assert_eq!(groups::char_rows(&row_major).unwrap(), vec!["A1", "B2"]);
+    assert_eq!(groups::char_rows(&column_major).unwrap(), vec!["A1", "B2"]);
     for group in [row_major, column_major] {
         let boxes = build_box_stats(
             tensor(vec![1.0, 2.0], vec![2, 1]),
@@ -670,7 +672,9 @@ fn scalar_text_options_reject_containers_but_factor_direction_accepts_text_vecto
     .is_err());
     assert!(BoxplotOptions::parse(vec![
         Value::from("FullFactors"),
-        Value::CharArray(CharArray::new(vec!['o', 'n', 'o', 'f', 'f', ' '], 2, 3).unwrap()),
+        Value::CharArray(
+            CharArray::from_unicode_scalars(vec!['o', 'n', 'o', 'f', 'f', ' '], 2, 3).unwrap()
+        ),
     ])
     .is_err());
     let directions = BoxplotOptions::parse(vec![
@@ -703,7 +707,9 @@ fn factor_gap_and_separator_use_the_scalar_text_boundary() {
         .is_err());
         assert!(BoxplotOptions::parse(vec![
             Value::from(name),
-            Value::CharArray(CharArray::new(vec!['a', 'u', 't', 'o'], 2, 2).unwrap()),
+            Value::CharArray(
+                CharArray::from_unicode_scalars(vec!['a', 'u', 't', 'o'], 2, 2).unwrap()
+            ),
         ])
         .is_err());
         assert!(BoxplotOptions::parse(vec![Value::from(name), Value::from("auto")]).is_ok());
@@ -1291,7 +1297,11 @@ fn label_orientation_changes_axes_rotation_without_changing_horizontal_labels() 
 fn unrepresentable_filled_vertices_reject_before_plot_state_changes() {
     let _guard = crate::builtins::plotting::lock_plot_test_context();
     crate::builtins::plotting::reset_plot_state();
-    crate::builtins::plotting::figure::figure_builtin(Vec::new()).expect("create baseline figure");
+    crate::builtins::plotting::figure::figure_builtin(
+        None,
+        crate::builtins::common::test_support::builtin_arguments(Vec::new()),
+    )
+    .expect("create baseline figure");
     let options =
         BoxplotOptions::parse(vec![Value::from("BoxStyle"), Value::from("filled")]).unwrap();
     let boxes = build_box_stats(

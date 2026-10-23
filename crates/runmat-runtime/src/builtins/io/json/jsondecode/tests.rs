@@ -326,7 +326,8 @@ fn jsondecode_invalid_text_reports_error() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn jsondecode_rejects_multirow_char_input() {
-    let chars = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).expect("char array");
+    let chars =
+        CharArray::from_unicode_scalars(vec!['a', 'b', 'c', 'd'], 2, 2).expect("char array");
     let err =
         block_on(jsondecode_builtin(Value::CharArray(chars))).expect_err("expected type error");
     assert_eq!(error_message(err), JSONDECODE_ERROR_INPUT_TYPE.message);

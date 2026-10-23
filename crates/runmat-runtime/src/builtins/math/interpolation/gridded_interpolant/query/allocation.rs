@@ -26,7 +26,13 @@ pub(in crate::builtins::math::interpolation::gridded_interpolant) fn admit_splin
     if !object.is_class(CLASS_IDENTITY) {
         return Ok(None);
     }
-    let Some(method) = object.properties().get(METHOD).and_then(text_from_value) else {
+    let Some(method) = object
+        .properties()
+        .get(METHOD)
+        .map(text_from_value)
+        .transpose()?
+        .flatten()
+    else {
         return Ok(None);
     };
     let Some(method) = MethodKeyword::parse(&method) else {

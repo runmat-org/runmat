@@ -192,7 +192,10 @@ fn weboptions_rejects_nonscalar_text_key_values_before_other_resident_readback()
         )
         .expect("resident unrelated option");
     let invalid_text = [
-        Value::CharArray(runmat_value::CharArray::new(vec!['a', 'b'], 2, 1).expect("char matrix")),
+        Value::CharArray(
+            runmat_value::CharArray::from_unicode_scalars(vec!['a', 'b'], 2, 1)
+                .expect("char matrix"),
+        ),
         Value::StringArray(
             runmat_value::StringArray::new(vec!["a".into(), "b".into()], vec![1, 2])
                 .expect("string array"),

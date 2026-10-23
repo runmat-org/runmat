@@ -4,7 +4,7 @@ use runmat_runtime::execution::RootedValue;
 use crate::{NativeExecutorError, NativeExecutorResult};
 
 use super::super::state::HostState;
-use super::{CallCompletion, CompletedPayload, CompletionFuture, PendingCall};
+use super::{CallCompletion, CompletedPayload, PendingCall};
 
 pub(in crate::execute) fn take_completed_statement_output(
     state: &mut HostState,
@@ -64,7 +64,7 @@ pub(in crate::execute) fn begin_statement_output(
     };
     let (continuation, generation) = state.next_suspension_identity()?;
     let runtime = state.runtime.clone();
-    let future: CompletionFuture = Box::pin(async move {
+    let future = super::admit_completion_with(state, move || async move {
         runtime
             .scope(runmat_runtime::console::emit_statement_value(
                 &runtime,
@@ -73,14 +73,14 @@ pub(in crate::execute) fn begin_statement_output(
             ))
             .await?;
         Ok(CallCompletion::StatementOutput)
-    });
+    })?;
     state.pending_call = Some(PendingCall {
         request,
         continuation,
         generation,
         embedded: None,
         retained_roots: Vec::new(),
-        future: super::scope_completion(state, future),
+        future,
     });
     Err(NativeExecutorError::CallSuspended)
 }

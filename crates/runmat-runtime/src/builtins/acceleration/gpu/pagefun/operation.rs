@@ -28,7 +28,16 @@ impl PageOperation {
                         "function char array must be a single row character vector",
                     ));
                 }
-                Cow::Owned(chars.data().iter().collect::<String>())
+                Cow::Owned(runmat_value::decode_utf16_code_units(chars.data()).map_err(
+                    |source| {
+                        let mut error = pagefun_error_with_detail(
+                            &PAGEFUN_ERROR_INVALID_CALLABLE,
+                            source.to_string(),
+                        );
+                        error.source = Some(Box::new(source));
+                        error
+                    },
+                )?)
             }
             other => {
                 return Err(pagefun_error_with_detail(

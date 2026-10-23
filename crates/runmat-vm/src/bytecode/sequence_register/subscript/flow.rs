@@ -50,7 +50,10 @@ fn validate_nested_flow(instructions: &[Instr], flow: SubscriptFlow) -> Result<(
             }
         }
         let successors = normal_successors(instructions, pc)?;
-        if successors.is_empty() && !outgoing.is_empty() {
+        if successors.is_empty()
+            && !super::super::control_flow::is_exceptional_exit(&instructions[pc])
+            && !outgoing.is_empty()
+        {
             return Err(format!(
                 "{label} remains live at function exit instruction {pc}"
             ));

@@ -11,9 +11,6 @@ use std::{cell::RefCell, rc::Rc};
 
 struct Recorder(Rc<RefCell<Vec<(&'static str, RealUnaryPredicate)>>>);
 impl RuntimeAccelerationService for Recorder {
-    fn supports_operation(&self, _: &str) -> bool {
-        true
-    }
     fn prepare_admitted(
         &self,
         _: RuntimeContext,

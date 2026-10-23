@@ -103,7 +103,7 @@ fn eq_vector_broadcast() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn eq_char_array_against_numeric() {
-    let char_array = CharArray::new(vec!['A', 'B', 'A'], 1, 3).unwrap();
+    let char_array = CharArray::from_unicode_scalars(vec!['A', 'B', 'A'], 1, 3).unwrap();
     let tensor = Tensor::new(vec![65.0, 66.0, 65.0], vec![1, 3]).unwrap();
     let result = run_eq(Value::CharArray(char_array), Value::Tensor(tensor)).expect("eq");
     match result {

@@ -1,12 +1,10 @@
 //! MATLAB-compatible `join` builtin with GPU-aware semantics for RunMat.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, JOIN_ERROR_ARG_COUNT, JOIN_ERROR_DELIMITER_SIZE,
+    JOIN_ERROR_DELIMITER_TYPE, JOIN_ERROR_DIMENSION_TYPE, JOIN_ERROR_INPUT_TYPE,
+    JOIN_ERROR_INTERNAL, JOIN_RESIDENT_INPUT_EXTENSION, JOIN_REVERSED_ARGUMENTS_EXTENSION,
+    JOIN_TYPED_INTEGER_DIMENSION_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, StringArray, Value};
@@ -18,8 +16,9 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::builtins::strings::common::{char_row_to_string_slice, is_missing_string};
-use crate::builtins::strings::type_resolvers::text_concat_type;
-use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
+use crate::{
+    build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult, RuntimeError,
+};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::strings::transform::join")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -50,209 +49,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "join";
 
-const JOIN_TYPED_INTEGER_DIMENSION_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "join-typed-integer-dimension",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "join with a typed-integer dimension is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:JoinTypedIntegerDimensionExtension"),
-    };
-const JOIN_REVERSED_ARGUMENTS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "join-dimension-before-delimiter",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "join(str, dim, delimiter) is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:JoinDimensionBeforeDelimiterExtension"),
-};
-const JOIN_RESIDENT_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "join-resident-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "join with an explicitly resident gpuArray argument is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:JoinResidentInputExtension"),
-};
-pub const JOIN_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    JOIN_TYPED_INTEGER_DIMENSION_EXTENSION,
-    JOIN_REVERSED_ARGUMENTS_EXTENSION,
-    JOIN_RESIDENT_INPUT_EXTENSION,
-];
-
-const JOIN_INTEGER_DIMENSION_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "dim",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The documented dimension is a positive integer-valued double scalar. RunMat mode additionally accepts every native typed-integer scalar exactly.",
-    }];
-pub const JOIN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "out = join(str, delimiter?, integer_dim)",
-        inputs: &JOIN_INTEGER_DIMENSION_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "Typed dimensions are compatibility-gated before resident access, parsed from authoritative integer storage, and never converted through floating point.",
-    }];
-
-const JOIN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "out",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Joined text preserving join output container semantics.",
-}];
-
-const JOIN_INPUTS_BASE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "str",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input text (string/char/cell).",
-}];
-
-const JOIN_INPUTS_DELIMITER: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text (string/char/cell).",
-    },
-    BuiltinParamDescriptor {
-        name: "delimiter",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: Some("\" \""),
-        description: "Delimiter scalar or delimiter array matching join shape constraints.",
-    },
-];
-
-const JOIN_INPUTS_DIM: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text (string/char/cell).",
-    },
-    BuiltinParamDescriptor {
-        name: "dim",
-        ty: BuiltinParamType::IntegerScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Positive dimension index to join along.",
-    },
-];
-
-const JOIN_INPUTS_DELIMITER_DIM: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "str",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text (string/char/cell).",
-    },
-    BuiltinParamDescriptor {
-        name: "delimiter",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Delimiter scalar or delimiter array matching join shape constraints.",
-    },
-    BuiltinParamDescriptor {
-        name: "dim",
-        ty: BuiltinParamType::IntegerScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Positive dimension index to join along.",
-    },
-];
-
-const JOIN_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "out = join(str)",
-        inputs: &JOIN_INPUTS_BASE,
-        outputs: &JOIN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "out = join(str, delimiter)",
-        inputs: &JOIN_INPUTS_DELIMITER,
-        outputs: &JOIN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "out = join(str, dim)",
-        inputs: &JOIN_INPUTS_DIM,
-        outputs: &JOIN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "out = join(str, delimiter, dim)",
-        inputs: &JOIN_INPUTS_DELIMITER_DIM,
-        outputs: &JOIN_OUTPUT,
-    },
-];
-
-const JOIN_ERROR_INPUT_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.JOIN.INPUT_TYPE",
-    identifier: Some("RunMat:join:InputType"),
-    when: "Input text is not a string array/scalar, char array, or cell array of text scalars.",
-    message:
-        "join: input must be a string array, string scalar, character array, or cell array of character vectors",
-};
-
-const JOIN_ERROR_DELIMITER_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.JOIN.DELIMITER_TYPE",
-    identifier: Some("RunMat:join:DelimiterType"),
-    when: "Delimiter is not a supported text scalar/array/cell value.",
-    message:
-        "join: delimiter must be a string, character vector, string array, or cell array of character vectors",
-};
-
-const JOIN_ERROR_DELIMITER_SIZE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.JOIN.DELIMITER_SIZE",
-    identifier: Some("RunMat:join:DelimiterSize"),
-    when: "Delimiter array shape does not match join shape constraints.",
-    message:
-        "join: size of delimiter array must match the size of str, with the join dimension reduced by one",
-};
-
-const JOIN_ERROR_DIMENSION_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.JOIN.DIMENSION_TYPE",
-    identifier: Some("RunMat:join:DimensionType"),
-    when: "Dimension argument is not a positive integer scalar.",
-    message: "join: dimension must be a positive integer scalar",
-};
-
-const JOIN_ERROR_ARG_COUNT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.JOIN.ARG_COUNT",
-    identifier: Some("RunMat:join:ArgCount"),
-    when: "More than three total arguments are supplied.",
-    message: "join: too many input arguments",
-};
-
-const JOIN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.JOIN.INTERNAL",
-    identifier: Some("RunMat:join:InternalError"),
-    when: "Internal output container construction failed.",
-    message: "join: internal error",
-};
-
-const JOIN_ERRORS: [BuiltinErrorDescriptor; 6] = [
-    JOIN_ERROR_INPUT_TYPE,
-    JOIN_ERROR_DELIMITER_TYPE,
-    JOIN_ERROR_DELIMITER_SIZE,
-    JOIN_ERROR_DIMENSION_TYPE,
-    JOIN_ERROR_ARG_COUNT,
-    JOIN_ERROR_INTERNAL,
-];
-
-pub const JOIN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &JOIN_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &JOIN_ERRORS,
-};
-
 fn map_flow(err: RuntimeError) -> RuntimeError {
     map_control_flow_with_builtin(err, BUILTIN_NAME)
 }
@@ -274,26 +70,30 @@ fn join_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
 
 #[runtime_builtin(
     name = "join",
-    category = "strings/transform",
-    summary = "Join text elements with delimiters along a dimension.",
-    keywords = "join,string join,concatenate strings,delimiters,cell array join",
-    accel = "none",
-    type_resolver(text_concat_type),
-    descriptor(crate::builtins::strings::transform::join::JOIN_DESCRIPTOR),
-    extensions(crate::builtins::strings::transform::join::JOIN_EXTENSIONS),
-    integer_capabilities(crate::builtins::strings::transform::join::JOIN_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::transform::join"
 )]
-async fn join_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-    preflight_join_extensions(&text, &rest)?;
+async fn join_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    text: Value,
+    rest: crate::call::BuiltinArguments,
+) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::JOIN_DESCRIPTOR,
+        &runmat_builtins::JOIN_ERROR_TOO_MANY_OUTPUTS,
+        "join",
+    )?;
+    preflight_join_extensions(&text, rest.view())?;
     let text = gather_if_needed_async(&text).await.map_err(map_flow)?;
-    let mut args = Vec::with_capacity(rest.len());
-    for arg in rest {
-        args.push(gather_if_needed_async(&arg).await.map_err(map_flow)?);
-    }
+    let args = rest
+        .try_map_preserving_roots_async(rest.len(), runtime.as_ref(), async |index| {
+            gather_if_needed_async(&rest[index]).await.map_err(map_flow)
+        })
+        .await?;
 
     let mut input = JoinInput::from_value(text)?;
-    let (delimiter_arg, dimension_arg) = parse_arguments(&args)?;
+    let (delimiter_arg, dimension_arg) = parse_arguments(args.view())?;
 
     let mut shape = input.shape.clone();
     if shape.is_empty() {
@@ -326,30 +126,38 @@ async fn join_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     input.build_output(output_data, output_shape)
 }
 
-fn preflight_join_extensions(text: &Value, args: &[Value]) -> BuiltinResult<()> {
+fn preflight_join_extensions(
+    text: &Value,
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     if args.len() > 2 {
         return Err(join_error(&JOIN_ERROR_ARG_COUNT));
     }
-    if !is_join_input(text) {
+    if !is_join_input(text)
+        || crate::builtins::strings::common::has_unsupported_character_pages(text)
+        || args
+            .iter()
+            .any(crate::builtins::strings::common::has_unsupported_character_pages)
+    {
         return Err(join_error(&JOIN_ERROR_INPUT_TYPE));
     }
 
-    let dimension = match args {
-        [] => None,
-        [only] if is_dimension_candidate(only) => Some(only),
-        [delimiter] => {
+    let dimension = match (args.get(0), args.get(1)) {
+        (None, None) => None,
+        (Some(only), None) if is_dimension_candidate(only) => Some(only),
+        (Some(delimiter), None) => {
             if !is_join_delimiter(delimiter) {
                 return Err(join_error(&JOIN_ERROR_DELIMITER_TYPE));
             }
             None
         }
-        [delimiter, dimension] if is_dimension_candidate(dimension) => {
+        (Some(delimiter), Some(dimension)) if is_dimension_candidate(dimension) => {
             if !is_join_delimiter(delimiter) {
                 return Err(join_error(&JOIN_ERROR_DELIMITER_TYPE));
             }
             Some(dimension)
         }
-        [dimension, delimiter] if is_dimension_candidate(dimension) => {
+        (Some(dimension), Some(delimiter)) if is_dimension_candidate(dimension) => {
             if !is_join_delimiter(delimiter) {
                 return Err(join_error(&JOIN_ERROR_DELIMITER_TYPE));
             }
@@ -359,7 +167,7 @@ fn preflight_join_extensions(text: &Value, args: &[Value]) -> BuiltinResult<()> 
             )?;
             Some(dimension)
         }
-        [_, _] => return Err(join_error(&JOIN_ERROR_DIMENSION_TYPE)),
+        (Some(_), Some(_)) => return Err(join_error(&JOIN_ERROR_DIMENSION_TYPE)),
         _ => unreachable!("join arity checked above"),
     };
 
@@ -384,7 +192,7 @@ fn is_join_input(value: &Value) -> bool {
         Value::Cell(cell) => cell
             .data()
             .iter()
-            .all(|value| cell_element_to_string(value).is_some()),
+            .all(|value| cell_element_to_string(value).ok().flatten().is_some()),
         _ => false,
     }
 }
@@ -395,7 +203,7 @@ fn is_join_delimiter(value: &Value) -> bool {
         Value::Cell(cell) => cell
             .data()
             .iter()
-            .all(|value| cell_element_to_string(value).is_some()),
+            .all(|value| cell_element_to_string(value).ok().flatten().is_some()),
         _ => false,
     }
 }
@@ -435,7 +243,9 @@ fn is_dimension_candidate(value: &Value) -> bool {
     }
 }
 
-fn parse_arguments(args: &[Value]) -> BuiltinResult<(Option<Value>, Option<usize>)> {
+fn parse_arguments(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<(Option<Value>, Option<usize>)> {
     match args.len() {
         0 => Ok((None, None)),
         1 => {
@@ -554,7 +364,7 @@ impl JoinInput {
                 })
             }
             Value::CharArray(array) => {
-                let strings = char_array_rows_to_strings(&array);
+                let strings = char_array_rows_to_strings(&array)?;
                 Ok(Self {
                     data: strings.into_iter().map(Into::into).collect(),
                     shape: vec![array.rows, 1],
@@ -617,60 +427,84 @@ fn build_value<T: Default + Into<runmat_value::Utf8Text> + AsRef<str>>(
             let rows = shape.first().copied().unwrap_or(0);
             let cols = shape.get(1).copied().unwrap_or(1);
             if rows == 0 || cols == 0 || data.is_empty() {
-                return make_cell(Vec::new(), rows, cols).map_err(|e| {
+                return make_cell_with_shape(Vec::new(), shape).map_err(|e| {
                     join_error_with_message(format!("{BUILTIN_NAME}: {e}"), &JOIN_ERROR_INTERNAL)
                 });
             }
-            let mut values = Vec::with_capacity(rows * cols);
-            for row in 0..rows {
-                for col in 0..cols {
-                    let idx = row + col * rows;
-                    let chars: Vec<char> = data[idx].as_ref().chars().collect();
-                    let cols_count = chars.len();
-                    let char_array = CharArray::new(chars, 1, cols_count).map_err(|e| {
-                        join_error_with_message(
-                            format!("{BUILTIN_NAME}: {e}"),
-                            &JOIN_ERROR_INTERNAL,
-                        )
-                    })?;
-                    values.push(Value::CharArray(char_array));
+            let page_len = rows
+                .checked_mul(cols)
+                .ok_or_else(|| join_error(&JOIN_ERROR_INTERNAL))?;
+            if !data.len().is_multiple_of(page_len) {
+                return Err(join_error(&JOIN_ERROR_INTERNAL));
+            }
+            let mut values = Vec::with_capacity(data.len());
+            for page in data.chunks_exact(page_len) {
+                for row in 0..rows {
+                    for col in 0..cols {
+                        let idx = row + col * rows;
+                        let chars: Vec<char> = page[idx].as_ref().chars().collect();
+                        let cols_count = page[idx].as_ref().encode_utf16().count();
+                        let char_array = CharArray::from_unicode_scalars(chars, 1, cols_count)
+                            .map_err(|e| {
+                                join_error_with_message(
+                                    format!("{BUILTIN_NAME}: {e}"),
+                                    &JOIN_ERROR_INTERNAL,
+                                )
+                            })?;
+                        values.push(Value::CharArray(char_array));
+                    }
                 }
             }
-            make_cell(values, rows, cols).map_err(|e| {
+            make_cell_with_shape(values, shape).map_err(|e| {
                 join_error_with_message(format!("{BUILTIN_NAME}: {e}"), &JOIN_ERROR_INTERNAL)
             })
         }
     }
 }
 
-fn char_array_rows_to_strings(array: &CharArray) -> Vec<String> {
+fn char_array_rows_to_strings(array: &CharArray) -> BuiltinResult<Vec<String>> {
     let mut strings = Vec::with_capacity(array.rows);
     for row in 0..array.rows {
-        strings.push(char_row_to_string_slice(array.data(), array.cols, row));
+        strings.push(
+            char_row_to_string_slice(array.data(), array.cols, row).map_err(|e| {
+                join_error_with_message(format!("{BUILTIN_NAME}: {e}"), &JOIN_ERROR_INTERNAL)
+            })?,
+        );
     }
-    strings
+    Ok(strings)
 }
 
 fn cell_array_to_strings(
     cell: CellArray,
 ) -> BuiltinResult<(Vec<runmat_value::Utf8Text>, Vec<usize>)> {
-    let (data, _, rows, cols) = cell.into_parts();
-    let mut strings = Vec::with_capacity(rows * cols);
-    for col in 0..cols {
-        for row in 0..rows {
-            let idx = row * cols + col;
-            strings.push(
-                cell_element_to_string(&data[idx])
-                    .ok_or_else(|| join_error(&JOIN_ERROR_INPUT_TYPE))?
-                    .into(),
-            );
+    let (data, shape, rows, cols) = cell.into_parts();
+    let page_len = rows
+        .checked_mul(cols)
+        .ok_or_else(|| join_error(&JOIN_ERROR_INTERNAL))?;
+    let mut strings = Vec::with_capacity(data.len());
+    if page_len == 0 {
+        return Ok((strings, shape.to_vec()));
+    }
+    if !data.len().is_multiple_of(page_len) {
+        return Err(join_error(&JOIN_ERROR_INTERNAL));
+    }
+    for page in data.chunks_exact(page_len) {
+        for col in 0..cols {
+            for row in 0..rows {
+                let idx = row * cols + col;
+                strings.push(
+                    cell_element_to_string(&page[idx])?
+                        .ok_or_else(|| join_error(&JOIN_ERROR_INPUT_TYPE))?
+                        .into(),
+                );
+            }
         }
     }
-    Ok((strings, vec![rows, cols]))
+    Ok((strings, shape.to_vec()))
 }
 
-fn cell_element_to_string(value: &Value) -> Option<String> {
-    match value {
+fn cell_element_to_string(value: &Value) -> BuiltinResult<Option<String>> {
+    Ok(match value {
         Value::String(text) => Some(text.as_str().to_owned()),
         Value::StringArray(array) if array.data().len() == 1 => {
             Some(array.data()[0].as_str().to_owned())
@@ -679,11 +513,18 @@ fn cell_element_to_string(value: &Value) -> Option<String> {
             if array.rows == 0 {
                 Some(String::new())
             } else {
-                Some(char_row_to_string_slice(array.data(), array.cols, 0))
+                Some(
+                    char_row_to_string_slice(array.data(), array.cols, 0).map_err(|e| {
+                        join_error_with_message(
+                            format!("{BUILTIN_NAME}: {e}"),
+                            &JOIN_ERROR_INTERNAL,
+                        )
+                    })?,
+                )
             }
         }
         _ => None,
-    }
+    })
 }
 
 #[derive(Clone)]
@@ -708,7 +549,7 @@ impl Delimiter {
         match value {
             None => Ok(Self::Scalar(" ".to_string())),
             Some(v) => {
-                if let Some(text) = value_to_scalar_string(&v) {
+                if let Some(text) = value_to_scalar_string(&v)? {
                     return Ok(Self::Scalar(text));
                 }
                 let (data, shape) = value_to_string_array(v)?;
@@ -749,22 +590,29 @@ impl DelimiterArray {
     }
 }
 
-fn value_to_scalar_string(value: &Value) -> Option<String> {
-    match value {
+fn value_to_scalar_string(value: &Value) -> BuiltinResult<Option<String>> {
+    Ok(match value {
         Value::String(text) => Some(text.as_str().to_owned()),
         Value::CharArray(array) if array.rows <= 1 => {
             if array.rows == 0 {
                 Some(String::new())
             } else {
-                Some(char_row_to_string_slice(array.data(), array.cols, 0))
+                Some(
+                    char_row_to_string_slice(array.data(), array.cols, 0).map_err(|e| {
+                        join_error_with_message(
+                            format!("{BUILTIN_NAME}: {e}"),
+                            &JOIN_ERROR_INTERNAL,
+                        )
+                    })?,
+                )
             }
         }
         Value::StringArray(array) if array.data().len() == 1 => {
             Some(array.data()[0].as_str().to_owned())
         }
-        Value::Cell(cell) if cell.data().len() == 1 => cell_element_to_string(&cell.data()[0]),
+        Value::Cell(cell) if cell.data().len() == 1 => cell_element_to_string(&cell.data()[0])?,
         _ => None,
-    }
+    })
 }
 
 fn value_to_string_array(value: Value) -> BuiltinResult<(Vec<String>, Vec<usize>)> {
@@ -788,7 +636,7 @@ fn value_to_string_array(value: Value) -> BuiltinResult<(Vec<String>, Vec<usize>
         }
         Value::CharArray(array) => {
             let rows = array.rows;
-            let strings = char_array_rows_to_strings(&array);
+            let strings = char_array_rows_to_strings(&array)?;
             Ok((strings, vec![rows, 1]))
         }
         _ => Err(join_error(&JOIN_ERROR_DELIMITER_TYPE)),
@@ -923,13 +771,21 @@ fn increment_coords(coords: &mut [usize], shape: &[usize], axis_idx: usize) {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::make_cell;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_backend;
-    use runmat_builtins::{ResolveContext, Type};
+    use runmat_builtins::{
+        BuiltinIntegerInputAvailability, JOIN_DESCRIPTOR, JOIN_EXTENSIONS,
+        JOIN_INTEGER_CAPABILITIES,
+    };
     use runmat_value::{IntValue, IntegerStorage, Tensor};
 
     fn join_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(super::join_builtin(text, rest))
+        futures::executor::block_on(super::join_builtin(
+            None,
+            text,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1240,11 +1096,11 @@ pub(crate) mod tests {
                 match (first, second) {
                     (Value::CharArray(a), Value::CharArray(b)) => {
                         assert_eq!(
-                            char_row_to_string_slice(a.data(), a.cols, 0),
+                            char_row_to_string_slice(a.data(), a.cols, 0).unwrap(),
                             "GPU, Accelerate"
                         );
                         assert_eq!(
-                            char_row_to_string_slice(b.data(), b.cols, 0),
+                            char_row_to_string_slice(b.data(), b.cols, 0).unwrap(),
                             "VM, Interpreter"
                         );
                     }
@@ -1253,6 +1109,41 @@ pub(crate) mod tests {
             }
             other => panic!("expected cell array, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn join_preserves_nd_cell_pages_through_both_layout_bridges() {
+        let input = make_cell_with_shape(
+            vec!["a", "b", "c", "d"]
+                .into_iter()
+                .map(|text| Value::CharArray(CharArray::new_row(text)))
+                .collect(),
+            vec![1, 2, 2],
+        )
+        .expect("nd text cells");
+        let Value::Cell(output) =
+            join_builtin(input, vec![Value::string(","), Value::Num(2.0)]).expect("join each page")
+        else {
+            panic!("cell output");
+        };
+        assert_eq!(output.shape(), &[1, 1, 2]);
+        assert_eq!(output.data().len(), 2);
+        assert_eq!(
+            output.data()[0],
+            Value::CharArray(CharArray::new_row("a,b"))
+        );
+        assert_eq!(
+            output.data()[1],
+            Value::CharArray(CharArray::new_row("c,d"))
+        );
+        let pages = Value::CharArray(
+            CharArray::from_unicode_scalars_with_shape(vec!['x', 'y'], vec![1, 1, 2])
+                .expect("character pages"),
+        );
+        let nested = make_cell_with_shape(vec![pages], vec![1, 1]).expect("nested character pages");
+        let error =
+            join_builtin(nested, vec![]).expect_err("do not drop character pages inside cells");
+        assert_eq!(error.identifier(), JOIN_ERROR_INPUT_TYPE.identifier);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1277,7 +1168,7 @@ pub(crate) mod tests {
     #[test]
     fn join_char_array_input_produces_string_array() {
         let data: Vec<char> = "RunMatGPUDev".chars().collect();
-        let char_array = CharArray::new(data, 3, 4).unwrap();
+        let char_array = CharArray::from_unicode_scalars(data, 3, 4).unwrap();
         let result = join_builtin(Value::CharArray(char_array), Vec::new()).expect("join");
         match result {
             Value::StringArray(sa) => {
@@ -1406,7 +1297,8 @@ pub(crate) mod tests {
     #[test]
     fn join_accepts_char_delimiter_scalar() {
         let array = StringArray::new(vec!["A".into(), "B".into()], vec![1, 2]).unwrap();
-        let delimiter_chars = CharArray::new("++".chars().collect::<Vec<char>>(), 1, 2).unwrap();
+        let delimiter_chars =
+            CharArray::from_unicode_scalars("++".chars().collect::<Vec<char>>(), 1, 2).unwrap();
         let result = join_builtin(
             Value::StringArray(array),
             vec![Value::CharArray(delimiter_chars)],
@@ -1473,13 +1365,5 @@ pub(crate) mod tests {
             }
             other => panic!("expected string array, got {other:?}"),
         }
-    }
-
-    #[test]
-    fn join_type_concatenates_text() {
-        assert_eq!(
-            text_concat_type(&[Type::String], &ResolveContext::new(Vec::new())),
-            Type::String
-        );
     }
 }

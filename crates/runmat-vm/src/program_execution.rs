@@ -15,23 +15,23 @@ use std::collections::{HashMap, HashSet};
 #[path = "program_execution/dynamic_admission.rs"]
 pub mod dynamic_admission;
 
-#[path = "program_execution/unit_sources.rs"]
-mod unit_sources;
-#[path = "program_execution/unit_admission.rs"]
-mod unit_admission;
-#[path = "program_execution/request_future.rs"]
-mod request_future;
-#[path = "program_execution/semantic_identity.rs"]
-mod semantic_identity;
-#[path = "program_execution/region_sources.rs"]
-mod region_sources;
 #[path = "program_execution/graph_materialization.rs"]
 mod graph_materialization;
 #[path = "program_execution/graph_request.rs"]
 mod graph_request;
+#[path = "program_execution/region_sources.rs"]
+mod region_sources;
+#[path = "program_execution/request_future.rs"]
+mod request_future;
+#[path = "program_execution/semantic_identity.rs"]
+mod semantic_identity;
+#[path = "program_execution/unit_admission.rs"]
+mod unit_admission;
+#[path = "program_execution/unit_sources.rs"]
+mod unit_sources;
 pub use crate::bytecode::program::retained_artifacts::{
     prepare_retained_callable_units, PreparedRetainedCallableUnits, RetainedCallableStageError,
-    RetainedCallableStageLimits,
+    RetainedCallableStageLimits, SelectedFingerprintInvariant,
 };
 pub use graph_materialization::materialize_deferred_graph_call;
 pub use graph_request::{
@@ -72,27 +72,31 @@ pub fn materialize_deferred_call(
 > {
     let (callable, invocation_context, arguments) = match &call.invocation {
         DeferredInvocation::Callable(descriptor) => {
-            let callable = match &descriptor.target {
-                runmat_runtime::call::descriptor::CallableTarget::Resolved {
-                    identity:
-                        runmat_hir::CallableIdentity::BoundFunction(function)
-                        | runmat_hir::CallableIdentity::AnonymousFunction(function)
-                        | runmat_hir::CallableIdentity::ExternalFunction { function, .. },
-                    ..
-                } => ProgramCallable::semantic(
-                    semantic_identity::captured_function(call, *function)
-                        .map_err(ExecutionServiceError::Failed)?,
-                    descriptor
-                        .metadata
-                        .display_name
-                        .as_ref()
-                        .map(ToString::to_string),
-                ),
-                runmat_runtime::call::descriptor::CallableTarget::Resolved {
-                    identity: runmat_hir::CallableIdentity::Builtin(name),
-                    ..
-                } => ProgramCallable::builtin(name.0.clone())
-                    .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?,
+            let runmat_runtime::call::descriptor::CallableTarget::Resolved { identity, .. } =
+                &descriptor.target
+            else {
+                return Err(ExecutionServiceError::Failed(
+                    "isolated execution requires a resolved semantic callable".into(),
+                ));
+            };
+            let callable = match identity.as_identity() {
+                runmat_hir::CallableIdentity::BoundFunction(function)
+                | runmat_hir::CallableIdentity::AnonymousFunction(function)
+                | runmat_hir::CallableIdentity::ExternalFunction { function, .. } => {
+                    ProgramCallable::semantic(
+                        semantic_identity::captured_function(call, *function)
+                            .map_err(ExecutionServiceError::Failed)?,
+                        descriptor
+                            .metadata
+                            .display_name
+                            .as_ref()
+                            .map(ToString::to_string),
+                    )
+                }
+                runmat_hir::CallableIdentity::Builtin(name) => {
+                    ProgramCallable::builtin(name.0.clone())
+                        .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?
+                }
                 _ => {
                     return Err(ExecutionServiceError::Failed(
                         "isolated execution requires a resolved semantic callable".into(),

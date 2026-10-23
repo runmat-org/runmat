@@ -238,14 +238,15 @@ async fn num_arguments_from_subscript_with_context(
     .map_err(|error| error.into_runtime_error())
 }
 
+mod cardinality;
 mod context;
 mod selectors;
-mod cardinality;
 use cardinality::*;
 pub use cardinality::{
     brace_assignment_cardinality, member_assignment_cardinality,
-    object_path_assignment_cardinality, object_path_cardinality,
-    object_path_cardinality_in_context, PreparedObjectAssignmentCardinality,
+    object_path_assignment_cardinality, object_path_assignment_cardinality_in_context,
+    object_path_cardinality, object_path_cardinality_in_context,
+    PreparedObjectAssignmentCardinality,
 };
 pub(crate) use context::ensure_indexing_context_classes_registered;
 use context::*;

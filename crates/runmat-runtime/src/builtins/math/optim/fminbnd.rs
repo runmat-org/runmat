@@ -284,7 +284,14 @@ fn option_string(field: &str, value: &Value) -> BuiltinResult<String> {
     match value {
         Value::String(s) => Ok(s.as_str().to_owned()),
         Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].as_str().to_owned()),
-        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data().iter().collect()),
+        Value::CharArray(chars) if chars.rows == 1 => {
+            runmat_value::decode_utf16_code_units(chars.data()).map_err(|error| {
+                fminbnd_error_with_detail(
+                    &FMINBND_ERROR_INVALID_ARGUMENT,
+                    format!("option {field} contains {error}"),
+                )
+            })
+        }
         other => Err(fminbnd_error_with_detail(
             &FMINBND_ERROR_INVALID_ARGUMENT,
             format!("option {field} must be a string, got {other:?}"),

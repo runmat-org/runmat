@@ -99,7 +99,7 @@ fn sparse_input_preserves_sparse_single_storage_and_implicit_zeros() {
 
 #[test]
 fn table_and_character_inputs_map_elementwise() {
-    let chars = CharArray::new(vec!['A'], 1, 1).expect("characters");
+    let chars = CharArray::from_unicode_scalars(vec!['A'], 1, 1).expect("characters");
     assert!(matches!(
         call(Value::CharArray(chars)),
         Ok(Value::Tensor(_))
@@ -132,7 +132,7 @@ fn logical_and_character_extensions_have_independent_compatibility_gates() {
     assert_eq!(output.materialize_f64(), &[1.0_f64.exp_m1(), 0.0]);
 
     let character_error = call_matlab(Value::CharArray(
-        CharArray::new(vec!['A'], 1, 1).expect("character input"),
+        CharArray::from_unicode_scalars(vec!['A'], 1, 1).expect("character input"),
     ))
     .expect_err("character compatibility gate");
     assert_eq!(

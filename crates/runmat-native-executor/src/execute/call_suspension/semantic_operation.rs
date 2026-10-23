@@ -6,9 +6,7 @@ use runmat_runtime::native::NativeValueRef;
 use crate::{NativeExecutorError, NativeExecutorResult};
 
 use super::super::state::{EmbeddedOperationIdentity, HostState};
-use super::{
-    CallCompletion, CompletedPayload, CompletionFuture, PendingCall, SemanticOperationOutput,
-};
+use super::{CallCompletion, CompletedPayload, PendingCall, SemanticOperationOutput};
 
 /// Identifies the exact resumable semantic operation within one native site.
 ///
@@ -19,6 +17,7 @@ use super::{
 pub(in crate::execute) enum SemanticOperationKind {
     IndexedRead,
     IndexedAssignment,
+    ArgumentRegion,
     TensorAggregate,
 }
 
@@ -125,49 +124,81 @@ fn take_completed_output(
 
 /// Installs one owned semantic operation in the canonical native suspension
 /// slot. The future is never polled on the generated-code stack.
-pub(in crate::execute) fn begin_semantic_operation(
+pub(in crate::execute) fn begin_admitted_semantic_operation_with<F>(
     state: &mut HostState,
     embedded: Option<EmbeddedOperationIdentity>,
     kind: SemanticOperationKind,
-    retained_roots: Vec<NativeValueRef>,
-    future: impl Future<Output = NativeExecutorResult<RootedValues>> + 'static,
-) -> NativeExecutorResult<RootedValues> {
-    let future = super::scope_completion(state, async move {
-        future
-            .await
-            .map(|values| CallCompletion::SemanticOperation {
-                kind,
-                output: SemanticOperationOutput::Values(values),
-            })
-    });
-    install_semantic_operation(state, embedded, retained_roots, future)
+    make_future: impl FnOnce() -> F,
+) -> NativeExecutorResult<RootedValues>
+where
+    F: Future<Output = NativeExecutorResult<RootedValues>> + 'static,
+{
+    begin_semantic_operation(state, embedded, kind, Vec::new(), make_future)
 }
 
-pub(in crate::execute) fn begin_semantic_value_operation(
+pub(in crate::execute) fn begin_semantic_operation<F>(
     state: &mut HostState,
     embedded: Option<EmbeddedOperationIdentity>,
     kind: SemanticOperationKind,
     retained_roots: Vec<NativeValueRef>,
-    future: impl Future<Output = NativeExecutorResult<RootedValue>> + 'static,
-) -> NativeExecutorResult<RootedValue> {
-    let future = super::scope_completion(state, async move {
-        future.await.map(|value| CallCompletion::SemanticOperation {
-            kind,
-            output: SemanticOperationOutput::Value(value),
-        })
-    });
-    install_semantic_operation(state, embedded, retained_roots, future)
+    make_future: impl FnOnce() -> F,
+) -> NativeExecutorResult<RootedValues>
+where
+    F: Future<Output = NativeExecutorResult<RootedValues>> + 'static,
+{
+    let request = semantic_request(state)?;
+    let future = super::admit_completion_with(state, move || {
+        let future = make_future();
+        async move {
+            future
+                .await
+                .map(|values| CallCompletion::SemanticOperation {
+                    kind,
+                    output: SemanticOperationOutput::Values(values),
+                })
+        }
+    })?;
+    install_semantic_operation(state, request, embedded, retained_roots, future)
+}
+
+pub(in crate::execute) fn begin_semantic_value_operation<F>(
+    state: &mut HostState,
+    embedded: Option<EmbeddedOperationIdentity>,
+    kind: SemanticOperationKind,
+    retained_roots: Vec<NativeValueRef>,
+    make_future: impl FnOnce() -> F,
+) -> NativeExecutorResult<RootedValue>
+where
+    F: Future<Output = NativeExecutorResult<RootedValue>> + 'static,
+{
+    let request = semantic_request(state)?;
+    let future = super::admit_completion_with(state, move || {
+        let future = make_future();
+        async move {
+            future.await.map(|value| CallCompletion::SemanticOperation {
+                kind,
+                output: SemanticOperationOutput::Value(value),
+            })
+        }
+    })?;
+    install_semantic_operation(state, request, embedded, retained_roots, future)
+}
+
+fn semantic_request(
+    state: &HostState,
+) -> NativeExecutorResult<runmat_runtime::native::NativeSiteRequest> {
+    state.current_request.ok_or_else(|| {
+        NativeExecutorError::Host("pending semantic operation has no active site".into())
+    })
 }
 
 fn install_semantic_operation<T>(
     state: &mut HostState,
+    request: runmat_runtime::native::NativeSiteRequest,
     embedded: Option<EmbeddedOperationIdentity>,
     retained_roots: Vec<NativeValueRef>,
-    future: CompletionFuture,
+    future: super::PendingCompletionFuture,
 ) -> NativeExecutorResult<T> {
-    let request = state.current_request.ok_or_else(|| {
-        NativeExecutorError::Host("pending semantic operation has no active site".into())
-    })?;
     let (continuation, generation) = state.next_suspension_identity()?;
     state.pending_call = Some(PendingCall {
         continuation,

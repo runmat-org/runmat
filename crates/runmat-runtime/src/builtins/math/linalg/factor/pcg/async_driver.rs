@@ -1,123 +1,141 @@
-//! Allocation-free asynchronous execution boundary for a PCG recurrence.
-//!
-//! The recurrence owns its admitted numeric workspace and decides when an A,
-//! M1, or M2 application is needed. This driver performs each requested
-//! operation exactly once, then returns its borrowed native result to the
-//! one recurrence also driven by the synchronous matrix-only route.
-
-use super::kernel::{PcgOutcome, PcgScalar};
+//! Runtime authority adapter for the shared, allocation-free PCG owner.
+use super::super::iterative::PreconditionerStatus;
+use super::kernel::{Native, PcgOutcome, PcgScalar, PcgSolveInput};
 use crate::context::host_allocation::{
     HostAllocationError, HostAllocationPolicy, HostAllocationReceipt,
 };
 use crate::context::RuntimeContext;
+use crate::execution::CpuCooperationBudget;
 use crate::runtime_error::semantic_error;
 use crate::RuntimeError;
+pub(super) use runmat_sparse_solvers::krylov::pcg::PcgOperation;
+use runmat_sparse_solvers::krylov::{Control, KrylovFailure};
 
-/// The recurrence, not the callback adapter, chooses when preconditioning
-/// occurs. A solver with no M1/M2 simply never yields those requests.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum PcgOperation {
-    Coefficient,
-    FirstPreconditioner,
-    SecondPreconditioner,
-}
-
-pub(super) enum PcgContinuation<'a, T> {
-    Apply {
-        operation: PcgOperation,
-        input: &'a [T],
-    },
-    Complete(PcgOutcome),
-}
-
-/// Pure recurrence state over the caller's already-admitted numeric slices.
-/// `accept` consumes one completed operation result; it may not request that
-/// the driver re-execute a callback whose effect has already occurred.
-pub(super) trait PcgRecurrence<T: PcgScalar> {
-    fn continuation(&self) -> PcgContinuation<'_, T>;
-    fn accept(
-        &mut self,
-        output: &[T],
-        checkpoint: &mut dyn FnMut() -> Result<(), RuntimeError>,
-    ) -> Result<(), RuntimeError>;
-}
-
-/// Generic async operation authority. A concrete callable implementation
-/// must retain its input Value and the user-produced output independently;
-/// this driver's scratch slice is temporary and cannot fund either owner.
 pub(super) trait AsyncPcgOperation<T: PcgScalar> {
     async fn apply(
         &mut self,
         operation: PcgOperation,
         input: &[T],
         output: &mut [T],
-        runtime: &RuntimeContext,
-    ) -> Result<(), RuntimeError>;
+        runtime: Option<&RuntimeContext>,
+    ) -> Result<PreconditionerStatus, RuntimeError>;
+    fn checkpoint(&mut self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
 }
-
-fn admission(runtime: &RuntimeContext, error: HostAllocationError) -> RuntimeError {
-    crate::builtin::builtin_control_error(Some(&runtime.cancellation_context()), "pcg", error)
+fn admission(runtime: Option<&RuntimeContext>, error: HostAllocationError) -> RuntimeError {
+    super::execution::map_operator_in_context(error.into(), runtime)
 }
-
-/// Drive a single owned recurrence to completion. Consuming `recurrence`
-/// makes an error terminal: callers cannot retry a completed callback by
-/// replaying a partially advanced state. The result slice is an admitted,
-/// caller-owned numeric workspace, never a published language Value.
-pub(super) async fn drive<T, R, O>(
-    mut recurrence: R,
-    mut operation: O,
-    output_scratch: &mut [T],
-    runtime: &RuntimeContext,
-    receipt: Option<&HostAllocationReceipt>,
-) -> Result<PcgOutcome, RuntimeError>
-where
-    T: PcgScalar,
-    R: PcgRecurrence<T>,
-    O: AsyncPcgOperation<T>,
+fn terminal(mut error: RuntimeError) -> RuntimeError {
+    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    error
+}
+struct Driver<'a, T, O, F> {
+    operation: O,
+    context: Option<&'a RuntimeContext>,
+    fence: F,
+    cooperation: Option<CpuCooperationBudget>,
+    scalar: std::marker::PhantomData<T>,
+}
+impl<T: PcgScalar, O: AsyncPcgOperation<T>, F: FnMut() -> Result<(), RuntimeError>> Control
+    for Driver<'_, T, O, F>
 {
-    let cancellation = runtime.cancellation();
+    type Error = RuntimeError;
+    fn checkpoint(&mut self) -> Result<(), RuntimeError> {
+        (self.fence)()?;
+        self.operation.checkpoint()
+    }
+    async fn cooperate(&mut self, completed: u64) -> Result<(), RuntimeError> {
+        self.checkpoint()?;
+        if let Some(budget) = self.cooperation.as_mut() {
+            budget
+                .checkpoint(completed)
+                .await
+                .map_err(|error| error.into_runtime_error_in_context(self.context))?;
+        }
+        self.checkpoint()
+    }
+}
+impl<T: PcgScalar, O: AsyncPcgOperation<T>, F: FnMut() -> Result<(), RuntimeError>>
+    runmat_sparse_solvers::krylov::pcg::PcgOperations<T> for Driver<'_, T, O, F>
+{
+    async fn apply(
+        &mut self,
+        operation: PcgOperation,
+        input: &[T],
+        output: &mut [T],
+    ) -> Result<PreconditionerStatus, RuntimeError> {
+        self.operation.checkpoint()?;
+        let result = self
+            .operation
+            .apply(operation, input, output, self.context)
+            .await?;
+        self.operation.checkpoint()?;
+        Ok(result)
+    }
+}
+/// Consumes the selected operation owner; failed effects cannot be replayed.
+pub(super) async fn drive<T: PcgScalar, O: AsyncPcgOperation<T>>(
+    input: PcgSolveInput<'_, T>,
+    operation: O,
+    runtime: Option<&RuntimeContext>,
+    receipt: Option<&HostAllocationReceipt>,
+    preconditioners: (bool, bool),
+) -> Result<PcgOutcome, RuntimeError> {
     let initial_policy =
-        HostAllocationReceipt::policy(Some(runtime)).map_err(|error| admission(runtime, error))?;
+        HostAllocationReceipt::policy(runtime).map_err(|error| admission(runtime, error))?;
     if receipt.is_none() && initial_policy == HostAllocationPolicy::Managed {
         return Err(admission(runtime, HostAllocationError::MissingManagedOwner));
     }
-    let mut checkpoint = || {
-        if !cancellation.same_generation(&runtime.cancellation()) {
-            return Err(admission(runtime, HostAllocationError::StaleAuthority));
+    let cancellation = runtime.map(RuntimeContext::cancellation);
+    let fence = || {
+        if let (Some(runtime), Some(cancellation)) = (runtime, cancellation.as_ref()) {
+            if !cancellation.same_generation(&runtime.cancellation()) {
+                return Err(admission(
+                    Some(runtime),
+                    HostAllocationError::StaleAuthority,
+                ));
+            }
         }
-        match receipt {
-            Some(receipt) => receipt
+        match (receipt, runtime) {
+            (Some(receipt), Some(runtime)) => receipt
                 .checkpoint(runtime)
-                .map_err(|error| admission(runtime, error)),
-            None => {
-                let current = HostAllocationReceipt::policy(Some(runtime))
+                .map_err(|error| admission(Some(runtime), error)),
+            (Some(_), None) => Err(admission(None, HostAllocationError::MissingManagedOwner)),
+            (None, _) => {
+                let policy = HostAllocationReceipt::policy(runtime)
                     .map_err(|error| admission(runtime, error))?;
-                if current != initial_policy {
+                if policy != initial_policy {
                     return Err(admission(runtime, HostAllocationError::StaleAuthority));
                 }
                 Ok(())
             }
         }
     };
-
-    loop {
-        checkpoint()?;
-        let (requested, input) = match recurrence.continuation() {
-            PcgContinuation::Complete(outcome) => return Ok(outcome),
-            PcgContinuation::Apply { operation, input } => (operation, input),
-        };
-        if output_scratch.len() != input.len() {
-            return Err(semantic_error(
-                "PcgOperationShape",
-                "PCG operation scratch extent does not match its input",
-            ));
-        }
-        operation
-            .apply(requested, input, output_scratch, runtime)
-            .await?;
-        // No callback replay occurs if cancellation or rebind wins here. The
-        // owned recurrence is discarded with the error before `accept`.
-        checkpoint()?;
-        recurrence.accept(output_scratch, &mut checkpoint)?;
-    }
+    let mut driver = Driver {
+        operation,
+        context: runtime,
+        fence,
+        cooperation: runtime.map(RuntimeContext::cpu_cooperation),
+        scalar: std::marker::PhantomData,
+    };
+    runmat_sparse_solvers::krylov::pcg::solve::<T, Native<T>, _>(
+        input.rhs,
+        input.initial,
+        runmat_sparse_solvers::krylov::pcg::PcgParameters {
+            tolerance: input.tolerance,
+            maximum_iterations: input.maximum_iterations,
+            preconditioners,
+        },
+        input.work,
+        input.operation_scratch,
+        &mut driver,
+    )
+    .await
+    .map_err(|error| {
+        terminal(match error {
+            KrylovFailure::Operation(original) => original,
+            KrylovFailure::Invalid(message) => semantic_error("PcgRecurrence", message),
+        })
+    })
 }

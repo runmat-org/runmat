@@ -243,11 +243,34 @@ mod tests {
         let mut session = RunMatSession::with_options(false, false).unwrap();
         let unit = session
             .compile_executable_unit(
-                ExecutableSource::new("drop-control", "dropLoop.m", "while true; a = 1; end"),
+                ExecutableSource::new("drop-control", "dropInput.m", "a = input('pending', 's');"),
                 None,
             )
             .await
             .unwrap();
+        // The serial CPU service is NeverYield: an infinite language loop
+        // cannot establish a pending future. Suspend the actual selected input
+        // operation instead and prove that dropping it retires that operation.
+        struct PendingInput(std::sync::Arc<std::sync::atomic::AtomicBool>);
+        impl Drop for PendingInput {
+            fn drop(&mut self) {
+                self.0.store(true, std::sync::atomic::Ordering::Release);
+            }
+        }
+        let entered = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let retired = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let input_entered = entered.clone();
+        let input_retired = retired.clone();
+        session.install_async_input_handler(move |request| {
+            let entered = input_entered.clone();
+            let retired = input_retired.clone();
+            async move {
+                assert_eq!(request.prompt, "pending");
+                let _retirement = PendingInput(retired);
+                entered.store(true, std::sync::atomic::Ordering::Release);
+                futures::future::pending::<Result<crate::session::InputResponse, String>>().await
+            }
+        });
         let ledger = ManagedHostEffectLedger::new(64 * 1024 * 1024);
         session.install_parallel_service(Rc::new(ManagedAllocation(ledger.clone())));
         let root = session.runtime_context.clone();
@@ -261,18 +284,21 @@ mod tests {
             Box::pin(session.invoke_executable(&unit, ProcedureInvocation::entrypoint(), &control));
         futures::future::poll_fn(|cx| {
             assert!(std::future::Future::poll(pending.as_mut(), cx).is_pending());
-            if root.cancellation().deadline_unix_ms() == Some(deadline) {
+            if entered.load(std::sync::atomic::Ordering::Acquire) {
+                assert_eq!(root.cancellation().deadline_unix_ms(), Some(deadline));
                 std::task::Poll::Ready(())
             } else {
                 std::task::Poll::Pending
             }
         })
         .await;
+        assert!(!retired.load(std::sync::atomic::Ordering::Acquire));
         let retained = root.clone().with_cancellation_token(root.cancellation());
         external.store(true, std::sync::atomic::Ordering::Release);
         old.cancel(runmat_execution::CancellationReason::User);
         assert!(retained.is_cancelled());
         drop(pending);
+        assert!(retired.load(std::sync::atomic::Ordering::Acquire));
         assert!(
             !root.is_cancelled(),
             "dropped admission poisoned the session"

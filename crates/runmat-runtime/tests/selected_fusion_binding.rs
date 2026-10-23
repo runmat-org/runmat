@@ -1,7 +1,6 @@
-//! Production selection needs a single runtime library. The runtime's unit
-//! harness can also link a normal runtime through its accelerate dev-dependency,
-//! duplicating shared builtins provenance while keeping runtime-local binding
-//! inventories distinct. Ambiguous provenance must continue to fail closed.
+//! Selection is owned by the actual Runtime binding, including its physical
+//! declaration association. Shared process-wide provenance is evidence, not
+//! permission to lower a different scoped implementation.
 use runmat_runtime::{
     builtin::{RuntimeBuiltinBinding, RuntimeBuiltinFuture},
     builtins::common::spec::{
@@ -33,7 +32,7 @@ impl RuntimeBuiltinService for ChangingService {
 }
 
 fn replacement(_: runmat_runtime::builtin::RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
-    Box::pin(async {
+    runmat_runtime::builtin::admitted_builtin_future(None, "fixture", async {
         let sequence = runmat_value::ValueSequence::single(Value::Num(99.0))
             .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?;
         runmat_runtime::execution::RootedValueSequence::new(sequence)
@@ -91,6 +90,9 @@ fn indexed_declarations_never_cache_scoped_selection_permission() {
         .with_service_ports(RuntimeServicePorts::default().with_builtin(service.clone()));
         let expected = Some(original[0].identity);
         assert!(selected_fusion_binding("sin", expected, Some(&context)).is_some());
+        service.bindings.borrow_mut()[0].provenance = None;
+        assert!(selected_fusion_binding("sin", expected, Some(&context)).is_none());
+        *service.bindings.borrow_mut() = original.clone();
         service.bindings.borrow_mut()[0].implementation = replacement;
         assert!(selected_fusion_binding("sin", expected, Some(&context)).is_none());
         *service.bindings.borrow_mut() = vec![original[0], original[0]];
@@ -99,7 +101,7 @@ fn indexed_declarations_never_cache_scoped_selection_permission() {
         assert!(selected_fusion_binding("sin", expected, Some(&context)).is_none());
         *service.bindings.borrow_mut() = original;
         assert!(selected_fusion_binding("SIN", expected, Some(&context)).is_some());
-        assert_eq!(service.calls.get(), 5);
+        assert_eq!(service.calls.get(), 6);
         // A separate invocation authority cannot inherit this service's result.
         let absent = Rc::new(ChangingService {
             bindings: RefCell::new(vec![]),
@@ -111,7 +113,7 @@ fn indexed_declarations_never_cache_scoped_selection_permission() {
         .with_service_ports(RuntimeServicePorts::default().with_builtin(absent.clone()));
         assert!(selected_fusion_binding("sin", expected, Some(&other)).is_none());
         assert_eq!(absent.calls.get(), 1);
-        assert_eq!(service.calls.get(), 5);
+        assert_eq!(service.calls.get(), 6);
     });
 }
 

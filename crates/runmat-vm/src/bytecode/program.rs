@@ -34,9 +34,9 @@ mod selected_class_product;
 #[path = "program/selected_executable_product.rs"]
 mod selected_executable_product;
 pub use selected_executable_product::{
-    SelectedExecutableCode, SelectedExecutableProduct, SelectedLinkedNativeSite,
-    SelectedStaticCapture, SelectedStaticProductDependency, SelectedStaticProductTarget,
-    SelectedStaticSiteOwner,
+    SelectedExecutableAttachmentError, SelectedExecutableCode, SelectedExecutableProduct,
+    SelectedLinkedNativeSite, SelectedStaticCapture, SelectedStaticProductDependency,
+    SelectedStaticProductTarget, SelectedStaticSiteOwner,
 };
 #[path = "program/selected_registry.rs"]
 mod selected_registry;

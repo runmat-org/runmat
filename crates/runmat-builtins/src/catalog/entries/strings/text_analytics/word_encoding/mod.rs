@@ -1,6 +1,7 @@
 use crate::*;
 mod contract;
 mod inference;
+mod documentation;
 pub use contract::*;
 
 pub const WORD_ENCODING_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
@@ -10,12 +11,7 @@ pub const WORD_ENCODING_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry
         name: "wordEncoding",
     },
     category: "strings/text_analytics",
-    // Preserve docs/builtins/reference/wordEncoding.json as the prose authority
-    // until the documentation exporter mechanically conserves and retires it.
-    documentation: BuiltinDocumentation {
-        summary: "Create a word encoding object that maps words to indices and back.",
-        ..BuiltinDocumentation::EMPTY
-    },
+    documentation: documentation::DOCUMENTATION,
     descriptor: &WORD_ENCODING_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Incomplete,

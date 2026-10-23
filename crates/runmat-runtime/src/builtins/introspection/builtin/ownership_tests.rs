@@ -25,7 +25,7 @@ impl RuntimeBuiltinService for Registered {
 
 fn selected(invocation: RuntimeBuiltinInvocation<'_>) -> RuntimeBuiltinFuture {
     let input = invocation.into_continuation_input();
-    Box::pin(async move {
+    crate::builtin::admitted_builtin_future(None, "fixture", async move {
         let input = input?;
         assert!(
             input.context.is_some(),

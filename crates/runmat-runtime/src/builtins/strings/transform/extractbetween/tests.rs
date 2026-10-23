@@ -191,7 +191,7 @@ fn extractBetween_string_array_broadcast() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn extractBetween_character_vector_returns_scalar_cellstr() {
-    let chars = CharArray::new(
+    let chars = CharArray::from_unicode_scalars(
         "GPUAccelerateVM".chars().collect(),
         1,
         "GPUAccelerateVM".len(),
@@ -210,7 +210,8 @@ fn extractBetween_character_vector_returns_scalar_cellstr() {
             let Value::CharArray(chars) = &out.data()[0] else {
                 panic!("expected character vector element")
             };
-            let text: String = chars.data().iter().collect();
+            let text: String =
+                runmat_value::decode_utf16_code_units(chars.data()).expect("valid UTF-16 fixture");
             assert_eq!(text.trim_end(), "Accelerate");
         }
         other => panic!("expected scalar cellstr, got {other:?}"),

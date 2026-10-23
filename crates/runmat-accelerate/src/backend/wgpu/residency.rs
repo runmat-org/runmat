@@ -15,6 +15,7 @@ pub enum BufferUsageClass {
 struct ResidencyKey {
     usage: BufferUsageClass,
     allocated_bytes: u64,
+    scope: Option<runmat_accelerate_api::DeviceAllocationScope>,
 }
 
 impl ResidencyKey {
@@ -22,6 +23,7 @@ impl ResidencyKey {
         Self {
             usage,
             allocated_bytes,
+            scope: None,
         }
     }
 }
@@ -30,6 +32,7 @@ impl Hash for ResidencyKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.usage.hash(state);
         self.allocated_bytes.hash(state);
+        self.scope.hash(state);
     }
 }
 
@@ -124,7 +127,8 @@ impl BufferResidency {
             ));
         }
 
-        let key = ResidencyKey::new(usage, size_bytes);
+        let mut key = ResidencyKey::new(usage, size_bytes);
+        key.scope = runmat_accelerate_api::current_device_allocation_scope();
         let reused = self
             .pools
             .lock()
@@ -165,13 +169,112 @@ impl BufferResidency {
         allocated_bytes: u64,
         buffer: runmat_accelerate_api::WgpuBufferOwner,
     ) -> Result<(), RejectedBuffer> {
-        release_into(
-            &self.pools,
-            self.max_per_key,
-            ResidencyKey::new(usage, allocated_bytes),
-            buffer,
+        let mut key = ResidencyKey::new(usage, allocated_bytes);
+        key.scope = buffer.creation_scope();
+        release_into(&self.pools, self.max_per_key, key, buffer)
+            .map_err(|(reason, buffer)| RejectedBuffer { reason, buffer })
+    }
+
+    /// Detach one scope's reusable buffers, then destroy without the pool lock.
+    pub(super) fn has_scope(
+        &self,
+        scope: runmat_accelerate_api::DeviceAllocationScope,
+    ) -> anyhow::Result<bool> {
+        Ok(self
+            .pools
+            .lock()
+            .map_err(|_| anyhow::anyhow!("WGPU scoped pool query is poisoned"))?
+            .iter()
+            .any(|(key, buffers)| {
+                !buffers.is_empty() && key.scope.is_some_and(|created| scope.covers(created))
+            }))
+    }
+
+    pub(super) fn reset_selection_bytes(
+        &self,
+        scope: runmat_accelerate_api::DeviceAllocationScope,
+        retiring_records: usize,
+    ) -> Option<u64> {
+        let pools = self.pools.lock().ok()?;
+        let count = pools
+            .keys()
+            .filter(|key| key.scope.is_some_and(|created| scope.covers(created)))
+            .count();
+        // A concurrent final lease can move a quoted record into one new pool
+        // key before the fence settles. Fund that bounded transition too.
+        u64::try_from(
+            count
+                .checked_add(retiring_records)?
+                .checked_mul(std::mem::size_of::<ResidencyKey>())?,
         )
-        .map_err(|(reason, buffer)| RejectedBuffer { reason, buffer })
+        .ok()
+    }
+
+    pub(super) async fn destroy_scope(
+        &self,
+        scope: runmat_accelerate_api::DeviceAllocationScope,
+        access: &runmat_accelerate_api::WgpuDeviceAccess,
+    ) -> anyhow::Result<()> {
+        let keys = {
+            let pools = self
+                .pools
+                .lock()
+                .map_err(|_| anyhow::anyhow!("WGPU scoped pool reset is poisoned"))?;
+            let count = pools
+                .keys()
+                .filter(|key| key.scope.is_some_and(|created| scope.covers(created)))
+                .count();
+            let mut keys = runmat_value::exact_capacity_vec(count)?;
+            keys.extend(
+                pools
+                    .keys()
+                    .filter(|key| key.scope.is_some_and(|created| scope.covers(created)))
+                    .copied(),
+            );
+            keys
+        };
+        for key in keys {
+            loop {
+                tokio::task::yield_now().await;
+                let candidate = {
+                    let pools = self
+                        .pools
+                        .lock()
+                        .map_err(|_| anyhow::anyhow!("WGPU scoped pool reset is poisoned"))?;
+                    pools.get(&key).and_then(|buffers| buffers.front().cloned())
+                };
+                let Some(buffer) = candidate else {
+                    break;
+                };
+                // A rejected cleanup leaves every owner in the existing pool.
+                // No pool lock crosses a driver call and no queue is detached on
+                // failure, so a retained reset failure cannot fabricate release.
+                access.with_cleanup(|cleanup| cleanup.destroy_buffer(&buffer))?;
+                let removed = {
+                    let mut pools = self
+                        .pools
+                        .lock()
+                        .map_err(|_| anyhow::anyhow!("WGPU scoped pool reset is poisoned"))?;
+                    let Some(buffers) = pools.get_mut(&key) else {
+                        continue;
+                    };
+                    let removed = if buffers.front().is_some_and(|front| {
+                        runmat_accelerate_api::WgpuBufferOwner::ptr_eq(front, &buffer)
+                    }) {
+                        buffers.pop_front()
+                    } else {
+                        None
+                    };
+                    if buffers.is_empty() {
+                        pools.remove(&key);
+                    }
+                    removed
+                };
+                drop(removed);
+                drop(buffer);
+            }
+        }
+        Ok(())
     }
 
     pub fn pooled_bytes(&self, _element_size: usize) -> u64 {

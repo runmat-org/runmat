@@ -9,6 +9,23 @@ const MAX_ARGUMENTS: i32 = 16_384;
 pub type AotFunctionResolver = unsafe extern "C" fn(function: u32) -> *const std::ffi::c_void;
 pub type AotBuiltinResolver = unsafe extern "C" fn(binding: u32) -> *const std::ffi::c_void;
 
+#[derive(Clone, Copy)]
+pub struct LinkedExternalFactories {
+    pub ui: *const std::ffi::c_void,
+    pub callback: *const std::ffi::c_void,
+    pub dynamic: *const std::ffi::c_void,
+}
+
+impl LinkedExternalFactories {
+    pub const fn absent() -> Self {
+        Self {
+            ui: std::ptr::null(),
+            callback: std::ptr::null(),
+            dynamic: std::ptr::null(),
+        }
+    }
+}
+
 /// Borrowed symbols passed across the generated launcher's C ABI boundary.
 pub struct LinkedProcessImage {
     pub argc: i32,
@@ -16,6 +33,8 @@ pub struct LinkedProcessImage {
     pub function_resolver: *const std::ffi::c_void,
     pub builtin_resolver: *const std::ffi::c_void,
     pub source_service_factory: *const std::ffi::c_void,
+    pub network_service_factory: *const std::ffi::c_void,
+    pub external_factories: LinkedExternalFactories,
     pub native_ir: *const u8,
     pub native_ir_len: u64,
     pub program: *const u8,
@@ -49,6 +68,15 @@ pub struct AotProcessInput {
 pub(crate) struct LinkedAotProcessInput {
     input: AotProcessInput,
     source_service_factory: *const std::ffi::c_void,
+    network_service_factory: *const std::ffi::c_void,
+    external_factories: LinkedExternalFactories,
+}
+
+pub(crate) struct LinkedAotProcessParts {
+    pub input: AotProcessInput,
+    pub source_service_factory: *const std::ffi::c_void,
+    pub network_service_factory: *const std::ffi::c_void,
+    pub external_factories: LinkedExternalFactories,
 }
 
 impl LinkedAotProcessInput {
@@ -58,15 +86,24 @@ impl LinkedAotProcessInput {
     pub(crate) unsafe fn from_verified_link(
         input: AotProcessInput,
         source_service_factory: *const std::ffi::c_void,
+        network_service_factory: *const std::ffi::c_void,
+        external_factories: LinkedExternalFactories,
     ) -> Self {
         Self {
             input,
             source_service_factory,
+            network_service_factory,
+            external_factories,
         }
     }
 
-    pub(crate) fn into_parts(self) -> (AotProcessInput, *const std::ffi::c_void) {
-        (self.input, self.source_service_factory)
+    pub(crate) fn into_parts(self) -> LinkedAotProcessParts {
+        LinkedAotProcessParts {
+            input: self.input,
+            source_service_factory: self.source_service_factory,
+            network_service_factory: self.network_service_factory,
+            external_factories: self.external_factories,
+        }
     }
 }
 
@@ -219,7 +256,9 @@ pub(crate) unsafe fn copy_bounded(
 
 #[cfg(test)]
 mod tests {
-    use super::{copy_process_arguments, AotProcessInput, LinkedProcessImage};
+    use super::{
+        copy_process_arguments, AotProcessInput, LinkedExternalFactories, LinkedProcessImage,
+    };
 
     #[test]
     fn raw_boundary_rejects_null_and_oversized_payloads_before_reading() {
@@ -231,6 +270,8 @@ mod tests {
                 function_resolver: std::ptr::null(),
                 builtin_resolver: std::ptr::null(),
                 source_service_factory: std::ptr::null(),
+                network_service_factory: std::ptr::null(),
+                external_factories: LinkedExternalFactories::absent(),
                 native_ir: std::ptr::null(),
                 native_ir_len: 1,
                 program: one.as_ptr(),
@@ -256,6 +297,8 @@ mod tests {
                 function_resolver: std::ptr::dangling(),
                 builtin_resolver: std::ptr::dangling(),
                 source_service_factory: std::ptr::null(),
+                network_service_factory: std::ptr::null(),
+                external_factories: LinkedExternalFactories::absent(),
                 native_ir: one.as_ptr(),
                 native_ir_len: (512_u64 * 1024 * 1024) + 1,
                 program: one.as_ptr(),

@@ -19,7 +19,9 @@ fn names(value: Value) -> Vec<String> {
     elements
         .into_iter()
         .map(|entry| match entry.fields.get("name") {
-            Some(Value::CharArray(name)) if name.rows == 1 => name.data().iter().collect(),
+            Some(Value::CharArray(name)) if name.rows == 1 => {
+                runmat_value::decode_utf16_code_units(name.data()).expect("valid UTF-16 fixture")
+            }
             other => panic!("expected character-row name, got {other:?}"),
         })
         .collect()

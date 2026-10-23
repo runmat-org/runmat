@@ -30,6 +30,24 @@ pub(in crate::builtins::math::linalg) struct VectorContract {
 }
 
 impl VectorContract {
+    fn infer(len: usize, value: &Value) -> Result<Self, RuntimeError> {
+        let class = match value {
+            Value::Num(_) => VectorClass::RealDouble,
+            Value::Complex(..) => VectorClass::ComplexDouble,
+            Value::Tensor(t) if t.as_f32_slice().is_some() => VectorClass::RealSingle,
+            Value::Tensor(t) if t.as_f64_slice().is_some() => VectorClass::RealDouble,
+            Value::ComplexTensor(t) if t.as_f32_slice().is_some() => VectorClass::ComplexSingle,
+            Value::ComplexTensor(t) if t.as_f64_slice().is_some() => VectorClass::ComplexDouble,
+            _ => {
+                return Err(invalid(
+                    "operator callback requires native floating vectors",
+                ))
+            }
+        };
+        let contract = Self { len, class };
+        contract.check(value)?;
+        Ok(contract)
+    }
     pub(in crate::builtins::math::linalg) fn check(
         self,
         value: &Value,
@@ -38,6 +56,8 @@ impl VectorContract {
             return Err(invalid("operator vector dimension must be nonzero"));
         }
         let valid = match (self.class, value) {
+            (VectorClass::RealDouble, Value::Num(_))
+            | (VectorClass::ComplexDouble, Value::Complex(_, _)) => self.len == 1,
             (VectorClass::RealSingle, Value::Tensor(tensor)) => {
                 tensor.numeric_dtype() == NumericDType::F32
                     && tensor.shape() == [self.len, 1]
@@ -80,6 +100,26 @@ pub(in crate::builtins::math::linalg) struct RepeatedCallableVector {
 }
 
 impl RepeatedCallableVector {
+    /// One successful, rooted class-discovery evaluation. Its result is not
+    /// automatically an iteration product: the caller must prove exact input
+    /// binding before reuse. An error is terminal, never an inference retry.
+    pub(in crate::builtins::math::linalg) async fn select_with_probe(
+        runtime: &RuntimeContext,
+        target: Value,
+        input: Value,
+        len: usize,
+    ) -> Result<(Self, RootedValueSequence), RuntimeError> {
+        VectorContract::infer(len, &input)?;
+        let selected = RepeatableCallable::select(runtime, target, &SemanticResolver)?;
+        let output = selected
+            .invoke_rooted(runtime, root_argument(runtime, input)?, 1)
+            .await?;
+        let [value] = output.value().as_slice() else {
+            return Err(invalid("operator callback must return exactly one value"));
+        };
+        let contract = VectorContract::infer(len, value)?;
+        Ok((Self { selected, contract }, output))
+    }
     pub(in crate::builtins::math::linalg) fn select(
         runtime: &RuntimeContext,
         target: Value,

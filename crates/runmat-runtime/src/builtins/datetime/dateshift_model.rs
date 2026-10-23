@@ -1,80 +1,40 @@
 use super::capabilities::MAX_DATESHIFT_DAY_OCCURRENCE;
 use super::*;
+pub(super) use runmat_builtins::{DateShiftBoundary, DateShiftUnit};
+use runmat_builtins::{DateShiftDayTarget, DateShiftRuleKeyword};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum DateShiftBoundary {
-    Start,
-    End,
-    DayOfWeek,
+pub(super) fn parse_dateshift_boundary(value: &Value) -> BuiltinResult<DateShiftBoundary> {
+    let text = scalar_text(value, "dateshift boundary")?;
+    parse_boundary_text(&text)
 }
 
-impl DateShiftBoundary {
-    pub(super) fn parse(value: &Value) -> BuiltinResult<Self> {
-        let text = scalar_text(value, "dateshift boundary")?;
-        match text.trim().to_ascii_lowercase().as_str() {
-            "start" => Ok(Self::Start),
-            "end" => Ok(Self::End),
-            "dayofweek" => Ok(Self::DayOfWeek),
-            other => Err(datetime_error(format!(
-                "dateshift: unsupported boundary '{other}'"
-            ))),
-        }
-    }
+pub(super) fn parse_boundary_text(text: &str) -> BuiltinResult<DateShiftBoundary> {
+    DateShiftBoundary::parse_text(text)
+        .ok_or_else(|| datetime_error(format!("dateshift: unsupported boundary '{text}'")))
+}
+pub(super) fn parse_dateshift_unit(value: &Value) -> BuiltinResult<DateShiftUnit> {
+    let text = scalar_text(value, "dateshift unit")?;
+    parse_unit_text(&text)
 }
 
-#[derive(Clone, Copy)]
-pub(super) enum DateShiftUnit {
-    Year,
-    Quarter,
-    Month,
-    Week,
-    Day,
-    Hour,
-    Minute,
-    Second,
+pub(super) fn parse_unit_text(text: &str) -> BuiltinResult<DateShiftUnit> {
+    DateShiftUnit::parse_text(text)
+        .ok_or_else(|| datetime_error(format!("dateshift: unsupported unit '{text}'")))
 }
-
-impl DateShiftUnit {
-    pub(super) fn parse(value: &Value) -> BuiltinResult<Self> {
-        let text = scalar_text(value, "dateshift unit")?;
-        match text.trim().to_ascii_lowercase().as_str() {
-            "year" => Ok(Self::Year),
-            "quarter" => Ok(Self::Quarter),
-            "month" => Ok(Self::Month),
-            "week" => Ok(Self::Week),
-            "day" => Ok(Self::Day),
-            "hour" => Ok(Self::Hour),
-            "minute" => Ok(Self::Minute),
-            "second" => Ok(Self::Second),
-            other => Err(datetime_error(format!(
-                "dateshift: unsupported unit '{other}'"
-            ))),
-        }
-    }
-}
-
-pub(super) fn parse_weekday(value: &Value) -> BuiltinResult<Weekday> {
-    match value {
-        Value::Num(n) if n.is_finite() && (*n - n.round()).abs() <= f64::EPSILON => {
-            weekday_from_matlab_index(n.round() as i64)
-        }
-        Value::Int(i) => weekday_from_matlab_index(i.to_i64()),
-        _ => {
-            let text = scalar_text(value, "weekday")?;
-            match text.trim().to_ascii_lowercase().as_str() {
-                "sun" | "sunday" => Ok(Weekday::Sun),
-                "mon" | "monday" => Ok(Weekday::Mon),
-                "tue" | "tues" | "tuesday" => Ok(Weekday::Tue),
-                "wed" | "wednesday" => Ok(Weekday::Wed),
-                "thu" | "thur" | "thurs" | "thursday" => Ok(Weekday::Thu),
-                "fri" | "friday" => Ok(Weekday::Fri),
-                "sat" | "saturday" => Ok(Weekday::Sat),
-                other => Err(datetime_error(format!(
-                    "dateshift: unsupported weekday '{other}'"
-                ))),
-            }
-        }
-    }
+pub(super) fn parse_dateshift_day_target(text: &str) -> BuiltinResult<DayTarget> {
+    let target = DateShiftDayTarget::parse_text(text)
+        .ok_or_else(|| datetime_error(format!("dateshift: unsupported weekday '{text}'")))?;
+    Ok(match target {
+        DateShiftDayTarget::Sunday => DayTarget::Exact(Weekday::Sun),
+        DateShiftDayTarget::Monday => DayTarget::Exact(Weekday::Mon),
+        DateShiftDayTarget::Tuesday => DayTarget::Exact(Weekday::Tue),
+        DateShiftDayTarget::Wednesday => DayTarget::Exact(Weekday::Wed),
+        DateShiftDayTarget::Thursday => DayTarget::Exact(Weekday::Thu),
+        DateShiftDayTarget::Friday => DayTarget::Exact(Weekday::Fri),
+        DateShiftDayTarget::Saturday => DayTarget::Exact(Weekday::Sat),
+        DateShiftDayTarget::Weekday => DayTarget::Weekday,
+        DateShiftDayTarget::Weekend => DayTarget::Weekend,
+    })
 }
 
 pub(super) fn weekday_from_matlab_index(index: i64) -> BuiltinResult<Weekday> {
@@ -189,16 +149,7 @@ pub(super) enum DateShiftRule {
     Occurrence(i64),
 }
 
-pub(super) fn exact_f64_to_i64(value: f64) -> Option<i64> {
-    // i64::MAX rounds upward to 2^63 as f64, so the upper test must be
-    // half-open. The lower endpoint -2^63 is exactly representable.
-    const I64_LOWER_INCLUSIVE: f64 = -9_223_372_036_854_775_808.0;
-    const I64_UPPER_EXCLUSIVE: f64 = 9_223_372_036_854_775_808.0;
-    (value.is_finite()
-        && value.fract() == 0.0
-        && (I64_LOWER_INCLUSIVE..I64_UPPER_EXCLUSIVE).contains(&value))
-    .then_some(value as i64)
-}
+pub(super) use runmat_builtins::dateshift_exact_f64_to_i64 as exact_f64_to_i64;
 
 pub(super) fn exact_integer_values(
     value: &Value,
@@ -217,7 +168,7 @@ pub(super) fn exact_integer_values(
                 ))
             }),
         Value::Tensor(array) => {
-            let shape = tensor::default_shape_for(array.shape(), tensor::tensor_element_len(array));
+            let shape = array.shape().to_vec();
             if let Some(storage) = array.integer_storage() {
                 let mut out = Vec::with_capacity(storage.len());
                 for value in storage.exact_values() {
@@ -258,17 +209,7 @@ pub(super) fn parse_rules(
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_)
     ) {
         let text = scalar_text(value, "dateshift rule")?;
-        let rule = match text.trim().to_ascii_lowercase().as_str() {
-            "current" => DateShiftRule::Current,
-            "next" => DateShiftRule::Next,
-            "previous" => DateShiftRule::Previous,
-            "nearest" => DateShiftRule::Nearest,
-            other => {
-                return Err(datetime_error(format!(
-                    "dateshift: unsupported rule '{other}'"
-                )))
-            }
-        };
+        let rule = parse_rule_text(&text)?;
         return Ok((vec![rule], vec![1, 1]));
     }
     let (values, shape) = exact_integer_values(value, "rule")?;
@@ -276,6 +217,17 @@ pub(super) fn parse_rules(
         values.into_iter().map(DateShiftRule::Occurrence).collect(),
         shape,
     ))
+}
+
+pub(super) fn parse_rule_text(text: &str) -> BuiltinResult<DateShiftRule> {
+    let keyword = DateShiftRuleKeyword::parse_text(text)
+        .ok_or_else(|| datetime_error(format!("dateshift: unsupported rule '{text}'")))?;
+    Ok(match keyword {
+        DateShiftRuleKeyword::Current => DateShiftRule::Current,
+        DateShiftRuleKeyword::Next => DateShiftRule::Next,
+        DateShiftRuleKeyword::Previous => DateShiftRule::Previous,
+        DateShiftRuleKeyword::Nearest => DateShiftRule::Nearest,
+    })
 }
 
 pub(super) fn unit_step(

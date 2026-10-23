@@ -10,6 +10,7 @@ mod instance;
 mod listener;
 mod memmap;
 mod native;
+mod numeric_factor;
 mod payload;
 mod selected_class;
 
@@ -41,6 +42,11 @@ pub use memmap::{
 };
 use native::NativeObjectPayload;
 pub use native::ObjectPersistencePayloadKind;
+pub use numeric_factor::{
+    DenseOrthogonalFactorData, FactorPermutation, NativeDenseFactorMatrix,
+    NumericFactorBufferAdoption, NumericFactorCandidate, NumericFactorData, NumericFactorKind,
+    NumericFactorValidation, OrthogonalFactorData,
+};
 use payload::{ObjectPayload, SharedObjectPayload};
 pub use selected_class::{
     SelectedObjectClassFacts, SelectedObjectMethod, SelectedReceiverClassDeclaration,

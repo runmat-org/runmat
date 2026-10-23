@@ -244,7 +244,7 @@ fn grpstats_table_impl(
             )));
         }
     }
-    let groups = table_grpstats_groups(&variables, &group_names, height);
+    let groups = table_grpstats_groups(&variables, &group_names, height)?;
     let group_rows = groups
         .rows
         .iter()
@@ -532,23 +532,22 @@ fn table_grpstats_groups(
     variables: &StructValue,
     group_names: &[String],
     height: usize,
-) -> GroupedRows {
+) -> BuiltinResult<GroupedRows> {
     if group_names.is_empty() {
-        return GroupedRows {
+        return Ok(GroupedRows {
             keys: vec![Vec::new()],
             rows: vec![(0..height).collect()],
-        };
+        });
     }
     let mut row_keys = Vec::new();
     for row in 0..height {
         let mut key = Vec::with_capacity(group_names.len());
         let mut missing = false;
         for name in group_names {
-            let atom = variables
-                .fields
-                .get(name)
-                .map(|value| cell_group_atom(value, row))
-                .unwrap_or(GroupAtom::Missing);
+            let atom = match variables.fields.get(name) {
+                Some(value) => cell_group_atom(value, row)?,
+                None => GroupAtom::Missing,
+            };
             if group_atom_is_missing(&atom) {
                 missing = true;
                 break;
@@ -559,7 +558,7 @@ fn table_grpstats_groups(
             row_keys.push((row, key));
         }
     }
-    grouped_rows_from_row_keys(row_keys)
+    Ok(grouped_rows_from_row_keys(row_keys))
 }
 
 fn matrix_groups(group: &Value, rows: usize) -> BuiltinResult<GroupedRows> {
@@ -681,19 +680,22 @@ fn grouping_atoms(value: &Value, rows: usize) -> BuiltinResult<Vec<GroupAtom>> {
             .iter()
             .map(|text| text_group_atom(text.to_string()))
             .collect()),
-        Value::CharArray(array) => Ok((0..array.rows)
-            .map(|row| {
+        Value::CharArray(array) => (0..array.rows)
+            .map(|row| -> BuiltinResult<GroupAtom> {
                 let start = row * array.cols;
-                GroupAtom::Text(
-                    array.data()[start..start + array.cols]
-                        .iter()
-                        .collect::<String>()
-                        .trim()
-                        .to_string(),
-                )
+                let text =
+                    runmat_value::decode_utf16_code_units(&array.data()[start..start + array.cols])
+                        .map_err(|error| {
+                            table_error_with_source(
+                                &TABLE_ERROR_INVALID_ARGUMENT,
+                                format!("grpstats: group label is not valid UTF-16 text: {error}"),
+                                error,
+                            )
+                        })?;
+                Ok(GroupAtom::Text(text.trim().to_string()))
             })
-            .collect()),
-        Value::Cell(cell) => Ok(cell.data().iter().map(cell_atom).collect()),
+            .collect(),
+        Value::Cell(cell) => cell.data().iter().map(cell_atom).collect(),
         Value::Object(obj) if obj.is_class(CATEGORICAL_CLASS) => Ok((0..rows)
             .map(|row| {
                 categorical_label_at(obj, row)
@@ -705,15 +707,24 @@ fn grouping_atoms(value: &Value, rows: usize) -> BuiltinResult<Vec<GroupAtom>> {
     }
 }
 
-fn cell_atom(value: &Value) -> GroupAtom {
-    match value {
+fn cell_atom(value: &Value) -> BuiltinResult<GroupAtom> {
+    Ok(match value {
         Value::Num(value) => number_group_atom(*value),
         Value::Int(value) => GroupAtom::Integer(value.clone()),
         Value::Bool(value) => GroupAtom::Logical(*value),
         Value::String(value) => text_group_atom(value.to_string()),
-        Value::CharArray(array) if array.rows == 1 => {
-            text_group_atom(array.data().iter().collect::<String>().trim().to_string())
-        }
+        Value::CharArray(array) if array.rows == 1 => text_group_atom(
+            runmat_value::decode_utf16_code_units(array.data())
+                .map_err(|error| {
+                    table_error_with_source(
+                        &TABLE_ERROR_INVALID_VARIABLE,
+                        format!("grpstats: character value is not valid UTF-16 text: {error}"),
+                        error,
+                    )
+                })?
+                .trim()
+                .to_string(),
+        ),
         Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => tensor
             .integer_storage()
             .and_then(|storage| storage.value_at(0))
@@ -722,8 +733,8 @@ fn cell_atom(value: &Value) -> GroupAtom {
         Value::LogicalArray(array) if array.data.len() == 1 => {
             GroupAtom::Logical(array.data[0] != 0)
         }
-        other => GroupAtom::Text(cell_key_string(other, 0)),
-    }
+        other => GroupAtom::Text(cell_key_string(other, 0)?),
+    })
 }
 
 #[derive(Clone, Debug)]

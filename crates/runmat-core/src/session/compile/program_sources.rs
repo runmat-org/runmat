@@ -160,21 +160,22 @@ impl ProgramSourceTable {
                 .functions
                 .get(&function.id)
                 .ok_or("HIR function is absent from compiled registry")?;
-            if compiled
+            let compiled_source = compiled
                 .source_id
-                .and_then(runmat_vm::BytecodeSourceRef::program)
-                != Some(module_source)
-                || bytecode
-                    .bound_functions
-                    .get(&function.id)
-                    .and_then(|body| body.source_id)
-                    .and_then(runmat_vm::BytecodeSourceRef::program)
-                    != Some(module_source)
-                || !contains(compiled.source_id)
+                .and_then(runmat_vm::BytecodeSourceRef::program);
+            let bound_source = bytecode
+                .bound_functions
+                .get(&function.id)
+                .and_then(|body| body.source_id)
+                .and_then(runmat_vm::BytecodeSourceRef::program);
+            let admitted = contains(compiled.source_id);
+            if compiled_source != Some(module_source)
+                || bound_source != Some(module_source)
+                || !admitted
             {
                 return Err(format!(
-                    "compiled function {:?} differs from its admitted HIR source module",
-                    function.id
+                    "compiled function {:?} differs from its admitted HIR source module: HIR={module_source:?}, registry={compiled_source:?}, bound={bound_source:?}, registry_admitted={admitted}",
+                    function.id,
                 ));
             }
         }

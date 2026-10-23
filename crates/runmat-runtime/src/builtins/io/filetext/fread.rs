@@ -19,7 +19,9 @@ use runmat_value::{
     Tensor, Value,
 };
 
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::gpu_helpers;
+#[cfg(test)]
+use crate::builtins::common::tensor;
 use crate::builtins::io::filetext::{helpers::extract_scalar_string, registry};
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -105,16 +107,17 @@ impl FreadEval {
         vec![self.data.clone(), Value::Num(self.count as f64)]
     }
 
-    fn apply_like(
-        &mut self,
-        like_proto: Option<&Value>,
-        precision: PrecisionSpec,
-    ) -> BuiltinResult<()> {
-        if let Some(proto) = like_proto {
-            let adjusted = adjust_output_for_like(self.data.clone(), proto, precision)?;
-            self.data = adjusted;
-        }
-        Ok(())
+    async fn publish(
+        self,
+        runtime: Option<&crate::context::RuntimeContext>,
+        projection: reader::presentation::Projection<'_>,
+        cooperation: &mut super::cooperation::FileCooperation,
+    ) -> BuiltinResult<Self> {
+        let data = projection.publish(runtime, self.data, cooperation).await?;
+        Ok(Self {
+            data,
+            count: self.count,
+        })
     }
 
     #[cfg(test)]
@@ -182,65 +185,76 @@ pub async fn evaluate_in_view(
         .await_io(prepared.resolve_controls(&operation.info.machinefmt))
         .await??;
 
-    operation.check_authority(runtime).map_err(|source| {
-        let mut builder = build_runtime_error(format!("{}: {source}", FREAD_ERROR_IO.message))
-            .with_builtin(BUILTIN_NAME)
-            .with_source(source);
-        if let Some(identifier) = FREAD_ERROR_IO.identifier {
-            builder = builder.with_identifier(identifier);
-        }
-        builder.build()
-    })?;
-    cooperation.completed(0).await?;
-
-    let (mut eval, encountered_eof) = read_from_handle(
-        operation.file_mut(),
-        &controls.size,
-        &controls.precision,
-        controls.skip,
-        controls.machine,
-        &mut cooperation,
-    )
-    .await
-    .map_err(|error| match error {
-        ReadFailure::Execution(source) => *source,
-        other => {
-            let detail = other.to_string();
-            let detail = detail.strip_prefix("fread: ").unwrap_or(&detail);
-            let mut builder =
-                build_runtime_error(format!("{}: {}", FREAD_ERROR_IO.message, detail))
-                    .with_builtin(BUILTIN_NAME)
-                    .with_source(other);
+    // Once this selected file operation is attempted, neither read effects nor
+    // decoder state may be replayed by automatic argument gathering.
+    let result = async {
+        operation.check_authority(runtime).map_err(|source| {
+            let mut builder = build_runtime_error(format!("{}: {source}", FREAD_ERROR_IO.message))
+                .with_builtin(BUILTIN_NAME)
+                .with_source(source);
             if let Some(identifier) = FREAD_ERROR_IO.identifier {
                 builder = builder.with_identifier(identifier);
             }
             builder.build()
+        })?;
+        cooperation.completed(0).await?;
+        let projection = reader::presentation::Projection::select(controls.precision.output, like)?;
+        let (eval, encountered_eof) = read_from_handle(
+            operation.file_mut(),
+            &controls.size,
+            &controls.precision,
+            controls.skip,
+            controls.machine,
+            &mut cooperation,
+            runtime,
+            projection,
+        )
+        .await
+        .map_err(|error| match error {
+            ReadFailure::Execution(source) => *source,
+            other => {
+                let detail = other.to_string();
+                let detail = detail.strip_prefix("fread: ").unwrap_or(&detail);
+                let mut builder =
+                    build_runtime_error(format!("{}: {}", FREAD_ERROR_IO.message, detail))
+                        .with_builtin(BUILTIN_NAME)
+                        .with_source(other);
+                if let Some(identifier) = FREAD_ERROR_IO.identifier {
+                    builder = builder.with_identifier(identifier);
+                }
+                builder.build()
+            }
+        })?;
+        operation.check_authority(runtime).map_err(|source| {
+            let mut builder = build_runtime_error(format!("{}: {source}", FREAD_ERROR_IO.message))
+                .with_builtin(BUILTIN_NAME)
+                .with_source(source);
+            if let Some(identifier) = FREAD_ERROR_IO.identifier {
+                builder = builder.with_identifier(identifier);
+            }
+            builder.build()
+        })?;
+        if encountered_eof {
+            registry::mark_eof_encountered_in(fid, runtime);
         }
-    })?;
-    operation.check_authority(runtime).map_err(|source| {
-        let mut builder = build_runtime_error(format!("{}: {source}", FREAD_ERROR_IO.message))
-            .with_builtin(BUILTIN_NAME)
-            .with_source(source);
-        if let Some(identifier) = FREAD_ERROR_IO.identifier {
-            builder = builder.with_identifier(identifier);
-        }
-        builder.build()
-    })?;
-    if encountered_eof {
-        registry::mark_eof_encountered_in(fid, runtime);
+        let eval = eval.publish(runtime, projection, &mut cooperation).await?;
+        operation.check_authority(runtime).map_err(|source| {
+            let mut builder = build_runtime_error(format!("{}: {source}", FREAD_ERROR_IO.message))
+                .with_builtin(BUILTIN_NAME)
+                .with_source(source);
+            if let Some(identifier) = FREAD_ERROR_IO.identifier {
+                builder = builder.with_identifier(identifier);
+            }
+            builder.build()
+        })?;
+        cooperation.completed(0).await?;
+        Ok(eval)
     }
-    eval.apply_like(like, controls.precision)?;
-    operation.check_authority(runtime).map_err(|source| {
-        let mut builder = build_runtime_error(format!("{}: {source}", FREAD_ERROR_IO.message))
-            .with_builtin(BUILTIN_NAME)
-            .with_source(source);
-        if let Some(identifier) = FREAD_ERROR_IO.identifier {
-            builder = builder.with_identifier(identifier);
-        }
-        builder.build()
-    })?;
-    cooperation.completed(0).await?;
-    Ok(eval)
+    .await;
+    result.map_err(|mut error: RuntimeError| {
+        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        error
+    })
 }
 
 fn validate_like_prototype(prototype: &Value) -> Result<(), String> {
@@ -287,16 +301,28 @@ fn validate_like_prototype(prototype: &Value) -> Result<(), String> {
 }
 
 fn validate_like_output_kind(prototype: &Value, output: OutputKind) -> Result<(), String> {
-    let character_prototype = matches!(
-        prototype,
-        Value::CharArray(_) | Value::String(_) | Value::StringArray(_)
-    );
-    match (character_prototype, output) {
-        (true, OutputKind::Char) | (false, OutputKind::Numeric(_)) => Ok(()),
-        (true, OutputKind::Numeric(_)) => Err(
+    enum LikeClass {
+        Character,
+        Logical,
+        Numeric,
+    }
+
+    let prototype_class = match prototype {
+        Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => LikeClass::Character,
+        Value::LogicalArray(_) | Value::Bool(_) => LikeClass::Logical,
+        Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle) => {
+            LikeClass::Logical
+        }
+        _ => LikeClass::Numeric,
+    };
+    match (prototype_class, output) {
+        (LikeClass::Character, OutputKind::Char)
+        | (LikeClass::Logical, OutputKind::Char | OutputKind::Numeric(_))
+        | (LikeClass::Numeric, OutputKind::Numeric(_)) => Ok(()),
+        (LikeClass::Character, OutputKind::Numeric(_)) => Err(
             "fread: character prototypes require a character precision such as '*char'".to_string(),
         ),
-        (false, OutputKind::Char) => {
+        (LikeClass::Numeric, OutputKind::Char) => {
             Err("fread: character output requires a character prototype".to_string())
         }
     }
@@ -311,6 +337,7 @@ async fn gather_value(value: &Value) -> BuiltinResult<Value> {
 mod admission;
 mod controls;
 mod decode;
+#[cfg(test)]
 mod output;
 mod precision;
 mod reader;
@@ -318,6 +345,7 @@ mod reader;
 use admission::*;
 use controls::*;
 use decode::*;
+#[cfg(test)]
 use output::*;
 use precision::*;
 use reader::*;

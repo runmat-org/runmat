@@ -45,6 +45,11 @@ fn hamming_error_with_message(
 
 fn hamming_map_window_error(error: WindowArgError) -> RuntimeError {
     match error {
+        WindowArgError::Text(source) => {
+            let mut error = hamming_error(&HAMMING_ERROR_INVALID_OPTION);
+            error.source = Some(Box::new(source));
+            error
+        }
         WindowArgError::TooManyOptions => hamming_error(&HAMMING_ERROR_ARG_COUNT),
         WindowArgError::InvalidLength => hamming_error(&HAMMING_ERROR_INVALID_LENGTH),
         WindowArgError::InvalidOptionType => hamming_error(&HAMMING_ERROR_INVALID_OPTION),

@@ -14,21 +14,30 @@ fn decode_surface_coordinates(
     args: crate::call::FunctionArgumentView<'_>,
     builtin: &'static str,
 ) -> BuiltinResult<(Value, Value, Value, usize)> {
+    // Only actual text scalar controls begin the Z-only style tail. Numeric
+    // coordinates retain the existing X,Y,Z form and are never stringified.
+    let style_tail = args.get(1).is_some_and(|value| match value {
+        Value::String(_) => true,
+        Value::CharArray(chars) => {
+            chars.rows == 1 && crate::builtins::common::shape::effective_rank(&chars.shape) == 2
+        }
+        _ => false,
+    });
+    if args.len() == 1 || style_tail {
+        let z = args[0].clone();
+        let (rows, cols) = inferred_grid_shape(&z, builtin)?;
+        return Ok((
+            Value::Tensor(default_surface_axis(cols)),
+            Value::Tensor(default_surface_axis(rows)),
+            z,
+            1,
+        ));
+    }
     match args.len() {
         0 | 2 => Err(plotting_error(
             builtin,
             format!("{builtin}: expected Z or X,Y,Z input"),
         )),
-        1 => {
-            let z = args[0].clone();
-            let (rows, cols) = inferred_grid_shape(&z, builtin)?;
-            Ok((
-                Value::Tensor(default_surface_axis(cols)),
-                Value::Tensor(default_surface_axis(rows)),
-                z,
-                1,
-            ))
-        }
         _ => Ok((args[0].clone(), args[1].clone(), args[2].clone(), 3)),
     }
 }
@@ -43,45 +52,35 @@ pub fn parse_surface_call_args_matlab_xy(
     Ok((x, y, z, args.into_range(consumed..)?))
 }
 
-/// Existing source-only adapter for actual legacy image/mesh registrations.
-/// This is not a managed fallback for canonical argument owners.
-pub fn parse_surface_source_call_args_matlab_xy(
-    args: Vec<Value>,
-    builtin: &'static str,
-) -> BuiltinResult<(Value, Value, Value, Vec<Value>)> {
-    let (x, y, z, consumed) = decode_surface_coordinates(
-        crate::call::FunctionArgumentView::from_slice(&args),
-        builtin,
-    )?;
-    Ok((x, y, z, args.into_iter().skip(consumed).collect()))
-}
-
-/// Parse image-family inputs without confusing `C,Name,Value` with `X,Y,C`.
+/// Image calls retain the canonical source and segmented property tail.
 pub fn parse_image_call_args(
-    args: Vec<Value>,
+    args: crate::call::BuiltinArguments,
     builtin: &'static str,
-) -> BuiltinResult<(Value, Value, Value, Vec<Value>)> {
+) -> BuiltinResult<(Value, Value, Value, crate::call::BuiltinArguments)> {
     if args.is_empty() {
         return Err(plotting_error(
             builtin,
             format!("{builtin}: expected C or X,Y,C input"),
         ));
     }
-    let c_only =
-        args.len() < 3 || matches!(args.get(1), Some(Value::String(_) | Value::CharArray(_)));
-    if c_only {
-        let mut values = args.into_iter();
-        let c = values.next().expect("nonempty image arguments");
-        let rest = values.collect();
+    let text_tail = args.get(1).is_some_and(|value| match value {
+        Value::String(_) => true,
+        Value::CharArray(chars) => {
+            chars.rows == 1 && crate::builtins::common::shape::effective_rank(&chars.shape) == 2
+        }
+        _ => false,
+    });
+    if args.len() < 3 || text_tail {
+        let c = args[0].clone();
         let (rows, cols) = inferred_grid_shape(&c, builtin)?;
         return Ok((
             Value::Tensor(default_surface_axis(cols)),
             Value::Tensor(default_surface_axis(rows)),
             c,
-            rest,
+            args.into_range(1..)?,
         ));
     }
-    parse_surface_source_call_args_matlab_xy(args, builtin)
+    parse_surface_call_args_matlab_xy(args, builtin)
 }
 
 fn inferred_grid_shape(value: &Value, builtin: &'static str) -> BuiltinResult<(usize, usize)> {
@@ -93,8 +92,14 @@ fn inferred_grid_shape(value: &Value, builtin: &'static str) -> BuiltinResult<(u
                     format!("{builtin}: Z must contain at least a 2-D grid"),
                 ));
             }
-            let rows = handle.shape()[0].max(1);
-            let cols = handle.shape()[1].max(1);
+            let rows = handle.shape()[0];
+            let cols = handle.shape()[1];
+            if rows == 0 || cols == 0 {
+                return Err(plotting_error(
+                    builtin,
+                    format!("{builtin}: Z must contain a nonempty 2-D grid"),
+                ));
+            }
             Ok((rows, cols))
         }
         other => {
@@ -158,6 +163,21 @@ mod tests {
         assert_eq!(x.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0]);
         assert_eq!(y.materialize_f64(), vec![1.0, 2.0, 3.0]);
         assert!(rest.is_empty());
+
+        // The shared surf/mesh parser retains the real Z-only style tail;
+        // numeric explicit coordinates must not be mistaken for controls.
+        let z = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap());
+        for builtin in ["surf", "mesh", "meshc", "surfc"] {
+            let (_, _, actual, rest) = parse_surface_call_args_matlab_xy(
+                vec![z.clone(), Value::from("FaceAlpha"), Value::Num(0.5)],
+                builtin,
+            )
+            .unwrap();
+            assert_eq!(actual, z);
+            assert_eq!(rest.len(), 2);
+            assert_eq!(rest[0], Value::from("FaceAlpha"));
+            assert_eq!(rest[1], Value::Num(0.5));
+        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]

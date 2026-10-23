@@ -203,24 +203,37 @@ pub(super) fn numeric_size_to_usize(n: f64, context: &str) -> BuiltinResult<usiz
     Ok(n as usize)
 }
 
-pub(super) fn scalar_text(value: &Value) -> Option<String> {
-    match value {
+pub(super) fn scalar_text(value: &Value) -> crate::BuiltinResult<Option<String>> {
+    Ok(match value {
         Value::String(text) => Some(text.as_str().to_owned()),
         Value::StringArray(array) if array.data().len() == 1 => {
             Some(array.data()[0].as_str().to_owned())
         }
-        Value::CharArray(array) if array.rows == 1 => Some(array.data().iter().collect()),
+        Value::CharArray(array) if array.rows == 1 => Some(
+            runmat_value::decode_utf16_code_units(array.data()).map_err(|source| {
+                let mut error = invalid_argument(source.to_string());
+                error.source = Some(Box::new(source));
+                error
+            })?,
+        ),
         _ => None,
-    }
+    })
 }
 
-pub(super) fn char_rows(array: &CharArray) -> Vec<String> {
+pub(super) fn char_rows(array: &CharArray) -> BuiltinResult<Vec<String>> {
     let mut out = Vec::with_capacity(array.rows);
     for row in 0..array.rows {
         let start = row * array.cols;
-        out.push(array.data()[start..start + array.cols].iter().collect());
+        out.push(
+            runmat_value::decode_utf16_code_units(&array.data()[start..start + array.cols])
+                .map_err(|source| {
+                    let mut error = invalid_argument(source.to_string());
+                    error.source = Some(Box::new(source));
+                    error
+                })?,
+        );
     }
-    out
+    Ok(out)
 }
 
 pub(super) fn is_missing_text(text: &str) -> bool {

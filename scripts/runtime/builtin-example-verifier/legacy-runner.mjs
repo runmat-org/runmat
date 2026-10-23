@@ -32,8 +32,8 @@ import { resolveConcurrency, resolveLogIntervalMs, resolveNativeTimeoutMs, resol
 import { buildReportHtml, buildReportMarkdown, filterReportRows, formatExecutionOutput, normalizeOutput, resolveReportMode, writePlotImageArtifact } from "./presentation.mjs";
 
 /**
- * @typedef {import("../metadata/BuiltinMetadataSpecification").BuiltinMetadata} BuiltinMetadata
- * @typedef {import("../metadata/BuiltinMetadataSpecification").Example} BuiltinExample
+ * @typedef {import("../../metadata/BuiltinMetadataSpecification").BuiltinMetadata} BuiltinMetadata
+ * @typedef {import("../../metadata/BuiltinMetadataSpecification").Example} BuiltinExample
  */
 
 /**

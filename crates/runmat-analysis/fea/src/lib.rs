@@ -78,3 +78,14 @@ pub use signal_processing::{construct_shock_response_spectrum, ShockResponseSpec
 
 #[cfg(test)]
 mod tests;
+
+/// `2^bits` as a size bound, saturated to the address space on 32-bit targets (wasm32), where a
+/// larger structural codec bound is unreachable anyway.
+pub(crate) const fn address_space_power_of_two(bits: u32) -> usize {
+    let value = 1u64 << bits;
+    if value > usize::MAX as u64 {
+        usize::MAX
+    } else {
+        value as usize
+    }
+}

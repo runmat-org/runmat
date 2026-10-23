@@ -11,16 +11,22 @@ pub(in crate::builtins::cells::core::cellfun) enum CellfunShorthand {
 }
 
 impl CellfunShorthand {
-    pub(super) fn parse_bare_value(value: &Value) -> Option<Self> {
+    pub(super) fn parse_bare_value(value: &Value) -> BuiltinResult<Option<Self>> {
         let text = match value {
             Value::String(text) => text.as_str(),
             Value::CharArray(value) if value.rows == 1 => {
-                return Self::parse_name(&value.data().iter().collect::<String>());
+                return Ok(Self::parse_name(
+                    &runmat_value::decode_utf16_code_units(value.data()).map_err(|source| {
+                        let mut error = error::invalid(source.to_string());
+                        error.source = Some(Box::new(source));
+                        error
+                    })?,
+                ));
             }
             Value::StringArray(value) if value.data().len() == 1 => value.data()[0].as_str(),
-            _ => return None,
+            _ => return Ok(None),
         };
-        Self::parse_name(text)
+        Ok(Self::parse_name(text))
     }
 
     fn parse_name(name: &str) -> Option<Self> {
@@ -56,18 +62,24 @@ async fn is_class(arguments: crate::call::FunctionArgumentView<'_>) -> BuiltinRe
         ));
     };
     let value = &arguments[0];
-    let requested = class_identity(&arguments[1])
+    let requested = class_identity(&arguments[1])?
         .ok_or_else(|| error::invalid("cellfun: class name must be a string scalar"))?;
     let actual = crate::builtins::introspection::class_identity::class_identity_for_value(value);
     Ok(Value::Bool(actual == requested))
 }
 
-fn class_identity(value: &Value) -> Option<runmat_types::ClassIdentity> {
+fn class_identity(value: &Value) -> BuiltinResult<Option<runmat_types::ClassIdentity>> {
     let text = match value {
         Value::String(text) => text.to_string(),
-        Value::CharArray(value) if value.rows == 1 => value.data().iter().collect(),
+        Value::CharArray(value) if value.rows == 1 => {
+            runmat_value::decode_utf16_code_units(value.data()).map_err(|source| {
+                let mut error = error::invalid(source.to_string());
+                error.source = Some(Box::new(source));
+                error
+            })?
+        }
         Value::StringArray(value) if value.data().len() == 1 => value.data()[0].to_string(),
-        _ => return None,
+        _ => return Ok(None),
     };
-    runmat_types::ClassIdentity::new(text.trim()).ok()
+    Ok(runmat_types::ClassIdentity::new(text.trim()).ok())
 }

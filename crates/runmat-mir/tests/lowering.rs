@@ -5,9 +5,9 @@ use runmat_hir::{
 use runmat_mir::{
     analysis::{analyze_assembly, AnalysisStore, AssignmentFact},
     lowering::lower_assembly,
-    AsyncBehaviorFact, MirAggregateKind, MirBody, MirCallArg, MirCallee, MirConstant,
-    MirExpansionSource, MirIndexComponent, MirIndexPlan, MirLocalKind, MirOperand, MirOutputTarget,
-    MirPlace, MirRvalue, MirStmt, MirStmtKind, MirTerminatorKind,
+    AsyncBehaviorFact, MirAggregateElement, MirAggregateKind, MirBody, MirCallArg, MirCallee,
+    MirConstant, MirExpansionSource, MirIndexComponent, MirIndexPlan, MirLocalKind, MirOperand,
+    MirOutputTarget, MirPlace, MirRvalue, MirStmt, MirStmtKind, MirTerminatorKind,
 };
 use runmat_types::{
     CertaintyFact, DimensionFact, DynamicReason, ExecutionFact, NumericClass, NumericDomain,
@@ -20,6 +20,372 @@ fn lower_mir(src: &str) -> runmat_mir::MirAssembly {
     let ast = runmat_parser::parse(src).unwrap();
     let hir = lower(&ast, &LoweringContext::empty()).unwrap();
     lower_assembly(&hir.assembly).unwrap()
+}
+
+#[test]
+fn await_prefix_retains_an_earlier_comma_list_as_a_sequence_not_scalar() {
+    let assembly = lower_mir("async function y=f(t,c)\ny=consume(c{:},await(t));\nend");
+    let body = assembly
+        .bodies
+        .values()
+        .find(|body| {
+            body.blocks
+                .iter()
+                .any(|block| matches!(block.terminator.kind, MirTerminatorKind::Await { .. }))
+        })
+        .unwrap();
+    body.validate_expression_regions().unwrap();
+    let captured = body
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .find_map(|statement| match statement.kind {
+            MirStmtKind::CaptureSequence { destination, .. } => Some(destination),
+            _ => None,
+        })
+        .expect("prefix captures the sequence before suspension");
+    let call = body.blocks.iter().flat_map(|block| &block.statements).find_map(|statement|
+        match &statement.kind { MirStmtKind::Assign { value: MirRvalue::Call(call), .. } if call.args.iter().any(|argument|
+            matches!(argument, MirCallArg::CapturedSequence(sequence) if *sequence == captured)) => Some(call), _ => None })
+        .expect("resumed call consumes the exact captured sequence");
+    assert!(
+        matches!(call.args.first(), Some(MirCallArg::CapturedSequence(sequence)) if *sequence == captured)
+    );
+}
+
+#[test]
+fn expanding_fixed_target_prepares_before_nested_rhs_and_retains_one_source_owner() {
+    for source in [
+        "A=[1,2]; C={1}; A(C{:})=outer(inner());",
+        "s(1).field=outer(inner());",
+        "s(1,2).branch.field=outer(inner());",
+        "cells{1}.field=outer(inner());",
+        "async function y=f(t,s)\ns(await(t)).field=outer(inner()); y=s;\nend",
+        "async function y=f(t,s)\ns(1).(await(t))=outer(inner()); y=s;\nend",
+        "async function y=f(t)\nA=[1,2]; C={1}; A(C{:})=outer(await(t)); y=A;\nend",
+        "async function y=f(t,A,C)\nA(C{:})=await(t); y=A;\nend",
+        "async function y=f(t,A,C)\nA(C{:},await(t))=outer(inner()); y=A;\nend",
+        "async function y=f(t,A,C)\nA(end+await(t)).x(C{:})=outer(inner()); y=A;\nend",
+        "async function y=f(t,C)\nfactory().x(C{:},await(t))=outer(inner()); y=1;\nend",
+    ] {
+        let assembly = lower_mir(source);
+        let body = assembly
+            .bodies
+            .values()
+            .find(|body| {
+                body.blocks.iter().any(|block| {
+                    block.statements.iter().any(|statement| {
+                        matches!(statement.kind, MirStmtKind::PrepareFixedAssignment(_))
+                    })
+                })
+            })
+            .expect("canonical preparation");
+        body.validate_expression_regions().unwrap();
+        // Await continuation blocks need not follow their predecessors in
+        // storage order. These straight-line fixtures must prove ordering on
+        // the actual normal CFG path, including every suspension/resume edge.
+        let mut statements = Vec::new();
+        let mut block = body.blocks.first().unwrap();
+        let mut visited = std::collections::HashSet::new();
+        loop {
+            assert!(visited.insert(block.id), "fixture unexpectedly loops");
+            statements.extend(&block.statements);
+            let next = match &block.terminator.kind {
+                MirTerminatorKind::Goto(next) | MirTerminatorKind::Await { resume: next, .. } => {
+                    *next
+                }
+                MirTerminatorKind::Return(_) => break,
+                other => panic!("fixture unexpectedly branches: {other:?}"),
+            };
+            block = body.blocks.iter().find(|block| block.id == next).unwrap();
+        }
+        let prepare = statements
+            .iter()
+            .position(|statement| matches!(statement.kind, MirStmtKind::PrepareFixedAssignment(_)))
+            .unwrap();
+        let consume = statements
+            .iter()
+            .position(|statement| matches!(statement.kind, MirStmtKind::PreparedAssign { .. }))
+            .unwrap();
+        assert!(prepare < consume);
+        let phases = statements[..consume]
+            .iter()
+            .filter_map(|statement| match &statement.kind {
+                MirStmtKind::PrepareFixedAssignment(phase) => Some(phase),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(matches!(
+            phases.first().unwrap().phase,
+            runmat_mir::MirFixedPreparationPhase::CaptureReceiver
+        ));
+        assert!(matches!(
+            phases.last().unwrap().phase,
+            runmat_mir::MirFixedPreparationPhase::FinishStep { .. }
+        ));
+        let mut state = None;
+        let scalar_receipts = phases
+            .iter()
+            .filter_map(|phase| match phase.output() {
+                Some(runmat_mir::MirFixedSelectorDestination::Scalar(local)) => Some(local),
+                _ => None,
+            })
+            .collect();
+        for phase in &phases {
+            state = Some(
+                runmat_mir::MirFixedPreparationState::advance(state, phase, &scalar_receipts)
+                    .unwrap(),
+            );
+        }
+        assert!(state.as_ref().unwrap().is_ready());
+        if source.contains("await") {
+            assert!(body
+                .blocks
+                .iter()
+                .any(|block| matches!(block.terminator.kind, MirTerminatorKind::Await { .. })));
+        }
+        // A nested synchronous RHS may stay in the consumed rvalue; an Await
+        // prefix instead lives in the intervening CFG. Both must start only
+        // after the complete destination is ready, not merely receiver capture.
+        let ready = statements[..consume]
+            .iter()
+            .rposition(|statement| matches!(statement.kind, MirStmtKind::PrepareFixedAssignment(_)))
+            .unwrap();
+        assert!(ready < consume);
+        let rhs_start = source
+            .find("outer(")
+            .or_else(|| source.find("=await(t)").map(|offset| offset + 1))
+            .expect("fixture RHS start");
+        for statement in &statements[..=ready] {
+            statement.visit_expression_regions(|region| {
+                for step in region.steps() {
+                    let span = match step {
+                        runmat_mir::MirExpressionStep::Let { span, .. }
+                        | runmat_mir::MirExpressionStep::CaptureSequence { span, .. } => span,
+                    };
+                    assert!(
+                        span.start < rhs_start,
+                        "RHS expression work ran before target preparation finished"
+                    );
+                }
+            });
+        }
+        assert!(matches!(
+            statements[consume].kind,
+            MirStmtKind::PreparedAssign { .. }
+        ));
+
+        let mut wrong_source = body.clone();
+        for statement in wrong_source
+            .blocks
+            .iter_mut()
+            .flat_map(|block| &mut block.statements)
+        {
+            if let MirStmtKind::PreparedAssign { preparation, .. } = &mut statement.kind {
+                preparation.source_statement.0 += 1;
+            }
+        }
+        assert!(wrong_source
+            .validate_expression_regions()
+            .unwrap_err()
+            .contains("source contracts disagree"));
+
+        let mut missing_consumer = body.clone();
+        for block in &mut missing_consumer.blocks {
+            block
+                .statements
+                .retain(|statement| !matches!(statement.kind, MirStmtKind::PreparedAssign { .. }));
+        }
+        assert!(missing_consumer
+            .validate_expression_regions()
+            .unwrap_err()
+            .contains("source contracts disagree"));
+
+        let mut missing_finish = body.clone();
+        let last = phases.last().unwrap();
+        for block in &mut missing_finish.blocks {
+            block.statements.retain(|statement| {
+                !matches!(&statement.kind,
+                MirStmtKind::PrepareFixedAssignment(phase) if phase == *last)
+            });
+        }
+        assert!(missing_finish.validate_expression_regions().is_err());
+
+        let mut unavailable_capture = body.clone();
+        let mut changed = false;
+        for statement in unavailable_capture
+            .blocks
+            .iter_mut()
+            .flat_map(|block| &mut block.statements)
+        {
+            if let MirStmtKind::PrepareFixedAssignment(runmat_mir::MirFixedPreparation {
+                phase: runmat_mir::MirFixedPreparationPhase::EvaluateSelector { region, .. },
+                ..
+            }) = &mut statement.kind
+            {
+                if let MirCallArg::CapturedSequence(sequence) = &mut region.argument {
+                    sequence.0 = usize::MAX;
+                    changed = true;
+                    break;
+                }
+            }
+        }
+        if changed {
+            assert!(unavailable_capture.validate_expression_regions().is_err());
+        }
+        for phase in &phases {
+            let Some(receiver) = phase.assignment.mutation.place.root_local() else {
+                continue;
+            };
+            if matches!(
+                phase.phase,
+                runmat_mir::MirFixedPreparationPhase::EvaluateSelector { .. }
+            ) {
+                let mut hostile = (*phase).clone();
+                if let runmat_mir::MirFixedPreparationPhase::EvaluateSelector {
+                    destination, ..
+                } = &mut hostile.phase
+                {
+                    *destination = runmat_mir::MirFixedSelectorDestination::Scalar(receiver);
+                }
+                assert!(hostile.validate().is_err());
+                let mut hostile = (*phase).clone();
+                if let runmat_mir::MirFixedPreparationPhase::EvaluateSelector { region, .. } =
+                    &mut hostile.phase
+                {
+                    if let Some(runmat_mir::MirExpressionStep::Let { local, .. }) = region
+                        .steps
+                        .iter_mut()
+                        .find(|step| matches!(step, runmat_mir::MirExpressionStep::Let { .. }))
+                    {
+                        *local = receiver;
+                        assert!(hostile.validate().is_err());
+                    }
+                }
+                break;
+            }
+        }
+    }
+    // The guarded result has two mutually exclusive publishers. Evaluating a
+    // future-producing call also exports a prefix temporary on only one path.
+    for source in [
+        "async function y=f(t,flag,A,C)\nA(C{:},flag && await(t))=outer(); y=A;\nend",
+        "async function y=f(t,flag,A,C)\nA(C{:},flag || await(make_future()))=outer(); y=A;\nend",
+    ] {
+        let mir = lower_mir(source);
+        let body = mir
+            .bodies
+            .values()
+            .find(|body| {
+                body.blocks
+                    .iter()
+                    .any(|block| matches!(block.terminator.kind, MirTerminatorKind::Await { .. }))
+            })
+            .unwrap();
+        body.validate_expression_regions().unwrap();
+        let mut publishers = std::collections::BTreeMap::new();
+        for statement in body.blocks.iter().flat_map(|block| &block.statements) {
+            if let MirStmtKind::PrepareFixedAssignment(phase) = &statement.kind {
+                if let Some(runmat_mir::MirFixedSelectorDestination::Scalar(local)) = phase.output()
+                {
+                    *publishers.entry(local).or_insert(0) += 1;
+                }
+            }
+        }
+        assert!(publishers.values().any(|count| *count == 2));
+        if source.contains("make_future") {
+            let branch_only = body
+                .blocks
+                .iter()
+                .flat_map(|block| &block.statements)
+                .find_map(|statement| {
+                    let MirStmtKind::PrepareFixedAssignment(phase) = &statement.kind else {
+                        return None;
+                    };
+                    let Some(runmat_mir::MirFixedSelectorDestination::Scalar(local)) =
+                        phase.output()
+                    else {
+                        return None;
+                    };
+                    (publishers[&local] == 1
+                        && phase.steps().iter().any(|step| {
+                            matches!(
+                                step,
+                                runmat_mir::MirExpressionStep::Let {
+                                    value: MirRvalue::Call(_),
+                                    ..
+                                }
+                            )
+                        }))
+                    .then_some(local)
+                })
+                .expect("future call has a branch-only phase receipt");
+            let guarded = *publishers.iter().find(|(_, count)| **count == 2).unwrap().0;
+            let mut hostile = body.clone();
+            let mut changed = false;
+            for statement in hostile
+                .blocks
+                .iter_mut()
+                .flat_map(|block| &mut block.statements)
+            {
+                let MirStmtKind::PrepareFixedAssignment(phase) = &mut statement.kind else {
+                    continue;
+                };
+                let mut reads_guard = false;
+                phase.visit_external_operands(|operand| {
+                    reads_guard |= *operand == MirOperand::Local(guarded)
+                });
+                if reads_guard {
+                    if let runmat_mir::MirFixedPreparationPhase::EvaluateSelector {
+                        region, ..
+                    } = &mut phase.phase
+                    {
+                        region.argument = MirCallArg::Single(MirOperand::Local(branch_only));
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+            assert!(changed);
+            assert!(hostile
+                .validate_expression_regions()
+                .unwrap_err()
+                .contains("unavailable"));
+        }
+        let local = *publishers.keys().next().unwrap();
+        let mut hostile = body.clone();
+        let mut forged = body
+            .blocks
+            .iter()
+            .flat_map(|block| &block.statements)
+            .find(|statement| matches!(statement.kind, MirStmtKind::PrepareFixedAssignment(_)))
+            .expect("fixture has a real preparation statement")
+            .clone();
+        forged.kind = MirStmtKind::Assign {
+            place: MirPlace::Local(local),
+            value: MirRvalue::Use(MirOperand::Constant(MirConstant::Bool(false))),
+        };
+        hostile.blocks[0].statements.insert(0, forged);
+        assert!(hostile.validate_expression_regions().is_err());
+    }
+    // Same-list outer End plus variable-width CSL is explicitly unsupported;
+    // the separate-index End/Await control above must remain valid.
+    for source in [
+        "A=[1,2]; C={1}; A(C{:},end)=9;",
+        "A=[1,2]; C={1}; A(end,C{:})=9;",
+        "A=[1,2]; C={1}; A(C{:},[1,end])=[];",
+    ] {
+        let ast = runmat_parser::parse(source).expect("mixed selector syntax parses");
+        let hir =
+            lower(&ast, &LoweringContext::empty()).expect("typed target reaches MIR lowering");
+        let error = lower_assembly(&hir.assembly)
+            .expect_err("same-list outer End and CSL must not acquire guessed slot semantics");
+        assert_eq!(
+            error.message,
+            "contextual end cannot share an index list with variable-width argument expansion",
+            "unexpected refusal for {source}",
+        );
+    }
 }
 
 #[test]
@@ -170,8 +536,8 @@ fn function_remap_moves_dotted_semantic_fallback_identity() {
             } if chain.steps.iter().any(|step| matches!(
                 step,
                 runmat_mir::MirSubscriptStep::DottedInvoke {
-                    semantic_fallback: Some(CallableIdentity::BoundFunction(id)), ..
-                } if *id == moved
+                    semantic_fallback: Some(identity), ..
+                } if matches!(identity.as_ref(), CallableIdentity::BoundFunction(id) if *id == moved)
             ))
         )));
 }
@@ -2888,22 +3254,25 @@ fn feval_after_external_workspace_effect_keeps_static_workspace_first_fallback()
 
 #[test]
 fn unverified_qualified_function_handle_preserves_dynamic_identity_operand() {
-    let mir = lower_mir("h = @Point.origin; y = feval(h);");
+    assert!(runmat_builtins::builtin_id_by_name("UnpublishedFixtureNamespace.callback").is_none());
+    let mir = lower_mir("h = @UnpublishedFixtureNamespace.callback; y = feval(h);");
     let body = mir.bodies.values().next().expect("body");
-    assert!(body
-        .blocks
-        .iter()
-        .flat_map(|block| &block.statements)
-        .any(|stmt| matches!(
-            &stmt.kind,
-            MirStmtKind::Assign {
-                value:
-                    MirRvalue::Use(MirOperand::FunctionHandle(
-                        CallableIdentity::DynamicName(name)
-                    )),
-                ..
-            } if name.0 == "Point.origin"
-        )));
+    assert!(
+        body.blocks
+            .iter()
+            .flat_map(|block| &block.statements)
+            .any(|stmt| matches!(
+                &stmt.kind,
+                MirStmtKind::Assign {
+                    value:
+                        MirRvalue::Use(MirOperand::FunctionHandle(
+                            CallableIdentity::DynamicName(name)
+                        )),
+                    ..
+                } if name.0 == "UnpublishedFixtureNamespace.callback"
+            )),
+        "{body:#?}"
+    );
 }
 
 #[test]
@@ -2952,26 +3321,61 @@ fn command_call_lowers_to_zero_output_call_with_string_args() {
     ));
 }
 
+fn assert_aggregate_preparation(body: &MirBody, expected_kind: MirAggregateKind) {
+    let [snapshot, calculation, aggregate] = body.blocks[0].statements.as_slice() else {
+        panic!("expected ordered snapshot, calculation and publication: {body:#?}");
+    };
+    let MirStmtKind::Assign {
+        place: MirPlace::Local(saved),
+        value: MirRvalue::Use(MirOperand::Local(input)),
+    } = &snapshot.kind
+    else {
+        panic!("snapshot: {snapshot:?}")
+    };
+    assert_eq!(*input, first_local_of_kind(body, MirLocalKind::Parameter));
+    let MirStmtKind::Assign {
+        place: MirPlace::Local(computed),
+        value:
+            MirRvalue::Binary(
+                MirOperand::Local(source),
+                OperatorKind::Add,
+                MirOperand::Constant(MirConstant::Number(one)),
+            ),
+    } = &calculation.kind
+    else {
+        panic!("calculation: {calculation:?}")
+    };
+    assert_eq!(source, input);
+    assert_eq!(one, "1");
+    let MirStmtKind::Assign {
+        place: MirPlace::Local(output),
+        value:
+            MirRvalue::Aggregate {
+                kind,
+                row_lengths,
+                elements,
+            },
+    } = &aggregate.kind
+    else {
+        panic!("aggregate: {aggregate:?}")
+    };
+    assert_eq!(*kind, expected_kind);
+    assert_eq!(*output, first_local_of_kind(body, MirLocalKind::Output));
+    assert_eq!(row_lengths, &[2]);
+    assert_eq!(
+        elements,
+        &[
+            MirAggregateElement::Single(MirOperand::Local(*saved)),
+            MirAggregateElement::Single(MirOperand::Local(*computed)),
+        ]
+    );
+}
+
 #[test]
 fn tensor_literal_lowers_to_mir_aggregate() {
     let mir = lower_mir("function y = make_tensor(x); y = [x, x + 1]; end");
     let body = mir.bodies.values().next().unwrap();
-
-    assert!(body
-        .locals
-        .iter()
-        .any(|local| matches!(local.kind, MirLocalKind::Temporary)));
-    assert!(matches!(
-        body.blocks[0].statements[1].kind,
-        MirStmtKind::Assign {
-            value: MirRvalue::Aggregate {
-                kind: MirAggregateKind::Tensor,
-                ref row_lengths,
-                ref elements,
-            },
-            ..
-        } if row_lengths == &[2] && elements.len() == 2
-    ));
+    assert_aggregate_preparation(body, MirAggregateKind::Tensor);
 }
 
 #[test]
@@ -2979,17 +3383,7 @@ fn cell_literal_lowers_to_mir_aggregate() {
     let mir = lower_mir("function y = make_cell(x); y = {x, x + 1}; end");
     let body = mir.bodies.values().next().unwrap();
 
-    assert!(matches!(
-        body.blocks[0].statements[1].kind,
-        MirStmtKind::Assign {
-            value: MirRvalue::Aggregate {
-                kind: MirAggregateKind::Cell,
-                ref row_lengths,
-                ref elements,
-            },
-            ..
-        } if row_lengths == &[2] && elements.len() == 2
-    ));
+    assert_aggregate_preparation(body, MirAggregateKind::Cell);
 }
 
 #[test]
@@ -3249,17 +3643,47 @@ fn index_components_lower_to_mir_operands() {
     let mir = lower_mir("function y = read_index(a, i); y = a(i + 1); end");
     let body = mir.bodies.values().next().unwrap();
 
-    assert!(body
-        .locals
-        .iter()
-        .any(|local| matches!(local.kind, MirLocalKind::Temporary)));
-    assert!(matches!(
-        body.blocks[0].statements[1].kind,
-        MirStmtKind::Assign {
-            value: MirRvalue::Index { .. },
-            ..
-        }
-    ));
+    let [snapshot, calculation, indexing] = body.blocks[0].statements.as_slice() else {
+        panic!("expected ordered base snapshot, selector and index: {body:#?}");
+    };
+    let MirStmtKind::Assign {
+        place: MirPlace::Local(saved),
+        value: MirRvalue::Use(MirOperand::Local(input)),
+    } = &snapshot.kind
+    else {
+        panic!("base snapshot: {snapshot:?}")
+    };
+    assert_eq!(*input, first_local_of_kind(body, MirLocalKind::Parameter));
+    let MirStmtKind::Assign {
+        place: MirPlace::Local(selector),
+        value:
+            MirRvalue::Binary(
+                MirOperand::Local(_),
+                OperatorKind::Add,
+                MirOperand::Constant(MirConstant::Number(one)),
+            ),
+    } = &calculation.kind
+    else {
+        panic!("selector: {calculation:?}")
+    };
+    assert_eq!(one, "1");
+    let MirStmtKind::Assign {
+        place: MirPlace::Local(output),
+        value:
+            MirRvalue::Index {
+                base: MirOperand::Local(base),
+                indexing,
+            },
+    } = &indexing.kind
+    else {
+        panic!("index: {indexing:?}")
+    };
+    assert_eq!(base, saved);
+    assert_eq!(*output, first_local_of_kind(body, MirLocalKind::Output));
+    assert_eq!(
+        indexing.components,
+        vec![MirIndexComponent::Expr(MirOperand::Local(*selector))]
+    );
 }
 
 #[test]
@@ -3349,20 +3773,16 @@ fn indexed_member_assignment_lowers_to_index_place_over_member_base() {
     let mir = lower_mir("function s = write_member_index(s); s.a(2) = 9; end");
     let body = mir.bodies.values().next().expect("body");
 
-    assert!(matches!(
-        body.blocks[0].statements[0].kind,
-        MirStmtKind::PlaceMutation(ref mutation)
-            if mutation.kind == runmat_hir::PlaceMutationKind::IndexedAssign
-                && mutation.creation_policy == runmat_hir::AssignmentCreationPolicy::CreateArrayByIndex
-    ));
-    assert!(matches!(
-        &body.blocks[0].statements[1].kind,
-        MirStmtKind::Assign {
-            place: MirPlace::Index(base, indexing),
-            ..
-        } if matches!(&**base, MirPlace::Member(_, _))
-            && indexing.plan == MirIndexPlan::Scalar
-    ));
+    let prepared =
+        indexed_member_prepared_assignment(body, runmat_hir::PlaceMutationKind::IndexedAssign);
+    assert_eq!(
+        prepared.mutation.creation_policy,
+        runmat_hir::AssignmentCreationPolicy::CreateArrayByIndex
+    );
+    assert!(
+        matches!(&prepared.mutation.place, MirPlace::Index(base, indexing)
+        if matches!(&**base, MirPlace::Member(_, _)) && indexing.plan == MirIndexPlan::Scalar)
+    );
 }
 
 #[test]
@@ -3370,20 +3790,15 @@ fn indexed_member_delete_lowers_to_index_place_over_member_base() {
     let mir = lower_mir("function s = delete_member_index(s); s.a = {1, 2, 3}; s.a(2) = []; end");
     let body = mir.bodies.values().next().expect("body");
 
-    assert!(matches!(
-        body.blocks[0].statements[2].kind,
-        MirStmtKind::PlaceMutation(ref mutation)
-            if mutation.kind == runmat_hir::PlaceMutationKind::Delete
-                && mutation.creation_policy == runmat_hir::AssignmentCreationPolicy::ExistingOnly
-    ));
-    assert!(matches!(
-        &body.blocks[0].statements[3].kind,
-        MirStmtKind::Assign {
-            place: MirPlace::Index(base, indexing),
-            ..
-        } if matches!(&**base, MirPlace::Member(_, _))
-            && indexing.plan == MirIndexPlan::Scalar
-    ));
+    let prepared = indexed_member_prepared_assignment(body, runmat_hir::PlaceMutationKind::Delete);
+    assert_eq!(
+        prepared.mutation.creation_policy,
+        runmat_hir::AssignmentCreationPolicy::ExistingOnly
+    );
+    assert!(
+        matches!(&prepared.mutation.place, MirPlace::Index(base, indexing)
+        if matches!(&**base, MirPlace::Member(_, _)) && indexing.plan == MirIndexPlan::Scalar)
+    );
 }
 
 #[test]
@@ -3393,20 +3808,49 @@ fn indexed_dynamic_member_delete_lowers_to_index_place_over_dynamic_member_base(
     );
     let body = mir.bodies.values().next().expect("body");
 
-    assert!(matches!(
-        body.blocks[0].statements[2].kind,
-        MirStmtKind::PlaceMutation(ref mutation)
-            if mutation.kind == runmat_hir::PlaceMutationKind::Delete
-                && mutation.creation_policy == runmat_hir::AssignmentCreationPolicy::ExistingOnly
-    ));
-    assert!(matches!(
-        &body.blocks[0].statements[3].kind,
-        MirStmtKind::Assign {
-            place: MirPlace::Index(base, indexing),
-            ..
-        } if matches!(&**base, MirPlace::DynamicMember(_, _))
-            && indexing.plan == MirIndexPlan::Scalar
-    ));
+    let prepared = indexed_member_prepared_assignment(body, runmat_hir::PlaceMutationKind::Delete);
+    assert_eq!(
+        prepared.mutation.creation_policy,
+        runmat_hir::AssignmentCreationPolicy::ExistingOnly
+    );
+    assert!(
+        matches!(&prepared.mutation.place, MirPlace::Index(base, indexing)
+        if matches!(&**base, MirPlace::DynamicMember(_, _)) && indexing.plan == MirIndexPlan::Scalar)
+    );
+}
+
+fn indexed_member_prepared_assignment(
+    body: &MirBody,
+    kind: runmat_hir::PlaceMutationKind,
+) -> &runmat_mir::MirPreparedAssignment {
+    body.validate_expression_regions().unwrap();
+    let statements = body
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .collect::<Vec<_>>();
+    let (consumer_index, prepared) = statements
+        .iter()
+        .enumerate()
+        .find_map(|(index, statement)| match &statement.kind {
+            MirStmtKind::PreparedAssign { preparation, .. }
+                if preparation.mutation.kind == kind =>
+            {
+                Some((index, preparation))
+            }
+            _ => None,
+        })
+        .expect("typed prepared indexed assignment consumer");
+    let capture_index = statements.iter().position(|statement| matches!(&statement.kind,
+        MirStmtKind::PrepareFixedAssignment(phase)
+        if phase.assignment == *prepared && matches!(phase.phase, runmat_mir::MirFixedPreparationPhase::CaptureReceiver)
+    )).expect("exact matching source receiver capture");
+    assert!(capture_index < consumer_index);
+    assert!(statements[capture_index..consumer_index].iter().any(|statement| matches!(&statement.kind,
+        MirStmtKind::PrepareFixedAssignment(phase)
+        if phase.assignment == *prepared && matches!(phase.phase, runmat_mir::MirFixedPreparationPhase::FinishStep { path_step } if path_step + 1 == prepared.path_len())
+    )));
+    prepared
 }
 
 #[test]
@@ -4161,7 +4605,7 @@ fn every_mir_construct_has_one_explicit_native_lowering_class() {
     use std::collections::HashSet;
 
     // StatementOutput is a distinct construct from expression evaluation.
-    assert_eq!(MirConstructKind::ALL.len(), 59);
+    assert_eq!(MirConstructKind::ALL.len(), 61);
     assert_eq!(
         MirConstructKind::ALL
             .into_iter()

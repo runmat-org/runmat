@@ -19,9 +19,9 @@ pub use bytecode::program::{
     instruction_reference_sites, remap_reference_sites, FunctionReferenceKind,
 };
 pub use bytecode::program::{
-    SelectedExecutableCode, SelectedExecutableProduct, SelectedLinkedNativeSite,
-    SelectedStaticCapture, SelectedStaticProductDependency, SelectedStaticProductTarget,
-    SelectedStaticSiteOwner,
+    SelectedExecutableAttachmentError, SelectedExecutableCode, SelectedExecutableProduct,
+    SelectedLinkedNativeSite, SelectedStaticCapture, SelectedStaticProductDependency,
+    SelectedStaticProductTarget, SelectedStaticSiteOwner,
 };
 pub use graph_schema::{
     selected_graph_code_required_schema, selected_graph_execution_required_schema,
@@ -115,7 +115,7 @@ pub use program_execution::{
     selected_graph_callable_facts_for_owner, AdmittedExecutableUnit, ExecutableUnitAdmissionError,
     GraphCodecAdmission, PreparedRetainedCallableUnits, RetainedCallableStageError,
     RetainedCallableStageLimits, RetainedExecutableSourceOwner, RuntimeBoundExecutableUnit,
-    SelectedGraphCallableFacts, SelectedUnitInteropReceipt,
+    SelectedFingerprintInvariant, SelectedGraphCallableFacts, SelectedUnitInteropReceipt,
 };
 pub use program_execution::{
     encode_portable_region_sources_v1, execute_deferred_program_in_context, execute_graph_request,

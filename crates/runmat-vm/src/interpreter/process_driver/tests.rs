@@ -11,6 +11,43 @@ use std::error::Error;
 
 struct Retired(&'static str, Rc<RefCell<Vec<&'static str>>>);
 
+struct CatchScopedProbe {
+    runtime: RuntimeContext,
+    catch: Option<Rc<runmat_value::MException>>,
+    polls: Rc<Cell<usize>>,
+    drops: Rc<Cell<usize>>,
+}
+
+impl CatchScopedProbe {
+    fn assert_selected_catch(&self) {
+        assert_eq!(
+            self.runtime
+                .active_catch_exception_shared()
+                .as_ref()
+                .map(Rc::as_ptr),
+            self.catch.as_ref().map(Rc::as_ptr),
+            "the exact selected exception, including explicit None, survives sibling placement"
+        );
+    }
+}
+
+impl Future for CatchScopedProbe {
+    type Output = SemanticReply;
+
+    fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
+        self.assert_selected_catch();
+        self.polls.set(self.polls.get() + 1);
+        Poll::Pending
+    }
+}
+
+impl Drop for CatchScopedProbe {
+    fn drop(&mut self) {
+        self.assert_selected_catch();
+        self.drops.set(self.drops.get() + 1);
+    }
+}
+
 struct ScopedFutureDrop {
     scope_id: runmat_execution::ExecutionScopeId,
     dropped: Rc<Cell<bool>>,
@@ -89,6 +126,76 @@ fn pending_child_retires_before_awaiting_root() {
     assert!(matches!(driven.as_mut().poll(&mut context), Poll::Pending));
     drop(driven);
     assert_eq!(*retired.borrow(), ["child", "root"]);
+
+    // A semantic sibling must not depend on the caller's catch guard still
+    // being active. Both an unpolled factory's captures and a pending child
+    // retire under the exact selected Rc, or explicitly no catch.
+    for has_catch in [false, true] {
+        for unpolled in [false, true] {
+            let runtime = RuntimeContext::new(Rc::new(
+                runmat_runtime::execution::RuntimeExecutionService::new(),
+            ));
+            let selected = has_catch.then(|| {
+                Rc::new(runmat_value::MException::new(
+                    "RunMat:selected".into(),
+                    "selected".into(),
+                ))
+            });
+            // Unlike the legacy enqueue witness above, this selected scoped
+            // queue requires the driver to own this runtime's authority.
+            let owner =
+                ProcessContinuationDriver::new_with_dynamic_admission_in_context(&runtime, None)
+                    .expect("select the catch matrix's process driver runtime");
+            let handle = owner.handle();
+            let polls = Rc::new(Cell::new(0));
+            let drops = Rc::new(Cell::new(0));
+            let probe = CatchScopedProbe {
+                runtime: runtime.clone(),
+                catch: selected.clone(),
+                polls: polls.clone(),
+                drops: drops.clone(),
+            };
+            let child_runtime = runtime.clone();
+            let mut driven = Box::pin(owner.drive(async move {
+                let guard = child_runtime.enter_active_catch_shared(selected);
+                let scope = child_runtime.prepare_poll_scope()?;
+                let ticket =
+                    handle.enqueue_scoped_in_context(&child_runtime, scope, move || probe)?;
+                drop(guard);
+                if unpolled {
+                    drop(ticket);
+                    futures::future::pending::<SemanticReply>().await
+                } else {
+                    ticket.await
+                }
+            }));
+            let outer = Rc::new(runmat_value::MException::new(
+                "RunMat:unrelated".into(),
+                "unrelated".into(),
+            ));
+            let guard = runtime.enter_active_catch_shared(Some(outer.clone()));
+            match driven.as_mut().poll(&mut context) {
+                Poll::Pending => {}
+                Poll::Ready(Err(error)) => panic!(
+                    "catch matrix admission failed (has_catch={has_catch}, unpolled={unpolled}): {error:?}"
+                ),
+                Poll::Ready(Ok(_)) => panic!(
+                    "catch matrix unexpectedly completed (has_catch={has_catch}, unpolled={unpolled})"
+                ),
+            }
+            drop(driven);
+            assert_eq!(polls.get(), usize::from(!unpolled));
+            assert_eq!(drops.get(), 1);
+            assert!(Rc::ptr_eq(
+                &runtime
+                    .active_catch_exception_shared()
+                    .expect("restore outer"),
+                &outer,
+            ));
+            drop(guard);
+            assert!(runtime.active_catch_exception_shared().is_none());
+        }
+    }
 }
 
 #[test]

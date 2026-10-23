@@ -2,12 +2,12 @@
 
 #[path = "browser/connection.rs"]
 mod connection;
+#[path = "browser/retirement.rs"]
+mod retirement;
 #[path = "browser/store.rs"]
 mod store;
 #[path = "browser/transaction.rs"]
 mod transaction;
-#[path = "browser/retirement.rs"]
-mod retirement;
 
 use super::document::{DocumentMutation, DocumentMutationError, PreferenceDocumentError};
 use super::{PreferenceGroups, PreferenceServiceError, PreferenceValues, RuntimePreferenceService};
@@ -15,12 +15,12 @@ use crate::context::{
     RuntimeContext, RuntimeServiceFuture, RuntimeUserPathService, UserPathMutation,
     UserPathServiceError, UserPathSnapshot,
 };
-use crate::execution::value_codec::{decode_durable_value, encode_durable_value};
 use crate::execution::CpuCooperationBudget;
 use futures::lock::Mutex;
 use runmat_execution::profiling::CommandProfilingReceipt;
 use runmat_value::Value;
 use std::fmt;
+use std::rc::Rc;
 use std::sync::Arc;
 use wasm_bindgen::JsValue;
 
@@ -73,12 +73,19 @@ impl BrowserPreferenceService {
         mutation: DocumentMutation,
         profiling: Option<&CommandProfilingReceipt>,
     ) -> Result<transaction::BrowserPrepared, PreferenceServiceError> {
-        self.mutate_request(
-            budget,
-            transaction::BrowserMutation::Prepared(mutation),
-            profiling,
-        )
-        .await
+        let result = self
+            .mutate_request(
+                budget,
+                transaction::BrowserMutation::Prepared(mutation),
+                profiling,
+            )
+            .await?;
+        match result {
+            completed @ transaction::BrowserPrepared::Completed { .. } => Ok(completed),
+            transaction::BrowserPrepared::NeedsPreparation(_) => {
+                unreachable!("prepared mutation owns no caller defaults")
+            }
+        }
     }
 
     async fn mutate_request(
@@ -125,7 +132,10 @@ impl RuntimePreferenceService for BrowserPreferenceService {
             for (group, values) in document.groups {
                 let mut decoded = PreferenceValues::new();
                 for (name, payload) in values {
-                    decoded.insert(name, decode_durable_value(&payload)?);
+                    decoded.insert(
+                        name,
+                        super::decode_selected_preference(&payload, &mut budget, &runtime).await?,
+                    );
                     checkpoint(&mut budget, 1).await?;
                 }
                 output.insert(group, decoded);
@@ -152,7 +162,10 @@ impl RuntimePreferenceService for BrowserPreferenceService {
             };
             let mut decoded = PreferenceValues::new();
             for (name, payload) in values {
-                decoded.insert(name.clone(), decode_durable_value(payload)?);
+                decoded.insert(
+                    name.clone(),
+                    super::decode_selected_preference(payload, &mut budget, &runtime).await?,
+                );
                 checkpoint(&mut budget, 1).await?;
             }
             Ok(Some(decoded))
@@ -226,29 +239,56 @@ impl RuntimePreferenceService for BrowserPreferenceService {
                             group: group.clone(),
                             name: name.clone(),
                         })?;
-                    output.push(decode_durable_value(payload)?);
+                    output.push(
+                        super::decode_selected_preference(payload, &mut budget, &runtime).await?,
+                    );
                     checkpoint(&mut budget, 1).await?;
                 }
                 return Ok(output);
             };
-            let prepared = service
-                .mutate_request(
-                    &mut budget,
-                    transaction::BrowserMutation::ReadOrCreate {
-                        group,
-                        names,
-                        defaults,
-                        _roots: roots,
-                    },
-                    profiling.as_ref(),
-                )
-                .await?;
-            prepared
-                .values
-                .iter()
-                .map(decode_durable_value)
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(PreferenceServiceError::ValueEncoding)
+            let shared = Rc::new(transaction::SharedDefaults::new(defaults, roots));
+            loop {
+                checkpoint(&mut budget, 0).await?;
+                let prepared = service
+                    .mutate_request(
+                        &mut budget,
+                        transaction::BrowserMutation::ReadOrCreate {
+                            group: group.clone(),
+                            names: names.clone(),
+                            defaults: shared.clone(),
+                        },
+                        profiling.as_ref(),
+                    )
+                    .await?;
+                match prepared {
+                    transaction::BrowserPrepared::NeedsPreparation(indices) => {
+                        if indices.is_empty() {
+                            return Err(PreferenceServiceError::InvalidTransaction(
+                                "browser preference default selection made no progress".into(),
+                            ));
+                        }
+                        for index in indices {
+                            let payload = super::encode_selected_preference(
+                                shared.value(index),
+                                &mut budget,
+                                &runtime,
+                            )
+                            .await?;
+                            shared.mark_prepared(index, payload);
+                        }
+                    }
+                    transaction::BrowserPrepared::Completed { values, .. } => {
+                        let mut output = Vec::with_capacity(values.len());
+                        for payload in &values {
+                            output.push(
+                                super::decode_selected_preference(payload, &mut budget, &runtime)
+                                    .await?,
+                            );
+                        }
+                        return Ok(output);
+                    }
+                }
+            }
         })
     }
 
@@ -267,7 +307,10 @@ impl RuntimePreferenceService for BrowserPreferenceService {
             checkpoint(&mut budget, 0).await?;
             let mut encoded = Vec::with_capacity(entries.len());
             for (name, value) in entries {
-                encoded.push((name, encode_durable_value(&value)?));
+                encoded.push((
+                    name,
+                    super::encode_selected_preference(&value, &mut budget, &runtime).await?,
+                ));
                 checkpoint(&mut budget, 1).await?;
             }
             if encoded.is_empty() {
@@ -326,9 +369,10 @@ impl RuntimeUserPathService for BrowserPreferenceService {
                     profiling.as_ref(),
                 )
                 .await?;
-            Ok(prepared
-                .user_path
-                .expect("user-path mutation prepares a setting snapshot"))
+            let transaction::BrowserPrepared::Completed { user_path, .. } = prepared else {
+                unreachable!("user-path mutation owns no caller defaults")
+            };
+            Ok(user_path.expect("user-path mutation prepares a setting snapshot"))
         })
     }
 }
@@ -347,8 +391,6 @@ enum BrowserPreferenceError {
     Document(#[from] PreferenceDocumentError),
     #[error(transparent)]
     Mutation(#[from] DocumentMutationError),
-    #[error(transparent)]
-    ValueEncoding(#[from] crate::execution::value_codec::ValueCodecError),
 }
 
 #[derive(Debug)]
@@ -376,9 +418,6 @@ fn read_error(error: BrowserPreferenceError) -> PreferenceServiceError {
             PreferenceServiceError::InvalidTransaction(
                 "application user-path revision is exhausted".into(),
             )
-        }
-        BrowserPreferenceError::ValueEncoding(source) => {
-            PreferenceServiceError::ValueEncoding(source)
         }
         other => PreferenceServiceError::Storage(
             crate::build_runtime_error("browser application settings read failed")

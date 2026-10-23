@@ -146,6 +146,7 @@ impl RuntimeContext {
             #[cfg(not(target_arch = "wasm32"))]
             java_reentry: None,
             vm_fusion_host_route: None,
+            native_region_host_route: None,
             prepared_host_execution: None,
             vm_fusion_selected_binding: None,
             cancellation: Rc::new(RefCell::new(self.cancellation())),
@@ -205,6 +206,7 @@ impl RuntimeContext {
             #[cfg(not(target_arch = "wasm32"))]
             java_reentry,
             vm_fusion_host_route,
+            native_region_host_route: _,
             prepared_host_execution,
             vm_fusion_selected_binding,
             cancellation,
@@ -285,6 +287,7 @@ impl RuntimeContext {
                     #[cfg(not(target_arch = "wasm32"))]
                     java_reentry: java_reentry.clone(),
                     vm_fusion_host_route: vm_fusion_host_route.clone(),
+                    native_region_host_route: None,
                     prepared_host_execution: prepared_host_execution.clone(),
                     vm_fusion_selected_binding,
                     cancellation: cancellation.clone(),

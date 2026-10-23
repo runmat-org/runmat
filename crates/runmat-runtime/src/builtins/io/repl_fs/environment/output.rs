@@ -55,15 +55,17 @@ fn cell_text_output(
 fn character_matrix(rows: Vec<String>, row_count: usize) -> Result<CharArray, String> {
     let width = rows
         .iter()
-        .map(|row| row.chars().count())
+        .map(|row| row.encode_utf16().count())
         .max()
         .unwrap_or(0);
     let mut data = Vec::with_capacity(row_count.saturating_mul(width));
     for row in rows {
-        let mut chars = row.chars();
+        let mut units = row.encode_utf16();
         for _ in 0..width {
-            data.push(chars.next().unwrap_or(' '));
+            data.push(runmat_value::Utf16CodeUnit::from_raw(
+                units.next().unwrap_or(b' ' as u16),
+            ));
         }
     }
-    CharArray::new(data, row_count, width)
+    CharArray::from_code_units(data, row_count, width)
 }

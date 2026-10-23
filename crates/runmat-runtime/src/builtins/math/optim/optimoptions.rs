@@ -632,7 +632,12 @@ fn logical_value(field: &str, value: &Value) -> BuiltinResult<bool> {
         Value::String(s) => logical_from_text(field, s),
         Value::StringArray(sa) if sa.data().len() == 1 => logical_from_text(field, &sa.data()[0]),
         Value::CharArray(array) if array.rows == 1 => {
-            let text: String = array.data().iter().collect();
+            let text = runmat_value::decode_utf16_code_units(array.data()).map_err(|error| {
+                optimoptions_error_with(
+                    &OPTIMOPTIONS_ERROR_INVALID_OPTION_VALUE,
+                    format!("optimoptions: option {field} contains {error}"),
+                )
+            })?;
             logical_from_text(field, &text)
         }
         other => Err(optimoptions_error_with(
@@ -725,7 +730,11 @@ fn expect_string_scalar(
     match value {
         Value::String(s) => Ok(s.as_str().to_owned()),
         Value::StringArray(sa) if sa.data().len() == 1 => Ok(sa.data()[0].as_str().to_owned()),
-        Value::CharArray(array) if array.rows == 1 => Ok(array.data().iter().collect()),
+        Value::CharArray(array) if array.rows == 1 => {
+            runmat_value::decode_utf16_code_units(array.data()).map_err(|decode_error| {
+                optimoptions_error_with(error, format!("{context}: {decode_error}"))
+            })
+        }
         _ => Err(optimoptions_error_with(error, context)),
     }
 }
@@ -745,7 +754,40 @@ mod tests {
     use crate::call_builtin_async;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_value::{IntValue, IntegerStorage, Tensor};
+    use runmat_value::{IntValue, IntegerStorage, Tensor, Utf16CodeUnit};
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn option_text_decodes_surrogate_pairs_and_rejects_unpaired_units() {
+        let valid = Value::CharArray(
+            CharArray::from_code_units(
+                vec![
+                    Utf16CodeUnit::from_raw(0xd83d),
+                    Utf16CodeUnit::from_raw(0xde80),
+                ],
+                1,
+                2,
+            )
+            .expect("valid character geometry"),
+        );
+        assert_eq!(
+            expect_string_scalar(&valid, "option", &OPTIMOPTIONS_ERROR_INVALID_OPTION_VALUE)
+                .expect("surrogate pair must decode"),
+            "🚀"
+        );
+
+        let invalid = Value::CharArray(
+            CharArray::from_code_units(vec![Utf16CodeUnit::from_raw(0xd83d)], 1, 1)
+                .expect("valid character geometry"),
+        );
+        let error =
+            expect_string_scalar(&invalid, "option", &OPTIMOPTIONS_ERROR_INVALID_OPTION_VALUE)
+                .expect_err("unpaired surrogate must retain the option error");
+        assert_eq!(
+            error.identifier(),
+            OPTIMOPTIONS_ERROR_INVALID_OPTION_VALUE.identifier
+        );
+    }
 
     fn run_optimoptions(rest: Vec<Value>) -> BuiltinResult<Value> {
         let rest = crate::execution::RootedValues::new(rest)

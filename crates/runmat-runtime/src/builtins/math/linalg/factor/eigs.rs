@@ -1,10 +1,8 @@
 //! MATLAB-compatible `eigs` builtin for subset eigenvalue queries.
 //!
-//! RunMat currently computes the exact dense/generalized decomposition through
-//! the shared `eig` implementation, then applies MATLAB-compatible subset
-//! selection. Sparse and GPU inputs are accepted by gathering/materialising to
-//! host first; native iterative sparse/GPU eigensolver hooks belong in the
-//! acceleration layer once the provider API exposes them.
+//! Native sparse and selected callable operands use owned restarted iteration.
+//! Dense and explicit GPU/nonfloating compatibility inputs retain the shared
+//! exact eig decomposition. No iterative route materializes a dense A.
 
 use std::cmp::Ordering;
 
@@ -27,6 +25,10 @@ use crate::builtins::common::tensor;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 use super::eig;
+mod allocation;
+mod controls;
+mod dense;
+mod iterative;
 
 const NAME: &str = "eigs";
 const DEFAULT_K: usize = 6;
@@ -76,38 +78,81 @@ async fn eigs_builtin_context(
     a: Value,
     rest: crate::call::BuiltinArguments,
 ) -> BuiltinResult<Value> {
-    if crate::value_contains_gpu(&a) || rest.iter().any(crate::value_contains_gpu) {
+    if let Some(runtime) = &runtime {
+        runtime
+            .cpu_cooperation()
+            .checkpoint(0)
+            .await
+            .map_err(|e| e.into_runtime_error_in_context(Some(runtime)))?;
+    }
+    let resident_inputs =
+        crate::value_contains_gpu(&a) || rest.iter().any(crate::value_contains_gpu);
+    if resident_inputs {
         crate::compatibility::ensure_builtin_extension_enabled(&EIGS_GPU_INPUT_EXTENSION, NAME)?;
     }
     ensure_eigs_coefficient_class_enabled(&a)?;
-    preflight_eigs_extensions(rest.view())?;
-    crate::builtins::common::validation::reject_typed_complex_integer(&a, "eigs")?;
-    for value in &rest {
-        crate::builtins::common::validation::reject_typed_complex_integer(value, "eigs")?;
-    }
-    let a = crate::execution::RootedValue::in_optional_context(a, runtime.as_ref())?;
-    let args = crate::builtins::common::mapped_callable::prepend_rooted_argument(
-        &rest,
-        a,
-        runtime.as_ref(),
-    )
-    .await?;
-    let args = gather_eigs_arguments(args, runtime.as_ref()).await?;
-    let request = Request::parse(args).await?;
-    let eval = compute_subset(request).await?;
+    let selected = allocation::Selected::admit(&a, &rest, resident_inputs, runtime.as_ref())?;
+    // Root/carrier admission is part of the selected host execution too. Keep
+    // its original allocation/control cause, but never replay it through gather.
+    async {
+        if matches!(&selected, allocation::Selected::Dense(_)) {
+            preflight_eigs_extensions(runtime.as_ref(), rest.view())?;
+        }
+        crate::builtins::common::validation::reject_typed_complex_integer(&a, "eigs")?;
+        for value in &rest {
+            crate::builtins::common::validation::reject_typed_complex_integer(value, "eigs")?;
+        }
+        let a = crate::execution::RootedValue::in_optional_context(a, runtime.as_ref())?;
+        let args = crate::builtins::common::mapped_callable::prepend_rooted_argument(
+            &rest,
+            a,
+            runtime.as_ref(),
+        )
+        .await?;
+        let legacy = match selected {
+            allocation::Selected::Iterative => {
+                return iterative::evaluate(args, runtime.as_ref()).await;
+            }
+            allocation::Selected::Dense(work) => work,
+        };
+        legacy.check()?;
+        let args = gather_eigs_arguments(args, runtime.as_ref()).await?;
+        legacy.check()?;
+        let request = Request::parse(args, runtime.as_ref()).await?;
+        legacy.check()?;
+        let eval = dense::compute(request, runtime.as_ref()).await?;
+        legacy.check()?;
 
-    match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::output_list(Vec::new())),
-        Some(1) => Ok(Value::output_list(vec![eval.values])),
-        Some(2) => Ok(Value::output_list(vec![eval.vectors, eval.diagonal])),
-        Some(3) => Ok(Value::output_list(vec![
-            eval.vectors,
-            eval.diagonal,
-            Value::Num(0.0),
-        ])),
-        Some(_) => Err(eigs_error(&ERROR_INVALID_ARGUMENT)),
-        None => Ok(eval.values),
+        let output = match crate::output_count::current_output_count() {
+            Some(0) => eig::work::output_list(runtime.as_ref(), [], 0).await,
+            Some(1) => eig::work::output_list(runtime.as_ref(), [Some(eval.values)], 1).await,
+            Some(2) => {
+                eig::work::output_list(
+                    runtime.as_ref(),
+                    [Some(eval.vectors), Some(eval.diagonal)],
+                    2,
+                )
+                .await
+            }
+            Some(3) => {
+                eig::work::output_list(
+                    runtime.as_ref(),
+                    [
+                        Some(eval.vectors),
+                        Some(eval.diagonal),
+                        Some(Value::Num(0.)),
+                    ],
+                    3,
+                )
+                .await
+            }
+            Some(_) => Err(eigs_error(&ERROR_INVALID_ARGUMENT)),
+            None => Ok(eval.values),
+        };
+        legacy.finish(output)
     }
+    .await
+    .map_err(with_context)
 }
 
 async fn gather_eigs_arguments(
@@ -122,7 +167,7 @@ async fn gather_eigs_arguments(
         return Ok(args);
     }
     args.try_map_preserving_roots_async(args.len(), runtime, async |index| {
-        crate::dispatcher::gather_if_needed_async(&args[index])
+        crate::dispatcher::gather_if_needed_in_context_async(&args[index], runtime)
             .await
             .map_err(with_context)
     })
@@ -131,7 +176,10 @@ async fn gather_eigs_arguments(
 
 #[cfg(test)]
 async fn eigs_builtin(a: Value, rest: crate::call::BuiltinArguments) -> BuiltinResult<Value> {
-    eigs_builtin_context(None, a, rest).await
+    let runtime = crate::context::RuntimeContext::new(std::rc::Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ));
+    eigs_builtin_context(Some(runtime), a, rest).await
 }
 
 fn ensure_eigs_coefficient_class_enabled(value: &Value) -> BuiltinResult<()> {
@@ -144,7 +192,10 @@ fn ensure_eigs_coefficient_class_enabled(value: &Value) -> BuiltinResult<()> {
     Ok(())
 }
 
-fn preflight_eigs_extensions(rest: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
+fn preflight_eigs_extensions(
+    runtime: Option<&crate::context::RuntimeContext>,
+    rest: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<()> {
     let mut cursor = 0usize;
     if let Some(candidate) = rest.first() {
         if is_empty_matrix(candidate) {
@@ -167,21 +218,24 @@ fn preflight_eigs_extensions(rest: crate::call::FunctionArgumentView<'_>) -> Bui
         cursor += 1;
     }
     if cursor < rest.len() {
-        preflight_start_vector_extension(rest.range(cursor..).expect("bounded eigs option range"))?;
+        preflight_start_vector_extension(
+            runtime,
+            rest.range(cursor..).expect("bounded eigs option range"),
+        )?;
     }
     Ok(())
 }
 
 fn preflight_start_vector_extension(
+    runtime: Option<&crate::context::RuntimeContext>,
     args: crate::call::FunctionArgumentView<'_>,
 ) -> BuiltinResult<()> {
     if args.len() == 1 {
         if let Value::Struct(options) = &args[0] {
             for (name, value) in &options.fields {
-                if matches!(
-                    name.trim().to_ascii_lowercase().as_str(),
-                    "startvector" | "v0"
-                ) && is_typed_integer_value(value)
+                if (name.trim().eq_ignore_ascii_case("startvector")
+                    || name.trim().eq_ignore_ascii_case("v0"))
+                    && is_typed_integer_value(value)
                 {
                     crate::compatibility::ensure_builtin_extension_enabled(
                         &EIGS_INTEGER_START_VECTOR_EXTENSION,
@@ -194,11 +248,9 @@ fn preflight_start_vector_extension(
     }
     let mut idx = 0usize;
     while idx + 1 < args.len() {
-        if text_value(&args[idx]).is_some_and(|name| {
-            matches!(
-                name.trim().to_ascii_lowercase().as_str(),
-                "startvector" | "v0"
-            )
+        if text_value_in_context(runtime, &args[idx])?.is_some_and(|name| {
+            name.trim().eq_ignore_ascii_case("startvector")
+                || name.trim().eq_ignore_ascii_case("v0")
         }) && is_typed_integer_value(&args[idx + 1])
         {
             crate::compatibility::ensure_builtin_extension_enabled(
@@ -277,12 +329,13 @@ struct Request {
     b: Option<Value>,
     k: usize,
     sigma: Sigma,
+    cholesky: Option<dense::Cholesky>,
 }
 
 #[derive(Default)]
 struct ParsedOptions {
     is_cholesky: bool,
-    cholesky_permutation: Option<Vec<usize>>,
+    cholesky_permutation: Option<runmat_value::ExactArrayStorage<usize>>,
     is_function_symmetric: bool,
     is_symmetric_definite: bool,
 }
@@ -294,7 +347,10 @@ struct SubsetEval {
 }
 
 impl Request {
-    async fn parse(mut args: crate::call::BuiltinArguments) -> BuiltinResult<Self> {
+    async fn parse(
+        mut args: crate::call::BuiltinArguments,
+        runtime: Option<&crate::context::RuntimeContext>,
+    ) -> BuiltinResult<Self> {
         let a = args.pop_front().ok_or_else(|| {
             error_with_detail("eigs: missing coefficient matrix", &ERROR_INVALID_INPUT)
         })?;
@@ -319,6 +375,7 @@ impl Request {
         let mut b = None;
         let mut k = DEFAULT_K.min(n);
         let mut sigma = Sigma::LargestAbs;
+        let mut imaginary_alias = controls::ImaginaryAlias::Explicit;
         let mut options = ParsedOptions::default();
 
         if let Some(candidate) = args.first() {
@@ -344,8 +401,17 @@ impl Request {
         }
 
         if cursor < args.len() {
-            if let Some(parsed_sigma) = parse_sigma(&args[cursor])? {
+            if let Some(parsed_sigma) = parse_sigma_in_context(runtime, &args[cursor])? {
                 sigma = parsed_sigma;
+                if let Some(text) = controls::Text::of(&args[cursor]) {
+                    let text = text.trim(&mut None).await.map_err(|error| match error {
+                        crate::builtins::math::linalg::ops::linear_operator::CooperativeOperatorError::Execution(source) => source.into_runtime_error_in_context(None),
+                        source => build_runtime_error(format!("eigs: selector parsing failed: {source:?}")).with_gpu_gather_retry(crate::GpuGatherRetry::Never).build(),
+                    })?;
+                    if let Some((_, alias)) = controls::selector(text) {
+                        imaginary_alias = alias;
+                    }
+                }
                 cursor += 1;
             }
         }
@@ -355,9 +421,15 @@ impl Request {
                 .view()
                 .range(cursor..)
                 .expect("bounded eigs option range");
-            parse_options(option_args, n, k, &mut options)?;
+            parse_options(runtime, option_args, n, k, &mut options).await?;
         }
 
+        sigma = imaginary_alias.resolve(
+            sigma,
+            matches!(&a, Value::ComplexTensor(_) | Value::Complex(..))
+                || b.as_ref()
+                    .is_some_and(|b| matches!(b, Value::ComplexTensor(_) | Value::Complex(..))),
+        );
         validate_option_combination(sigma, &options)?;
 
         if let Some(b_value) = b.as_mut() {
@@ -368,10 +440,6 @@ impl Request {
                     &ERROR_INVALID_INPUT,
                 ));
             }
-            if options.is_cholesky {
-                *b_value =
-                    cholesky_factor_to_b(b_value.clone(), options.cholesky_permutation.as_deref())?;
-            }
         } else if options.is_cholesky || options.cholesky_permutation.is_some() {
             return Err(error_with_detail(
                 "eigs: Cholesky options require a generalized B matrix",
@@ -381,18 +449,43 @@ impl Request {
 
         a = matrix_host_value(a)?;
 
-        Ok(Self { a, b, k, sigma })
+        let cholesky = options.is_cholesky.then(|| {
+            options
+                .cholesky_permutation
+                .map_or(dense::Cholesky::Identity, dense::Cholesky::Permuted)
+        });
+        Ok(Self {
+            a,
+            b,
+            k,
+            sigma,
+            cholesky,
+        })
     }
 }
 
 fn matrix_host_value(value: Value) -> BuiltinResult<Value> {
-    match value {
-        Value::SparseTensor(sparse) => sparse
-            .to_dense()
-            .map(Value::Tensor)
-            .map_err(|err| error_with_detail(format!("eigs: {err}"), &ERROR_INTERNAL)),
-        other => Ok(other),
+    if let Value::SparseTensor(sparse) = &value {
+        sparse.rows.checked_mul(sparse.cols).ok_or_else(|| {
+            error_with_detail(
+                "eigs: SparseTensor dense dimensions overflow usize",
+                &ERROR_INTERNAL,
+            )
+        })?;
+        if sparse.is_logical() {
+            return Err(error_with_detail(
+                "eigs: SparseTensor logical storage requires to_dense_logical",
+                &ERROR_INTERNAL,
+            ));
+        }
+        if sparse.is_complex() {
+            return Err(error_with_detail(
+                "eigs: SparseTensor complex storage requires to_dense_complex",
+                &ERROR_INTERNAL,
+            ));
+        }
     }
+    Ok(value)
 }
 
 fn matrix_order(value: &Value) -> BuiltinResult<usize> {
@@ -457,18 +550,18 @@ fn is_generalized_b(value: &Value) -> bool {
 }
 
 fn parse_k(value: &Value) -> BuiltinResult<Option<usize>> {
-    parse_integer_scalar(value).map(|parsed| parsed.map(|k| k as usize))
+    parse_integer_scalar(value)
 }
 
-fn parse_integer_scalar(value: &Value) -> BuiltinResult<Option<i64>> {
+fn parse_integer_scalar(value: &Value) -> BuiltinResult<Option<usize>> {
     if let Some(value) = exact_integer_scalar(value) {
-        let Some(raw) = value.try_to_i64() else {
+        let Some(raw) = value.try_to_usize() else {
             return Err(error_with_detail(
                 "eigs: k is too large for this platform",
                 &ERROR_INVALID_ARGUMENT,
             ));
         };
-        if raw <= 0 {
+        if raw == 0 {
             return Err(error_with_detail(
                 "eigs: k must be a positive integer scalar",
                 &ERROR_INVALID_ARGUMENT,
@@ -501,17 +594,24 @@ fn parse_integer_scalar(value: &Value) -> BuiltinResult<Option<i64>> {
             &ERROR_INVALID_ARGUMENT,
         ));
     }
-    if raw >= i64::MAX as f64 {
+    if raw > usize::MAX as f64 || (usize::BITS == 64 && raw == usize::MAX as f64) {
         return Err(error_with_detail(
             "eigs: k is too large for this platform",
             &ERROR_INVALID_ARGUMENT,
         ));
     }
-    Ok(Some(raw as i64))
+    Ok(Some(raw as usize))
 }
 
+#[cfg(test)]
 fn parse_sigma(value: &Value) -> BuiltinResult<Option<Sigma>> {
-    if let Some(text) = text_value(value) {
+    parse_sigma_in_context(None, value)
+}
+fn parse_sigma_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    value: &Value,
+) -> BuiltinResult<Option<Sigma>> {
+    if let Some(text) = text_value_in_context(runtime, value)? {
         return Ok(Some(parse_sigma_text(&text)?));
     }
     match value {
@@ -544,23 +644,15 @@ fn parse_sigma(value: &Value) -> BuiltinResult<Option<Sigma>> {
 }
 
 fn parse_sigma_text(text: &str) -> BuiltinResult<Sigma> {
-    match text.trim().to_ascii_lowercase().as_str() {
-        "largestabs" | "lm" => Ok(Sigma::LargestAbs),
-        "smallestabs" | "sm" => Ok(Sigma::SmallestAbs),
-        "largestreal" | "lr" | "la" => Ok(Sigma::LargestReal),
-        "smallestreal" | "sr" | "sa" => Ok(Sigma::SmallestReal),
-        "bothendsreal" | "be" => Ok(Sigma::BothEndsReal),
-        "largestimag" | "li" => Ok(Sigma::LargestImag),
-        "smallestimag" | "si" => Ok(Sigma::SmallestImag),
-        "bothendsimag" => Ok(Sigma::BothEndsImag),
-        other => Err(error_with_detail(
-            format!("eigs: unsupported sigma '{other}'"),
-            &ERROR_INVALID_ARGUMENT,
-        )),
-    }
+    controls::selector(controls::Text::Utf8(text.trim()))
+        .map(|(sigma, _)| sigma)
+        .ok_or_else(|| {
+            error_with_detail("eigs: unsupported sigma selector", &ERROR_INVALID_ARGUMENT)
+        })
 }
 
-fn parse_options(
+async fn parse_options(
+    runtime: Option<&crate::context::RuntimeContext>,
     args: crate::call::FunctionArgumentView<'_>,
     n: usize,
     k: usize,
@@ -568,7 +660,7 @@ fn parse_options(
 ) -> BuiltinResult<()> {
     if args.len() == 1 {
         if let Value::Struct(opts) = &args[0] {
-            return parse_options_struct(opts, n, k, options);
+            return parse_options_struct(runtime, opts, n, k, options).await;
         }
     }
     if args.is_empty() {
@@ -582,38 +674,40 @@ fn parse_options(
     }
     let mut idx = 0usize;
     while idx < args.len() {
-        let name = text_value(&args[idx]).ok_or_else(|| {
+        let name = text_value_in_context(runtime, &args[idx])?.ok_or_else(|| {
             error_with_detail(
                 "eigs: option names must be character vectors or string scalars",
                 &ERROR_INVALID_ARGUMENT,
             )
         })?;
-        parse_named_option(&name, &args[idx + 1], n, k, options)?;
+        parse_named_option(runtime, &name, &args[idx + 1], n, k, options).await?;
         idx += 2;
     }
     Ok(())
 }
 
-fn parse_options_struct(
+async fn parse_options_struct(
+    runtime: Option<&crate::context::RuntimeContext>,
     opts: &StructValue,
     n: usize,
     k: usize,
     options: &mut ParsedOptions,
 ) -> BuiltinResult<()> {
     for (field, value) in &opts.fields {
-        parse_named_option(field, value, n, k, options)?;
+        parse_named_option(runtime, field, value, n, k, options).await?;
     }
     Ok(())
 }
 
-fn parse_named_option(
+async fn parse_named_option(
+    runtime: Option<&crate::context::RuntimeContext>,
     name: &str,
     value: &Value,
     n: usize,
     k: usize,
     options: &mut ParsedOptions,
 ) -> BuiltinResult<()> {
-    match canonical_option_name(name)?.as_str() {
+    match canonical_option_name(name)? {
         "tolerance" => {
             let tol = numeric_scalar(value, "Tolerance")?;
             if !tol.is_finite() || tol <= 0.0 {
@@ -651,20 +745,24 @@ fn parse_named_option(
             }
         }
         "failuretreatment" => {
-            let text = text_value(value).ok_or_else(|| {
+            let text = text_value_in_context(runtime, value)?.ok_or_else(|| {
                 error_with_detail(
                     "eigs: FailureTreatment must be a text scalar",
                     &ERROR_INVALID_ARGUMENT,
                 )
             })?;
-            match text.trim().to_ascii_lowercase().as_str() {
-                "replacenan" | "keep" | "drop" => {}
-                other => {
-                    return Err(error_with_detail(
-                        format!("eigs: unsupported FailureTreatment '{other}'"),
-                        &ERROR_INVALID_ARGUMENT,
-                    ));
-                }
+            let text = text.trim();
+            if !["replacenan", "keep", "drop"]
+                .into_iter()
+                .any(|name| text.eq_ignore_ascii_case(name))
+            {
+                return Err(error_with_detail(
+                    format!(
+                        "eigs: unsupported FailureTreatment '{}'",
+                        text.to_ascii_lowercase()
+                    ),
+                    &ERROR_INVALID_ARGUMENT,
+                ));
             }
         }
         "display" => {
@@ -680,7 +778,8 @@ fn parse_named_option(
             options.is_cholesky = parse_bool(value, name)?;
         }
         "choleskypermutation" => {
-            options.cholesky_permutation = Some(parse_permutation(value, n)?);
+            options.cholesky_permutation =
+                Some(parse_permutation_in_context(runtime, value, n).await?);
         }
         other => {
             return Err(error_with_detail(
@@ -692,23 +791,10 @@ fn parse_named_option(
     Ok(())
 }
 
-fn canonical_option_name(name: &str) -> BuiltinResult<String> {
-    match name.trim().to_ascii_lowercase().as_str() {
-        "tol" | "tolerance" => Ok("tolerance".to_string()),
-        "maxit" | "maxiterations" => Ok("maxiterations".to_string()),
-        "p" | "subspacedimension" => Ok("subspacedimension".to_string()),
-        "v0" | "startvector" => Ok("startvector".to_string()),
-        "fail" | "failuretreatment" => Ok("failuretreatment".to_string()),
-        "disp" | "display" => Ok("display".to_string()),
-        "issym" | "isfunctionsymmetric" => Ok("isfunctionsymmetric".to_string()),
-        "cholb" | "ischolesky" => Ok("ischolesky".to_string()),
-        "permb" | "choleskypermutation" => Ok("choleskypermutation".to_string()),
-        "spdb" | "issymmetricdefinite" => Ok("issymmetricdefinite".to_string()),
-        other => Err(error_with_detail(
-            format!("eigs: unsupported option '{other}'"),
-            &ERROR_INVALID_ARGUMENT,
-        )),
-    }
+fn canonical_option_name(name: &str) -> BuiltinResult<&'static str> {
+    controls::option(controls::Text::Utf8(name.trim()))
+        .map(|key| key.name())
+        .ok_or_else(|| error_with_detail("eigs: unsupported option", &ERROR_INVALID_ARGUMENT))
 }
 
 fn validate_option_combination(sigma: Sigma, options: &ParsedOptions) -> BuiltinResult<()> {
@@ -729,344 +815,8 @@ fn validate_option_combination(sigma: Sigma, options: &ParsedOptions) -> Builtin
     Ok(())
 }
 
-async fn compute_subset(request: Request) -> BuiltinResult<SubsetEval> {
-    let mut eig_args = Vec::new();
-    if let Some(b) = request.b {
-        eig_args.push(b);
-    }
-    eig_args.push(Value::string("vector".to_string()));
-    let eval = eig::evaluate(
-        request.a,
-        crate::call::FunctionArgumentView::from_slice(&eig_args),
-        false,
-    )
-    .await
-    .map_err(with_context)?;
-    let output_dtype = floating_output_dtype(&eval.eigenvalues());
-    let all_values = eigenvalue_list(&eval.eigenvalues())?;
-    let selected = select_indices(&all_values, request.k, request.sigma);
-    let values = select_vector(&all_values, &selected, output_dtype)?;
-    let diagonal = diagonal_from_selected(&all_values, &selected, output_dtype)?;
-    let vectors = select_columns(&eval.right(), &selected)?;
-    Ok(SubsetEval {
-        values,
-        vectors,
-        diagonal,
-    })
-}
-
-fn eigenvalue_list(value: &Value) -> BuiltinResult<Vec<Complex64>> {
-    match value {
-        Value::Tensor(tensor) => Ok(tensor::tensor_values_f64_cow(tensor)
-            .iter()
-            .map(|&re| Complex64::new(re, 0.0))
-            .collect()),
-        Value::ComplexTensor(tensor) => Ok(tensor
-            .materialize_f64()
-            .iter()
-            .map(|&(re, im)| Complex64::new(re, im))
-            .collect()),
-        Value::Num(n) => Ok(vec![Complex64::new(*n, 0.0)]),
-        Value::Complex(re, im) => Ok(vec![Complex64::new(*re, *im)]),
-        other => Err(error_with_detail(
-            format!("eigs: unexpected eigenvalue output {other:?}"),
-            &ERROR_INTERNAL,
-        )),
-    }
-}
-
-fn select_indices(values: &[Complex64], k: usize, sigma: Sigma) -> Vec<usize> {
-    let mut indices: Vec<usize> = (0..values.len()).collect();
-    let k = k.min(indices.len());
-    match sigma {
-        Sigma::LargestAbs => sort_take(&mut indices, values, k, |value| -value.norm()),
-        Sigma::SmallestAbs => sort_take(&mut indices, values, k, |value| value.norm()),
-        Sigma::LargestReal => sort_take(&mut indices, values, k, |value| -value.re),
-        Sigma::SmallestReal => sort_take(&mut indices, values, k, |value| value.re),
-        Sigma::LargestImag => sort_take(&mut indices, values, k, |value| -value.im),
-        Sigma::SmallestImag => sort_take(&mut indices, values, k, |value| value.im),
-        Sigma::Near(target) => sort_take(&mut indices, values, k, |value| (*value - target).norm()),
-        Sigma::BothEndsReal => both_ends_real(values, k),
-        Sigma::BothEndsImag => both_ends_imag(values, k),
-    }
-}
-
-fn sort_take(
-    indices: &mut Vec<usize>,
-    values: &[Complex64],
-    k: usize,
-    metric: impl Fn(&Complex64) -> f64,
-) -> Vec<usize> {
-    indices.sort_by(|&lhs, &rhs| total_cmp(metric(&values[lhs]), metric(&values[rhs])));
-    indices.truncate(k);
-    indices.clone()
-}
-
-fn both_ends_real(values: &[Complex64], k: usize) -> Vec<usize> {
-    let mut by_real: Vec<usize> = (0..values.len()).collect();
-    by_real.sort_by(|&lhs, &rhs| total_cmp(values[lhs].re, values[rhs].re));
-    let low = k / 2;
-    let high = k - low;
-    let mut selected = Vec::with_capacity(k);
-    selected.extend(by_real.iter().take(low).copied());
-    selected.extend(by_real.iter().rev().take(high).copied());
-    selected.sort_by(|&lhs, &rhs| total_cmp(values[lhs].re, values[rhs].re));
-    selected.dedup();
-    selected.truncate(k);
-    selected
-}
-
-fn both_ends_imag(values: &[Complex64], k: usize) -> Vec<usize> {
-    let mut by_imag: Vec<usize> = (0..values.len()).collect();
-    by_imag.sort_by(|&lhs, &rhs| total_cmp(values[lhs].im, values[rhs].im));
-    let low = k / 2;
-    let high = k - low;
-    let mut selected = Vec::with_capacity(k);
-    selected.extend(by_imag.iter().take(low).copied());
-    selected.extend(by_imag.iter().rev().take(high).copied());
-    selected.sort_by(|&lhs, &rhs| {
-        total_cmp(values[rhs].im.abs(), values[lhs].im.abs())
-            .then_with(|| total_cmp(values[rhs].im, values[lhs].im))
-    });
-    selected.dedup();
-    selected.truncate(k);
-    selected
-}
-
 fn total_cmp(lhs: f64, rhs: f64) -> Ordering {
     lhs.total_cmp(&rhs)
-}
-
-fn select_vector(
-    values: &[Complex64],
-    selected: &[usize],
-    dtype: NumericDType,
-) -> BuiltinResult<Value> {
-    let data = selected.iter().map(|&idx| values[idx]).collect::<Vec<_>>();
-    complex_vector_value(data, dtype)
-}
-
-fn diagonal_from_selected(
-    values: &[Complex64],
-    selected: &[usize],
-    dtype: NumericDType,
-) -> BuiltinResult<Value> {
-    let k = selected.len();
-    let mut data = vec![Complex64::new(0.0, 0.0); k * k];
-    for (out_idx, &value_idx) in selected.iter().enumerate() {
-        data[out_idx + out_idx * k] = values[value_idx];
-    }
-    complex_matrix_value_with_dtype(data, k, k, dtype)
-}
-
-fn select_columns(matrix: &Value, selected: &[usize]) -> BuiltinResult<Value> {
-    match matrix {
-        Value::Tensor(tensor) => {
-            let rows = tensor.rows();
-            let mut indices = Vec::with_capacity(rows * selected.len());
-            for &col in selected {
-                if col >= tensor.cols() {
-                    return Err(error_with_detail(
-                        "eigs: eigenvector column index out of range",
-                        &ERROR_INTERNAL,
-                    ));
-                }
-                for row in 0..rows {
-                    indices.push(row + col * rows);
-                }
-            }
-            let storage = tensor
-                .clone()
-                .into_numeric_storage()
-                .map_err(|err| error_with_detail(format!("eigs: {err}"), &ERROR_INTERNAL))?
-                .gather(&indices)
-                .map_err(|err| error_with_detail(format!("eigs: {err}"), &ERROR_INTERNAL))?;
-            Tensor::from_numeric_storage(storage, vec![rows, selected.len()])
-                .map(Value::Tensor)
-                .map_err(|err| error_with_detail(format!("eigs: {err}"), &ERROR_INTERNAL))
-        }
-        Value::ComplexTensor(tensor) => {
-            let rows = tensor.rows();
-            let mut data = Vec::with_capacity(rows * selected.len());
-            for &col in selected {
-                if col >= tensor.cols() {
-                    return Err(error_with_detail(
-                        "eigs: eigenvector column index out of range",
-                        &ERROR_INTERNAL,
-                    ));
-                }
-                for row in 0..rows {
-                    let (re, im) = tensor.materialize_f64()[row + col * rows];
-                    data.push(Complex64::new(re, im));
-                }
-            }
-            complex_matrix_value_with_dtype(data, rows, selected.len(), tensor.numeric_dtype())
-        }
-        other => Err(error_with_detail(
-            format!("eigs: unexpected eigenvector output {other:?}"),
-            &ERROR_INTERNAL,
-        )),
-    }
-}
-
-fn floating_output_dtype(value: &Value) -> NumericDType {
-    match value {
-        Value::Tensor(tensor) => tensor.numeric_dtype(),
-        Value::ComplexTensor(tensor) => tensor.numeric_dtype(),
-        _ => NumericDType::F64,
-    }
-}
-
-fn complex_vector_value(data: Vec<Complex64>, dtype: NumericDType) -> BuiltinResult<Value> {
-    if data.iter().all(|value| value.im.abs() <= 1e-12) {
-        let shape = vec![data.len(), 1];
-        let tensor = if dtype == NumericDType::F32 {
-            Tensor::from_f32(data.iter().map(|value| value.re as f32).collect(), shape)
-        } else {
-            Tensor::new(data.iter().map(|value| value.re).collect(), shape)
-        };
-        tensor
-            .map(Value::Tensor)
-            .map_err(|err| error_with_detail(format!("eigs: {err}"), &ERROR_INTERNAL))
-    } else {
-        ComplexTensor::from_f64_values_with_dtype(
-            data.iter().map(|value| (value.re, value.im)).collect(),
-            vec![data.len(), 1],
-            dtype,
-        )
-        .map(Value::ComplexTensor)
-        .map_err(|err| error_with_detail(format!("eigs: {err}"), &ERROR_INTERNAL))
-    }
-}
-
-fn complex_matrix_value(data: Vec<Complex64>, rows: usize, cols: usize) -> BuiltinResult<Value> {
-    complex_matrix_value_with_dtype(data, rows, cols, NumericDType::F64)
-}
-
-fn complex_matrix_value_with_dtype(
-    data: Vec<Complex64>,
-    rows: usize,
-    cols: usize,
-    dtype: NumericDType,
-) -> BuiltinResult<Value> {
-    if data.iter().all(|value| value.im.abs() <= 1e-12) {
-        let tensor = if dtype == NumericDType::F32 {
-            Tensor::from_f32(
-                data.iter().map(|value| value.re as f32).collect(),
-                vec![rows, cols],
-            )
-        } else {
-            Tensor::new_2d(data.iter().map(|value| value.re).collect(), rows, cols)
-        };
-        tensor
-            .map(Value::Tensor)
-            .map_err(|err| error_with_detail(format!("eigs: {err}"), &ERROR_INTERNAL))
-    } else {
-        ComplexTensor::from_f64_values_with_dtype(
-            data.iter().map(|value| (value.re, value.im)).collect(),
-            vec![rows, cols],
-            dtype,
-        )
-        .map(Value::ComplexTensor)
-        .map_err(|err| error_with_detail(format!("eigs: {err}"), &ERROR_INTERNAL))
-    }
-}
-
-fn cholesky_factor_to_b(value: Value, permutation: Option<&[usize]>) -> BuiltinResult<Value> {
-    let r = dense_complex_matrix(value)?;
-    let n = r.rows;
-    if r.rows != r.cols {
-        return Err(error_with_detail(
-            "eigs: Cholesky factor B must be square",
-            &ERROR_INVALID_INPUT,
-        ));
-    }
-    let mut b = vec![Complex64::new(0.0, 0.0); n * n];
-    for col in 0..n {
-        for row in 0..n {
-            let mut sum = Complex64::new(0.0, 0.0);
-            for k in 0..n {
-                sum += r.data[k + row * n].conj() * r.data[k + col * n];
-            }
-            b[row + col * n] = sum;
-        }
-    }
-    if let Some(perm) = permutation {
-        let mut unpermuted = vec![Complex64::new(0.0, 0.0); n * n];
-        for new_col in 0..n {
-            for new_row in 0..n {
-                let old_row = perm[new_row] - 1;
-                let old_col = perm[new_col] - 1;
-                unpermuted[old_row + old_col * n] = b[new_row + new_col * n];
-            }
-        }
-        b = unpermuted;
-    }
-    complex_matrix_value(b, n, n)
-}
-
-struct DenseComplexMatrix {
-    data: Vec<Complex64>,
-    rows: usize,
-    cols: usize,
-}
-
-fn dense_complex_matrix(value: Value) -> BuiltinResult<DenseComplexMatrix> {
-    match matrix_host_value(value)? {
-        Value::Tensor(tensor) => Ok(DenseComplexMatrix {
-            rows: tensor.rows(),
-            cols: tensor.cols(),
-            data: tensor::tensor_into_values_f64(tensor)
-                .into_iter()
-                .map(|re| Complex64::new(re, 0.0))
-                .collect(),
-        }),
-        Value::ComplexTensor(tensor) => Ok(DenseComplexMatrix {
-            rows: tensor.rows(),
-            cols: tensor.cols(),
-            data: tensor
-                .materialize_f64()
-                .into_iter()
-                .map(|(re, im)| Complex64::new(re, im))
-                .collect(),
-        }),
-        Value::LogicalArray(logical) => {
-            let (rows, cols) = matrix_shape_from_slice(&logical.shape);
-            Ok(DenseComplexMatrix {
-                rows,
-                cols,
-                data: logical
-                    .data
-                    .into_iter()
-                    .map(|bit| Complex64::new(if bit != 0 { 1.0 } else { 0.0 }, 0.0))
-                    .collect(),
-            })
-        }
-        Value::Num(n) => Ok(DenseComplexMatrix {
-            data: vec![Complex64::new(n, 0.0)],
-            rows: 1,
-            cols: 1,
-        }),
-        Value::Int(i) => Ok(DenseComplexMatrix {
-            data: vec![Complex64::new(i.to_f64(), 0.0)],
-            rows: 1,
-            cols: 1,
-        }),
-        Value::Bool(b) => Ok(DenseComplexMatrix {
-            data: vec![Complex64::new(if b { 1.0 } else { 0.0 }, 0.0)],
-            rows: 1,
-            cols: 1,
-        }),
-        Value::Complex(re, im) => Ok(DenseComplexMatrix {
-            data: vec![Complex64::new(re, im)],
-            rows: 1,
-            cols: 1,
-        }),
-        other => Err(error_with_detail(
-            format!("eigs: unsupported Cholesky B input {other:?}"),
-            &ERROR_INVALID_INPUT,
-        )),
-    }
 }
 
 fn numeric_scalar(value: &Value, name: &str) -> BuiltinResult<f64> {
@@ -1170,143 +920,141 @@ fn numeric_vector_len(value: &Value, name: &str) -> BuiltinResult<usize> {
     }
 }
 
-fn parse_permutation(value: &Value, n: usize) -> BuiltinResult<Vec<usize>> {
-    if let Some(values) = exact_integer_vector(value)? {
-        if values.len() != n {
-            return Err(error_with_detail(
-                "eigs: CholeskyPermutation length must match size(A,1)",
-                &ERROR_INVALID_ARGUMENT,
-            ));
+#[cfg(test)]
+fn parse_permutation(
+    value: &Value,
+    n: usize,
+) -> BuiltinResult<runmat_value::ExactArrayStorage<usize>> {
+    futures::executor::block_on(parse_permutation_in_context(None, value, n))
+}
+async fn parse_permutation_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    value: &Value,
+    n: usize,
+) -> BuiltinResult<runmat_value::ExactArrayStorage<usize>> {
+    let length = match value {
+        Value::Tensor(v) if v.integer_storage().is_some() => {
+            if v.rows() != 1 && v.cols() != 1 {
+                return Err(error_with_detail(
+                    "eigs: CholeskyPermutation must be a vector",
+                    &ERROR_INVALID_ARGUMENT,
+                ));
+            }
+            v.len()
         }
-        let mut seen = vec![false; n];
-        let mut out = Vec::with_capacity(n);
-        for raw in values {
+        Value::ComplexTensor(_) | Value::Complex(_, _) => {
+            return Err(error_with_detail(
+                "eigs: CholeskyPermutation must be a numeric vector",
+                &ERROR_INVALID_ARGUMENT,
+            ))
+        }
+        _ => numeric_vector_len(value, "CholeskyPermutation")?,
+    };
+    if length != n {
+        return Err(error_with_detail(
+            "eigs: CholeskyPermutation length must match size(A,1)",
+            &ERROR_INVALID_ARGUMENT,
+        ));
+    }
+    let mut seen = eig::work::Buffer::<usize>::new(n, runtime)
+        .await
+        .map_err(with_context)?;
+    let mut output =
+        crate::context::host_allocation::prepare_host_array_optional::<usize>(runtime, n)
+            .map_err(with_context)?;
+    let mut budget = runtime.map(crate::context::RuntimeContext::cpu_cooperation);
+    for i in 0..n {
+        let exact = match value {
+            Value::Int(v) => Some(int_value_i128(v)),
+            Value::Tensor(v) => v.numeric_value_at(i).and_then(numeric_scalar_i128),
+            _ => None,
+        };
+        let index = if let Some(raw) = exact {
             if raw < 1 || raw > n as i128 {
                 return Err(error_with_detail(
                     "eigs: CholeskyPermutation must contain 1-based integer indices",
                     &ERROR_INVALID_ARGUMENT,
                 ));
             }
-            let idx = raw as usize;
-            if seen[idx - 1] {
+            raw as usize
+        } else {
+            let raw = eig::host::element(value, i).re;
+            if !raw.is_finite() || raw.fract() != 0. || raw < 1. || raw > n as f64 {
                 return Err(error_with_detail(
-                    "eigs: CholeskyPermutation entries must be unique",
+                    "eigs: CholeskyPermutation must contain 1-based integer indices",
                     &ERROR_INVALID_ARGUMENT,
                 ));
             }
-            seen[idx - 1] = true;
-            out.push(idx);
-        }
-        return Ok(out);
-    }
-    let values = numeric_vector_values(value, "CholeskyPermutation")?;
-    if values.len() != n {
-        return Err(error_with_detail(
-            "eigs: CholeskyPermutation length must match size(A,1)",
-            &ERROR_INVALID_ARGUMENT,
-        ));
-    }
-    let mut seen = vec![false; n];
-    let mut out = Vec::with_capacity(n);
-    for raw in values {
-        if !raw.is_finite() || raw.fract() != 0.0 || raw < 1.0 || raw > n as f64 {
-            return Err(error_with_detail(
-                "eigs: CholeskyPermutation must contain 1-based integer indices",
-                &ERROR_INVALID_ARGUMENT,
-            ));
-        }
-        let idx = raw as usize;
-        if seen[idx - 1] {
+            raw as usize
+        };
+        if seen.get()[index - 1] != 0 {
             return Err(error_with_detail(
                 "eigs: CholeskyPermutation entries must be unique",
                 &ERROR_INVALID_ARGUMENT,
             ));
         }
-        seen[idx - 1] = true;
-        out.push(idx);
+        seen.get_mut()[index - 1] = 1;
+        output.try_push(index).map_err(|_| {
+            error_with_detail("eigs: permutation exceeded admitted width", &ERROR_INTERNAL)
+        })?;
+        if i.is_multiple_of(4096) {
+            if let Some(budget) = &mut budget {
+                budget
+                    .checkpoint(4096)
+                    .await
+                    .map_err(|e| e.into_runtime_error_in_context(runtime))?;
+            }
+        }
     }
-    Ok(out)
+    seen.check(runtime).map_err(with_context)?;
+    output
+        .try_finish()
+        .map_err(|_| error_with_detail("eigs: incomplete permutation", &ERROR_INTERNAL))
 }
 
-fn exact_integer_vector(value: &Value) -> BuiltinResult<Option<Vec<i128>>> {
+fn text_value_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    value: &Value,
+) -> BuiltinResult<Option<runmat_value::Utf8Text>> {
     match value {
-        Value::Int(value) => Ok(Some(vec![int_value_i128(value)])),
-        Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
-            if tensor.rows() != 1 && tensor.cols() != 1 {
-                return Err(error_with_detail(
-                    "eigs: CholeskyPermutation must be a vector",
-                    &ERROR_INVALID_ARGUMENT,
-                ));
-            }
-            let mut values = Vec::with_capacity(tensor.len());
-            for index in 0..tensor.len() {
-                let exact = tensor
-                    .numeric_value_at(index)
-                    .and_then(numeric_scalar_i128)
-                    .ok_or_else(|| {
-                        error_with_detail(
-                            "eigs: unable to read integer CholeskyPermutation",
-                            &ERROR_INTERNAL,
-                        )
-                    })?;
-                values.push(exact);
-            }
-            Ok(Some(values))
+        Value::String(text) => Ok(Some(text.clone())),
+        Value::StringArray(array) if array.data().len() == 1 => Ok(Some(array.data()[0].clone())),
+        Value::CharArray(chars) if chars.rows == 1 => {
+            crate::call::argument_text::copy_chars(chars.data(), runtime)
+                .map(Some)
+                .map_err(|mut error| {
+                    if error
+                        .source
+                        .as_ref()
+                        .is_some_and(|source| source.is::<runmat_value::Utf16DecodeError>())
+                    {
+                        let source = error.source.take().expect("checked UTF16 cause");
+                        let mut error =
+                            error_with_detail(source.to_string(), &ERROR_INVALID_ARGUMENT);
+                        error.source = Some(source);
+                        error
+                    } else {
+                        with_context(error)
+                    }
+                })
         }
         _ => Ok(None),
     }
 }
 
-fn numeric_vector_values(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
-    match value {
-        Value::Tensor(tensor) if tensor.rows() == 1 || tensor.cols() == 1 => {
-            Ok(tensor::tensor_values_f64(tensor))
-        }
-        Value::LogicalArray(logical) => {
-            let (rows, cols) = matrix_shape_from_slice(&logical.shape);
-            if rows == 1 || cols == 1 {
-                Ok(logical
-                    .data
-                    .iter()
-                    .map(|&bit| if bit != 0 { 1.0 } else { 0.0 })
-                    .collect())
-            } else {
-                Err(error_with_detail(
-                    format!("eigs: {name} must be a vector"),
-                    &ERROR_INVALID_ARGUMENT,
-                ))
-            }
-        }
-        Value::Num(n) => Ok(vec![*n]),
-        Value::Int(i) => Ok(vec![i.to_f64()]),
-        Value::Bool(flag) => Ok(vec![if *flag { 1.0 } else { 0.0 }]),
-        _ => Err(error_with_detail(
-            format!("eigs: {name} must be a numeric vector"),
-            &ERROR_INVALID_ARGUMENT,
-        )),
-    }
-}
-
-fn text_value(value: &Value) -> Option<String> {
-    match value {
-        Value::String(text) => Some(text.as_str().to_owned()),
-        Value::StringArray(array) if array.data().len() == 1 => {
-            Some(array.data()[0].as_str().to_owned())
-        }
-        Value::CharArray(chars) if chars.rows == 1 => Some(chars.data().iter().collect()),
-        _ => None,
-    }
-}
-
 fn is_text(value: &Value) -> bool {
-    text_value(value).is_some()
+    matches!(value, Value::String(_))
+        || matches!(value,Value::StringArray(a) if a.data().len()==1)
+        || matches!(value,Value::CharArray(a) if a.rows==1)
 }
 
 fn error_with_detail(
     message: impl Into<String>,
     descriptor: &'static BuiltinErrorDescriptor,
 ) -> RuntimeError {
-    let mut builder = build_runtime_error(message).with_builtin(NAME);
+    let mut builder = build_runtime_error(message)
+        .with_builtin(NAME)
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never);
     if let Some(identifier) = descriptor.identifier {
         builder = builder.with_identifier(identifier);
     }
@@ -1318,11 +1066,7 @@ fn eigs_error(descriptor: &'static BuiltinErrorDescriptor) -> RuntimeError {
 }
 
 fn with_context(mut error: RuntimeError) -> RuntimeError {
-    if error.message() == "interaction pending..." {
-        return build_runtime_error("interaction pending...")
-            .with_builtin(NAME)
-            .build();
-    }
+    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
     if error.context.builtin.is_none() {
         error.context = error.context.with_builtin(NAME);
     }
@@ -1356,6 +1100,14 @@ fn ensure_exact_eigs_integer_boundary(value: &Value, role: &str) -> BuiltinResul
         Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
             for index in 0..tensor.len() {
                 if let Some(exact) = tensor.numeric_value_at(index).and_then(numeric_scalar_i128) {
+                    check(exact)?;
+                }
+            }
+            Ok(())
+        }
+        Value::SparseTensor(sparse) => {
+            for index in 0..sparse.nnz() {
+                if let Some(exact) = sparse.numeric_value_at(index).and_then(numeric_scalar_i128) {
                     check(exact)?;
                 }
             }
@@ -1470,7 +1222,16 @@ mod tests {
         let matrix = Value::Tensor(
             Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).expect("single vectors"),
         );
-        let selected = tensor(select_columns(&matrix, &[1]).expect("selected column"));
+        let selected = tensor(
+            block_on(dense::publish_columns(
+                None,
+                NumericDType::F32,
+                2,
+                1,
+                |row, _| eig::host::element(&matrix, row + 2),
+            ))
+            .expect("selected column"),
+        );
         assert_eq!(selected.numeric_dtype(), runmat_value::NumericDType::F32);
         assert_eq!(selected.shape(), [2, 1]);
         assert_eq!(selected.materialize_f64(), vec![3.0, 4.0]);
@@ -1629,6 +1390,103 @@ mod tests {
         let builtin = builtin_catalog_entry_by_name(NAME).expect("registered eigs catalog entry");
         assert_eq!(builtin.extensions, &EIGS_EXTENSIONS);
         assert_eq!(builtin.integer_capabilities.len(), 4);
+
+        use crate::context::{
+            host_effect::ManagedHostEffectLedger, ParallelCapability, RuntimeContext,
+            RuntimeParallelResources, RuntimeParallelService, RuntimeServicePorts,
+        };
+        struct Managed(ManagedHostEffectLedger);
+        impl RuntimeParallelService for Managed {
+            fn supports(&self, _: ParallelCapability) -> bool {
+                false
+            }
+            fn placement_resources(&self) -> RuntimeParallelResources {
+                let snapshot = self.0.snapshot();
+                RuntimeParallelResources {
+                    memory_available_bytes: Some(snapshot.free_bytes()),
+                    epoch: snapshot.epoch,
+                    ..Default::default()
+                }
+            }
+            fn managed_host_effect_ledger(&self) -> Option<ManagedHostEffectLedger> {
+                Some(self.0.clone())
+            }
+        }
+        for single in [false, true] {
+            for n in [1, 2] {
+                for limit in [0, 1 << 20] {
+                    let ledger = ManagedHostEffectLedger::new(limit);
+                    let runtime = RuntimeContext::new(std::rc::Rc::new(
+                        crate::execution::RuntimeExecutionService::new(),
+                    ))
+                    .with_service_ports(
+                        RuntimeServicePorts::default()
+                            .with_parallel(std::rc::Rc::new(Managed(ledger.clone()))),
+                    );
+                    let input = if single {
+                        Value::Tensor(
+                            Tensor::from_f32(
+                                if n == 1 {
+                                    vec![8.]
+                                } else {
+                                    vec![1., 0., 0., 8.]
+                                },
+                                vec![n, n],
+                            )
+                            .unwrap(),
+                        )
+                    } else {
+                        Value::Tensor(
+                            Tensor::new(
+                                if n == 1 {
+                                    vec![8.]
+                                } else {
+                                    vec![1., 0., 0., 8.]
+                                },
+                                vec![n, n],
+                            )
+                            .unwrap(),
+                        )
+                    };
+                    let result = block_on(eigs_builtin_context(
+                        Some(runtime),
+                        input,
+                        crate::builtins::common::test_support::builtin_arguments(vec![Value::Num(
+                            1.,
+                        )]),
+                    ));
+                    if limit == 0 {
+                        let error = result.expect_err("zero budget must deny before dense work");
+                        let mut source: &(dyn std::error::Error + 'static) = &error;
+                        while !source.is::<crate::context::host_allocation::HostAllocationError>() {
+                            source = source.source().expect("original admission cause");
+                        }
+                    } else {
+                        let output = result.expect("funded full EVD");
+                        let Value::Tensor(value) = &output else {
+                            panic!("eigs subset retains matrix storage")
+                        };
+                        assert_eq!(
+                            value.numeric_dtype(),
+                            if single {
+                                NumericDType::F32
+                            } else {
+                                NumericDType::F64
+                            }
+                        );
+                        assert_eq!(value.shape(), [1, 1]);
+                        assert!(
+                            (value.numeric_value_at(0).unwrap().materialize_f64() - 8.).abs()
+                                < 1e-5
+                        );
+                        assert!(ledger.snapshot().live_claimed_bytes > 0);
+                        drop(output);
+                    }
+                    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+                    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+                }
+            }
+        }
     }
 
     #[test]
@@ -1654,7 +1512,9 @@ mod tests {
             )
             .unwrap(),
         );
-        assert_eq!(out.materialize_f64(), vec![2.0, -4.0]);
+        for (actual, expected) in out.materialize_f64().iter().zip([2.0, -4.0]) {
+            assert!((actual - expected).abs() < 1e-10);
+        }
     }
 
     #[test]
@@ -1693,15 +1553,43 @@ mod tests {
         let permutation =
             Tensor::new_integer(IntegerStorage::U16(vec![2, 1, 3]), vec![1, 3]).unwrap();
         assert_eq!(
-            parse_permutation(&Value::Tensor(permutation), 3).unwrap(),
-            vec![2, 1, 3]
+            parse_permutation(&Value::Tensor(permutation), 3)
+                .unwrap()
+                .as_ref(),
+            &[2, 1, 3]
         );
 
         let initial = Tensor::new_integer(IntegerStorage::I16(vec![3, 2, 1]), vec![3, 1]).unwrap();
         assert_eq!(
-            numeric_vector_values(&Value::Tensor(initial), "InitialVector").unwrap(),
-            vec![3.0, 2.0, 1.0]
+            numeric_vector_len(&Value::Tensor(initial.clone()), "StartVector").unwrap(),
+            3
         );
+        block_on(parse_named_option(
+            None,
+            "StartVector",
+            &Value::Tensor(initial),
+            3,
+            1,
+            &mut ParsedOptions::default(),
+        ))
+        .expect("actual dense start-vector admission");
+        let wide = Value::Tensor(
+            Tensor::new_integer(
+                IntegerStorage::U64(vec![1, (1u64 << 53) + 1, 3]),
+                vec![3, 1],
+            )
+            .unwrap(),
+        );
+        let error = block_on(parse_named_option(
+            None,
+            "StartVector",
+            &wide,
+            3,
+            1,
+            &mut ParsedOptions::default(),
+        ))
+        .expect_err("actual role rejects wide native integers");
+        assert!(error.message().contains("exactly representable as double"));
 
         let fail = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
         assert!(parse_bool(&Value::Tensor(fail), "Fail").unwrap());
@@ -1823,7 +1711,7 @@ mod tests {
             (usize::MAX as f64) + 1.0
         };
         assert!(positive_integer_option(&Value::Num(boundary), "MaxIterations").is_err());
-        assert!(parse_k(&Value::Num(i64::MAX as f64)).is_err());
+        assert!(parse_k(&Value::Num(usize::MAX as f64 + 1.0)).is_err());
     }
 
     #[test]

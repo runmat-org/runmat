@@ -2,8 +2,8 @@
 //! session owns counters, the provider owns device work, and the existing
 //! whole-work and host-allocation services own finite admission.
 
+use crate::builtins::common::gpu_helpers::query_metadata;
 use crate::builtins::common::random::gpu;
-use crate::builtins::common::random::gpu_query;
 use crate::builtins::common::random_args::validate_constructor_gpu_output_protecting;
 use crate::context::host_allocation::{
     provider_registration_host_quote, HostAllocationPlan, HostAllocationReceipt,
@@ -180,12 +180,14 @@ fn explicit(
                 preparation_shape_ranks: &[],
                 preparation_representation_slots: 0,
             };
-            let query_bytes = gpu_query::requested_bytes(label, &footprint)?;
+            let query_bytes = query_metadata::requested_bytes(label, &footprint)?;
             // This claim precedes every owned Vec/String in the feasibility
             // query and remains live through selection, then retires before
             // the separately admitted output-publication metadata.
-            let _query_receipt = gpu_query::admit(runtime.as_ref(), query_bytes)
-                .map_err(|source| gpu_query::admission_error(label, runtime.as_ref(), source))?;
+            let _query_receipt =
+                query_metadata::admit(runtime.as_ref(), query_bytes).map_err(|source| {
+                    query_metadata::admission_error(label, runtime.as_ref(), source)
+                })?;
             let output_shape = shape
                 .iter()
                 .map(|extent| u64::try_from(*extent))

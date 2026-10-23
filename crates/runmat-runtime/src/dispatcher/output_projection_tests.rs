@@ -47,7 +47,7 @@ fn pending_output_fixture(
             .pop_front()
             .expect("test call control")
     });
-    Box::pin(async move {
+    crate::builtin::admitted_builtin_future(None, "fixture", async move {
         let entry = (
             requested_outputs,
             crate::output_count::current_output_scope(),

@@ -14,5 +14,6 @@ async fn getenv_builtin(
     runtime: Option<crate::context::RuntimeContext>,
     args: crate::call::BuiltinArguments,
 ) -> crate::BuiltinResult<crate::execution::RootedValue> {
+    crate::builtins::common::env::require_read()?;
     execute::run(runtime.as_ref(), args)
 }

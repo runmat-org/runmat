@@ -209,7 +209,7 @@ fn atan2_scalar_fast_path_reads_typed_integer_without_double_mirror() {
 #[test]
 fn atan2_char_input() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-    let chars = CharArray::new("A".chars().collect(), 1, 1).unwrap();
+    let chars = CharArray::from_unicode_scalars("A".chars().collect(), 1, 1).unwrap();
     let result = atan2_builtin(Value::CharArray(chars), Value::Num(100.0)).expect("atan2");
     match result {
         Value::Num(v) => assert!((v - (65.0f64).atan2(100.0)).abs() < EPS),

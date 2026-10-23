@@ -1,7 +1,7 @@
 //! MATLAB-compatible `cat` builtin with GPU-aware semantics for RunMat.
 
 use crate::builtins::common::concatenation::{
-    char_array_from_f64_with_prefix, char_from_f64_code_point,
+    char_array_from_f64_with_prefix, char_from_f64_code_unit,
 };
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::integer_conversion::{integer_values, IntegerClass, IntegerClassExt};
@@ -37,8 +37,10 @@ fn is_like_name(value: &Value) -> bool {
             .data()
             .iter()
             .copied()
-            .zip("like".chars())
-            .all(|(actual, expected)| actual.eq_ignore_ascii_case(&expected)),
+            .zip(b"like")
+            .all(|(actual, expected)| {
+                u8::try_from(actual.raw()).is_ok_and(|actual| actual.eq_ignore_ascii_case(expected))
+            }),
         _ => false,
     }
 }
@@ -844,8 +846,10 @@ fn cat_char_arrays(dim_zero: usize, values: BuiltinArguments) -> BuiltinResult<V
             shape => shape.to_vec(),
         })
         .collect();
-    let buffers: Vec<Vec<char>> = arrays.iter().map(CharArray::to_column_major).collect();
-    let data_refs: Vec<&[char]> = buffers.iter().map(Vec::as_slice).collect();
+    let buffers: Vec<Vec<runmat_value::Utf16CodeUnit>> =
+        arrays.iter().map(CharArray::to_column_major).collect();
+    let data_refs: Vec<&[runmat_value::Utf16CodeUnit]> =
+        buffers.iter().map(Vec::as_slice).collect();
     let (data, shape) = concat_column_major(dim_zero, &shapes, &data_refs, "cat")?;
     CharArray::from_column_major(data, shape)
         .map(Value::CharArray)
@@ -892,8 +896,8 @@ fn char_array_from_value(value: Value) -> BuiltinResult<CharArray> {
     }
 }
 
-fn char_from_numeric_code_point(value: f64) -> BuiltinResult<char> {
-    char_from_f64_code_point(value, "cat")
+fn char_from_numeric_code_point(value: f64) -> BuiltinResult<runmat_value::Utf16CodeUnit> {
+    char_from_f64_code_unit(value, "cat")
 }
 
 fn cat_string_arrays(dim_zero: usize, values: BuiltinArguments) -> BuiltinResult<Value> {
@@ -1333,7 +1337,12 @@ fn value_into_string_array(value: Value) -> BuiltinResult<StringArray> {
                 for row in 0..chars.rows {
                     let start = page_offset + row * chars.cols;
                     let end = start + chars.cols;
-                    let text: String = chars.data()[start..end].iter().collect();
+                    let text = runmat_value::decode_utf16_code_units(&chars.data()[start..end])
+                        .map_err(|source| {
+                            let mut error = cat_err(format!("cat: invalid string row: {source}"));
+                            error.source = Some(Box::new(source));
+                            error
+                        })?;
                     data.push(text);
                 }
             }
@@ -1738,8 +1747,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn cat_char_columns() {
-        let left = CharArray::new("Run".chars().collect(), 1, 3).unwrap();
-        let right = CharArray::new("Mat".chars().collect(), 1, 3).unwrap();
+        let left = CharArray::from_unicode_scalars("Run".chars().collect(), 1, 3).unwrap();
+        let right = CharArray::from_unicode_scalars("Mat".chars().collect(), 1, 3).unwrap();
         let result = cat_builtin(
             Value::Int(IntValue::I32(2)),
             vec![Value::CharArray(left), Value::CharArray(right)],
@@ -1749,7 +1758,8 @@ pub(crate) mod tests {
             Value::CharArray(arr) => {
                 assert_eq!(arr.rows, 1);
                 assert_eq!(arr.cols, 6);
-                let text: String = arr.data().iter().collect();
+                let text: String = runmat_value::decode_utf16_code_units(arr.data())
+                    .expect("valid UTF-16 fixture");
                 assert_eq!(text, "RunMat");
             }
             other => panic!("expected char array, got {other:?}"),
@@ -1858,9 +1868,11 @@ pub(crate) mod tests {
     #[test]
     fn cat_supports_nd_character_and_cell_arrays() {
         let left_chars =
-            CharArray::new_with_shape("abcd".chars().collect(), vec![1, 2, 2]).expect("left");
+            CharArray::from_unicode_scalars_with_shape("abcd".chars().collect(), vec![1, 2, 2])
+                .expect("left");
         let right_chars =
-            CharArray::new_with_shape("efgh".chars().collect(), vec![1, 2, 2]).expect("right");
+            CharArray::from_unicode_scalars_with_shape("efgh".chars().collect(), vec![1, 2, 2])
+                .expect("right");
         let char_result = cat_builtin(
             Value::Int(IntValue::I32(3)),
             vec![Value::CharArray(left_chars), Value::CharArray(right_chars)],
@@ -1870,7 +1882,10 @@ pub(crate) mod tests {
             panic!("expected char array");
         };
         assert_eq!(chars.shape, vec![1, 2, 4]);
-        assert_eq!(chars.data().iter().collect::<String>(), "abcdefgh");
+        assert_eq!(
+            runmat_value::decode_utf16_code_units(chars.data()).unwrap(),
+            "abcdefgh"
+        );
 
         let left_cells = CellArray::new_with_shape(
             vec![Value::Int(IntValue::I8(1)), Value::Int(IntValue::I8(2))],

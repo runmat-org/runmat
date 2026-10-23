@@ -113,6 +113,7 @@ struct Entry {
     encoding: String,
     resource: Resource,
     eof_encountered: bool,
+    text_input: Option<super::encoding::TextInputBox>,
     restore_failure: Option<Arc<io::Error>>,
     issuer: FileIssuer,
     filesystem: Option<Arc<FileFilesystem>>,
@@ -142,6 +143,7 @@ impl Entry {
             encoding: "UTF-8".to_string(),
             resource: Resource::Standard,
             eof_encountered: false,
+            text_input: None,
             restore_failure: None,
             issuer: FileIssuer::Process,
             filesystem: None,
@@ -207,6 +209,7 @@ impl RegisteredFile {
             encoding: self.encoding,
             resource: Resource::File(self.handle),
             eof_encountered: false,
+            text_input: None,
             restore_failure: None,
             issuer,
             filesystem,
@@ -507,8 +510,8 @@ pub(crate) fn test_guard() -> RegistryTestGuard {
 }
 
 #[cfg(test)]
-#[path = "registry/session_tests.rs"]
-mod session_tests;
-#[cfg(test)]
 #[path = "registry/await_tests.rs"]
 mod await_tests;
+#[cfg(test)]
+#[path = "registry/session_tests.rs"]
+mod session_tests;

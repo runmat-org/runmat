@@ -2,6 +2,7 @@
 // Projection schema: runmat-builtin-module-composition-projection/v6
 
 mod business_calendar;
+mod allocation;
 mod business_day_builtins;
 mod calendar_duration;
 mod calendar_duration_builtins;
@@ -20,6 +21,7 @@ mod metadata;
 mod model;
 mod operators;
 mod prelude;
+mod second_builtin;
 mod text_parsing;
 #[cfg(test)]
 mod tests;
@@ -64,8 +66,8 @@ pub(crate) use self::component_builtins::{
     __runmat_wasm_register_builtin_clock_builtin, __runmat_wasm_register_builtin_day_builtin,
     __runmat_wasm_register_builtin_hour_builtin, __runmat_wasm_register_builtin_isdatetime_builtin,
     __runmat_wasm_register_builtin_minute_builtin, __runmat_wasm_register_builtin_month_builtin,
-    __runmat_wasm_register_builtin_now_builtin, __runmat_wasm_register_builtin_second_builtin,
-    __runmat_wasm_register_builtin_today_builtin, __runmat_wasm_register_builtin_year_builtin,
+    __runmat_wasm_register_builtin_now_builtin, __runmat_wasm_register_builtin_today_builtin,
+    __runmat_wasm_register_builtin_year_builtin,
 };
 use self::construction::*;
 #[cfg(target_arch = "wasm32")]
@@ -76,12 +78,12 @@ use self::conversion::*;
 pub(crate) use self::dateshift_builtin::__runmat_wasm_register_builtin_dateshift_builtin;
 use self::dateshift_model::*;
 pub use self::descriptors::{
-    DATESHIFT_DESCRIPTOR, DATESHIFT_INTEGER_CAPABILITIES, DATETIME_BINARY_DESCRIPTOR,
-    DATETIME_DAY_DESCRIPTOR, DATETIME_HOUR_DESCRIPTOR, DATETIME_MINUTE_DESCRIPTOR,
-    DATETIME_MONTH_DESCRIPTOR, DATETIME_SECOND_DESCRIPTOR, DATETIME_SUBSASGN_DESCRIPTOR,
-    DATETIME_SUBSREF_DESCRIPTOR, DATETIME_YEAR_DESCRIPTOR, DAY_INTEGER_CAPABILITIES,
-    HOUR_INTEGER_CAPABILITIES, MINUTE_INTEGER_CAPABILITIES, MONTH_INTEGER_CAPABILITIES,
-    SECOND_INTEGER_AUDIT, YEAR_INTEGER_CAPABILITIES,
+    DATESHIFT_DESCRIPTOR, DATESHIFT_INTEGER_CAPABILITIES, DATETIME_DAY_DESCRIPTOR,
+    DATETIME_HOUR_DESCRIPTOR, DATETIME_MINUTE_DESCRIPTOR, DATETIME_MONTH_DESCRIPTOR,
+    DATETIME_SECOND_DESCRIPTOR, DATETIME_SUBSASGN_DESCRIPTOR, DATETIME_SUBSREF_DESCRIPTOR,
+    DATETIME_YEAR_DESCRIPTOR, DAY_INTEGER_CAPABILITIES, HOUR_INTEGER_CAPABILITIES,
+    MINUTE_INTEGER_CAPABILITIES, MONTH_INTEGER_CAPABILITIES, SECOND_INTEGER_AUDIT,
+    YEAR_INTEGER_CAPABILITIES,
 };
 use self::indexing::*;
 #[cfg(target_arch = "wasm32")]
@@ -111,5 +113,7 @@ pub(crate) use self::operators::{
     __runmat_wasm_register_builtin_datetime_subsref,
 };
 use self::prelude::*;
+#[cfg(target_arch = "wasm32")]
+pub(crate) use self::second_builtin::__runmat_wasm_register_builtin_second_builtin;
 use self::text_parsing::*;
 pub(crate) use self::timer_firing::timer_firing_arguments;

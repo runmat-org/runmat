@@ -74,7 +74,8 @@ fn fgets_reads_line_with_newline() {
     let line = eval.first_output();
     match line {
         Value::CharArray(ca) => {
-            let text: String = ca.data().iter().collect();
+            let text: String =
+                runmat_value::decode_utf16_code_units(ca.data()).expect("valid UTF-16 fixture");
             assert_eq!(text, "Hello world\n");
         }
         other => panic!("expected char array, got {other:?}"),
@@ -121,7 +122,8 @@ fn fgets_honours_nchar_limit() {
         run_evaluate(&Value::Num(handle.fid as f64), &[Value::Num(5.0)]).expect("limited read");
     match eval.first_output() {
         Value::CharArray(ca) => {
-            let text: String = ca.data().iter().collect();
+            let text: String =
+                runmat_value::decode_utf16_code_units(ca.data()).expect("valid UTF-16 fixture");
             assert_eq!(text, "abcde");
         }
         other => panic!("expected char array, got {other:?}"),
@@ -136,7 +138,8 @@ fn fgets_honours_nchar_limit() {
     let next = run_evaluate(&Value::Num(handle.fid as f64), &[Value::Num(5.0)]).expect("next read");
     match next.first_output() {
         Value::CharArray(ca) => {
-            let text: String = ca.data().iter().collect();
+            let text: String =
+                runmat_value::decode_utf16_code_units(ca.data()).expect("valid UTF-16 fixture");
             assert_eq!(text, "fghij");
         }
         other => panic!("expected char array, got {other:?}"),
@@ -182,7 +185,8 @@ fn fgets_respects_limit_before_crlf_sequence() {
     let first = run_evaluate(&Value::Num(handle.fid as f64), &[Value::Num(3.0)]).expect("first");
     match first.first_output() {
         Value::CharArray(ca) => {
-            let text: String = ca.data().iter().collect();
+            let text: String =
+                runmat_value::decode_utf16_code_units(ca.data()).expect("valid UTF-16 fixture");
             assert_eq!(text, "ABC");
         }
         other => panic!("expected char array, got {other:?}"),
@@ -195,7 +199,8 @@ fn fgets_respects_limit_before_crlf_sequence() {
     let second = run_evaluate(&Value::Num(handle.fid as f64), &[]).expect("second");
     match second.first_output() {
         Value::CharArray(ca) => {
-            let text: String = ca.data().iter().collect();
+            let text: String =
+                runmat_value::decode_utf16_code_units(ca.data()).expect("valid UTF-16 fixture");
             assert_eq!(text, "DE\r\n");
         }
         other => panic!("expected char array, got {other:?}"),
@@ -208,7 +213,8 @@ fn fgets_respects_limit_before_crlf_sequence() {
     let third = run_evaluate(&Value::Num(handle.fid as f64), &[]).expect("third");
     match third.first_output() {
         Value::CharArray(ca) => {
-            let text: String = ca.data().iter().collect();
+            let text: String =
+                runmat_value::decode_utf16_code_units(ca.data()).expect("valid UTF-16 fixture");
             assert_eq!(text, "next\n");
         }
         other => panic!("expected char array, got {other:?}"),
@@ -230,7 +236,8 @@ fn fgets_handles_crlf_newlines() {
     let outputs = eval.outputs();
     match &outputs[0] {
         Value::CharArray(ca) => {
-            let text: String = ca.data().iter().collect();
+            let text: String =
+                runmat_value::decode_utf16_code_units(ca.data()).expect("valid UTF-16 fixture");
             assert_eq!(text, "first line\r\n");
         }
         other => panic!("expected char array, got {other:?}"),
@@ -257,7 +264,8 @@ fn fgets_consumes_lfcr_as_one_newline_sequence() {
     let first = run_evaluate(&Value::Num(handle.fid as f64), &[]).expect("first");
     match first.first_output() {
         Value::CharArray(ca) => {
-            let text: String = ca.data().iter().collect();
+            let text: String =
+                runmat_value::decode_utf16_code_units(ca.data()).expect("valid UTF-16 fixture");
             assert_eq!(text, "first\n\r");
         }
         other => panic!("expected char array, got {other:?}"),
@@ -265,7 +273,8 @@ fn fgets_consumes_lfcr_as_one_newline_sequence() {
     let second = run_evaluate(&Value::Num(handle.fid as f64), &[]).expect("second");
     match second.first_output() {
         Value::CharArray(ca) => {
-            let text: String = ca.data().iter().collect();
+            let text: String =
+                runmat_value::decode_utf16_code_units(ca.data()).expect("valid UTF-16 fixture");
             assert_eq!(text, "second");
         }
         other => panic!("expected char array, got {other:?}"),
@@ -294,7 +303,8 @@ fn fgets_decodes_latin1() {
     let read = run_evaluate(&Value::Num(fid as f64), &[]).expect("fgets");
     match read.first_output() {
         Value::CharArray(ca) => {
-            let text: String = ca.data().iter().collect();
+            let text: String =
+                runmat_value::decode_utf16_code_units(ca.data()).expect("valid UTF-16 fixture");
             assert_eq!(text, "Hola ñ\n");
         }
         other => panic!("expected char array, got {other:?}"),
@@ -350,7 +360,7 @@ fn fgets_nchar_one_returns_one_character() {
         Value::CharArray(ca) => {
             assert_eq!(ca.rows, 1);
             assert_eq!(ca.cols, 1);
-            assert_eq!(ca.data(), vec!['h']);
+            assert_eq!(ca.data(), runmat_value::encode_utf16_code_units("h"));
         }
         other => panic!("expected one-character row, got {other:?}"),
     }
@@ -386,7 +396,8 @@ fn fgets_gathers_gpu_scalar_arguments() {
         let eval = run_evaluate(&fid_gpu, &[limit_gpu]).expect("fgets");
         match eval.first_output() {
             Value::CharArray(ca) => {
-                let text: String = ca.data().iter().collect();
+                let text: String =
+                    runmat_value::decode_utf16_code_units(ca.data()).expect("valid UTF-16 fixture");
                 assert_eq!(text, "abc");
             }
             other => panic!("expected char array, got {other:?}"),

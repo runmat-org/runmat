@@ -209,7 +209,7 @@ pub(crate) fn select_rows_in_context(
                 let start = row * array.cols;
                 data.extend_from_slice(&array.data()[start..start + array.cols]);
             }
-            CharArray::new(data, rows.len(), array.cols)
+            CharArray::from_code_units(data, rows.len(), array.cols)
                 .map(Value::CharArray)
                 .map_err(invalid_variable)
         }
@@ -254,7 +254,7 @@ pub(crate) fn select_rows_in_context(
                     crate::builtins::datetime::datetime_object_from_serial_tensor(
                         runtime,
                         tensor,
-                        crate::builtins::datetime::datetime_format_from_value(value),
+                        crate::builtins::datetime::datetime_format_from_value(value)?,
                     )
                 }
                 _ => unreachable!("select_rows tensor branch returns tensor"),
@@ -268,7 +268,7 @@ pub(crate) fn select_rows_in_context(
                     crate::builtins::duration::duration_object_from_days_tensor(
                         runtime,
                         tensor,
-                        crate::builtins::duration::duration_format_from_value(value),
+                        crate::builtins::duration::duration_format_from_value(value)?,
                     )
                 }
                 _ => unreachable!("select_rows tensor branch returns tensor"),

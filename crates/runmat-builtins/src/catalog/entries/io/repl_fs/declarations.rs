@@ -73,3 +73,5 @@ mod system;
 mod userpath;
 #[path = "restoredefaultpath/mod.rs"]
 mod restoredefaultpath;
+#[path = "winqueryreg/mod.rs"]
+mod winqueryreg;

@@ -1,0 +1,36 @@
+use crate::*;
+pub(super) const EXAMPLES: &[BuiltinExample] = &[
+    BuiltinExample {
+        id: "example-1",
+        title: "Find the axes and figure for a plotted line",
+        program: "h = plot(1:3);\nax = ancestor(h, 'axes');\nfig = ancestor(h, 'figure');",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::BrowserGraphics,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: "assert(strcmp(get(ax,'Type'),'axes')); assert(strcmp(get(fig,'Type'),'figure')); assert(get(h,'Parent')==ax); assert(ancestor(ax,'figure')==fig);" },
+    },
+    BuiltinExample {
+        id: "example-2",
+        title: "Choose nearest or top-level match from multiple types",
+        program: "h = plot(1:3);\nnearest = ancestor(h, {'axes','figure'});\ntop = ancestor(h, {'axes','figure'}, 'toplevel');",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::BrowserGraphics,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: "assert(nearest==get(h,'Parent')); assert(strcmp(get(top,'Type'),'figure'));" },
+    },
+    BuiltinExample {
+        id: "example-3",
+        title: "Inspect a ruler handle",
+        program: "ax = gca;\nxr = get(ax, 'XAxis');\nancestor(xr, 'numericruler')",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::BrowserGraphics,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Figure { minimum_figures: 1, assertions: "assert(ancestor(xr,'numericruler')==xr); assert(ancestor(xr,'axes')==ax);" },
+    },
+];

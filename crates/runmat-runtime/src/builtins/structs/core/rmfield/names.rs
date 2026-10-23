@@ -58,7 +58,13 @@ fn cell_array(array: &CellArray) -> crate::BuiltinResult<Vec<String>> {
 }
 
 fn scalar(value: &Value, context: Option<&str>) -> crate::BuiltinResult<String> {
-    let name = field_name::decode(value).map_err(|_| super::error::field_name_type(context))?;
+    let name = field_name::decode(value).map_err(|source| {
+        let mut error = super::error::field_name_type(context);
+        if let field_name::ExpectedScalarFieldName::Encoding(source) = source {
+            error.source = Some(Box::new(source));
+        }
+        error
+    })?;
     require_nonempty(name, context.map(str::to_string))
 }
 

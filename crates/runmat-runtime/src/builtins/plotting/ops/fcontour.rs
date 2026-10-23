@@ -1,13 +1,11 @@
 //! MATLAB-compatible `fcontour` builtin.
-
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+use runmat_builtins::BuiltinErrorDescriptor;
+pub use runmat_builtins::{
+    FCONTOUR_ERROR_EVALUATION, FCONTOUR_ERROR_INTERNAL, FCONTOUR_ERROR_INVALID_ARGUMENT,
+    FCONTOUR_INTEGER_LINE_COLOR_EXTENSION, FCONTOUR_POSITIONAL_LEVEL_EXTENSION,
+    FCONTOUR_RESIDENT_NUMERIC_EXTENSION,
 };
+
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ContourFillPlot, ContourPlot};
 use runmat_value::{IntValue, Tensor, Value};
@@ -17,8 +15,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor as tensor_utils;
-use crate::builtins::math::optim::common::call_function;
-use crate::builtins::plotting::type_resolvers::handle_scalar_type;
+
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 use super::common::SurfaceDataInput;
@@ -27,7 +24,7 @@ use super::contour::{
     build_contour_plot, parse_level_spec, ContourArgs, ContourLevelSpec, ContourLineColor,
 };
 use super::fsurf::function_surface_ref;
-use super::op_common::{apply_axes_target, split_leading_axes_handle, AxesTarget};
+use super::op_common::{apply_axes_target, split_leading_axes_arguments, AxesTarget};
 use super::plotting_error;
 use super::state::{
     current_figure_handle, register_function_contour_handle, render_active_plot, PlotRenderOptions,
@@ -43,305 +40,6 @@ const DEFAULT_DOMAIN: Domain = Domain {
 };
 const DEFAULT_MESH_DENSITY: usize = 71;
 const MAX_MESH_DENSITY: usize = 400;
-
-pub(crate) const FCONTOUR_INTEGER_LINE_COLOR_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "fcontour-integer-line-color",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "fcontour with a typed-integer RGB LineColor is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:FcontourIntegerLineColorExtension"),
-    };
-pub(crate) const FCONTOUR_POSITIONAL_LEVEL_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "fcontour-positional-level-spec",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "fcontour with a positional level count or value vector is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:FcontourPositionalLevelSpecExtension"),
-    };
-pub(crate) const FCONTOUR_RESIDENT_NUMERIC_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "fcontour-resident-numeric-input",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "fcontour with resident numeric arguments is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:FcontourResidentNumericInputExtension"),
-    };
-pub const FCONTOUR_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    FCONTOUR_INTEGER_LINE_COLOR_EXTENSION,
-    FCONTOUR_POSITIONAL_LEVEL_EXTENSION,
-    FCONTOUR_RESIDENT_NUMERIC_EXTENSION,
-];
-
-const FCONTOUR_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Handle to the rendered function contour.",
-}];
-
-const FCONTOUR_INPUTS_F: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "f",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Function of two variables, z = f(x,y).",
-}];
-
-const FCONTOUR_INPUTS_F_DOMAIN: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "f",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Function of two variables, z = f(x,y).",
-    },
-    BuiltinParamDescriptor {
-        name: "xyinterval",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Optional,
-        default: Some("[-5 5 -5 5]"),
-        description: "Two- or four-element domain vector.",
-    },
-];
-
-const FCONTOUR_INPUTS_PROPS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "args",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Function-handle and optional domain arguments.",
-    },
-    BuiltinParamDescriptor {
-        name: "name_value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "MeshDensity and contour name/value arguments.",
-    },
-];
-
-const FCONTOUR_INPUTS_AX_PROPS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "args",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Function-handle and optional domain arguments.",
-    },
-    BuiltinParamDescriptor {
-        name: "name_value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "MeshDensity and contour name/value arguments.",
-    },
-];
-
-const FCONTOUR_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "h = fcontour(f)",
-        inputs: &FCONTOUR_INPUTS_F,
-        outputs: &FCONTOUR_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = fcontour(f, xyinterval)",
-        inputs: &FCONTOUR_INPUTS_F_DOMAIN,
-        outputs: &FCONTOUR_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = fcontour(___, Name, Value, ...)",
-        inputs: &FCONTOUR_INPUTS_PROPS,
-        outputs: &FCONTOUR_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = fcontour(ax, ___)",
-        inputs: &FCONTOUR_INPUTS_AX_PROPS,
-        outputs: &FCONTOUR_OUTPUT_HANDLE,
-    },
-];
-
-pub const FCONTOUR_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FCONTOUR.INVALID_ARGUMENT",
-    identifier: Some("RunMat:fcontour:InvalidArgument"),
-    when: "Function handle, domain, mesh density, axes target, levels, or contour properties are invalid.",
-    message: "fcontour: invalid argument",
-};
-
-pub const FCONTOUR_ERROR_EVALUATION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FCONTOUR.EVALUATION",
-    identifier: Some("RunMat:fcontour:EvaluationFailed"),
-    when: "A sampled function handle fails or does not return a scalar numeric value.",
-    message: "fcontour: function evaluation failed",
-};
-
-pub const FCONTOUR_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FCONTOUR.INTERNAL",
-    identifier: Some("RunMat:fcontour:Internal"),
-    when: "Contour construction or rendering fails unexpectedly.",
-    message: "fcontour: internal operation failed",
-};
-
-const FCONTOUR_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    FCONTOUR_ERROR_INVALID_ARGUMENT,
-    FCONTOUR_ERROR_EVALUATION,
-    FCONTOUR_ERROR_INTERNAL,
-];
-
-pub const FCONTOUR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FCONTOUR_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FCONTOUR_ERRORS,
-};
-
-const fn integer_input(
-    name: &'static str,
-    availability: BuiltinIntegerInputAvailability,
-    notes: &'static str,
-) -> BuiltinIntegerInputCapability {
-    BuiltinIntegerInputCapability {
-        name,
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes,
-    }
-}
-
-const INTEGER_DOMAIN_INPUT: [BuiltinIntegerInputCapability; 1] = [integer_input(
-    "xyinterval",
-    BuiltinIntegerInputAvailability::Documented,
-    "The documented two- or four-element plotting interval accepts real numeric vectors; authoritative integer bounds are validated before the host graphics conversion boundary.",
-)];
-const INTEGER_MESH_DENSITY_INPUT: [BuiltinIntegerInputCapability; 1] = [integer_input(
-    "MeshDensity",
-    BuiltinIntegerInputAvailability::Documented,
-    "MeshDensity is an exact scalar count with a documented effective minimum of three and a RunMat resource ceiling of 400.",
-)];
-const INTEGER_LEVEL_LIST_INPUT: [BuiltinIntegerInputCapability; 1] = [integer_input(
-    "LevelList",
-    BuiltinIntegerInputAvailability::Documented,
-    "LevelList explicitly documents every built-in integer class; a scalar is one level and vector order is not constrained.",
-)];
-const INTEGER_LEVEL_STEP_INPUT: [BuiltinIntegerInputCapability; 1] = [integer_input(
-    "LevelStep",
-    BuiltinIntegerInputAvailability::Documented,
-    "LevelStep explicitly documents every built-in integer class; zero selects automatic levels and positive values select spacing.",
-)];
-const INTEGER_LINE_WIDTH_INPUT: [BuiltinIntegerInputCapability; 1] = [integer_input(
-    "LineWidth",
-    BuiltinIntegerInputAvailability::Documented,
-    "A positive integer line width crosses one checked f32 graphics-property boundary.",
-)];
-const INTEGER_FILL_INPUT: [BuiltinIntegerInputCapability; 1] = [integer_input(
-    "Fill",
-    BuiltinIntegerInputAvailability::Documented,
-    "The documented numeric on/off form accepts only the exact scalar values zero and one.",
-)];
-const INTEGER_LINE_COLOR_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "LineColor",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "RunMat mode accepts a three-element typed-integer RGB vector containing only zero or one.",
-    }];
-const INTEGER_POSITIONAL_LEVEL_INPUT: [BuiltinIntegerInputCapability; 1] = [integer_input(
-    "levels",
-    BuiltinIntegerInputAvailability::RunMatOnly,
-    "RunMat mode accepts the contour-style positional level count or value-vector shorthand after the function handle.",
-)];
-
-pub const FCONTOUR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 8] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = fcontour(f, integer_xyinterval)",
-        inputs: &INTEGER_DOMAIN_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Exact bounds cross one deliberate binary64 graphics-domain boundary; the result is an opaque graphics handle.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = fcontour(..., 'MeshDensity', integer_density)",
-        inputs: &INTEGER_MESH_DENSITY_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The exact count controls bounded host callback sampling and does not become integer output.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = fcontour(..., 'LevelList', integer_levels)",
-        inputs: &INTEGER_LEVEL_LIST_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Authoritative level values cross one deliberate contour-geometry conversion boundary.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = fcontour(..., 'LevelStep', integer_step)",
-        inputs: &INTEGER_LEVEL_STEP_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "The exact scalar step crosses one checked f32 contour-geometry boundary.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = fcontour(..., 'LineWidth', integer_width)",
-        inputs: &INTEGER_LINE_WIDTH_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "The exact positive scalar crosses one checked f32 renderer-property boundary.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = fcontour(..., 'Fill', integer_on_off)",
-        inputs: &INTEGER_FILL_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "Zero disables and one enables filled contour bands; the result remains graphics state.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = fcontour(..., 'LineColor', integer_rgb)",
-        inputs: &INTEGER_LINE_COLOR_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "This independently gated RunMat extension validates exact RGB components before graphics conversion.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "h = fcontour(f, integer_level_count_or_values)",
-        inputs: &INTEGER_POSITIONAL_LEVEL_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "This independently gated RunMat shorthand reuses contour positional-level semantics.",
-    },
-];
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::fcontour")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -372,33 +70,41 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "fcontour",
-    execution_stack = "process",
-    category = "plotting",
-    summary = "Plot contour lines of a function over a 2-D domain.",
-    keywords = "fcontour,function contour,contour,plotting",
-    sink = true,
-    suppress_auto_output = true,
-    type_resolver(handle_scalar_type),
-    descriptor(crate::builtins::plotting::fcontour::FCONTOUR_DESCRIPTOR),
-    extensions(crate::builtins::plotting::fcontour::FCONTOUR_EXTENSIONS),
-    integer_capabilities(crate::builtins::plotting::fcontour::FCONTOUR_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::plotting::fcontour"
 )]
-pub async fn fcontour_builtin(mut args: Vec<Value>) -> BuiltinResult<f64> {
+pub async fn fcontour_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+) -> crate::BuiltinResult<f64> {
+    if matches!(crate::output_count::current_output_count(), Some(n) if n > 1) {
+        return Err(crate::runtime_error::semantic_error(
+            "RunMat:plotting:TooManyOutputs",
+            "fcontour: expected at most one output",
+        ));
+    }
+    let work = super::coordinate_admission::CoordinateWork::admit(runtime.as_ref(), "fcontour")?;
+    let _arguments = args.fork();
+    work.finish(fcontour_impl(runtime.as_ref(), args, &work).await)
+}
+
+async fn fcontour_impl(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: crate::call::BuiltinArguments,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> crate::BuiltinResult<f64> {
     if matches!(crate::output_count::current_output_count(), Some(count) if count > 1) {
         return Err(fcontour_invalid("too many output arguments"));
     }
-    preflight_fcontour_extensions(&args)?;
-    for value in &mut args {
-        if matches!(value, Value::GpuTensor(_)) {
-            *value = crate::dispatcher::gather_if_needed_async(value)
-                .await
-                .map_err(map_fcontour_invalid)?;
-        }
-    }
+    preflight_fcontour_extensions(args.view())?;
+    let args = crate::dispatcher::gather_builtin_arguments_async(args, runtime)
+        .await
+        .map_err(map_fcontour_invalid)?;
+    work.check()?;
     let parsed = parse_fcontour_args(args).map_err(map_fcontour_invalid)?;
-    let sampled = sample_contour(&parsed).await?;
-    render_fcontour(sampled, &parsed).map_err(map_fcontour_internal)
+    let sampled = sample_contour(&parsed, runtime, work).await?;
+    render_fcontour(sampled, &parsed, runtime, work).map_err(map_fcontour_internal)
 }
 
 #[derive(Clone, Copy)]
@@ -420,7 +126,7 @@ struct ParsedFcontour {
     fill: bool,
 }
 
-fn preflight_fcontour_extensions(args: &[Value]) -> BuiltinResult<()> {
+fn preflight_fcontour_extensions(args: crate::call::FunctionArgumentView<'_>) -> BuiltinResult<()> {
     if args
         .iter()
         .any(|value| matches!(value, Value::GpuTensor(_)))
@@ -430,8 +136,16 @@ fn preflight_fcontour_extensions(args: &[Value]) -> BuiltinResult<()> {
             BUILTIN_NAME,
         )?;
     }
-    for pair in args.windows(2) {
-        let Some(key) = value_as_string(&pair[0]) else {
+    for index in 0..args.len().saturating_sub(1) {
+        let pair = args.range(index..index + 2)?;
+        let Some(key) = value_as_string(&pair[0]).map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                "fcontour",
+                source.to_string(),
+                source,
+            )
+        })?
+        else {
             continue;
         };
         if matches!(
@@ -477,29 +191,50 @@ fn map_fcontour_invalid(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    fcontour_error_with_detail(&FCONTOUR_ERROR_INVALID_ARGUMENT, err.message)
+    let mapped = fcontour_error_with_detail(&FCONTOUR_ERROR_INVALID_ARGUMENT, err.message.clone());
+    let mut builder = crate::build_runtime_error(mapped.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = mapped.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn map_fcontour_eval(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    fcontour_error_with_detail(&FCONTOUR_ERROR_EVALUATION, err.message)
+    let mapped = fcontour_error_with_detail(&FCONTOUR_ERROR_EVALUATION, err.message.clone());
+    let mut builder = crate::build_runtime_error(mapped.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = mapped.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
 fn map_fcontour_internal(err: RuntimeError) -> RuntimeError {
     if err.identifier().is_some() {
         return err;
     }
-    fcontour_error_with_detail(&FCONTOUR_ERROR_INTERNAL, err.message)
+    let mapped = fcontour_error_with_detail(&FCONTOUR_ERROR_INTERNAL, err.message.clone());
+    let mut builder = crate::build_runtime_error(mapped.message)
+        .with_builtin(BUILTIN_NAME)
+        .with_source(err);
+    if let Some(identifier) = mapped.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
 }
 
-fn parse_fcontour_args(args: Vec<Value>) -> BuiltinResult<ParsedFcontour> {
+fn parse_fcontour_args(args: crate::call::BuiltinArguments) -> BuiltinResult<ParsedFcontour> {
     if args.is_empty() {
         return Err(fcontour_invalid("expected a function handle"));
     }
 
-    let (target_axes, mut values) = split_leading_axes_handle(args, BUILTIN_NAME)?;
+    let (target_axes, mut values) = split_leading_axes_arguments(args, BUILTIN_NAME)?;
     if values.is_empty() {
         return Err(fcontour_invalid(
             "expected a function handle after axes handle",
@@ -508,11 +243,11 @@ fn parse_fcontour_args(args: Vec<Value>) -> BuiltinResult<ParsedFcontour> {
     if !is_function_handle(&values[0]) {
         return Err(fcontour_invalid("expected a function handle"));
     }
-    let function = values.remove(0);
+    let function = values.pop_front().expect("checked argument prefix");
 
     let mut domain = DEFAULT_DOMAIN;
     if values.first().is_some_and(is_domain_value) {
-        domain = parse_domain(&values.remove(0))?;
+        domain = parse_domain(&values.pop_front().expect("checked argument prefix"))?;
     }
 
     let mut level_spec = ContourLevelSpec::Auto;
@@ -521,8 +256,11 @@ fn parse_fcontour_args(args: Vec<Value>) -> BuiltinResult<ParsedFcontour> {
             &FCONTOUR_POSITIONAL_LEVEL_EXTENSION,
             BUILTIN_NAME,
         )?;
-        level_spec =
-            parse_level_spec(values.remove(0), BUILTIN_NAME).map_err(map_fcontour_invalid)?;
+        level_spec = parse_level_spec(
+            values.pop_front().expect("checked argument prefix"),
+            BUILTIN_NAME,
+        )
+        .map_err(map_fcontour_invalid)?;
     }
 
     let options = split_fcontour_options(values)?;
@@ -664,14 +402,26 @@ struct FcontourOptions {
     fill: bool,
 }
 
-fn split_fcontour_options(args: Vec<Value>) -> BuiltinResult<FcontourOptions> {
+fn split_fcontour_options(args: crate::call::BuiltinArguments) -> BuiltinResult<FcontourOptions> {
     let mut mesh_density = DEFAULT_MESH_DENSITY;
     let mut display_name = None;
     let mut contour_options = Vec::new();
     let mut level_spec = None;
     let mut fill = false;
     let mut idx = 0usize;
-    if let Some(token) = args.first().and_then(value_as_string) {
+    if let Some(token) = args
+        .first()
+        .map(value_as_string)
+        .transpose()
+        .map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                "fcontour",
+                source.to_string(),
+                source,
+            )
+        })?
+        .flatten()
+    {
         let trimmed = token.trim();
         if !is_fcontour_special_option(trimmed) && !is_contour_pair_option(trimmed) {
             contour_options.push(args[0].clone());
@@ -679,7 +429,14 @@ fn split_fcontour_options(args: Vec<Value>) -> BuiltinResult<FcontourOptions> {
         }
     }
     while idx < args.len() {
-        let Some(key) = value_as_string(&args[idx]) else {
+        let Some(key) = value_as_string(&args[idx]).map_err(|source| {
+            crate::builtins::plotting::plotting_error_with_source(
+                "fcontour",
+                source.to_string(),
+                source,
+            )
+        })?
+        else {
             return Err(fcontour_invalid("name-value option names must be strings"));
         };
         if idx + 1 >= args.len() {
@@ -693,6 +450,13 @@ fn split_fcontour_options(args: Vec<Value>) -> BuiltinResult<FcontourOptions> {
             "displayname" => {
                 display_name = Some(
                     value_as_string(&args[idx + 1])
+                        .map_err(|source| {
+                            crate::builtins::plotting::plotting_error_with_source(
+                                "fcontour",
+                                source.to_string(),
+                                source,
+                            )
+                        })?
                         .ok_or_else(|| fcontour_invalid("DisplayName must be text"))?
                         .to_string(),
                 );
@@ -909,7 +673,11 @@ struct SampledFcontour {
     fill: Option<ContourFillPlot>,
 }
 
-async fn sample_contour(parsed: &ParsedFcontour) -> BuiltinResult<SampledFcontour> {
+async fn sample_contour(
+    parsed: &ParsedFcontour,
+    runtime: Option<&crate::context::RuntimeContext>,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> BuiltinResult<SampledFcontour> {
     let x_axis = linspace(
         parsed.domain.x_min,
         parsed.domain.x_max,
@@ -923,7 +691,8 @@ async fn sample_contour(parsed: &ParsedFcontour) -> BuiltinResult<SampledFcontou
     let mut grid = vec![vec![0.0; x_axis.len()]; y_axis.len()];
     for (row, &y) in y_axis.iter().enumerate() {
         for (col, &x) in x_axis.iter().enumerate() {
-            grid[row][col] = call_contour_function(&parsed.function, x, y).await?;
+            work.check()?;
+            grid[row][col] = call_contour_function(runtime, work, &parsed.function, x, y).await?;
         }
     }
 
@@ -940,7 +709,7 @@ async fn sample_contour(parsed: &ParsedFcontour) -> BuiltinResult<SampledFcontou
     };
     apply_contour_options_with_integer_line_color_extension(
         &mut contour_args,
-        &parsed.contour_options,
+        crate::call::FunctionArgumentView::from_slice(&parsed.contour_options),
         &FCONTOUR_INTEGER_LINE_COLOR_EXTENSION,
     )
     .map_err(map_fcontour_invalid)?;
@@ -999,13 +768,28 @@ async fn sample_contour(parsed: &ParsedFcontour) -> BuiltinResult<SampledFcontou
     })
 }
 
-async fn call_contour_function(function: &Value, x: f64, y: f64) -> BuiltinResult<f64> {
-    let value = call_function(function, vec![Value::Num(x), Value::Num(y)])
-        .await
-        .map_err(map_fcontour_eval)?;
+async fn call_contour_function(
+    runtime: Option<&crate::context::RuntimeContext>,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+    function: &Value,
+    x: f64,
+    y: f64,
+) -> BuiltinResult<f64> {
+    work.check()?;
+    let callback = crate::canonicalize_callback_handle_for_semantic_resolution(function.clone())?;
+    let arguments = [Value::Num(x), Value::Num(y)];
+    let value = match runtime {
+        Some(runtime) => {
+            crate::call_feval_async_with_outputs_in_context(runtime, callback, &arguments, 1).await
+        }
+        None => crate::call_feval_async_with_outputs(callback, &arguments, 1).await,
+    }
+    .map_err(map_fcontour_eval)?;
+    work.check()?;
     let value = crate::dispatcher::gather_if_needed_async(&value)
         .await
         .map_err(map_fcontour_eval)?;
+    work.check()?;
     contour_value_to_scalar(value).map_err(map_fcontour_eval)
 }
 
@@ -1035,9 +819,15 @@ fn linspace(start: f64, stop: f64, count: usize) -> Vec<f64> {
     (0..count).map(|idx| start + step * idx as f64).collect()
 }
 
-fn render_fcontour(sampled: SampledFcontour, parsed: &ParsedFcontour) -> BuiltinResult<f64> {
+fn render_fcontour(
+    sampled: SampledFcontour,
+    parsed: &ParsedFcontour,
+    runtime: Option<&crate::context::RuntimeContext>,
+    work: &super::coordinate_admission::CoordinateWork<'_>,
+) -> BuiltinResult<f64> {
+    work.check()?;
     apply_axes_target(parsed.target_axes, BUILTIN_NAME)?;
-    let function_ref = function_surface_ref(&parsed.function, BUILTIN_NAME)?;
+    let function_ref = function_surface_ref(runtime, &parsed.function, BUILTIN_NAME)?;
     let mut contour = Some(sampled.contour);
     let mut fill = sampled.fill;
     let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
@@ -1087,6 +877,21 @@ fn render_fcontour(sampled: SampledFcontour, parsed: &ParsedFcontour) -> Builtin
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_builtins::{FCONTOUR_EXTENSIONS, FCONTOUR_INTEGER_CAPABILITIES};
+    fn parse_fcontour_args(args: Vec<Value>) -> crate::BuiltinResult<super::ParsedFcontour> {
+        super::parse_fcontour_args(crate::builtins::common::test_support::builtin_arguments(
+            args,
+        ))
+    }
+
+    async fn fcontour_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+        super::fcontour_builtin(
+            crate::context::legacy::active(),
+            crate::builtins::common::test_support::builtin_arguments(args),
+        )
+        .await
+    }
+
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, clone_figure, current_figure_handle};

@@ -77,7 +77,14 @@ fn parse_component(
         Value::Bool(value) => Ok(IndexComponent::Logical(vec![u8::from(*value)])),
         Value::LogicalArray(array) => Ok(IndexComponent::Logical(array.data.to_vec())),
         Value::CharArray(array) => {
-            parse_text(&array.data().iter().collect::<String>(), uses_textual_index)
+            let text = runmat_value::decode_utf16_code_units(array.data()).map_err(|source| {
+                PathError {
+                    kind: PathErrorKind::InvalidIndex,
+                    detail: "textual index is not valid UTF-16".into(),
+                    source: Some(source),
+                }
+            })?;
+            parse_text(&text, uses_textual_index)
         }
         Value::String(text) => parse_text(text, uses_textual_index),
         Value::StringArray(array) if array.data().len() == 1 => {
@@ -175,7 +182,13 @@ fn parse_field_name(value: Value) -> Result<String, PathError> {
     match value {
         Value::String(value) => Ok(value.to_string()),
         Value::StringArray(array) if array.data().len() == 1 => Ok(array.data()[0].to_string()),
-        Value::CharArray(array) if array.rows == 1 => Ok(array.data().iter().collect()),
+        Value::CharArray(array) if array.rows == 1 => {
+            runmat_value::decode_utf16_code_units(array.data()).map_err(|source| PathError {
+                kind: PathErrorKind::FieldName,
+                detail: "field name is not valid UTF-16".into(),
+                source: Some(source),
+            })
+        }
         _ => Err(error(
             PathErrorKind::FieldName,
             "field names must be scalar strings or character row vectors",
@@ -187,5 +200,6 @@ fn error(kind: PathErrorKind, detail: impl Into<String>) -> PathError {
     PathError {
         kind,
         detail: detail.into(),
+        source: None,
     }
 }

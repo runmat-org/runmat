@@ -76,7 +76,53 @@ pub fn admit_candidate_resources(
         provider_retained_bytes,
         require_transactional_results,
     } = admission;
-    if let CandidateExecutionLocation::VmRegion { device_id } = location {
+    if location == CandidateExecutionLocation::NativeSource {
+        let unknown = crate::placement::ResourceByteBound::Unavailable(
+            crate::placement::ResourceBoundUnavailable::NoPeakMemoryBound,
+        );
+        if kind != ExecutionCandidateKind::OriginalNativeRegion
+            || output_residency != CandidateOutputResidency::Unknown
+            || !matches!(presentation, CandidateOutputPresentation::Direct)
+            || transactional_results
+            || require_transactional_results
+            || demand.cpu_millicores != 0
+            || demand.queue_slots != 0
+            || demand.retained_bytes != unknown
+            || demand.scratch_bytes != unknown
+            || demand.provider_host_workspace.is_some()
+            || demand.provider_input_stages.is_some()
+            || demand.peak_live.is_some()
+        {
+            return Err(ResourceAdmissionError::Overflow);
+        }
+        // No single device/tail is certified. Each ordinary native operation
+        // retains its own admission; an aggregate finite policy cannot infer
+        // a missing whole-region bound from that deferred ownership.
+        if resources.cpu_millicores_available == 0
+            || resources.memory_available_bytes.is_some()
+            || resources.providers.iter().any(|provider| {
+                provider.capacity_bytes.is_some()
+                    || provider.scratch_available_bytes.is_some()
+                    || provider.queue_limit.is_some()
+                    || provider.queue_depth.is_some()
+            })
+            || !host_retained_bytes.is_empty()
+            || provider_retained_bytes
+                .values()
+                .any(|bytes| !bytes.is_empty())
+        {
+            return Err(ResourceAdmissionError::InsufficientEvidence {
+                budget: ResourceBudgetKind::HostMemory,
+                reason: crate::placement::ResourceBoundUnavailable::NoPeakMemoryBound,
+            });
+        }
+        return Ok(AdmittedResourceDemand {
+            evictions: BTreeMap::new(),
+        });
+    }
+    if let CandidateExecutionLocation::VmRegion { device_id }
+    | CandidateExecutionLocation::NativeRegion { device_id } = location
+    {
         // The original VM route is admitted by each instruction's existing
         // host/provider owners, not by a fabricated aggregate allocation.
         // It can enter whole-work learning only where no finite whole-route
@@ -84,7 +130,17 @@ pub fn admit_candidate_resources(
         let provider = resources
             .provider(device_id)
             .ok_or(ResourceAdmissionError::UnavailableProvider)?;
-        if kind != ExecutionCandidateKind::OriginalVmRegion
+        let matching_owner = matches!(
+            (kind, location),
+            (
+                ExecutionCandidateKind::OriginalVmRegion,
+                CandidateExecutionLocation::VmRegion { .. }
+            ) | (
+                ExecutionCandidateKind::OriginalNativeRegion,
+                CandidateExecutionLocation::NativeRegion { .. }
+            )
+        );
+        if !matching_owner
             || output_residency != CandidateOutputResidency::Unknown
             || !matches!(presentation, CandidateOutputPresentation::Direct)
             || transactional_results
@@ -92,7 +148,15 @@ pub fn admit_candidate_resources(
             || demand.queue_slots != 1
             || demand.cpu_millicores != 0
             || demand.retained_bytes != CandidateResourceDemand::default().retained_bytes
-            || demand.provider_host_workspace.is_some()
+            || matches!(
+                demand.provider_host_workspace,
+                Some(crate::placement::ResourceByteBound::Unavailable(_))
+            )
+            || (kind == ExecutionCandidateKind::OriginalNativeRegion
+                && !matches!(
+                    demand.provider_host_workspace,
+                    Some(crate::placement::ResourceByteBound::Known(_))
+                ))
             || demand.provider_input_stages.is_some()
             || demand.peak_live.is_some()
             || !matches!(
@@ -139,7 +203,9 @@ pub fn admit_candidate_resources(
         }
     }
     match location {
-        CandidateExecutionLocation::VmRegion { .. } => unreachable!("handled above"),
+        CandidateExecutionLocation::VmRegion { .. }
+        | CandidateExecutionLocation::NativeRegion { .. }
+        | CandidateExecutionLocation::NativeSource => unreachable!("handled above"),
         CandidateExecutionLocation::Host => {
             if demand.cpu_millicores > resources.cpu_millicores_available {
                 return Err(ResourceAdmissionError::OverBudget);
@@ -527,6 +593,54 @@ pub fn admit_candidate_resources(
 mod tests {
     use super::*;
     use crate::placement::{ProviderResourceSnapshot, ResourceBoundUnavailable, ResourceByteBound};
+
+    #[test]
+    fn unbound_native_source_is_not_a_finite_cpu_or_provider_certificate() {
+        let check = |resources: &PlacementResourceSnapshot, kind| {
+            admit_candidate_resources(
+                CandidateResourceFacts {
+                    location: CandidateExecutionLocation::NativeSource,
+                    output_residency: CandidateOutputResidency::Unknown,
+                    presentation: &CandidateOutputPresentation::Direct,
+                    kind,
+                    demand: CandidateResourceDemand {
+                        retained_bytes: ResourceByteBound::Unavailable(
+                            ResourceBoundUnavailable::NoPeakMemoryBound,
+                        ),
+                        scratch_bytes: ResourceByteBound::Unavailable(
+                            ResourceBoundUnavailable::NoPeakMemoryBound,
+                        ),
+                        ..Default::default()
+                    },
+                    transactional_results: false,
+                },
+                ResourceAdmissionContext {
+                    resources,
+                    host_retained_bytes: ResourceAccount::default(),
+                    provider_retained_bytes: &BTreeMap::new(),
+                    require_transactional_results: false,
+                },
+            )
+        };
+        let mut resources = PlacementResourceSnapshot {
+            cpu_millicores_available: 1000,
+            ..Default::default()
+        };
+        assert!(check(&resources, ExecutionCandidateKind::OriginalNativeRegion).is_ok());
+        assert!(check(&resources, ExecutionCandidateKind::SpecializedNativeCpu).is_err());
+        resources.memory_available_bytes = Some(1024);
+        assert!(matches!(
+            check(&resources, ExecutionCandidateKind::OriginalNativeRegion),
+            Err(ResourceAdmissionError::InsufficientEvidence {
+                reason: ResourceBoundUnavailable::NoPeakMemoryBound,
+                ..
+            })
+        ));
+        assert!(ExecutionCandidateKind::OriginalNativeRegion
+            .matches_location(CandidateExecutionLocation::NativeSource));
+        assert!(!ExecutionCandidateKind::VectorizedNativeCpu
+            .matches_location(CandidateExecutionLocation::NativeSource));
+    }
 
     #[test]
     fn physical_eviction_and_unavailable_scratch_remain_distinct_from_timing() {

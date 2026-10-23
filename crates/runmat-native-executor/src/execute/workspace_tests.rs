@@ -137,6 +137,7 @@ pub(super) fn fixture(value: Value) -> (NativeFunction, NativeWorkspaceInput) {
                 region_capacity: 0,
                 retained_input_capacity: 0,
             },
+        operation_contracts: vec![],
         expected_sites: vec![],
     };
     let input = NativeWorkspaceInput::from_test_values(

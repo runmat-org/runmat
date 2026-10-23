@@ -31,7 +31,7 @@ pub const MUST_BE_NONZERO_LENGTH_TEXT_CATALOG_ENTRY: BuiltinCatalogEntry = Built
         preparation: BuiltinOperandPreparation::RuntimeOwned,
         portability: BuiltinPortability::NativeAndWasm,
         accelerator: BuiltinAcceleratorPolicy::Forbidden,
-        residency: BuiltinResidencyPolicy::PreserveInputs,
+        residency: BuiltinResidencyPolicy::Host,
         fusion: BuiltinFusionPolicy::Boundary,
         distributed: BuiltinDistributedPolicy::InspectHandles,
     },

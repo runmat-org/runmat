@@ -27,8 +27,10 @@ pub use validation::{ValuePayloadValidationCursor, ValueValidationProgress};
 #[cfg(test)]
 mod callable_tests;
 pub use durable_aggregate::{
-    DurableDynamicProperty, DurableObjectArray, DurablePlainObject, DurableStructArray,
-    DurableStructArrayField,
+    DurableDecompositionPayload, DurableDenseOrthogonalFactor, DurableDynamicProperty,
+    DurableEmptyFactorKind, DurableFactorPermutation, DurableNumericFactor, DurableObjectArray,
+    DurableOrthogonalFactor, DurablePlainObject, DurableStructArray, DurableStructArrayField,
+    DurableStructuralDecomposition,
 };
 
 pub use admission::{
@@ -207,8 +209,9 @@ pub enum InlineValue {
     },
     String(String),
     Char {
+        encoding: CharacterEncoding,
         shape: Vec<u64>,
-        code_points: Vec<u32>,
+        code_units: Vec<u16>,
     },
     StringArray {
         shape: Vec<u64>,
@@ -229,6 +232,15 @@ pub enum InlineValue {
     DurablePlainObject(DurablePlainObject),
     DurableStructArray(DurableStructArray),
     DurableObjectArray(DurableObjectArray),
+}
+
+/// Versioned physical representation for a portable character payload.
+/// There is intentionally no legacy scalar-value variant: pre-1.0 payloads
+/// must be regenerated rather than ambiguously changing array geometry.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CharacterEncoding {
+    Utf16CodeUnitsV1,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -348,6 +360,7 @@ pub enum ExceptionGpuGatherRetry {
 pub enum ExceptionFailureOrigin {
     Unclassified,
     LanguageEvaluation,
+    ExecutionControlCancellation,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

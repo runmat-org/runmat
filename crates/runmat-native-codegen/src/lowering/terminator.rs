@@ -351,16 +351,20 @@ pub(super) fn lower_terminator(
     };
 
     let construct = runmat_mir::terminator_construct_kind(&block.terminator.kind);
-    let class = construct.native_lowering_class();
+    let terminator_site = NativeMirSite {
+        point,
+        phase: NativeSitePhase::Terminator,
+        ordinal: 0,
+        construct,
+    };
+    let requirements = ctx.operation_contract(&terminator_site)?;
+    let class = runmat_mir::effective_native_lowering_class(construct, &requirements.effects);
     let terminator = NativeTerminator {
-        site: NativeMirSite {
-            point,
-            phase: NativeSitePhase::Terminator,
-            ordinal: 0,
-            construct,
-        },
+        site: terminator_site,
         source: source.clone(),
         class,
+        effects: requirements.effects,
+        capabilities: requirements.capabilities,
         safepoint: (class != runmat_mir::NativeLoweringClass::NativeOperation
             && class != runmat_mir::NativeLoweringClass::ProvenUnreachable)
             .then(|| ctx.safepoint()),
@@ -395,6 +399,13 @@ fn lower_rvalue(
             "terminator operation count exceeds the Native IR schema",
         )
     })?;
+    let operation_site = NativeMirSite {
+        point,
+        phase: NativeSitePhase::TerminatorRvalue,
+        ordinal: current_ordinal,
+        construct: runmat_mir::rvalue_construct_kind(value),
+    };
+    let requirements = ctx.operation_contract(&operation_site)?;
     let mut instruction = super::operation::lower_rvalue(
         ctx,
         super::operation::OperationSite {
@@ -408,7 +419,7 @@ fn lower_rvalue(
         locals,
         &[None],
         NativeRvalueResult::Terminator,
-        super::operation::declared_requirements(value),
+        requirements,
         side_effect_epoch,
     )?;
     super::operation::install_frame_locals(&mut instruction, locals);

@@ -7,12 +7,12 @@ use std::cell::RefCell;
 use std::sync::{Arc, RwLock};
 
 mod buffer;
-mod diary;
 mod capture_projection;
+mod diary;
 mod entries;
-mod text;
 #[cfg(test)]
 mod tests;
+mod text;
 use crate::context::host_allocation::{
     HostAllocationError, HostAllocationPlan, HostAllocationPolicy, HostAllocationReceipt,
     HostTextError,
@@ -209,14 +209,30 @@ fn record_console_text(
         return Ok(());
     }
 
+    forward_to_registered(&entry);
+    Ok(())
+}
+
+fn forward_to_registered(entry: &ConsoleEntry) {
     if let Some(forwarder) = FORWARDER
         .get()
         .and_then(|lock| lock.read().ok().map(|guard| guard.as_ref().cloned()))
         .flatten()
     {
-        forwarder(&entry);
+        forwarder(entry);
     }
-    Ok(())
+}
+
+/// The stock hosted-console port forwards the already-admitted text through
+/// the same invocation listener as the ordinary no-host route. It does not
+/// allocate a second capture or replace the managed thread-buffer owner.
+pub(crate) fn forward_host_text(stream: ConsoleStream, text: ConsoleText) {
+    let entry = ConsoleEntry {
+        stream,
+        text,
+        timestamp_ms: now_ms(),
+    };
+    forward_to_registered(&entry);
 }
 
 pub(super) fn console_admission(
@@ -322,19 +338,22 @@ pub async fn emit_statement_value(
     label: Option<&str>,
     value: &Value,
 ) -> Result<(), crate::RuntimeError> {
-    if runtime.is_cancelled() {
-        return Err(crate::runtime_error::semantic_error(
-            "RunMat:Cancelled",
-            "statement output was cancelled",
-        ));
-    }
-    let host_value = crate::dispatcher::gather_if_needed_async(value).await?;
-    if runtime.is_cancelled() {
-        return Err(crate::runtime_error::semantic_error(
-            "RunMat:Cancelled",
-            "statement output was cancelled",
-        ));
-    }
+    let mut cooperation = runtime.cpu_cooperation();
+    let control = |cause: crate::execution::ExecutionServiceError| {
+        cause.into_runtime_error_in_context(Some(runtime))
+    };
+    cooperation.checkpoint(0).await.map_err(control)?;
+    // Poll cancellation before constructing/polling the gather. The selected
+    // provider's physical callback keeps its own original download claims if
+    // cancellation drops this logical waiter; no later statement can overtake
+    // an output whose gather is still pending.
+    let host_value = cooperation
+        .await_cancellable(async {
+            crate::dispatcher::gather_if_needed_in_context_async(value, Some(runtime)).await
+        })
+        .await
+        .map_err(control)??;
+    cooperation.checkpoint(0).await.map_err(control)?;
     record_value_output(label, &host_value)?;
     Ok(())
 }

@@ -155,7 +155,7 @@ fn hypot_complex_tensor_with_real() {
 #[test]
 fn hypot_char_array_inputs() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-    let chars = CharArray::new("AB".chars().collect(), 1, 2).unwrap();
+    let chars = CharArray::from_unicode_scalars("AB".chars().collect(), 1, 2).unwrap();
     let result =
         hypot_builtin(Value::CharArray(chars), Value::Int(IntValue::I32(1))).expect("char hypot");
     match result {

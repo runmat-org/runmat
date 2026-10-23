@@ -1,3 +1,3 @@
 mod scalar;
 
-pub(crate) use scalar::decode;
+pub(crate) use scalar::{decode, ExpectedScalarFieldName};

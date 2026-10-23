@@ -25,6 +25,30 @@ pub const CHOL_OUTPUT_RP: [BuiltinParamDescriptor; 2] = [
     },
 ];
 
+pub const CHOL_OUTPUT_RPP: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "R",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Upper or lower triangular Cholesky factor.",
+    },
+    BuiltinParamDescriptor {
+        name: "p",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Failure flag (0 means positive definite).",
+    },
+    BuiltinParamDescriptor {
+        name: "P",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Sparse fill-reducing permutation matrix or vector.",
+    },
+];
+
 pub const CHOL_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "A",
     ty: BuiltinParamType::NumericArray,
@@ -50,7 +74,48 @@ pub const CHOL_INPUTS_A_TRIANGLE: [BuiltinParamDescriptor; 2] = [
     },
 ];
 
-pub const CHOL_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
+pub const CHOL_INPUTS_S_OUTPUT_FORM: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Sparse input matrix to factorize.",
+    },
+    BuiltinParamDescriptor {
+        name: "outputForm",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"matrix\""),
+        description: "Sparse permutation form (`\"matrix\"` or `\"vector\"`).",
+    },
+];
+
+pub const CHOL_INPUTS_S_TRIANGLE_OUTPUT_FORM: [BuiltinParamDescriptor; 3] = [
+    BuiltinParamDescriptor {
+        name: "A",
+        ty: BuiltinParamType::NumericArray,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Sparse input matrix to factorize.",
+    },
+    BuiltinParamDescriptor {
+        name: "triangle",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"upper\""),
+        description: "Triangle form (`\"upper\"` or `\"lower\"`).",
+    },
+    BuiltinParamDescriptor {
+        name: "outputForm",
+        ty: BuiltinParamType::StringScalar,
+        arity: BuiltinParamArity::Required,
+        default: Some("\"matrix\""),
+        description: "Sparse permutation form (`\"matrix\"` or `\"vector\"`).",
+    },
+];
+
+pub const CHOL_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
     BuiltinSignatureDescriptor {
         label: "R = chol(A)",
         inputs: &CHOL_INPUTS_A,
@@ -71,13 +136,28 @@ pub const CHOL_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
         inputs: &CHOL_INPUTS_A_TRIANGLE,
         outputs: &CHOL_OUTPUT_RP,
     },
+    BuiltinSignatureDescriptor {
+        label: "[R, p, P] = chol(S)",
+        inputs: &CHOL_INPUTS_A,
+        outputs: &CHOL_OUTPUT_RPP,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[R, p, P] = chol(S, outputForm)",
+        inputs: &CHOL_INPUTS_S_OUTPUT_FORM,
+        outputs: &CHOL_OUTPUT_RPP,
+    },
+    BuiltinSignatureDescriptor {
+        label: "[R, p, P] = chol(S, triangle, outputForm)",
+        inputs: &CHOL_INPUTS_S_TRIANGLE_OUTPUT_FORM,
+        outputs: &CHOL_OUTPUT_RPP,
+    },
 ];
 
 pub const CHOL_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.CHOL.INVALID_ARGUMENT",
     identifier: Some("RunMat:chol:InvalidArgument"),
     when: "Option arguments or requested output count are invalid.",
-    message: "chol currently supports at most two outputs",
+    message: "chol supports a third permutation output only for sparse input",
 };
 
 pub const CHOL_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {

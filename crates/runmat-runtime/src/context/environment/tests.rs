@@ -9,6 +9,45 @@ fn context(value: &str) -> RuntimeContext {
 }
 
 #[test]
+fn selected_constructor_does_not_inherit_unselected_environment_or_clock() {
+    let runtime = RuntimeContext::selected_native_base(
+        Rc::new(RuntimeExecutionService::new()),
+        None,
+        false,
+        false,
+    )
+    .unwrap();
+    assert!(runtime.environment_snapshot().is_empty());
+    assert!(runtime.service_ports().timing().is_err());
+    assert!(runtime.search_path().unwrap().current_string().is_empty());
+    let frozen =
+        runmat_execution::EnvironmentSnapshot::new(vec![("SELECTED_ONLY".into(), "frozen".into())])
+            .unwrap();
+    let deterministic = RuntimeContext::selected_native_base(
+        Rc::new(RuntimeExecutionService::new()),
+        Some(&frozen),
+        false,
+        false,
+    )
+    .unwrap();
+    assert_eq!(
+        deterministic.environment_snapshot(),
+        [("SELECTED_ONLY".into(), "frozen".into())]
+    );
+    assert!(deterministic.service_ports().timing().is_err());
+    {
+        let _scope = deterministic.enter();
+        crate::builtins::common::path_state::set_path_string("invocation-only")
+            .expect("session-owned path does not require an environment write");
+    }
+    assert_eq!(
+        deterministic.search_path().unwrap().current_string(),
+        "invocation-only"
+    );
+    assert!(runtime.search_path().unwrap().current_string().is_empty());
+}
+
+#[test]
 fn nested_scopes_mutations_and_unwind_preserve_environment_ownership() {
     let host = std::env::var_os("RUNMAT_CONTEXT_ENV");
     let first = context("first");

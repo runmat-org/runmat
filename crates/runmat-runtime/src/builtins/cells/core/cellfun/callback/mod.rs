@@ -24,7 +24,7 @@ impl Callable {
         Ok(())
     }
     pub(super) fn parse(value: Value) -> BuiltinResult<Self> {
-        if let Some(shorthand) = CellfunShorthand::parse_bare_value(&value) {
+        if let Some(shorthand) = CellfunShorthand::parse_bare_value(&value)? {
             return Ok(Self::Shorthand(shorthand));
         }
         MappedCallable::parse(value)

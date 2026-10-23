@@ -1,14 +1,10 @@
 use super::ResolvedObjectMethodTarget;
 use super::{ObjectProtocolCallingConvention, ProtocolResolution, ResolvedObjectMethod};
-use crate::call::descriptor::{
-    execute_callable_descriptor, execute_callable_descriptor_in_context, CallableCallKind,
-    CallableDescriptor,
-};
+use crate::call::descriptor::{CallableCallKind, CallableDescriptor};
 use crate::context::RuntimeContext;
 use crate::execution::{RootedValue, RootedValueSequence};
 use crate::object::indexing::ObjectSubscriptPath;
 use crate::runtime_error::semantic_error;
-use crate::sequence::{ResolveValueSequence, SequenceResolutionContext};
 use crate::RuntimeError;
 use runmat_value::Value;
 use std::future::Future;
@@ -46,13 +42,12 @@ fn invoke_resolved_object_protocol_with_context<'runtime, 'resolution>(
     path: ObjectSubscriptPath,
     requested_outputs: usize,
 ) -> impl Future<Output = Result<RootedValueSequence, RuntimeError>> + use<'runtime, 'resolution> {
-    let work = invoke_resolved_object_protocol_in_scope(
-        runtime,
-        resolution,
-        base,
-        path,
-        requested_outputs,
-    );
+    let inputs = retain_protocol_inputs(runtime, &base, &path);
+    let work = async move {
+        let _inputs = inputs?;
+        invoke_resolved_object_protocol_in_scope(runtime, resolution, base, path, requested_outputs)
+            .await
+    };
     super::context::scope(runtime, work)
 }
 
@@ -69,28 +64,51 @@ async fn invoke_resolved_object_protocol_in_scope(
             "object indexing does not define the requested protocol",
         ));
     };
-    let arguments = invocation_arguments(method, base, path)?;
-    invoke_resolved_object_method_with_context(runtime, method, arguments, requested_outputs).await
+    let arguments = invocation_arguments(runtime, method, base, path)?;
+    invoke_resolved_object_method_retained(runtime, method, arguments, requested_outputs).await
 }
 
 /// Invoke a prepared assignment protocol with the exact comma-separated RHS.
 /// The sequence remains an argument list and can never be stored as one
 /// language value.
-pub fn invoke_resolved_object_assignment<'method>(
-    method: &'method ResolvedObjectMethod,
+pub async fn invoke_resolved_object_assignment(
+    method: &ResolvedObjectMethod,
     base: Value,
     path: ObjectSubscriptPath,
     values: Vec<Value>,
+) -> Result<RootedValue, RuntimeError> {
+    let values = runmat_value::ValueSequence::comma_separated(values)
+        .map_err(crate::sequence::sequence_error_to_runtime)?;
+    invoke_resolved_object_assignment_with_context(None, method, base, path, values).await
+}
+
+pub async fn invoke_resolved_object_assignment_in_context(
+    runtime: &RuntimeContext,
+    method: &ResolvedObjectMethod,
+    base: Value,
+    path: ObjectSubscriptPath,
+    values: Vec<Value>,
+) -> Result<RootedValue, RuntimeError> {
+    let values = runmat_value::ValueSequence::comma_separated(values)
+        .map_err(crate::sequence::sequence_error_to_runtime)?;
+    invoke_resolved_object_assignment_with_context(Some(runtime), method, base, path, values).await
+}
+
+pub(crate) fn invoke_resolved_object_assignment_sequence<'method>(
+    method: &'method ResolvedObjectMethod,
+    base: Value,
+    path: ObjectSubscriptPath,
+    values: runmat_value::ValueSequence,
 ) -> impl Future<Output = Result<RootedValue, RuntimeError>> + use<'method> {
     invoke_resolved_object_assignment_with_context(None, method, base, path, values)
 }
 
-pub fn invoke_resolved_object_assignment_in_context<'runtime, 'method>(
+pub fn invoke_resolved_object_assignment_sequence_in_context<'runtime, 'method>(
     runtime: &'runtime RuntimeContext,
     method: &'method ResolvedObjectMethod,
     base: Value,
     path: ObjectSubscriptPath,
-    values: Vec<Value>,
+    values: runmat_value::ValueSequence,
 ) -> impl Future<Output = Result<RootedValue, RuntimeError>> + use<'runtime, 'method> {
     invoke_resolved_object_assignment_with_context(Some(runtime), method, base, path, values)
 }
@@ -100,9 +118,17 @@ fn invoke_resolved_object_assignment_with_context<'runtime, 'method>(
     method: &'method ResolvedObjectMethod,
     base: Value,
     path: ObjectSubscriptPath,
-    values: Vec<Value>,
+    values: runmat_value::ValueSequence,
 ) -> impl Future<Output = Result<RootedValue, RuntimeError>> + use<'runtime, 'method> {
-    let work = invoke_resolved_object_assignment_in_scope(runtime, method, base, path, values);
+    let inputs = retain_protocol_inputs(runtime, &base, &path);
+    let values = match runtime {
+        Some(runtime) => RootedValueSequence::in_context(values, runtime),
+        None => RootedValueSequence::new(values).map_err(|e| e.into_runtime_error()),
+    };
+    let work = async move {
+        let _inputs = inputs?;
+        invoke_resolved_object_assignment_in_scope(runtime, method, base, path, values?).await
+    };
     super::context::scope(runtime, work)
 }
 
@@ -111,27 +137,23 @@ async fn invoke_resolved_object_assignment_in_scope(
     method: &ResolvedObjectMethod,
     base: Value,
     path: ObjectSubscriptPath,
-    values: Vec<Value>,
+    values: RootedValueSequence,
 ) -> Result<RootedValue, RuntimeError> {
-    let mut arguments = invocation_arguments(method, base, path)?;
-    arguments.extend(values);
-    invoke_resolved_object_method_with_context(runtime, method, arguments, 1)
+    let arguments = invocation_arguments(runtime, method, base, path)?;
+    let count = arguments
+        .len()
+        .checked_add(values.len())
+        .ok_or_else(|| semantic_error("CallableArguments", "argument count overflows"))?;
+    let combined = initialize_arguments(runtime, count, |index| {
+        Ok(if index < arguments.len() {
+            arguments.get(index).expect("prefix argument").clone()
+        } else {
+            values.as_slice()[index - arguments.len()].clone()
+        })
+    })?;
+    invoke_resolved_object_method_retained(runtime, method, combined, 1)
         .await?
-        .try_map_owned(
-            |sequence| {
-                let values = sequence.resolve(
-                    runmat_types::SequenceUse::RequireSingle,
-                    SequenceResolutionContext::default(),
-                )?;
-                crate::sequence::into_first_output(values)?.ok_or_else(|| {
-                    semantic_error(
-                        "ObjectAssignmentOutput",
-                        "object assignment protocol did not return its updated receiver",
-                    )
-                })
-            },
-            |error| error.into_runtime_error(),
-        )
+        .try_into_single()
 }
 
 pub fn invoke_resolved_object_method<'method>(
@@ -157,15 +179,58 @@ fn invoke_resolved_object_method_with_context<'runtime, 'method>(
     arguments: Vec<Value>,
     requested_outputs: usize,
 ) -> impl Future<Output = Result<RootedValueSequence, RuntimeError>> + use<'runtime, 'method> {
-    let work =
-        invoke_resolved_object_method_in_scope(runtime, method, arguments, requested_outputs);
+    let arguments = retained_arguments(runtime, arguments);
+    let work = async move {
+        invoke_resolved_object_method_in_scope(runtime, method, arguments?, requested_outputs).await
+    };
     super::context::scope(runtime, work)
 }
 
+pub(crate) fn invoke_resolved_object_method_retained<'a>(
+    runtime: Option<&'a RuntimeContext>,
+    method: &'a ResolvedObjectMethod,
+    arguments: crate::call::BuiltinArguments,
+    requested_outputs: usize,
+) -> impl Future<Output = Result<RootedValueSequence, RuntimeError>> + 'a {
+    super::context::scope(
+        runtime,
+        invoke_resolved_object_method_in_scope(runtime, method, arguments, requested_outputs),
+    )
+}
+fn retained_arguments(
+    runtime: Option<&RuntimeContext>,
+    arguments: Vec<Value>,
+) -> Result<crate::call::BuiltinArguments, RuntimeError> {
+    match runtime {
+        Some(runtime) => crate::execution::RootedValues::in_context(arguments, runtime),
+        None => crate::execution::RootedValues::new(arguments).map_err(|e| e.into_runtime_error()),
+    }
+    .map(Into::into)
+}
+fn initialize_arguments(
+    runtime: Option<&RuntimeContext>,
+    count: usize,
+    mut initialize: impl FnMut(usize) -> Result<Value, RuntimeError>,
+) -> Result<crate::call::BuiltinArguments, RuntimeError> {
+    match runtime {
+        Some(runtime) => {
+            crate::execution::RootedValues::try_initialize_in_context(count, runtime, initialize)
+        }
+        None => {
+            let mut values = runmat_value::exact_capacity_vec(count)
+                .map_err(|e| crate::object::indexing::allocation_error(None, e.into()))?;
+            for index in 0..count {
+                values.push(initialize(index)?);
+            }
+            crate::execution::RootedValues::new(values).map_err(|e| e.into_runtime_error())
+        }
+    }
+    .map(Into::into)
+}
 async fn invoke_resolved_object_method_in_scope(
     runtime: Option<&RuntimeContext>,
     method: &ResolvedObjectMethod,
-    arguments: Vec<Value>,
+    arguments: crate::call::BuiltinArguments,
     requested_outputs: usize,
 ) -> Result<RootedValueSequence, RuntimeError> {
     if !super::resolved_method_is_current(method) {
@@ -190,35 +255,60 @@ async fn invoke_resolved_object_method_in_scope(
                 .with_selected_method_body(Rc::clone(facts), owner.clone(), binding.clone());
             let descriptor = CallableDescriptor::bound(
                 binding.clone(),
-                arguments,
+                Vec::new(),
                 requested_outputs,
                 CallableCallKind::Direct,
-            );
-            execute_callable_descriptor_in_context(&selected, descriptor).await
+            )
+            .with_retained_arguments(arguments)?;
+            crate::call::descriptor::execute_retained_callable_descriptor(
+                Some(&selected),
+                descriptor,
+            )
+            .await
         }
         ResolvedObjectMethodTarget::RegisteredBound(binding) => {
             let descriptor = CallableDescriptor::bound(
                 binding.clone(),
-                arguments,
+                Vec::new(),
                 requested_outputs,
                 CallableCallKind::Direct,
-            );
+            )
+            .with_retained_arguments(arguments)?;
             match runtime {
-                Some(runtime) => execute_callable_descriptor_in_context(runtime, descriptor).await,
-                None => execute_callable_descriptor(descriptor).await,
+                Some(runtime) => {
+                    crate::call::descriptor::execute_retained_callable_descriptor(
+                        Some(runtime),
+                        descriptor,
+                    )
+                    .await
+                }
+                None => {
+                    crate::call::descriptor::execute_retained_callable_descriptor(None, descriptor)
+                        .await
+                }
             }
         }
         ResolvedObjectMethodTarget::Named(callable) => {
             let descriptor = CallableDescriptor::resolved(
                 callable.clone(),
-                arguments,
+                Vec::new(),
                 requested_outputs,
                 method.fallback,
                 CallableCallKind::Direct,
-            );
+            )
+            .with_retained_arguments(arguments)?;
             match runtime {
-                Some(runtime) => execute_callable_descriptor_in_context(runtime, descriptor).await,
-                None => execute_callable_descriptor(descriptor).await,
+                Some(runtime) => {
+                    crate::call::descriptor::execute_retained_callable_descriptor(
+                        Some(runtime),
+                        descriptor,
+                    )
+                    .await
+                }
+                None => {
+                    crate::call::descriptor::execute_retained_callable_descriptor(None, descriptor)
+                        .await
+                }
             }
         }
     }
@@ -332,43 +422,61 @@ pub(super) async fn invoke_prepared_object_end_with_context(
             "object end component metadata exceeds exact double range",
         ));
     }
-    invoke_resolved_object_method_with_context(
-        runtime,
-        method,
-        vec![
+    let arguments = crate::call::BuiltinArguments::from_borrowed(
+        &[
             receiver,
             Value::Num(k as f64),
             Value::Num(component_count as f64),
         ],
-        1,
-    )
-    .await?
-    .try_map_owned(
-        |sequence| {
-            let values = sequence.resolve(
-                runmat_types::SequenceUse::RequireSingle,
-                SequenceResolutionContext::default(),
-            )?;
-            crate::sequence::into_first_output(values)?.ok_or_else(|| {
-                semantic_error(
-                    "ObjectEndOutput",
-                    "object end protocol did not return one scalar value",
-                )
-            })
-        },
-        |error| error.into_runtime_error(),
-    )
+        runtime,
+    )?;
+    invoke_resolved_object_method_retained(runtime, method, arguments, 1)
+        .await?
+        .try_into_single()
+}
+
+fn retain_protocol_inputs(
+    runtime: Option<&RuntimeContext>,
+    base: &Value,
+    path: &ObjectSubscriptPath,
+) -> Result<crate::execution::RootedValueLease, RuntimeError> {
+    let values = std::iter::once(base).chain(path.steps().iter().flat_map(|step| {
+        let components: &[crate::object::indexing::ObjectIndexComponent] = match step.selector() {
+            crate::object::indexing::ObjectIndexSelector::IndexValues { components } => components,
+            _ => &[],
+        };
+        components.iter().filter_map(|component| match component {
+            crate::object::indexing::ObjectIndexComponent::Value(value) => Some(value),
+            crate::object::indexing::ObjectIndexComponent::Colon => None,
+        })
+    }));
+    match runtime {
+        Some(runtime) => {
+            crate::execution::RootedValueLease::for_values_iterator_in_context(values, runtime)
+        }
+        None => crate::execution::RootedValueLease::for_values(values)
+            .map_err(|e| e.into_runtime_error()),
+    }
 }
 
 fn invocation_arguments(
+    runtime: Option<&RuntimeContext>,
     method: &ResolvedObjectMethod,
     base: Value,
     path: ObjectSubscriptPath,
-) -> Result<Vec<Value>, RuntimeError> {
+) -> Result<crate::call::BuiltinArguments, RuntimeError> {
     match method.convention {
         ObjectProtocolCallingConvention::StandardSubstruct => {
-            let arguments = vec![base, path.to_standard_substruct_value()?];
-            Ok(arguments)
+            if let Some(runtime) = runtime {
+                let descriptor = path.to_standard_substruct_value_in_context(runtime)?;
+                crate::call::BuiltinArguments::from_borrowed(
+                    &[base, descriptor.value().clone()],
+                    Some(runtime),
+                )
+            } else {
+                let descriptor = path.to_standard_substruct_value()?;
+                crate::call::BuiltinArguments::from_borrowed(&[base, descriptor], None)
+            }
         }
         ObjectProtocolCallingConvention::DirectArguments => Err(semantic_error(
             "InvalidObjectProtocolInvocation",

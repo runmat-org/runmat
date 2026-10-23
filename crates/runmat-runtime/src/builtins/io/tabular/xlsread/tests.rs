@@ -6,7 +6,7 @@ use runmat_value::IntegerStorage;
 #[test]
 fn text_controls_require_effective_scalar_shape() {
     let paged = Value::CharArray(
-        runmat_value::CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2])
+        runmat_value::CharArray::from_unicode_scalars_with_shape(vec!['a', 'b'], vec![1, 1, 2])
             .expect("paged character array"),
     );
     assert!(value_to_string_scalar(&paged).is_err());
@@ -16,7 +16,7 @@ fn text_controls_require_effective_scalar_shape() {
     );
     assert!(value_to_string_scalar(&nonscalar).is_err());
     let trailing = Value::CharArray(
-        runmat_value::CharArray::new_with_shape(vec!['x'], vec![1, 1, 1])
+        runmat_value::CharArray::from_unicode_scalars_with_shape(vec!['x'], vec![1, 1, 1])
             .expect("trailing singleton character row"),
     );
     assert_eq!(value_to_string_scalar(&trailing).unwrap(), "x");
@@ -273,6 +273,7 @@ fn fill_named_xlsx<W: Write + std::io::Seek>(zip: &mut zip::ZipWriter<W>, sheet_
 fn direct_xlsread(path: &Path, args: Vec<Value>, outputs: Option<usize>) -> Value {
     let _guard = outputs
         .map(|count| crate::output_count::push_output_count(Some(count)))
+        .transpose()
         .expect("output-count scope");
     block_on(xlsread_builtin(
         None,

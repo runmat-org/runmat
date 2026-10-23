@@ -437,6 +437,14 @@ pub enum Instr {
     BeginOutputAssignment {
         target_count: usize,
     },
+    BeginFixedAssignment {
+        source_statement: runmat_types::StmtId,
+        root_slot: usize,
+    },
+    CommitFixedAssignment {
+        source_statement: runmat_types::StmtId,
+        root_slot: usize,
+    },
     PrepareFixedOutputTarget,
     PrepareDiscardOutputTarget,
     PrepareMemberSequenceOutputTarget {
@@ -464,8 +472,13 @@ pub enum Instr {
         root_slot: usize,
         root_creation: runmat_mir::SequenceRootCreation,
     },
-    PrepareMemberPathStep(runmat_types::MemberName),
-    PrepareDynamicMemberPathStep,
+    PrepareMemberPathStep {
+        member: runmat_types::MemberName,
+        child_creation: runmat_types::AssignmentChildCreation,
+    },
+    PrepareDynamicMemberPathStep {
+        child_creation: runmat_types::AssignmentChildCreation,
+    },
     BeginPreparedIndexSelectors {
         component_count: usize,
     },
@@ -482,16 +495,23 @@ pub enum Instr {
         component_count: usize,
     },
     PrepareParenthesesPathStep {
+        child_creation: runmat_types::AssignmentChildCreation,
         component_count: usize,
         selectors: Vec<super::BytecodeSubscriptSelector>,
     },
     PrepareBracesPathStep {
+        child_creation: runmat_types::AssignmentChildCreation,
         component_count: usize,
         selectors: Vec<super::BytecodeSubscriptSelector>,
         expand_all: bool,
     },
     FinishMemberSequenceOutputTarget(runmat_types::MemberName),
     FinishDynamicMemberSequenceOutputTarget,
+    FinishFixedAssignmentTarget {
+        endpoint: super::BytecodeSubscriptStep,
+        selector_context: Option<usize>,
+        mutation: runmat_types::PlaceMutationKind,
+    },
     FinishCellContentsSequenceOutputTarget {
         component_count: usize,
         selectors: Vec<super::BytecodeSubscriptSelector>,
@@ -752,6 +772,12 @@ pub enum Instr {
     },
     /// Read an assignment root, creating an empty structure only when unassigned.
     LoadVarForStructAssignment(usize),
+    /// Move one retained CSL window between frame receipt slots, without
+    /// extracting or copying any language payload.
+    MoveCapturedSequence {
+        source_slot: usize,
+        destination_slot: usize,
+    },
 }
 
 #[cfg(feature = "native-accel")]
@@ -822,7 +848,7 @@ impl Instr {
             Instr::MemberSequenceCardinality => effect(1, 1),
             Instr::LoadMemberSequenceUsingOutputSlot { .. } => effect(1, 0),
             Instr::LoadMemberDynamicSequenceUsingOutputSlot { .. } => effect(2, 0),
-            Instr::CaptureCallOutputSequence => effect(0, 0),
+            Instr::CaptureCallOutputSequence | Instr::MoveCapturedSequence { .. } => effect(0, 0),
             Instr::CaptureScalarSequence => effect(1, 0),
             Instr::ReadSubscriptPath {
                 steps,
@@ -862,6 +888,8 @@ impl Instr {
                 argument_operand_count.checked_add(1)?,
             ),
             Instr::BeginOutputAssignment { .. }
+            | Instr::BeginFixedAssignment { .. }
+            | Instr::CommitFixedAssignment { .. }
             | Instr::PrepareFixedOutputTarget
             | Instr::PrepareDiscardOutputTarget
             | Instr::PrepareMemberSequenceOutputTarget { .. } => effect(0, 0),
@@ -877,10 +905,10 @@ impl Instr {
                 effect(*num_indices, 0)
             }
             Instr::BeginSequenceOutputTarget { .. }
-            | Instr::PrepareMemberPathStep(_)
+            | Instr::PrepareMemberPathStep { .. }
             | Instr::BeginPreparedIndexSelectors { .. }
             | Instr::FinishMemberSequenceOutputTarget(_) => effect(0, 0),
-            Instr::PrepareDynamicMemberPathStep
+            Instr::PrepareDynamicMemberPathStep { .. }
             | Instr::FinishDynamicMemberSequenceOutputTarget => effect(1, 0),
             Instr::LoadPreparedIndexEnd { .. } | Instr::LoadContextualIndexEnd { .. } => {
                 effect(0, 1)
@@ -893,6 +921,9 @@ impl Instr {
                 effect(subscript_selector_operand_count(selectors), 0)
             }
             Instr::CommitPreparedOutputTargets { retained_outputs } => effect(0, *retained_outputs),
+            Instr::FinishFixedAssignmentTarget { endpoint, .. } => {
+                effect(endpoint.operand_count(), 0)
+            }
             Instr::CaptureMemberSequence { .. } | Instr::CaptureReturnedOutputsSequence { .. } => {
                 effect(1, 0)
             }
@@ -1115,6 +1146,10 @@ fn subscript_operand_count(steps: &[super::BytecodeSubscriptStep]) -> usize {
 fn subscript_selector_operand_count(selectors: &[super::BytecodeSubscriptSelector]) -> usize {
     selectors
         .iter()
-        .filter(|selector| matches!(selector, super::BytecodeSubscriptSelector::Value))
-        .count()
+        .map(|selector| match selector {
+            super::BytecodeSubscriptSelector::Value => 1,
+            super::BytecodeSubscriptSelector::Colon => 0,
+            super::BytecodeSubscriptSelector::Expansion(spec) => spec.stack_operand_count(),
+        })
+        .sum()
 }

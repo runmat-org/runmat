@@ -3,22 +3,16 @@ use runmat_builtins::LOGSPACE_ERRORS;
 
 use runmat_accelerate_api::{HostNumericDataView, HostNumericTensorView, ProviderPrecision};
 use runmat_builtins::BuiltinErrorDescriptor;
-#[cfg(test)]
-use runmat_builtins::Type;
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, IntValue, NumericDType, Tensor, Value};
 
 use crate::build_runtime_error;
-#[cfg(test)]
-use crate::builtins::array::type_resolvers::row_vector_type;
 use crate::builtins::common::residency::{sequence_gpu_preference, SequenceIntent};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-#[cfg(test)]
-use runmat_builtins::ResolveContext;
 
 const LN_10: f64 = std::f64::consts::LN_10;
 
@@ -63,11 +57,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     emits_nan: false,
     notes: "Sequence generation is treated as a sink and is not fused with other operations.",
 };
-
-#[cfg(test)]
-fn logspace_type(_args: &[Type], ctx: &ResolveContext) -> Type {
-    row_vector_type(ctx)
-}
 
 fn terminal_gpu_error(
     message: impl Into<String>,
@@ -876,16 +865,6 @@ pub(crate) mod tests {
         )
         .expect_err("integer endpoints must be rejected");
         assert!(error.message().contains("single or double"));
-    }
-
-    #[test]
-    fn logspace_type_is_row_vector() {
-        assert_eq!(
-            logspace_type(&[Type::Num, Type::Num], &ResolveContext::new(Vec::new())),
-            Type::Tensor {
-                shape: Some(vec![Some(1), None])
-            }
-        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

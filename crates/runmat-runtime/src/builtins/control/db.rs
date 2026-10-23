@@ -151,7 +151,11 @@ fn parse_mode(value: Value) -> BuiltinResult<DbMode> {
             "mode must be a scalar string",
         )),
         Value::CharArray(array) if array.rows == 1 => {
-            let text = array.data().iter().collect::<String>();
+            let text = runmat_value::decode_utf16_code_units(array.data()).map_err(|source| {
+                let mut error = db_error_with_detail(&DB_ERROR_INVALID_MODE, source.to_string());
+                error.source = Some(Box::new(source));
+                error
+            })?;
             parse_mode_string(&text)
         }
         Value::CharArray(_) => Err(db_error_with_detail(

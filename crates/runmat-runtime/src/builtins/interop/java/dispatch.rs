@@ -284,15 +284,28 @@ pub(super) fn text_scalar_eq(value: &Value, expected: &str, ignore_ascii_case: b
             if chars.rows == 1
                 && crate::builtins::common::shape::effective_rank(&chars.shape) == 2 =>
         {
-            chars.data().iter().copied().eq(expected.chars())
+            chars
+                .data()
+                .iter()
+                .map(|unit| unit.raw())
+                .eq(expected.encode_utf16())
                 || (ignore_ascii_case
                     && chars
                         .data()
                         .iter()
-                        .copied()
-                        .zip(expected.chars())
-                        .all(|(left, right)| left.eq_ignore_ascii_case(&right))
-                    && chars.data().len() == expected.chars().count())
+                        .map(|unit| unit.raw())
+                        .zip(expected.encode_utf16())
+                        .all(|(left, right)| {
+                            let lower = |unit: u16| {
+                                if (65..=90).contains(&unit) {
+                                    unit + 32
+                                } else {
+                                    unit
+                                }
+                            };
+                            lower(left) == lower(right)
+                        })
+                    && chars.data().len() == expected.encode_utf16().count())
         }
         _ => false,
     }

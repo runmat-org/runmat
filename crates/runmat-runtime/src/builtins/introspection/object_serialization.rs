@@ -1,18 +1,20 @@
 //! Object save/load customization hooks.
 
 use crate::execution::{RootedValue, RootedValueLease, RootedValuesBuilder};
-use futures::future::LocalBoxFuture;
 use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, StructValue, Value};
 use std::ops::ControlFlow;
 
 mod assembly;
+#[cfg(test)]
+#[path = "object_serialization/factor_tests.rs"]
+mod factor_tests;
 mod mat_load;
-mod restore;
 #[cfg(test)]
 #[path = "object_serialization/pending_tests.rs"]
 mod pending_tests;
+mod restore;
 pub(crate) use mat_load::{classify_mat_load_restoration, MatLoadRestoration};
 
 pub(crate) const SAVEOBJ_METHOD: runmat_types::StaticMethodName =
@@ -47,7 +49,7 @@ fn dispatch_registered_method<'a>(
     builtin: &'static str,
     selected_runtime: Option<&crate::context::RuntimeContext>,
     builtin_issuance: Option<crate::class_registry::BuiltinClassIssuance>,
-) -> LocalBoxFuture<'a, crate::BuiltinResult<ControlFlow<RootedValue, RootedValue>>> {
+) -> crate::execution::RuntimeContinuationFuture<'a, ControlFlow<RootedValue, RootedValue>> {
     // The callback's inputs must remain rooted even if the admitted future is
     // retained unpolled, cancelled, or dropped by its caller.
     let runtime = selected_runtime
@@ -312,6 +314,21 @@ pub(crate) fn prepare_mat_object_element(
         RootedValueLease::for_traced(&value).map_err(|error| error.into_runtime_error());
     async move {
         let _input_root = input_root?;
+        if let Value::Object(object) = &value {
+            if object.is_class(runmat_types::standard::DECOMPOSITION) {
+                let selected = runtime.ok_or_else(|| {
+                    serialization_error(
+                        SAVEOBJ_METHOD.display_name(),
+                        &SERIALIZATION_ERROR_DISPATCH,
+                        "saving a decomposition factor requires its selected invocation",
+                    )
+                })?;
+                crate::builtins::math::linalg::factor::decomposition::validate_factor_object_binding(
+                    object, selected,
+                )
+                .await?;
+            }
+        }
         if let Some(facts) = crate::object::protocol::selected_graph_receiver_facts(&value)? {
             let method = facts.method(&SAVEOBJ_METHOD.owned());
             if let Some(method) = method {
@@ -588,6 +605,47 @@ pub(crate) async fn restore_mat_object_element(
                 )
             });
     }
+    if !handle
+        && matches!(
+            product,
+            crate::context::CurrentClassProductResolution::RegisteredBuiltin(_)
+        )
+        && class
+            == &crate::builtins::math::linalg::factor::decomposition::DECOMPOSITION_CLASS_IDENTITY
+    {
+        let runtime = runtime.ok_or_else(|| {
+            serialization_error(
+                LOADOBJ_METHOD.display_name(),
+                &SERIALIZATION_ERROR_DISPATCH,
+                "restoring a decomposition factor requires its selected invocation",
+            )
+        })?;
+        return payload.with_owned_async(|payload| async move {
+            let Value::Struct(fields) = payload else {
+                return Err(serialization_error(
+                    LOADOBJ_METHOD.display_name(),
+                    &SERIALIZATION_ERROR_ARGUMENT,
+                    "decomposition factor requires its saved property recipe",
+                ));
+            };
+            let object = crate::execution::object::construct_object_from_borrowed_fields(
+                Some(runtime), class.display_name(), fields.fields.iter(),
+            )?;
+            object.with_owned_async(|value| async move {
+                let Value::Object(object) = value else {
+                    return Err(serialization_error(
+                        LOADOBJ_METHOD.display_name(),
+                        &SERIALIZATION_ERROR_DISPATCH,
+                        "decomposition recipe did not construct an object",
+                    ));
+                };
+                let restored = crate::builtins::math::linalg::factor::decomposition::restore_decomposition_factor_object(
+                    object, runtime,
+                ).await?;
+                RootedValue::in_optional_context(Value::Object(restored), Some(runtime))
+            }).await
+        }).await;
+    }
     payload.with_owned(|payload| {
         let Value::Struct(fields) = payload else {
             return Err(serialization_error(
@@ -739,7 +797,10 @@ pub(crate) fn reconcile_mat_object_product(
 fn object_properties_payload(value: &Value) -> crate::BuiltinResult<StructValue> {
     match value {
         Value::Object(object) => {
-            if object.has_native_payload() {
+            if object.has_native_payload()
+                && !(object.is_class(crate::builtins::math::linalg::factor::decomposition::DECOMPOSITION_CLASS_IDENTITY)
+                    && object.numeric_factor_data().is_some())
+            {
                 return Err(serialization_error(
                     SAVEOBJ_METHOD.display_name(),
                     &SERIALIZATION_ERROR_ARGUMENT,

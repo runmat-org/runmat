@@ -5,17 +5,31 @@ use runmat_value::NumericScalar;
 mod labels;
 pub(crate) use self::labels::categorical_label_view;
 
-pub(crate) fn categorical_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
-    let source = args
-        .first()
-        .cloned()
-        .unwrap_or_else(|| Value::StringArray(StringArray::new(Vec::new(), vec![0, 1]).unwrap()));
-    let parsed = parse_categorical_args(&args[1..])?;
-    let labels = categorical_labels(&source)?;
+pub(crate) fn categorical_from_args(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Value> {
+    if args.len() == 1
+        && matches!(args.first(),Some(Value::Object(object)) if object.is_class(CATEGORICAL_CLASS))
+    {
+        return Ok(args.first().expect("one categorical source").clone());
+    }
+    let empty;
+    let source = match args.first() {
+        Some(value) => value,
+        None => {
+            empty = Value::StringArray(
+                StringArray::new(Vec::new(), vec![0, 0]).map_err(invalid_variable)?,
+            );
+            &empty
+        }
+    };
+    let rest = args.range(args.len().min(1)..)?;
+    let parsed = parse_categorical_args(rest)?;
+    let labels = categorical_labels(source)?;
     let category_plan =
-        categorical_category_plan(&source, &labels, parsed.valueset.as_ref(), parsed.catnames)?;
+        categorical_category_plan(source, &labels, parsed.valueset, parsed.catnames)?;
     categorical_object_from_plan(
-        &source,
+        source,
         labels,
         category_plan,
         parsed.ordinal,
@@ -42,10 +56,8 @@ fn categorical_object_from_plan(
             codes.push(f64::NAN);
         }
     }
-    let mut object = runmat_value::UnboundedObjectBuilder::with_property_capacity(
-        CATEGORICAL_CLASS.to_string(),
-        4,
-    );
+    let mut object =
+        runmat_value::UnboundedObjectBuilder::with_property_capacity(CATEGORICAL_CLASS, 4);
     object.insert(
         "Codes".to_string(),
         Value::Tensor(
@@ -67,15 +79,17 @@ fn categorical_object_from_plan(
     Ok(Value::Object(object.finish()))
 }
 
-pub(in crate::builtins::table) fn ordinal_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
+pub(in crate::builtins::table) fn ordinal_from_args(
+    args: crate::call::FunctionArgumentView<'_>,
+) -> BuiltinResult<Value> {
     if args.is_empty() {
         return Err(invalid_argument("ordinal: X is required"));
     }
     if args.len() == 1 {
-        let mut categorical_args = args;
-        categorical_args.push(Value::from("Ordinal"));
-        categorical_args.push(Value::Bool(true));
-        return categorical_from_args(categorical_args);
+        let source = args.first().expect("one source");
+        let labels = categorical_labels(source)?;
+        let plan = categorical_category_plan(source, &labels, None, None)?;
+        return categorical_object_from_plan(source, labels, plan, true, true);
     }
     if args.len() > 4 {
         return Err(invalid_argument(
@@ -213,10 +227,8 @@ fn categorical_object_from_codes(
     ordinal: bool,
     protected: bool,
 ) -> BuiltinResult<Value> {
-    let mut object = runmat_value::UnboundedObjectBuilder::with_property_capacity(
-        CATEGORICAL_CLASS.to_string(),
-        4,
-    );
+    let mut object =
+        runmat_value::UnboundedObjectBuilder::with_property_capacity(CATEGORICAL_CLASS, 4);
     object.insert(
         "Codes".to_string(),
         Value::Tensor(
@@ -452,10 +464,8 @@ fn categorical_from_code_value(
             )))
         }
     };
-    let mut object = runmat_value::UnboundedObjectBuilder::with_property_capacity(
-        CATEGORICAL_CLASS.to_string(),
-        4,
-    );
+    let mut object =
+        runmat_value::UnboundedObjectBuilder::with_property_capacity(CATEGORICAL_CLASS, 4);
     object.insert("Codes".to_string(), Value::Tensor(codes));
     object.insert("Categories".to_string(), categories);
     object.insert("Ordinal".to_string(), Value::Bool(true));
@@ -471,7 +481,7 @@ pub(crate) fn categorical_labels(value: &Value) -> BuiltinResult<Vec<String>> {
             .iter()
             .map(|value| normalize_category_label(value))
             .collect()),
-        Value::CharArray(array) => Ok(char_rows(array)
+        Value::CharArray(array) => Ok(char_rows(array)?
             .into_iter()
             .map(|value| normalize_category_label(&value))
             .collect()),
@@ -488,7 +498,7 @@ pub(crate) fn categorical_labels(value: &Value) -> BuiltinResult<Vec<String>> {
             .iter()
             .map(|flag| if *flag != 0 { "true" } else { "false" }.to_string())
             .collect()),
-        Value::Cell(cell) => cell.data().iter().map(cell_scalar_label).collect(),
+        Value::Cell(cell) => cell.iter_column_major().map(cell_scalar_label).collect(),
         Value::Object(object) if object.is_class(CATEGORICAL_CLASS) => {
             categorical_object_labels(object)
         }
@@ -500,7 +510,13 @@ pub(in crate::builtins::table) fn cell_scalar_label(value: &Value) -> BuiltinRes
     match value {
         Value::String(text) => Ok(normalize_category_label(text)),
         Value::CharArray(array) if array.rows == 1 => {
-            let text: String = array.data().iter().collect();
+            let text = runmat_value::decode_utf16_code_units(array.data()).map_err(|error| {
+                table_error_with_source(
+                    &TABLE_ERROR_INVALID_VARIABLE,
+                    format!("categorical: label is not valid UTF-16 text: {error}"),
+                    error,
+                )
+            })?;
             Ok(normalize_category_label(&text))
         }
         Value::Num(value) if value.is_nan() => Ok(String::new()),
@@ -519,23 +535,28 @@ pub(in crate::builtins::table) fn value_shape_or_column(
         Value::LogicalArray(array) => Ok(array.shape.to_vec()),
         Value::Cell(cell) => Ok(cell.shape().to_vec()),
         Value::CharArray(array) => Ok(vec![array.rows, 1]),
+        Value::Object(object) if object.is_class(CATEGORICAL_CLASS) => {
+            categorical_codes(object).map(|codes| codes.shape().to_vec())
+        }
         _ => Ok(vec![1, 1]),
     }
 }
 
 #[derive(Default)]
-struct CategoricalArgs {
-    valueset: Option<Value>,
+struct CategoricalArgs<'a> {
+    valueset: Option<&'a Value>,
     catnames: Option<Vec<String>>,
     ordinal: bool,
     protected: Option<bool>,
 }
 
-fn parse_categorical_args(args: &[Value]) -> BuiltinResult<CategoricalArgs> {
+fn parse_categorical_args<'a>(
+    args: crate::call::FunctionArgumentView<'a>,
+) -> BuiltinResult<CategoricalArgs<'a>> {
     let mut parsed = CategoricalArgs::default();
     let mut idx = 0usize;
     if idx < args.len() && !is_categorical_option_pair(args, idx) {
-        parsed.valueset = Some(args[idx].clone());
+        parsed.valueset = args.get(idx);
         idx += 1;
     }
     if idx < args.len() && !is_categorical_option_pair(args, idx) {
@@ -549,14 +570,18 @@ fn parse_categorical_args(args: &[Value]) -> BuiltinResult<CategoricalArgs> {
             ));
         }
         let option_name = scalar_text(&args[idx], "categorical option")?;
-        if option_name.eq_ignore_ascii_case("Ordinal") {
-            parsed.ordinal = categorical_bool_scalar(&args[idx + 1], "Ordinal")?;
-        } else if option_name.eq_ignore_ascii_case("Protected") {
-            parsed.protected = Some(categorical_bool_scalar(&args[idx + 1], "Protected")?);
-        } else {
-            return Err(invalid_argument(format!(
-                "categorical: unsupported option '{option_name}'"
-            )));
+        match runmat_builtins::CategoricalOption::parse(&option_name) {
+            Some(runmat_builtins::CategoricalOption::Ordinal) => {
+                parsed.ordinal = categorical_bool_scalar(&args[idx + 1], "Ordinal")?
+            }
+            Some(runmat_builtins::CategoricalOption::Protected) => {
+                parsed.protected = Some(categorical_bool_scalar(&args[idx + 1], "Protected")?)
+            }
+            None => {
+                return Err(invalid_argument(format!(
+                    "categorical: unsupported option '{option_name}'"
+                )))
+            }
         }
         idx += 2;
     }
@@ -567,8 +592,7 @@ fn categorical_category_names(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => categorical_labels(value),
         Value::Cell(cell) => cell
-            .data()
-            .iter()
+            .iter_column_major()
             .map(|value| match value {
                 Value::String(_) | Value::CharArray(_) => cell_scalar_label(value),
                 _ => Err(invalid_argument(
@@ -582,14 +606,14 @@ fn categorical_category_names(value: &Value) -> BuiltinResult<Vec<String>> {
     }
 }
 
-fn is_categorical_option_pair(args: &[Value], idx: usize) -> bool {
+fn is_categorical_option_pair(args: crate::call::FunctionArgumentView<'_>, idx: usize) -> bool {
     let Some(value) = args.get(idx) else {
         return false;
     };
     let Ok(name) = scalar_text(value, "categorical option") else {
         return false;
     };
-    if !(name.eq_ignore_ascii_case("Ordinal") || name.eq_ignore_ascii_case("Protected")) {
+    if runmat_builtins::CategoricalOption::parse(&name).is_none() {
         return false;
     }
     args.get(idx + 1)
@@ -1145,10 +1169,8 @@ mod tests {
             );
 
             let codes = Tensor::new_integer(storage, vec![1, 1]).unwrap();
-            let mut object = runmat_value::UnboundedObjectBuilder::with_property_capacity(
-                CATEGORICAL_CLASS.to_string(),
-                2,
-            );
+            let mut object =
+                runmat_value::UnboundedObjectBuilder::with_property_capacity(CATEGORICAL_CLASS, 2);
             object.insert("Codes".to_string(), Value::Tensor(codes));
             object.insert(
                 "Categories".to_string(),
@@ -1180,10 +1202,8 @@ mod tests {
         );
 
         let codes = Tensor::from_f32(vec![2.0, f32::NAN, 1.5], vec![1, 3]).unwrap();
-        let mut object = runmat_value::UnboundedObjectBuilder::with_property_capacity(
-            CATEGORICAL_CLASS.to_string(),
-            2,
-        );
+        let mut object =
+            runmat_value::UnboundedObjectBuilder::with_property_capacity(CATEGORICAL_CLASS, 2);
         object.insert("Codes".to_string(), Value::Tensor(codes));
         object.insert(
             "Categories".to_string(),
@@ -1196,5 +1216,56 @@ mod tests {
             categorical_object_labels(&object).unwrap(),
             vec!["two", "", ""]
         );
+    }
+    #[test]
+    fn empty_cell_geometry_and_categorical_copy_preserve_codes_and_metadata() {
+        use crate::call::FunctionArgumentView;
+        let Value::Object(empty) =
+            categorical_from_args(FunctionArgumentView::from_slice(&[])).unwrap()
+        else {
+            panic!("categorical")
+        };
+        let Value::Tensor(codes) = &empty.properties()["Codes"] else {
+            panic!("codes")
+        };
+        assert_eq!(codes.shape(), &[0, 0]);
+        let source = Value::Cell(
+            CellArray::new_with_shape(
+                ["a", "b", "c", "d", "e", "f", "g", "h"]
+                    .into_iter()
+                    .map(Value::from)
+                    .collect(),
+                vec![2, 2, 2],
+            )
+            .unwrap(),
+        );
+        let names = Value::StringArray(
+            StringArray::new(
+                ["a", "b", "c", "d", "e", "f", "g", "h", "unused"]
+                    .into_iter()
+                    .map(String::from)
+                    .collect(),
+                vec![1, 9],
+            )
+            .unwrap(),
+        );
+        let args = [source, names, Value::from("Ordinal"), Value::Bool(true)];
+        let original = categorical_from_args(FunctionArgumentView::from_slice(&args)).unwrap();
+        let Value::Object(object) = &original else {
+            panic!("categorical")
+        };
+        let Value::Tensor(codes) = &object.properties()["Codes"] else {
+            panic!("codes")
+        };
+        assert_eq!(codes.shape(), &[2, 2, 2]);
+        assert_eq!(
+            codes.materialize_f64(),
+            vec![1., 3., 2., 4., 5., 7., 6., 8.]
+        );
+        let copy = categorical_from_args(FunctionArgumentView::from_slice(std::slice::from_ref(
+            &original,
+        )))
+        .unwrap();
+        assert_eq!(copy, original);
     }
 }

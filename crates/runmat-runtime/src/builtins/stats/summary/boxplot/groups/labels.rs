@@ -2,9 +2,9 @@
 use super::super::*;
 use crate::builtins::common::grouping_keys::KeyAtom;
 
+mod builder;
 #[cfg(test)]
 mod tests;
-mod builder;
 mod text_copy;
 use builder::{GroupLabelBuilder, LabelProgress};
 
@@ -91,21 +91,25 @@ fn scalar_group_label(value: &Value) -> BuiltinResult<Option<GroupLabel>> {
     }
 }
 
-pub(in crate::builtins::stats::summary::boxplot) fn char_rows(array: &CharArray) -> Vec<String> {
+pub(in crate::builtins::stats::summary::boxplot) fn char_rows(
+    array: &CharArray,
+) -> BuiltinResult<Vec<String>> {
     (0..array.rows.max(1))
         .map(|row| char_row(array, row))
         .collect()
 }
 
-fn char_row(array: &CharArray, row: usize) -> String {
-    if array.rows <= 1 {
-        return array.data().iter().collect();
-    }
-    (0..array.cols)
-        .filter_map(|col| array.data().get(row * array.cols + col).copied())
-        .collect::<String>()
-        .trim_end()
-        .to_string()
+fn char_row(array: &CharArray, row: usize) -> BuiltinResult<String> {
+    let units = if array.rows <= 1 {
+        array.data()
+    } else {
+        let start = row * array.cols;
+        &array.data()[start..start + array.cols]
+    };
+    crate::builtins::stats::decode_utf16_with_error(units, || {
+        invalid("boxplot: group label is not valid UTF-16 text")
+    })
+    .map(|text| text.trim_end().to_string())
 }
 
 pub(in crate::builtins::stats::summary::boxplot) fn number_label(value: &f64) -> String {

@@ -33,7 +33,7 @@ pub const MUST_BE_NONMISSING_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalog
         preparation: BuiltinOperandPreparation::RuntimeOwned,
         portability: BuiltinPortability::NativeAndWasm,
         accelerator: BuiltinAcceleratorPolicy::Forbidden,
-        residency: BuiltinResidencyPolicy::PreserveInputs,
+        residency: BuiltinResidencyPolicy::Host,
         fusion: BuiltinFusionPolicy::Boundary,
         distributed: BuiltinDistributedPolicy::InspectHandles,
     },

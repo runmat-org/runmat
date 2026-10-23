@@ -1,27 +1,28 @@
 //! MATLAB-compatible `ismember` builtin with GPU-aware semantics for RunMat.
 
+use super::set_policy::{ElementKey, Operand};
+#[cfg(test)]
+use super::type_resolvers::logical_output_type;
+use crate::call::{BuiltinArguments, FunctionArgumentView};
+pub use runmat_builtins::{
+    ISMEMBER_DESCRIPTOR, ISMEMBER_ERROR_INTERNAL, ISMEMBER_ERROR_INVALID_ARGUMENT,
+    ISMEMBER_ERROR_LEGACY_OPTION_UNSUPPORTED, ISMEMBER_ERROR_NUMERIC_CLASS_MISMATCH,
+    ISMEMBER_ERROR_ROWS_COLUMN_MISMATCH, ISMEMBER_ERROR_UNKNOWN_OPTION,
+    ISMEMBER_ERROR_UNSUPPORTED_INPUT_TYPE, ISMEMBER_INTEGER_CAPABILITIES,
+};
 use std::collections::HashMap;
 
 use runmat_accelerate_api::{
     GpuTensorHandle, HostLogicalOwned, IsMemberOptions as ProviderIsMemberOptions, IsMemberResult,
 };
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CharArray, ComplexStorage, ComplexTensor, IntValue, LogicalArray, NumericDType, NumericStorage,
-    StringArray, Tensor, Utf8Text, Value,
+    StringArray, Tensor, Utf16CodeUnit, Utf8Text, Value,
 };
 
-use super::{
-    float_order::{ComplexSequence, SetFloat},
-    type_resolvers::logical_output_type,
-};
+use super::float_order::{ComplexSequence, SetFloat};
 use crate::build_runtime_error;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::integer_conversion::{IntegerClass, IntegerClassExt};
@@ -62,173 +63,6 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 const BUILTIN_NAME: &str = "ismember";
 
-const ISMEMBER_OUTPUT_MASK: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tf",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Membership mask over A.",
-}];
-
-const ISMEMBER_OUTPUT_MASK_LOC: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "tf",
-        ty: BuiltinParamType::LogicalArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Membership mask over A.",
-    },
-    BuiltinParamDescriptor {
-        name: "loc",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "First-match indices into B for each element/row in A (0 when absent).",
-    },
-];
-
-const ISMEMBER_INPUTS_A_B: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Values or rows to query.",
-    },
-    BuiltinParamDescriptor {
-        name: "B",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Reference set of values or rows.",
-    },
-];
-
-const ISMEMBER_INPUTS_A_B_OPTIONS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Values or rows to query.",
-    },
-    BuiltinParamDescriptor {
-        name: "B",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Reference set of values or rows.",
-    },
-    BuiltinParamDescriptor {
-        name: "option",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Option tokens: 'rows'.",
-    },
-];
-
-const ISMEMBER_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "tf = ismember(A, B)",
-        inputs: &ISMEMBER_INPUTS_A_B,
-        outputs: &ISMEMBER_OUTPUT_MASK,
-    },
-    BuiltinSignatureDescriptor {
-        label: "tf = ismember(A, B, option...)",
-        inputs: &ISMEMBER_INPUTS_A_B_OPTIONS,
-        outputs: &ISMEMBER_OUTPUT_MASK,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[tf, loc] = ismember(A, B)",
-        inputs: &ISMEMBER_INPUTS_A_B,
-        outputs: &ISMEMBER_OUTPUT_MASK_LOC,
-    },
-    BuiltinSignatureDescriptor {
-        label: "[tf, loc] = ismember(A, B, option...)",
-        inputs: &ISMEMBER_INPUTS_A_B_OPTIONS,
-        outputs: &ISMEMBER_OUTPUT_MASK_LOC,
-    },
-];
-
-const ISMEMBER_ERROR_LEGACY_OPTION_UNSUPPORTED: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISMEMBER.LEGACY_OPTION_UNSUPPORTED",
-    identifier: Some("RunMat:ismember:LegacyOptionUnsupported"),
-    when: "Legacy compatibility options are requested.",
-    message: "ismember: the 'legacy' behaviour is not supported",
-};
-
-const ISMEMBER_ERROR_UNKNOWN_OPTION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISMEMBER.UNKNOWN_OPTION",
-    identifier: Some("RunMat:ismember:UnknownOption"),
-    when: "An unsupported option token is provided.",
-    message: "ismember: unrecognised option",
-};
-
-const ISMEMBER_ERROR_ROWS_COLUMN_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISMEMBER.ROWS_COLUMN_MISMATCH",
-    identifier: Some("RunMat:ismember:RowsColumnMismatch"),
-    when: "'rows' mode is used and column counts differ.",
-    message: "ismember: inputs must have the same number of columns when using 'rows'",
-};
-
-const ISMEMBER_ERROR_UNSUPPORTED_INPUT_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISMEMBER.UNSUPPORTED_INPUT_TYPE",
-    identifier: Some("RunMat:ismember:UnsupportedInputType"),
-    when: "Input classes or execution residency are unsupported.",
-    message: "ismember: unsupported input type",
-};
-
-const ISMEMBER_ERROR_NUMERIC_CLASS_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISMEMBER.NUMERIC_CLASS_MISMATCH",
-    identifier: Some("RunMat:ismember:NumericClassMismatch"),
-    when: "Numeric inputs have incompatible nondouble classes.",
-    message: "ismember: numeric inputs must have the same class, except double may be combined with one nondouble class",
-};
-
-const ISMEMBER_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISMEMBER.INVALID_ARGUMENT",
-    identifier: Some("RunMat:ismember:InvalidArgument"),
-    when: "Option arguments are not string-like where required.",
-    message: "ismember: expected string option arguments",
-};
-
-const ISMEMBER_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISMEMBER.INTERNAL",
-    identifier: Some("RunMat:ismember:Internal"),
-    when: "Internal conversion/allocation/provider decode fails.",
-    message: "ismember: internal operation failed",
-};
-
-const ISMEMBER_ERRORS: [BuiltinErrorDescriptor; 7] = [
-    ISMEMBER_ERROR_LEGACY_OPTION_UNSUPPORTED,
-    ISMEMBER_ERROR_UNKNOWN_OPTION,
-    ISMEMBER_ERROR_ROWS_COLUMN_MISMATCH,
-    ISMEMBER_ERROR_UNSUPPORTED_INPUT_TYPE,
-    ISMEMBER_ERROR_NUMERIC_CLASS_MISMATCH,
-    ISMEMBER_ERROR_INVALID_ARGUMENT,
-    ISMEMBER_ERROR_INTERNAL,
-];
-
-const ISMEMBER_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "[Lia, Locb] = ismember(integer_A, integer_B, options)",
-        inputs: &super::BINARY_SET_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GpuRestricted,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Lia is logical and optional Locb is one-based double. Host supports all eight integer classes exactly; GPU supports integer classes through 32 bits, gathers typed fallback when needed, and restores both outputs to the owning provider.",
-    }];
-
-pub const ISMEMBER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ISMEMBER_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ISMEMBER_ERRORS,
-};
-
 fn ismember_error_with(
     error: &'static BuiltinErrorDescriptor,
     message: impl Into<String>,
@@ -250,17 +84,14 @@ fn ismember_internal_error(message: impl Into<String>) -> crate::RuntimeError {
 
 #[runtime_builtin(
     name = "ismember",
-    category = "array/sorting_sets",
-    summary = "Identify array elements or rows that appear in another array while returning first-match indices.",
-    keywords = "ismember,membership,set,rows,indices,gpu",
-    accel = "array_construct",
-    sink = true,
-    type_resolver(logical_output_type),
-    descriptor(crate::builtins::array::sorting_sets::ismember::ISMEMBER_DESCRIPTOR),
-    integer_capabilities(ISMEMBER_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::sorting_sets::ismember"
 )]
-async fn ismember_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn ismember_builtin(
+    a: Value,
+    b: Value,
+    rest: BuiltinArguments,
+) -> crate::BuiltinResult<Value> {
     if matches!(crate::output_count::current_output_count(), Some(n) if n > 2) {
         return Err(ismember_error_with(
             &ISMEMBER_ERROR_INVALID_ARGUMENT,
@@ -268,7 +99,7 @@ async fn ismember_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::Builti
         ));
     }
     let provider = super::set_output_provider(&a, &b);
-    let eval = evaluate(a, b, &rest).await?;
+    let eval = evaluate_view(a, b, rest.view()).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::output_list(Vec::new()));
@@ -306,9 +137,17 @@ pub async fn evaluate(
     b: Value,
     rest: &[Value],
 ) -> crate::BuiltinResult<IsMemberEvaluation> {
+    evaluate_view(a, b, FunctionArgumentView::from_slice(rest)).await
+}
+
+pub(super) async fn evaluate_view(
+    a: Value,
+    b: Value,
+    rest: FunctionArgumentView<'_>,
+) -> crate::BuiltinResult<IsMemberEvaluation> {
     crate::builtins::common::validation::reject_typed_complex_integer(&a, "ismember")?;
     crate::builtins::common::validation::reject_typed_complex_integer(&b, "ismember")?;
-    let opts = parse_options(rest)?;
+    let opts = parse_options_view(rest)?;
     for value in [&a, &b] {
         if let Value::GpuTensor(handle) = value {
             if super::is_unsupported_set_gpu_integer(handle) {
@@ -344,7 +183,12 @@ impl IsMemberOptions {
     }
 }
 
+#[cfg(test)]
 fn parse_options(rest: &[Value]) -> crate::BuiltinResult<IsMemberOptions> {
+    parse_options_view(FunctionArgumentView::from_slice(rest))
+}
+
+fn parse_options_view(rest: FunctionArgumentView<'_>) -> crate::BuiltinResult<IsMemberOptions> {
     let mut opts = IsMemberOptions { rows: false };
     for arg in rest {
         let text = tensor::value_to_string(arg)
@@ -371,23 +215,29 @@ async fn ismember_gpu_pair(
     handle_b: GpuTensorHandle,
     opts: &IsMemberOptions,
 ) -> crate::BuiltinResult<IsMemberEvaluation> {
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle_a)
-        .or_else(runmat_accelerate_api::provider)
-    {
-        let provider_opts = opts.into_provider_options();
-        match provider
-            .ismember(&handle_a, &handle_b, &provider_opts)
-            .await
-        {
-            Ok(result) => return IsMemberEvaluation::from_provider_result(result),
-            Err(_) => {
-                // Fall back to host gather when the provider lacks an ismember implementation.
+    if super::provider_result::real_pair(&handle_a, &handle_b) {
+        if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle_a) {
+            let provider_opts = opts.into_provider_options();
+            if let Some(result) = super::provider_result::attempt(
+                provider.ismember(&handle_a, &handle_b, &provider_opts),
+                ismember_internal_error,
+            )
+            .await?
+            {
+                let (mask, loc) = super::provider_result::membership(
+                    result,
+                    &handle_a,
+                    &handle_b,
+                    opts.rows,
+                    ismember_internal_error,
+                )?;
+                return Ok(IsMemberEvaluation::new(mask, loc));
             }
         }
     }
-    let tensor_a = gpu_helpers::gather_tensor_async(&handle_a).await?;
-    let tensor_b = gpu_helpers::gather_tensor_async(&handle_b).await?;
-    ismember_numeric_tensors(tensor_a, tensor_b, opts)
+    let a = gpu_helpers::gather_value_async(&Value::GpuTensor(handle_a)).await?;
+    let b = gpu_helpers::gather_value_async(&Value::GpuTensor(handle_b)).await?;
+    ismember_host(a, b, opts)
 }
 
 async fn ismember_gpu_mixed(
@@ -396,11 +246,11 @@ async fn ismember_gpu_mixed(
     opts: &IsMemberOptions,
     gpu_is_a: bool,
 ) -> crate::BuiltinResult<IsMemberEvaluation> {
-    let tensor_gpu = gpu_helpers::gather_tensor_async(&handle_gpu).await?;
+    let gpu = gpu_helpers::gather_value_async(&Value::GpuTensor(handle_gpu)).await?;
     if gpu_is_a {
-        ismember_host(Value::Tensor(tensor_gpu), other, opts)
+        ismember_host(gpu, other, opts)
     } else {
-        ismember_host(other, Value::Tensor(tensor_gpu), opts)
+        ismember_host(other, gpu, opts)
     }
 }
 
@@ -619,16 +469,17 @@ fn ismember_floating_elements<T: SetFloat>(
     a_shape: Vec<usize>,
     b_values: Vec<T>,
 ) -> crate::BuiltinResult<IsMemberEvaluation> {
-    let mut map: HashMap<u64, usize> = HashMap::new();
+    let mut map: HashMap<ElementKey, usize> = HashMap::new();
     for (idx, &value) in b_values.iter().enumerate() {
-        map.entry(value.canonical_key()).or_insert(idx + 1);
+        map.entry(ElementKey::real(value, Operand::B, idx))
+            .or_insert(idx + 1);
     }
 
     let mut mask_data = Vec::<u8>::with_capacity(a_values.len());
     let mut loc_data = Vec::<f64>::with_capacity(a_values.len());
 
-    for &value in a_values.iter() {
-        let key = value.canonical_key();
+    for (index, &value) in a_values.iter().enumerate() {
+        let key = ElementKey::real(value, Operand::A, index);
         if let Some(&pos) = map.get(&key) {
             mask_data.push(1);
             loc_data.push(pos as f64);
@@ -668,7 +519,7 @@ fn ismember_floating_rows<T: SetFloat>(
             let idx = r + c * rows_b;
             row_values.push(b_values[idx]);
         }
-        let key = FloatingRowKey::from_slice(&row_values);
+        let key = FloatingRowKey::from_slice(&row_values, Operand::B, r);
         map.entry(key).or_insert(r + 1);
     }
 
@@ -681,7 +532,7 @@ fn ismember_floating_rows<T: SetFloat>(
             let idx = r + c * rows_a;
             row_values.push(a_values[idx]);
         }
-        let key = FloatingRowKey::from_slice(&row_values);
+        let key = FloatingRowKey::from_slice(&row_values, Operand::A, r);
         if let Some(&pos) = map.get(&key) {
             mask_data[r] = 1;
             loc_data[r] = pos as f64;
@@ -760,7 +611,8 @@ fn ismember_floating_complex_elements<T: SetFloat, A: ComplexSequence<T>, B: Com
     let mut map: HashMap<ComplexKey, usize> = HashMap::new();
     for idx in 0..b.len() {
         let value = b.pair_at(idx);
-        map.entry(ComplexKey::new(value)).or_insert(idx + 1);
+        map.entry(ElementKey::complex(value, Operand::B, idx))
+            .or_insert(idx + 1);
     }
 
     let mut mask_data = Vec::<u8>::with_capacity(a.len());
@@ -768,7 +620,7 @@ fn ismember_floating_complex_elements<T: SetFloat, A: ComplexSequence<T>, B: Com
 
     for index in 0..a.len() {
         let value = a.pair_at(index);
-        let key = ComplexKey::new(value);
+        let key = ElementKey::complex(value, Operand::A, index);
         if let Some(&pos) = map.get(&key) {
             mask_data.push(1);
             loc_data.push(pos as f64);
@@ -810,7 +662,7 @@ fn ismember_floating_complex_rows<T: SetFloat, A: ComplexSequence<T>, B: Complex
         let mut row_keys = Vec::with_capacity(cols_b);
         for c in 0..cols_b {
             let idx = r + c * rows_b;
-            row_keys.push(ComplexKey::new(b.pair_at(idx)));
+            row_keys.push(ElementKey::complex(b.pair_at(idx), Operand::B, r));
         }
         map.entry(row_keys).or_insert(r + 1);
     }
@@ -822,7 +674,7 @@ fn ismember_floating_complex_rows<T: SetFloat, A: ComplexSequence<T>, B: Complex
         let mut row_keys = Vec::with_capacity(cols_a);
         for c in 0..cols_a {
             let idx = r + c * rows_a;
-            row_keys.push(ComplexKey::new(a.pair_at(idx)));
+            row_keys.push(ElementKey::complex(a.pair_at(idx), Operand::A, r));
         }
         if let Some(&pos) = map.get(&row_keys) {
             mask_data[r] = 1;
@@ -853,7 +705,7 @@ fn ismember_char(
 fn ismember_char_elements(a: CharArray, b: CharArray) -> crate::BuiltinResult<IsMemberEvaluation> {
     let rows_b = b.rows;
     let cols_b = b.cols;
-    let mut map: HashMap<char, usize> = HashMap::new();
+    let mut map: HashMap<Utf16CodeUnit, usize> = HashMap::new();
 
     for col in 0..cols_b {
         for row in 0..rows_b {
@@ -1043,35 +895,25 @@ fn shape_rows_cols(shape: &[usize], name: &str) -> crate::BuiltinResult<(usize, 
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct FloatingRowKey(Vec<u64>);
-
+struct FloatingRowKey(Vec<ElementKey>);
 impl FloatingRowKey {
-    fn from_slice<T: SetFloat>(values: &[T]) -> Self {
-        FloatingRowKey(values.iter().map(|&value| value.canonical_key()).collect())
+    fn from_slice<T: SetFloat>(values: &[T], operand: Operand, record: usize) -> Self {
+        Self(
+            values
+                .iter()
+                .map(|&value| ElementKey::real(value, operand, record))
+                .collect(),
+        )
     }
 }
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-struct ComplexKey {
-    re: u64,
-    im: u64,
-}
-
-impl ComplexKey {
-    fn new<T: SetFloat>(value: (T, T)) -> Self {
-        Self {
-            re: value.0.canonical_key(),
-            im: value.1.canonical_key(),
-        }
-    }
-}
+type ComplexKey = ElementKey;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct RowCharKey(Vec<u32>);
+struct RowCharKey(Vec<Utf16CodeUnit>);
 
 impl RowCharKey {
-    fn from_slice(values: &[char]) -> Self {
-        RowCharKey(values.iter().map(|&ch| ch as u32).collect())
+    fn from_slice(values: &[Utf16CodeUnit]) -> Self {
+        RowCharKey(values.to_vec())
     }
 }
 
@@ -1154,7 +996,11 @@ pub(crate) mod tests {
     }
 
     fn builtin_sync(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-        futures::executor::block_on(ismember_builtin(a, b, rest))
+        futures::executor::block_on(ismember_builtin(
+            a,
+            b,
+            crate::builtins::common::test_support::builtin_arguments(rest),
+        ))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1254,8 +1100,8 @@ pub(crate) mod tests {
         let a = Tensor::from_f32(vec![1.0, 2.0, f32::NAN], vec![3, 1]).unwrap();
         let b = Tensor::from_f32(vec![2.0, f32::NAN], vec![2, 1]).unwrap();
         let eval = evaluate_sync(Value::Tensor(a), Value::Tensor(b), &[]).expect("single ismember");
-        assert_eq!(eval.mask.data, vec![0, 1, 1]);
-        assert_eq!(eval.loc.materialize_f64(), vec![0.0, 1.0, 2.0]);
+        assert_eq!(eval.mask.data, vec![0, 1, 0]);
+        assert_eq!(eval.loc.materialize_f64(), vec![0.0, 1.0, 0.0]);
 
         let a = Tensor::from_f32(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
         let b = Tensor::from_f32(vec![3.0, 5.0, 4.0, 6.0], vec![2, 2]).unwrap();
@@ -1531,8 +1377,8 @@ pub(crate) mod tests {
         let a = Tensor::new(vec![f64::NAN, 1.0], vec![1, 2]).unwrap();
         let b = Tensor::new(vec![f64::NAN, 2.0], vec![1, 2]).unwrap();
         let eval = ismember_numeric_elements(a, b).expect("ismember");
-        assert_eq!(eval.mask.data, vec![1, 0]);
-        assert_eq!(eval.loc.materialize_f64(), vec![1.0, 0.0]);
+        assert_eq!(eval.mask.data, vec![0, 0]);
+        assert_eq!(eval.loc.materialize_f64(), vec![0.0, 0.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1613,8 +1459,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_membership() {
-        let a = CharArray::new(vec!['r', 'u', 'n', 'm'], 2, 2).unwrap();
-        let b = CharArray::new(vec!['m', 'a', 'r', 'u'], 2, 2).unwrap();
+        let a = CharArray::from_unicode_scalars(vec!['r', 'u', 'n', 'm'], 2, 2).unwrap();
+        let b = CharArray::from_unicode_scalars(vec!['m', 'a', 'r', 'u'], 2, 2).unwrap();
         let eval = ismember_char_elements(a, b).expect("ismember");
         assert_eq!(eval.mask.data, vec![1, 0, 1, 1]);
         assert_eq!(eval.loc.materialize_f64(), vec![2.0, 0.0, 4.0, 1.0]);
@@ -1623,8 +1469,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn char_rows_membership() {
-        let a = CharArray::new(vec!['m', 'a', 't', 'l'], 2, 2).unwrap();
-        let b = CharArray::new(vec!['m', 'a', 'g', 'e', 't', 'l'], 3, 2).unwrap();
+        let a = CharArray::from_unicode_scalars(vec!['m', 'a', 't', 'l'], 2, 2).unwrap();
+        let b = CharArray::from_unicode_scalars(vec!['m', 'a', 'g', 'e', 't', 'l'], 3, 2).unwrap();
         let eval = ismember_char_rows(a, b).expect("ismember");
         assert_eq!(eval.mask.data, vec![1, 1]);
         assert_eq!(eval.loc.materialize_f64(), vec![1.0, 3.0]);
@@ -1885,7 +1731,7 @@ pub(crate) mod tests {
         let a = Tensor::new(vec![f64::NAN, 1.0], vec![2, 1]).unwrap();
         let b = Tensor::new(vec![f64::NAN, 2.0], vec![2, 1]).unwrap();
         let eval = ismember_numeric_rows(a, b).expect("ismember");
-        assert_eq!(eval.mask.data, vec![1, 0]);
-        assert_eq!(eval.loc.materialize_f64(), vec![1.0, 0.0]);
+        assert_eq!(eval.mask.data, vec![0, 0]);
+        assert_eq!(eval.loc.materialize_f64(), vec![0.0, 0.0]);
     }
 }

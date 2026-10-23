@@ -122,8 +122,12 @@ fn context_uses_actual_adapter_policy_and_turn_hook() {
         calls: calls.clone(),
         behavior: TurnBehavior::Ready,
     });
-    let context = RuntimeContext::with_cancellation(service, source.token());
+    let authority: Rc<dyn RuntimeExecutionServices> = service.clone();
+    let context = RuntimeContext::with_cancellation(authority.clone(), source.token());
     let mut budget = context.cpu_cooperation();
+    assert!(
+        matches!(&budget.turn, Some(CpuTurnOwner::Service(retained)) if Rc::ptr_eq(retained, &authority))
+    );
     futures::executor::block_on(budget.checkpoint(6)).unwrap();
     assert_eq!(calls.get(), 0);
     futures::executor::block_on(budget.checkpoint(1)).unwrap();

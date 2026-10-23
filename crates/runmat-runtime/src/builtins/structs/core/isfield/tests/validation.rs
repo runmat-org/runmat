@@ -12,7 +12,7 @@ fn invalid_top_level_name_type_uses_the_owned_error() {
 
 #[test]
 fn character_matrix_is_not_a_field_name() {
-    let matrix = CharArray::new(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap();
+    let matrix = CharArray::from_unicode_scalars(vec!['a', 'b', 'c', 'd'], 2, 2).unwrap();
     let error = run(Value::Struct(StructValue::new()), Value::CharArray(matrix)).unwrap_err();
     assert_eq!(
         error.identifier(),

@@ -112,7 +112,7 @@ fn build_table_fit_spec(
     let mut formula_predictors = None;
     if let Some(first_arg) = rest.first() {
         if arguments.option_start == 1 {
-            if let Some(text) = scalar_text(first_arg) {
+            if let Some(text) = scalar_text(first_arg)? {
                 if text.contains('~') {
                     let parsed = parse_formula(&text, &variable_names)?;
                     response_name = parsed.0;

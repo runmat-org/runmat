@@ -19,7 +19,7 @@ impl RoundingMode {
                 "rounding mode must be scalar text or a character row",
             ));
         }
-        let Some(keyword) = keyword_of(value) else {
+        let Some(keyword) = keyword_of(value)? else {
             return Err(error(&ERROR_INVALID_INPUT, "rounding mode must be text"));
         };
         match keyword.as_str() {

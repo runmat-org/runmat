@@ -93,7 +93,7 @@ fn complex_table_character_and_symbolic_overloads_remain_distinct() {
         ComplexStorage::F32(_)
     ));
 
-    let chars = CharArray::new(vec!['A'], 1, 1).unwrap();
+    let chars = CharArray::from_unicode_scalars(vec!['A'], 1, 1).unwrap();
     assert!(matches!(
         call(Value::CharArray(chars)),
         Ok(Value::Num(_)) | Ok(Value::Tensor(_))

@@ -198,6 +198,8 @@ fn closed_world_native_callback_reuses_local_strcmp_feedback() {
         .aot_object_data(
             &assembly,
             runmat_core::AotObjectDataOptions {
+                clock_inputs: None,
+                local_service_inputs: None,
                 runtime_binding_mode:
                     runmat_native_codegen::aot::AotRuntimeBindingMode::ClosedWorld,
                 builtin_bindings: vec![runmat_native_codegen::aot::AotBuiltinBinding {

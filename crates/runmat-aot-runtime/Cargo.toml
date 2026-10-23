@@ -35,10 +35,13 @@ tempfile = "3.12"
 tracing = "0.1"
 
 [features]
-default = ["wgpu", "cuda"]
+default = ["wgpu", "cuda", "stock-hosted-factories"]
 wgpu = ["runmat-accelerate/wgpu", "runmat-runtime/wgpu"]
 cuda = ["runmat-accelerate/cuda"]
 source-evaluation = ["dep:runmat-core"]
+# A custom target-built embedding archive provides these same qualified
+# symbols itself and builds this runtime without the stock host factories.
+stock-hosted-factories = []
 
 [dev-dependencies]
 runmat-core = { workspace = true }

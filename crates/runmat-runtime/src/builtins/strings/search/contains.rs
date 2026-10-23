@@ -305,7 +305,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contains_broadcast_pattern_column_vector() {
-        let patterns = CharArray::new(vec!['s', 'n', 'x'], 3, 1).unwrap();
+        let patterns = CharArray::from_unicode_scalars(vec!['s', 'n', 'x'], 3, 1).unwrap();
         let result = run_contains(
             Value::String("saturn".into()),
             Value::CharArray(patterns),

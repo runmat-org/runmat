@@ -1,4 +1,7 @@
-use super::{invalid, loader, NativeInstallationLayout, NativeLoaderImage};
+use super::{
+    invalid, loader, ExternalNativeInstallationAdmission, NativeInstallationLayout,
+    NativeLoaderImage, NATIVE_INSTALLATION_SCHEMA_VERSION,
+};
 use crate::link::{LinkedProgram, NativeLinkBuildIdentity, NativeProgramLinkIdentity};
 use crate::tree::{
     physical, resolve_build_tree, HostedNativeTree, NativeFile, NativeStorageGrant,
@@ -12,24 +15,6 @@ use runmat_execution::{
 use runmat_execution_artifact::target_pack::VerifiedTargetPackContents;
 use runmat_package::{ContentDigest, NormalizedRelativePath};
 use runmat_package_cache::{TreeEntry, TreeManifest};
-
-pub const NATIVE_INSTALLATION_SCHEMA_VERSION: u16 = 2;
-
-/// Trusted deployment expectations, not decoded from an artifact. Matching
-/// this input admits physical installation only, not loader/provider execution.
-pub struct ExternalNativeInstallationAdmission {
-    pub product: Digest,
-    pub image: Digest,
-    pub inputs: NativeProgramLinkIdentity,
-    pub build: NativeLinkBuildIdentity,
-    pub layout: NativeInstallationLayout,
-    /// Independent caller storage authority, NOT the manifest's byte counts.
-    pub storage: NativeStorageGrant,
-    /// Exact identifiers, not resolved installed paths. Expected build-local
-    /// identifiers remain unqualified loader obligations, not runtime rights.
-    pub loader_images: Vec<NativeLoaderImage>,
-    pub deployment_qualification: Digest,
-}
 
 #[derive(Debug, serde::Serialize)]
 pub struct NativeInstallationManifest {
