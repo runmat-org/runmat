@@ -55,6 +55,12 @@ element field, it returns the native value of the element that contains the poin
 shared face or edge reads one of the elements that touch it. A point outside the meshed solid is an
 observation error; RunMat does not clamp it to the nearest surface.
 
+`analysis.static.field.node.von_mises_stress` is the nodal von Mises field: the volume-weighted
+average of the element values around each node, the same field `recover(...,
+to = node, using = volume_weighted_average)` names. Interpolating it gives a value that follows
+the stress gradient to the sample point, which is the comparison to make against a surface stress
+from beam or plate theory; the element field gives the containing element's average.
+
 This is intentionally separate from rendering. After a run, ordinary RunMat code selects the
 field and plots it:
 
