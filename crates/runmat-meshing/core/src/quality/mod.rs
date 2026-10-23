@@ -1,4 +1,5 @@
 pub mod boundary;
+pub mod boundary_face;
 pub mod predicate;
 pub mod spatial_index;
 pub mod tolerance;

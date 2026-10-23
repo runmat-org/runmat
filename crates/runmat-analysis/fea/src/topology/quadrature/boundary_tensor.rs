@@ -1,10 +1,10 @@
 //! Explicit high-order face integration. Geometry validity is checked over the
 //! whole quadratic triangle, not merely at integration points. The caller must
 //! establish convergence of its actual integrand on curved faces.
-use super::{boundary_shape, signed_boundary_area_minimum, weighted_derivative, weighted_position};
+use super::{boundary_shape, weighted_derivative, weighted_position};
 use crate::topology::{
     contract::BoundaryQuadraturePoint,
-    element::{cross, dot, norm, subtract},
+    element::{cross, norm},
 };
 use runmat_meshing_core::BoundaryTriangleOrder;
 
@@ -21,16 +21,7 @@ pub(crate) fn visit(
     if coordinates.len() != node_count {
         return None;
     }
-    let corner_normal = cross(
-        subtract(coordinates[1], coordinates[0]),
-        subtract(coordinates[2], coordinates[0]),
-    );
-    if !norm(corner_normal).is_finite() || norm(corner_normal) <= 0.0 {
-        return None;
-    }
-    if order == BoundaryTriangleOrder::Tri6
-        && signed_boundary_area_minimum(coordinates, corner_normal)? <= 0.0
-    {
+    if !runmat_meshing_core::is_valid_boundary_face(order, coordinates) {
         return None;
     }
     for &(r, wr) in rule {
@@ -42,9 +33,6 @@ pub(crate) fn visit(
             let tangent_v = weighted_derivative(coordinates, &derivatives[..node_count], 1);
             let area_vector = cross(tangent_u, tangent_v);
             let jacobian = norm(area_vector);
-            if !jacobian.is_finite() || jacobian <= 0.0 || dot(area_vector, corner_normal) <= 0.0 {
-                return None;
-            }
             let weight = wr * ws * (1.0 - r);
             visit(BoundaryQuadraturePoint {
                 reference_barycentric: barycentric,

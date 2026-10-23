@@ -106,16 +106,7 @@ impl BoundarySurface {
         if coordinates.len() != count || coordinates.iter().flatten().any(|x| !x.is_finite()) {
             return Err(BoundarySearchError::InvalidGeometry);
         }
-        let normal = cross(
-            subtract(coordinates[1], coordinates[0]),
-            subtract(coordinates[2], coordinates[0]),
-        );
-        if !norm(normal).is_finite()
-            || norm(normal) <= 0.0
-            || (order == BoundaryTriangleOrder::Tri6
-                && quadrature::signed_boundary_area_minimum(coordinates, normal)
-                    .is_none_or(|minimum| minimum <= 0.0))
-        {
+        if !runmat_meshing_core::is_valid_boundary_face(order, coordinates) {
             return Err(BoundarySearchError::InvalidGeometry);
         }
         let mut nodes = [[0.0; 3]; 6];
