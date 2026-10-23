@@ -78,6 +78,11 @@ pub use quality::boundary::{
     BoundaryQualityCandidateError, BoundaryQualityCandidateEvaluation,
     BoundaryQualityCandidateOptions, BoundaryQualityCandidateRejectionReason,
 };
+pub use quality::boundary_face::{
+    boundary_face_rule, boundary_face_validity, is_valid_boundary_face, BoundaryFaceRule,
+    BoundaryFaceValidity, BOUNDARY_FACE_MINIMUM_NORMAL_JACOBIAN_RATIO,
+    GAUSS_LEGENDRE_EIGHT_UNIT, GAUSS_LEGENDRE_SIXTEEN_UNIT, GAUSS_LEGENDRE_TWELVE_UNIT,
+};
 pub use quality::ElementQuality;
 pub use quality::{predicate, spatial_index, tolerance};
 pub use runmat_meshing_size::adaptive::{

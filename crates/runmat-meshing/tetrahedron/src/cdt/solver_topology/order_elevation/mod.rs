@@ -465,10 +465,10 @@ fn describe_element(
     )
 }
 
-/// Elements with a folded curved boundary face, merged into the uncertified inventory. A
-/// boundary face's curved Jacobian, projected on its corner normal, must stay positive over
-/// the whole face (the exact minimum of that quadratic, the same criterion consumers apply
-/// before projecting onto the surface); a folded face is never published.
+/// Elements with an invalid boundary face, merged into the uncertified inventory. Validity is
+/// the rule every analysis consumer applies before integrating over the face
+/// (`runmat_meshing_core::boundary_face_validity`), so the mesher never publishes a face a
+/// consumer rejects.
 fn with_folded_faces<'storage>(
     topology: &SolverMeshTopology,
     mut invalid: super::storage::ReservedBuffer<'storage, usize>,
@@ -511,7 +511,10 @@ fn folded_boundary_face_elements(
         for (slot, id) in face.node_ids.iter().enumerate() {
             coordinates[slot] = position(*id)?;
         }
-        if signed_face_area_minimum(&coordinates).is_none_or(|minimum| minimum <= 0.0) {
+        if !runmat_meshing_core::is_valid_boundary_face(
+            runmat_meshing_core::BoundaryTriangleOrder::Tri6,
+            &coordinates,
+        ) {
             for element_id in &face.adjacent_volume_element_ids {
                 if let Some(index) = topology
                     .volume_elements
@@ -524,73 +527,6 @@ fn folded_boundary_face_elements(
         }
     }
     Ok(folded)
-}
-
-/// Exact minimum over the face of the six-node triangle's tangent cross product projected on
-/// its corner normal (corners 0..3, midsides 01, 12, 20).
-fn signed_face_area_minimum(coordinates: &[[f64; 3]; 6]) -> Option<f64> {
-    let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
-    let cross = |a: [f64; 3], b: [f64; 3]| {
-        [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
-    };
-    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    let normal = cross(sub(coordinates[1], coordinates[0]), sub(coordinates[2], coordinates[0]));
-    let signed_area = |u: f64, v: f64| {
-        let l1 = 1.0 - u - v;
-        let derivatives: [[f64; 2]; 6] = [
-            [1.0 - 4.0 * l1, 1.0 - 4.0 * l1],
-            [4.0 * u - 1.0, 0.0],
-            [0.0, 4.0 * v - 1.0],
-            [4.0 * (l1 - u), -4.0 * u],
-            [4.0 * v, 4.0 * u],
-            [-4.0 * v, 4.0 * (l1 - v)],
-        ];
-        let tangent = |axis: usize| -> [f64; 3] {
-            std::array::from_fn(|component| {
-                (0..6)
-                    .map(|node| derivatives[node][axis] * coordinates[node][component])
-                    .sum::<f64>()
-            })
-        };
-        dot(cross(tangent(0), tangent(1)), normal)
-    };
-    let [q00, q10, q01, qh0, q0h, qhh] = [
-        signed_area(0.0, 0.0),
-        signed_area(1.0, 0.0),
-        signed_area(0.0, 1.0),
-        signed_area(0.5, 0.0),
-        signed_area(0.0, 0.5),
-        signed_area(0.5, 0.5),
-    ];
-    if [q00, q10, q01, qh0, q0h, qhh].iter().any(|value| !value.is_finite()) {
-        return None;
-    }
-    let a = 2.0 * (q10 + q00 - 2.0 * qh0);
-    let b = 2.0 * (q01 + q00 - 2.0 * q0h);
-    let d = q10 - q00 - a;
-    let e = q01 - q00 - b;
-    let c = 4.0 * (qhh - 0.25 * (a + b) - 0.5 * (d + e) - q00);
-    let edge_minimum = |start: f64, end: f64, midpoint: f64| {
-        let curvature = 2.0 * (start + end - 2.0 * midpoint);
-        if curvature <= 0.0 {
-            return start.min(end);
-        }
-        let slope = end - start - curvature;
-        let position = (-slope / (2.0 * curvature)).clamp(0.0, 1.0);
-        (curvature * position + slope) * position + start
-    };
-    let mut minimum = edge_minimum(q00, q10, qh0)
-        .min(edge_minimum(q00, q01, q0h))
-        .min(edge_minimum(q10, q01, qhh));
-    let determinant = 4.0 * a * b - c * c;
-    if a > 0.0 && determinant > 0.0 {
-        let u = (c * e - 2.0 * b * d) / determinant;
-        let v = (c * d - 2.0 * a * e) / determinant;
-        if u >= 0.0 && v >= 0.0 && u + v <= 1.0 {
-            minimum = minimum.min(a * u * u + b * v * v + c * u * v + d * u + e * v + q00);
-        }
-    }
-    minimum.is_finite().then_some(minimum)
 }
 
 pub(super) fn sorted_edge(mut nodes: [u64; 2]) -> [u64; 2] {
@@ -613,28 +549,6 @@ fn phase_error(
 mod relaxation_tests {
     use super::*;
     use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
-
-    // witness: FEA-MESH-DISCRETIZATION-001/volume_quality_convergence @
-    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
-    //   boundary: A six-node boundary face whose curved Jacobian folds against its corner
-    //   normal is uncertified; the bracket Tet10 study exercises the whole elevation.
-    #[test]
-    fn folded_curved_boundary_face_is_uncertified() {
-        let mut face = [
-            [0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [0.5, 0.0, 0.0],
-            [0.5, 0.5, 0.0],
-            [0.0, 0.5, 0.0],
-        ];
-        assert!(signed_face_area_minimum(&face).unwrap() > 0.0);
-        // A gently curved face stays positive; a midside pushed past the far corner folds it.
-        face[4][2] = 0.1;
-        assert!(signed_face_area_minimum(&face).unwrap() > 0.0);
-        face[3][0] = 1.5;
-        assert!(signed_face_area_minimum(&face).unwrap() <= 0.0);
-    }
 
     // witness: FEA-MESH-DISCRETIZATION-001/volume_quality_convergence @
     //   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
