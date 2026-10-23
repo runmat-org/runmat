@@ -3949,7 +3949,7 @@ impl PlotRenderer {
         self.needs_update = true;
     }
     fn refresh_geometry_scene_render_data(&mut self, geometry_scene: &GeometryScene) {
-        log::info!(
+        log::debug!(
             target: "runmat_plot",
             "geometry_scene.refresh_render_data chunks={} selected_region_id={} selected_region_count={}",
             geometry_scene.chunks.len(),

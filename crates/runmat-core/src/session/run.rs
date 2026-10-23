@@ -39,7 +39,7 @@ fn discover_source_catalog(
     let Ok(cwd) = runmat_filesystem::current_dir() else {
         let source_name = source_name?;
         let source_path = PathBuf::from(source_name);
-        if source_path.is_absolute() {
+        if crate::diagnostic_path::host_path_is_absolute(&source_path) {
             let source_cwd = source_path
                 .parent()
                 .map(Path::to_path_buf)

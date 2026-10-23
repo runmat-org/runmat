@@ -6,6 +6,7 @@ mod units;
 
 pub use change_set::evaluate_change_set;
 pub use profile::inspect_ap242;
+pub use units::declared_length_unit;
 
 pub fn has_ap242_schema(source: &str) -> bool {
     source.split(';').any(|statement| {

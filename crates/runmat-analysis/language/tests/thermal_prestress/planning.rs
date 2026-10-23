@@ -84,6 +84,7 @@ fn check_planning(order: ElementOrder, consumer: Consumer) {
                 GeometryInspectionCapability::PersistentIds,
             ],
             exchange: None,
+            resolved_units: None,
         },
     );
     let checked = FeaCompiler::new(&host).check(CheckRequest {

@@ -1302,7 +1302,7 @@ impl GeometrySceneChunk {
                 region_id,
                 GEOMETRY_SELECTED_REGION_COLOR,
             );
-            log::info!(
+            log::debug!(
                 target: "runmat_plot",
                 "geometry_scene.selection_color chunk_id={} region_id={} colored_triangles={}",
                 self.chunk_id,
@@ -1331,7 +1331,7 @@ impl GeometrySceneChunk {
                 region_id,
                 GEOMETRY_SELECTED_REGION_COLOR,
             );
-            log::info!(
+            log::debug!(
                 target: "runmat_plot",
                 "geometry_scene.selection_color chunk_id={} region_id={} colored_triangles={}",
                 self.chunk_id,
@@ -1391,7 +1391,7 @@ impl GeometrySceneChunk {
             return 0;
         }
         let Some(region) = self.regions.iter().find(|item| item.region_id == region_id) else {
-            log::info!(
+            log::debug!(
                 target: "runmat_plot",
                 "geometry_scene.selection_color_missing chunk_id={} region_id={} available_regions={}",
                 self.chunk_id,

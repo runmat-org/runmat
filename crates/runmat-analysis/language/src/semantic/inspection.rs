@@ -85,7 +85,14 @@ pub fn inspect_geometry_declarations<H: GeometryInspectionSource + ?Sized>(
 fn imported_geometry_source(
     declaration: &runmat_parser::fea::FeaDeclaration,
 ) -> Option<(String, runmat_geometry_core::UnitSystem, Span)> {
-    let units = declaration.body.statements.iter().find_map(|statement| {
+    // Omitted `units` asks the host for the file's own declared length unit.
+    let authored_units = declaration.body.statements.iter().any(|statement| {
+        matches!(&statement.kind, FeaStatementKind::Assignment { target, .. }
+            if target.segments.len() == 1 && target.segments[0].text == "units")
+    });
+    let units = if !authored_units {
+        Some(runmat_geometry_core::UnitSystem::Unspecified)
+    } else { declaration.body.statements.iter().find_map(|statement| {
         let FeaStatementKind::Assignment { target, value, .. } = &statement.kind else {
             return None;
         };
@@ -106,7 +113,7 @@ fn imported_geometry_source(
             "in" | "inch" | "inches" => Some(runmat_geometry_core::UnitSystem::Inch),
             _ => None,
         }
-    })?;
+    }) }?;
     declaration.body.statements.iter().find_map(|statement| {
         let FeaStatementKind::Assignment { target, value, .. } = &statement.kind else {
             return None;

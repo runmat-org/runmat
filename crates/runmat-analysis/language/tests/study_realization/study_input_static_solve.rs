@@ -92,6 +92,7 @@ fn two_authored_force_inputs_compile_to_distinct_physical_static_solutions() {
                 GeometryInspectionCapability::PersistentIds,
             ],
             exchange: None,
+            resolved_units: None,
         },
     );
     let program = FeaCompiler::new(&host).check(CheckRequest {

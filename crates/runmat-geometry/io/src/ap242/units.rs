@@ -231,3 +231,84 @@ fn unsupported(id: u64, detail: &str) -> Ap242InspectionError {
 fn inconsistent(detail: impl Into<String>) -> Ap242InspectionError {
     Ap242InspectionError::Inconsistent(detail.into())
 }
+
+/// The single length unit a STEP file's global unit contexts declare, when it
+/// is one RunMat geometry can import in (m, mm or inch). `None` when the file
+/// declares no length unit, several different ones, or one RunMat cannot use.
+pub fn declared_length_unit(source: &str) -> Option<runmat_geometry_core::UnitSystem> {
+    let file = super::p21::parse(source).ok()?;
+    let mut declared = None;
+    for entity in file.entities.values() {
+        let Some(context) = entity.component("GLOBAL_UNIT_ASSIGNED_CONTEXT") else {
+            continue;
+        };
+        let Some(references) = context.arguments.first().and_then(P21Value::as_list) else {
+            continue;
+        };
+        for unit in references.iter().filter_map(P21Value::as_reference) {
+            let Some(unit) = file.entities.get(&unit).filter(|unit| unit.has("LENGTH_UNIT")) else {
+                continue;
+            };
+            let system = length_unit_system(unit)?;
+            if declared.is_some_and(|previous| previous != system) {
+                return None;
+            }
+            declared = Some(system);
+        }
+    }
+    declared
+}
+
+fn length_unit_system(unit: &super::p21::Entity) -> Option<runmat_geometry_core::UnitSystem> {
+    use runmat_geometry_core::UnitSystem;
+    if let Some(si) = unit.component("SI_UNIT") {
+        let metre = matches!(si.arguments.get(1), Some(P21Value::Enumeration(base)) if base == "METRE");
+        return match si.arguments.first() {
+            Some(P21Value::Null) | None if metre => Some(UnitSystem::Meter),
+            Some(P21Value::Enumeration(prefix)) if metre && prefix == "MILLI" => {
+                Some(UnitSystem::Millimeter)
+            }
+            _ => None,
+        };
+    }
+    let conversion = unit.component("CONVERSION_BASED_UNIT")?;
+    conversion
+        .arguments
+        .first()
+        .and_then(P21Value::as_string)
+        .filter(|name| name.trim().eq_ignore_ascii_case("inch"))
+        .map(|_| UnitSystem::Inch)
+}
+
+#[cfg(test)]
+mod declared_length_unit_tests {
+    use super::declared_length_unit;
+    use runmat_geometry_core::UnitSystem;
+
+    fn step(units: &str) -> String {
+        format!(
+            "ISO-10303-21;\nHEADER;\nFILE_SCHEMA(('AP242'));\nENDSEC;\nDATA;\n\
+             #1=(GEOMETRIC_REPRESENTATION_CONTEXT(3) GLOBAL_UNIT_ASSIGNED_CONTEXT((#2,#3)) REPRESENTATION_CONTEXT('',''));\n\
+             #2=({units});\n\
+             #3=(NAMED_UNIT(*) PLANE_ANGLE_UNIT() SI_UNIT($,.RADIAN.));\n\
+             ENDSEC;\nEND-ISO-10303-21;\n"
+        )
+    }
+
+    #[test]
+    fn reads_the_declared_length_unit() {
+        assert_eq!(
+            declared_length_unit(&step("LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.)")),
+            Some(UnitSystem::Millimeter)
+        );
+        assert_eq!(
+            declared_length_unit(&step("LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT($,.METRE.)")),
+            Some(UnitSystem::Meter)
+        );
+        assert_eq!(
+            declared_length_unit(&step("LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.CENTI.,.METRE.)")),
+            None
+        );
+        assert_eq!(declared_length_unit("not a step file"), None);
+    }
+}
