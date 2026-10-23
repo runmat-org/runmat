@@ -25,7 +25,7 @@ const FAULTS: &[Fault] = &[
     Fault { name: "material on a face", from: "assign material.steel to geometry.beam.region.body", to: "assign material.steel to geometry.beam.region.fixed_end", expected: "assigns a material to face region `geometry.beam.region.fixed_end`" },
     Fault { name: "fixed support on a solid", from: "target = geometry.beam.region.fixed_end", to: "target = geometry.beam.region.body", expected: "constraint kind requires boundary topology" },
     Fault { name: "missing region", from: "region.loaded_end = [", to: "region.free_end = [", expected: "unresolved reference `geometry.beam.region.free_end`" },
-    Fault { name: "selector matches nothing", from: "select name \"Loaded end\"", to: "select name \"No such face\"", expected: "region `loaded_end` resolved 0 entities" },
+    Fault { name: "selector matches nothing", from: "select name \"Loaded end\"", to: "select name \"No such face\"", expected: "selects face name \"No such face\", which `geometry/cantilever.step` does not carry" },
     // Hand-offs
     Fault { name: "output the step does not produce", from: "output displacement = analysis.static.field.node.displacement", to: "output displacement = analysis.static.field.node.temperature", expected: "does not produce `Temperature`" },
     Fault { name: "output from an unknown step", from: "analysis.static.field.element.von_mises_stress", to: "analysis.modes.field.element.von_mises_stress", expected: "unknown analysis step `modes`" },

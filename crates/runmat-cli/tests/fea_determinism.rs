@@ -130,8 +130,24 @@ fn a_study_gives_identical_results_across_runs_workers_and_threads() {
             reference.assessed.iter().map(|value| value.to_bits()).collect::<Vec<_>>(),
             "{policy:?}"
         );
+        // Every run is a fresh attempt of the same definition: the step run ids share their
+        // definition part and differ only in the attempt suffix.
         if policy.is_none() {
-            assert_eq!(identity.step_run_ids, reference.step_run_ids);
+            let definitions = |ids: &serde_json::Value| {
+                ids.as_array()
+                    .expect("step run ids")
+                    .iter()
+                    .map(|id| {
+                        let id = id.as_str().expect("step run id");
+                        id.rsplit_once('_').expect("attempt run id").0.to_string()
+                    })
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(
+                definitions(&identity.step_run_ids),
+                definitions(&reference.step_run_ids)
+            );
+            assert_ne!(identity.step_run_ids, reference.step_run_ids);
         }
     }
 }

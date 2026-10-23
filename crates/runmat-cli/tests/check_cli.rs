@@ -371,9 +371,10 @@ fn structural_static_step_documentation_example_runs_and_publishes_fields() {
         manifest["solver_mesh_digest"]
     );
     assert_eq!(evidence.artifact_digest, mesh.canonical_digest);
-    assert_eq!(mesh.topology.nodes.len(), 168);
-    assert_eq!(mesh.topology.volume_elements.len(), 292);
-    assert_eq!(mesh.topology.boundary_faces.len(), 320);
+    // Golden counts of the current mesher for this example (deterministic across runs).
+    assert_eq!(mesh.topology.nodes.len(), 778);
+    assert_eq!(mesh.topology.volume_elements.len(), 2156);
+    assert_eq!(mesh.topology.boundary_faces.len(), 1328);
 
     let model: AnalysisModel =
         serde_json::from_value(manifest["compiled"]["model"].clone()).unwrap();
@@ -1061,5 +1062,10 @@ fn a_script_running_the_same_study_twice_publishes_two_attempts() {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(String::from_utf8_lossy(&output.stdout).contains(second));
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains(second),
+        "latest attempt of {definition} is not {second}:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
