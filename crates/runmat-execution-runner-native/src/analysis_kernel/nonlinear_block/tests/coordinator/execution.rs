@@ -198,7 +198,13 @@ pub(in super::super) fn execute_preparation(
                     )
                     .unwrap()
                     .decision,
-                    runmat_analysis_fea::results::accuracy::PublicationDecision::Block
+                    if original_plan.unavailable_evidence
+                        == runmat_analysis_core::UnavailableEvidencePolicy::MarkIndeterminate
+                    {
+                        runmat_analysis_fea::results::accuracy::PublicationDecision::Allow
+                    } else {
+                        runmat_analysis_fea::results::accuracy::PublicationDecision::Block
+                    }
                 );
             }
             NonlinearSolidStudyPhase::ReadyForState { ordinal } => {

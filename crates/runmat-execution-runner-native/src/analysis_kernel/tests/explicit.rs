@@ -143,45 +143,30 @@ fn native_kernel_executes_explicit_structural_workload_without_mesh_input() {
     }));
 
     let solver_result = prepare_kernel_output(&outputs[0]);
-    let source_result = SolverResultIdentity::new(
-        prepared.host.workload.identity,
-        solver_result.manifest.payload_digest,
-    )
-    .unwrap();
-    let recovery_request = FieldRecoveryRequest::new(
-        prepared.host.workload.step,
-        FieldRecoverySource::SolverResult(source_result),
-        runmat_analysis_fea::execution::FieldTopologyIdentity::Structural {
-            topology: result.constraint_result.topology,
+    // Field recovery runs under its own governed admission: the preparation carries the
+    // recovery request, the original invocation, the solver result and the resource plan.
+    let recovery = runmat_analysis_execution::prepare_structural_field_recovery(
+        runmat_analysis_execution::StructuralFieldRecoveryPreparation {
+            source_host: prepared.host.clone(),
+            source_invocation: prepared
+                .inputs
+                .iter()
+                .find(|input| input.manifest.kind == AnalysisNumericalObjectKind::SolverInvocation)
+                .unwrap()
+                .clone(),
+            source_result: solver_result,
+            mesh: None,
+            program_revision: revision(),
+            chunk_bytes: 4096,
+            inventory_limits: ObjectInventoryLimits::default(),
         },
-        runmat_analysis_fea::execution::FieldRecoveryPlan::resolve_structural(
-            solve.procedure_step().unwrap(),
-            StructuralRecoveredFieldTopology::derive(&solve.model, None).unwrap(),
-            result.constraint_result.groups.len(),
-        )
-        .unwrap(),
     )
     .unwrap();
-    let recovery_request = runmat_analysis_execution::prepare_analysis_objects(
-        AnalysisNumericalObjectKind::FieldRecoveryRequest,
-        recovery_request.identity().digest(),
-        &recovery_request.canonical_bytes().unwrap(),
-        4096,
-        ObjectNamespace::InputValue,
-        ObjectInventoryLimits::default(),
-    )
-    .unwrap();
-    let recovery_inputs = vec![recovery_request, prepared.inputs[0].clone(), solver_result];
+    let recovery_inputs = recovery.inputs.clone();
     assert!(recovery_inputs
         .iter()
         .all(|input| input.manifest.kind != AnalysisNumericalObjectKind::Mesh));
-    let recovery_host = test_host_for_inputs(
-        &prepared.host,
-        AnalysisWorkKind::RecoverField,
-        &recovery_inputs,
-        vec![AnalysisNumericalObjectKind::Field],
-        Some(2),
-    );
+    let recovery_host = recovery.host.clone();
     let recovered_outputs = NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
             output_policy: output_policy(),
@@ -212,7 +197,11 @@ fn native_kernel_executes_explicit_structural_workload_without_mesh_input() {
     )
     .unwrap();
     let mut substituted_recovery_inputs = recovery_inputs.clone();
-    substituted_recovery_inputs[1] = substituted_invocation.clone();
+    let invocation_index = substituted_recovery_inputs
+        .iter()
+        .position(|input| input.manifest.kind == AnalysisNumericalObjectKind::SolverInvocation)
+        .unwrap();
+    substituted_recovery_inputs[invocation_index] = substituted_invocation.clone();
     assert!(NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
             output_policy: output_policy(),

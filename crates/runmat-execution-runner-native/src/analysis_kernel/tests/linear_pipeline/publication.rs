@@ -121,7 +121,14 @@ pub(super) fn execute(solved: &SolvedPipeline, observed: &ObservedPipeline) {
             inputs: &altered_inputs,
         })
         .unwrap_err();
-    assert!(error.to_string().contains("accuracy resource plan differs"));
+    assert!(
+        // A substituted plan is rejected when the original source is rederived.
+        error.to_string().contains("accuracy resource plan differs")
+            || error
+                .to_string()
+                .contains("accuracy original-source resource rederivation differs"),
+        "{error}"
+    );
     let original_request =
         AccuracyEvaluationRequest::from_canonical_bytes(&accuracy_inputs[0].payload()).unwrap();
     let mut weakened_plan = original_request.plan.clone();
