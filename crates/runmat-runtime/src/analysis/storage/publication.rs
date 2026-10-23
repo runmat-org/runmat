@@ -177,6 +177,8 @@ struct StandardDigestView<'a> {
     observation_histories: &'a Vec<PersistedObservationHistory>,
     #[serde(skip_serializing_if = "Option::is_none")]
     original_fields: &'a Option<runmat_analysis_fea::results::field::RecoveredFieldArtifactManifest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dynamic_balance: &'a Option<PersistedDynamicBalance>,
 }
 
 #[derive(Serialize)]
@@ -205,6 +207,7 @@ pub(super) fn record_digest(record: &PersistedAnalysisArtifact) -> Result<Digest
                 render_tiles: &r.render_tiles,
                 observation_histories: &r.observation_histories,
                 original_fields: &r.original_fields,
+                dynamic_balance: &r.dynamic_balance,
             },
         ),
         PersistedAnalysisArtifact::StructuralFrequency(r) => canonical_digest(

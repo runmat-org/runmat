@@ -197,8 +197,84 @@ pub(super) fn prepare_run_artifact_with_admission(
             manifest: chunked.manifest,
         });
     }
+    // Transient dynamic-balance vectors are numerical payload: chunk them like fields.
+    let dynamic_balance = match run.transient_results.as_ref() {
+        Some(transient)
+            if transient
+                .dynamic_balance_snapshots
+                .iter()
+                .any(|balance| !balance.applied_load.is_empty()) =>
+        {
+            let mut flat = Vec::new();
+            let mut dof_counts = Vec::with_capacity(transient.dynamic_balance_snapshots.len());
+            for balance in &transient.dynamic_balance_snapshots {
+                dof_counts.push(balance.applied_load.len() as u64);
+                for vector in [
+                    &balance.applied_load,
+                    &balance.inertia_force,
+                    &balance.damping_force,
+                    &balance.elastic_force,
+                    &balance.equilibrium_residual,
+                ] {
+                    if vector.len() != balance.applied_load.len() {
+                        return Err("transient dynamic balance vectors differ in length".into());
+                    }
+                    flat.extend_from_slice(vector);
+                }
+            }
+            let payload_bytes = (flat.len() as u64).saturating_mul(16);
+            match sink.as_deref_mut() {
+                Some(sink) => sink.admit_in_flight(payload_bytes)?,
+                None => admit(payload_bytes)?,
+            }
+            let payload = encode_field_values(&flat);
+            drop(flat);
+            let chunked = chunk_numerical_payload(
+                AnalysisNumericalObjectKind::Field,
+                Digest::sha256(&payload),
+                &payload,
+                DEFAULT_ANALYSIS_CHUNK_BYTES,
+            )
+            .map_err(|error| error.to_string())?;
+            for (descriptor, bytes) in chunked.manifest.chunks.iter().zip(chunked.chunks) {
+                if let Some(sink) = sink.as_deref_mut() {
+                    sink.put(descriptor.digest, &bytes)?;
+                    continue;
+                }
+                match chunks.entry(descriptor.digest) {
+                    std::collections::hash_map::Entry::Occupied(existing)
+                        if existing.get() != &bytes =>
+                    {
+                        return Err("dynamic balance chunk digest collision".into());
+                    }
+                    std::collections::hash_map::Entry::Occupied(_) => {}
+                    std::collections::hash_map::Entry::Vacant(slot) => {
+                        slot.insert(bytes);
+                    }
+                }
+            }
+            Some(PersistedDynamicBalance {
+                dof_counts,
+                manifest: chunked.manifest,
+            })
+        }
+        _ => None,
+    };
     admit(typed_estimate(run)?)?;
     let mut stripped_run = run.clone();
+    if dynamic_balance.is_some() {
+        if let Some(transient) = stripped_run.transient_results.as_mut() {
+            for balance in &mut transient.dynamic_balance_snapshots {
+                *balance = runmat_analysis_fea::StructuralDynamicBalanceSnapshot {
+                    applied_load: Vec::new(),
+                    inertia_force: Vec::new(),
+                    damping_force: Vec::new(),
+                    elastic_force: Vec::new(),
+                    equilibrium_residual: Vec::new(),
+                };
+            }
+        }
+    }
     stripped_run.observation_scalars =
         runmat_analysis_fea::results::assessment::scalar_observation_inventory(&run.run);
     stripped_run.render_topology = None;
@@ -224,6 +300,7 @@ pub(super) fn prepare_run_artifact_with_admission(
         render_tiles.as_ref(),
         &observation_histories,
         None,
+        dynamic_balance.as_ref(),
     )?;
     let metadata = compact_run_metadata(&run_value)?;
     Ok(PreparedRunArtifact {
@@ -240,6 +317,7 @@ pub(super) fn prepare_run_artifact_with_admission(
             render_tiles,
             observation_histories,
             original_fields: None,
+            dynamic_balance,
         },
         chunks,
     })

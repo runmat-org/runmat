@@ -125,6 +125,7 @@ impl AnalysisPublicationBuilder {
             run.render_tiles.as_ref(),
             &run.observation_histories,
             Some(catalog),
+            run.dynamic_balance.as_ref(),
         )?;
         run.original_fields = Some(catalog.clone());
         run.run_digest = digest;
