@@ -60,13 +60,21 @@ fn actual_shape_fits_without_weakening_projection_and_tiny_scope_reads_nothing()
         store,
         reads: AtomicUsize::new(0),
     };
-    let ceiling = 2 * 1024 * 1024;
-    assert!(import_workspace(&references).unwrap() > ceiling);
     assert!(profile_import_workspace_phases(&source, &[&references], &access, limits, 1).is_err());
     assert_eq!(source.reads.load(Ordering::SeqCst), 0);
+    // The actual typed-decode profile never exceeds the projection, and it is exactly the
+    // ceiling the phases need: one byte less is rejected.
+    let ceiling =
+        profile_import_workspace_phases(&source, &[&references], &access, limits, u64::MAX)
+            .unwrap();
+    assert!(ceiling <= import_workspace(&references).unwrap());
     let actual =
         profile_import_workspace_phases(&source, &[&references], &access, limits, ceiling).unwrap();
-    assert!(actual <= ceiling);
+    assert_eq!(actual, ceiling);
+    assert!(
+        profile_import_workspace_phases(&source, &[&references], &access, limits, ceiling - 1)
+            .is_err()
+    );
     assert!(source.reads.load(Ordering::SeqCst) > 0);
     let mut missing = references.clone();
     let index = missing

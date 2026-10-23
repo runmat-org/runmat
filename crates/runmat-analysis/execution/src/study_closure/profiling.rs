@@ -78,7 +78,7 @@ pub(crate) fn profile_import_workspace_phases(
             .filter(|r| r.media_type != ANALYSIS_CHUNK_MEDIA_TYPE)
         {
             let raw = read(&bounded, reference, limits)?;
-            bytes = bytes.checked_add(runmat_canonical_codec::canonical_payload_materialization_resident_bytes_estimate(&raw)?)
+            bytes = bytes.checked_add(runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(&raw)?)
                 .ok_or_else(|| limit("profile contract inventory overflow"))?;
             admit(bytes, maximum)?;
             if reference.media_type == ANALYSIS_MANIFEST_MEDIA_TYPE {
@@ -106,7 +106,7 @@ pub(crate) fn profile_import_workspace_phases(
                 )?;
                 for partition in &objects.manifest.partitions {
                     let payload = objects.partition_payload(partition.logical_identity)?;
-                    bytes = bytes.checked_add(runmat_canonical_codec::canonical_payload_materialization_resident_bytes_estimate(&payload)?)
+                    bytes = bytes.checked_add(runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(&payload)?)
                         .ok_or_else(|| limit("profile semantic inventory overflow"))?;
                     admit(bytes, maximum)?;
                 }
