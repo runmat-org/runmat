@@ -482,3 +482,32 @@ fn magnetic_publication_context_rejects_coherent_foreign_rule_and_native_field_i
     .unwrap();
     assert!(publish_spoof(&workload, &mesh, request, remapped, four).is_err());
 }
+
+// witness: FEA-EM-QUALIFICATION-001/accuracy @ magnetostatic/tet4/public_study; coverage: partial;
+//   boundary: Sampled publication catalogs of 0.3 and 2.3 MB (2- and 4-cell slabs, beyond the
+//   fixed per-contract allowance) are admitted by the accuracy reservation basis (four typed
+//   decodes of their canonical bytes), and measured metadata validation stays within the
+//   direct-encoding estimate; catalog sizing only, not field accuracy.
+#[test]
+fn large_catalog_metadata_validation_fits_the_typed_decode_reservation() {
+    for cells in [2, 4] {
+        let mesh = slab_mesh(cells);
+        let (workload, recovery, fields, catalog, _) = fixture(&mesh);
+        let ObservationFieldCatalogSource::SampledRecovery { sampling, .. } = catalog.source()
+        else {
+            panic!("sampled source")
+        };
+        let sampling = (**sampling).clone();
+        // publish_spoof also measures the validation peak against the estimate.
+        let publication = publish_spoof(&workload, &mesh, recovery, fields, sampling).unwrap();
+        let bytes = publication.canonical_bytes().unwrap();
+        let typed = runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(&bytes)
+            .unwrap();
+        let required = publication.metadata_validation_resident_bytes().unwrap();
+        eprintln!(
+            "catalog cells={cells} encoded={} typed={typed} required={required}",
+            bytes.len()
+        );
+        assert!(required <= 4 * typed, "{required} > 4 x {typed}");
+    }
+}
