@@ -715,13 +715,19 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
         admission.factor_nonzero_upper_bound,
         Count(expected_admission.factor_nonzero_limit())
     );
+    // The static solve is proved by its Cholesky factor: only factorization work and the
+    // factor's resident payload are reserved, never the local-energy proof's graph budgets.
     assert_eq!(
         admission.update_count_upper_bound,
-        Count(expected_admission.update_limit())
+        Count(expected_admission.factor_flop_limit())
     );
     assert_eq!(
         admission.resident_bytes_upper_bound,
-        ByteCount(expected_admission.resident_bytes_limit())
+        ByteCount(
+            (expected_admission.factor_nonzero_limit() * 16
+                + (expected_admission.dimension() + 1) * 8)
+                .max(expected_admission.factor_resident_limit())
+        )
     );
     plan.validate_identity().unwrap();
 

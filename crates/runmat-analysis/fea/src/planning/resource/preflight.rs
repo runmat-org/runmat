@@ -186,13 +186,24 @@ pub(super) fn build_static_resource_input(
     // fill-reducing ordering is recalculated for the exact graph. Even a successful symbolic
     // proof on the superset is therefore not an upper bound on exact fill or update work.
     // Reserve the graph-count envelope; exact coercivity is proved after numerical assembly.
+    // The static solve proves coercivity with the Cholesky factor that also solves; it is never
+    // given a local-energy source, so only the factorization is reserved.
     let bound = CoercivityWorkEnvelope::derive(&admission_pattern)
         .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
     let admission = SolverAdmissionResourcePolicy {
         dimension: Count(bound.dimension()),
         factor_nonzero_upper_bound: Count(bound.factor_nonzero_limit()),
-        update_count_upper_bound: Count(bound.update_limit()),
-        resident_bytes_upper_bound: ByteCount(bound.resident_bytes_limit()),
+        update_count_upper_bound: Count(bound.factor_flop_limit()),
+        // The factor's values, column indices and row offsets are resident while it proves
+        // and solves; the solver's own peak estimate is never allowed below that payload.
+        resident_bytes_upper_bound: ByteCount(
+            bound
+                .factor_nonzero_limit()
+                .checked_mul(16)
+                .and_then(|bytes| bytes.checked_add((bound.dimension() + 1) * 8))
+                .ok_or(ResourcePlanningError::Overflow("static factor payload"))?
+                .max(bound.factor_resident_limit()),
+        ),
     };
     let solve = solve_policy(
         preconditioner,

@@ -189,6 +189,61 @@ mod tests {
     use crate::fixtures::{fixture_model, FixtureId};
     use runmat_analysis_core::{AnalysisProcedure, AnalysisSequence};
 
+    /// Diagnostic: the static resource plan of a structured Tet10 cantilever as it refines.
+    #[test]
+    #[ignore]
+    fn report_static_plan_growth_for_refined_tet10_cantilever() {
+        let model = fixture_model(FixtureId::CantileverLinearStatic);
+        let step = &model.sequence.steps[0];
+        for divisions in [2usize, 4, 6, 8, 10] {
+            let mesh = crate::adaptation::structural_recovery::qualification_tests::mesh::structured_cantilever(
+                divisions,
+                runmat_meshing_core::ElementOrder::Tet10,
+            );
+            let compilation =
+                crate::pipeline::constraint_preparation::compile_inventory(&model, Some(&mesh), step)
+                    .unwrap();
+            let constraints = compilation.plan();
+            let connectors =
+                compile_model_connector_plan(&model, Some(&mesh), constraints.reference_points.len())
+                    .unwrap();
+            let fields = structural_static_observable_field_definitions().unwrap();
+            let observations = resolve_structural_observation_plan_with_connectors(
+                step,
+                &model,
+                Some(&mesh),
+                constraints,
+                &connectors,
+                &fields,
+                ObservationLimits::default(),
+            )
+            .unwrap();
+            let plan = build_static_resource_plan(StaticResourcePreflight {
+                compilation: Some(&compilation),
+                model: &model,
+                step,
+                backend: ComputeBackend::Cpu,
+                preconditioner: LinearStaticSolveOptions::default().preconditioner_kind,
+                observation_execution: ObservationExecutionPolicy::serial(),
+                mesh: Some(&mesh),
+                constraints,
+                observations: &observations,
+                accelerator_requests: &[],
+                local_execution: LinearStaticSolveOptions::default().local_execution,
+                prepared_inputs: None,
+            })
+            .unwrap();
+            eprintln!(
+                "divisions={divisions} nodes={} elements={} memory={} scratch={}\n{:#?}",
+                mesh.topology.nodes.len(),
+                mesh.topology.volume_elements.len(),
+                plan.request.memory_bytes,
+                plan.request.scratch_bytes,
+                plan.breakdown
+            );
+        }
+    }
+
     #[test]
     fn physical_static_rejects_missing_solid_capabilities_before_resource_planning() {
         let model = fixture_model(FixtureId::CantileverLinearStatic);
