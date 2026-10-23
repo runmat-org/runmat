@@ -127,7 +127,8 @@ pub(in crate::analysis::storage) fn commit(
     }
     for (id, record) in &prepared.runs {
         let path = root.join("runs").join(format!("{id}.json"));
-        let bytes = resources::json(&record_value(record)?, prepared.maximum_bytes)?;
+        // Written straight from the typed record; no JSON tree is built.
+        let bytes = resources::json(&resources::RecordView(record), prepared.maximum_bytes)?;
         match store
             .atomic_create_new(&path, &bytes)
             .map_err(AnalysisPublicationError::from_io)?

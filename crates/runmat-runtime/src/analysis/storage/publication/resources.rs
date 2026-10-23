@@ -89,9 +89,23 @@ pub(super) fn commit_work(
     let mut record_work = 0;
     for record in runs.values() {
         let view = RecordView(record);
-        // Record projection for stable identity and its bounded JSON transport coexist.
+        // The record's identity is its direct canonical encoding and its transport is JSON
+        // written from the typed record: neither builds a value tree. Both buffers coexist.
+        let encoding = runmat_canonical_codec::profile_canonical_encoding(
+            &view,
+            runmat_canonical_codec::CanonicalLimits::new(
+                usize::try_from(maximum).unwrap_or(usize::MAX),
+                usize::MAX,
+                65_536,
+                64,
+            ),
+        )
+        .map_err(AnalysisPublicationError::from)?;
         record_work = record_work.max(add(
-            resident(&view, maximum)?,
+            add(
+                encoding.encoded_bytes_upper_bound,
+                encoding.resident_workspace_bytes_estimate,
+            )?,
             profile_json_bytes(&view, maximum).map_err(AnalysisPublicationError::from)?,
         )?);
     }

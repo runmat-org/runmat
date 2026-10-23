@@ -144,6 +144,7 @@ impl PreparedAnalysisPublication {
     }
 }
 
+#[cfg(test)]
 fn record_value(record: &PersistedAnalysisArtifact) -> Result<serde_json::Value, String> {
     match record {
         PersistedAnalysisArtifact::Standard(r) => serde_json::to_value(r),
@@ -153,7 +154,79 @@ fn record_value(record: &PersistedAnalysisArtifact) -> Result<serde_json::Value,
     .map_err(|e| e.to_string())
 }
 
+/// The record without its creation time, borrowed field by field. The canonical encoder orders
+/// keys, so encoding this view directly yields the same bytes as encoding the record's JSON tree
+/// with `created_at` removed, without materializing that tree.
+#[derive(Serialize)]
+struct StandardDigestView<'a> {
+    schema_version: &'a String,
+    op_version: &'a String,
+    run_digest: &'a Digest,
+    run: &'a serde_json::Value,
+    metadata: &'a AnalysisRunResult,
+    field_inventory: &'a Vec<AnalysisField>,
+    materialized_field_ids: &'a Vec<String>,
+    fields: &'a Vec<PersistedFieldArtifact>,
+    render_tiles: &'a Option<RenderTileIndex>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    observation_histories: &'a Vec<PersistedObservationHistory>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    original_fields: &'a Option<runmat_analysis_fea::results::field::RecoveredFieldArtifactManifest>,
+}
+
+#[derive(Serialize)]
+struct FrequencyDigestView<'a, S, C, R> {
+    schema_version: &'a String,
+    op_version: &'a String,
+    step: &'a S,
+    object_catalog: &'a C,
+    artifact_roots: &'a R,
+}
+
 pub(super) fn record_digest(record: &PersistedAnalysisArtifact) -> Result<Digest, String> {
+    const DOMAIN: &str = "analysis-publication-record";
+    match record {
+        PersistedAnalysisArtifact::Standard(r) => canonical_digest(
+            DOMAIN,
+            &StandardDigestView {
+                schema_version: &r.schema_version,
+                op_version: &r.op_version,
+                run_digest: &r.run_digest,
+                run: &r.run,
+                metadata: &r.metadata,
+                field_inventory: &r.field_inventory,
+                materialized_field_ids: &r.materialized_field_ids,
+                fields: &r.fields,
+                render_tiles: &r.render_tiles,
+                observation_histories: &r.observation_histories,
+                original_fields: &r.original_fields,
+            },
+        ),
+        PersistedAnalysisArtifact::StructuralFrequency(r) => canonical_digest(
+            DOMAIN,
+            &FrequencyDigestView {
+                schema_version: &r.schema_version,
+                op_version: &r.op_version,
+                step: &r.step,
+                object_catalog: &r.object_catalog,
+                artifact_roots: &r.artifact_roots,
+            },
+        ),
+        PersistedAnalysisArtifact::AcousticFrequency(r) => canonical_digest(
+            DOMAIN,
+            &FrequencyDigestView {
+                schema_version: &r.schema_version,
+                op_version: &r.op_version,
+                step: &r.step,
+                object_catalog: &r.object_catalog,
+                artifact_roots: &r.artifact_roots,
+            },
+        ),
+    }
+}
+
+#[cfg(test)]
+fn tree_record_digest(record: &PersistedAnalysisArtifact) -> Result<Digest, String> {
     let mut value = record_value(record)?;
     value
         .as_object_mut()
