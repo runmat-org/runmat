@@ -170,6 +170,7 @@ fn aggregate_accounts_mesh_as_input_not_as_emitted_output() {
             matches!(
                 input.manifest.kind,
                 AnalysisNumericalObjectKind::AcousticFrequencyWorkload
+                    | AnalysisNumericalObjectKind::AcousticFrequencyAssemblyRequest
                     | AnalysisNumericalObjectKind::SolverResult
             )
         })
