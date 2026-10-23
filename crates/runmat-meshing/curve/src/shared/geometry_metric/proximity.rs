@@ -13,6 +13,9 @@ use runmat_meshing_size::metric::DirectionalMetricEnvelope;
 #[derive(Clone, Debug)]
 pub(super) struct EdgeWitness {
     pub edge_id: PersistentEntityId,
+    /// The exact edge's geometric tolerance; separations within the pair's combined
+    /// tolerance are the same location.
+    pub tolerance_m: f64,
     pub endpoint_ids: BTreeSet<PersistentEntityId>,
     pub face_ids: BTreeSet<PersistentEntityId>,
     /// Solids bounded by the edge's faces; empty for sheet geometry.
@@ -113,10 +116,13 @@ pub(super) fn derive_proximity_contributions(
                     }
                 }
             }
-            if minimum == 0.0 {
+            if minimum <= coincidence_tolerance_m(left, right) {
                 // Edges of separate bodies that touch (a part seated in a recess, stacked
-                // blocks) coincide; that is contact, with no gap to resolve. Within one body,
-                // coincident nonincident edges are a topology defect.
+                // blocks) coincide; that is contact, with no gap to resolve. Two separately
+                // evaluated coincident edges agree only to their geometric tolerance and
+                // coordinate roundoff, so a separation inside that is coincidence, not a gap
+                // to size for. Within one body, coincident nonincident edges are a topology
+                // defect.
                 let separate_bodies = !left.solid_ids.is_empty()
                     && !right.solid_ids.is_empty()
                     && left.solid_ids.is_disjoint(&right.solid_ids);
@@ -173,6 +179,18 @@ pub(super) fn derive_proximity_contributions(
     // The parent request performs the one authoritative canonical ordering
     // together with curvature and feature contributions.
     Ok(contributions)
+}
+
+/// Separations at or below this are one location: the edges' combined geometric tolerance,
+/// and never less than the roundoff of their coordinates.
+fn coincidence_tolerance_m(left: &EdgeWitness, right: &EdgeWitness) -> f64 {
+    let magnitude = left
+        .points_m
+        .iter()
+        .chain(&right.points_m)
+        .flatten()
+        .fold(0.0_f64, |largest, coordinate| largest.max(coordinate.abs()));
+    (left.tolerance_m + right.tolerance_m).max(64.0 * f64::EPSILON * magnitude)
 }
 
 fn bounds(witness: &EdgeWitness) -> ([f64; 3], [f64; 3]) {
@@ -318,6 +336,20 @@ mod tests {
         };
         // A part seated against another (the speaker cone in the air's recess): no gap.
         assert!(derive(left.clone(), right.clone()).unwrap().is_empty());
+        // Separately evaluated coincident edges differ by coordinate roundoff, or by up to
+        // their geometric tolerance; neither is a gap that sizes the mesh.
+        let mut offset = right.clone();
+        offset.points_m = vec![[0.08, 0.0, 9.0e-18]];
+        let mut seated = left.clone();
+        seated.points_m = vec![[0.08, 0.0, 0.0]];
+        assert!(derive(seated.clone(), offset.clone()).unwrap().is_empty());
+        offset.points_m = vec![[0.08, 0.0, 1.5e-7]];
+        seated.tolerance_m = 1.0e-7;
+        offset.tolerance_m = 1.0e-7;
+        assert!(derive(seated.clone(), offset.clone()).unwrap().is_empty());
+        // A real gap beyond the tolerance still sizes both edges.
+        offset.points_m = vec![[0.08, 0.0, 1.0e-3]];
+        assert_eq!(derive(seated, offset).unwrap().len(), 2);
         right.solid_ids = left.solid_ids.clone();
         assert!(derive(left, right).is_err());
     }
@@ -429,6 +461,7 @@ mod tests {
     fn witness(seed: u8, x: f64) -> EdgeWitness {
         EdgeWitness {
             edge_id: id(PersistentEntityKind::Edge, seed),
+            tolerance_m: 0.0,
             endpoint_ids: BTreeSet::from([id(PersistentEntityKind::Vertex, seed)]),
             face_ids: BTreeSet::new(),
             solid_ids: BTreeSet::new(),
