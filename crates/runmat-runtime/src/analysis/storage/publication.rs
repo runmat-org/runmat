@@ -15,6 +15,7 @@ mod preparation;
 mod run_admission;
 mod source_fields;
 mod source_phase;
+pub(in crate::analysis::storage) mod spill;
 mod typed_preparation;
 pub(in crate::analysis) use preparation::PreparationReservation;
 pub(in crate::analysis) use typed_preparation::retained_mesh_storage;
@@ -34,6 +35,8 @@ pub struct AnalysisPublicationBuilder {
     evidence_access: crate::analysis::structural_study::publication::evidence::StudyEvidenceAccess,
     admission: std::sync::Mutex<bool>,
     store: InMemoryAnalysisArtifactStore,
+    /// Field chunks streamed out of staging; the budget bounds only the bytes in flight.
+    spill: std::sync::Mutex<spill::SpilledChunks>,
 }
 
 pub struct PreparedAnalysisPublication {
@@ -44,6 +47,8 @@ pub struct PreparedAnalysisPublication {
     runs: HashMap<String, PersistedAnalysisArtifact>,
     chunks: HashMap<Digest, Arc<[u8]>>,
     observations: HashMap<String, observations::ObservationAttachment>,
+    /// Field chunks written to the private spill area during staging, read back at commit.
+    spilled: spill::SpilledChunks,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -256,6 +261,7 @@ impl AnalysisPublicationBuilder {
             evidence_access: crate::analysis::structural_study::publication::evidence::StudyEvidenceAccess::capture(),
             admission: std::sync::Mutex::new(false),
             store: InMemoryAnalysisArtifactStore::staging(),
+            spill: std::sync::Mutex::new(spill::SpilledChunks::default()),
         })
     }
     fn admit(&self, additional: u64) -> Result<(), AnalysisPublicationError> {
@@ -307,8 +313,48 @@ impl AnalysisPublicationBuilder {
         validate_run_identity(run)?;
         let mut requested = 0u64;
         let mut denied = None;
-        let prepared =
-            prepare_run_artifact_with_admission(run, Utc::now().to_rfc3339(), &mut |bytes| {
+        let mut spill = self.spill.lock().map_err(|_| "publication spill lock poisoned")?;
+        // Field payloads stream to the spill area: each is charged only while in flight, on
+        // top of what staging already retains, and released once its chunks are written.
+        struct Streamed<'a> {
+            builder: &'a AnalysisPublicationBuilder,
+            run: &'a AnalysisRunResult,
+            spill: &'a mut spill::SpilledChunks,
+            denied: Option<AnalysisPublicationError>,
+        }
+        impl super::preparation::FieldChunkSink for Streamed<'_> {
+            fn admit_in_flight(&mut self, bytes: u64) -> Result<(), String> {
+                self.builder.admit(bytes).map_err(|error| {
+                    let error = error.context(&run_admission::run_failure_facts(
+                        self.run,
+                        self.builder.maximum_bytes,
+                    ));
+                    let message = error.to_string();
+                    self.denied = Some(error);
+                    message
+                })
+            }
+            fn put(&mut self, digest: Digest, bytes: &[u8]) -> Result<(), String> {
+                self.spill.put(digest, bytes)?;
+                self.builder
+                    .store
+                    .streamed
+                    .write()
+                    .map_err(|_| "streamed chunk lock poisoned")?
+                    .insert(digest);
+                Ok(())
+            }
+        }
+        let mut streamed = Streamed {
+            builder: self,
+            run,
+            spill: &mut spill,
+            denied: None,
+        };
+        let prepared = prepare_run_artifact_with_admission(
+            run,
+            Utc::now().to_rfc3339(),
+            &mut |bytes| {
                 requested = requested
                     .checked_add(bytes)
                     .ok_or("staging byte overflow")?;
@@ -319,10 +365,13 @@ impl AnalysisPublicationBuilder {
                     denied = Some(error);
                     message
                 })
-            });
-        if let Some(error) = denied {
+            },
+            Some(&mut streamed),
+        );
+        if let Some(error) = streamed.denied.take().or(denied) {
             return Err(error);
         }
+        drop(spill);
         let prepared = prepared?;
         self.store
             .persist_prepared_run(run, prepared)
@@ -522,6 +571,10 @@ impl AnalysisPublicationBuilder {
             runs,
             chunks,
             observations,
+            spilled: self
+                .spill
+                .into_inner()
+                .map_err(|_| "publication spill lock poisoned")?,
         })
     }
 }

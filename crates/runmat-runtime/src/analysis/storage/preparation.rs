@@ -4,7 +4,14 @@ pub(super) fn prepare_run_artifact(
     run: &AnalysisRunResult,
     created_at: String,
 ) -> Result<PreparedRunArtifact, String> {
-    prepare_run_artifact_with_admission(run, created_at, &mut |_| Ok(()))
+    prepare_run_artifact_with_admission(run, created_at, &mut |_| Ok(()), None)
+}
+
+/// Receives field chunks as they are produced so they need not stay resident in staging.
+pub(super) trait FieldChunkSink {
+    /// Admits one field's encoded payload and chunk copies while they are in flight.
+    fn admit_in_flight(&mut self, bytes: u64) -> Result<(), String>;
+    fn put(&mut self, digest: Digest, bytes: &[u8]) -> Result<(), String>;
 }
 
 /// Prepares the persisted run, charging `admit` before each phase allocates:
@@ -15,6 +22,7 @@ pub(super) fn prepare_run_artifact_with_admission(
     run: &AnalysisRunResult,
     created_at: String,
     admit: &mut dyn FnMut(u64) -> Result<(), String>,
+    mut sink: Option<&mut dyn FieldChunkSink>,
 ) -> Result<PreparedRunArtifact, String> {
     let mut fields = BTreeMap::<String, PersistedFieldArtifact>::new();
     let mut chunks = HashMap::new();
@@ -57,7 +65,11 @@ pub(super) fn prepare_run_artifact_with_admission(
                 }
                 // The encoded payload and its chunk copies coexist while chunking.
                 let payload_bytes = (values.len() as u64).saturating_mul(16);
-                if let Err(error) = admit(payload_bytes) {
+                let admitted = match sink.as_deref_mut() {
+                    Some(sink) => sink.admit_in_flight(payload_bytes),
+                    None => admit(payload_bytes),
+                };
+                if let Err(error) = admitted {
                     preparation_error = Some(error);
                     return;
                 }
@@ -90,6 +102,13 @@ pub(super) fn prepare_run_artifact_with_admission(
                     manifest: chunked.manifest.clone(),
                 };
                 for (descriptor, bytes) in chunked.manifest.chunks.iter().zip(chunked.chunks) {
+                    if let Some(sink) = sink.as_deref_mut() {
+                        if let Err(error) = sink.put(descriptor.digest, &bytes) {
+                            preparation_error = Some(error);
+                            return;
+                        }
+                        continue;
+                    }
                     match chunks.get(&descriptor.digest) {
                         Some(existing) if existing != &bytes => {
                             preparation_error =

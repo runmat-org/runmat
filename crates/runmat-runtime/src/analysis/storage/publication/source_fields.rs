@@ -90,6 +90,7 @@ impl AnalysisPublicationBuilder {
                 .chunks
                 .read()
                 .map_err(|_| "publication chunks poisoned")?;
+            let spilled = self.spill.lock().map_err(|_| "publication spill lock poisoned")?;
             let mut entries = Vec::with_capacity(source.fields.len());
             for entry in &source.fields {
                 let field = run
@@ -99,7 +100,11 @@ impl AnalysisPublicationBuilder {
                     .ok_or("original source channel disappeared")?;
                 let payload =
                     super::super::field_reader::read_field_payload(field, &mut |digest| {
-                        Ok(chunks.get(&digest).map(|bytes| bytes.to_vec()))
+                        match chunks.get(&digest) {
+                            Some(bytes) => Ok(Some(bytes.to_vec())),
+                            // Streamed field chunks are read back from the spill area.
+                            None => spilled.read(&digest),
+                        }
                     })?;
                 let recovered = RecoveredField::new(
                     entry.definition.clone(),

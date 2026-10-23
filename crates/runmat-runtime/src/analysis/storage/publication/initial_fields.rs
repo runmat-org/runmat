@@ -96,9 +96,14 @@ impl AnalysisPublicationBuilder {
             .chunks
             .read()
             .map_err(|_| "publication chunks poisoned")?;
+        let spilled = self.spill.lock().map_err(|_| "publication spill lock poisoned")?;
         for (entry, field) in candidate {
             let payload = super::super::field_reader::read_field_payload(field, &mut |digest| {
-                Ok(chunks.get(&digest).map(|bytes| bytes.to_vec()))
+                match chunks.get(&digest) {
+                            Some(bytes) => Ok(Some(bytes.to_vec())),
+                            // Streamed field chunks are read back from the spill area.
+                            None => spilled.read(&digest),
+                        }
             })?;
             let values = decode_field_values(&payload)?;
             let recovered = RecoveredField::new(

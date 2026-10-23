@@ -92,7 +92,13 @@ fn missing_retained_object_blocks_collection_before_orphan_deletion() {
     let root = tempfile::tempdir().unwrap();
     let disk = FilesystemAnalysisArtifactStore::new(root.path().to_path_buf());
     let original = prepare(&run, &["retained"]);
-    let required = *original.chunks.keys().next().unwrap();
+    let required = original
+        .chunks
+        .keys()
+        .copied()
+        .chain(original.spilled.digests())
+        .next()
+        .unwrap();
     disk.commit_publication(original).unwrap();
     std::fs::remove_file(disk.object_path(required)).unwrap();
     let orphan = Digest::sha256(b"orphan");

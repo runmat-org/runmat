@@ -3079,3 +3079,63 @@ fn element_field_over_a_boundary_region_reads_the_face_owners() {
         );
     }
 }
+
+// witness: FEA-SHARED-OBSERVATIONS-001/governed_observation_corpus @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: a nodal von Mises field, which the solver provides only as the volume-weighted
+//   transfer of element values, binds by its node location and is sampled at a point by shape
+//   function interpolation (exact for a nodal field linear in x) on a three-element Tet4 mesh.
+//   The transfer itself is witnessed by the recovery tests, not here.
+#[test]
+fn node_located_von_mises_binds_its_declared_transfer_and_interpolates() {
+    let mesh = runmat_meshing_core::fixtures::three_region_tetrahedron_solver_mesh();
+    let projection = AnalysisProjection::derive(&mesh).unwrap();
+    let definition = RecoveredFieldDefinition::new_derived(
+        "structural.nodal_von_mises",
+        ObservationQuantity::VonMisesStress,
+        FieldLocation::Node,
+        RecoveredFieldEntityDomain::Nodes,
+        ObservationValueShape::Scalar,
+        RecoveredFieldNumericRepresentation::Real,
+        RecoveredFieldDerivation::LocationTransfer {
+            source_location: FieldLocation::Element,
+            recovery: RecoveryPolicy::VolumeWeightedAverage,
+        },
+    )
+    .unwrap();
+    let values = projection
+        .nodes
+        .iter()
+        .map(|node| 1.0e6 * node.coordinates_m[0] + 3.0e6)
+        .collect::<Vec<_>>();
+    let fields = catalog(&projection, &definition, vec![values.len()], values);
+    let element = &projection.elements[1];
+    let corner = projection.nodes[element.node_indices[0]].coordinates_m;
+    let position =
+        std::array::from_fn(|axis| 0.6 * element.centroid_m[axis] + 0.4 * corner[axis]);
+    let mut request = spec(
+        "surface_sample",
+        ObservationTarget::Point {
+            position: Position::new(position),
+        },
+    );
+    request.quantity = ObservationQuantity::VonMisesStress;
+    request.value_shape = ObservationValueShape::Scalar;
+    request.source_location = FieldLocation::Node;
+    request.output_location = FieldLocation::Point;
+    request.recovery = RecoveryPolicy::ShapeFunctionInterpolation;
+    request.cost = runmat_analysis_core::ObservationCostPolicy::Automatic;
+    let mut step = ProcedureStep::structural_static("static");
+    step.observations = vec![ObservationRequest::Probe(request)];
+    let plan = resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let result = evaluate_observations(&plan, &projection, &fields).unwrap();
+    let value = result[0].field.as_host_f64().unwrap()[0];
+    let expected = 1.0e6 * position[0] + 3.0e6;
+    assert!((value - expected).abs() <= 1e-9 * expected, "{value} vs {expected}");
+}

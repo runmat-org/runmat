@@ -345,9 +345,18 @@ fn failed_private_attempt_is_reclaimed_without_losing_shared_original_fields() {
     let disk = FilesystemAnalysisArtifactStore::new(root.path().to_path_buf());
     let aborted = prepare(&run, &["reused_child"]);
     let old_identity = aborted.descriptor.identity().unwrap();
-    let (digest, original) = aborted.chunks.iter().next().unwrap();
-    let digest = *digest;
-    let original = original.clone();
+    // Field chunks are streamed during staging; any committed chunk serves the test.
+    let digest = aborted
+        .chunks
+        .keys()
+        .copied()
+        .chain(aborted.spilled.digests())
+        .next()
+        .unwrap();
+    let original: std::sync::Arc<[u8]> = match aborted.chunks.get(&digest) {
+        Some(bytes) => bytes.clone(),
+        None => aborted.spilled.read(&digest).unwrap().unwrap().into(),
+    };
     std::fs::create_dir_all(disk.objects_directory()).unwrap();
     std::fs::write(disk.object_path(digest), b"invalid preexisting object").unwrap();
     assert!(disk

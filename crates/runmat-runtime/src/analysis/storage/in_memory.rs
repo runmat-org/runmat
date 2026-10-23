@@ -12,6 +12,7 @@ impl InMemoryAnalysisArtifactStore {
             observations: RwLock::new(HashMap::new()),
             runs: RwLock::new(HashMap::new()),
             chunks: RwLock::new(HashMap::new()),
+            streamed: RwLock::new(std::collections::HashSet::new()),
         }
     }
     pub(super) fn staging() -> Self {
