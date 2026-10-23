@@ -481,7 +481,7 @@ pub fn import_semantic_state_completion(
     crate::object::validate_prepared_output_resource_facts(&imported, &demand.output)?;
     let payload = imported.payload();
     let materialization =
-        runmat_canonical_codec::canonical_payload_materialization_resident_bytes_estimate(&payload)
+        runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(&payload)
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if materialization > demand.state_materialization_resident_bytes_estimate.0 {
         return Err(AnalysisBridgeError::Identity(

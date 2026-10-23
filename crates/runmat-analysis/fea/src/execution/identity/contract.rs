@@ -22,6 +22,14 @@ macro_rules! identity_type {
             ) -> AnalysisExecutionResult<Self> {
                 Ok(Self(super::derive_digest(domain, input)?))
             }
+
+            #[allow(dead_code)]
+            pub(in crate::execution) fn derive_content<T: Serialize>(
+                domain: &'static str,
+                input: &T,
+            ) -> AnalysisExecutionResult<Self> {
+                Ok(Self(super::derive_content_digest(domain, input)?))
+            }
         }
     };
 }

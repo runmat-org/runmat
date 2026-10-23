@@ -255,3 +255,22 @@ mod access;
 mod reclamation;
 
 mod evidence;
+
+// witness: FEA-SHARED-RESOURCES-001/phase_lifetimes @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: a staged run record's identity is digested from its typed fields without building
+//   a JSON tree, and equals the digest of that tree with `created_at` removed, for a linear
+//   static run. Frequency records use the same view and are not exercised here.
+#[test]
+fn record_digest_matches_the_json_tree_digest_without_building_the_tree() {
+    let _guard = tests::analysis_test_guard();
+    let run = run();
+    let prepared = prepare(&run, &["digest_view"]);
+    assert!(!prepared.runs.is_empty());
+    for record in prepared.runs.values() {
+        assert_eq!(
+            super::record_digest(record).unwrap(),
+            super::tree_record_digest(record).unwrap()
+        );
+    }
+}

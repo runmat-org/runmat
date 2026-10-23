@@ -189,7 +189,7 @@ fn run_linear_static_with_constraint_plan(
     // Element recovery now owns the temperatures it needs. Release the aligned global
     // field before solving; only the canonical transition must survive into the result.
     let thermal_transition = thermal_transfer.map(|transfer| transfer.transition);
-    preflight::verify_executed_preassembly(
+    let planned_reduced_support = preflight::verify_executed_preassembly(
         model,
         &options,
         assembly_constraint_plan,
@@ -238,7 +238,12 @@ fn run_linear_static_with_constraint_plan(
     drop(phase_clock);
     let phase_clock = crate::progress::phase_timer("structural_static.solve");
     let solve_result =
-        solve::solve_static_system(&summary, &options, preassembly.solver_admission.as_ref())?;
+        solve::solve_static_system(
+            &summary,
+            &options,
+            preassembly.solver_admission.as_ref(),
+            planned_reduced_support.as_ref(),
+        )?;
     drop(phase_clock);
     let phase_clock = crate::progress::phase_timer("structural_static.balance_and_reactions");
     let static_balance = solve::recover_static_balance(&summary, &solve_result.solution, &options)?;

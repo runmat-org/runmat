@@ -373,7 +373,15 @@ fn create_results_object_from_args(args: crate::call::BuiltinArguments) -> Built
             return Ok(args[0].clone());
         }
     }
-    let run_id = run_id_from_value(RESULTS_NAME, &args[0])?;
+    let requested = run_id_from_value(RESULTS_NAME, &args[0])?;
+    // A definition run id names every attempt; the object reports the attempt it holds.
+    let run_id = crate::analysis::storage::resolve_run_attempt(&requested).map_err(|err| {
+        builtin_error(
+            RESULTS_NAME,
+            &ERROR_OPERATION,
+            format!("failed to resolve the latest FEA run attempt: {err}"),
+        )
+    })?;
     let query = results_query_from_args(args.view().range(1..)?)?;
     let envelope = analysis_results_by_run_id_op(&run_id, query, OperationContext::new(None, None))
         .map_err(|err| operation_error(RESULTS_NAME, &ERROR_OPERATION, err))?;

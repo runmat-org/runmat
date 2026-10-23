@@ -291,9 +291,12 @@ pub(crate) fn validate_prepared_output_resource_facts(
     if output.manifest.encoded_length > admitted.encoded_payload_bytes_upper_bound.0
         || actual_closure > admitted.transport_closure_bytes_upper_bound.0
     {
-        return Err(AnalysisBridgeError::Invalid(
-            "prepared output exceeds its admitted semantic or transport envelope".into(),
-        ));
+        return Err(AnalysisBridgeError::Invalid(format!(
+            "prepared output exceeds its admitted semantic or transport envelope: encoded {} of {}, closure {actual_closure} of {}",
+            output.manifest.encoded_length,
+            admitted.encoded_payload_bytes_upper_bound.0,
+            admitted.transport_closure_bytes_upper_bound.0,
+        )));
     }
     Ok(())
 }

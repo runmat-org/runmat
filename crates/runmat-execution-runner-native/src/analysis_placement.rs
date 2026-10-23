@@ -191,7 +191,7 @@ pub async fn execute_structural_workloads_locally(
                 "prepared structural study has no workloads".into(),
             )
         })?;
-    let maximum_resident_bytes = authored_model
+    let authored_resident_bytes = authored_model
         .sequence
         .steps
         .iter()
@@ -202,6 +202,14 @@ pub async fn execute_structural_workloads_locally(
                 "prepared structural study has no workloads".into(),
             )
         })?;
+    // The effective ceiling is min(authored, machine): an unbounded authored ceiling runs within
+    // the memory this host admits (the same snapshot as the pool's capacity).
+    let machine_resident_bytes = match execution_config.local_memory_capacity_bytes {
+        Some(capacity) => capacity,
+        None => crate::machine_capacity::memory_bytes()
+            .map_err(|error| crate::NativeExecutionError::Configuration(error.to_string()))?,
+    };
+    let maximum_resident_bytes = authored_resident_bytes.min(machine_resident_bytes);
     let mut required_capabilities = BTreeSet::new();
     required_capabilities.insert(Capability::ProcessIsolation);
     execution_config.max_workers = workers.max(1);

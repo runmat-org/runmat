@@ -38,7 +38,7 @@ pub(super) fn validate_output_bounds(
     }
     let payload = imported.payload();
     let resident =
-        runmat_canonical_codec::canonical_payload_materialization_resident_bytes_estimate(&payload)
+        runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(&payload)
             .map_err(|e| AnalysisBridgeError::Invalid(e.to_string()))?;
     if resident > demand.output.construction_resident_bytes_admission_budget.0 {
         return Err(AnalysisBridgeError::Identity(

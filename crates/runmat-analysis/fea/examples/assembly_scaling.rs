@@ -15,7 +15,8 @@ use runmat_analysis_fea::{
 };
 use runmat_meshing_core::{
     fixtures::{connected_tetrahedron_solver_mesh, elevate_connected_tet4_fixture},
-    solver_volume_element_identity, ElementOrder, FieldTopologyLocation, MeshNeighbor,
+    solver_volume_element_identity, CanonicalMeshingContract, ElementOrder, FieldTopologyLocation,
+    MeshNeighbor,
     SolverMeshArtifact, SolverMeshNode, StableDigest,
 };
 

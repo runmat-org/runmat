@@ -71,8 +71,21 @@ fn solve_affine_constraint_system_with_settings(
             "affine reduction differs from the canonical resolved constraint matrix",
         );
     }
+    let stiffness = summary.operator.operators().stiffness();
+    let derived_support;
+    let reduced_support = match summary.planned_reduced_support {
+        Some(planned) => planned,
+        None => match reduction.reduce_sparse_pattern(stiffness.pattern()) {
+            Ok(pattern) => {
+                derived_support = pattern;
+                &derived_support
+            }
+            Err(error) => return rejected_affine_system(summary, &error.to_string()),
+        },
+    };
     let (reduced_operator, reduced_rhs) = match reduction.reduce_sparse_system_on_support(
-        summary.operator.operators().stiffness(),
+        stiffness,
+        reduced_support,
         summary.operator.load(),
     ) {
         Ok(reduced) => reduced,
@@ -122,6 +135,7 @@ fn solve_affine_constraint_system_with_settings(
     }
 
     let reduced_dofs = reduction.reduced_dof_count;
+    let reduced_pattern_entries = reduced_operator.pattern().column_indices().len();
     let preparation = shared_sparse::with_plan(plan, move || match reuse {
         Some(reuse) => PreparedRealLinearSystem::try_new_reusing(
             reduced_operator,
@@ -150,7 +164,9 @@ fn solve_affine_constraint_system_with_settings(
             return rejected_affine_system(
                 summary,
                 &format!(
-                    "exact reduced-solver work (dimension, factor nonzeros, updates, bytes) {exact:?} exceeds the admitted resource envelope {admission:?}"
+                    "exact reduced-solver work (dimension, factor nonzeros, updates, bytes) {exact:?} on a reduced pattern of {} entries (planned support: {}) exceeds the admitted resource envelope {admission:?}",
+                    reduced_pattern_entries,
+                    summary.planned_reduced_support.is_some(),
                 ),
             );
         }

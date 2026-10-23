@@ -79,6 +79,7 @@ pub fn solve_linear_system_with_execution(
         initial_guess,
         plan,
         None,
+        None,
     )
 }
 
@@ -90,9 +91,13 @@ pub(crate) fn solve_linear_system_with_execution_admitted(
     initial_guess: Option<&[f64]>,
     plan: LocalExecutionPlan,
     admission: Option<&SolverAdmissionResourcePolicy>,
+    planned_reduced_support: Option<&crate::algebra::SparsePattern>,
 ) -> Result<LinearSolveResult, ScopedSpmvError> {
     input::solve_structural_system_with_execution(
-        &input::StructuralLinearSystemView::from(summary),
+        &input::StructuralLinearSystemView {
+            planned_reduced_support,
+            ..input::StructuralLinearSystemView::from(summary)
+        },
         preconditioner_kind,
         backend_kind,
         algebra_backend,

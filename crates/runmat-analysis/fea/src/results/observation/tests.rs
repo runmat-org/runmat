@@ -2979,3 +2979,103 @@ fn element_field_point_sample_reads_the_containing_element() {
         );
     }
 }
+
+// witness: FEA-SHARED-OBSERVATIONS-001/governed_observation_corpus @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: an element field over a boundary-face region reads each face's owning element;
+//   its area-weighted average and its maximum match the owners' values on a three-element Tet4
+//   mesh. Tet10 faces and faces shared by two elements (interfaces) are not exercised.
+#[test]
+fn element_field_over_a_boundary_region_reads_the_face_owners() {
+    use runmat_analysis_core::{
+        EntityDimension, ExcitationTarget, ExpectedTopology, RegionTarget, TargetCardinality,
+    };
+    let mesh = runmat_meshing_core::fixtures::three_region_tetrahedron_solver_mesh();
+    let projection = AnalysisProjection::derive(&mesh).unwrap();
+    let definition = RecoveredFieldDefinition::new(
+        "stress.recovered",
+        ObservationQuantity::Stress,
+        FieldLocation::Element,
+        RecoveredFieldEntityDomain::VolumeElements,
+        ObservationValueShape::SymmetricTensor3,
+        RecoveredFieldNumericRepresentation::Real,
+    )
+    .unwrap();
+    let element_values = [100.0, 200.0, 300.0];
+    let fields = catalog(
+        &projection,
+        &definition,
+        vec![3, 6],
+        element_values
+            .iter()
+            .flat_map(|value| [*value, 0.0, 0.0, 0.0, 0.0, 0.0])
+            .collect(),
+    );
+    let entity = projection.boundary_faces[0].provenance[0].clone();
+    let mut region = RegionTarget::new(
+        "faces",
+        EntityDimension::Face,
+        ExpectedTopology::BoundaryFace,
+        TargetCardinality::OneOrMore,
+    );
+    region.bind_resolved_entities(vec![entity.clone()]).unwrap();
+    // Expected trace of the element field: owner values weighted by face area.
+    let (mut weighted, mut area, mut peak) = (0.0, 0.0, f64::NEG_INFINITY);
+    let mut owners = std::collections::BTreeSet::new();
+    for face in projection
+        .boundary_faces
+        .iter()
+        .filter(|face| face.provenance.contains(&entity))
+    {
+        let [a, b, c] = [0, 1, 2].map(|k| projection.nodes[face.node_indices[k]].coordinates_m);
+        let (u, v) = (
+            [b[0] - a[0], b[1] - a[1], b[2] - a[2]],
+            [c[0] - a[0], c[1] - a[1], c[2] - a[2]],
+        );
+        let cross = [
+            u[1] * v[2] - u[2] * v[1],
+            u[2] * v[0] - u[0] * v[2],
+            u[0] * v[1] - u[1] * v[0],
+        ];
+        let face_area = 0.5 * cross.iter().map(|x| x * x).sum::<f64>().sqrt();
+        let owner = face.adjacent_element_indices[0];
+        owners.insert(owner);
+        weighted += element_values[owner] * face_area;
+        area += face_area;
+        peak = peak.max(element_values[owner]);
+    }
+    assert!(owners.len() >= 1 && area > 0.0);
+    for (id, operation, output_location, expected) in [
+        ("mean", SpatialReduction::Average, FieldLocation::Global, weighted / area),
+        ("peak", SpatialReduction::Maximum, FieldLocation::Element, peak),
+    ] {
+        let mut request = spec(id, ObservationTarget::Spatial(ExcitationTarget::Region(region.clone())));
+        request.quantity = ObservationQuantity::Stress;
+        request.value_shape = ObservationValueShape::SymmetricTensor3;
+        request.source_location = FieldLocation::Element;
+        request.output_location = output_location;
+        request.recovery = RecoveryPolicy::Native;
+        request.component = ObservationComponent::VonMises;
+        request.cost = runmat_analysis_core::ObservationCostPolicy::Automatic;
+        request.reduction = Some(ReductionPolicy {
+            spatial: operation,
+            series: SeriesReduction::None,
+            extrema_ties: ExtremaTiePolicy::FirstCanonical,
+        });
+        let mut step = ProcedureStep::structural_static("static");
+        step.observations = vec![ObservationRequest::Reduction(request)];
+        let plan = resolve_observation_plan(
+            &step,
+            &projection,
+            std::slice::from_ref(&definition),
+            ObservationLimits::default(),
+        )
+        .unwrap();
+        let result = evaluate_observations(&plan, &projection, &fields).unwrap();
+        let value = result[0].field.as_host_f64().unwrap()[0];
+        assert!(
+            (value - expected).abs() <= 1e-12 * expected,
+            "{id}: {value} vs {expected}"
+        );
+    }
+}

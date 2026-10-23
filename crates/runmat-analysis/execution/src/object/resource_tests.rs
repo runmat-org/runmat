@@ -10,7 +10,7 @@ fn chunked_input_inventory_preserves_partition_cost_and_rejects_missing_bytes() 
     let expected = payloads
         .iter()
         .map(|p| {
-            runmat_canonical_codec::canonical_payload_materialization_resident_bytes_estimate(p)
+            runmat_canonical_codec::canonical_payload_typed_resident_bytes_estimate(p)
                 .unwrap()
         })
         .sum::<u64>();

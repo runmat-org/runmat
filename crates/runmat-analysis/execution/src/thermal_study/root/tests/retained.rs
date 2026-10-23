@@ -113,7 +113,7 @@ fn selected_source_replanning_preserves_original_authority_and_rejects_other_int
     wrong.product.compiled.model.sequence.steps[0]
         .accuracy
         .resources
-        .maximum_resident_bytes += 1;
+        .maximum_resident_bytes -= 1;
     assert!(ThermalStudyCoordinator::new(wrong).is_err());
     let mut wrong = retained_preparation();
     wrong.field_source = None;
