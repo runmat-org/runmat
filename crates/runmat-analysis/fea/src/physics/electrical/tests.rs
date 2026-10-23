@@ -730,4 +730,5 @@ fn copper_bar_carries_sigma_v_over_l_and_dissipates_v_squared_over_r() {
         .outward_flux
         .abs();
     assert!((current * VOLTS - expected_power).abs() <= 1e-9 * expected_power);
+    assert_eq!(response.operator_proof, ElectricalOperatorProof::LocalEnergy);
 }

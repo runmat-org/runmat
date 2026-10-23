@@ -12,7 +12,8 @@ mod terminals;
 pub(crate) mod tests;
 
 pub use response::{
-    CanonicalElectricalResponse, ElectricalConstitutiveResponse, ElectricalTerminalResponse,
+    CanonicalElectricalResponse, ElectricalConstitutiveResponse, ElectricalOperatorProof,
+    ElectricalTerminalResponse,
 };
 use runmat_analysis_core::{
     AnalysisModel, AnalysisProcedure, ElectromagneticDomain, IndependentDomain, PhysicsFamily,

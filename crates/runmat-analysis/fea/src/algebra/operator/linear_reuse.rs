@@ -26,6 +26,11 @@ enum LocalEnergySource {
 impl LinearPreparationReuse {
     pub(crate) const RESIDENT_BYTES: u64 = std::mem::size_of::<Self>() as u64;
 
+    /// The certificate of the last prepared operator, if any.
+    pub(crate) fn certificate(&self) -> Option<&CoercivityCertificate> {
+        self.certificate.as_ref()
+    }
+
     pub(crate) fn clear(&mut self) {
         self.certificate = None;
         self.factor = None;

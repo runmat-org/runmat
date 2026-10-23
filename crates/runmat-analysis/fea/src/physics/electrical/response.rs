@@ -32,6 +32,18 @@ pub struct ElectricalTerminalResponse {
     pub outward_flux: f64,
 }
 
+/// What certified the electrical operator before its solve.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ElectricalOperatorProof {
+    /// The anchored local-energy bound separated the assembled operator from singularity.
+    LocalEnergy,
+    /// The local-energy bound was indeterminate; the sparse Cholesky factorization decided.
+    SparseCholesky,
+    /// Periodic relations reduced the system, which the shared SPD solver factored or iterated.
+    ReducedRelations,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CanonicalElectricalResponse {
@@ -58,6 +70,8 @@ pub struct CanonicalElectricalResponse {
     /// Absolute residual divided by the same lifted RHS norm used by shared PCG.
     pub linear_relative_residual: f64,
     pub iterations: u32,
+    /// What certified the operator before the solve, retained as evidence of the run.
+    pub operator_proof: ElectricalOperatorProof,
 }
 
 pub(super) fn solve(
@@ -140,7 +154,7 @@ pub(super) fn solve(
             )
         })
         .collect();
-    let (increment, linear_absolute_residual, relative_residual, iterations) =
+    let (increment, linear_absolute_residual, relative_residual, iterations, operator_proof) =
         if let Some(operator) = reduced_operator {
         // Periodic relations: eliminate the secondary nodes and solve the reduced system.
         // Relations hold absolute potentials; in increments they gain the reference shift.
@@ -174,7 +188,13 @@ pub(super) fn solve(
         drop(proof);
         drop(operators);
         let rhs_norm = rhs.iter().map(|v| v * v).sum::<f64>().sqrt();
-        (solution, relative_residual * rhs_norm, relative_residual, reduced.iterations)
+        (
+            solution,
+            relative_residual * rhs_norm,
+            relative_residual,
+            reduced.iterations,
+            ElectricalOperatorProof::ReducedRelations,
+        )
     } else {
     let system = AssembledRealSystem::try_new_with_nullspace_evidence(
             operators,
@@ -232,11 +252,20 @@ pub(super) fn solve(
                 "electrical relative residual target not satisfied".into(),
             ));
         }
+        let operator_proof = if preparation
+            .certificate()
+            .is_some_and(|certificate| certificate.proved_by_factorization())
+        {
+            ElectricalOperatorProof::SparseCholesky
+        } else {
+            ElectricalOperatorProof::LocalEnergy
+        };
         (
             solution.solution,
             solution.residual_norm,
             relative_residual,
             solution.iterations,
+            operator_proof,
         )
     };
     let potential = increment
@@ -376,6 +405,7 @@ pub(super) fn solve(
         )));
     }
     Ok(CanonicalElectricalResponse {
+        operator_proof,
         equation,
         mesh_digest: assembly.projection.mesh_digest,
         ordered_node_ids: assembly
