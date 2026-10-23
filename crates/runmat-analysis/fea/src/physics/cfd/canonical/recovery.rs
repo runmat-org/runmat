@@ -274,3 +274,40 @@ pub(super) fn relative(numerator: f64, denominator: f64) -> f64 {
         numerator / denominator
     }
 }
+
+/// The cell with the largest independent momentum residual: index, centroid, volume, its
+/// exterior face laws and relative residual, for exhaustion diagnostics.
+pub(super) fn describe_worst_cell(
+    p: &CanonicalFluidProblem<'_>,
+    residual: &CanonicalFluidResidual,
+) -> (f64, String) {
+    let (cell, relative) = residual
+        .cell_momentum_relative
+        .iter()
+        .enumerate()
+        .fold((0, 0.0f64), |acc, (c, r)| if *r > acc.1 { (c, *r) } else { acc });
+    let Some(geometry) = p.topology.cells.get(cell) else {
+        return (relative, "no cells".into());
+    };
+    let laws = p
+        .topology
+        .faces
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| f.owner == cell && f.neighbor.is_none())
+        .map(|(i, _)| match &p.boundaries[i] {
+            super::boundary::FaceBoundary::Interior => "interior",
+            super::boundary::FaceBoundary::Velocity { moving_wall: true, .. } => "moving_wall",
+            super::boundary::FaceBoundary::Velocity { .. } => "velocity",
+            super::boundary::FaceBoundary::PressureOutlet { .. } => "outlet",
+            super::boundary::FaceBoundary::Symmetry { .. } => "symmetry",
+        })
+        .collect::<Vec<_>>();
+    (
+        relative,
+        format!(
+            "cell {cell} at {:?} m, volume {:e} m^3, exterior faces {laws:?}, relative residual {relative:e}",
+            geometry.centroid_m, geometry.volume_m3
+        ),
+    )
+}

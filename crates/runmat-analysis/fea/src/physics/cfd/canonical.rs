@@ -18,6 +18,7 @@ pub(crate) use input_authority::{
     potential_boundary_authorities, supports_action, supports_signal,
 };
 mod iterate;
+mod jacobian;
 pub mod qualification;
 pub use initial::CanonicalFluidInitialState;
 mod linear;
@@ -157,7 +158,7 @@ pub enum CanonicalFluidError {
         relative_residual: Option<f64>,
         breakdown: bool,
     },
-    #[error("canonical fluid exhausted outer={outer_iterations}, linear={linear_iterations}, momentum={momentum_relative}, continuity={continuity_relative}, flux={flux_constitutive_relative}, global_momentum={global_momentum_relative}, maximum_cell_momentum={maximum_cell_momentum_relative}")]
+    #[error("canonical fluid exhausted outer={outer_iterations}, linear={linear_iterations}, momentum={momentum_relative}, continuity={continuity_relative}, flux={flux_constitutive_relative}, global_momentum={global_momentum_relative}, maximum_cell_momentum={maximum_cell_momentum_relative}; worst {worst_cell}")]
     IterationExhausted {
         outer_iterations: usize,
         linear_iterations: u64,
@@ -166,6 +167,8 @@ pub enum CanonicalFluidError {
         flux_constitutive_relative: f64,
         global_momentum_relative: f64,
         maximum_cell_momentum_relative: f64,
+        /// Where the largest cell momentum residual sits at the last step and how it moved.
+        worst_cell: String,
     },
 }
 
@@ -191,6 +194,8 @@ pub struct CanonicalFluidProblem<'a> {
     pressure_reference_plan: pressure_reference::PressureReferencePlan,
     pressure_stencils: Vec<pressure_gradient::PressureGradientStencil>,
     velocity_stencils: Vec<velocity_gradient::VelocityGradientStencil>,
+    /// Two-ring structure of the coupled momentum block, derived once per problem.
+    momentum_jacobian: jacobian::MomentumJacobianPattern,
     /// Cell-adjacency CSR support shared (by reference count) by every momentum/pressure
     /// operator of this problem; derived once instead of per outer iteration.
     operator_pattern: crate::algebra::SparsePattern,
@@ -383,6 +388,8 @@ impl<'a> CanonicalFluidProblem<'a> {
             )?;
         let pressure_stencils = pressure_gradient::derive(topology, &boundaries)?;
         let velocity_stencils = velocity_gradient::derive(topology, &boundaries)?;
+        let momentum_jacobian =
+            jacobian::MomentumJacobianPattern::derive(topology, &boundaries, &velocity_stencils)?;
         let numerical_input_identity = identity(
             "fea-fluid-numerical-input/v8",
             &(
@@ -418,6 +425,7 @@ impl<'a> CanonicalFluidProblem<'a> {
             pressure_reference_plan,
             pressure_stencils,
             velocity_stencils,
+            momentum_jacobian,
             operator_pattern: linear::cell_operator_pattern(topology)?,
         })
     }

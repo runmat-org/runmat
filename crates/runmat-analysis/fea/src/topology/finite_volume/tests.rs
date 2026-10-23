@@ -3,11 +3,11 @@ use runmat_meshing_core::{fixtures, ElementOrder, StableDigest};
 
 fn policy() -> FiniteVolumeProjectionPolicy {
     FiniteVolumeProjectionPolicy {
-        max_cells: 10000,
-        max_face_incidences: 40000,
-        max_boundary_faces: 40000,
-        max_scratch_bytes: 100_000_000,
-        max_traversal_operations: 100_000_000,
+        max_cells: Some(10000),
+        max_face_incidences: Some(40000),
+        max_boundary_faces: Some(40000),
+        max_scratch_bytes: Some(100_000_000),
+        max_traversal_operations: Some(100_000_000),
     }
 }
 
@@ -243,21 +243,21 @@ fn exact_admission_bounds_succeed_and_each_one_below_rejects() {
     )
     .unwrap();
     let exact = FiniteVolumeProjectionPolicy {
-        max_cells: r.cell_count,
-        max_face_incidences: r.face_incidence_count,
-        max_boundary_faces: r.boundary_face_count,
-        max_scratch_bytes: r.scratch_bytes,
-        max_traversal_operations: r.traversal_operations,
+        max_cells: Some(r.cell_count),
+        max_face_incidences: Some(r.face_incidence_count),
+        max_boundary_faces: Some(r.boundary_face_count),
+        max_scratch_bytes: Some(r.scratch_bytes),
+        max_traversal_operations: Some(r.traversal_operations),
     };
     FiniteVolumeTopology::derive(&source, exact).unwrap();
     for field in 0..5 {
         let mut p = exact;
         match field {
-            0 => p.max_cells -= 1,
-            1 => p.max_face_incidences -= 1,
-            2 => p.max_boundary_faces -= 1,
-            3 => p.max_scratch_bytes -= 1,
-            _ => p.max_traversal_operations -= 1,
+            0 => p.max_cells = p.max_cells.map(|v| v - 1),
+            1 => p.max_face_incidences = p.max_face_incidences.map(|v| v - 1),
+            2 => p.max_boundary_faces = p.max_boundary_faces.map(|v| v - 1),
+            3 => p.max_scratch_bytes = p.max_scratch_bytes.map(|v| v - 1),
+            _ => p.max_traversal_operations = p.max_traversal_operations.map(|v| v - 1),
         }
         assert!(matches!(
             FiniteVolumeTopology::derive(&source, p),

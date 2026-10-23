@@ -100,3 +100,58 @@ pub(super) fn evaluate(p: &CanonicalFluidProblem<'_>, values: &[V]) -> Result<Ve
     }
     Ok(gradients)
 }
+
+/// Linear part of the reconstruction: per cell, the cells it reads and the coefficients
+/// T[k][j][d] = ∂(∂u_k/∂x_d)/∂u_j(m). Boundary values are constants and drop out; a symmetry
+/// plane's mirror trace couples the owner's components through the plane normal.
+pub(super) fn linear_terms(
+    t: &FiniteVolumeTopology,
+    stencils: &[VelocityGradientStencil],
+) -> Vec<Vec<(usize, [[V; 3]; 3])>> {
+    stencils
+        .iter()
+        .enumerate()
+        .map(|(c, stencil)| {
+            let mut terms: Vec<(usize, [[V; 3]; 3])> = Vec::with_capacity(5);
+            let mut add_term = |m: usize, k: usize, j: usize, weight: V, factor: f64| {
+                let at = match terms.iter().position(|(cell, _)| *cell == m) {
+                    Some(at) => at,
+                    None => {
+                        terms.push((m, [[[0.0; 3]; 3]; 3]));
+                        terms.len() - 1
+                    }
+                };
+                for d in 0..3 {
+                    terms[at].1[k][j][d] += factor * weight[d];
+                }
+            };
+            for &(sample, weight) in &stencil.weights {
+                match sample {
+                    Sample::Cell(n) => {
+                        for k in 0..3 {
+                            add_term(n, k, k, weight, 1.0);
+                            add_term(c, k, k, weight, -1.0);
+                        }
+                    }
+                    Sample::VelocityFace(_) => {
+                        for k in 0..3 {
+                            add_term(c, k, k, weight, -1.0);
+                        }
+                    }
+                    Sample::SymmetryFace(i) => {
+                        let f = &t.faces[i];
+                        let normal = scale(f.owner_area_vector_m2, 1.0 / f.area_m2);
+                        for k in 0..3 {
+                            for j in 0..3 {
+                                add_term(c, k, j, weight, -normal[k] * normal[j]);
+                            }
+                        }
+                    }
+                    Sample::ZeroNormalDerivative => {}
+                }
+            }
+            terms.sort_by_key(|(cell, _)| *cell);
+            terms
+        })
+        .collect()
+}

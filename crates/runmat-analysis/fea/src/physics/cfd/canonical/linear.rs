@@ -218,3 +218,36 @@ pub(super) fn solve(
     }
     Ok((x, report.iterations as u64))
 }
+
+/// The CFD entry point to the shared restarted GMRES: every fluid Krylov solve goes through
+/// here, so a change of the shared solver interface is made in one place.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn restarted_gmres(
+    operator: &dyn runmat_sparse_solvers::LinearOperator<f64>,
+    preconditioner: Option<&dyn Preconditioner<f64>>,
+    rhs: &[f64],
+    x: &mut [f64],
+    relative_tolerance: f64,
+    maximum_iterations: usize,
+    restart: usize,
+    side: PreconditionerSide,
+) -> Result<runmat_sparse_solvers::krylov::KrylovReport, SolverError> {
+    gmres(
+        operator,
+        preconditioner,
+        rhs,
+        x,
+        &KrylovOptions {
+            rtol: relative_tolerance,
+            max_iterations: maximum_iterations,
+            return_best_iterate: true,
+            ..KrylovOptions::default()
+        },
+        &GmresOptions {
+            restart,
+            side,
+            ..GmresOptions::default()
+        },
+        control(),
+    )
+}

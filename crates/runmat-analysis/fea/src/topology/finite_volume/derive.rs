@@ -59,7 +59,7 @@ fn reserve_regions<'a>(
         (incidences, policy.max_face_incidences, "face incidences"),
         (boundaries, policy.max_boundary_faces, "boundary faces"),
     ] {
-        if count > maximum {
+        if maximum.is_some_and(|maximum| count > maximum) {
             return Err(Error::Limit(name));
         }
     }
@@ -84,7 +84,7 @@ fn reserve_regions<'a>(
             .ok_or(Error::Overflow)?;
         for component in &region.assembly_path {
             region_visits = region_visits.checked_add(1).ok_or(Error::Overflow)?;
-            if region_visits > policy.max_traversal_operations {
+            if policy.max_traversal_operations.is_some_and(|m| region_visits > m) {
                 return Err(Error::Limit("traversal operations"));
             }
             bytes = bytes.checked_add(component.len()).ok_or(Error::Overflow)?;
@@ -92,7 +92,7 @@ fn reserve_regions<'a>(
                 .checked_add(component.len())
                 .ok_or(Error::Overflow)?;
         }
-        if bytes > policy.max_scratch_bytes {
+        if policy.max_scratch_bytes.is_some_and(|m| bytes > m) {
             return Err(Error::Limit("scratch bytes"));
         }
     }
@@ -100,10 +100,10 @@ fn reserve_regions<'a>(
         .checked_add(region_visits)
         .and_then(|v| v.checked_add(region_bytes))
         .ok_or(Error::Overflow)?;
-    if bytes > policy.max_scratch_bytes {
+    if policy.max_scratch_bytes.is_some_and(|m| bytes > m) {
         return Err(Error::Limit("scratch bytes"));
     }
-    if operations > policy.max_traversal_operations {
+    if policy.max_traversal_operations.is_some_and(|m| operations > m) {
         return Err(Error::Limit("traversal operations"));
     }
     Ok(FiniteVolumeReservation {

@@ -14,12 +14,13 @@ use super::AnalysisProjection;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
+/// Each limit is `None` when unbounded: a cap is a count, never a sentinel value.
 pub struct FiniteVolumeProjectionPolicy {
-    pub max_cells: usize,
-    pub max_face_incidences: usize,
-    pub max_boundary_faces: usize,
-    pub max_scratch_bytes: usize,
-    pub max_traversal_operations: usize,
+    pub max_cells: Option<usize>,
+    pub max_face_incidences: Option<usize>,
+    pub max_boundary_faces: Option<usize>,
+    pub max_scratch_bytes: Option<usize>,
+    pub max_traversal_operations: Option<usize>,
 }
 
 /// No fixed size caps by default: derivation memory is charged to the calling phase's
@@ -27,11 +28,11 @@ pub struct FiniteVolumeProjectionPolicy {
 impl Default for FiniteVolumeProjectionPolicy {
     fn default() -> Self {
         Self {
-            max_cells: usize::MAX,
-            max_face_incidences: usize::MAX,
-            max_boundary_faces: usize::MAX,
-            max_scratch_bytes: usize::MAX,
-            max_traversal_operations: usize::MAX,
+            max_cells: None,
+            max_face_incidences: None,
+            max_boundary_faces: None,
+            max_scratch_bytes: None,
+            max_traversal_operations: None,
         }
     }
 }
@@ -41,11 +42,11 @@ impl FiniteVolumeProjectionPolicy {
     /// are governed by the calling phase's resident admission, not by a fixed cell cap.
     pub fn covering(source: &AnalysisProjection) -> Self {
         Self {
-            max_cells: source.elements.len(),
-            max_face_incidences: source.elements.len().saturating_mul(4),
-            max_boundary_faces: source.boundary_faces.len(),
-            max_scratch_bytes: usize::MAX,
-            max_traversal_operations: usize::MAX,
+            max_cells: Some(source.elements.len()),
+            max_face_incidences: Some(source.elements.len().saturating_mul(4)),
+            max_boundary_faces: Some(source.boundary_faces.len()),
+            max_scratch_bytes: None,
+            max_traversal_operations: None,
         }
     }
 }
