@@ -4,12 +4,21 @@ use super::TimeScheduleError as Error;
 pub(super) struct OrderedUnion<'a> {
     sources: [&'a [f64]; 3],
     positions: [usize; 3],
+    /// Coordinates closer than this are one time: a uniform grid point computed as
+    /// start + k·Δt and the authored time it stands for (0.1 s against 0.09999999999999999 s)
+    /// must not leave a rounding-width interval between them.
+    tolerance: f64,
 }
 impl<'a> OrderedUnion<'a> {
     pub(super) fn new(sources: [&'a [f64]; 3]) -> Self {
+        let scale = sources
+            .iter()
+            .flat_map(|s| s.first().into_iter().chain(s.last()))
+            .fold(0.0f64, |m, v| m.max(v.abs()));
         Self {
             sources,
             positions: [0; 3],
+            tolerance: 1e-12 * scale,
         }
     }
 }
@@ -23,12 +32,23 @@ impl Iterator for OrderedUnion<'_> {
             .filter_map(|(s, p)| s.get(p))
             .copied()
             .min_by(f64::total_cmp)?;
-        for (source, position) in self.sources.iter().zip(&mut self.positions) {
-            while source.get(*position).is_some_and(|v| *v == value) {
+        // One coordinate per cluster; an authored event or required time (later sources)
+        // names it over a computed grid point.
+        let mut chosen = value;
+        for (index, (source, position)) in
+            self.sources.iter().zip(&mut self.positions).enumerate()
+        {
+            while let Some(v) = source.get(*position).copied() {
+                if v - value > self.tolerance {
+                    break;
+                }
+                if index > 0 {
+                    chosen = v;
+                }
                 *position += 1;
             }
         }
-        Some(if value == 0.0 { 0.0 } else { value })
+        Some(if chosen == 0.0 { 0.0 } else { chosen })
     }
 }
 

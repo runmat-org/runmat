@@ -463,8 +463,8 @@ impl FluidSteadySolverResult {
     fn native_value_sources<'s>(
         &'s self,
         layout: &'s VolumeMeshLayout,
+        original: &'s crate::physics::cfd::canonical::CanonicalFluidResult,
     ) -> Vec<Box<dyn Iterator<Item = f64> + 's>> {
-        let original = self.original();
         let viscous = &original.residual.face_forces.viscous_traction_n;
         let vorticity = &original.residual.cell_vorticity_per_s;
         let mut sources: Vec<Box<dyn Iterator<Item = f64> + 's>> = vec![
@@ -503,6 +503,52 @@ impl FluidSteadySolverResult {
         sources
     }
 
+    /// Retained field samples in stored order. A steady flow has its final state. A transient
+    /// has, in increasing physical time, each retained interval whose end an authored history
+    /// samples, then its terminal state at the end time: sampled producers keep physical
+    /// coordinates, and final outputs select the terminal sample. Coupled node fields
+    /// (temperature, displacement) belong to steady or terminal coupled states only.
+    pub(crate) fn field_samples(
+        &self,
+        workload: &FluidSteadyWorkload,
+    ) -> AnalysisExecutionResult<
+        Vec<(
+            RecoveredFieldSample,
+            &crate::physics::cfd::canonical::CanonicalFluidResult,
+        )>,
+    > {
+        let Some(history) = self.transient_history() else {
+            return Ok(vec![(RecoveredFieldSample::Final, self.original())]);
+        };
+        let step = workload
+            .model
+            .sequence
+            .steps
+            .first()
+            .ok_or_else(|| invalid("fluid study has no step"))?;
+        let schedule = super::FluidTransientSchedule::derive(&workload.model, step)?;
+        let points = schedule.points_s();
+        let terminal = points.len() - 2;
+        let mut samples = Vec::new();
+        for (ordinal, result) in history.retained_results() {
+            let sample = RecoveredFieldSample::TimeSeconds(points[ordinal + 1]);
+            if *ordinal == terminal
+                || crate::results::observation::authored_histories_sample(step, sample)
+                    .map_err(invalid)?
+            {
+                samples.push((sample, result));
+            }
+        }
+        let terminal_retained = match (samples.last(), history.terminal()) {
+            (Some((_, last)), Some(expected)) => std::ptr::eq(*last, expected),
+            _ => false,
+        };
+        if !terminal_retained {
+            return Err(invalid("transient fluid retained no terminal state"));
+        }
+        Ok(samples)
+    }
+
     pub fn recover_native_fields(
         &self,
         workload: &FluidSteadyWorkload,
@@ -516,24 +562,24 @@ impl FluidSteadySolverResult {
             ));
         }
         let definitions = layout.definitions(workload.coupling())?;
-        let mut fields = Vec::with_capacity(definitions.len());
-        for (definition, values) in definitions
-            .into_iter()
-            .zip(self.native_value_sources(&layout))
-        {
-            let values = values.collect::<Vec<_>>();
-            let shape = definition
-                .storage_shape(definition.stored_entities(layout.counts))
-                .map_err(invalid)?;
-            let storage = AnalysisField::host_f64(definition.field_id(), shape, values);
-            fields.push(
-                RecoveredField::new(definition, RecoveredFieldSample::Final, storage)
-                    .map_err(invalid)?,
-            );
+        let samples = self.field_samples(workload)?;
+        let mut fields = Vec::with_capacity(definitions.len() * samples.len());
+        for (sample, original) in samples {
+            for (definition, values) in definitions
+                .iter()
+                .zip(self.native_value_sources(&layout, original))
+            {
+                let values = values.collect::<Vec<_>>();
+                let shape = definition
+                    .storage_shape(definition.stored_entities(layout.counts))
+                    .map_err(invalid)?;
+                let storage = AnalysisField::host_f64(definition.field_id(), shape, values);
+                fields.push(
+                    RecoveredField::new(definition.clone(), sample, storage).map_err(invalid)?,
+                );
+            }
         }
-        request
-            .plan
-            .validate_definitions(fields.iter().map(|f| f.definition().clone()))?;
+        request.plan.validate_definitions(definitions)?;
         RecoveredFieldArtifact::new(
             request.identity(),
             request.source,
@@ -553,19 +599,27 @@ impl FluidSteadySolverResult {
     ) -> AnalysisExecutionResult<()> {
         let (layout, _) = self.volume_mesh_layout(workload, mesh)?;
         let definitions = layout.definitions(workload.coupling())?;
+        let samples = self.field_samples(workload)?;
         // Compared in place against the original arrays: no second copy of the values.
-        let expected = self.native_value_sources(&layout);
-        if fields.fields().len() != definitions.len()
-            || expected.len() != definitions.len()
+        let expected = samples
+            .iter()
+            .flat_map(|(sample, original)| {
+                definitions
+                    .iter()
+                    .zip(self.native_value_sources(&layout, original))
+                    .map(move |(definition, values)| (*sample, definition, values))
+            })
+            .collect::<Vec<_>>();
+        if fields.fields().len() != expected.len()
+            || expected.len() != definitions.len() * samples.len()
             || fields.entity_counts() != layout.counts
             || fields
                 .fields()
                 .iter()
-                .zip(&definitions)
                 .zip(expected)
-                .any(|((field, definition), mut values)| {
+                .any(|(field, (sample, definition, mut values))| {
                     field.definition() != definition
-                        || field.sample() != RecoveredFieldSample::Final
+                        || field.sample() != sample
                         || field.storage().as_host_f64().is_none_or(|stored| {
                             !stored
                                 .iter()

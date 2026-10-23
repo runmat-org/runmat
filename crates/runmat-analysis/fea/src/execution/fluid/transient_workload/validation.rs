@@ -92,7 +92,15 @@ impl FluidTransientWorkload {
                 "transient fluid action lacks canonical realization",
             ));
         }
-        crate::results::observation::validate_sampled_requests(step).map_err(invalid)?;
+        if step.observations.iter().any(|request| {
+            matches!(
+                request,
+                runmat_analysis_core::ObservationRequest::Diagnostic(_)
+                    | runmat_analysis_core::ObservationRequest::Monitor(_)
+            )
+        }) {
+            return Err(invalid("fluid outputs observe native fields only"));
+        }
         super::super::FluidTransientSchedule::derive(&self.model, step)?;
         Ok(())
     }

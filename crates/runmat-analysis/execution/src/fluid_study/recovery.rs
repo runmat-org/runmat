@@ -67,7 +67,7 @@ impl FluidStudyCoordinator {
             self.tail = tail;
             self.phase = FluidStudyPhase::ReadyForAccuracy;
         } else {
-            self.phase = FluidStudyPhase::ReadyForObservationFanout;
+            self.phase = FluidStudyPhase::ReadyForObservations;
         }
         Ok(())
     }
