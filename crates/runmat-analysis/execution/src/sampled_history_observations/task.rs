@@ -1,4 +1,4 @@
-//! Borrowed task interface; phase ownership remains in the thermal coordinator.
+//! Borrowed task interface; phase ownership remains in the family coordinator.
 use crate::{
     AnalysisHostWorkload, PreparedAnalysisProgram, PreparedObservationAssembly,
     PreparedObservationHistoryCheckpointTask, PreparedObservationHistoryFinalizationTask,
@@ -6,7 +6,7 @@ use crate::{
 };
 use runmat_analysis_fea::planning::resource::FeaResourcePlan;
 
-pub struct ThermalObservationTask<'a> {
+pub struct SampledObservationTask<'a> {
     pub host: &'a AnalysisHostWorkload,
     pub program: &'a PreparedAnalysisProgram,
     pub resource_plan: &'a FeaResourcePlan,
@@ -21,7 +21,7 @@ pub(super) enum PendingObservationTask {
 }
 
 impl PendingObservationTask {
-    pub(super) fn view(&self) -> ThermalObservationTask<'_> {
+    pub(super) fn view(&self) -> SampledObservationTask<'_> {
         let (host, program, resource_plan) = match self {
             Self::Partition(task) => (&task.host, &task.program, &task.resource_plan),
             Self::Reduction(task) => (&task.host, &task.program, &task.resource_plan),
@@ -29,7 +29,7 @@ impl PendingObservationTask {
             Self::Assembly(task) => (&task.host, &task.program, &task.resource_plan),
             Self::Finalization(task) => (&task.host, &task.program, &task.resource_plan),
         };
-        ThermalObservationTask {
+        SampledObservationTask {
             host,
             program,
             resource_plan,

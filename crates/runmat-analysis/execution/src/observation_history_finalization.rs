@@ -41,6 +41,9 @@ pub enum ObservationHistoryFinalizationSource {
         workload: PreparedAnalysisObjects,
         mesh: PreparedAnalysisObjects,
     },
+    /// Native node, element or face fields on the canonical solver mesh, of any family: the
+    /// volume-mesh field catalog carries the producing step, so the mesh is the only context.
+    VolumeMesh { mesh: PreparedAnalysisObjects },
 }
 
 pub struct ObservationHistoryFinalizationPreparation {
@@ -218,16 +221,36 @@ pub fn prepare_observation_history_finalization_task(
                 Some(decoded_mesh),
             )
         }
+        ObservationHistoryFinalizationSource::VolumeMesh { mesh } => {
+            if mesh.manifest.kind != Kind::Mesh {
+                return Err(invalid("volume-mesh history requires the canonical mesh"));
+            }
+            let decoded_mesh =
+                SolverMeshArtifact::canonical_decode(&mesh.payload()).map_err(invalid)?;
+            if mesh.manifest.logical_identity
+                != runmat_execution::Digest::from_bytes(*decoded_mesh.canonical_digest.bytes())
+            {
+                return Err(AnalysisBridgeError::Identity(
+                    "volume-mesh history mesh identity differs",
+                ));
+            }
+            inputs.push(mesh);
+            (AdmittedObservationWorkload::VolumeMesh, Some(decoded_mesh))
+        }
     };
     let context = match &decoded_workload {
         AdmittedObservationWorkload::NonlinearSolid(_) => {
             return Err(invalid("nonlinear history needs an original accepted-path source; only final fields are admitted"));
         }
+        AdmittedObservationWorkload::VolumeMesh => ObservationHistorySourceContext::VolumeMesh {
+            mesh: decoded_mesh
+                .as_ref()
+                .ok_or_else(|| invalid("volume-mesh history mesh absent"))?,
+        },
         AdmittedObservationWorkload::Magnetostatic(_)
-        | AdmittedObservationWorkload::VolumeMesh
         | AdmittedObservationWorkload::MaxwellHarmonic(_) => {
             return Err(invalid(
-                "sampled electromagnetic, fluid and acoustic history finalization is not admitted",
+                "electromagnetic workload histories finalize through the volume-mesh source",
             ));
         }
         AdmittedObservationWorkload::Thermal(workload) => {

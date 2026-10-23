@@ -46,7 +46,7 @@ pub(super) fn execute(
         || usize::from(thermal_objects.is_some())
             + usize::from(linear_objects.is_some())
             + usize::from(frequency_objects.is_some())
-            != 1
+            > 1
     {
         return Err(AnalysisBridgeError::Identity(
             "history finalization has unexpected inputs",
@@ -138,6 +138,9 @@ pub(super) fn execute(
             Some(source @ StructuralObservationSource::Frequency(_)),
             mesh,
         ) => ObservationHistorySourceContext::Structural { source, mesh },
+        (ObservationFieldCatalogSource::VolumeMeshRecovery { .. }, None, None, Some(mesh)) => {
+            ObservationHistorySourceContext::VolumeMesh { mesh }
+        }
         _ => {
             return Err(AnalysisBridgeError::Identity(
                 "history source context differs from catalog",

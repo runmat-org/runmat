@@ -43,20 +43,26 @@ fn thread_cpu_ns() -> Option<u64> {
 }
 
 pub(crate) struct CheckpointClock {
+    /// Process-unique: a thread's CPU sample belongs to one clock. An address would be reused
+    /// by a later clock allocated where a dropped one lived, which then inherited its sample.
+    identity: usize,
     origin: Instant,
     latest_elapsed_ns: AtomicU64,
 }
 
+static NEXT_CLOCK_IDENTITY: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
+
 impl CheckpointClock {
     pub(crate) fn new(origin: Instant) -> Self {
         Self {
+            identity: NEXT_CLOCK_IDENTITY.fetch_add(1, Ordering::Relaxed),
             origin,
             latest_elapsed_ns: AtomicU64::new(0),
         }
     }
 
     fn identity(&self) -> usize {
-        self as *const Self as usize
+        self.identity
     }
 
     fn elapsed_ns(&self, now: Instant) -> u64 {

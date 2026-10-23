@@ -50,13 +50,9 @@ pub(super) fn admit(
         structural_constraint_result: None,
         structural_connector_result: None,
         observations: completed.observation_results.clone(),
-        observation_histories: Vec::new(),
-        series_reductions: Vec::new(),
-        fields: fields
-            .into_fields()
-            .into_iter()
-            .map(|field| field.into_storage())
-            .collect(),
+        observation_histories: completed.observation_histories.clone(),
+        series_reductions: completed.series_reductions.clone(),
+        fields: published_fields(fields),
     };
     let provenance = RunProvenance {
         requested_backend: run.requested_backend,
@@ -101,4 +97,31 @@ pub(super) fn admit(
         context,
         result,
     ))
+}
+
+/// Run fields named once each: the terminal (or steady) state keeps the native field ids, and
+/// each earlier retained sample of a transient publishes as `<id>.time.<n>`, n counting retained
+/// samples from 1 in increasing time.
+fn published_fields(
+    fields: RecoveredFieldArtifact,
+) -> Vec<runmat_analysis_core::AnalysisField> {
+    let fields = fields.into_fields();
+    let terminal = fields.last().map(|field| field.sample());
+    let mut ordinal = 0usize;
+    let mut previous = None;
+    fields
+        .into_iter()
+        .map(|field| {
+            let sample = field.sample();
+            if previous != Some(sample) {
+                ordinal += 1;
+                previous = Some(sample);
+            }
+            let mut storage = field.into_storage();
+            if Some(sample) != terminal {
+                storage.field_id = format!("{}.time.{ordinal}", storage.field_id);
+            }
+            storage
+        })
+        .collect()
 }

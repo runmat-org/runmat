@@ -219,18 +219,20 @@ impl CurveMetricField for ResolvedCurveMetricField {
             .for_edge(query.edge_id)
         })?;
         let resolved = &record.resolved;
-        let failure = |error: runmat_meshing_size::metric::MetricContractError| {
-            SharedCurveError::new(
-                SharedCurveErrorKind::MetricEvaluation,
-                "curve boundary trace",
-                error.to_string(),
-            )
-            .for_edge(query.edge_id)
+        let failure = |step: &'static str, detail: String| {
+            move |error: runmat_meshing_size::metric::MetricContractError| {
+                SharedCurveError::new(
+                    SharedCurveErrorKind::MetricEvaluation,
+                    "curve boundary trace",
+                    format!("{step}: {error} ({detail})"),
+                )
+                .for_edge(query.edge_id)
+            }
         };
         let mut density = resolved
             .metric
             .directional_density(query.unit_tangent)
-            .map_err(failure)?;
+            .map_err(failure("edge metric", format!("{:?}", resolved.metric)))?;
         for face in &record.faces {
             let face_metric = self
                 .resolver
@@ -239,17 +241,26 @@ impl CurveMetricField for ResolvedCurveMetricField {
                     &self.face_local[*face],
                     query.point_m,
                 )
-                .map_err(failure)?;
+                .map_err(failure(
+                    "graded face metric",
+                    format!("uniform {:?} at {:?}", self.face_metrics[*face].metric, query.point_m),
+                ))?;
             density = density.max(
                 face_metric
                     .directional_density(query.unit_tangent)
-                    .map_err(failure)?,
+                    .map_err(failure("face directional density", format!("{face_metric:?}")))?,
             );
         }
         let metric = resolved
             .metric
             .with_directional_density(query.unit_tangent, density)
-            .map_err(failure)?;
+            .map_err(failure(
+                "tightened edge metric",
+                format!(
+                    "base {:?}, tangent {:?}, density {density:e}",
+                    resolved.metric, query.unit_tangent
+                ),
+            ))?;
         Ok(CurveMetricEvaluation {
             metric,
             active_sources: resolved.active_sources.clone(),

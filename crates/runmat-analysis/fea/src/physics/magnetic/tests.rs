@@ -67,12 +67,24 @@ fn reference_energy(mu_j2: f64, maximum: usize) -> f64 {
     32.0 * mu_j2 / pi.powi(6) * sum
 }
 
-// witness: FEA-EM-MAGNETOSTATIC-001/formulation @ magnetostatic/tet4/numerical_kernel;
-//   boundary: Affine Tet4 extruded unit square, uniform axial current and grounded boundary;
-//   independent Fourier-series potential, curl field and energy with tail bounds and three meshes.
-//   No Tet10 convergence or force evidence.
+// witness: FEA-EM-MAGNETOSTATIC-001/formulation @ magnetostatic/tet4|tet10/numerical_kernel;
+//   boundary: Affine Tet4 and Tet10 extruded unit square, uniform axial current and grounded
+//   boundary; independent Fourier-series potential, curl field and energy with tail bounds and
+//   three meshes per order. Lowest-order edge basis on both geometry orders, so Tet10 matches
+//   Tet4 to roundoff; no higher-order magnetic convergence or force evidence.
+// witness: FEA-EM-QUALIFICATION-001/references @ magnetostatic/tet4|tet10/numerical_kernel;
+//   coverage: partial;
+//   boundary: Magnetostatic reference: uniform-current square conductor against the Fourier
+//   series with mesh convergence of potential, flux density and energy on Tet4 and Tet10
+//   geometry; no magnetic material interface or gap reference.
 #[test]
 fn square_uniform_current_has_independent_potential_field_and_energy_convergence() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        square_uniform_current_converges(order);
+    }
+}
+
+fn square_uniform_current_converges(order: ElementOrder) {
     let mut errors = Vec::new();
     let exact_energy = reference_energy(1.0, 255);
     // Energy-series tail <= 8/(3π⁴N³); verify a separate truncation agrees.
@@ -81,7 +93,7 @@ fn square_uniform_current_has_independent_potential_field_and_energy_convergence
             < 8.0 / (3.0 * std::f64::consts::PI.powi(4) * 255.0f64.powi(3))
     );
     for cells in [1, 2, 4] {
-        let (projection, data) = problem(ElementOrder::Tet4, cells, 1.0, 1.0);
+        let (projection, data) = problem(order, cells, 1.0, 1.0);
         let result = solve_grounded_volume(&projection, &super::exterior_face_identities(&projection), &[], &data, 1e-10).unwrap();
         let mut potential_error = 0.0;
         let mut field_error = 0.0;
@@ -101,7 +113,7 @@ fn square_uniform_current_has_independent_potential_field_and_energy_convergence
             (result.magnetic_energy_j - exact_energy).abs() / exact_energy,
         );
         eprintln!(
-            "magnetic cells={cells} errors={error:?} iterations={}",
+            "magnetic {order:?} cells={cells} errors={error:?} iterations={}",
             result.iterations
         );
         assert!(result.relative_physical_residual < 8e-10);

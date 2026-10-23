@@ -173,6 +173,8 @@ pub use fluid_study::{
     CompletedFluidStudy, FluidStudyCoordinator, FluidStudyPhase, FluidStudyPreparation,
     FluidStudyResultClosure, FluidStudyResultPhase, PreparedFluidStudyRoot,
 };
+mod sampled_history_observations;
+pub use sampled_history_observations::{CompletedSampledObservations, SampledObservationTask};
 mod sampled_study_observations;
 mod statistical_study_observations;
 pub use statistical_study_observations::{
@@ -330,8 +332,8 @@ pub use structural_state_profiles::{
 };
 pub use thermal_study::{
     import_thermal_study_completion, import_thermal_study_root, prepare_thermal_study_root,
-    CompletedThermalObservations, CompletedThermalStudy, PreparedThermalStudyRoot,
-    ThermalObservationTask, ThermalStudyCoordinator, ThermalStudyPhase, ThermalStudyPreparation,
+    CompletedThermalStudy, PreparedThermalStudyRoot, ThermalStudyCoordinator, ThermalStudyPhase,
+    ThermalStudyPreparation,
     ThermalStudyResultClosure, ThermalStudyResultPhase, ThermalStudyScope,
 };
 mod thermal_task;

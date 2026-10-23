@@ -362,3 +362,84 @@ fn authored_study_workload_retains_and_recovers_the_complete_transient_history()
     )
     .is_err());
 }
+
+// witness: FEA-FLUID-TRANSIENT-001/history @
+//   incompressible_laminar_transient/canonical_tetrahedra/numerical_kernel; coverage: partial;
+//   boundary: an authored time history retains the sampled interval's fields (and drops the
+//   others), and native field recovery publishes them at their physical times beside the
+//   terminal state, against the accelerating-flow reference.
+#[test]
+fn authored_history_retains_and_publishes_fields_at_sampled_times() {
+    let (kernel, m) = accelerating_transient();
+    let mut study = FluidSteadyWorkload {
+        model: kernel.model.clone(),
+        step_id: kernel.step_id.clone(),
+        policy: kernel.policy,
+        geometry_policy: kernel.geometry_policy,
+    };
+    study.model.sequence.steps[0]
+        .observations
+        .push(ObservationRequest::History(ObservationSpec {
+            observation_id: ObservationId("velocity_history".into()),
+            quantity: ObservationQuantity::FluidVelocity,
+            value_shape: ObservationValueShape::Vector3,
+            target: ObservationTarget::WholeModel,
+            source_location: FieldLocation::Cell,
+            output_location: FieldLocation::Cell,
+            recovery: RecoveryPolicy::Native,
+            component: ObservationComponent::All,
+            frame: CoordinateFrame::Global,
+            sign_convention: SignConvention::Native,
+            complex_representation: ComplexRepresentation::Real,
+            sampling: SamplingPolicy::TimeSeconds(vec![0.1]),
+            reduction: None,
+            storage: ObservationStoragePolicy {
+                precision: SignalPrecision::Real64,
+                compression: CompressionPolicy::Lossless,
+                retention: RetentionPolicy::Canonical,
+                partial_access: PartialAccessPolicy::ManifestAndChunks,
+            },
+            purpose: ObservationPurpose::Publication,
+            cost: ObservationCostPolicy::Automatic,
+        }));
+    let result = study.execute(&m).unwrap();
+    let history = result.transient_history().unwrap();
+    assert_eq!(history.intervals().len(), 3);
+    assert_eq!(
+        history
+            .retained_results()
+            .iter()
+            .map(|(ordinal, _)| *ordinal)
+            .collect::<Vec<_>>(),
+        vec![0, 1, 2]
+    );
+    let request = result.native_field_request(&study, &m).unwrap();
+    let fields = result.recover_native_fields(&study, &m, &request).unwrap();
+    result.validate_native_fields(&study, &m, &fields).unwrap();
+    let samples = fields
+        .fields()
+        .iter()
+        .map(|field| field.sample())
+        .collect::<Vec<_>>();
+    let velocity = fields
+        .fields()
+        .iter()
+        .filter(|field| field.definition().quantity() == ObservationQuantity::FluidVelocity)
+        .collect::<Vec<_>>();
+    assert_eq!(velocity.len(), 2);
+    for (field, time) in velocity.iter().zip([0.1, 0.3]) {
+        let crate::results::field::RecoveredFieldSample::TimeSeconds(t) = field.sample() else {
+            panic!("{:?}", field.sample())
+        };
+        assert!((t - time).abs() < 1e-12, "{t}");
+        let values = field.storage().as_host_f64().unwrap();
+        for u in values.chunks(3) {
+            assert!((u[0] - (0.001 + 0.01 * time)).abs() < 1e-8, "{u:?} at {time}");
+        }
+    }
+    assert!(samples.windows(2).all(|pair| match pair {
+        [crate::results::field::RecoveredFieldSample::TimeSeconds(a),
+         crate::results::field::RecoveredFieldSample::TimeSeconds(b)] => a <= b,
+        _ => false,
+    }));
+}

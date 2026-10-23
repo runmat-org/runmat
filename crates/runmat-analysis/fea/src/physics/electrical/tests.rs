@@ -441,20 +441,27 @@ fn missing_anchors_conflicts_unsupported_intent_and_invalid_material_fail_closed
 }
 
 // witness: FEA-EM-INPUTS-002/scalar_potential_inputs @
-//   electrostatic|electrical_conduction/tet4/numerical_kernel; coverage: partial;
+//   electrostatic|electrical_conduction/tet4|tet10/numerical_kernel; coverage: partial;
 //   boundary: A terminal_voltage load holds its terminal like a prescribed potential for
-//   electrostatics and steady conduction on a two-cell Tet4 slab; terminal current, charge,
-//   equipotential and floating inputs are not covered.
-// witness: FEA-EM-INPUT-001/excitation @ electrostatic/tet4/numerical_kernel, electrical_conduction/tet4/numerical_kernel; coverage: partial;
+//   electrostatics and steady conduction on two-cell Tet4 and Tet10 slabs; terminal current,
+//   charge, equipotential and floating inputs are separate tests.
+// witness: FEA-EM-INPUT-001/excitation @ electrostatic|electrical_conduction/tet4|tet10/numerical_kernel;
+//   coverage: partial;
 //   boundary: A constant terminal-voltage signal on a face reproduces the prescribed-potential
-//   field exactly on a Tet4 slab; no time history, phasor or Tet10 case.
+//   field exactly on Tet4 and Tet10 slabs; no time history or phasor.
 #[test]
 fn terminal_voltage_load_holds_its_terminal_like_a_prescribed_potential() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        terminal_voltage_load_holds_its_terminal_like_a_prescribed_potential_on(order);
+    }
+}
+
+fn terminal_voltage_load_holds_its_terminal_like_a_prescribed_potential_on(order: ElementOrder) {
     for equation in [
         StaticElectricalEquation::Electrostatics,
         StaticElectricalEquation::SteadyConduction,
     ] {
-        let mesh = mesh(ElementOrder::Tet4, 2);
+        let mesh = mesh(order, 2);
         let mut constrained = model(equation);
         prescribe(&mut constrained, "left".into(), RegionTarget::boundary("slab_left"), 0.0);
         let mut driven = constrained.clone();
@@ -507,12 +514,24 @@ fn terminal_voltage_load_holds_its_terminal_like_a_prescribed_potential() {
     }
 }
 
-// witness: FEA-EM-INPUT-001/scalar_constraints @ electrical_conduction/tet4/numerical_kernel; coverage: partial;
-//   boundary: Integral-current and floating terminals solved by superposition reach the common
-//   potential and current balance of a Tet4 conduction slab; no electrostatic charge case.
+// witness: FEA-EM-INPUT-001/scalar_constraints @ electrical_conduction|electrostatic/tet4|tet10/numerical_kernel;
+//   coverage: partial;
+//   boundary: Integral-current (conduction) and uncharged floating (electrostatic) terminals
+//   reach the common potential and current balance of Tet4 and Tet10 slabs; no charged
+//   floating conductor.
+// witness: FEA-EM-INPUTS-002/scalar_potential_inputs @
+//   electrostatic|electrical_conduction/tet4|tet10/numerical_kernel; coverage: partial;
+//   boundary: Electric current terminal and floating inputs close the terminal current balance
+//   on Tet4 and Tet10 slabs; no charged floating conductor or equipotential set.
 #[test]
 fn integral_current_and_floating_terminals_find_their_common_potential() {
-    let mesh = mesh(ElementOrder::Tet4, 2);
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        integral_current_and_floating_terminals_find_their_common_potential_on(order);
+    }
+}
+
+fn integral_current_and_floating_terminals_find_their_common_potential_on(order: ElementOrder) {
+    let mesh = mesh(order, 2);
     // Reference: 1 V across the slab gives the terminal current I1, so R = 1/I1.
     let mut reference = model(StaticElectricalEquation::SteadyConduction);
     prescribe(&mut reference, "left".into(), RegionTarget::boundary("slab_left"), 0.0);
@@ -578,12 +597,19 @@ fn integral_current_and_floating_terminals_find_their_common_potential() {
     assert!(response.potential_v.iter().all(|v| (v - 3.0).abs() < 1e-8));
 }
 
-// witness: FEA-EM-INPUT-001/excitation @ electrical_conduction/tet4/numerical_kernel; coverage: partial;
+// witness: FEA-EM-INPUT-001/excitation @ electrical_conduction/tet4|tet10/numerical_kernel;
+//   coverage: partial;
 //   boundary: A face current density realizes its integrated normal current as the grounded
-//   terminal's outward flux on a Tet4 slab; no time history or Tet10 case.
+//   terminal's outward flux on Tet4 and Tet10 slabs; no time history.
 #[test]
 fn face_current_density_injects_its_normal_flux() {
-    let mesh = mesh(ElementOrder::Tet4, 2);
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        face_current_density_injects_its_normal_flux_on(order);
+    }
+}
+
+fn face_current_density_injects_its_normal_flux_on(order: ElementOrder) {
+    let mesh = mesh(order, 2);
     let mut model = model(StaticElectricalEquation::SteadyConduction);
     prescribe(&mut model, "left".into(), RegionTarget::boundary("slab_left"), 0.0);
     model.signals.push(PhysicalSignal::ElectricCurrentDensity(Signal {
@@ -642,17 +668,23 @@ fn face_current_density_injects_its_normal_flux() {
     assert_relative(left.outward_flux, 4.0 * area, 1e-8);
 }
 
-// witness: FEA-EM-INPUT-001/scalar_constraints @ electrostatic/tet4/numerical_kernel; coverage:
-//   partial;
+// witness: FEA-EM-INPUT-001/scalar_constraints @ electrostatic/tet4|tet10/numerical_kernel;
+//   coverage: partial;
 //   boundary: A charged slab with a translation-periodic right face matches the same slab grounded
-//   on both faces to 1e-8, and the grounded face carries the full flux; terminal voltage, floating
-//   and integral-current constraints are separate tests.
+//   on both faces to 1e-8 on Tet4 and Tet10, and the grounded face carries the full flux; terminal
+//   voltage, floating and integral-current constraints are separate tests.
 #[test]
 fn periodic_faces_share_their_potential() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        periodic_faces_share_their_potential_on(order);
+    }
+}
+
+fn periodic_faces_share_their_potential_on(order: ElementOrder) {
     // A charged slab grounded on both faces, against the same slab grounded on the left and
     // periodic (by translation) on the right: the right face carries the left face's potential,
     // so the fields agree.
-    let mesh = mesh(ElementOrder::Tet4, 2);
+    let mesh = mesh(order, 2);
     let projection = AnalysisProjection::derive(&mesh).unwrap();
     let mean_x = |target: &str| {
         let xs: Vec<f64> = projection

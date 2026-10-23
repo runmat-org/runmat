@@ -166,9 +166,19 @@ fn surface_midpoint(
     let storage = crate::cdt::solver_topology::storage::Storage(Some(evaluation.control));
     let mut parameters = storage.vector(request.surface_uses.len())?;
     for surface_use in request.surface_uses {
+        let face = evaluation.sources.face(surface_use.source_face_id)?;
+        let periods = ExactSurfaceEvaluator::periodicity(evaluation.evaluator, &face.surface_evaluator_id)
+            .map_err(error::geometry)?;
+        let bounds =
+            ExactSurfaceEvaluator::parameter_bounds(evaluation.evaluator, &face.surface_evaluator_id)
+                .map_err(error::geometry)?;
         let (left_uv, right_uv) =
-            compatible_surface_parameters(request.left, request.right, surface_use)?;
-        let evaluator_uv = interpolate2(left_uv, right_uv, request.fraction);
+            compatible_surface_parameters(request.left, request.right, surface_use, periods)?;
+        let evaluator_uv = wrap_into_period(
+            interpolate2(left_uv, right_uv, request.fraction),
+            periods,
+            bounds,
+        );
         let Some(point) =
             evaluate_surface_candidate(surface_use, evaluator_uv, evaluation, options)?
         else {
@@ -328,13 +338,20 @@ pub(super) fn curve_parameter(
         .ok_or_else(|| invalid("exact curve edge endpoint has no matching parameter"))
 }
 
+/// The nearest pair of the endpoints' chart images. On a periodic axis an image is the same
+/// point as its translates by the period, so the right image is taken at the translate nearest
+/// the left one: an edge crossing the seam interpolates across it, not around the surface.
 fn compatible_surface_parameters(
     left: &SolverMeshNode,
     right: &SolverMeshNode,
     surface_use: &SurfaceUse,
+    periods: [Option<f64>; 2],
 ) -> Result<([f64; 2], [f64; 2]), DelaunaySolverTopologyError> {
     surface_parameters(left, surface_use)
-        .flat_map(|left| surface_parameters(right, surface_use).map(move |right| (left, right)))
+        .flat_map(|left| {
+            surface_parameters(right, surface_use)
+                .map(move |right| (left, nearest_translate(left, right, periods)))
+        })
         .min_by(|(left_a, right_a), (left_b, right_b)| {
             squared_parameter_distance(*left_a, *right_a)
                 .total_cmp(&squared_parameter_distance(*left_b, *right_b))
@@ -409,6 +426,43 @@ fn points_match(input: &ProjectionInput<'_>, left: [f64; 3], right: [f64; 3]) ->
         .map(|(left, right)| (left - right) * (left - right))
         .sum::<f64>();
     squared_distance.is_finite() && squared_distance <= tolerance * tolerance
+}
+
+/// The translate of `image` by whole periods nearest `reference` on each periodic axis: the
+/// same surface point, expressed on the reference's side of the seam.
+pub(super) fn nearest_translate(
+    reference: [f64; 2],
+    image: [f64; 2],
+    periods: [Option<f64>; 2],
+) -> [f64; 2] {
+    std::array::from_fn(|axis| match periods[axis] {
+        Some(period) if period.is_finite() && period > 0.0 => {
+            image[axis] + period * ((reference[axis] - image[axis]) / period).round()
+        }
+        _ => image[axis],
+    })
+}
+
+/// A periodic coordinate interpolated across the seam can leave the parameter domain by less
+/// than a period; its translate inside the domain is the same surface point.
+pub(super) fn wrap_into_period(
+    uv: [f64; 2],
+    periods: [Option<f64>; 2],
+    bounds: [runmat_geometry_core::ParameterRange; 2],
+) -> [f64; 2] {
+    std::array::from_fn(|axis| match periods[axis] {
+        Some(period) if period.is_finite() && period > 0.0 => {
+            let start = bounds[axis].start;
+            if uv[axis] < start {
+                uv[axis] + period
+            } else if uv[axis] > start + period {
+                uv[axis] - period
+            } else {
+                uv[axis]
+            }
+        }
+        _ => uv[axis],
+    })
 }
 
 fn interpolate(left: f64, right: f64, fraction: f64) -> f64 {

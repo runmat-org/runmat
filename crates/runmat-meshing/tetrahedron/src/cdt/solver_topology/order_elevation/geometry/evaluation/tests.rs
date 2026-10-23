@@ -82,8 +82,44 @@ fn periodic_surface_midpoint_uses_the_nearest_chart_images() {
             &seam,
             &surface_node(&[[6.0, 0.5]], &face, chart),
             &surface_use,
+            [None, None],
         )
         .unwrap(),
         ([std::f64::consts::TAU, 0.5], [6.0, 0.5])
     );
+}
+
+// witness: FEA-MESH-DISCRETIZATION-001/volume_quality_convergence @
+//   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+//   boundary: A seam node carrying only its u = 0 image pairs with a node near u = 2 pi
+//   across the seam; the coax Tet10 study exercises the whole elevation.
+#[test]
+fn periodic_surface_midpoint_crosses_the_seam_without_a_second_seam_image() {
+    let face = PersistentEntityId::new(
+        PersistentEntityKind::Face,
+        "face:periodic".to_owned(),
+        Vec::new(),
+    );
+    let chart = StableDigest::from_bytes([2; 32]);
+    let surface_use = SurfaceUse {
+        source_face_id: &face,
+        chart_id: chart,
+    };
+    let seam = surface_node(&[[0.0, 0.5]], &face, chart);
+    let tau = std::f64::consts::TAU;
+    let (left, right) = compatible_surface_parameters(
+        &seam,
+        &surface_node(&[[tau - 0.2, 0.5]], &face, chart),
+        &surface_use,
+        [Some(tau), None],
+    )
+    .unwrap();
+    assert_eq!(left, [0.0, 0.5]);
+    assert!((right[0] + 0.2).abs() < 1.0e-12 && right[1] == 0.5);
+    let bounds = [
+        runmat_geometry_core::ParameterRange { start: 0.0, end: tau },
+        runmat_geometry_core::ParameterRange { start: 0.0, end: 1.0 },
+    ];
+    let middle = wrap_into_period(interpolate2(left, right, 0.5), [Some(tau), None], bounds);
+    assert!((middle[0] - (tau - 0.1)).abs() < 1.0e-12 && middle[1] == 0.5);
 }

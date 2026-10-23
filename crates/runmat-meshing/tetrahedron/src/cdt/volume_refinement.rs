@@ -36,6 +36,8 @@ pub enum DelaunayRefinementCandidateKind {
     MetricCircumcenter,
     MetricOffcenter,
     InteriorPoint,
+    /// Near-midpoint of the longest size-violating edge with an interior endpoint.
+    MetricEdgeMidpoint,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -313,6 +315,7 @@ fn candidate_identity(
         DelaunayRefinementCandidateKind::MetricCircumcenter => 0,
         DelaunayRefinementCandidateKind::MetricOffcenter => 1,
         DelaunayRefinementCandidateKind::InteriorPoint => 2,
+        DelaunayRefinementCandidateKind::MetricEdgeMidpoint => 3,
     }]);
     hasher.update(construction_point_index.to_be_bytes());
     StableDigest::from_bytes(hasher.finalize().into())
