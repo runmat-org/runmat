@@ -39,7 +39,13 @@ pub enum ElectricalStaticError {
     Operator(String),
     #[error("canonical electrical boundary is invalid: {0}")]
     Boundary(String),
-    #[error("canonical electrical solve did not converge after {iterations} iterations (residual {residual:e})")]
+    #[error(
+        "canonical electrical solve did not converge after {iterations} iterations (residual {residual:e}){}",
+        diagnostics
+            .iter()
+            .map(|diagnostic| format!("; {}: {}", diagnostic.code, diagnostic.message))
+            .collect::<String>()
+    )]
     NotConverged {
         iterations: u32,
         residual: f64,

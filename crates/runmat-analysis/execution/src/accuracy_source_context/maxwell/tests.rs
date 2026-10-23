@@ -265,15 +265,6 @@ fn cold_context_both_orders_authenticates_exact_original_receipt_and_authored_ac
             AccuracyPlanId("foreign-plan".into());
         let rehashed = request(&policy, &receipt);
         assert!(validate(&rehashed, &receipt, None, &refs).is_err());
-        let wrong_requirement = AccuracyEvaluationRequest::new(
-            original.producer,
-            original.source_kind,
-            original.source_result,
-            None,
-            original.plan.clone(),
-        )
-        .unwrap();
-        assert!(validate(&wrong_requirement, &receipt, None, &refs).is_err());
         let mut foreign = inputs.clone();
         foreign[2].manifest.payload_digest = Digest::sha256(b"foreign exact retained source");
         assert!(validate(

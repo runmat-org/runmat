@@ -9,6 +9,54 @@ use runmat_analysis_fea::{
     results::observation::ObservationPublicationCatalog,
 };
 
+/// A receipt validates only against the accuracy plan it was produced under: changing the plan
+/// identifier alone, or one criterion's tolerance alone, must be rejected.
+pub(super) fn assert_accuracy_plan_identity_bound(
+    request: &AccuracyEvaluationRequest,
+    receipt: &AccuracySourceReceipt,
+    observations: Option<&ObservationPublicationCatalog>,
+    inputs: &[&crate::PreparedAnalysisObjects],
+) {
+    validate_accuracy_source_context(request, receipt, observations, inputs).unwrap();
+    let retagged = {
+        let mut plan = request.plan.clone();
+        plan.accuracy_plan_id =
+            runmat_analysis_core::AccuracyPlanId(format!("{}-foreign", plan.accuracy_plan_id.0));
+        plan
+    };
+    let loosened = {
+        let mut plan = request.plan.clone();
+        let criterion = plan.criteria.first_mut().expect("an accuracy plan has a criterion");
+        criterion.tolerance = match criterion.tolerance {
+            runmat_analysis_core::AccuracyTolerance::Relative(value) => {
+                runmat_analysis_core::AccuracyTolerance::Relative(value * 10.0)
+            }
+            runmat_analysis_core::AccuracyTolerance::Absolute {
+                quantity,
+                canonical_value,
+            } => runmat_analysis_core::AccuracyTolerance::Absolute {
+                quantity,
+                canonical_value: canonical_value * 10.0,
+            },
+        };
+        plan
+    };
+    for plan in [retagged, loosened] {
+        let tampered = AccuracyEvaluationRequest::new(
+            request.producer,
+            request.source_kind,
+            request.source_result,
+            observations,
+            plan,
+        )
+        .unwrap();
+        assert!(
+            validate_accuracy_source_context(&tampered, receipt, observations, inputs).is_err(),
+            "a receipt validated against a different accuracy plan"
+        );
+    }
+}
+
 pub(super) fn reject_substituted_structural_authority(
     prepared: &PreparedAccuracy,
     catalog: &ObservationPublicationCatalog,
@@ -36,6 +84,7 @@ pub(super) fn reject_substituted_structural_authority(
         })
         .collect();
     validate_accuracy_source_context(&prepared.request, &receipt, Some(catalog), &context).unwrap();
+    assert_accuracy_plan_identity_bound(&prepared.request, &receipt, Some(catalog), &context);
 
     for omitted in 0..context.len() {
         let incomplete: Vec<_> = context

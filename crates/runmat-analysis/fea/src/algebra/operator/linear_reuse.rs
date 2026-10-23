@@ -90,19 +90,27 @@ impl LinearPreparationReuse {
                         &prescribed,
                         local,
                         normalization,
-                    )?
+                    )
                 }
                 LocalEnergySource::Selection(local, rows) => {
-                    CoercivityCertificate::prove_selected_energy(matrix, local, &rows)?
+                    CoercivityCertificate::prove_selected_energy(matrix, local, &rows)
                 }
             };
-            PreparedSolverAdmissibility::bind_existing_with_source(
-                certificate,
-                None,
-                matrix,
-                rhs,
-                source,
-            )?
+            match certificate {
+                Ok(certificate) => PreparedSolverAdmissibility::bind_existing_with_source(
+                    certificate,
+                    None,
+                    matrix,
+                    rhs,
+                    source,
+                )?,
+                // A local-energy bound too weak to separate the assembly error from zero is not
+                // a disproof: the sparse Cholesky proof decides, and its factor serves the solve.
+                Err(CoercivityError::EnergyIndeterminate { .. }) => {
+                    PreparedSolverAdmissibility::prove(matrix, rhs, source)?
+                }
+                Err(error) => return Err(error),
+            }
         } else {
             PreparedSolverAdmissibility::prove(matrix, rhs, source)?
         };

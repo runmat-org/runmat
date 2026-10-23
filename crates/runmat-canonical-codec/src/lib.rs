@@ -17,6 +17,7 @@ pub use materialization::{
     canonical_chunked_payload_materialization_resident_bytes_estimate,
     canonical_chunked_payload_typed_resident_bytes_estimate,
     canonical_payload_materialization_resident_bytes_estimate,
+    canonical_payload_typed_resident_bytes_estimate,
     canonical_value_materialization_resident_bytes_estimate,
     canonical_value_typed_resident_bytes_estimate, projected_canonical_encoding_resident_bytes_estimate,
     projected_canonical_materialization_resident_bytes_estimate,
@@ -49,7 +50,7 @@ pub trait CanonicalCodecControl: Send + Sync {
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-struct NeverCancelled;
+pub(crate) struct NeverCancelled;
 
 impl CanonicalCodecControl for NeverCancelled {
     fn is_cancelled(&self) -> bool {
