@@ -18,7 +18,13 @@ fn target(id: &str, entities: Vec<runmat_meshing_core::PersistentEntityId>) -> R
 }
 
 fn symmetry_case(n: usize, kind: fn(RegionTarget) -> FluidConstraintKind) -> fixture::Fixture {
-    let mut f = case(n, ReferenceCase::Duct, false);
+    symmetry_case_on(fixture::case(n, ReferenceCase::Duct, false), kind)
+}
+
+fn symmetry_case_on(
+    mut f: fixture::Fixture,
+    kind: fn(RegionTarget) -> FluidConstraintKind,
+) -> fixture::Fixture {
     let mut inlet = Vec::new();
     let mut walls = Vec::new();
     let mut planes = Vec::new();
@@ -234,4 +240,54 @@ fn closed_component_with_symmetry_planes_reproduces_couette_flow() {
         worst = worst.max(norm(sub(*u, [c.centroid_m[1], 0.0, 0.0])));
     }
     assert!(worst < 0.05, "Couette error {worst}");
+}
+
+// witness: FEA-FLUID-SOLVERS-001/coupled_newton_continuation @
+//   incompressible_laminar_steady/tet4/numerical_kernel; coverage: partial;
+//   boundary: thin cells on a symmetry plane (spanwise grading z⁴, first layer 1/256 of the
+//   span) converge in at most five coupled steps with the assembled momentum Jacobian and
+//   reproduce plane Poiseuille flow; continuation and line search are not covered.
+#[test]
+fn thin_cells_on_symmetry_planes_converge_promptly() {
+    let f = symmetry_case_on(
+        fixture::case_mapped(4, ReferenceCase::Duct, false, |[x, y, z]| [x, y, z.powi(4)]),
+        |target| FluidConstraintKind::Symmetry { target },
+    );
+    let p = CanonicalFluidProblem::prepare(f.input()).unwrap();
+    let r = p.solve().unwrap();
+    assert!(r.outer_iterations <= 5, "outer iterations {}", r.outer_iterations);
+    let (relative, _) = error(&f, &r);
+    assert!(relative < 0.1, "relative L2 error {relative}");
+}
+
+// witness: FEA-FLUID-SOLVERS-001/block_linear_solvers @
+//   incompressible_laminar_steady/tet4/numerical_kernel; coverage: partial;
+//   boundary: the assembled two-ring momentum Jacobian reproduces the matrix-free momentum
+//   rows to roundoff on a graded slab with symmetry planes, a pressure outlet, inflow and
+//   outflow faces, for a nonuniform velocity and change.
+#[test]
+fn assembled_momentum_block_matches_the_matrix_free_rows() {
+    let f = symmetry_case_on(
+        fixture::case_mapped(3, ReferenceCase::Duct, false, |[x, y, z]| [x, y, z.powi(4)]),
+        |target| FluidConstraintKind::Symmetry { target },
+    );
+    let p = CanonicalFluidProblem::prepare(f.input()).unwrap();
+    let n = p.topology.cells.len();
+    let field = |c: &crate::topology::FiniteVolumeCell, a: f64| {
+        let [x, y, z] = c.centroid_m;
+        [a * (1.0 + x * y), 0.3 * a * (z - y * y), 0.2 * a * (x - z)]
+    };
+    let origin = p.topology.cells.iter().map(|c| field(c, 0.7)).collect::<Vec<_>>();
+    let change = p.topology.cells.iter().map(|c| field(c, -0.4)).collect::<Vec<_>>();
+    let pressure = vec![0.0; n];
+    let q = super::super::pressure::h_flux(&p, &origin, &vec![[0.0; 3]; n]).unwrap();
+    let (assembled, matrix_free) =
+        super::super::coupled::assembled_and_matrix_free_rows(&p, &origin, &pressure, &q, &change)
+            .unwrap();
+    let scale = matrix_free.iter().fold(0.0f64, |m, v| m.max(v.abs()));
+    let worst = assembled
+        .iter()
+        .zip(&matrix_free)
+        .fold(0.0f64, |m, (a, b)| m.max((a - b).abs()));
+    assert!(worst <= 1e-12 * scale, "difference {worst} against scale {scale}");
 }

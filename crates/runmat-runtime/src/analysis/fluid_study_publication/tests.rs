@@ -17,6 +17,6 @@ fn publication_cannot_substitute_precision_or_independent_numerical_controls() {
     changed.numerical.physical_relative_tolerance *= 0.5;
     assert!(validate(&changed).is_err());
     changed = original.clone();
-    changed.geometry.max_face_incidences += 1;
+    changed.geometry.max_face_incidences = Some(1);
     assert!(validate(&changed).is_err());
 }

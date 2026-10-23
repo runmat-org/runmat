@@ -167,15 +167,33 @@ pub(super) fn viscous_parts(
     i: usize,
     gu: &[[V; 3]],
 ) -> Result<(f64, V), Error> {
+    viscous_parts_with(p, i, gu, gu)
+}
+
+/// Viscous face parts with the viscosity taken from `viscosity_gu` (a frozen iterate for a
+/// shear-rate dependent law) and the correction from `gu`.
+pub(super) fn viscous_parts_with(
+    p: &CanonicalFluidProblem<'_>,
+    i: usize,
+    gu: &[[V; 3]],
+    viscosity_gu: &[[V; 3]],
+) -> Result<(f64, V), Error> {
     let f = &p.topology.faces[i];
     let (alpha, tangent, w) = face_geometry(p, f)?;
-    let grad = if let Some(other) = f.neighbor {
-        std::array::from_fn(|k| interpolate(gu[f.owner][k], gu[other][k], w))
-    } else {
-        gu[f.owner]
+    let face_gradient = |g: &[[V; 3]]| -> [V; 3] {
+        if let Some(other) = f.neighbor {
+            std::array::from_fn(|k| interpolate(g[f.owner][k], g[other][k], w))
+        } else {
+            g[f.owner]
+        }
     };
+    let grad = face_gradient(gu);
     let normal_diffusion = !matches!(p.boundaries[i], FaceBoundary::PressureOutlet { .. });
-    let viscosity = face_viscosity(p, &grad);
+    let viscosity = if std::ptr::eq(gu, viscosity_gu) {
+        face_viscosity(p, &grad)
+    } else {
+        face_viscosity(p, &face_gradient(viscosity_gu))
+    };
     if !viscosity.is_finite() || viscosity <= 0.0 {
         return Err(Error::Invalid("nonpositive or nonfinite face viscosity"));
     }

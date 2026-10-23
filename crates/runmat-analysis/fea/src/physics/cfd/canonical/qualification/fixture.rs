@@ -65,16 +65,30 @@ pub fn policy() -> CanonicalFluidPolicy {
 
 pub fn geometry_policy() -> FiniteVolumeProjectionPolicy {
     FiniteVolumeProjectionPolicy {
-        max_cells: 10000,
-        max_face_incidences: 40000,
-        max_boundary_faces: 40000,
-        max_scratch_bytes: 100_000_000,
-        max_traversal_operations: 100_000_000,
+        max_cells: None,
+        max_face_incidences: None,
+        max_boundary_faces: None,
+        max_scratch_bytes: None,
+        max_traversal_operations: None,
     }
 }
 
 pub fn case(n: usize, reference: ReferenceCase, rotated: bool) -> Fixture {
+    case_mapped(n, reference, rotated, |x| x)
+}
+
+/// The reference case on a slab whose nodes are moved by `map` (for example graded toward a
+/// plane), keeping its topology and boundary faces.
+pub fn case_mapped(
+    n: usize,
+    reference: ReferenceCase,
+    rotated: bool,
+    map: fn([f64; 3]) -> [f64; 3],
+) -> Fixture {
     let mut mesh = fixtures::slab_mesh(n);
+    for node in &mut mesh.topology.nodes {
+        node.coordinates_m = map(node.coordinates_m);
+    }
     if rotated {
         for node in &mut mesh.topology.nodes {
             node.coordinates_m = reference::rotate(node.coordinates_m);

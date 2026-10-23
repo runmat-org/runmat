@@ -34,6 +34,8 @@ pub(super) fn solve_with_time(
     };
     let mut linear_iterations = 0;
     let mut last = [f64::INFINITY; 5];
+    let mut worst = String::from("not evaluated");
+    let mut first_worst: Option<f64> = None;
     let mut acceleration_history = None;
     for iteration in 1..=p.policy.maximum_outer_iterations {
         if crate::is_fea_cancelled() {
@@ -135,6 +137,9 @@ pub(super) fn solve_with_time(
                 .copied()
                 .fold(0.0, f64::max),
         ];
+        let (worst_relative, description) = recovery::describe_worst_cell(p, &residual);
+        let first = *first_worst.get_or_insert(worst_relative);
+        worst = format!("{description}; it was {first:e} at the first evaluated step");
         if residual.accepted(p.policy.physical_relative_tolerance) {
             let pressure_pa = pressure_fluctuation
                 .iter()
@@ -170,5 +175,6 @@ pub(super) fn solve_with_time(
         flux_constitutive_relative: last[2],
         global_momentum_relative: last[3],
         maximum_cell_momentum_relative: last[4],
+        worst_cell: worst,
     })
 }

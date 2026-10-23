@@ -295,6 +295,9 @@ impl CanonicalFluidReservation {
         // Charge the extra retained vector with the same doubled payload allowance.
         let mut bytes = add(add(baseline_bytes, mul(n, 4 * 8)?)?, add(mul(n, 32)?, 96)?)?;
         bytes = add(bytes, ilu.resident_bytes_upper_bound)?;
+        // Coupled momentum block: the two-ring pattern (at most 41 cells per row for
+        // tetrahedra), its 3 × 3-block values, the ILU copy and the linear reconstruction terms.
+        bytes = add(bytes, mul(n, 9 * 41 * (8 + 8 + 8) + 5 * 216 + 41 * 8)?)?;
         // Frozen velocity reconstruction: four source/weight records per cell,
         // doubled payload growth plus the owning Vec header. No field is retained.
         bytes = add(

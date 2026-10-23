@@ -13,7 +13,7 @@ use crate::{
     solve::shared_sparse::{ambient_plan, control, with_plan, CsrArrays},
 };
 use runmat_sparse_solvers::{
-    krylov::{gmres, GmresOptions, KrylovOptions, PreconditionerSide},
+    krylov::PreconditionerSide,
     operator::FnOperator,
     precond::{Amg, AmgOptions, Ilu0},
     Preconditioner, SolverError, SolverResult,
@@ -28,20 +28,35 @@ const INNER_ITERATIONS: usize = 40;
 /// Coefficients frozen at the current iterate: the momentum operator and right-hand side
 /// (convection from the current flux, deferred corrections from the current velocity), the
 /// Rhie–Chow coefficients, and the residual at the iterate.
-struct Frozen {
+struct Frozen<'t> {
     matrix: RealSparseMatrix,
-    /// Momentum right-hand side without the pressure force: b = V f + corrections.
-    base: Vec<V>,
+    /// The explicit momentum terms (non-orthogonal diffusion, higher-order advection,
+    /// symmetry traction, boundary values) are linear in the velocity; the residual evaluates
+    /// them at the trial velocity with the frozen flux, pressure and time history, so the
+    /// linear step is exact in them instead of lagging them a Picard step. Lagged, graded or
+    /// skewed cells (thin cells on a plane) contract by only the ratio of their explicit to
+    /// implicit parts per step and stall.
+    flux: Vec<f64>,
+    time: Option<super::transient::TimeDerivative<'t>>,
+    /// Velocity gradients of the frozen iterate: the viscosity of a shear-rate dependent law.
+    viscosity_gradients: Vec<[V; 3]>,
     diagonal: Vec<f64>,
     rau: Vec<f64>,
     rf: Vec<f64>,
     /// Continuity rows are weighted by ρU so both residual blocks are forces.
     continuity_weight: f64,
+    /// The momentum block J = A − ∂b/∂u assembled on the two-ring pattern: its action is the
+    /// matrix-free one, at one sparse product per application.
+    jacobian: super::jacobian::MomentumJacobian,
+    /// The frozen iterate and the matrix-free momentum rows there: rows(u) =
+    /// origin_rows + J (u − origin).
+    origin: Vec<V>,
+    origin_rows: Vec<f64>,
 }
 
 fn face_flux(
     p: &CanonicalFluidProblem<'_>,
-    frozen: &Frozen,
+    frozen: &Frozen<'_>,
     u: &[V],
     pressure_values: &[f64],
 ) -> Result<Vec<f64>, Error> {
@@ -53,21 +68,72 @@ fn face_flux(
     pressure::corrected_flux(p, &qh, &frozen.rf, pressure_values)
 }
 
+/// Momentum rows of the linear step at velocity `u` and the frozen pressure: the assembled
+/// operator plus the explicit terms evaluated at `u`, without the pressure force.
+fn momentum_rows(
+    p: &CanonicalFluidProblem<'_>,
+    frozen: &Frozen<'_>,
+    u: &[V],
+) -> Result<Vec<f64>, Error> {
+    let n = u.len();
+    let rhs = momentum::rhs_with_time(
+        p,
+        u,
+        &frozen.flux,
+        momentum::MomentumMode::Coupled,
+        frozen.time,
+        &frozen.viscosity_gradients,
+    )?;
+    let mut out = vec![0.0; 3 * n];
+    for k in 0..3 {
+        let component = u.iter().map(|v| v[k]).collect::<Vec<_>>();
+        let action = spmv(&frozen.matrix, &component).map_err(|e| Error::Operator(e.to_string()))?;
+        for c in 0..n {
+            out[k * n + c] = action[c] - rhs[c][k];
+        }
+    }
+    Ok(out)
+}
+
+/// Momentum rows through the assembled block: origin_rows + J (u − origin).
+fn assembled_rows(
+    p: &CanonicalFluidProblem<'_>,
+    frozen: &Frozen<'_>,
+    u: &[V],
+) -> Result<Vec<f64>, Error> {
+    let n = u.len();
+    let mut change = vec![0.0; 3 * n];
+    for c in 0..n {
+        for k in 0..3 {
+            change[k * n + c] = u[c][k] - frozen.origin[c][k];
+        }
+    }
+    let mut rows = frozen.origin_rows.clone();
+    let mut action = vec![0.0; 3 * n];
+    frozen
+        .jacobian
+        .view(&p.momentum_jacobian)
+        .spmv(&change, &mut action);
+    for (row, a) in rows.iter_mut().zip(&action) {
+        *row += a;
+    }
+    Ok(rows)
+}
+
 /// Weighted residual [R_u (3n, force), w·div q (n)] at (u, p).
 fn residual(
     p: &CanonicalFluidProblem<'_>,
-    frozen: &Frozen,
+    frozen: &Frozen<'_>,
     u: &[V],
     pressure_values: &[f64],
 ) -> Result<Vec<f64>, Error> {
     let n = u.len();
     let mut out = vec![0.0; 4 * n];
     let force = pressure_force(p, pressure_values, &pressure_gradient(p, pressure_values)?)?;
+    let rows = assembled_rows(p, frozen, u)?;
     for k in 0..3 {
-        let component = u.iter().map(|v| v[k]).collect::<Vec<_>>();
-        let action = spmv(&frozen.matrix, &component).map_err(|e| Error::Operator(e.to_string()))?;
         for c in 0..n {
-            out[k * n + c] = action[c] - frozen.base[c][k] + force[c][k];
+            out[k * n + c] = rows[k * n + c] + force[c][k];
         }
     }
     let q = face_flux(p, frozen, u, pressure_values)?;
@@ -125,7 +191,8 @@ fn pressure_laplacian(p: &CanonicalFluidProblem<'_>, rf: &[f64]) -> Result<RealS
 
 struct SimplePreconditioner<'a, 'p> {
     p: &'a CanonicalFluidProblem<'p>,
-    frozen: &'a Frozen,
+    frozen: &'a Frozen<'a>,
+    /// The assembled momentum block and its ILU factors.
     momentum: &'a dyn LinearOperatorView,
     momentum_preconditioner: &'a dyn Preconditioner<f64>,
     pressure: &'a dyn LinearOperatorView,
@@ -139,32 +206,47 @@ struct SimplePreconditioner<'a, 'p> {
 trait LinearOperatorView: runmat_sparse_solvers::LinearOperator<f64> {}
 impl<T: runmat_sparse_solvers::LinearOperator<f64>> LinearOperatorView for T {}
 
+/// Block-diagonal preconditioner: each velocity component by its own ILU factors.
+struct ComponentIlu<F> {
+    n: usize,
+    factors: [F; 3],
+}
+
+impl<F: Preconditioner<f64>> Preconditioner<f64> for ComponentIlu<F> {
+    fn apply(&self, r: &[f64], z: &mut [f64]) -> SolverResult<()> {
+        for k in 0..3 {
+            let range = k * self.n..(k + 1) * self.n;
+            self.factors[k].apply(&r[range.clone()], &mut z[range])?;
+        }
+        Ok(())
+    }
+    fn label(&self) -> &'static str {
+        "component-ilu"
+    }
+    fn is_symmetric_positive_definite(&self) -> bool {
+        false
+    }
+}
+
 fn inner_solve(
     operator: &dyn LinearOperatorView,
     preconditioner: &dyn Preconditioner<f64>,
     rhs: &[f64],
 ) -> SolverResult<Vec<f64>> {
+    let iterations = INNER_ITERATIONS;
     let mut x = vec![0.0; rhs.len()];
     if rhs.iter().all(|v| *v == 0.0) {
         return Ok(x);
     }
-    gmres(
+    linear::restarted_gmres(
         operator,
         Some(preconditioner),
         rhs,
         &mut x,
-        &KrylovOptions {
-            rtol: INNER_REDUCTION,
-            max_iterations: INNER_ITERATIONS,
-            return_best_iterate: true,
-            ..KrylovOptions::default()
-        },
-        &GmresOptions {
-            restart: INNER_ITERATIONS,
-            side: PreconditionerSide::Right,
-            ..GmresOptions::default()
-        },
-        control(),
+        INNER_REDUCTION,
+        iterations,
+        iterations,
+        PreconditionerSide::Right,
     )?;
     Ok(x)
 }
@@ -173,18 +255,12 @@ impl Preconditioner<f64> for SimplePreconditioner<'_, '_> {
     fn apply(&self, r: &[f64], z: &mut [f64]) -> SolverResult<()> {
         let n = self.base_u.len();
         let fail = |e: Error| SolverError::Breakdown(e.to_string());
-        // Momentum predictor: A z_u* = r_u.
-        let mut predicted = vec![[0.0; 3]; n];
-        for k in 0..3 {
-            let x = inner_solve(
-                self.momentum,
-                self.momentum_preconditioner,
-                &r[k * n..(k + 1) * n],
-            )?;
-            for c in 0..n {
-                predicted[c][k] = x[c];
-            }
-        }
+        // Momentum predictor on the assembled momentum block J (the implicit operator and
+        // the explicit terms' Jacobian): J z_u* = r_u by inner GMRES with its ILU factors.
+        let solution = inner_solve(self.momentum, self.momentum_preconditioner, &r[..3 * n])?;
+        let predicted = (0..n)
+            .map(|c| [solution[c], solution[n + c], solution[2 * n + c]])
+            .collect::<Vec<_>>();
         // Continuity of the predictor: the exact linear flux of z_u* (affine difference).
         let trial = (0..n)
             .map(|c| add(self.base_u[c], predicted[c]))
@@ -228,6 +304,84 @@ impl Preconditioner<f64> for SimplePreconditioner<'_, '_> {
     }
 }
 
+/// Freeze the coefficients at (u, p, q): the assembled implicit operator, the momentum
+/// Jacobian, the Rhie–Chow coefficients and the origin of the affine momentum rows.
+fn freeze<'t>(
+    p: &CanonicalFluidProblem<'_>,
+    u: &[V],
+    pressure_values: &[f64],
+    q: &[f64],
+    time: Option<super::transient::TimeDerivative<'t>>,
+) -> Result<Frozen<'t>, Error> {
+    let n = u.len();
+    let m = momentum::assemble_with_time(
+        p,
+        u,
+        pressure_values,
+        q,
+        momentum::MomentumMode::Coupled,
+        time,
+    )?;
+    let rau = (0..n)
+        .map(|c| p.topology.cells[c].volume_m3 * p.policy.momentum_relaxation / m.diagonal[c])
+        .collect::<Vec<_>>();
+    let rf = pressure::coefficients(p, &rau)?;
+    let speed = u
+        .iter()
+        .map(|v| norm(*v))
+        .chain(p.boundaries.iter().filter_map(|b| match b {
+            super::boundary::FaceBoundary::Velocity { value, .. } => Some(norm(*value)),
+            _ => None,
+        }))
+        .fold(0.0f64, f64::max);
+    let gradients = velocity_gradients(p, u)?;
+    let jacobian = super::jacobian::assemble(
+        p,
+        &m.matrix,
+        q,
+        momentum::MomentumMode::Coupled,
+        time,
+        &gradients,
+    )?;
+    let mut frozen = Frozen {
+        matrix: m.matrix,
+        flux: q.to_vec(),
+        time,
+        diagonal: m.diagonal,
+        rau,
+        rf,
+        continuity_weight: p.density * speed.max(f64::MIN_POSITIVE.sqrt()),
+        viscosity_gradients: gradients,
+        jacobian,
+        origin: u.to_vec(),
+        origin_rows: Vec::new(),
+    };
+    frozen.origin_rows = momentum_rows(p, &frozen, u)?;
+    Ok(frozen)
+}
+
+/// Momentum rows of the assembled block and of the matrix-free right-hand side at
+/// `origin + change`, with coefficients frozen at (origin, pressure, q).
+#[cfg(test)]
+pub(super) fn assembled_and_matrix_free_rows(
+    p: &CanonicalFluidProblem<'_>,
+    origin: &[V],
+    pressure_values: &[f64],
+    q: &[f64],
+    change: &[V],
+) -> Result<(Vec<f64>, Vec<f64>), Error> {
+    let frozen = freeze(p, origin, pressure_values, q, None)?;
+    let trial = origin
+        .iter()
+        .zip(change)
+        .map(|(a, b)| add(*a, *b))
+        .collect::<Vec<_>>();
+    Ok((
+        assembled_rows(p, &frozen, &trial)?,
+        momentum_rows(p, &frozen, &trial)?,
+    ))
+}
+
 pub(super) fn solve_with_time(
     p: &CanonicalFluidProblem<'_>,
     initial: Option<super::transient::CanonicalFluidFields<'_>>,
@@ -249,48 +403,34 @@ pub(super) fn solve_with_time(
     };
     let mut linear_iterations = 0u64;
     let mut last = [f64::INFINITY; 5];
+    let mut worst = String::from("not evaluated");
+    let mut first_worst: Option<f64> = None;
     for iteration in 1..=p.policy.maximum_outer_iterations {
         if crate::is_fea_cancelled() {
             return Err(Error::Cancelled);
         }
-        let m = momentum::assemble_with_time(
-            p,
-            &u,
-            &pressure_values,
-            &q,
-            momentum::MomentumMode::Coupled,
-            time,
-        )?;
-        let force = pressure_force(p, &pressure_values, &pressure_gradient(p, &pressure_values)?)?;
-        let base = (0..n).map(|c| add(m.rhs[c], force[c])).collect::<Vec<_>>();
-        let rau = (0..n)
-            .map(|c| p.topology.cells[c].volume_m3 * p.policy.momentum_relaxation / m.diagonal[c])
-            .collect::<Vec<_>>();
-        let rf = pressure::coefficients(p, &rau)?;
-        let speed = u
-            .iter()
-            .map(|v| norm(*v))
-            .chain(p.boundaries.iter().filter_map(|b| match b {
-                super::boundary::FaceBoundary::Velocity { value, .. } => Some(norm(*value)),
-                _ => None,
-            }))
-            .fold(0.0f64, f64::max);
-        let frozen = Frozen {
-            matrix: m.matrix,
-            base,
-            diagonal: m.diagonal,
-            rau,
-            rf,
-            continuity_weight: p.density * speed.max(f64::MIN_POSITIVE.sqrt()),
-        };
+        let frozen = freeze(p, &u, &pressure_values, &q, time)?;
         let base_residual = residual(p, &frozen, &u, &pressure_values)?;
         let laplacian = pressure_laplacian(p, &frozen.rf)?;
-        let momentum_arrays = CsrArrays::of(&frozen.matrix);
         let pressure_arrays = CsrArrays::of(&laplacian);
+        let blocks = super::jacobian::component_operators(
+            p,
+            &frozen.matrix,
+            &frozen.viscosity_gradients,
+        )?;
         let solved = with_plan(ambient_plan(), || {
-            let momentum_view = momentum_arrays.view();
+            let momentum_view = frozen.jacobian.view(&p.momentum_jacobian);
             let pressure_view = pressure_arrays.view();
-            let ilu = Ilu0::new(momentum_view, false)?;
+            // Each velocity component is preconditioned by the ILU factors of its implicit
+            // operator; the inner solve applies the full block J.
+            let ilu = ComponentIlu {
+                n,
+                factors: [
+                    Ilu0::new(blocks[0].view(), false)?,
+                    Ilu0::new(blocks[1].view(), false)?,
+                    Ilu0::new(blocks[2].view(), false)?,
+                ],
+            };
             let amg = Amg::new(pressure_view, AmgOptions::default(), control())?;
             let preconditioner = SimplePreconditioner {
                 p,
@@ -322,23 +462,15 @@ pub(super) fn solve_with_time(
             };
             let rhs = base_residual.iter().map(|v| -v).collect::<Vec<_>>();
             let mut step = vec![0.0; 4 * n];
-            let report = gmres(
+            let report = linear::restarted_gmres(
                 &operator,
                 Some(&preconditioner),
                 &rhs,
                 &mut step,
-                &KrylovOptions {
-                    rtol: LINEAR_REDUCTION.max(p.policy.linear_relative_tolerance),
-                    max_iterations: p.policy.maximum_linear_iterations,
-                    return_best_iterate: true,
-                    ..KrylovOptions::default()
-                },
-                &GmresOptions {
-                    restart: p.policy.gmres_restart,
-                    side: PreconditionerSide::Flexible,
-                    ..GmresOptions::default()
-                },
-                control(),
+                LINEAR_REDUCTION.max(p.policy.linear_relative_tolerance),
+                p.policy.maximum_linear_iterations,
+                p.policy.gmres_restart,
+                PreconditionerSide::Flexible,
             )?;
             Ok::<_, SolverError>((step, report))
         });
@@ -382,31 +514,9 @@ pub(super) fn solve_with_time(
                 .copied()
                 .fold(0.0, f64::max),
         ];
-        let worst_cell = residual
-            .cell_momentum_relative
-            .iter()
-            .enumerate()
-            .fold((0, 0.0f64), |acc, (c, r)| if *r > acc.1 { (c, *r) } else { acc });
-        tracing::info!(
-            target: "runmat_fea::fluid::coupled",
-            iteration,
-            linear = report.iterations,
-            momentum = last[0],
-            continuity = last[1],
-            global_momentum = last[3],
-            worst_cell = worst_cell.0,
-            worst_cell_relative = worst_cell.1,
-            worst_cell_centroid = ?p.topology.cells[worst_cell.0].centroid_m,
-            worst_cell_boundaries = ?p
-                .topology
-                .faces
-                .iter()
-                .enumerate()
-                .filter(|(_, f)| f.owner == worst_cell.0 && f.neighbor.is_none())
-                .map(|(i, _)| boundary_kind(&p.boundaries[i]))
-                .collect::<Vec<_>>(),
-            "coupled fluid Picard step"
-        );
+        let (worst_relative, description) = recovery::describe_worst_cell(p, &residual);
+        let first = *first_worst.get_or_insert(worst_relative);
+        worst = format!("{description}; it was {first:e} at the first evaluated step");
         if residual.accepted(p.policy.physical_relative_tolerance) {
             let pressure_pa = pressure_values
                 .iter()
@@ -442,15 +552,7 @@ pub(super) fn solve_with_time(
         flux_constitutive_relative: last[2],
         global_momentum_relative: last[3],
         maximum_cell_momentum_relative: last[4],
+        worst_cell: worst,
     })
 }
 
-fn boundary_kind(boundary: &super::boundary::FaceBoundary<'_>) -> &'static str {
-    match boundary {
-        super::boundary::FaceBoundary::Interior => "interior",
-        super::boundary::FaceBoundary::Velocity { moving_wall: true, .. } => "moving_wall",
-        super::boundary::FaceBoundary::Velocity { .. } => "velocity",
-        super::boundary::FaceBoundary::PressureOutlet { .. } => "outlet",
-        super::boundary::FaceBoundary::Symmetry { .. } => "symmetry",
-    }
-}
