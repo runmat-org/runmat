@@ -1441,7 +1441,6 @@ fn resource_usage_requires_the_exact_planned_accelerator_reservation() {
                     .unwrap()
                 })
                 .collect(),
-            memory_capacity_bytes: 0,
         };
         ResourceUsageAttempt {
             attempt_id,
@@ -1456,8 +1455,6 @@ fn resource_usage_requires_the_exact_planned_accelerator_reservation() {
                 0,
             )
             .unwrap(),
-            machine_memory_bytes: 0,
-            effective_memory_ceiling_bytes: 0,
         }
     };
     let record_usage = |allocation| {
@@ -1519,8 +1516,6 @@ fn resource_usage_evidence_binds_plan_workload_result_attempt_and_worker() {
             0,
         )
         .unwrap(),
-        machine_memory_bytes: 0,
-        effective_memory_ceiling_bytes: 0,
     };
     let retry_attempt = ResourceUsageAttempt {
         attempt_id: runmat_execution::identity::AttemptId::derive(&[b"retry-attempt"]),
@@ -1534,8 +1529,6 @@ fn resource_usage_evidence_binds_plan_workload_result_attempt_and_worker() {
             0,
         )
         .unwrap(),
-        machine_memory_bytes: 0,
-        effective_memory_ceiling_bytes: 0,
     };
     let evidence = record_resource_usage(
         &plan,
@@ -1574,8 +1567,6 @@ fn resource_usage_evidence_binds_plan_workload_result_attempt_and_worker() {
             0,
         )
         .unwrap(),
-        machine_memory_bytes: 0,
-        effective_memory_ceiling_bytes: 0,
     };
     assert!(matches!(
         record_resource_usage(
@@ -1608,8 +1599,6 @@ fn resource_usage_rejects_under_reserved_attempts_even_when_they_fit_the_plan_bu
                     allocation, 1, 0, 0, 0,
                 )
                 .unwrap(),
-                machine_memory_bytes: 0,
-                effective_memory_ceiling_bytes: 0,
             }],
             1,
         )
@@ -1653,8 +1642,6 @@ fn resource_usage_evidence_reconciles_each_attempt_against_its_authenticated_pla
             0,
         )
         .unwrap(),
-        machine_memory_bytes: 0,
-        effective_memory_ceiling_bytes: 0,
     };
     let primary_attempt = ResourceUsageAttempt {
         attempt_id: runmat_execution::identity::AttemptId::derive(&[b"primary-attempt"]),
@@ -1668,8 +1655,6 @@ fn resource_usage_evidence_reconciles_each_attempt_against_its_authenticated_pla
             0,
         )
         .unwrap(),
-        machine_memory_bytes: 0,
-        effective_memory_ceiling_bytes: 0,
     };
 
     let evidence = record_resource_graph_usage(
@@ -1741,8 +1726,6 @@ fn resource_usage_evidence_reconciles_each_attempt_against_its_authenticated_pla
             0,
         )
         .unwrap(),
-        machine_memory_bytes: 0,
-        effective_memory_ceiling_bytes: 0,
     };
     assert!(matches!(
         record_resource_graph_usage(
@@ -1785,53 +1768,4 @@ fn test_accelerator_device(
         features: std::collections::BTreeSet::from([AcceleratorFeature::Compute]),
         inventory_epoch: 1,
     }
-}
-
-// witness: FEA-SHARED-RESOURCES-001/machine_cpu_execution @ shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
-//   boundary: usage evidence records each attempt's effective resident-memory ceiling as
-//   min(authored ceiling, placed machine memory), keeps the authored ceiling when the machine
-//   recorded none, and rejects an allocation above it. Scheduler placement is witnessed by the
-//   runner's own tests, not here.
-#[test]
-fn resource_usage_records_the_effective_memory_ceiling() {
-    let plan = build_resource_plan(input(PartitioningPolicy::Monolithic)).unwrap();
-    let authored = plan.input.accuracy_ceiling.maximum_resident_bytes;
-    let allocation = plan.request.clone();
-    let attempt = |machine: u64| ResourceUsageAttempt {
-        attempt_id: runmat_execution::identity::AttemptId::derive(&[b"ceiling-attempt"]),
-        worker_id: runmat_execution::identity::WorkerId::derive(&[b"ceiling-worker"]),
-        plan: plan.identity,
-        resources: runmat_execution::resource::ResourceAccounting::for_reserved_interval(
-            allocation.clone(),
-            1,
-            0,
-            0,
-            0,
-        )
-        .unwrap(),
-        machine_memory_bytes: machine,
-        effective_memory_ceiling_bytes: 0,
-    };
-    let record = |machine| {
-        record_resource_usage(
-            &plan,
-            Digest::sha256("workload"),
-            Digest::sha256("result"),
-            vec![attempt(machine)],
-            1,
-        )
-    };
-    let machine = allocation.memory_bytes.checked_mul(2).unwrap();
-    assert!(machine < authored);
-    let evidence = record(machine).unwrap();
-    assert_eq!(evidence.attempts[0].effective_memory_ceiling_bytes, machine);
-    assert_eq!(
-        ResourceUsageEvidence::from_canonical_bytes(&evidence.canonical_bytes().unwrap()).unwrap(),
-        evidence
-    );
-    assert_eq!(
-        record(0).unwrap().attempts[0].effective_memory_ceiling_bytes,
-        authored
-    );
-    assert!(record(allocation.memory_bytes - 1).is_err());
 }

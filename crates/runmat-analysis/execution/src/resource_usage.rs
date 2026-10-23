@@ -208,8 +208,6 @@ fn usage_attempt(
         worker_id: accounting.worker_id,
         plan,
         resources: accounting.resources.clone(),
-        machine_memory_bytes: accounting.memory_capacity_bytes,
-        effective_memory_ceiling_bytes: 0,
     }
 }
 

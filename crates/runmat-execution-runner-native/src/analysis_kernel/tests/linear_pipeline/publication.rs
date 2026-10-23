@@ -247,8 +247,6 @@ pub(super) fn execute(solved: &SolvedPipeline, observed: &ObservedPipeline) {
                 0,
             )
             .unwrap(),
-            machine_memory_bytes: 0,
-            effective_memory_ceiling_bytes: 0,
         }],
         1,
     )
@@ -261,8 +259,6 @@ pub(super) fn execute(solved: &SolvedPipeline, observed: &ObservedPipeline) {
         plan: plan.identity,
         resources: ResourceAccounting::for_reserved_interval(plan.request.clone(), 1, 0, 0, 0)
             .unwrap(),
-        machine_memory_bytes: 0,
-        effective_memory_ceiling_bytes: 0,
     });
     let resource_usage = runmat_analysis_fea::planning::resource::record_resource_graph_usage(
         &solved.prepared.resource_plan,
@@ -361,8 +357,6 @@ pub(super) fn execute(solved: &SolvedPipeline, observed: &ObservedPipeline) {
                 0,
             )
             .unwrap(),
-            machine_memory_bytes: 0,
-            effective_memory_ceiling_bytes: 0,
         });
         let conflicting_usage = rebuild(conflicting_plans, conflicting_attempts);
         assert!(

@@ -77,8 +77,6 @@ fn fixture() -> (
         plan: primary.identity,
         resources: ResourceAccounting::for_reserved_interval(primary.request.clone(), 1, 0, 0, 0)
             .unwrap(),
-        machine_memory_bytes: 0,
-        effective_memory_ceiling_bytes: 0,
     };
     let baseline = record_resource_usage(
         &primary,
@@ -105,8 +103,6 @@ fn fixture() -> (
         plan: plan.identity,
         resources: ResourceAccounting::for_reserved_interval(plan.request.clone(), 2, 100, 0, 0)
             .unwrap(),
-        machine_memory_bytes: 0,
-        effective_memory_ceiling_bytes: 0,
     };
     let terminal = record_resource_graph_usage(
         &primary,

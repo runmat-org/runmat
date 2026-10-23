@@ -92,8 +92,6 @@ fn terminal_usage(
         plan: plan.identity,
         resources: ResourceAccounting::for_reserved_interval(plan.request.clone(), 1, 0, 0, 0)
             .unwrap(),
-        machine_memory_bytes: 0,
-        effective_memory_ceiling_bytes: 0,
     });
     let mut plans = baseline
         .plans
@@ -183,8 +181,6 @@ fn matching_request_with_substituted_result_cannot_hide_beside_valid_accounting(
             0,
         )
         .unwrap(),
-        machine_memory_bytes: 0,
-        effective_memory_ceiling_bytes: 0,
     });
     let mixed = record_resource_graph_usage(
         usage.primary_plan().unwrap(),

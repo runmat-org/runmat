@@ -306,9 +306,6 @@ pub struct AttemptResourceAccounting {
     pub attempt_id: AttemptId,
     pub worker_id: WorkerId,
     pub resources: ResourceAccounting,
-    /// Memory capacity of the placed worker (see `ResourceAssignment::memory_capacity_bytes`).
-    #[serde(default)]
-    pub memory_capacity_bytes: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -368,7 +365,6 @@ impl AttemptResourceAccounting {
             attempt_id,
             worker_id,
             resources,
-            memory_capacity_bytes: 0,
         })
     }
 
@@ -379,7 +375,7 @@ impl AttemptResourceAccounting {
         egress_bytes: u64,
         relay_bytes: u64,
     ) -> Result<Self, String> {
-        let mut accounting = Self::new(
+        Self::new(
             request.id,
             request.worker_id,
             ResourceAccounting::for_assigned_interval(
@@ -391,9 +387,7 @@ impl AttemptResourceAccounting {
                 relay_bytes,
             )
             .map_err(|error| error.to_string())?,
-        )?;
-        accounting.memory_capacity_bytes = request.resource_assignment.memory_capacity_bytes;
-        Ok(accounting)
+        )
     }
 
     pub fn validate(&self) -> Result<(), String> {

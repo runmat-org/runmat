@@ -2589,7 +2589,6 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
                     0,
                 )
                 .unwrap(),
-                memory_capacity_bytes: 0,
             },
         }],
         1,
@@ -2629,7 +2628,6 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
                     0,
                 )
                 .unwrap(),
-                memory_capacity_bytes: 0,
             },
         }],
         1,
@@ -2677,7 +2675,6 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
                             0,
                         )
                         .unwrap(),
-                    memory_capacity_bytes: 0,
                 };
                 PlannedResourceUsageAttempt { plan, accounting }
             })

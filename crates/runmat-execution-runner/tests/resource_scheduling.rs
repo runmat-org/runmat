@@ -81,7 +81,7 @@ fn exact_devices_are_selected_leased_and_released() {
     let request = request(Some(provider));
     let mut allocated = ResourceAllocation::default();
     let selected = select_devices(&inventory, &allocated, &request).unwrap();
-    let assignment = assignment_for(AttemptId::derive(&[b"attempt"]), 7, &selected, 0).unwrap();
+    let assignment = assignment_for(AttemptId::derive(&[b"attempt"]), 7, &selected).unwrap();
 
     reserve(&mut allocated, &request, &assignment).unwrap();
     assert!(!fits(&inventory, &allocated, &request));
@@ -117,7 +117,7 @@ fn lease_identity_binds_every_admission_fact() {
         device("gpu-1", 16_000, provider.clone()),
     ];
     let attempt = AttemptId::derive(&[b"attempt"]);
-    let mut assignment = assignment_for(attempt, 7, &selected, 0).unwrap();
+    let mut assignment = assignment_for(attempt, 7, &selected).unwrap();
     assignment.accelerator_leases[0]
         .features
         .insert(AcceleratorFeature::UnifiedMemory);
@@ -134,7 +134,7 @@ fn assignment_rejects_a_lease_that_does_not_satisfy_the_request() {
         device("gpu-1", 16_000, provider.clone()),
     ];
     let attempt = AttemptId::derive(&[b"attempt"]);
-    let mut assignment = assignment_for(attempt, 7, &selected, 0).unwrap();
+    let mut assignment = assignment_for(attempt, 7, &selected).unwrap();
     assignment.accelerator_leases[0].features.clear();
     assert!(reserve(
         &mut ResourceAllocation::default(),
@@ -151,7 +151,7 @@ fn conflicting_device_reservation_is_transactional() {
         device("gpu-0", 8_000, provider.clone()),
         device("gpu-1", 16_000, provider.clone()),
     ];
-    let assignment = assignment_for(AttemptId::derive(&[b"attempt"]), 7, &selected, 0).unwrap();
+    let assignment = assignment_for(AttemptId::derive(&[b"attempt"]), 7, &selected).unwrap();
     let class = AcceleratorClass::new("gpu").unwrap();
     let mut allocated = ResourceAllocation {
         cpu_millicores: 250,
@@ -209,7 +209,6 @@ fn assignment_matching_handles_overlapping_requests_without_reusing_a_device() {
         AttemptId::derive(&[b"overlapping"]),
         8,
         &[ordinary, specialized],
-        0,
     )
     .unwrap();
     assert!(assignment.validate_for_request(&request).is_ok());
@@ -283,5 +282,5 @@ fn assignment_rejects_two_provider_views_of_one_physical_device() {
         device_view("wgpu-primary", "physical-primary", 16_000, wgpu),
     ];
 
-    assert!(assignment_for(AttemptId::derive(&[b"aliased"]), 9, &views, 0).is_err());
+    assert!(assignment_for(AttemptId::derive(&[b"aliased"]), 9, &views).is_err());
 }
