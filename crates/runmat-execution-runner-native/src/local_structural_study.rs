@@ -303,7 +303,11 @@ async fn execute_family_locally(
     );
     let inventory = ObjectInventoryLimits::default();
     let resources = planned
-        .local_resources(decoded.local_execution, inventory)
+        .local_resources(
+            decoded.local_execution,
+            inventory,
+            analysis_config.local_memory_capacity_bytes,
+        )
         .map_err(NativeExecutionError::Protocol)?;
     analysis_config.max_workers = workers.max(1);
     crate::analysis_task_pool::configure_local_analysis_envelope(&mut analysis_config, &resources);

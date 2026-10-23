@@ -121,18 +121,25 @@ pub(crate) struct PlannedFamilyStudy {
 }
 
 impl PlannedFamilyStudy {
-    /// Process-isolated task envelope derived from the authored step accuracy resources.
+    /// Process-isolated task envelope derived from the authored step accuracy resources. Its
+    /// memory is the effective ceiling, min(authored, machine capacity).
     pub fn local_resources(
         &self,
         local_execution: LocalExecutionPlan,
         inventory: ObjectInventoryLimits,
+        machine_memory_bytes: Option<u64>,
     ) -> Result<ResourceRequest, String> {
+        let machine = match machine_memory_bytes {
+            Some(capacity) => capacity,
+            None => crate::machine_capacity::memory_bytes().map_err(|error| error.to_string())?,
+        };
+        let memory = self.maximum_resident_bytes.min(machine);
         let resources = ResourceRequest {
             cpu_millicores: local_execution
                 .checked_cpu_millicores()
                 .map_err(|error| error.to_string())?,
-            memory_bytes: self.maximum_resident_bytes,
-            scratch_bytes: self.maximum_resident_bytes,
+            memory_bytes: memory,
+            scratch_bytes: memory,
             max_wall_millis: self.maximum_wall_millis,
             max_artifact_bytes: inventory.max_total_bytes,
             max_egress_bytes: 0,
