@@ -616,11 +616,6 @@ mod relaxation_tests {
 
     // witness: FEA-MESH-DISCRETIZATION-001/volume_quality_convergence @
     //   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
-    //   boundary: An uncertifiable Tet10 relaxes interior midsides to chords and boundary
-    //   midsides only to the chordal deviation from their exact image; real parts are
-    //   exercised by the hv-electrode and coax studies.
-    // witness: FEA-MESH-DISCRETIZATION-001/volume_quality_convergence @
-    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
     //   boundary: A six-node boundary face whose curved Jacobian folds against its corner
     //   normal is uncertified; the bracket Tet10 study exercises the whole elevation.
     #[test]
@@ -641,6 +636,11 @@ mod relaxation_tests {
         assert!(signed_face_area_minimum(&face).unwrap() <= 0.0);
     }
 
+    // witness: FEA-MESH-DISCRETIZATION-001/volume_quality_convergence @
+    //   shared_infrastructure/canonical_mixed_topology/numerical_kernel; coverage: partial;
+    //   boundary: An uncertifiable Tet10 relaxes interior midsides to chords and boundary
+    //   midsides only to the chordal deviation from their exact image; real parts are
+    //   exercised by the hv-electrode and coax studies.
     #[test]
     fn relaxation_keeps_boundary_midsides_within_the_chordal_deviation() {
         let mut topology = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10).topology;
