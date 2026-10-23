@@ -86,7 +86,11 @@ impl RuntimePlacementService for ControlledReadyPlacement {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn controlled_ready_routes(winner: runmat_execution::ExecutionCandidateKind, profileless: bool) {
+fn controlled_ready_routes(
+    winner: runmat_execution::ExecutionCandidateKind,
+    profileless: bool,
+    fresh_units: bool,
+) {
     use runmat_execution::ExecutionCandidateKind;
     let mut session = RunMatSession::with_options(true, false).expect("Core session");
     session.set_native_tiering_config_for_testing(runmat_jit::tiering::TieringConfig {
@@ -117,9 +121,27 @@ fn controlled_ready_routes(winner: runmat_execution::ExecutionCandidateKind, pro
         .clone()
         .with_placement(service.clone());
     session.runtime_context = session.runtime_context.clone().with_service_ports(ports);
+    let mut compilation_digest = None;
     for _ in 0..12 {
+        // A clone shares the digest OnceCell and cannot model ordinary source
+        // requests. Recompile the same immutable source into a fresh seal.
+        let fresh_unit = fresh_units.then(|| {
+            futures::executor::block_on(session.compile_executable_unit(
+                crate::ExecutableSource::new(
+                    "all-ready-routes@1",
+                    "allReady.m",
+                    "function y = allReady(x)\ny=x+1;\nend\n",
+                ),
+                None,
+            ))
+            .expect("compile fresh equivalent all-ready fixture")
+        });
+        let invoked_unit = fresh_unit.as_ref().unwrap_or(&unit);
+        if fresh_units {
+            assert!(invoked_unit.cached_native_compilation_digest().is_none());
+        }
         let output = futures::executor::block_on(session.invoke_executable(
-            &unit,
+            invoked_unit,
             crate::ProcedureInvocation {
                 target: crate::ProcedureTarget::Function("allReady".into()),
                 arguments: crate::ProcedureArguments::Source(vec![Value::Num(4.0)]),
@@ -129,6 +151,14 @@ fn controlled_ready_routes(winner: runmat_execution::ExecutionCandidateKind, pro
         ))
         .expect("selected ready route executes");
         assert_eq!(output.as_slice(), &[Value::Num(5.0)]);
+        let digest = invoked_unit
+            .cached_native_compilation_digest()
+            .expect("native preparation owns the compilation digest");
+        if let Some(expected) = compilation_digest {
+            assert_eq!(digest, expected, "fresh units retain exact native identity");
+        } else {
+            compilation_digest = Some(digest);
+        }
     }
     let offered = service.offered.borrow();
     let last = offered.last().expect("ready routes reach placement");
@@ -156,17 +186,22 @@ fn all_published_ready_routes_compete_and_each_can_win() {
         ExecutionCandidateKind::GenericNativeCpu,
         ExecutionCandidateKind::SpecializedNativeCpu,
     ] {
-        controlled_ready_routes(winner, false);
+        for fresh_units in [false, true] {
+            controlled_ready_routes(winner, false, fresh_units);
+        }
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn profileless_ready_generic_still_competes_with_interpreter() {
-    controlled_ready_routes(
-        runmat_execution::ExecutionCandidateKind::GenericNativeCpu,
-        true,
-    );
+    for fresh_units in [false, true] {
+        controlled_ready_routes(
+            runmat_execution::ExecutionCandidateKind::GenericNativeCpu,
+            true,
+            fresh_units,
+        );
+    }
 }
 
 struct RecordingPlacement {
