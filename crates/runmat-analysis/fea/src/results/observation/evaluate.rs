@@ -257,6 +257,26 @@ pub fn authored_observations_sample(
     Ok(false)
 }
 
+/// Whether any authored history (an observation sampled over the independent domain, not only
+/// at its end) samples `sample`: the rule deciding which interior samples a producer retains.
+pub fn authored_histories_sample(
+    step: &runmat_analysis_core::ProcedureStep,
+    sample: RecoveredFieldSample,
+) -> Result<bool, ObservationError> {
+    for observation in &step.observations {
+        let Some(spec) = observation.spec() else {
+            continue;
+        };
+        if spec.sampling != SamplingPolicy::Final
+            && sample_matches_history_policy(&spec.sampling, sample, None)?
+            && sample_matches_domain(&step.independent_domain, sample)
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 fn terminal_physical_sample(
     domain: &runmat_analysis_core::IndependentDomain,
 ) -> Option<RecoveredFieldSample> {

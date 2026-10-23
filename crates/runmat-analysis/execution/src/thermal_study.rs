@@ -39,7 +39,9 @@ pub use root::{import_thermal_study_root, prepare_thermal_study_root, PreparedTh
 pub use scope::ThermalStudyScope;
 #[cfg(test)]
 pub(crate) mod tests;
-pub use observations::{CompletedThermalObservations, ThermalObservationTask};
+use crate::sampled_history_observations::{
+    CompletedSampledObservations, SampledObservationTask,
+};
 
 /// Owned terminal artifacts for the declared scope, not necessarily the whole authored study.
 /// Consuming the coordinator does not clone numerical storage.
@@ -47,7 +49,7 @@ pub use observations::{CompletedThermalObservations, ThermalObservationTask};
 pub struct CompletedThermalStudy {
     replay: completion::ThermalStudyReplayContext,
     closures: Vec<ThermalStudyResultClosure>,
-    pub observations: CompletedThermalObservations,
+    pub observations: CompletedSampledObservations,
     pub compiled: CompiledAnalysisStudy,
     pub workload: runmat_analysis_fea::execution::ThermalWorkload,
     pub result: ImportedThermalResult,
@@ -104,7 +106,7 @@ pub struct ThermalStudyCoordinator {
     baseline: Option<PreparedResourceUsage>,
     terminal: Option<PreparedResourceUsage>,
     publication: Option<ImportedPublishedResult>,
-    observations: observations::Workflow,
+    observations: crate::sampled_history_observations::SampledHistoryWorkflow,
 }
 
 impl ThermalStudyCoordinator {
@@ -136,7 +138,7 @@ impl ThermalStudyCoordinator {
             baseline: None,
             terminal: None,
             publication: None,
-            observations: observations::Workflow::default(),
+            observations: crate::sampled_history_observations::SampledHistoryWorkflow::default(),
         })
     }
 
@@ -197,7 +199,7 @@ impl ThermalStudyCoordinator {
     pub fn prepare_next_observation(
         &mut self,
         source: &impl CacheImport,
-    ) -> AnalysisBridgeResult<Option<ThermalObservationTask<'_>>> {
+    ) -> AnalysisBridgeResult<Option<SampledObservationTask<'_>>> {
         self.require(ThermalStudyPhase::ReadyForObservations)?;
         let context = observations::Context {
             setup: &self.preparation,
@@ -489,7 +491,7 @@ impl ThermalStudyCoordinator {
     pub fn accuracy(&self) -> Option<&ImportedAccuracy> {
         self.accuracy.as_ref()
     }
-    pub fn observations(&self) -> &CompletedThermalObservations {
+    pub fn observations(&self) -> &CompletedSampledObservations {
         self.observations.completed()
     }
     pub fn states(&self) -> &[ImportedSemanticState] {

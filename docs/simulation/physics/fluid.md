@@ -155,8 +155,27 @@ analysis startup {
 The time grid must resolve boundary-signal breakpoints and the relevant convective/viscous scales;
 signal breakpoints are added to the authored grid. Initial velocity and pressure are typed initial
 conditions; without them the flow starts from rest. Each backward-Euler interval is solved to the
-study's physical tolerance and retained, so the published final state recovers cold from its
-predecessor without solving again.
+study's physical tolerance. Every interval keeps its solve evidence; fields are kept where outputs
+sample them, so memory follows the samples you ask for, not the number of time steps. Each kept
+state recovers cold from its predecessor without solving again.
+
+Field and scalar outputs report the final state. To follow a quantity through the transient,
+sample it over time; histories publish at each sample and can be reduced over time:
+
+```fea
+output peak_pressure_history {
+    value = sample(
+        max(output.pressure, over = geometry.channel.region.fluid),
+        over = time,
+        at = [1 s, 2 s, 3 s, 4 s, 5 s],
+    )
+    retention = explicit_samples
+    maximum_samples = 5
+}
+```
+
+Sample times join the time grid. A sampled state's fields also publish beside the final ones as
+`<field>.time.<n>`, counting samples from 1 in increasing time.
 
 ## Why is my pressure drop or mass balance wrong?
 

@@ -9,9 +9,7 @@ use serde::{Deserialize, Serialize};
 pub enum FluidStudyResultPhase {
     Solve,
     FieldRecovery,
-    ObservationPartition { ordinal: usize },
-    ObservationReduction { ordinal: usize },
-    ObservationAssembly,
+    Observation,
     Accuracy,
     State { ordinal: usize },
     Publication,
@@ -154,12 +152,6 @@ pub fn import_fluid_study_completion(
         if study.phase() == FluidStudyPhase::Complete {
             break;
         }
-        if study.phase() == FluidStudyPhase::ReadyForObservationFanout {
-            study.prepare_observation_fanout(source)?;
-        }
-        let closure = closures
-            .next()
-            .ok_or_else(|| invalid("fluid completion omits an authored phase"))?;
         let (phase, host) = match study.phase() {
             FluidStudyPhase::ReadyForSolve => {
                 (FluidStudyResultPhase::Solve, &study.prepare_solve()?.host)
@@ -168,28 +160,12 @@ pub fn import_fluid_study_completion(
                 FluidStudyResultPhase::FieldRecovery,
                 &study.prepare_field_recovery()?.host,
             ),
-            FluidStudyPhase::AwaitingObservationPartitions => {
-                let FluidStudyResultPhase::ObservationPartition { ordinal } = closure.phase else {
-                    return Err(invalid("fluid completion omits a fanout partition"));
+            FluidStudyPhase::ReadyForObservations => {
+                let Some(task) = study.prepare_next_observation(source)? else {
+                    continue;
                 };
-                let task = study
-                    .observation_state
-                    .fanout
-                    .as_ref()
-                    .expect("prepared fanout")
-                    .partitions
-                    .get(ordinal)
-                    .ok_or_else(|| invalid("fluid replay partition ordinal outside fanout"))?;
-                (closure.phase, &task.host)
+                (FluidStudyResultPhase::Observation, task.host)
             }
-            FluidStudyPhase::ReadyForObservationReduction { ordinal } => (
-                FluidStudyResultPhase::ObservationReduction { ordinal },
-                &study.prepare_observation_reduction()?.host,
-            ),
-            FluidStudyPhase::ReadyForObservationAssembly => (
-                FluidStudyResultPhase::ObservationAssembly,
-                &study.prepare_observation_assembly()?.host,
-            ),
             FluidStudyPhase::ReadyForAccuracy => (
                 FluidStudyResultPhase::Accuracy,
                 &study.prepare_accuracy()?.host,
@@ -204,6 +180,9 @@ pub fn import_fluid_study_completion(
             ),
             _ => return Err(invalid("fluid completion replay reached an awaiting phase")),
         };
+        let closure = closures
+            .next()
+            .ok_or_else(|| invalid("fluid completion omits an authored phase"))?;
         closure.validate_for(phase, host)?;
         match phase {
             FluidStudyResultPhase::Solve => {
@@ -212,18 +191,8 @@ pub fn import_fluid_study_completion(
             FluidStudyResultPhase::FieldRecovery => {
                 study.complete_field_recovery(source, closure.response, closure.execution)?
             }
-            FluidStudyResultPhase::ObservationPartition { ordinal } => study
-                .complete_observation_partition(
-                    source,
-                    ordinal,
-                    closure.response,
-                    closure.execution,
-                )?,
-            FluidStudyResultPhase::ObservationReduction { .. } => {
-                study.complete_observation_reduction(source, closure.response, closure.execution)?
-            }
-            FluidStudyResultPhase::ObservationAssembly => {
-                study.complete_observation_assembly(source, closure.response, closure.execution)?
+            FluidStudyResultPhase::Observation => {
+                study.complete_observation(source, closure.response, closure.execution)?
             }
             FluidStudyResultPhase::Accuracy => {
                 study.complete_accuracy(source, closure.response, closure.execution)?

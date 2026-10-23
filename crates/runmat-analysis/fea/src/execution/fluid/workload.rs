@@ -118,7 +118,27 @@ impl FluidSteadyWorkload {
             return Err(invalid("fluid study requires exactly one authored step"));
         };
         self.policy.validate().map_err(invalid)?;
-        crate::results::observation::validate_sampled_requests(step).map_err(invalid)?;
+        // Fluid outputs observe native fields on the solver mesh through the shared
+        // volume-mesh engine. Histories sample a transient's physical time; a steady flow has
+        // only its final state. Solver diagnostics and monitors are not fluid outputs.
+        for request in &step.observations {
+            match request {
+                runmat_analysis_core::ObservationRequest::Diagnostic(_)
+                | runmat_analysis_core::ObservationRequest::Monitor(_) => {
+                    return Err(invalid("fluid outputs observe native fields only"));
+                }
+                _ if !self.is_transient()
+                    && request.spec().is_some_and(|spec| {
+                        spec.sampling != runmat_analysis_core::SamplingPolicy::Final
+                    }) =>
+                {
+                    return Err(invalid(
+                        "a steady fluid output observes the final state; time histories need a transient analysis",
+                    ));
+                }
+                _ => {}
+            }
+        }
         let definitions = super::fields::field_definition_inventory(self.coupling())?;
         if step
             .observations

@@ -1,247 +1,173 @@
-//! Native fluid fields on the canonical solver mesh; the shared engine owns task, import and
-//! catalog mechanics.
+//! Native fluid fields on the canonical solver mesh as a sampled-history observation source:
+//! a steady flow's final state, or a transient's retained physical-time samples. The shared
+//! workflow owns task, import, checkpoint and catalog mechanics.
 use super::*;
-pub(super) use crate::sampled_study_observations::SampledStudyObservations as FluidObservations;
 use crate::{
-    ObservationPreparation, ObservationPublishedSource, ObservationWorkloadSource,
-    PreparedObservationAssembly, PreparedObservationFanout, PreparedObservationReduction,
+    sampled_history_observations::{SampledHistorySource, SampledObservationTask},
+    ObservationHistoryFinalizationSource, ObservationPreparation, ObservationPublishedSource,
+    ObservationWorkloadSource,
 };
+use runmat_analysis_core::ProcedureStep;
 use runmat_analysis_fea::{
     execution::{AnalysisNumericalObjectKind as Kind, ObservationHistorySourceContext},
-    results::observation::{ObservationFieldCatalog, ObservationLimits},
+    results::{
+        field::RecoveredFieldSample,
+        observation::{ObservationFieldCatalog, ObservationLimits},
+    },
 };
 
-impl FluidStudyCoordinator {
-    pub fn prepare_observation_fanout(
-        &mut self,
-        source: &impl CacheImport,
-    ) -> AnalysisBridgeResult<&PreparedObservationFanout> {
-        self.require(FluidStudyPhase::ReadyForObservationFanout)?;
-        let recovery = self.recovery_task.as_ref().expect("completed recovery");
-        let fields = self.fields.as_ref().expect("completed fields");
-        let policy = self.preparation.output_policy;
-        let task = FluidObservations::prepare_fanout(
-            source,
+struct Context<'a> {
+    study: &'a FluidStudyCoordinator,
+    recovery: &'a crate::PreparedFluidFieldRecovery,
+    fields: &'a crate::ImportedRecoveredFields,
+}
+
+impl Context<'_> {
+    /// Distinct retained samples in stored (increasing) order.
+    fn samples(&self) -> Vec<RecoveredFieldSample> {
+        let mut samples: Vec<RecoveredFieldSample> = Vec::new();
+        for entry in &self.fields.manifest.fields {
+            if samples.last() != Some(&entry.sample) {
+                samples.push(entry.sample);
+            }
+        }
+        samples
+    }
+}
+
+impl SampledHistorySource for Context<'_> {
+    fn step(&self) -> &ProcedureStep {
+        self.study.selected_step()
+    }
+    fn solve_host(&self) -> &AnalysisHostWorkload {
+        &self.recovery.host
+    }
+    fn program_revision(&self) -> &ProgramRevision {
+        &self.study.preparation.program_revision
+    }
+    fn output_policy(&self) -> AnalysisOutputPolicy {
+        self.study.preparation.output_policy
+    }
+    fn sample_count(&self) -> usize {
+        self.samples().len()
+    }
+    fn observation_preparation(
+        &self,
+        _source: &impl CacheImport,
+        ordinal: usize,
+    ) -> AnalysisBridgeResult<(ObservationPreparation, RecoveredFieldSample)> {
+        let sample = *self
+            .samples()
+            .get(ordinal)
+            .ok_or_else(|| invalid("fluid observation sample outside retained fields"))?;
+        let policy = self.output_policy();
+        Ok((
             ObservationPreparation {
-                source_host: recovery.host.clone(),
+                source_host: self.recovery.host.clone(),
                 source: ObservationPublishedSource::VolumeMeshRecovery {
-                    recovery_request: recovery.request.clone(),
-                    fields: fields.clone(),
+                    recovery_request: self.recovery.request.clone(),
+                    fields: self.fields.clone(),
                 },
                 source_workload: ObservationWorkloadSource::VolumeMesh(
-                    self.input(Kind::FluidSteadyWorkload)?,
+                    self.study.input(Kind::FluidSteadyWorkload)?,
                 ),
-                mesh: Some(self.input(Kind::Mesh)?),
+                mesh: Some(self.study.input(Kind::Mesh)?),
                 accelerator_requests: Vec::new(),
                 sequence: SequenceIdentity::from_solver_contract(
-                    &self.preparation.workload().model.sequence,
+                    &self.study.preparation.workload().model.sequence,
                 )?,
-                step: self.selected_step().clone(),
+                step: self.step().clone(),
                 limits: ObservationLimits::default(),
-                program_revision: self.preparation.program_revision.clone(),
+                program_revision: self.program_revision().clone(),
                 chunk_bytes: policy.chunk_bytes(),
                 inventory_limits: policy.inventory_limits(),
             },
-        )?;
-        if task.partitions.is_empty() {
-            return Err(invalid(
-                "fluid authored observations have no executable partitions",
-            ));
-        }
-        self.observation_state.fanout = Some(task);
-        self.phase = FluidStudyPhase::AwaitingObservationPartitions;
-        Ok(self
-            .observation_state
-            .fanout
-            .as_ref()
-            .expect("just prepared"))
+            sample,
+        ))
     }
-
-    /// Completion order is arbitrary; each immutable task ordinal may complete exactly once.
-    pub fn complete_observation_partition(
-        &mut self,
-        source: &impl CacheImport,
-        ordinal: usize,
-        response: ProgramExecutionResponse,
-        accounting: AnalysisPhaseExecutionEvidence,
-    ) -> AnalysisBridgeResult<()> {
-        self.require(FluidStudyPhase::AwaitingObservationPartitions)?;
-        if self.observation_state.contributions.contains_key(&ordinal) {
-            return Err(invalid("fluid observation partition already completed"));
-        }
-        let fanout = self
-            .observation_state
-            .fanout
-            .as_ref()
-            .expect("prepared fanout");
-        let task = fanout
-            .partitions
-            .get(ordinal)
-            .ok_or_else(|| invalid("fluid partition ordinal outside fanout"))?;
-        validate_accounting(&task.host, &task.resource_plan, &response, &accounting)?;
-        let closure = FluidStudyResultClosure::new(
-            FluidStudyResultPhase::ObservationPartition { ordinal },
-            &task.host,
-            &response,
-            &accounting,
-        );
-        let contribution = self.observation_state.import_partition(
-            source,
-            ordinal,
-            response,
-            self.preparation.output_policy,
-        )?;
-        let usage = self.extend_usage(&task.resource_plan, accounting)?;
-        let count = fanout.partitions.len();
-        self.observation_state
-            .contributions
-            .insert(ordinal, contribution);
-        self.usage = Some(usage);
-        self.closures.push(closure);
-        if self.observation_state.contributions.len() == count {
-            self.phase = FluidStudyPhase::ReadyForObservationReduction { ordinal: 0 };
-        }
-        Ok(())
-    }
-
-    pub fn prepare_observation_reduction(
-        &mut self,
-    ) -> AnalysisBridgeResult<&PreparedObservationReduction> {
-        let ordinal = self.observation_state.reduced.len();
-        self.require(FluidStudyPhase::ReadyForObservationReduction { ordinal })?;
-        let task = self.observation_state.prepare_reduction(
-            &self.preparation.program_revision,
-            self.preparation.output_policy,
-        )?;
-        self.observation_state.reduction = Some(task);
-        self.phase = FluidStudyPhase::AwaitingObservationReduction { ordinal };
-        Ok(self
-            .observation_state
-            .reduction
-            .as_ref()
-            .expect("just prepared"))
-    }
-
-    pub fn complete_observation_reduction(
-        &mut self,
-        source: &impl CacheImport,
-        response: ProgramExecutionResponse,
-        accounting: AnalysisPhaseExecutionEvidence,
-    ) -> AnalysisBridgeResult<()> {
-        let ordinal = self.observation_state.reduced.len();
-        self.require(FluidStudyPhase::AwaitingObservationReduction { ordinal })?;
-        let task = self
-            .observation_state
-            .reduction
-            .as_ref()
-            .expect("awaited reduction");
-        validate_accounting(&task.host, &task.resource_plan, &response, &accounting)?;
-        let closure = FluidStudyResultClosure::new(
-            FluidStudyResultPhase::ObservationReduction { ordinal },
-            &task.host,
-            &response,
-            &accounting,
-        );
-        let reduced = self.observation_state.import_reduction(
-            source,
-            response,
-            self.preparation.output_policy,
-        )?;
-        let usage = self.extend_usage(&task.resource_plan, accounting)?;
-        self.observation_state.reduced.push(reduced);
-        self.usage = Some(usage);
-        self.closures.push(closure);
-        let count = self
-            .observation_state
-            .fanout
-            .as_ref()
-            .expect("fanout")
-            .source_request
-            .plan
-            .observations
-            .len();
-        self.phase = if self.observation_state.reduced.len() == count {
-            FluidStudyPhase::ReadyForObservationAssembly
-        } else {
-            FluidStudyPhase::ReadyForObservationReduction {
-                ordinal: ordinal + 1,
-            }
-        };
-        Ok(())
-    }
-
-    pub fn prepare_observation_assembly(
-        &mut self,
-    ) -> AnalysisBridgeResult<&PreparedObservationAssembly> {
-        self.require(FluidStudyPhase::ReadyForObservationAssembly)?;
-        let task = self.observation_state.prepare_assembly(
-            &self.preparation.program_revision,
-            self.preparation.output_policy,
-        )?;
-        self.observation_state.assembly = Some(task);
-        self.phase = FluidStudyPhase::AwaitingObservationAssembly;
-        Ok(self
-            .observation_state
-            .assembly
-            .as_ref()
-            .expect("just prepared"))
-    }
-
-    pub fn complete_observation_assembly(
-        &mut self,
-        source: &impl CacheImport,
-        response: ProgramExecutionResponse,
-        accounting: AnalysisPhaseExecutionEvidence,
-    ) -> AnalysisBridgeResult<()> {
-        self.require(FluidStudyPhase::AwaitingObservationAssembly)?;
-        let task = self
-            .observation_state
-            .assembly
-            .as_ref()
-            .expect("awaited assembly");
-        validate_accounting(&task.host, &task.resource_plan, &response, &accounting)?;
-        let closure = FluidStudyResultClosure::new(
-            FluidStudyResultPhase::ObservationAssembly,
-            &task.host,
-            &response,
-            &accounting,
-        );
-        let artifact = self.observation_state.import_assembly(
-            source,
-            response,
-            self.preparation.output_policy,
-        )?;
-        let fields = self.fields.as_ref().expect("completed fields");
-        let recovery = self.recovery_task.as_ref().expect("completed recovery");
-        let catalog = self.observation_state.publication_catalog(
-            &artifact,
-            self.solve_task
-                .as_ref()
-                .expect("completed solve")
-                .host
-                .workload
-                .step,
-            ObservationFieldCatalog::volume_mesh_recovery(
-                recovery.request.clone(),
-                fields.manifest.clone(),
-                SequenceIdentity::from_solver_contract(
-                    &self.preparation.workload().model.sequence,
-                )?,
-                self.selected_step().clone(),
+    fn field_catalog(&self) -> AnalysisBridgeResult<ObservationFieldCatalog> {
+        Ok(ObservationFieldCatalog::volume_mesh_recovery(
+            self.recovery.request.clone(),
+            self.fields.manifest.clone(),
+            SequenceIdentity::from_solver_contract(
+                &self.study.preparation.workload().model.sequence,
             )?,
-            self.selected_step(),
-            ObservationHistorySourceContext::VolumeMesh {
-                mesh: &self.preparation.mesh,
-            },
-        )?;
-        let usage = self.extend_usage(&task.resource_plan, accounting)?;
-        let tail = self.prepare_tail(&usage, Some(catalog.clone()))?;
-        self.observation_state.completed = Some(artifact);
-        self.observation_state.catalog = Some(catalog);
-        self.usage = Some(usage);
-        self.closures.push(closure);
-        self.tail = Some(tail);
+            self.step().clone(),
+        )?)
+    }
+    fn finalization_source(&self) -> AnalysisBridgeResult<ObservationHistoryFinalizationSource> {
+        Ok(ObservationHistoryFinalizationSource::VolumeMesh {
+            mesh: self.study.input(Kind::Mesh)?,
+        })
+    }
+    fn history_context(&self) -> ObservationHistorySourceContext<'_> {
+        ObservationHistorySourceContext::VolumeMesh {
+            mesh: &self.study.preparation.mesh,
+        }
+    }
+}
+
+impl FluidStudyCoordinator {
+    /// Prepare exactly one owned observation phase. None means exact authored coverage is
+    /// closed and the study moves on to accuracy.
+    pub fn prepare_next_observation(
+        &mut self,
+        source: &impl CacheImport,
+    ) -> AnalysisBridgeResult<Option<SampledObservationTask<'_>>> {
+        self.require(FluidStudyPhase::ReadyForObservations)?;
+        let mut workflow = std::mem::take(&mut self.observation_state);
+        let prepared = {
+            let context = Context {
+                study: self,
+                recovery: self.recovery_task.as_ref().expect("completed recovery"),
+                fields: self.fields.as_ref().expect("completed fields"),
+            };
+            workflow.prepare(source, &context).map(|task| task.is_some())
+        };
+        self.observation_state = workflow;
+        if prepared? {
+            self.phase = FluidStudyPhase::AwaitingObservation;
+            return Ok(Some(self.observation_state.pending()?));
+        }
+        let usage = self.usage.clone().expect("completed recovery usage");
+        let catalog = self.observation_state.completed().catalog.clone();
+        self.tail = Some(self.prepare_tail(&usage, catalog)?);
         self.phase = FluidStudyPhase::ReadyForAccuracy;
+        Ok(None)
+    }
+
+    pub fn complete_observation(
+        &mut self,
+        source: &impl CacheImport,
+        response: ProgramExecutionResponse,
+        accounting: AnalysisPhaseExecutionEvidence,
+    ) -> AnalysisBridgeResult<()> {
+        self.require(FluidStudyPhase::AwaitingObservation)?;
+        let (closure, usage) = {
+            let task = self.observation_state.pending()?;
+            validate_accounting(task.host, task.resource_plan, &response, &accounting)?;
+            let closure = FluidStudyResultClosure::new(
+                FluidStudyResultPhase::Observation,
+                task.host,
+                &response,
+                &accounting,
+            );
+            (closure, self.extend_usage(task.resource_plan, accounting)?)
+        };
+        let mut workflow = std::mem::take(&mut self.observation_state);
+        let completed = {
+            let context = Context {
+                study: self,
+                recovery: self.recovery_task.as_ref().expect("completed recovery"),
+                fields: self.fields.as_ref().expect("completed fields"),
+            };
+            workflow.complete(source, response, &context)
+        };
+        self.observation_state = workflow;
+        completed?;
+        self.closures.push(closure);
+        self.usage = Some(usage);
+        self.phase = FluidStudyPhase::ReadyForObservations;
         Ok(())
     }
 }

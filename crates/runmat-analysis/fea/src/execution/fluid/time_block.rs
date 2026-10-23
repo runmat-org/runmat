@@ -178,22 +178,32 @@ impl<'a> FluidTransientBlock<'a> {
             .next()
             .filter(|_| selected.next().is_none())
             .ok_or_else(|| invalid("fluid block needs exactly one selected step"))?;
-        if step.settings != ProcedureSettings::None
-            || model.cfd.as_ref() != Some(input.material)
-            || input.signals != model.signals
-            || input.boundary_operators != model.boundaries
-            || model
-                .constraints
-                .iter()
-                .filter_map(|c| match c {
-                    AnalysisConstraint::Fluid(c) => Some(c),
-                    _ => None,
-                })
-                .ne(input.constraints.iter())
+        let mismatch = if step.settings != ProcedureSettings::None {
+            Some("procedure settings")
+        } else if input.signals != model.signals {
+            Some("signals")
+        } else if input.boundary_operators != model.boundaries {
+            Some("boundary operators")
+        } else if model
+            .constraints
+            .iter()
+            .filter_map(|c| match c {
+                AnalysisConstraint::Fluid(c) => Some(c),
+                _ => None,
+            })
+            .ne(input.constraints.iter())
             || model.constraints.len() != input.constraints.len()
-            || !step.activations.is_empty()
         {
-            return Err(invalid("fluid block numerical inputs differ from authored source or require unsupported activation"));
+            Some("constraints")
+        } else if !step.activations.is_empty() {
+            Some("step activations")
+        } else {
+            None
+        };
+        if let Some(what) = mismatch {
+            return Err(invalid(format!(
+                "fluid block {what} differ from the authored source or need unsupported activation"
+            )));
         }
         let selected_actions =
             crate::excitation::active_actions(model, Some(step)).map_err(invalid)?;
@@ -242,6 +252,9 @@ impl<'a> FluidTransientBlock<'a> {
                 initial.pressure_fluctuation_pa,
                 initial.face_volume_flux_m3_per_s,
                 input.policy,
+                // The fluid domain comes from the compiled material properties of the source,
+                // which already reconciles any model-level domain.
+                input.material,
                 input.topology.mesh_digest,
                 input.topology.projection_digest,
             ),

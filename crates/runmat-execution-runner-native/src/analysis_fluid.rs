@@ -78,69 +78,27 @@ pub(crate) async fn execute_with_pool(
         .complete_field_recovery(pool, executed.response, accounting)
         .map_err(protocol)?;
 
-    if coordinator.phase() == FluidStudyPhase::ReadyForObservationFanout {
-        // Partition tasks share the recovery predecessor, not artificial serial scientific
-        // dependencies. Placement may serialize them without changing their logical lineage.
-        let fanout = coordinator
-            .prepare_observation_fanout(pool)
-            .map_err(protocol)?;
-        let mut completed = Vec::with_capacity(fanout.partitions.len());
-        for (ordinal, task) in fanout.partitions.iter().enumerate() {
-            let (executed, accounting) = execute_one(
-                pool,
-                &task.host,
-                &task.program,
-                &task.resource_plan,
-                vec![preceding],
-                &policy,
-            )
-            .await?;
-            completed.push((ordinal, executed, accounting));
-        }
-        let mut partition_dependencies = Vec::with_capacity(completed.len());
-        for (ordinal, executed, accounting) in completed {
-            partition_dependencies.push(dependency(&executed));
-            coordinator
-                .complete_observation_partition(pool, ordinal, executed.response, accounting)
-                .map_err(protocol)?;
-        }
-        let mut reductions = Vec::new();
-        while matches!(
-            coordinator.phase(),
-            FluidStudyPhase::ReadyForObservationReduction { .. }
-        ) {
-            let reduction = coordinator
-                .prepare_observation_reduction()
-                .map_err(protocol)?;
-            let (executed, accounting) = execute_one(
-                pool,
-                &reduction.host,
-                &reduction.program,
-                &reduction.resource_plan,
-                partition_dependencies.clone(),
-                &policy,
-            )
-            .await?;
-            reductions.push(dependency(&executed));
-            coordinator
-                .complete_observation_reduction(pool, executed.response, accounting)
-                .map_err(protocol)?;
-        }
-        let assembly = coordinator
-            .prepare_observation_assembly()
-            .map_err(protocol)?;
+    // Each authored observation phase (partition, reduction, history checkpoint, assembly,
+    // history finalization) runs after its predecessor, sample by retained sample.
+    while coordinator.phase() == FluidStudyPhase::ReadyForObservations {
+        let Some(task) = coordinator
+            .prepare_next_observation(pool)
+            .map_err(|e| protocol(format!("fluid observation preparation: {e}")))?
+        else {
+            break;
+        };
         let (executed, accounting) = execute_one(
             pool,
-            &assembly.host,
-            &assembly.program,
-            &assembly.resource_plan,
-            reductions,
+            task.host,
+            task.program,
+            task.resource_plan,
+            vec![preceding],
             &policy,
         )
         .await?;
         preceding = dependency(&executed);
         coordinator
-            .complete_observation_assembly(pool, executed.response, accounting)
+            .complete_observation(pool, executed.response, accounting)
             .map_err(protocol)?;
     }
 

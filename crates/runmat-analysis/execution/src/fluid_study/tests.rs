@@ -186,7 +186,7 @@ fn exact_authored_plan_and_owned_phases_fail_closed() {
     let mut study = FluidStudyCoordinator::new(preparation()).unwrap();
     assert_eq!(study.phase(), FluidStudyPhase::ReadyForSolve);
     assert!(study.prepare_field_recovery().is_err());
-    assert!(study.prepare_observation_reduction().is_err());
+    assert!(study.prepare_next_observation(&EmptyStore).is_err());
     assert!(study.prepare_accuracy().is_err());
     assert!(study.prepare_next_state().is_err());
     assert!(study.prepare_publication().is_err());

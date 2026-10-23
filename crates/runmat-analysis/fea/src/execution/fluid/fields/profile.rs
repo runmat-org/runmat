@@ -51,42 +51,51 @@ struct FieldWire<'a, S: Serialize> {
     sample: RecoveredFieldSample,
     storage: S,
 }
+type Sample<'a> = (
+    RecoveredFieldSample,
+    &'a crate::physics::cfd::canonical::CanonicalFluidResult,
+);
 struct Fields<'a> {
     definitions: &'a [RecoveredFieldDefinition],
     counts: &'a [usize],
-    original: &'a crate::physics::cfd::canonical::CanonicalFluidResult,
+    samples: &'a [Sample<'a>],
     extra: Option<Values<'a>>,
 }
 impl Serialize for Fields<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        // Derived vectors (vorticity, face shear) have the width of the retained arrays they
-        // come from; the canonical f64 encoding has a fixed width per value.
-        let mut values = vec![
-            Values::Velocity(&self.original.velocity_m_per_s),
-            Values::Scalar(&self.original.pressure_pa),
-            Values::Scalar(&self.original.face_volume_flux_m3_per_s),
-            Values::Velocity(&self.original.residual.cell_vorticity_per_s),
-            Values::Velocity(&self.original.residual.face_forces.viscous_traction_n),
-        ];
-        if let Some(extra) = &self.extra {
-            values.push(match extra {
-                Values::Velocity(v) => Values::Velocity(v),
-                Values::Scalar(v) => Values::Scalar(v),
-            });
-        }
-        let mut seq = serializer.serialize_seq(Some(self.definitions.len()))?;
-        for ((definition, count), values) in self.definitions.iter().zip(self.counts).zip(values) {
-            let shape = definition
-                .storage_shape(*count)
-                .map_err(serde::ser::Error::custom)?;
-            let storage =
-                AnalysisField::host_f64_serialization(definition.field_id(), &shape, &values);
-            seq.serialize_element(&FieldWire {
-                identity: Digest::from_bytes([0; 32]),
-                definition,
-                sample: RecoveredFieldSample::Final,
-                storage,
-            })?;
+        let mut seq =
+            serializer.serialize_seq(Some(self.definitions.len() * self.samples.len()))?;
+        for (sample, original) in self.samples {
+            // Derived vectors (vorticity, face shear) have the width of the retained arrays
+            // they come from; the canonical f64 encoding has a fixed width per value.
+            let mut values = vec![
+                Values::Velocity(&original.velocity_m_per_s),
+                Values::Scalar(&original.pressure_pa),
+                Values::Scalar(&original.face_volume_flux_m3_per_s),
+                Values::Velocity(&original.residual.cell_vorticity_per_s),
+                Values::Velocity(&original.residual.face_forces.viscous_traction_n),
+            ];
+            if let Some(extra) = &self.extra {
+                values.push(match extra {
+                    Values::Velocity(v) => Values::Velocity(v),
+                    Values::Scalar(v) => Values::Scalar(v),
+                });
+            }
+            for ((definition, count), values) in
+                self.definitions.iter().zip(self.counts).zip(values)
+            {
+                let shape = definition
+                    .storage_shape(*count)
+                    .map_err(serde::ser::Error::custom)?;
+                let storage =
+                    AnalysisField::host_f64_serialization(definition.field_id(), &shape, &values);
+                seq.serialize_element(&FieldWire {
+                    identity: Digest::from_bytes([0; 32]),
+                    definition,
+                    sample: *sample,
+                    storage,
+                })?;
+            }
         }
         seq.end()
     }
@@ -104,7 +113,7 @@ struct ArtifactWire<'a> {
 fn artifact_profile(
     definitions: &[RecoveredFieldDefinition],
     counts: &[usize],
-    original: &crate::physics::cfd::canonical::CanonicalFluidResult,
+    samples: &[Sample<'_>],
     extra: Option<Values<'_>>,
     entity_counts: RecoveredFieldEntityCounts,
 ) -> AnalysisExecutionResult<SerializedCanonicalProfile> {
@@ -115,12 +124,14 @@ fn artifact_profile(
             Values::Velocity(v) => v.len() != counts[5],
             Values::Scalar(v) => v.len() != counts[5],
         })
-        || original.velocity_m_per_s.len() != counts[0]
-        || original.pressure_pa.len() != counts[1]
-        || original.pressure_fluctuation_pa.len() != counts[1]
-        || original.face_volume_flux_m3_per_s.len() != counts[2]
-        || original.residual.cell_vorticity_per_s.len() != counts[3]
-        || original.residual.face_forces.viscous_traction_n.len() != counts[4]
+        || samples.iter().any(|(_, original)| {
+            original.velocity_m_per_s.len() != counts[0]
+                || original.pressure_pa.len() != counts[1]
+                || original.pressure_fluctuation_pa.len() != counts[1]
+                || original.face_volume_flux_m3_per_s.len() != counts[2]
+                || original.residual.cell_vorticity_per_s.len() != counts[3]
+                || original.residual.face_forces.viscous_traction_n.len() != counts[4]
+        })
     {
         return Err(invalid("fluid native profile original cardinality"));
     }
@@ -138,7 +149,7 @@ fn artifact_profile(
             fields: Fields {
                 definitions,
                 counts,
-                original,
+                samples,
                 extra,
             },
         },
@@ -185,18 +196,13 @@ pub(super) fn requested_bytes(
         connectors: 0,
         constraint_groups: 0,
     };
-    let artifact = artifact_profile(
-        &definitions,
-        &counts,
-        result.original(),
-        extra,
-        entity_counts,
-    )?;
+    let samples = result.field_samples(workload)?;
+    let artifact = artifact_profile(&definitions, &counts, &samples, extra, entity_counts)?;
     let catalog = RecoveredFieldArtifactEntry::profile_sampled_catalog_shape(
         &definitions,
         &counts,
         RecoveredFieldSample::Final,
-        1,
+        samples.len(),
     )
     .map_err(invalid)?;
     let mut required = add(
@@ -219,28 +225,33 @@ pub(super) fn requested_bytes(
         FiniteVolumeFieldTopology::validation_workspace_bytes(nodes, cells, faces)
             .map_err(invalid)?,
     )?;
+    let per_sample = |bytes: u64| {
+        bytes
+            .checked_mul(samples.len() as u64)
+            .ok_or_else(|| invalid("fluid native field residency overflow"))
+    };
     for bytes in [
         vector_bytes::<StableDigest>(nodes)?,
         vector_bytes::<StableDigest>(cells)?,
         vector_bytes::<NativeOrientedFace>(faces)?,
-        vector_bytes::<RecoveredField>(definitions.len())?,
-        vector_bytes::<f64>(
+        per_sample(vector_bytes::<RecoveredField>(definitions.len())?)?,
+        per_sample(vector_bytes::<f64>(
             cells
                 .checked_mul(3)
                 .ok_or_else(|| invalid("fluid velocity count overflow"))?,
-        )?,
-        vector_bytes::<f64>(cells)?,
-        vector_bytes::<f64>(faces)?,
-        vector_bytes::<f64>(
+        )?)?,
+        per_sample(vector_bytes::<f64>(cells)?)?,
+        per_sample(vector_bytes::<f64>(faces)?)?,
+        per_sample(vector_bytes::<f64>(
             cells
                 .checked_mul(3)
                 .ok_or_else(|| invalid("fluid vorticity count overflow"))?,
-        )?,
-        vector_bytes::<f64>(
+        )?)?,
+        per_sample(vector_bytes::<f64>(
             faces
                 .checked_mul(3)
                 .ok_or_else(|| invalid("fluid face shear count overflow"))?,
-        )?,
+        )?)?,
         vector_bytes::<f64>(
             nodes
                 .checked_mul(extra_components)
@@ -414,7 +425,14 @@ mod tests {
         )
         .unwrap();
         let projected =
-            artifact_profile(&definitions, &counts, &original, None, entity_counts).unwrap();
+            artifact_profile(
+                &definitions,
+                &counts,
+                &[(RecoveredFieldSample::Final, &original)],
+                None,
+                entity_counts,
+            )
+            .unwrap();
         assert_eq!(projected, profile_serialized(&artifact, LIMITS).unwrap());
         let bytes = artifact.canonical_bytes().unwrap();
         assert!(bytes.len() as u64 <= projected.encoded_bytes_upper_bound);
