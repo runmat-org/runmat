@@ -105,6 +105,12 @@ fn thermal_accuracy_binds_numerical_workload_and_topology_not_host_identity() {
         )
     };
     assert!(check(&source_inputs).is_ok());
+    super::accuracy_source_context_tests::assert_accuracy_plan_identity_bound(
+        &accuracy.request,
+        &source_receipt,
+        None,
+        &source_inputs.iter().collect::<Vec<_>>(),
+    );
     assert!(check(&[]).is_err());
     assert!(check(&source_inputs[..1]).is_err());
     assert!(check(&[source_inputs[0].clone(), source_inputs[0].clone()]).is_err());

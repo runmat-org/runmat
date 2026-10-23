@@ -276,3 +276,4 @@ fn inconsistent_inputs_outputs_and_overflow_fail_closed() {
     assert!(add(u64::MAX, 1).is_err());
     assert!(mul(u64::MAX, 2).is_err());
 }
+

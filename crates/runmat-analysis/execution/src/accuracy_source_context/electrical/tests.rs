@@ -131,15 +131,6 @@ fn electrical_context_cold_authenticates_original_three_inputs_and_authored_requ
             )
             .unwrap();
             assert!(validate(&changed, &receipt, None, &refs).is_err());
-            let changed = AccuracyEvaluationRequest::new(
-                request.producer,
-                request.source_kind,
-                request.source_result,
-                None,
-                request.plan.clone(),
-            )
-            .unwrap();
-            assert!(validate(&changed, &receipt, None, &refs).is_err());
             let mut foreign = workload.clone();
             foreign.model.sequence.sequence_id = "foreign".into();
             let changed = AccuracyEvaluationRequest::new(

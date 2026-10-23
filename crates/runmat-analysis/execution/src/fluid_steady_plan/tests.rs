@@ -384,3 +384,70 @@ fn fluid_plan_carries_admitted_threads_and_worker_rederivation_converges() {
         w.execute(&m).unwrap()
     );
 }
+
+// witness: FEA-FLUID-ACCURACY-001/acceptance @
+//   incompressible_laminar_steady/canonical_tetrahedra/public_study; coverage: partial;
+//   boundary: The fluid accuracy source context accepts the original workload, mesh and result
+//   under the authored accuracy plan and rejects the same receipt under a re-identified plan or a
+//   loosened criterion; the context check only, on one steady fixture, not a full study run.
+#[test]
+fn fluid_accuracy_context_binds_the_authored_accuracy_plan() {
+    let (w, m) = authored();
+    let task = task(w.clone(), m.clone(), 1024);
+    let original = w
+        .execute_with_resource_plan(&m, &task.resource_plan)
+        .unwrap();
+    let receipt =
+        runmat_analysis_fea::execution::FluidNumericalReceiptArtifact::new(&w, &original, &m)
+            .unwrap();
+    let object = |kind, identity, bytes: Vec<u8>| {
+        prepare_analysis_objects(
+            kind,
+            identity,
+            &bytes,
+            1024,
+            ObjectNamespace::InputValue,
+            task.output_policy.inventory_limits(),
+        )
+        .unwrap()
+    };
+    let inputs = [
+        object(
+            AnalysisNumericalObjectKind::FluidSteadyWorkload,
+            w.identity().unwrap().digest(),
+            w.canonical_bytes().unwrap(),
+        ),
+        object(
+            AnalysisNumericalObjectKind::Mesh,
+            Digest::from_bytes(*m.canonical_digest.bytes()),
+            runmat_meshing_core::CanonicalMeshingContract::canonical_encode(&m).unwrap(),
+        ),
+        object(
+            AnalysisNumericalObjectKind::SolverResult,
+            original.identity().unwrap().digest(),
+            original.canonical_bytes().unwrap(),
+        ),
+    ];
+    let refs = inputs.iter().collect::<Vec<_>>();
+    let plan = w.model.sequence.steps[0].accuracy.clone();
+    let request = |plan| {
+        runmat_analysis_fea::execution::AccuracyEvaluationRequest::new(
+            w.producer_identity().unwrap(),
+            runmat_analysis_fea::execution::AccuracySourceKind::FluidSteady,
+            receipt.source_result(),
+            None,
+            plan,
+        )
+        .unwrap()
+    };
+    let source = runmat_analysis_fea::execution::AccuracySourceReceipt::FluidSteady(receipt.clone());
+    crate::validate_accuracy_source_context(&request(plan.clone()), &source, None, &refs).unwrap();
+    let mut retagged = plan.clone();
+    retagged.accuracy_plan_id = AccuracyPlanId("foreign-accuracy".into());
+    assert!(crate::validate_accuracy_source_context(&request(retagged), &source, None, &refs).is_err());
+    let mut loosened = plan;
+    if let AccuracyTolerance::Relative(value) = &mut loosened.criteria[0].tolerance {
+        *value *= 10.0;
+    }
+    assert!(crate::validate_accuracy_source_context(&request(loosened), &source, None, &refs).is_err());
+}
