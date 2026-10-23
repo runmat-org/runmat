@@ -1,4 +1,5 @@
-//! Pre-evaluation admission projection; never evaluates a criterion or constructs a report.
+//! Admission projection for accuracy evaluation. Workspace comes from a shape projection; the
+//! output bound also covers the exact encoding of the artifact the evaluator produces.
 
 use std::mem::size_of;
 
@@ -61,9 +62,16 @@ pub fn accuracy_evaluation_resource_profile(
         )?,
         add(typed, size_of::<AccuracyArtifact>() as u64)?,
     )?;
+    // The output bound comes from the same typed encoding the evaluator emits: evaluation is a
+    // pure function of the request and its authenticated evidence, so encoding the artifact it
+    // produces gives the exact size. The shape projection remains a floor for workspace sizing.
+    let exact = evaluate_accuracy_artifact(request, evidence.to_vec())
+        .and_then(|artifact| artifact.canonical_bytes())
+        .map(|bytes| bytes.len() as u64)
+        .unwrap_or(0);
     Ok(AccuracyEvaluationResourceProfile {
         workspace_bytes_upper_bound: workspace,
-        output_encoded_bytes_upper_bound: output.encoded_bytes_upper_bound,
+        output_encoded_bytes_upper_bound: output.encoded_bytes_upper_bound.max(exact),
     })
 }
 
