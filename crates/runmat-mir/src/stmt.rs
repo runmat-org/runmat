@@ -319,7 +319,7 @@ pub struct MirPlaceMutation {
 /// contract; its selectors are never evaluated by the consumer.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MirPreparedAssignment {
-    pub source_statement: runmat_hir::StmtId,
+    pub source_statement: runmat_types::StmtId,
     pub mutation: MirPlaceMutation,
     pub steps: Vec<crate::MirExpressionStep>,
 }
