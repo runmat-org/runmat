@@ -4,6 +4,7 @@ pub const FEA_FIELD_STRUCTURAL_DISPLACEMENT: &str = "structural.displacement";
 pub const FEA_FIELD_STRUCTURAL_ROTATION: &str = "structural.rotation";
 pub const FEA_FIELD_STRUCTURAL_VON_MISES: &str = "structural.von_mises";
 pub const FEA_FIELD_STRUCTURAL_NODAL_VON_MISES: &str = "structural.nodal_von_mises";
+pub const FEA_FIELD_STRUCTURAL_NODAL_STRESS: &str = "structural.nodal_stress";
 pub const FEA_FIELD_STRUCTURAL_STRAIN: &str = "structural.strain";
 pub const FEA_FIELD_STRUCTURAL_STRESS: &str = "structural.stress";
 pub const FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRAIN: &str =
@@ -47,6 +48,7 @@ pub enum StructuralFieldSelector {
     Rotation,
     VonMises,
     NodalVonMises,
+    NodalStress,
     Strain,
     Stress,
     IntegrationPointStrain,
@@ -78,6 +80,7 @@ impl StructuralFieldSelector {
             Self::Rotation => FEA_FIELD_STRUCTURAL_ROTATION,
             Self::VonMises => FEA_FIELD_STRUCTURAL_VON_MISES,
             Self::NodalVonMises => FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
+            Self::NodalStress => FEA_FIELD_STRUCTURAL_NODAL_STRESS,
             Self::Strain => FEA_FIELD_STRUCTURAL_STRAIN,
             Self::Stress => FEA_FIELD_STRUCTURAL_STRESS,
             Self::IntegrationPointStrain => FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRAIN,

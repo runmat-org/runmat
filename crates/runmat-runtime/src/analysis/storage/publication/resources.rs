@@ -87,6 +87,7 @@ pub(super) fn commit_work(
         observations: DigestKeys(observations),
     };
     let mut record_work = 0;
+    let mut largest_record_parts = String::new();
     for record in runs.values() {
         let view = RecordView(record);
         // The record's identity is its direct canonical encoding and its transport is JSON
@@ -101,13 +102,30 @@ pub(super) fn commit_work(
             ),
         )
         .map_err(AnalysisPublicationError::from)?;
-        record_work = record_work.max(add(
+        let work = add(
             add(
                 encoding.encoded_bytes_upper_bound,
                 encoding.resident_workspace_bytes_estimate,
             )?,
             profile_json_bytes(&view, maximum).map_err(AnalysisPublicationError::from)?,
-        )?);
+        )?;
+        if work > record_work {
+            record_work = work;
+            // Which parts of the record carry its size, for the rejection facts.
+            if let PersistedAnalysisArtifact::Standard(r) = record {
+                let json = |value: &dyn erased_json::Json| value.bytes(maximum);
+                largest_record_parts = format!(
+                    "run={} metadata={} field_inventory={} fields={} render_tiles={} histories={} original_fields={}",
+                    json(&r.run),
+                    json(&r.metadata),
+                    json(&r.field_inventory),
+                    json(&r.fields),
+                    json(&r.render_tiles),
+                    json(&r.observation_histories),
+                    json(&r.original_fields),
+                );
+            }
+        }
     }
     for attachment in observations.values() {
         record_work = record_work.max(add(
@@ -134,7 +152,7 @@ pub(super) fn commit_work(
     Ok(CommitWork {
         total,
         facts: format!(
-            "commit work: manifest={manifest_work} (largest entries {largest_manifest_entries:?}), descriptor={descriptor_work}, largest_record={record_work}, transport={memory_transport}"
+            "commit work: manifest={manifest_work} (largest entries {largest_manifest_entries:?}), descriptor={descriptor_work}, largest_record={record_work} ({largest_record_parts}), transport={memory_transport}"
         ),
     })
 }
@@ -475,4 +493,16 @@ pub(super) fn source_workspace(
             message: "publication source workspace overflow".into(),
         })?;
     add(encoded, decoded)
+}
+
+mod erased_json {
+    /// JSON byte bound of one record part, for diagnostics.
+    pub(super) trait Json {
+        fn bytes(&self, maximum: u64) -> u64;
+    }
+    impl<T: serde::Serialize> Json for T {
+        fn bytes(&self, maximum: u64) -> u64 {
+            runmat_canonical_codec::profile_json_bytes(self, maximum).unwrap_or(u64::MAX)
+        }
+    }
 }
