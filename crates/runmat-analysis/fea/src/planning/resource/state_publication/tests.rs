@@ -74,12 +74,7 @@ fn fixture(
         output: PreparedOutputResourceFacts {
             encoded_payload_bytes_upper_bound: ByteCount(1024),
             transport_closure_bytes_upper_bound: ByteCount(2048),
-            // Exactly the direct encoding of the 1024-byte state plus its 2048-byte transport.
-            construction_resident_bytes_admission_budget: ByteCount(
-                runmat_canonical_codec::projected_canonical_encoding_resident_bytes_estimate(1024, 1)
-                    .unwrap()
-                    + 2048,
-            ),
+            construction_resident_bytes_admission_budget: ByteCount(102_048),
         },
         output_set: PreparedOutputSetResourceFacts {
             encoded_bytes_upper_bound: ByteCount(1024),

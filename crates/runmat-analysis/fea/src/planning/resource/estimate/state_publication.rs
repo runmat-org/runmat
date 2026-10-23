@@ -9,30 +9,55 @@ pub(super) fn build_state_publication_plan(
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     let state_bytes = demand.state_encoded_bytes_upper_bound.0;
     let materialization = demand.state_materialization_resident_bytes_estimate.0;
-    // The published state is encoded directly from its owned typed value; that owned state is
-    // charged in the workspace below, so output construction covers the direct encoding and
-    // its transport only.
     let construction = add(
-        runmat_canonical_codec::projected_canonical_encoding_resident_bytes_estimate(state_bytes, 1)
-            .ok_or(ResourcePlanningError::Overflow("publication state encoding"))?,
+        materialization,
         demand.output.transport_closure_bytes_upper_bound.0,
         "publication encoding and output transport",
     )?;
-    if state_bytes == 0
-        || materialization < state_bytes
-        || demand.inputs.transport_closure_bytes < demand.inputs.encoded_payload_bytes
-        || demand.inputs.decoded_resident_bytes_admission_budget
-            < demand.inputs.encoded_payload_bytes
-        || demand.source_validation_workspace_bytes
-            < demand.inputs.decoded_resident_bytes_admission_budget
-        || demand.output.encoded_payload_bytes_upper_bound.0 != state_bytes
-        || demand.output.transport_closure_bytes_upper_bound.0 < state_bytes
-        || demand.output.construction_resident_bytes_admission_budget.0 < construction
-        || !input.worker.accelerators.is_empty()
-    {
-        return Err(ResourcePlanningError::Invalid(
-            "publication requires source decoding and source-bound state construction envelopes on host".into(),
-        ));
+    let checks = [
+        (state_bytes == 0, "empty state"),
+        (
+            materialization < state_bytes,
+            "state materialization below its encoding",
+        ),
+        (
+            demand.inputs.transport_closure_bytes < demand.inputs.encoded_payload_bytes,
+            "input transport below input payload",
+        ),
+        (
+            demand.inputs.decoded_resident_bytes_admission_budget
+                < demand.inputs.encoded_payload_bytes,
+            "input decoding below input payload",
+        ),
+        (
+            demand.source_validation_workspace_bytes
+                < demand.inputs.decoded_resident_bytes_admission_budget,
+            "source validation below input decoding",
+        ),
+        (
+            demand.output.encoded_payload_bytes_upper_bound.0 != state_bytes,
+            "output encoding differs from the state",
+        ),
+        (
+            demand.output.transport_closure_bytes_upper_bound.0 < state_bytes,
+            "output transport below the state",
+        ),
+        (
+            demand.output.construction_resident_bytes_admission_budget.0 < construction,
+            "output construction below state materialization and transport",
+        ),
+        (!input.worker.accelerators.is_empty(), "accelerator worker"),
+    ];
+    let failed = checks
+        .iter()
+        .filter(|(failed, _)| *failed)
+        .map(|(_, reason)| *reason)
+        .collect::<Vec<_>>();
+    if !failed.is_empty() {
+        return Err(ResourcePlanningError::Invalid(format!(
+            "publication requires source decoding and source-bound state construction envelopes on host ({})",
+            failed.join("; ")
+        )));
     }
     let retained_transport = ByteCount(add(
         demand.inputs.transport_closure_bytes.0,
